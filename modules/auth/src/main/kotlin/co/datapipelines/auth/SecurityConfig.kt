@@ -142,6 +142,16 @@ class SecurityConfig(
                         // the app chrome (DocsController).
                         "/docs",
                         "/docs/*",
+                        // 095: the agent skill, raw. `/skill.md` and `/skill/<reference>.md`
+                        // serve the Markdown packaged in the jar — SkillController reads no
+                        // principal, resolves no workspace and touches no datastore, and the
+                        // identical text is public in the AGPL repository on GitHub. It is the
+                        // MANUAL: a key would mean an agent cannot learn to use its key
+                        // correctly until after it has one. This is the delivery for clients
+                        // that speak no MCP — one curl into .agents/skills/ and the agent has
+                        // the manual for the version this deployment actually runs.
+                        "/skill.md",
+                        "/skill/*",
                         // 073: crawler infrastructure. robots.txt is a static file; sitemap.xml
                         // is generated from the page registry and the packaged doc slugs — both
                         // are, by definition, documents that must be readable without a login.

@@ -49,7 +49,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [rest-api.md](rest-api.md) | v1.4 frozen | Endpoints, envelopes, SSE execution stream, **uniform result-delivery cursor (§7)**, auth/user-admin endpoints (§16) |
-| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 31 tools, resources, prompts — a thin adapter over REST |
+| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 30 tools, resources, prompts, the agent skill's four deliveries (§15) — a thin adapter over REST |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
 | [versioning.md](versioning.md) | v1.4 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
@@ -71,6 +71,8 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) | The 2026-08 consistency campaign: findings, ratified decisions D1–D15, per-doc resolutions |
 | [ARCH-AUDIT-2026-08.md](ARCH-AUDIT-2026-08.md) | Service-layer gap + multi-instance readiness audit (2026-08-31): findings M1–M10, S1–S5, drift list — pending review |
 | [../DEVELOPMENT.md](../DEVELOPMENT.md) | Developer setup: local infra, OIDC setup, build/run/test, git workflow |
+| [../.agents/skills/datapipelines/](../.agents/skills/datapipelines/) | The agent skill — `SKILL.md` (the operating core) + `references/`. Its `references/tools.md` is GENERATED from the tool catalog (`./gradlew :modules:mcp-server:skillArtifacts`), and every derived copy is drift-tested. Not a spec: it tells an AGENT how to use the product, while these docs define what the product is |
+| [../plugins/datapipelines/](../plugins/datapipelines/) | The Claude Code plugin — the same skill plus the MCP server entry, installed with `/plugin marketplace add msabiransari/datapipelines`. Its `skills/` directory is a build-time copy of the skill, never a second source |
 
 ## House rules (cross-cutting)
 

@@ -57,6 +57,28 @@ credentials and your differences.
 Full setup and the variable reference: [`docs/environments.md`](docs/environments.md),
 [DEVELOPMENT.md](DEVELOPMENT.md), and the specs under [`docs/`](docs/).
 
+### Give your agent the skill
+
+The product is MCP-native, and the manual an agent needs to author pipelines ships WITH the
+server. In Claude Code, one plugin brings the skill and the MCP connection together:
+
+```
+/plugin marketplace add msabiransari/datapipelines
+/plugin install datapipelines@datapipelines
+```
+
+Any other agent reads the skill as a plain `.agents/skills/` directory — every deployment
+serves its own copy, unauthenticated, so the manual always matches the version you are
+running:
+
+```bash
+curl -sS https://your-deployment/skill.md -o .agents/skills/datapipelines/SKILL.md
+```
+
+`SKILL.md` maps the reference files it comes with; each one is at `/skill/<name>.md`. The
+server also briefs a connecting agent at handshake time and serves the same manual at
+`datapipelines://docs/skill` — see [`docs/mcp-server.md` §15](docs/mcp-server.md#15-the-skill-how-an-agent-learns-this-server).
+
 ## Documentation
 
 The `docs/` directory is the product specification and is load-bearing:
