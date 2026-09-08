@@ -1,5 +1,6 @@
 {
   "name": "datapipelines",
+  "description": "The datapipelines.co plugin: the agent skill for authoring declarative SQL pipelines, plus the MCP connection to your own self-hosted deployment.",
   "owner": {
     "name": "datapipelines.co",
     "url": "https://datapipelines.co"
