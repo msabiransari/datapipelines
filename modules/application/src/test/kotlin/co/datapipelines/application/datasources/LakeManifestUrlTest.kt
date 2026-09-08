@@ -5,12 +5,15 @@ import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.io.TempDir
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -179,5 +182,59 @@ class LakeManifestUrlTest {
         shouldThrow<DatapipelinesException> {
             LakeManifestFetcher.HTTP.fetch(tempDir.resolve("absent.json").toUri().toString())
         }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+    }
+
+    @Test
+    fun `the production fetcher GETs a vetted http URL and parses the body`() {
+        withServer("""{"tables": [], "schema_version": 7}""") { url ->
+            LakeManifestFetcher.HTTP
+                .fetch(url)
+                .get("schema_version")
+                .asInt() shouldBe 7
+        }
+    }
+
+    @Test
+    fun `the production fetcher maps a non-2xx answer to the unreachable code`() {
+        withServer("""{"error": "broken"}""", status = 500) { url ->
+            shouldThrow<DatapipelinesException> { LakeManifestFetcher.HTTP.fetch(url) }
+                .code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+        }
+    }
+
+    @Test
+    fun `the production fetcher maps an oversized local manifest to the unreachable code`() {
+        val oversized = Files.write(tempDir.resolve("big.json"), ByteArray(4 * 1024 * 1024 + 1) { ' '.code.toByte() })
+        shouldThrow<DatapipelinesException> {
+            LakeManifestFetcher.HTTP.fetch(oversized.toUri().toString())
+        }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+    }
+
+    @Test
+    fun `the production fetcher maps a body that is not JSON to the unreachable code`() {
+        val garbage = Files.writeString(tempDir.resolve("garbage.json"), "this is not json")
+        shouldThrow<DatapipelinesException> {
+            LakeManifestFetcher.HTTP.fetch(garbage.toUri().toString())
+        }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+    }
+
+    /** A loopback [HttpServer] answering every GET with [body] and [status]; the fetcher is under test, not the SSRF vetting. */
+    private fun withServer(
+        body: String,
+        status: Int = 200,
+        block: (String) -> Unit,
+    ) {
+        val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        server.createContext("/") { exchange ->
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(status, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        try {
+            server.start()
+            block("http://${server.address.hostString}:${server.address.port}/manifest.json")
+        } finally {
+            server.stop(0)
+        }
     }
 }
