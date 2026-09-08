@@ -9,12 +9,19 @@
 <th:block th:fragment="content">
   <div class="app-page-h">
     <div>
-      <h1 class="ds-headline" th:text="${datasource.displayName}">sample-lake</h1>
-      <p class="app-page-sub">
+      <h1 class="ds-headline u-mb-xs" th:text="${datasource.displayName}">sample-lake</h1>
+      <!-- 098 §F — the IDENTITY line and the DESCRIPTION are two elements, not one paragraph.
+           Both used to sit inside a single `<p class="app-page-sub">`, so the shipped
+           datasource-lake.png reads `LAKE sample-lake NYC TLC high-volume for-hire trips…` as
+           one block. Every other detail screen in the app separates them: a `u-row u-wrap` line
+           of badge-plus-identifiers under the headline (executions/detail.html), then the prose
+           in its own element. This is that shape. -->
+      <div class="u-row u-wrap u-mb-xs">
         <span class="ds-badge ds-badge-default" th:text="${datasource.dialect.wire}">LAKE</span>
-        <span class="u-mono" th:text="${datasource.name}">sample-lake</span>
-        <span th:if="${datasource.description} != null" th:text="${datasource.description}"></span>
-      </p>
+        <span class="u-mono u-text-sm" th:text="${datasource.name}">sample-lake</span>
+      </div>
+      <p class="app-page-sub" th:if="${datasource.description} != null"
+         th:text="${datasource.description}">NYC TLC high-volume for-hire trips.</p>
     </div>
     <div class="app-page-actions">
       <a class="ds-button ds-button-secondary" th:href="@{/datasources}">Back to datasources</a>
