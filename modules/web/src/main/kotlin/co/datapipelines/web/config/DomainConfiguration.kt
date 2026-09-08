@@ -204,6 +204,10 @@ class DomainConfiguration {
         }
 
     @Bean
+    // Nine collaborators: 089's registry + extension directory met 094's pool metrics + ceiling
+    // at the merge. Each is a distinct seam the registry owns; splitting the bean would hide the
+    // wiring this class exists to make explicit (§8.4).
+    @Suppress("LongParameterList")
     fun datasourceRegistry(
         repository: DatasourceRepository,
         encryptor: CredentialEncryptor,
