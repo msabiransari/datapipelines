@@ -108,6 +108,13 @@ tomcat = "10.1.59"
 
 # --- Not managed by the Spring Boot BOM: exact pins required -----------------
 duckdb-jdbc = "1.5.5.1"
+# awssdk s3: the 089 §F MinIO suites' bucket/upload client — TEST-scoped only, in
+# tests/integration-tests (the MinIO E2E) and modules/datasources (the LAKE
+# connectivity probe). Latest stable on Maven Central (2.46.7, verified 2026-09-08
+# via search.maven.org). Taken WITH url-connection-client so the default Netty
+# HTTP stack and its transitive tree stay OFF the test classpath — bucket-create
+# plus PUTs need nothing the JDK's HttpURLConnection cannot do.
+awssdk = "2.46.7"
 # commonmark: renders docs/*.md in-product at /docs (033). Latest stable on Maven
 # Central (verified 2026-08-31 against repo1.maven.org maven-metadata.xml —
 # 0.30.0, released 2026-08, active release line). ZERO compile/runtime deps
@@ -256,6 +263,9 @@ kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 testcontainers = { module = "org.testcontainers:testcontainers" }           # testcontainers-bom 1.21.4
 testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
+# The MinIO suites' S3 client (089 §F) — see the `awssdk` version note above.
+awssdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awssdk" }
+awssdk-url-connection-client = { module = "software.amazon.awssdk:url-connection-client", version.ref = "awssdk" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
 testcontainers-mysql = { module = "org.testcontainers:mysql" }
 testcontainers-mssqlserver = { module = "org.testcontainers:mssqlserver" }

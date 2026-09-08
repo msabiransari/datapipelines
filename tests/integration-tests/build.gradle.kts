@@ -24,6 +24,11 @@ dependencies {
     testImplementation(libs.testcontainers.mysql)
     testImplementation(libs.testcontainers.mssqlserver)
     testImplementation(libs.testcontainers.oracle.xe)
+    // The 089 §F MinIO suite's bucket/upload client (bucket create + PUTs of the
+    // generated parquet and the checked-in Iceberg fixture). Test-scoped; the
+    // url-connection client keeps Netty off the classpath (see the toml note).
+    testImplementation(libs.awssdk.s3)
+    testImplementation(libs.awssdk.url.connection.client)
     testImplementation(libs.rest.assured)
     // The SSE stream's `data:` payloads are parsed as JSON; app exposes its own
     // dependencies as `implementation`, so jackson is declared explicitly here (same
@@ -38,6 +43,15 @@ dependencies {
 // classpath, not exploded classes. The task dependency guarantees the jar exists and is
 // current whenever the suite runs; the test itself fails with build instructions if the
 // file is missing (never silently skips — a guard that can skip is not a guard).
-tasks.named("test") {
+tasks.named<Test>("test") {
     dependsOn(":modules:app:bootJar")
+    // The whole module runs in ONE forked JVM, and Spring's context cache keeps every
+    // suite's context — fifteen-odd full applications, their pools and the two-context
+    // suites' second boots — alive until JVM exit (SharedE2e's KDoc states the model).
+    // The default heap (a quarter of the host's RAM — 4 GB on a 16 GB box) ran OUT in
+    // the full-module run: java.lang.OutOfMemoryError booting the alphabetically-late
+    // suites, reproduced twice on 2026-09-08 once 089 §F added three more context-booting
+    // suites (the MinIO suite and the two-context lake registry suite). A ceiling, not an
+    // allocation — the JVM takes only what the cache actually needs.
+    maxHeapSize = "6g"
 }
