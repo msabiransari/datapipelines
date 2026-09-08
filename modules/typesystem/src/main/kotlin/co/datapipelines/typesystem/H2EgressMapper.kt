@@ -25,13 +25,16 @@ import java.sql.Types
  * ## Overflow
  *
  * H2 2.x supports `DECIMAL` precision up to [MAX_H2_DECIMAL_PRECISION]. Every bounded
- * precision any supported dialect can declare fits far inside it, and a `BIGDECIMAL`
- * with **omitted** precision (unbounded, §4) stages at that ceiling. A declared
+ * precision any supported dialect can declare fits far inside it, and an exact-unsized
+ * `BIGDECIMAL` (precision **and** scale omitted, §4) stages as `DECFLOAT` at that
+ * ceiling — H2's exact, arbitrary-scale decimal, so a value whose scale the source
+ * never declared keeps every fraction. (`DECIMAL(100000, 0)` was the defect-100
+ * truncation: it forced scale 0 onto values whose scale is unknown.) A declared
  * precision above the ceiling fails with `pipeline.staging.precision_overflow` — the
  * same threshold staging.md §5.2 states, and the two MUST stay identical.
  */
 object H2EgressMapper {
-    /** H2 2.x `DECIMAL` precision ceiling (§6; staging.md §5.2). */
+    /** H2 2.x `DECIMAL`/`DECFLOAT` precision ceiling (§6; staging.md §5.2). */
     const val MAX_H2_DECIMAL_PRECISION = 100_000
 
     /** Raised when a declared precision exceeds what H2 can store (§6). */
@@ -58,7 +61,9 @@ object H2EgressMapper {
 
             LogicalType.DECIMAL -> decimalType(column)
 
-            LogicalType.BIGDECIMAL -> decimalWithScale(column)
+            // Exact-unsized (precision omitted, §4) → DECFLOAT at the ceiling: exact,
+            // arbitrary-scale. Bounded → DECIMAL(p, s).
+            LogicalType.BIGDECIMAL -> bigDecimalType(column)
 
             // Length unbounded: H2 supports VARCHAR with no length spec.
             LogicalType.STRING -> "VARCHAR"
@@ -96,6 +101,19 @@ object H2EgressMapper {
 
     /** Approximate origin → `DOUBLE`; exact origin → `DECIMAL(p, s)` (§4.2). */
     private fun decimalType(column: ColumnSchema): String = if (column.isApproximateNumeric) "DOUBLE" else decimalWithScale(column)
+
+    /**
+     * Exact-unsized origin (§4) → `DECFLOAT` at the ceiling; bounded → `DECIMAL(p, s)`.
+     *
+     * `DECFLOAT` is H2 2.x's exact, arbitrary-scale decimal: the precision argument
+     * counts digits, and values keep whatever scale they carry. Measured on the pinned
+     * H2 (2.3.232): `ResultSetMetaData` reports a `DECFLOAT(100000)` column as
+     * `Types.NUMERIC` at precision 100000 (so the read path and the §6 ceiling
+     * round-trip rule are unchanged), `getObject` yields a `BigDecimal`, and a
+     * `BigDecimal` bound via [Types.DECIMAL] round-trips with every fraction intact.
+     */
+    private fun bigDecimalType(column: ColumnSchema): String =
+        if (column.precision == null) "DECFLOAT($MAX_H2_DECIMAL_PRECISION)" else decimalWithScale(column)
 
     private fun decimalWithScale(column: ColumnSchema): String = "DECIMAL(${checkedPrecision(column)}, ${column.scale ?: 0})"
 

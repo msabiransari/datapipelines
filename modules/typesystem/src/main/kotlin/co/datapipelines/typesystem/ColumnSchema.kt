@@ -17,6 +17,10 @@ import java.sql.ResultSetMetaData
  *    never be substituted.
  *  - `scale` absent on `DECIMAL` means the origin was **approximate** (REAL/FLOAT/
  *    DOUBLE), whose per-value scale varies (§4.1).
+ *  - `scale` absent on `BIGDECIMAL` means the source numeric is **exact but unsized**
+ *    (§4) — the driver reported no usable typmod, where scale 0 stands for *unknown*.
+ *    Declaring 0 asserted "integer" and truncated every fraction at the first exact
+ *    store (defect 100). Absent precision and absent scale travel together here.
  *  - `nullable` absent means the driver reported `columnNullableUnknown`. Clients MUST
  *    NOT read absence as `false`.
  *
@@ -55,8 +59,10 @@ data class ColumnSchema(
         require(type != LogicalType.DECIMAL || precision != null) {
             "DECIMAL requires precision (§7.1 allOf), column '$name'"
         }
-        require(type != LogicalType.BIGDECIMAL || scale != null) {
-            "BIGDECIMAL requires scale (§7.1 allOf), column '$name'"
+        // BIGDECIMAL requires scale only when BOUNDED: an exact-unsized numeric
+        // (precision omitted, §4) omits scale too — the driver reports 0 for *unknown*.
+        require(type != LogicalType.BIGDECIMAL || precision == null || scale != null) {
+            "BIGDECIMAL with a declared precision requires scale (§7.1 allOf), column '$name'"
         }
     }
 

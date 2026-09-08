@@ -45,7 +45,7 @@ The canonical type set is **11 types**.
 | `INTEGER` | `number` | Exact integer fitting in int32 (≤ 2^31 − 1, ~2.1 × 10^9). | int32 and smaller |
 | `BIGINTEGER` | `string` | Exact integer up to int64 (≤ 2^63 − 1, ~9.2 × 10^18). Exceeds IEEE 754 double safe integer range (2^53 − 1). | int64 |
 | `DECIMAL(p, s?)` | `number` | Exact numeric with precision ≤ 15. Scale is required for exact-numeric origins, omitted for approximate-numeric origins. | precision ≤ 15 |
-| `BIGDECIMAL(p, s)` | `string` | Exact numeric with precision > 15. Scale always declared. Precision is **omitted** when the source numeric is unsized (unbounded precision — see [§4](#4-precision-and-scale-semantics)). | precision > 15 or unbounded |
+| `BIGDECIMAL(p, s)` | `string` | Exact numeric with precision > 15. Scale is declared when the source declares a precision. Precision and scale are **omitted** together when the source numeric is unsized (unbounded precision, unknown scale — see [§4](#4-precision-and-scale-semantics)). | precision > 15 or unsized |
 | `STRING` | `string` | Variable-length text. Includes source JSON/JSONB, XML, enums, UUIDs, intervals, geospatial WKT, and any type without a clean canonical mapping. | — |
 | `BINARY` | `string` (base64) | Variable-length bytes. | — |
 | `DATE` | `string` (ISO 8601 date) | Calendar date, no time component. | — |
@@ -96,7 +96,7 @@ These rules fix the exact bytes a client receives. They apply to every egress pa
 2. **`TIME`** — ISO 8601 time-of-day with **exactly 6 fractional digits**, zero-padded, and **no** zone designator: `"14:30:00.123456"`, `"00:00:00.000000"`.
 3. **`DATE`** — ISO 8601 calendar date, no time component, no zone: `"2026-08-05"`.
 4. **`BINARY`** — **standard** base64 as defined by [RFC 4648 §4](https://www.rfc-editor.org/rfc/rfc4648#section-4), **with** `=` padding. The URL-safe alphabet (RFC 4648 §5, `-`/`_`) is **not** used, and the encoded string carries no line breaks and no `data:` prefix.
-5. **`BIGINTEGER` / `BIGDECIMAL`** — JSON string holding the plain decimal representation; no exponent notation, no thousands separators. `BIGDECIMAL` preserves the source's trailing zeros to its declared scale (`"12345.60"`, not `"12345.6"`).
+5. **`BIGINTEGER` / `BIGDECIMAL`** — JSON string holding the plain decimal representation; no exponent notation, no thousands separators. `BIGDECIMAL` preserves the source's trailing zeros to its declared scale (`"12345.60"`, not `"12345.6"`); an exact-unsized `BIGDECIMAL` (scale omitted, §4) renders each value with the value's own scale.
 6. **`NULL` values** — a NULL in any column serializes as JSON `null`, regardless of the column's canonical type.
 
 ---
@@ -108,15 +108,13 @@ These rules fix the exact bytes a client receives. They apply to every egress pa
 | Exact numeric (`NUMERIC(p,s)`, `DECIMAL(p,s)`) | from source metadata | from source metadata | `{"type": "DECIMAL", "precision": 12, "scale": 2}` (p ≤ 15) or `{"type": "BIGDECIMAL", "precision": 20, "scale": 4}` (p > 15) |
 | Approximate numeric (`REAL`, `FLOAT`, `DOUBLE`) | fixed by source bit-width (7 or 15) | **omitted** | `{"type": "DECIMAL", "precision": 7}` or `{"type": "DECIMAL", "precision": 15}` |
 | Money/currency (e.g., PG `money`, MSSQL `money`) | from source (PG money = 19, MSSQL money = 19, smallmoney = 10) | from source (PG = 2, MSSQL = 4) | `{"type": "BIGDECIMAL", "precision": 19, "scale": 2}` |
-| Unsized exact numeric with a bounded source default (`NUMBER` in Oracle with no precision) | the dialect's documented default (Oracle = 38) | 0 | `{"type": "BIGDECIMAL", "precision": 38, "scale": 0}` |
-| Unsized exact numeric with unbounded source precision (`numeric` / `decimal` in PG with no precision) | **omitted** (= unbounded) | 0 | `{"type": "BIGDECIMAL", "scale": 0}` |
+| Unsized exact numeric (`numeric` / `decimal` in PG with no precision, Oracle `NUMBER` with no precision, **or any exact-numeric expression whose typmod the engine drops** — `SUM(fare)`, `AVG(fare)`, `fare/2`) | **omitted** (= unbounded) | **omitted** (= unknown) | `{"type": "BIGDECIMAL"}` |
 
-**Omitted precision on BIGDECIMAL means unbounded (normative).** There is exactly **one** rule for an unsized source numeric whose dialect imposes no precision ceiling (today: PostgreSQL `numeric`/`decimal` declared without precision): the envelope reports **`BIGDECIMAL` with the `precision` field omitted**. Omitted precision is normative shorthand for "the source declares no precision limit; assume unbounded."
+**Omitted precision on BIGDECIMAL means unbounded; omitted scale on BIGDECIMAL means unknown (normative).** There is exactly **one** rule for an unsized source numeric (today: PostgreSQL `numeric`/`decimal` declared without precision, Oracle `NUMBER` declared without precision, and any exact-numeric expression that carries no typmod): the envelope reports **`BIGDECIMAL` with both the `precision` and `scale` fields omitted**. Omitted precision is normative shorthand for "the source declares no precision limit; assume unbounded"; omitted scale is normative shorthand for "the source declares no scale; every value carries its own."
 
-- The envelope never reports a synthetic ceiling for this case — neither PostgreSQL's internal maximum digit count nor another dialect's default precision may be substituted. A fabricated bound would be a lie about the source column and would break clients that size their local decimal buffers from it.
-- `scale` is still declared (`0`, as the driver reports it), so the BIGDECIMAL wire contract — a JSON string carrying the exact decimal — is unchanged.
-- Clients that need a bound must impose their own (or `CAST` in the source query). Staging applies its own ceiling separately: see the H2 overflow policy in [§6](#6-h2-staging-type-mapping-canonical--h2).
-- Dialects that *do* define a default precision for their unsized numeric (Oracle `NUMBER` → 38) report that default; they are not affected by this rule.
+- The envelope never reports a synthetic ceiling for this case — neither PostgreSQL's internal maximum digit count nor another dialect's storage maximum may be substituted. A fabricated bound would be a lie about the source column and would break clients that size their local decimal buffers from it. (Oracle's 38 digits for a bare `NUMBER` is Oracle's *storage maximum*, not a declared bound — and ojdbc reports scale `−127` for that column, its scale-unspecified marker, while typmod-less Oracle expressions report scale `0`; both mean *unknown*. Measured 2026-09-08, Oracle 21c XE.)
+- **`scale` is omitted, not `0` (adjudicated 2026-09-08, defect 100).** The driver reports scale `0` for *unknown* when the typmod is gone — pgjdbc reports `precision=0 scale=0` for `SUM(fare)` over a `NUMERIC(10,2)` column. Declaring `scale: 0` asserts "integer", and the first exact store enforced that lie: H2 staged the column as `DECIMAL(100000, 0)` and every fractional cent was truncated on insert (the live `nyc/mobility` `borough_od_matrix`, `airport_access_by_borough` and `weather_sensitivity_by_borough` pipelines returned whole-dollar totals until this fix — and `mobility_briefing`, which composes `borough_od_matrix`, inherited the truncation). The BIGDECIMAL wire contract — a JSON string carrying the exact decimal — is unchanged: each value renders with its own scale.
+- Clients that need a bound must impose their own (or `CAST` in the source query — the readable contract, e.g. `SUM(x)::NUMERIC(14,2)`). Staging applies its own ceiling separately: see the H2 overflow policy in [§6](#6-h2-staging-type-mapping-canonical--h2).
 - **Defensive generalization (2026-08-08):** ANY driver reporting precision ≤ 0 on an exact numeric takes this same unbounded encoding (`BIGDECIMAL`, precision omitted) — a `DECIMAL(0)` descriptor would violate §7.1's `minimum: 1`, and throwing on a driver quirk would violate §8.2's never-fail rule. Written for PG; applies everywhere the situation arises.
 
 ### 4.1 Why scale is omitted for approximate numerics
@@ -144,7 +142,7 @@ Each supported source dialect has a deterministic mapping from JDBC `java.sql.Ty
 | `int8`, `bigint`, `bigserial` | `BIGINT` (-5) | `BIGINTEGER` | |
 | `real`, `float4` | `REAL` (7) | `DECIMAL(7)` | no scale |
 | `float8`, `double precision`, `double` | `DOUBLE` (8) | `DECIMAL(15)` | no scale |
-| `numeric`, `decimal` (no precision) | `NUMERIC` (2) | `BIGDECIMAL`, **precision omitted**, `scale: 0` | PG unsized numeric is unbounded — omitted precision is the normative encoding for that (§4) |
+| `numeric`, `decimal` (no precision, or expression with no typmod) | `NUMERIC` (2) | `BIGDECIMAL`, **precision and scale omitted** | PG reports `precision=0 scale=0` for "unknown" — both keys are omitted, never declared 0 (§4) |
 | `numeric(p,s)`, `decimal(p,s)` (p ≤ 15) | `NUMERIC` (2) | `DECIMAL(p, s)` | |
 | `numeric(p,s)`, `decimal(p,s)` (p > 15) | `NUMERIC` (2) | `BIGDECIMAL(p, s)` | |
 | `money` | — | `BIGDECIMAL(19, 2)` | PG fixed at 19,2 |
@@ -178,7 +176,7 @@ Oracle has significant quirks; the **most important gotcha is that Oracle's `DAT
 | `NUMBER(p)` or `NUMBER(p,0)` (p > 18, scale = 0) | `NUMERIC` | `BIGDECIMAL(p, 0)` | exceeds int64 |
 | `NUMBER(p,s)` (s > 0, p ≤ 15) | `NUMERIC` (2) | `DECIMAL(p, s)` | |
 | `NUMBER(p,s)` (s > 0, p > 15) | `NUMERIC` (2) | `BIGDECIMAL(p, s)` | |
-| `NUMBER` (no precision/scale — Oracle default) | `NUMERIC` (2) | `BIGDECIMAL(38, 0)` | Oracle default = 38 digits |
+| `NUMBER` (no precision/scale, or typmod-less expression) | `NUMERIC` (2) | `BIGDECIMAL`, precision and scale omitted | bare NUMBER reports scale −127 (scale-unspecified), expressions report scale 0 — both mean *unknown* (§4); measured 2026-09-08 |
 | `FLOAT(p)` (Oracle's FLOAT — p in binary bits, 1-126) | `FLOAT` (6) | `DECIMAL(15)` | treated as double-precision |
 | `BINARY_FLOAT` | `REAL` (7) | `DECIMAL(7)` | no scale |
 | `BINARY_DOUBLE` | `DOUBLE` (8) | `DECIMAL(15)` | no scale |
@@ -272,6 +270,7 @@ H2 is the staging database. We map H2 → canonical when reading back from stagi
 | `BIGINT` | `BIGINTEGER` | |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` (p ≤ 15) | `DECIMAL(p, s)` | |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` (p > 15) | `BIGDECIMAL(p, s)` | |
+| `DECFLOAT` (any precision) | `BIGDECIMAL`, precision and scale omitted | exact, arbitrary-scale; the declared precision counts digits, scale is genuinely undeclared (§4) |
 | `REAL` | `DECIMAL(7)` | no scale |
 | `DOUBLE`, `DOUBLE PRECISION`, `FLOAT` | `DECIMAL(15)` | no scale (H2 FLOAT aliases DOUBLE) |
 | `BOOLEAN`, `BOOL`, `BIT`, `TRUE`, `FALSE` | `BOOLEAN` | |
@@ -345,7 +344,7 @@ What Parquet and Iceberg add is nested types (`STRUCT`, `LIST`, `MAP`), which Du
 
 When the executor stages data from a source into H2 (`CREATE TABLE staging.x ...`), each canonical type maps to a specific H2 column type.
 
-**Round-trip rule (normative, 2026-08-08):** an unbounded `BIGDECIMAL` (precision omitted, §4) stages as `DECIMAL(100000, s)` — but on the way BACK (reading staged data through the H2 ingress mapper), a reported exact-numeric precision **at the ceiling (≥ 100000) reads as the unbounded encoding again**: `BIGDECIMAL` with precision omitted. Without this rule the storage ceiling leaks into the schema envelope as exactly the fabricated bound §4 forbids. Consequence, accepted as truthful: a genuine H2 *source* column declared `DECIMAL(100000, s)` also reports unbounded — it sits at H2's own maximum, so "unbounded" is not a lie about it.
+**Round-trip rule (normative, 2026-08-08; storage amended 2026-09-08):** an exact-unsized `BIGDECIMAL` (precision and scale omitted, §4) stages as `DECFLOAT(100000)` — H2 2.x's exact, arbitrary-scale decimal at the same 100000-digit ceiling — and on the way BACK (reading staged data through the H2 ingress mapper), a reported exact-numeric precision **at the ceiling (≥ 100000) reads as the unbounded encoding again**: `BIGDECIMAL` with precision and scale omitted. Without this rule the storage ceiling leaks into the schema envelope as exactly the fabricated bound §4 forbids. Consequence, accepted as truthful: a genuine H2 *source* column declared `DECIMAL(100000, s)` also reports unbounded — it sits at H2's own maximum, so "unbounded" is not a lie about it.
 
 | Canonical | H2 type | Notes |
 |---|---|---|
@@ -355,7 +354,8 @@ When the executor stages data from a source into H2 (`CREATE TABLE staging.x ...
 | `BIGINTEGER` | `BIGINT` | H2 BIGINT = int64 |
 | `DECIMAL(p, s?)` (exact, scale declared) | `DECIMAL(p, s)` | |
 | `DECIMAL(p)` (approximate, no scale) | `DOUBLE` | preserve IEEE 754 representation |
-| `BIGDECIMAL(p, s)` | `DECIMAL(p, s)` | H2 2.x `DECIMAL` supports precision up to 100000 — every bounded source precision fits. `BIGDECIMAL` with **omitted** (unbounded) precision stages as `DECIMAL(100000, s)`; see the overflow policy below. |
+| `BIGDECIMAL(p, s)` | `DECIMAL(p, s)` | H2 2.x `DECIMAL` supports precision up to 100000 — every bounded source precision fits. See the overflow policy below. |
+| `BIGDECIMAL` (exact-unsized, precision and scale omitted) | `DECFLOAT(100000)` | exact, arbitrary-scale decimal at the same 100000-digit ceiling. `DECIMAL(100000, 0)` was the defect-100 truncation: it forced scale 0 onto values whose scale is unknown. Reads back as `NUMERIC` with precision 100000 — the round-trip rule above recovers the unsized encoding. |
 | `STRING` | `VARCHAR` | length unbounded; H2 supports `VARCHAR` with no length spec |
 | `BINARY` | `VARBINARY` | |
 | `DATE` | `DATE` | |
@@ -401,7 +401,7 @@ Every result set carries a **schema** describing its columns. The schema is an a
     "scale": {
       "type": "integer",
       "minimum": 0,
-      "description": "Required for exact-numeric DECIMAL and all BIGDECIMAL. Omitted for approximate-numeric DECIMAL (source was REAL/DOUBLE)."
+      "description": "Required for exact-numeric DECIMAL and for BIGDECIMAL with a declared precision. Omitted for approximate-numeric DECIMAL (source was REAL/DOUBLE) and for exact-unsized BIGDECIMAL (source numeric unsized — the driver reports 0 for *unknown*; see §4)."
     },
     "nullable": {
       "type": "boolean",
@@ -414,7 +414,7 @@ Every result set carries a **schema** describing its columns. The schema is an a
       "then": { "required": ["precision"] }
     },
     {
-      "if": { "properties": { "type": { "const": "BIGDECIMAL" } } },
+      "if": { "properties": { "type": { "const": "BIGDECIMAL" } }, "required": ["precision"] },
       "then": { "required": ["scale"] }
     }
   ]
@@ -437,7 +437,7 @@ Every result set carries a **schema** describing its columns. The schema is an a
     {"name": "customer_id",   "type": "INTEGER", "nullable": false},
     {"name": "customer_name", "type": "STRING", "nullable": false},
     {"name": "total_amount",  "type": "BIGDECIMAL", "precision": 18, "scale": 2, "nullable": true},
-    {"name": "unbounded_total", "type": "BIGDECIMAL", "scale": 0},
+    {"name": "unbounded_total", "type": "BIGDECIMAL"},
     {"name": "lifetime_value", "type": "DECIMAL", "precision": 12, "scale": 2},
     {"name": "measurement",   "type": "DECIMAL", "precision": 15},
     {"name": "order_count",   "type": "INTEGER"},
@@ -456,9 +456,9 @@ Every result set carries a **schema** describing its columns. The schema is an a
 - `type` — always present. One of the 11 canonical types.
 - `precision` — present iff `type ∈ {DECIMAL, BIGDECIMAL}`, with one exception: omitted for `BIGDECIMAL` when the source numeric is unsized/unbounded (§4). Omitted precision on `BIGDECIMAL` means unbounded; it never means "unknown".
 - `scale` — present iff:
-  - `type = BIGDECIMAL` (always), or
+  - `type = BIGDECIMAL` AND the source numeric declares a precision (bounded), or
   - `type = DECIMAL` AND the source was exact-numeric (NUMERIC/DECIMAL/MONEY).
-  - Omitted when `type = DECIMAL` AND the source was approximate-numeric (REAL/FLOAT/DOUBLE).
+  - Omitted when `type = DECIMAL` AND the source was approximate-numeric (REAL/FLOAT/DOUBLE), and when `type = BIGDECIMAL` AND the source numeric is unsized (§4 — the driver reports scale 0 for *unknown*; a declared 0 asserts "integer" and truncates at the first exact store).
 - `nullable` — **optional**, any type. `true`/`false` mirror the driver's `ResultSetMetaData.isNullable()` verdict (`columnNullable` / `columnNoNulls`); the field is omitted when the driver reports `columnNullableUnknown`. Absence means unknown — clients MUST NOT read an absent `nullable` as `false`. Being optional and additive, it does not bump `schema_version` ([§9.2](#92-what-is-not-frozen)).
 
 ---
@@ -708,7 +708,7 @@ The type system must have:
 - **Wire encoding tests**: every canonical type serializes to the declared wire representation; `JSON.parse` on the serialized output preserves exact values for BIG* types.
 - **Egress format tests** (§3.5): TIMESTAMP and TIME render exactly 6 fractional digits including the all-zero case; BINARY round-trips through a standard padded base64 decoder and contains no `-`/`_` characters.
 - **Fallback tests** (§8.2/§11.2): an unrecognized JDBC type code yields `STRING` plus exactly one `type_mapping.unknown_source_type` warning, and never throws.
-- **Unbounded-precision tests** (§4): a PG `numeric` with no declared precision produces a `BIGDECIMAL` descriptor with no `precision` key, and that descriptor validates against the §7.1 JSON Schema.
+- **Unbounded-precision tests** (§4): a PG `numeric` with no declared precision — or an exact-numeric expression whose typmod the engine drops — produces a `BIGDECIMAL` descriptor with no `precision` and no `scale` key, and that descriptor validates against the §7.1 JSON Schema.
 - **Unknown-field tests** (§7.1): a column descriptor carrying an unrecognized property still deserializes successfully in the reference clients.
 
 ---
@@ -735,3 +735,4 @@ These are explicitly **out of scope for v1** but tracked for future versions. Li
 | 2026-08-05 | v1.0 | initial draft | Initial type system specification: 11 canonical types, wire encoding, 7 dialect mappings, edge cases, stability promise |
 | 2026-08-07 | v1.1 | spec review | Per [SPEC-REVIEW-2026-08 §2.17](SPEC-REVIEW-2026-08.md#217-type-systemmd) (all [M]): §7.1 column descriptor gains optional `nullable` and opens `additionalProperties` with a normative clients-MUST-ignore-unknown-fields rule (resolves the §9.2 additive-evolution contradiction); PG unsized `numeric` adjudicated to `BIGDECIMAL` with **precision omitted = unbounded** — §3/§4/§5.1/§6/§7.1/§7.3 aligned on that single rule and the two conflicting synthetic-ceiling values deleted; §6 H2 `DECIMAL` limit and `pipeline.staging.precision_overflow` threshold both fixed at 100000 (matches staging.md §5.2); §5.7 REAL-affinity typo fixed and the two BLOB-affinity rows disambiguated (declared BLOB → `BINARY`, no declared type → `STRING`); §1/§2 principle 6 stability-promise pointer corrected to §9; new §3.5 normative egress rules (TIMESTAMP/TIME exactly 6 fractional digits, BINARY = RFC 4648 §4 base64 with padding); §8.4 promotes the UTC-JVM deployment precondition (`-Duser.timezone=UTC`) to a normative rule linked to deployment.md §3.1; §11.2 `forDialect` gains the documented `else` fallback wired to §8.2 (`FallbackTypeMapper` → STRING + `type_mapping.unknown_source_type`); §11.1 `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` per staging.md §5.3; §11.3 test list extended to cover the new rules. |
 | 2026-09-07 | v1.2 | 087 connector seams | New **§5.8 LAKE**: the dialect's ingress mapping is §5.6's verbatim — DuckDB is the engine, and `TypeMappers.forDialect(LAKE)` returns `DuckDbTypeMapper` rather than a second table to drift. §11.2's dispatch sketch gains the row. Nested Parquet/Iceberg types (`STRUCT`, `LIST`, `MAP`) fall under §8.2's unknown-type policy today, exactly as on an embedded DuckDB file. |
+| 2026-09-08 | v1.3 | defect 100 (unsized-numeric truncation) | An exact numeric whose driver reports `precision ≤ 0` now maps to `BIGDECIMAL` with **both precision and scale omitted** — the driver reports scale 0 for *unknown*, and declaring `scale: 0` asserted "integer", so H2 staged the column as `DECIMAL(100000, 0)` and truncated every fraction on insert (measured: `SUM(fare)` over `NUMERIC(10,2)` values 5.09 + 10.99 returned `16`). §4's unbounded row and bullets, §5.1's unsized row, §7.1's scale description and BIGDECIMAL `allOf` (now scoped to declared precision), §7.2's example and §7.3's scale rule aligned. §5.2's unsized-`NUMBER` row joins the same encoding: measured on ojdbc, a bare `NUMBER` reports scale `−127` (scale-unspecified, not a binary float) and typmod-less Oracle expressions report `0` — the old `BIGDECIMAL(38, 0)` had the same truncation; the 38-digit figure is a storage maximum, not a declared bound. §6: exact-unsized storage becomes `DECFLOAT(100000)` (exact, arbitrary-scale; reads back as `NUMERIC` at the ceiling, so the round-trip rule recovers the unsized encoding); §5.5 gains the `DECFLOAT` ingress row. Live impact: `nyc/mobility`'s `borough_od_matrix`, `airport_access_by_borough` and `weather_sensitivity_by_borough` returned whole-dollar totals until this fix, and `mobility_briefing` inherited the truncation by composing `borough_od_matrix`; all four baselines were re-recorded with the cents. |

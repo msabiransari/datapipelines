@@ -33,6 +33,31 @@ class H2StagingRoundTripTest {
     fun tearDown() = staging.close()
 
     @Test
+    fun `an exact-unsized numeric stages as DECFLOAT and keeps every fraction`() {
+        // Defect 100, pinned at the writer seam: a source column whose driver reports no
+        // usable typmod (H2 DECFLOAT here — PG's SUM/AVG shape is covered end to end by
+        // UnsizedNumericStagingIntegrationTest) must stage with its scale intact. The
+        // pre-fix DDL was DECIMAL(100000, 0) and 5.09 / 10.99 landed as 5 / 11.
+        SourceDb().use { src ->
+            src.exec("CREATE TABLE t (v DECFLOAT(100000))")
+            src.exec("INSERT INTO t VALUES (5.09), (10.99)")
+
+            val result = runBlocking { staging.stage(src.query("SELECT v AS \"v\" FROM t"), "stg_unsized", Dialect.H2) }
+
+            result.columns.single().type shouldBe LogicalType.BIGDECIMAL
+            result.columns.single().precision shouldBe null
+            result.columns.single().scale shouldBe null
+        }
+
+        val rows = readStagedAsWire("SELECT v FROM \"stg_unsized\" ORDER BY v")
+        rows.map { it.single() } shouldBe listOf("5.09", "10.99")
+
+        // The staged column is exact at any scale: the sum keeps the cents (16.08, not 16).
+        val sums = readStagedAsWire("SELECT SUM(v) FROM \"stg_unsized\"")
+        sums.single().single() shouldBe "16.08"
+    }
+
+    @Test
     fun `every canonical type round-trips losslessly to the JSON wire form`() {
         SourceDb().use { src ->
             src.exec(

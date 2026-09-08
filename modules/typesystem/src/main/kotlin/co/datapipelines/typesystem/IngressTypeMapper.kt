@@ -205,11 +205,15 @@ abstract class DialectTypeMapper : IngressTypeMapper {
          * `BIGDECIMAL(p, s)` above it.
          *
          * A driver reporting **no** precision (`0`, as PostgreSQL does for an unsized
-         * `numeric`) takes the §4 unbounded encoding — `BIGDECIMAL` with the precision
-         * key omitted. That is the spec's own shorthand for "the source declares no
-         * precision limit", and it is the only safe answer: `precision` is `minimum: 1`
-         * in the §7.1 schema, so emitting `DECIMAL(0, s)` would build an invalid
-         * descriptor, and inventing a ceiling would lie about the source column.
+         * `numeric` and for any expression whose typmod is gone — `SUM(fare)`,
+         * `AVG(fare)`, `fare/2`) takes the §4 exact-unsized encoding — `BIGDECIMAL`
+         * with the precision **and** scale keys omitted. That is the only safe answer:
+         * `precision` is `minimum: 1` in the §7.1 schema, so emitting `DECIMAL(0, s)`
+         * would build an invalid descriptor, inventing a ceiling would lie about the
+         * source column — and the reported scale means *unknown* here, not "integer"
+         * (pgjdbc reports `precision=0 scale=0` for `SUM(fare)` over a `NUMERIC(10,2)`;
+         * declaring `scale: 0` truncated every fraction at the first exact store —
+         * defect 100).
          */
         fun exactNumeric(
             precision: Int,
@@ -217,7 +221,7 @@ abstract class DialectTypeMapper : IngressTypeMapper {
         ): LogicalTypeMapping =
             when {
                 precision <= 0 -> {
-                    unboundedNumeric(scale)
+                    unboundedNumeric()
                 }
 
                 precision <= MAX_DOUBLE_SAFE_PRECISION -> {
@@ -236,17 +240,23 @@ abstract class DialectTypeMapper : IngressTypeMapper {
             }
 
         /**
-         * §4: an unsized exact numeric whose dialect imposes **no** precision ceiling
-         * (today only PostgreSQL `numeric`/`decimal` declared without precision).
+         * §4: an exact numeric whose driver reports no usable typmod — PostgreSQL
+         * `numeric`/`decimal` declared without precision, and any exact-numeric
+         * expression whose typmod the engine drops (the aggregate/arithmetic case).
          *
-         * The precision key is **omitted** — normative shorthand for "unbounded". A
-         * synthetic ceiling must never be substituted here: it would be a lie about the
-         * source column and would break clients that size local buffers from it.
-         * Dialects that *do* define a default (Oracle `NUMBER` → 38) report that default
-         * instead and never reach this helper.
+         * Both keys are **omitted**: precision absent is the normative shorthand for
+         * "unbounded", and scale absent is the shorthand for "unknown — every value
+         * carries its own scale". The driver's reported scale is meaningless in this
+         * case (0 stands for *unknown*, Oracle uses −127 for a scale-unspecified
+         * `NUMBER`), so it is deliberately NOT a parameter: carrying it into the
+         * envelope as `scale: 0` asserted "integer" and truncated every fraction at
+         * the first exact store (defect 100, measured 2026-09-08).
+         *
+         * A synthetic ceiling must never be substituted for the precision either: it
+         * would be a lie about the source column and would break clients that size
+         * local buffers from it.
          */
-        fun unboundedNumeric(scale: Int): LogicalTypeMapping =
-            LogicalTypeMapping(LogicalType.BIGDECIMAL, precision = null, scale = scale.coerceAtLeast(0))
+        fun unboundedNumeric(): LogicalTypeMapping = LogicalTypeMapping(LogicalType.BIGDECIMAL, precision = null, scale = null)
 
         /** Lowercased, parameter-stripped source type name: `"DECIMAL(18,2)"` → `"decimal"`. */
         fun normalizeTypeName(typeName: String): String = typeName.substringBefore('(').trim().lowercase()

@@ -83,8 +83,10 @@ class ColumnSchemaSpecDriftTest {
     @Test
     fun `both allOf conditionals are enforced by the constructor`() {
         // The spec says: if type = DECIMAL then precision is required; if type =
-        // BIGDECIMAL then scale is required. Read the conditionals out of the document
-        // rather than restating them, so a third or altered conditional fails here.
+        // BIGDECIMAL **with a declared precision** then scale is required (an exact-unsized
+        // BIGDECIMAL omits scale too — the driver reports 0 for *unknown*, §4). Read the
+        // conditionals out of the document rather than restating them, so a third or
+        // altered conditional fails here.
         val conditionals =
             schema["allOf"].associate { branch ->
                 branch["if"]["properties"]["type"]["const"].asText() to
@@ -93,14 +95,22 @@ class ColumnSchemaSpecDriftTest {
 
         conditionals shouldBe mapOf("DECIMAL" to listOf("precision"), "BIGDECIMAL" to listOf("scale"))
 
+        // The BIGDECIMAL branch is SCOPED to bounded descriptors: its `if` must require
+        // `precision`, or the exact-unsized encoding would fail validation.
+        val bigDecimalBranch = schema["allOf"].first { it["if"]["properties"]["type"]["const"].asText() == "BIGDECIMAL" }
+        bigDecimalBranch["if"]["required"].map { it.asText() } shouldContainExactly listOf("precision")
+
         conditionals.forEach { (typeName, required) ->
             val type = LogicalType.fromWire(typeName)
             required.forEach { field ->
-                withClue("$typeName without $field must not construct") {
+                withClue("bounded $typeName without $field must not construct") {
                     shouldThrow<IllegalArgumentException> { omitting(type, field) }
                 }
             }
         }
+
+        // The unbounded case the scoping exists for: no precision, no scale, valid.
+        shouldNotThrowAny { ColumnSchema("c", LogicalType.BIGDECIMAL, precision = null, scale = null) }
     }
 
     /** Builds a descriptor of [type] with [omittedField] left out, everything else valid. */

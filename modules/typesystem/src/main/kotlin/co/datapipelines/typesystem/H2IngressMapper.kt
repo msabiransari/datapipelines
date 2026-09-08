@@ -28,6 +28,9 @@ import java.sql.Types
 object H2IngressMapper : DialectTypeMapper() {
     private val EXACT_NUMERIC_NAMES = setOf("numeric", "decimal", "dec")
 
+    /** The §4 exact-unsized encoding: `BIGDECIMAL`, precision and scale omitted. */
+    private val EXACT_UNSIZED = unboundedNumeric()
+
     /** §5.5, keyed on the H2 type name (parameters stripped, lowercased). */
     override val recognizedTypeNames: Map<String, LogicalTypeMapping> get() = BY_NAME
 
@@ -64,6 +67,12 @@ object H2IngressMapper : DialectTypeMapper() {
             ).forEach { put(it, AS_STRING) }
             listOf("binary", "varbinary", "blob", "binary varying", "binary large object", "longvarbinary")
                 .forEach { put(it, AS_BINARY) }
+            // DECFLOAT is H2's exact, arbitrary-scale decimal: the declared precision
+            // counts digits and the scale is genuinely undeclared (RSMD reports scale 0
+            // for "none"), so it takes the §4 exact-unsized encoding whatever its
+            // precision — mapping DECFLOAT(38) as BIGDECIMAL(38, 0) would truncate its
+            // fractions at the next exact store (defect 100's shape, H2-side).
+            put("decfloat", EXACT_UNSIZED)
         }
 
     /** §5.5, keyed on the JDBC code — the only route [fromH2] has. */
@@ -130,12 +139,13 @@ object H2IngressMapper : DialectTypeMapper() {
     /**
      * Exact numeric read back **out of H2**, with the §6 round-trip rule applied.
      *
-     * An unbounded `BIGDECIMAL` (precision omitted, §4) stages as
-     * `DECIMAL(100000, s)`. Reading that column back through the generic
-     * [exactNumeric] would report `BIGDECIMAL(100000, s)` — reintroducing on egress
-     * exactly the fabricated bound §4 forbids on ingress, with the storage ceiling
-     * masquerading as a property of the source column. So a reported precision **at or
-     * above the ceiling** maps back to the unbounded encoding.
+     * An exact-unsized `BIGDECIMAL` (precision and scale omitted, §4) stages as
+     * `DECFLOAT(100000)`, which H2's metadata reports as `NUMERIC` at precision
+     * 100000. Reading that column back through the generic [exactNumeric] would
+     * report `BIGDECIMAL(100000, 0)` — reintroducing on egress exactly the fabricated
+     * bound §4 forbids on ingress, with the storage ceiling masquerading as a property
+     * of the source column. So a reported precision **at or above the ceiling** maps
+     * back to the exact-unsized encoding.
      *
      * The rule's accepted consequence (§6, normative): a genuine H2 *source* column
      * declared `DECIMAL(100000, s)` also reports unbounded. That column sits at H2's own
@@ -150,7 +160,7 @@ object H2IngressMapper : DialectTypeMapper() {
         scale: Int,
     ): LogicalTypeMapping =
         if (precision >= H2EgressMapper.MAX_H2_DECIMAL_PRECISION) {
-            unboundedNumeric(scale)
+            unboundedNumeric()
         } else {
             exactNumeric(precision, scale)
         }

@@ -35,16 +35,20 @@ class ColumnSchemaTest {
     }
 
     @Test
-    fun `an unbounded BIGDECIMAL emits NO precision key at all`() {
-        // §4, normative: omitted precision means unbounded. `"precision": null` would be
-        // a different statement, and a synthetic ceiling would be a lie about the source.
-        val column = ColumnSchema("unbounded_total", LogicalType.BIGDECIMAL, precision = null, scale = 0)
+    fun `an exact-unsized BIGDECIMAL emits NO precision or scale key at all`() {
+        // §4, normative: omitted precision means unbounded, and — since the unsized-numeric
+        // truncation fix — omitted scale means the source declares no scale either (the
+        // driver reports 0 for *unknown*; a declared 0 truncated at the first exact store).
+        // `"precision": null` would be a different statement, and a synthetic ceiling
+        // would be a lie about the source.
+        val column = ColumnSchema("unbounded_total", LogicalType.BIGDECIMAL, precision = null, scale = null)
         val keys = keysOf(column)
 
-        keys shouldContainExactly listOf("name", "type", "scale")
+        keys shouldContainExactly listOf("name", "type")
         keys shouldNotContain "precision"
+        keys shouldNotContain "scale"
         mapper.writeValueAsString(column) shouldBe
-            """{"name":"unbounded_total","type":"BIGDECIMAL","scale":0}"""
+            """{"name":"unbounded_total","type":"BIGDECIMAL"}"""
         column.isUnboundedPrecision shouldBe true
     }
 
@@ -107,7 +111,7 @@ class ColumnSchemaTest {
                     listOf(
                         ColumnSchema("customer_id", LogicalType.INTEGER, nullable = false),
                         ColumnSchema("total_amount", LogicalType.BIGDECIMAL, 18, 2, nullable = true),
-                        ColumnSchema("unbounded_total", LogicalType.BIGDECIMAL, scale = 0),
+                        ColumnSchema("unbounded_total", LogicalType.BIGDECIMAL),
                         ColumnSchema("measurement", LogicalType.DECIMAL, precision = 15),
                         ColumnSchema("first_order_at", LogicalType.TIMESTAMP),
                     ),
@@ -127,7 +131,8 @@ class ColumnSchemaTest {
 
     @Test
     fun `the §7-1 conditional-required rules are enforced at construction`() {
-        // DECIMAL requires precision; BIGDECIMAL requires scale (the JSON Schema allOf).
+        // DECIMAL requires precision; BIGDECIMAL requires scale **when bounded** (the JSON
+        // Schema allOf). An exact-unsized BIGDECIMAL (precision omitted) omits scale too.
         shouldThrow<IllegalArgumentException> { ColumnSchema("c", LogicalType.DECIMAL) }
         shouldThrow<IllegalArgumentException> { ColumnSchema("c", LogicalType.BIGDECIMAL, precision = 20) }
         // …and the field bounds: minLength 1, precision >= 1, scale >= 0.

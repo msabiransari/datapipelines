@@ -212,7 +212,7 @@ CREATE TABLE "stg_orders" (
 Notes:
 - Every identifier is double-quoted (§4.5). Table names are already lowercase-only by contract, so quoting does not change how templates reference them; column names may be mixed-case, and quoting makes them exact.
 - H2 `VARCHAR` without length spec = unbounded (practical limit 1GB). We don't propagate source length to H2 — source-DB length limits are not our concern (the source data is what it is).
-- H2 `DECIMAL(p, s)` preserves exact precision.
+- H2 `DECIMAL(p, s)` preserves exact precision. An exact-**unsized** numeric (canonical `BIGDECIMAL` with precision and scale omitted, type-system §4) is DDL'd as `DECFLOAT(100000)` — H2's exact, arbitrary-scale decimal — never `DECIMAL(100000, 0)`: the driver reported scale 0 for *unknown*, and a declared 0 truncated every fraction on insert (defect 100).
 - H2 `INTEGER` is 32-bit, `BIGINT` is 64-bit.
 
 ### 4.3 Batch inserts
@@ -323,6 +323,7 @@ See [Type System §6](type-system.md#6-h2-staging-type-mapping-canonical--h2) fo
 | `DECIMAL(p, s)` exact | `DECIMAL(p, s)` |
 | `DECIMAL(p)` approx | `DOUBLE` |
 | `BIGDECIMAL(p, s)` | `DECIMAL(p, s)` |
+| `BIGDECIMAL` (exact-unsized, precision and scale omitted) | `DECFLOAT(100000)` |
 | `STRING` | `VARCHAR` |
 | `BINARY` | `VARBINARY` |
 | `DATE` | `DATE` |

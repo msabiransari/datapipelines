@@ -89,3 +89,14 @@ so a backfill passes the right JSON type: a pipeline whose `fiscal_quarter` calc
 the run quarter from `$current_date` can be re-run for an old quarter with
 `"run_fiscal_quarter": 4` — a JSON **number** (the kind outputs INTEGER), never `"2025-Q4"`,
 which fails coercion with `pipeline.execution.invalid_parameter_type`.
+
+## Aggregates and arithmetic across engines — cast the result
+
+When you ship an aggregate or arithmetic result across engines, **cast it** —
+`SUM(x)::NUMERIC(14,2)`, `CAST(AVG(x) AS DECIMAL(14,4))` — so the wire type is what you
+mean, not what the driver guesses. Engines drop the typmod on computed numerics
+(Postgres reports `SUM`/`AVG`/division over a `NUMERIC(10,2)` with no precision and no
+scale), and while the platform now stores an unsized exact numeric exactly (it stages as
+H2 `DECFLOAT`, every fraction intact), the cast is still the readable contract: it
+documents the shape you intended, and it protects the result if the query is ever run
+through a client or engine that does not.

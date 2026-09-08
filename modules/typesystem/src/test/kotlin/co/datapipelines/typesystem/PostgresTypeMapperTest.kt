@@ -34,12 +34,11 @@ class PostgresTypeMapperTest {
     }
 
     @Test
-    fun `an unsized numeric produces a BIGDECIMAL descriptor with NO precision key`() {
-        // §4, the v1.1 adjudication: PG's unsized numeric is unbounded, and omitted
-        // precision is the normative encoding for that. The wire shape is the assertion
-        // that matters — a synthetic ceiling (PG's internal max, Oracle's 38) would
-        // serialize identically to a real bound and quietly lie to every client sizing
-        // a local decimal buffer from it.
+    fun `an unsized numeric produces a BIGDECIMAL descriptor with NO precision or scale key`() {
+        // §4: the driver reports precision 0 scale 0 for an expression whose typmod is
+        // gone (SUM/AVG/arithmetic over a sized numeric) — 0 is the driver's "unknown",
+        // not a declared integer scale. Carrying scale: 0 into the envelope truncated
+        // every such column at the first exact store (defect 100); both keys are omitted.
         val mapped =
             PostgresTypeMapper.mapColumn(
                 name = "unbounded_total",
@@ -51,7 +50,7 @@ class PostgresTypeMapperTest {
 
         mapped.column.type shouldBe LogicalType.BIGDECIMAL
         mapped.column.precision shouldBe null
-        mapped.column.scale shouldBe 0
+        mapped.column.scale shouldBe null
         mapped.warnings shouldBe emptyList()
 
         val keys =
@@ -60,7 +59,7 @@ class PostgresTypeMapperTest {
                 .fieldNames()
                 .asSequence()
                 .toList()
-        keys shouldContainExactly listOf("name", "type", "scale")
+        keys shouldContainExactly listOf("name", "type")
     }
 
     @Test
@@ -119,9 +118,9 @@ class PostgresTypeMapperTest {
                 MappingCase("real / float4", Types.REAL, SINGLE),
                 MappingCase("float8 / double precision", Types.DOUBLE, DOUBLE),
                 MappingCase(
-                    "numeric (no precision) -> unbounded",
+                    "numeric (no precision) -> exact-unsized",
                     Types.NUMERIC,
-                    unbounded(scale = 0),
+                    unbounded(),
                     typeName = "numeric",
                 ),
                 MappingCase("numeric(p,s) p <= 15", Types.NUMERIC, decimal(12, 2), precision = 12, scale = 2),

@@ -25,29 +25,34 @@ import java.sql.Types
  *
  * | scale | precision | canonical |
  * |---|---|---|
- * | 0 | unsized (driver reports 0) | `BIGDECIMAL(38, 0)` — Oracle's documented default |
+ * | any | unsized (driver reports 0) | `BIGDECIMAL`, precision and scale omitted — exact-unsized (§4) |
  * | 0 | ≤ 9 | `INTEGER` (fits int32) |
  * | 0 | 10–18 | `BIGINTEGER` (fits int64) |
  * | 0 | > 18 | `BIGDECIMAL(p, 0)` |
  * | > 0 | ≤ 15 | `DECIMAL(p, s)` |
  * | > 0 | > 15 | `BIGDECIMAL(p, s)` |
  *
+ * Measured against ojdbc (23.7.0.25.01, Oracle 21c XE, 2026-09-08): a bare `NUMBER`
+ * column reports `precision=0 scale=-127` (Oracle's scale-unspecified marker — the
+ * column is exact decimal with per-value scale, **not** a binary float), and an
+ * expression whose typmod is gone (`SUM(fare)`, `AVG(fare)`, `fare/2` over a
+ * `NUMBER(10,2)`) reports `precision=0 scale=0` — the same "unknown" shape as
+ * PostgreSQL. Both take the §4 exact-unsized encoding: the old `BIGDECIMAL(38, 0)`
+ * ("documented default") asserted integer scale and truncated a bare `NUMBER`'s
+ * fractions at the first exact store — defect 100's shape, Oracle-side. The 38-digit
+ * figure is Oracle's storage maximum, not a declared bound, so omitting it is no lie
+ * (the same argument §6's H2 ceiling round-trip rule makes).
+ *
  * **`NUMBER(1)` is NOT promoted to `BOOLEAN`** (§8.5). Some frameworks infer boolean
  * from it; we map by source type, not by guessed intent, so it lands in `INTEGER` above.
  * Authors who want boolean semantics write `CASE WHEN col = 1 THEN true ELSE false END`.
  */
 object OracleTypeMapper : DialectTypeMapper() {
-    /** Oracle's documented default precision for an unsized `NUMBER` (§4). */
-    private const val ORACLE_DEFAULT_NUMBER_PRECISION = 38
-
     /** Largest `NUMBER(p, 0)` that fits int32 → canonical `INTEGER`. */
     private const val MAX_INT32_DIGITS = 9
 
     /** Largest `NUMBER(p, 0)` that fits int64 → canonical `BIGINTEGER`. */
     private const val MAX_INT64_DIGITS = 18
-
-    private val UNSIZED_NUMBER =
-        LogicalTypeMapping(LogicalType.BIGDECIMAL, ORACLE_DEFAULT_NUMBER_PRECISION, scale = 0)
 
     /** §5.2, every row decided by the JDBC code alone. */
     override val recognizedTypeCodes: Map<Int, LogicalTypeMapping> get() = BY_CODE
@@ -107,9 +112,10 @@ object OracleTypeMapper : DialectTypeMapper() {
         scale: Int,
     ): LogicalTypeMapping =
         when {
-            // Unsized NUMBER: Oracle documents a 38-digit default, so — unlike PG (§4) —
-            // a real bound exists and is reported. This is not the unbounded case.
-            precision <= 0 -> UNSIZED_NUMBER
+            // Unsized NUMBER: a bare NUMBER reports scale −127 (scale-unspecified), a
+            // typmod-less expression reports scale 0 — both mean "unknown", so both take
+            // the §4 exact-unsized encoding (see the class KDoc for the measurement).
+            precision <= 0 -> unboundedNumeric()
 
             // scale <= 0 also covers Oracle's legal negative scales (NUMBER(10, -2)),
             // which the §7.1 envelope cannot express; they join the integer-shaped branch.
