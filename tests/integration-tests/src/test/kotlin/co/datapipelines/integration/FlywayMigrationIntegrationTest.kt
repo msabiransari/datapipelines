@@ -72,6 +72,9 @@ class FlywayMigrationIntegrationTest {
                 "14|lake dialect|true",
                 // 089 §A — the dp-lake catalog: one table, one named UNIQUE, one CHECK.
                 "15|lake tables|true",
+                // 089 §F — LAKE joins template_versions.chk_dialect (the 088 showcase's
+                // LAKE template insert, and every LAKE DQL template, violated the V8 set).
+                "16|lake template dialect|true",
             )
     }
 

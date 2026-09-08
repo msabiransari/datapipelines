@@ -22,6 +22,17 @@ abstract class AbstractDialectAdapter(
 
     override val defaultProperties: Map<String, String> = emptyMap()
 
+    /**
+     * Whether the dialect's driver honors `Connection.setReadOnly` — HikariCP applies the
+     * pool's `readOnly` flag (workspaces §6 layer 2b) to every NEW physical connection at pool
+     * init, so a driver that throws from `setReadOnly` fails the ENTIRE pool build of a
+     * readonly datasource. The DuckDB driver is the known refusal ("Can't change read-only
+     * status on connection level", duckdb_jdbc 1.5.5.1 — found live by the 089 §F MinIO
+     * suite), so the two DuckDB-family adapters override this to false and the D6 layer-2a
+     * executor re-check carries their enforcement alone.
+     */
+    protected open val driverSupportsConnectionReadOnly: Boolean get() = true
+
     final override val typeMapper: IngressTypeMapper get() = TypeMappers.forDialect(dialect)
 
     /** The §5.6 set for this dialect, resolved by the enum-total lookup — never adapter-local state. */
@@ -84,7 +95,14 @@ abstract class AbstractDialectAdapter(
         // leased connection) — and `properties.hikari.readOnly` is §5.6-refused so an operator
         // cannot flip it either way. The flag's real boundary is the SELECT-only DB user of
         // datasources.md §5.7.
-        if (datasource.isReadonly) config.isReadOnly = true
+        //
+        // [driverSupportsConnectionReadOnly] gates it: HikariCP applies the flag to every NEW
+        // physical connection at pool init, and a driver whose `Connection.setReadOnly` throws
+        // (DuckDB: "Can't change read-only status on connection level" — found live by the
+        // 089 §F MinIO suite) would fail the ENTIRE pool build of a readonly datasource, which
+        // is every lake the demo ships. The DuckDB-family adapters declare false; their D6
+        // layer-2a executor re-check and their engine posture are the enforcement that remains.
+        if (datasource.isReadonly && driverSupportsConnectionReadOnly) config.isReadOnly = true
         // Note: queryTimeoutSeconds is an execution-layer policy (§5.5), applied per-statement
         // by the executor — deliberately NOT a pool or connection property here.
 
@@ -319,6 +337,9 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
             // fetched, loaded, attached, read or written, whatever the two toggles above say.
             "enable_external_access" to "false",
         )
+
+    /** The DuckDB driver throws from `Connection.setReadOnly` — see the declaration's KDoc. */
+    override val driverSupportsConnectionReadOnly: Boolean get() = false
 }
 
 /**
@@ -480,6 +501,9 @@ class LakeDialectAdapter(
     /** DuckDB's engine catalogs, as [DuckdbDialectAdapter] excludes them. */
     override val introspectionSystemSchemas: Set<String> =
         setOf("information_schema", "pg_catalog", "system.main", "temp.main")
+
+    /** Same driver, same refusal — see the declaration's KDoc (and the demo's readonly lake). */
+    override val driverSupportsConnectionReadOnly: Boolean get() = false
 
     /**
      * The embedded five, MINUS `enable_external_access` — the one setting a lake exists to have

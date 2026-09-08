@@ -496,6 +496,27 @@ class LakeDialectAdapterTest {
         }
     }
 
+    @Test
+    fun `a readonly lake builds a pool - the duckdb driver's setReadOnly refusal is not pushed to it`() {
+        // 089 §F, found live by the MinIO suite: HikariCP applies the pool's readOnly flag to
+        // every new connection at init, and DuckDB's driver THROWS from setReadOnly — so an
+        // unguarded flag failed the ENTIRE pool build of a readonly lake (which is what the
+        // demo's sample-lake is). The DuckDB-family adapters declare
+        // driverSupportsConnectionReadOnly = false instead; both are pinned here because the
+        // flag must also stay SET for drivers that honor it (the H2 pool test covers that half).
+        val readonlyLake = lakeDatasource().copy(isReadonly = true)
+        assertAll(
+            { lake.buildHikariConfig(readonlyLake).isReadOnly shouldBe false },
+            { embedded.buildHikariConfig(readonlyLake.copy(dialect = Dialect.DUCKDB)).isReadOnly shouldBe false },
+        )
+        // …and the pool that config builds actually opens (the pre-fix failure was at init).
+        HikariDataSource(lake.buildHikariConfig(readonlyLake)).use { pool ->
+            pool.connection.use { connection ->
+                countOf(connection, "SELECT 1") shouldBe 1
+            }
+        }
+    }
+
     private fun embeddedDuckDb(): Datasource =
         Datasource(
             name = "embedded_ds",
