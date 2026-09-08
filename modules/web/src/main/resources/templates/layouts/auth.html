@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:attr="data-theme=${activeTheme}"
+      th:fragment="page(content)">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!--/* 090 §C — THE AUTHENTICATION LAYOUT.
+       The login screen, the forced-password-change gate and the OIDC error banner are
+       CEREMONY screens: they exist to move a visitor across the session boundary, and
+       until that move completes there is no workspace, no navigation and nothing to
+       navigate to. `layouts/default` gave them the app shell anyway — for a SIGNED-IN
+       visitor `authenticated` is true, so /login rendered the rail, the top bar and a
+       working menu around a form asking them to sign in (owner's walk, 2026-09-07).
+       The 302 in UiController closes that door; this layout is what makes the room
+       behind it the right shape for everyone else, including the anonymous visitor who
+       was already getting `.app-shell-anon` — a shell with its contents removed rather
+       than a page that never had them.
+
+       What this layout deliberately DOES NOT have, and what the tests pin:
+       - no `nav.app-nav`, no rail, no top bar, no workspace switcher, no avatar menu;
+       - no `#app-main`, and therefore no boosted-swap target: a ceremony screen can
+         never be swapped into an app page, and an app page can never be swapped into
+         it. `hx-boost` appears nowhere here (076 §B already marked /login and the OIDC
+         redirects as full navigations; this removes the machinery instead of opting
+         each link out of it);
+       - no `dp-rail` inline script: there is no rail whose width could flash.
+
+       What it KEEPS, because the ceremony needs it: the design system and the resolved
+       theme (a ceremony screen in the wrong theme is the first thing a returning user
+       sees), the font preloads, htmx and the toast stack — `settings/password.html`
+       posts its change through `hx-post` and its success arrives as an out-of-band
+       toast, so the stack and the `hx-headers` CSRF pair below are load-bearing here,
+       not decoration. */-->
+  <link th:href="@{/vendor/design-system/tokens.css}" rel="stylesheet">
+  <link th:id="theme-link"
+        th:href="@{/vendor/design-system/themes/{theme}.css(theme=${activeTheme})}"
+        rel="stylesheet">
+  <link th:href="@{/vendor/design-system/base.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/motion.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/icons.css}" rel="stylesheet">
+
+  <!--/* 079 §G's preloads, for the same reason they exist in `layouts/default`: the
+       login card is a page of TEXT, so it is the screen a font swap disfigures most. */-->
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        th:href="@{/vendor/fonts/inter/InterVariable.woff2}">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        th:href="@{/vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2}">
+
+  <link th:href="@{/css/app.css}" rel="stylesheet">
+
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
+  <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
+</head>
+<body class="app-auth-body"
+      th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;}'">
+
+  <!--/* The progress bar and the toast stack are the two pieces of shell chrome a ceremony
+       screen still uses: the password change is an htmx request like any other. Both are
+       position:fixed, so neither participates in the layout below. */-->
+  <div id="app-progress" class="app-progress" aria-hidden="true"></div>
+  <div id="toast" class="ds-toast-stack app-toast-stack" aria-live="polite"></div>
+
+  <div class="app-auth">
+    <!--/* The brand is a LINK to the public site, not to /dashboard: from here the visitor
+         either completes the ceremony or leaves, and /dashboard is exactly the place they
+         have not been let into yet. Same mark and tile as the rail's brand (079). */-->
+    <a class="app-auth-brand" th:href="@{/}">
+      <span class="app-brand-tile" aria-hidden="true"><svg viewBox="0 0 64 64" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default)"/></svg></span><span>datapipelines</span>
+    </a>
+
+    <!--/* A <main> WITHOUT the id: `#app-main` is the boosted swap target and nothing on a
+         ceremony screen may be one. The landmark itself is a11y, and stays. */-->
+    <main class="app-auth-main">
+      <th:block th:replace="${content}"/>
+    </main>
+  </div>
+
+  <script th:src="@{/webjars/htmx.org/2.0.10/dist/htmx.min.js}"></script>
+  <script th:src="@{/js/toast.js}"></script>
+</body>
+</html>

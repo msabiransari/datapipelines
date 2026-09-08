@@ -191,6 +191,7 @@ class AuthConfiguration {
         AuthFilters(
             apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver),
             jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver),
+            oidcSignedInBounce = OidcSignedInBounceFilter(jwtService, userService),
             loginRateLimit = LoginRateLimitFilter(clientAddressResolver, authProperties, authErrorWriter),
             promotionServerKey =
                 PromotionServerKeyFilter(

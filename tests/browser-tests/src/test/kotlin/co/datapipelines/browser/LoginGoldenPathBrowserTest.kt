@@ -98,4 +98,93 @@ class LoginGoldenPathBrowserTest : BrowserSuite() {
         fresh.page.waitForURL("**/dashboard")
         fresh.close()
     }
+
+    /**
+     * 090 §C — the owner's walk of 2026-09-07: signed in, `/login` opened in a new tab,
+     * and the sign-in form appeared with the sidebar around it and the menu working. Two
+     * defects in one screen — `/login` had no session check, and `login.html` decorated
+     * with `layouts/default`, which renders the shell whenever `authenticated` is true.
+     *
+     * This pins the outcome end to end. The unit half lives in `UiControllerTest` (the
+     * 302 itself) and `AuthLayoutRenderTest` (the shell-free markup); what only a browser
+     * can prove is that the redirect survives the real filter chain — the session cookie
+     * is authenticated by the JWT filter on a `permitAll` route, which is the exact
+     * mechanism that made the form render in the first place.
+     */
+    @Test
+    fun `a signed-in visitor who opens the login page lands on the dashboard`() {
+        startTrace()
+        // A slug of its own: `seedLocalUser` is ON CONFLICT DO NOTHING, so two tests sharing
+        // an email share a USER — and this one wants `mustChange = false` while the
+        // forced-change path wants true. Whichever ran first would decide, which is exactly
+        // the order dependency the suite forbids. (Caught by that test timing out, 090.)
+        val user = seedLocalUser(uniqueEmail("loginbounce"), generatedPassword("otp"), mustChange = false)
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+
+        page.navigate("$baseUrl/login")
+
+        page.waitForURL("**/dashboard")
+        page.locator("#login-email").count() shouldBe 0
+    }
+
+    /**
+     * The other door into the same dead end: the OIDC authorization entry, reachable by
+     * bookmark or a stale tab. This deployment registers no providers, so the route 404s
+     * rather than redirecting — which still proves the guard is INERT here (a filter that
+     * bounced unconditionally would answer 302 on a route that has no provider at all),
+     * and `OidcSignedInBounceFilterTest` owns the redirect itself with the chain mocked.
+     */
+    @Test
+    fun `the oidc authorization entry is not a login form for a signed-in visitor`() {
+        startTrace()
+        val user = seedLocalUser(uniqueEmail("oidcentry"), generatedPassword("otp"), mustChange = false)
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+
+        val response = page.navigate("$baseUrl/oauth2/authorization/google")
+
+        (response!!.status() != 200) shouldBe true
+        page.locator("#login-email").count() shouldBe 0
+    }
+
+    /**
+     * The ceremony layout itself, live: no rail, no top bar, no boosted-swap target — and
+     * the page does not scroll, which is what `.app-auth`'s single grid column buys over
+     * `.app-center`'s 70vh floor inside the shell's `<main>`.
+     */
+    @Test
+    fun `the login page renders the ceremony layout with no app shell`() {
+        startTrace()
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/login")
+
+        page.locator("nav.app-nav").count() shouldBe 0
+        page.locator("#app-main").count() shouldBe 0
+        page.locator(".app-rail").count() shouldBe 0
+        page.locator(".app-auth-brand").isVisible shouldBe true
+        page.locator(".app-card-auth").isVisible shouldBe true
+        val scrolls =
+            page.evaluate("() => document.documentElement.scrollHeight > window.innerHeight + 1") as Boolean
+        scrolls shouldBe false
+    }
+
+    /**
+     * The forced-change gate is the OTHER ceremony screen, and the one where a shell does
+     * real harm: the interceptor refuses every route but this one, so a rail of ten links
+     * that all bounce straight back is a menu of dead ends. `settings/password-forced`
+     * decorates with the auth layout; the voluntary change from Settings keeps the shell,
+     * which `AuthLayoutRenderTest` pins at the render.
+     */
+    @Test
+    fun `the forced password change screen renders without the app shell`() {
+        startTrace()
+        val user = seedLocalUser(uniqueEmail("forcedceremony"), generatedPassword("otp"), mustChange = true)
+        login(user.email, user.oneTimePassword)
+
+        page.waitForURL("**/settings/password")
+        page.locator("#password-change-form").isVisible shouldBe true
+        page.locator("nav.app-nav").count() shouldBe 0
+        page.locator("#app-main").count() shouldBe 0
+    }
 }

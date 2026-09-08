@@ -1,14 +1,20 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.AuthenticatedPrincipal
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import java.util.UUID
 
 class UiControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
@@ -83,4 +89,70 @@ class UiControllerTest {
         viewName shouldBe "dashboard"
         model["activeTheme"] shouldBe "dark"
     }
+
+    /**
+     * 090 §C — a live session never sees the sign-in form.
+     *
+     * `/login` is `permitAll`, so the JWT filter authenticates a valid `dp_session` before
+     * the request reaches this controller and `UiWorkspaceAdvice` reports `authenticated`.
+     * Opening it in a second tab therefore rendered the form inside the working app shell
+     * (owner's walk, 2026-09-07). The bounce reads the SecurityContext — the principal, not
+     * the cookie — so it fires exactly when the session is real.
+     *
+     * The collaborators are left UNSTUBBED on purpose: a redirect that still asked
+     * `oidcRegistrations.providers()` would blow up on the strict mock, which is what makes
+     * this test evidence that the bounce happens BEFORE the model is built rather than
+     * after it.
+     */
+    @Test
+    fun `a signed-in visitor is redirected away from the login page`() {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(signedInPrincipal(), null, emptyList())
+
+        val model = ExtendedModelMap()
+        controller.login(model, mockRequest()) shouldBe "redirect:/dashboard"
+        model.isEmpty() shouldBe true
+    }
+
+    /**
+     * The other half, and the reason the check reads the principal and not the cookie: a
+     * request whose credential did NOT authenticate (expired, tampered, deactivated owner)
+     * arrives here with an empty context, and that visitor genuinely needs the form —
+     * `/login?error=expired` exists for exactly them.
+     */
+    @Test
+    fun `a request with no authenticated principal still gets the login form`() {
+        SecurityContextHolder.getContext().authentication = null
+        every { oidcRegistrations.providers() } returns emptyList()
+        every { themeResolver.resolve(any()) } returns "saas"
+        val request = mockRequest()
+        every { request.getParameter("error") } returns "expired"
+
+        controller.login(ExtendedModelMap(), request) shouldBe "login"
+    }
+
+    /** A non-session credential (an API key principal is not one) must not bounce a browser. */
+    @Test
+    fun `an authentication holding a non-principal object does not bounce`() {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken("anonymous", null, emptyList())
+        every { oidcRegistrations.providers() } returns emptyList()
+        every { themeResolver.resolve(any()) } returns "saas"
+        val request = mockRequest()
+        every { request.getParameter("error") } returns null
+
+        controller.login(ExtendedModelMap(), request) shouldBe "login"
+    }
+
+    @AfterEach
+    fun clearContext() = SecurityContextHolder.clearContext()
+
+    private fun signedInPrincipal() =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "signed-in@example.test",
+            displayName = "Signed In",
+            scopes = emptySet(),
+            authMethod = AuthMethod.OIDC,
+        )
 }

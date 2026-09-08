@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
@@ -202,6 +203,11 @@ class SecurityConfig(
      * mismatch is indistinguishable from a §4.2 rejection at the success handler.
      */
     private fun configureOidcLogin(http: HttpSecurity) {
+        // 090 §C — ahead of the authorization redirect, which Spring Security orders BEFORE
+        // `UsernamePasswordAuthenticationFilter` and therefore before this chain's own
+        // credential filters. Installed only here, with the rest of the OIDC wiring: a
+        // deployment with no providers has no authorization endpoint to guard.
+        http.addFilterBefore(filters.oidcSignedInBounce, OAuth2AuthorizationRequestRedirectFilter::class.java)
         http.oauth2Login { oauth ->
             oauth.successHandler(oidcSuccessHandler)
             oauth.failureHandler { request, response, exception ->
