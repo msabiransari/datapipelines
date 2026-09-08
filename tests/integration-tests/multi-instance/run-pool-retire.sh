@@ -110,31 +110,44 @@ echo "both apps ready: app1=:$APP1_PORT app2=:$APP2_PORT"
 # ---------------------------------------------------------------- auth setup
 say "auth setup (against app1): login → forced password change → mint API key"
 JAR1=$(mktemp)
-LOGIN_HTML=$(curl -s -c "$JAR1" "http://localhost:$APP1_PORT/login")
-CSRF=$(printf '%s' "$LOGIN_HTML" | grep -o 'name="_csrf" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"//')
-[ -n "$CSRF" ] || fail "no _csrf hidden field on /login"
+# `set -o pipefail` makes a grep that matches NOTHING kill the script with no message, which is
+# how the first run of this harness ended: 21 seconds of stack, one blank line, and no reason.
+# The extraction is guarded and the page is dumped on failure — an unexplained exit is not a
+# result anybody can act on.
+LOGIN_PAGE=$(mktemp)
+LOGIN_STATUS=$(curl -s -o "$LOGIN_PAGE" -w '%{http_code}' -c "$JAR1" "http://localhost:$APP1_PORT/login")
+note "GET /login → $LOGIN_STATUS ($(wc -c < "$LOGIN_PAGE" | tr -d ' ') bytes)"
+CSRF=$(grep -o 'name="_csrf" value="[^"]*"' "$LOGIN_PAGE" | head -1 | sed 's/.*value="//;s/"//' || true)
+[ -n "$CSRF" ] || { echo "--- /login (first 60 lines) ---"; head -60 "$LOGIN_PAGE"; fail "no _csrf hidden field on /login (status $LOGIN_STATUS)"; }
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR1" -c "$JAR1" \
   --data-urlencode "email=$ADMIN_EMAIL" --data-urlencode "password=$SEED_PASSWORD" \
   --data-urlencode "_csrf=$CSRF" \
   "http://localhost:$APP1_PORT/login")
 [ "$CODE" = "302" ] || fail "login POST answered $CODE, expected 302"
 
-PW_HTML=$(curl -s -b "$JAR1" -c "$JAR1" "http://localhost:$APP1_PORT/settings/password")
-CSRF=$(printf '%s' "$PW_HTML" | grep -o 'name="_csrf" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"//')
+# The forced change is an HTMX form (`hx-post="/partials/account/password"`, partials/
+# password-card.html) and carries NO hidden `_csrf` input — htmx sends the double-submit token
+# as the `DP-CSRF-Token` HEADER, the same way the API-key mint below does. The 036/050 harnesses
+# still post a hidden `_csrf` field here; that was true when they were written and is not any
+# more, which is what the first run of this leg discovered. Reported in the handback rather than
+# fixed there: those scripts are another round's ground.
+curl -s -o "$LOGIN_PAGE" -b "$JAR1" -c "$JAR1" "http://localhost:$APP1_PORT/settings/password" >/dev/null
+CSRF_COOKIE=$(grep 'dp_csrf' "$JAR1" | awk '{print $NF}')
+[ -n "$CSRF_COOKIE" ] || fail "no dp_csrf cookie after login"
 CODE=$(curl -s -o /tmp/mi094-pw.txt -w '%{http_code}' -b "$JAR1" -c "$JAR1" \
+  -H "DP-CSRF-Token: $CSRF_COOKIE" \
   --data-urlencode "currentPassword=$SEED_PASSWORD" --data-urlencode "newPassword=$NEW_PASSWORD" \
-  --data-urlencode "confirmPassword=$NEW_PASSWORD" --data-urlencode "_csrf=$CSRF" \
+  --data-urlencode "confirmPassword=$NEW_PASSWORD" \
   "http://localhost:$APP1_PORT/partials/account/password")
 [ "$CODE" = "200" ] || { cat /tmp/mi094-pw.txt; fail "forced password change answered $CODE"; }
 
-CSRF_COOKIE=$(grep 'dp_csrf' "$JAR1" | awk '{print $NF}')
 KEY_JSON=$(curl -s -b "$JAR1" -H "DP-CSRF-Token: $CSRF_COOKIE" -H 'Content-Type: application/json' \
   -d '{"name":"mi094-harness","scopes":["admin"]}' \
   "http://localhost:$APP1_PORT/api/v1/auth/api-keys")
 API_KEY=$(echo "$KEY_JSON" | jq -r '.data.key // empty')
 [ -n "$API_KEY" ] || fail "API key mint failed: $KEY_JSON"
 echo "API key minted: ${API_KEY:0:12}…"
-rm -f "$JAR1"
+rm -f "$JAR1" "$LOGIN_PAGE"
 
 # ---------------------------------------------------------------- fixtures
 say "fixtures: pg-meta datasource, pg_sleep template + pipeline"
@@ -163,11 +176,18 @@ echo "pipeline id: $PIPELINE_ID"
 # ================================================================ THE MEASUREMENT
 say "step 1: warm BOTH pools — a real mid-query delete finds pools that already exist"
 for port in $APP1_PORT $APP2_PORT; do
-  # A short warm-up execution against the same datasource. It runs the same slow
-  # node, so this also proves the pipeline works before anything is deleted.
+  # A warm-up execution against the same datasource. It runs the same slow node, so this also
+  # proves the pipeline works before anything is deleted.
+  #
+  # Written to a FILE and grepped afterwards, never piped into `grep -q`: grep exits on the
+  # first match, curl takes SIGPIPE, and under `set -o pipefail` a perfectly good execution
+  # reads as a failure. (It also closes the SSE client early, which trips the 30s
+  # disconnect-grace cancellation — the 050 harness records the same reason.)
+  WARM=$(mktemp)
   curl -sN -H "DP-API-Key: $API_KEY" -H 'Accept: text/event-stream' -H 'Content-Type: application/json' \
-    -d '{"parameters":{}}' "http://localhost:$port/api/v1/pipelines/$PIPELINE_ID/execute" \
-    | grep -q 'data_ready' || fail "warm-up execution on :$port did not reach data_ready"
+    -d '{"parameters":{}}' "http://localhost:$port/api/v1/pipelines/$PIPELINE_ID/execute" > "$WARM"
+  grep -q 'data_ready' "$WARM" || { cat "$WARM"; rm -f "$WARM"; fail "warm-up execution on :$port did not reach data_ready"; }
+  rm -f "$WARM"
   note "warm-up on :$port completed"
 done
 
