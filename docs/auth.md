@@ -787,44 +787,66 @@ Rotation, which the config value never had: mint a second `server` key, set it o
 
 ### 8.1 Filter chain
 
+The sketch below is the shape of `SecurityConfig.securityFilterChain` as it is actually
+assembled, not a simplification: the three `addFilterBefore` calls read in the REVERSE of
+the order they produce, which is why the resulting order is spelled out under §8.2 rather
+than inferred from the source. The `permitAll` list is **not** written inline — it is
+`PublicPaths.ENTRIES` (§8.3), so every pattern carries a reason and is reachable to the
+tests that guard it.
+
 ```kotlin
 @Configuration
 @EnableWebSecurity
 class SecurityConfig(
-    private val jwtAuthenticationFilter: JwtAuthenticationFilter,
-    private val apiKeyFilter: ApiKeyFilter,
+    private val filters: AuthFilters,                 // apiKey, jwt, loginRateLimit, promotionServerKey, workspaceResolution, oidcSignedInBounce
     private val oidcSuccessHandler: OidcSuccessHandler,
-    private val scopeInterceptor: ScopeInterceptor
+    private val scopeInterceptor: ScopeInterceptor,
+    private val forcedPasswordChangeInterceptor: ForcedPasswordChangeInterceptor,
+    // …entry point, access-denied handler, logout handler, OAuth2 authorization-request
+    // repository + resolver, AuthProperties
 ) {
 
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { csrf ->
-                // Cookie: dp_csrf (readable by JS), header: DP-CSRF-Token
+                // Cookie: dp_csrf (readable by JS), header: DP-CSRF-Token; the plain
+                // (non-XOR) request handler keeps cookie value == header value.
                 csrf.csrfTokenRepository(cookieCsrfRepository())
-                // Exemption follows the CREDENTIAL, not the path (§8.4): only requests
-                // carrying DP-API-Key (or Bearer dpk_ on /mcp) skip CSRF.
-                csrf.ignoringRequestMatchers(apiKeyCarrierMatcher)
+                // Exemption follows the CREDENTIAL, not the path (§8.4): DP-API-Key (or
+                // Bearer dpk_ on /mcp), plus the promotion route on the same grounds (§10.6).
+                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher())
+                // Double-submit needs a STABLE cookie; this chain has no server session to
+                // protect, so Spring's rotate-or-delete strategy is neutered (027).
+                csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
             }
             .authorizeHttpRequests { auth ->
                 auth
-                    .requestMatchers(
-                        "/health", "/ready", "/info",
-                        "/login", "/login/**",
-                        "/oauth2/**",
-                        "/vendor/**", "/css/**", "/js/**", "/favicon.ico"
-                    ).permitAll()
+                    // A re-dispatch of an already-authorized request, not a path rule (§8.3).
+                    .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                    // THE allowlist — one row per pattern, each with its reason (§8.3).
+                    .requestMatchers(*PublicPaths.PATTERNS.toTypedArray()).permitAll()
                     .anyRequest().authenticated()
             }
-            .oauth2Login { oauth ->
-                oauth.successHandler(oidcSuccessHandler)
-            }
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
-            .addFilterBefore(apiKeyFilter, JwtAuthenticationFilter::class.java)
+
+        // OIDC login is wired ONLY when providers are configured (§5A): a local-accounts-only
+        // deployment has no ClientRegistrations and no /oauth2 endpoints.
+        if (oidcConfigured) configureOidcLogin(http)   // + OidcSignedInBounceFilter (090)
+
+        http
+            .addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
+            .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
+            .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
+            .addFilterBefore(filters.promotionServerKey, LoginRateLimitFilter::class.java)
+            .addFilterAfter(filters.workspaceResolution, JwtAuthenticationFilter::class.java)
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .exceptionHandling {
+                it.authenticationEntryPoint(authEntryPoint)      // §8.2 — splits by Accept
+                it.accessDeniedHandler(authAccessDeniedHandler)
+            }
             .logout { logout ->
                 logout.logoutUrl("/logout")
+                       .addLogoutHandler(auditLogoutHandler)
                        .deleteCookies("dp_session")
                        .logoutSuccessUrl("/login")
             }
@@ -832,42 +854,82 @@ class SecurityConfig(
         return http.build()
     }
 
-    @Bean
-    fun mvcInterceptor(): WebMvcConfigurer {
-        return object : WebMvcConfigurer {
-            override fun addInterceptors(registry: InterceptorRegistry) {
-                registry.addInterceptor(scopeInterceptor)
-            }
-        }
-    }
+    // Two MVC interceptors, registered as WebMvcConfigurer beans: the scope interceptor on
+    // every handler (§7.6), and the forced-password-change gate on every handler except
+    // ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS (§5A.4).
 }
 ```
 
 ### 8.2 Filter order (per request)
 
 ```
-1. CORS filter                     — adds CORS headers
-2. CSRF filter                     — validates CSRF token on state-changing requests (UI only; API paths excluded)
-3. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
-4. JwtAuthenticationFilter         — checks dp_session cookie; if present, validates and sets SecurityContext
-5. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
-6. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
-7. AuthorizationFilter             — checks authenticated() for protected paths
-8. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods; default-deny for unannotated handlers under /api/**, /partials/** and /mcp
-9. Controller                      — handles the request
+ 1. CORS filter                     — a container filter ahead of the security chain (one origin = auth.base-url; unset ⇒ no CORS)
+ 2. CSRF filter                     — validates dp_csrf on state-changing requests; exemption follows the CREDENTIAL (§8.4), never the path
+ 3. PromotionServerKeyFilter        — /api/v1/promotion/** only: the DP-Promotion-Key gate (§10.6). Inert everywhere else
+ 4. LoginRateLimitFilter            — /login and /oauth2/ only: per-client-IP damper, 429 rate_limit.exceeded (§11.5)
+ 5. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
+ 6. JwtAuthenticationFilter         — checks dp_session cookie; DECLINES when ApiKeyFilter stashed a rejection (§8.4); skips /mcp entirely
+ 7. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
+ 8. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects (wired only when a provider is configured)
+ 9. AuthorizationFilter             — checks the §8.3 allowlist, then authenticated() for everything else
+10. ForcedPasswordChangeInterceptor — §5A.4, every handler except EXCLUDE_PATTERNS
+11. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist
+12. Controller                      — handles the request
 ```
 
 If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter routes to the entry point, which splits by client shape (T31): a request whose `Accept` includes `text/html` — a browser navigating a UI route — gets a `302` to `/login` (the `Location` is a relative header, never `sendRedirect`'s Host-derived absolute URL); `/api/**` and `/mcp` NEVER redirect (their 401 JSON envelope is contract, byte-pinned), and non-HTML clients (`curl`'s `Accept: */*`, JSON API callers) keep the exact current envelope whatever path they hit. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
 
 ### 8.3 Public endpoints (no auth required)
 
-| Path pattern | Why public |
-|---|---|
-| `/health`, `/ready` | Health checks for orchestrators |
-| `/info` | Build info |
-| `/login`, `/login/**` | Login page + error redirects + the local password POST (§5A) |
-| `/oauth2/**` | OIDC authorization + callback |
-| `/vendor/**`, `/css/**`, `/js/**` | Static assets (design system, Cytoscape, Alpine, app CSS/JS) |
+The table below is **generated from `PublicPaths.ENTRIES`** (`modules/auth`), which is the
+single source of the `permitAll` list the chain in §8.1 is built from. `PublicPathsTest`
+parses this section and demands equality pattern-for-pattern, reason-for-reason and
+round-for-round, so neither side can move without the other; `PublicRouteWalkerTest`
+(`modules/web`) then walks every request mapping the application registers against these
+patterns and freezes the resulting public handler set by name, so a new controller mapped
+under one of the globs fails the build instead of shipping public. Everything not matched
+here falls to `anyRequest().authenticated()`.
+
+Two things are deliberately **not** rows in this table:
+
+- The `DispatcherType.ASYNC` / `ERROR` permit (§8.1). It is not a path rule: it says that a
+  re-dispatch of a request the REQUEST dispatch already authenticated and authorized is not
+  re-authorized from an empty `SecurityContext`. Without it every completed SSE stream dies
+  as Access Denied on its completion dispatch.
+- Anything reached only with a credential. Being on this list means *anonymous* access, not
+  "unscoped": an annotated handler on a public path is still enforced by `ScopeInterceptor`.
+
+| Path pattern | Why public | Since |
+|---|---|---|
+| `/` | The marketing home page: constant content, no datastore, no principal — public by design (033/D4). | 033 |
+| `/site/**` | The marketing site's own css/js/img assets; the design system it references rides /vendor/** below. | 033 |
+| `/mcp-server-for-sql-databases` | Intent-cluster page: GET-only constant content whose only live fact is the compile-time MCP tool count. | 073 |
+| `/mcp-server/*` | Per-engine intent-cluster pages, one segment deep and enumerated by the page registry, not globbed open. | 073 |
+| `/add-mcp-server-to-claude-code` | Intent-cluster page: GET-only constant content, no datastore and no principal on the request. | 073 |
+| `/ai-data-pipeline` | Intent-cluster page: GET-only constant content, no datastore and no principal on the request. | 073 |
+| `/text-to-sql-agent` | Intent-cluster page: GET-only constant content, no datastore and no principal on the request. | 073 |
+| `/compare/*` | The comparison pages (airflow, dbt): GET-only constant content, one segment deep, no datastore. | 073 |
+| `/federated-query` | Intent-cluster page: GET-only constant content, no datastore and no principal on the request. | 073 |
+| `/dp-lake` | The dp-lake product page: same shape and same reasoning as the 073 intent-cluster pages. | 089 |
+| `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
+| `/docs/*` | One packaged spec per slug, rendered from the jar; the same text is already public on GitHub. | 073 |
+| `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |
+| `/skill/*` | The skill's reference files, packaged in the jar and identical to the public AGPL repository's text. | 095 |
+| `/robots.txt` | Crawler infrastructure: a document that is meaningless unless it is readable without a login. | 073 |
+| `/sitemap.xml` | Generated from the page registry and packaged doc slugs; a sitemap behind auth indexes nothing. | 073 |
+| `/health` | Liveness probe for orchestrators, which present no credential; flattened UP/DOWN plus version only. | P3d |
+| `/ready` | Readiness probe for orchestrators, which present no credential; flattened UP/DOWN plus version only. | P3d |
+| `/info` | Build info (version, build time, commit) — the deployment's own identity, no principal data. | P3d |
+| `/login` | The login page and the local password POST: the surface a caller uses BEFORE it has a credential. | P3d |
+| `/login/**` | Login error redirects and the OIDC callback subtree, reached before any session exists. | P3d |
+| `/oauth2/**` | The OIDC authorization redirect and callback endpoints, by definition pre-authentication. | P3d |
+| `/vendor/**` | Vendored static assets (design system, fonts, icons, Alpine, Cytoscape, htmx) served to the login page too. | P3d |
+| `/css/**` | The application stylesheets, which the unauthenticated login and error pages already render. | P3d |
+| `/js/**` | The application scripts, which the unauthenticated login and error pages already render. | P3d |
+| `/favicon.ico` | The site icon, requested by the browser on the login page before any credential exists. | P3d |
+| `/webjars/**` | The webjar asset namespace, needed by the login page's htmx; a glob over dependency-supplied files. | P3d |
+| `/error` | Boot's default error page with no stack trace or message; an anonymous error must not loop through login. | P8 |
+
 
 ### 8.4 API endpoints (auth via API key OR JWT)
 
