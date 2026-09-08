@@ -35,6 +35,36 @@
         th:href="@{/vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2}">
 
   <link th:href="@{/css/app.css}" rel="stylesheet">
+
+  <!--/* 090 §A/§B — THE EXPLORER SHEET LOADS FROM THE HEAD, not from the page.
+
+       `templates/list.html` and `pipelines/list.html` used to carry their own
+       `<link rel="stylesheet" href="/css/template-tree.css">` inside the `content`
+       fragment — i.e. inside #app-main, the boosted-swap target. A boosted navigation
+       replaces that region's markup and the browser then discovers the link: an
+       inserted stylesheet does NOT block the already-painted document, so the explorer
+       paints at least one frame with NO tree rules at all, cached sheet or not.
+       Measured (090, chromium, seeded tree, first rAF after `htmx:afterSwap`):
+
+         width  rail       first frame              settled
+         1920   expanded   tree 1640px, detail at   tree 480px, detail at
+                           the SAME left edge as    x+24 — the two panes
+                           the tree (stacked)       side by side
+         2560   expanded   tree 2280px, stacked     tree 480px, gapped
+         2560   collapsed  tree 2452px, stacked     tree 480px, gapped
+
+       That unstyled frame is BOTH of the owner's reports at once: the tree at full
+       body width with the detail pane collapsed underneath it is exactly "css is
+       applied after data load", and a reader who looks at the page during (or just
+       after) it sees the detail section sitting hard against the rail. A page-scoped
+       sheet on a boosted route is the defect; the head is where it stops being one.
+       The pages' own links are gone — this is the only copy.
+
+       The same exposure remains, unfixed, for `pipeline-editor.css`, `template-editor.css`
+       and `docs.css`, which are page-scoped on boosted routes for the same reason. They
+       belong to the editor and docs surfaces (090's fence excludes both); the fix is
+       identical — hoist the link here — and the round is told so. */-->
+  <link th:href="@{/css/template-tree.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        This is the ONE inline script in the layout, and the round's only
