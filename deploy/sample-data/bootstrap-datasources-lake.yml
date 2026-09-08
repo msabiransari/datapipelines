@@ -6,10 +6,12 @@
 # this file and the family's examples on the shared sample volume; the app's
 # bootstrap keys pick them up from the SAMPLE_LAKE_ON marker.
 #
-# NO SECRETS HERE. `credential: {kind: none}` is the IAM credential chain
-# (datasources.md §3.4) — the published bucket is public, so the chain finds
-# nothing and the engine's reads go unsigned. `global: true` is REQUIRED
-# (§8A.1); `readonly: true` writes datasources.is_readonly (§5.7).
+# NO SECRETS HERE. `credential: {kind: none}` PLUS `unsigned: "true"`: the
+# published bucket is PUBLIC, so the datasource declares no S3 secret at all
+# and the engine's reads go unsigned — the IAM credential chain would VALIDATE
+# at create time and fail on a credentials-free box, taking the pool down
+# (found by the 089 live gate). `global: true` is REQUIRED (§8A.1);
+# `readonly: true` writes datasources.is_readonly (§5.7).
 #
 # THE REGISTRY SEED (089 §E). The demo's lake tables come from the PUBLISHED
 # manifest: `import_manifest` is fetched server-side at bootstrap through the
@@ -69,6 +71,9 @@ datasources:
         # deployment sets file:///srv/lake-mirror to declare the file root.
         catalog.ref: ${SAMPLE_LAKE_CATALOG_REF}
         region: us-east-1
+        # The published bucket is PUBLIC: no S3 secret at all (the credential
+        # chain validates at create and fails on a credentials-free box).
+        unsigned: "true"
     readonly: true
     global: true
     import_manifest: ${SAMPLE_LAKE_MANIFEST_URL}

@@ -311,9 +311,11 @@ The workflow is three steps:
    `jdbc_url: "jdbc:duckdb::memory:"`, and `properties.dialect` naming how the data is
    addressed — `catalog.kind: "s3"` + `region` for AWS, plus `endpoint` (and
    `url_style: "path"`) for an S3-compatible store like MinIO. Credentials:
-   `credential: {"kind": "none"}` is the IAM credential chain (and the right answer for a
-   public bucket); `{"kind": "password", "username": "<key-id>", "secret": "<secret>"}` is an
-   explicit key pair. Follow with `datasources_test`.
+   `credential: {"kind": "none"}` is the IAM credential chain; `{"kind": "password",
+   "username": "<key-id>", "secret": "<secret>"}` is an explicit key pair; and a PUBLIC
+   bucket adds `unsigned: "true"` — NO S3 secret at all, because the credential chain
+   validates at create time and fails on a credentials-free box. Follow with
+   `datasources_test`.
 2. **Register the tables.** `lake_tables_register` for one (`namespace`, `table`, `format`,
    `location`, optional `partition_column`), or `lake_tables_import` for a manifest's
    `tables[]` — inline, or a `manifest_url` fetched server-side from the datasource's OWN

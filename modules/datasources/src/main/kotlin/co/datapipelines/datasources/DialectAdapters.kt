@@ -544,6 +544,7 @@ class LakeDialectAdapter(
                 }.toMutableList()
         enumValue(properties, "catalog.kind", CATALOG_KINDS)?.let { errors += it }
         enumValue(properties, "url_style", URL_STYLES)?.let { errors += it }
+        enumValue(properties, "unsigned", BOOLEAN_WORDS)?.let { errors += it }
         limitValueError(properties)?.let { errors += it }
         return ValidationResult.of(errors)
     }
@@ -673,6 +674,12 @@ class LakeDialectAdapter(
         // the httpfs extension, which the branch above deliberately did not load, so emitting
         // one here would fail the connection of a purely local lake.
         properties["catalog.kind"] ?: return null
+        // A PUBLICLY readable bucket wants NO secret at all (`unsigned: true`): the
+        // credential_chain provider VALIDATES at create time, so on a credentials-free box —
+        // the public-bucket demo's whole premise — the CREATE fails and takes the pool down
+        // with it (found by the 089 live gate). With no secret the engine's reads go unsigned,
+        // which is exactly what a public object needs. `unsigned` beats every credential kind.
+        if (properties["unsigned"]?.toString()?.lowercase() == "true") return null
         val region = properties["region"]?.toString()
         val endpoint = properties["endpoint"]?.toString()
         val urlStyle = properties["url_style"]?.toString()
@@ -743,6 +750,7 @@ class LakeDialectAdapter(
                 "region",
                 "endpoint",
                 "url_style",
+                "unsigned",
                 "attach",
                 "memory_limit",
                 "threads",
@@ -751,6 +759,7 @@ class LakeDialectAdapter(
         val CATALOG_KINDS = setOf("s3", "glue", "s3_tables", "rest")
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")
         val URL_STYLES = setOf("path", "vhost")
+        val BOOLEAN_WORDS = setOf("true", "false")
 
         /** Bundled-directory LOAD list for `catalog.kind: s3` — `httpfs` before `aws`. */
         val BUNDLED_S3_EXTENSIONS = listOf("httpfs", "aws")

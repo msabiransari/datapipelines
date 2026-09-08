@@ -159,6 +159,48 @@ class LakeDialectAdapterTest {
     }
 
     @Test
+    fun `a PUBLIC bucket declares unsigned and gets NO secret at all - the chain validates at create`() {
+        val init =
+            lakeFixed.connectionInit(
+                lakeDatasource(
+                    credentialKind = CredentialKind.NONE,
+                    dialectProperties = mapOf("catalog.kind" to "s3", "region" to "us-east-1", "unsigned" to "true"),
+                ),
+            )
+
+        // The extensions still load — only the secret is gone. On a credentials-free box the
+        // credential_chain CREATE fails pool init (089 live gate); a public object needs no secret.
+        init shouldContainExactly
+            listOf(
+                "INSTALL httpfs",
+                "LOAD httpfs",
+                "INSTALL aws",
+                "LOAD aws",
+                "SET memory_limit = '2048MB'",
+                "SET preserve_insertion_order = false",
+            )
+    }
+
+    @Test
+    fun `unsigned takes only true or false`() {
+        val validator = DatasourceValidator()
+        assertAll(
+            {
+                validator
+                    .validate(lakeDatasource(dialectProperties = mapOf("unsigned" to "yes")), isCreate = true)
+                    .errors
+                    .single { it.field == "properties.dialect.unsigned" }
+                    .message shouldContain "must be one of"
+            },
+            {
+                validator
+                    .validate(lakeDatasource(dialectProperties = mapOf("unsigned" to "false")), isCreate = true)
+                    .valid shouldBe true
+            },
+        )
+    }
+
+    @Test
     fun `an Iceberg catalog kind additionally loads iceberg`() {
         val init =
             lake.connectionInit(

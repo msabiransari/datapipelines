@@ -254,7 +254,7 @@ Two rules make it safe:
 
 **`properties.dialect.*`** — a third reserved namespace beside `hikari` and `jdbc` (§12.1's frozen shape, amended additively). Unlike those two it is **typed and adapter-validated**: `DialectAdapter.validateDialectProperties` refuses unknown keys and bad values key by key, and the DEFAULT implementation refuses the whole namespace. A dialect gains `dialect.*` keys by declaring them, never by an adapter forgetting to look — silently ignoring an unrecognized key would let a typo look like a working setting, which is the failure this namespace exists to avoid.
 
-Reference uses, none of them implemented: Snowflake `dialect.warehouse` / `dialect.role`, Databricks `dialect.http_path` / `dialect.catalog`, and the shipped lake adapter's `dialect.catalog.kind` / `catalog.ref` / `region` / `endpoint` / `url_style` / `attach`.
+Reference uses, none of them implemented: Snowflake `dialect.warehouse` / `dialect.role`, Databricks `dialect.http_path` / `dialect.catalog`, and the shipped lake adapter's `dialect.catalog.kind` / `catalog.ref` / `region` / `endpoint` / `url_style` / `unsigned` / `attach`.
 
 **The `LAKE` adapter's setup**, in the order it runs:
 
@@ -1111,10 +1111,15 @@ The S3 credential comes from the datasource's §3.4 credential, never from `prop
 
 - **`credential.kind: none`** — the engine's `credential_chain` provider (IAM role,
   environment, shared config/profile). The self-hosted answer, with nothing to encrypt or
-  rotate; a PUBLIC bucket needs no credential at all and the reads go unsigned.
+  rotate.
 - **`credential.kind: password`** — an explicit key pair: the access key id as `username`,
   the secret as the stored credential, emitted as `KEY_ID`/`SECRET` in the connect-time
   `CREATE OR REPLACE SECRET`.
+- **A PUBLIC bucket declares `dialect.unsigned: "true"`** and gets **no S3 secret at all** —
+  the engine's reads go unsigned. This is not optional decoration: `credential_chain`
+  VALIDATES at create time, so on a credentials-free box the `CREATE SECRET` fails and takes
+  the pool down with it (found by the 089 live gate). `unsigned` beats every credential
+  kind; the demo's `sample-lake` sets it.
 
 `dialect.region` sets the secret's region; `dialect.endpoint` (host[:port], no scheme) points
 at an S3-compatible store — MinIO, on-prem — and a declared endpoint always emits
