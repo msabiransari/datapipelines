@@ -206,6 +206,15 @@ the UI did on 2026-09-02 (T85): the answer was in the event all along.
 
 ## Best practices (trouble-free authoring)
 
+**Read `references/authoring-playbook.md` before building anything with more than two
+nodes** — the judgment between the golden path's steps: read the question's grain first,
+join the lookups and answer with display names, infer table roles from naming when nothing
+is described, aggregate at the source and ship the answer's grain, index a large staged
+table only after loading it, keep `depends_on` to data flow, treat a timeout as work in the
+wrong place, cast what you ship across engines, never compare a sample to a census, validate
+one number independently, and stop at the draft. Each of those is a mistake an agent made
+here.
+
 1. **Render before you create.** `templates_render` with representative values catches
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
 2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
@@ -265,6 +274,9 @@ Each line says when to open the file; none of them is required reading first.
   `parameters` block's fields and types, and a minimal complete pipeline to copy.
 - **`references/node-types.md`** — wiring the DAG: what a node declares, the five node
   types, and where a DQL node's rows go.
+- **`references/authoring-playbook.md`** — building anything non-trivial: how an expert
+  reads the question and the schema, shapes the DAG (push down, ship little, then index),
+  gets the numbers right, and finishes — with the Do/Don't table of real misses.
 - **`references/templates.md`** — writing SQL: what a template is, how library imports
   work, and how a CALCULATOR node computes a value the SQL then binds.
 - **`references/naming.md`** — choosing where a new pipeline or template lives, or
