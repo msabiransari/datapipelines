@@ -98,7 +98,17 @@ abstract class BrowserSuite {
      * configuration.md §3.17): a first-login user has NO workspace until they create one
      * at /workspaces. Plain form POST + redirect — no htmx to wait out.
      */
-    protected fun createWorkspace(name: String) {
+    protected fun createWorkspace(name: String) = createWorkspaceOn(page, name)
+
+    /**
+     * [createWorkspace] on an explicit page — a test driving a SECOND session (a member beside
+     * an admin) needs the identical flow, and a hand-rolled copy is how one of them quietly
+     * stops waiting for the row and races the next navigation.
+     */
+    protected fun createWorkspaceOn(
+        page: Page,
+        name: String,
+    ) {
         page.navigate("$baseUrl/workspaces")
         page.waitForURL("**/workspaces")
         page.fill("form[action*='/workspaces/create'] input[name=name]", name)
@@ -135,7 +145,9 @@ abstract class BrowserSuite {
 
     /**
      * Seeds ONE local user with a unique email — the suite's isolation unit. No two tests
-     * share a user, so execution order cannot matter. Called from inside a test (Flyway
+     * share a user, so execution order cannot matter. [isAdmin] defaults TRUE because almost
+     * every golden path needs an admin; a suite asserting a D8 refusal passes `false` and gets
+     * a plain workspace MEMBER. Called from inside a test (Flyway
      * has migrated by then — the TracerBullet lesson; a static @BeforeAll races the
      * context boot).
      */
@@ -143,6 +155,7 @@ abstract class BrowserSuite {
         email: String,
         password: String,
         mustChange: Boolean,
+        isAdmin: Boolean = true,
     ): LocalUser {
         val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
         val hash = argon2.hash(2, 19_456, 1, password.toCharArray())
@@ -155,7 +168,7 @@ abstract class BrowserSuite {
                         INSERT INTO users (email, display_name, provider, provider_subject,
                                            is_active, is_admin, password_hash, must_change_password)
                         VALUES ('$email', 'Browser User', 'local', '$email',
-                                TRUE, TRUE, '$hash', $mustChange)
+                                TRUE, $isAdmin, '$hash', $mustChange)
                         ON CONFLICT (email) DO NOTHING
                         """.trimIndent(),
                     )

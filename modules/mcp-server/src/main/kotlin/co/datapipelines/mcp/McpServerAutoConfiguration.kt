@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.ExecutionLauncher
-import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.AuditLogger
@@ -77,7 +76,6 @@ class McpServerAutoConfiguration {
         // 068: the ONE validated datasource-registration path, shared with POST /api/v1/datasources.
         // A plain (required) parameter, not a provider: this whole bean is @ConditionalOnBean on
         // the engine, so wherever the tools exist the assembled application has declared it too.
-        datasourceCreateService: DatasourceCreateService,
         // 074 — the SAME publish service POST /api/v1/endpoints calls, so a publish cannot skip
         // the read-only rule by arriving over MCP.
         endpointPublishService: EndpointPublishService,
@@ -112,7 +110,7 @@ class McpServerAutoConfiguration {
                 executionRunner = executionRunner.getIfAvailable(),
             ),
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner),
-            PipelinesCreateTool(pipelineService),
+            PipelinesCreateTool(pipelineService, pipelines),
             PipelinesUpdateTool(pipelineService),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
@@ -126,7 +124,6 @@ class McpServerAutoConfiguration {
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, sqlRunner),
-            DatasourcesCreateTool(datasourceCreateService),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, executorConfig.result),

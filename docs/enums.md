@@ -127,7 +127,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 ## 5A. `CredentialKind` — what a datasource's stored credential IS
 
 **Source:** [Datasources §3.4](datasources.md#34-credential-kinds) (single authority)
-**Used by:** datasources (validation, pool build, encryption), rest-api (`POST /api/v1/datasources`), mcp-server (`datasources_create`), metadata-db (`datasources.credential_kind`).
+**Used by:** datasources (validation, pool build, encryption), rest-api (`POST /api/v1/datasources`), mcp-server (`datasources_get` reports the kind; there is no MCP create — [MCP Server §6.2.22](mcp-server.md#6222-removed--no-datasource-writes-on-this-surface)), metadata-db (`datasources.credential_kind`).
 
 Wire values are lowercase snake_case, so the `@JsonValue` mapping is explicit per the case convention above.
 

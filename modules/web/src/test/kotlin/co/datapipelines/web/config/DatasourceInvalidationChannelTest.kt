@@ -2,12 +2,14 @@ package co.datapipelines.web.config
 
 import co.datapipelines.datasources.DatasourceRegistry
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.data.redis.connection.Message
+import org.springframework.data.redis.connection.SubscriptionListener
 import org.springframework.data.redis.core.StringRedisTemplate
 import java.nio.charset.StandardCharsets
 
@@ -54,24 +56,24 @@ class DatasourceInvalidationChannelTest {
         }
 
     @Test
-    fun `a foreign origin evicts the named pool`() {
+    fun `a foreign origin retires the named pool`() {
         val registry = mockk<DatasourceRegistry>()
-        every { registry.evictPool("sales") } returns true
+        every { registry.retirePool("sales") } returns true
 
         DatasourceInvalidationListener(registry, mapper, instanceId = "B")
             .onMessage(message("""{"origin":"A","name":"sales"}"""), null)
 
-        verify(exactly = 1) { registry.evictPool("sales") }
+        verify(exactly = 1) { registry.retirePool("sales") }
     }
 
     @Test
-    fun `the instance's own message is skipped - local eviction was synchronous`() {
+    fun `the instance's own message is skipped - local retirement was synchronous`() {
         val registry = mockk<DatasourceRegistry>(relaxed = true)
 
         DatasourceInvalidationListener(registry, mapper, instanceId = "B")
             .onMessage(message("""{"origin":"B","name":"sales"}"""), null)
 
-        verify(exactly = 0) { registry.evictPool(any()) }
+        verify(exactly = 0) { registry.retirePool(any()) }
     }
 
     @Test
@@ -81,28 +83,66 @@ class DatasourceInvalidationChannelTest {
         DatasourceInvalidationListener(registry, mapper, instanceId = "B")
             .onMessage(message("not json at all"), null)
 
-        verify(exactly = 0) { registry.evictPool(any()) }
+        verify(exactly = 0) { registry.retirePool(any()) }
     }
 
     @Test
     fun `unknown JSON fields do not break the parse - forwards-compat between versions`() {
         val registry = mockk<DatasourceRegistry>()
-        every { registry.evictPool("sales") } returns false
+        every { registry.retirePool("sales") } returns false
 
         DatasourceInvalidationListener(registry, mapper, instanceId = "B")
             .onMessage(message("""{"origin":"A","name":"sales","futureField":1}"""), null)
 
-        verify(exactly = 1) { registry.evictPool("sales") }
+        verify(exactly = 1) { registry.retirePool("sales") }
     }
 
     @Test
-    fun `evicting no pool is silent - the foreign instance simply had none`() {
+    fun `retiring no pool is silent - the foreign instance simply had none`() {
         val registry = mockk<DatasourceRegistry>()
-        every { registry.evictPool("unused_here") } returns false
+        every { registry.retirePool("unused_here") } returns false
 
         // No exception, no state: the listener's only observable is the registry call, covered
         // above; this pins the no-op return path executes.
         DatasourceInvalidationListener(registry, mapper, instanceId = "B")
             .onMessage(message("""{"origin":"A","name":"unused_here"}"""), null)
+    }
+
+    // ------------------------------------------------------- reconcile on (re)subscribe (094)
+
+    @Test
+    fun `every subscription confirmation reconciles this instance's pools`() {
+        // The container fires this on the initial subscribe AND after every Redis reconnect —
+        // which is the whole missed-message story: a save published while this instance was
+        // disconnected is gone from pub/sub forever, so the reconnect must ASK.
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.reconcilePools() } returns 2
+
+        DatasourceInvalidationListener(registry, mapper, instanceId = "B")
+            .onChannelSubscribed(PoolInvalidationChannel.NAME.toByteArray(StandardCharsets.UTF_8), 1)
+
+        verify(exactly = 1) { registry.reconcilePools() }
+    }
+
+    @Test
+    fun `a failing reconcile never escapes the container callback`() {
+        // An exception out of a listener callback kills the subscription for every later
+        // message; a failed reconcile is retried at the next (re)subscription instead.
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.reconcilePools() } throws DataAccessResourceFailureException("metadata db down")
+
+        DatasourceInvalidationListener(registry, mapper, instanceId = "B")
+            .onChannelSubscribed(PoolInvalidationChannel.NAME.toByteArray(StandardCharsets.UTF_8), 1)
+
+        verify(exactly = 1) { registry.reconcilePools() }
+    }
+
+    @Test
+    fun `the listener is a SubscriptionListener - which is what makes the container call it`() {
+        // The binding is `instanceof SubscriptionListener` inside RedisMessageListenerContainer
+        // (pinned spring-data-redis 3.5.13). If this class stopped implementing the interface,
+        // every reconcile would silently stop happening and no other test would notice.
+        SubscriptionListener::class.java
+            .isAssignableFrom(DatasourceInvalidationListener::class.java) shouldBe true
     }
 }

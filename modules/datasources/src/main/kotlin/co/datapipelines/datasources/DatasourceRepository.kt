@@ -299,6 +299,23 @@ class DatasourceRepository(
             MapSqlParameterSource().addValue("name", name).addValue("credentialEncrypted", credentialEncrypted),
         ) > 0
 
+    /**
+     * Every live datasource's name and `updated_at` — the §5.7 reconcile's whole input (094).
+     *
+     * Two columns, no credential, no JSONB: the reconcile asks one question ("did the row my
+     * pool was built from move?") and this is the narrowest read that answers it, cheap enough
+     * to run on every (re)subscription. A name ABSENT from the result is a soft-deleted or
+     * vanished row, which retires its pool exactly like a changed one.
+     */
+    fun liveRowVersions(): Map<String, Instant> =
+        jdbc
+            .query(
+                "SELECT name, updated_at FROM datasources WHERE is_deleted = FALSE",
+                MapSqlParameterSource(),
+            ) { rs, _ ->
+                rs.getString("name") to rs.getObject("updated_at", OffsetDateTime::class.java).toInstant()
+            }.toMap()
+
     /** Soft-deletes [name]; false when nothing live existed. The row (and its name) survive. */
     fun softDelete(name: String): Boolean =
         jdbc.update(

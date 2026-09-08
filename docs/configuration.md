@@ -361,6 +361,16 @@ A `LAKE` datasource whose data is on S3 needs DuckDB's `httpfs` and `aws` extens
 
 **Version coupling:** the bundled binaries are valid for exactly one DuckDB core version. The pinned `duckdb_jdbc` is `1.5.5.1`, whose bundled core reports **v1.5.5** — the directory's `v1.5.5` component is the CORE version, not the JDBC patch version. A `duckdb_jdbc` upgrade must re-download all four extensions and rename the directory accordingly (the Dockerfile pins both in one `ARG`).
 
+### 3.26 Datasource pools
+
+How long a **retired** connection pool may keep connections out before it is closed regardless ([Datasources §5.2](datasources.md#52-pool-lifecycle), round 094). A datasource that is edited or deleted has its pool taken out of the live map at once and soft-evicted; the pool itself is closed when the statements already running on it finish — or at this ceiling, whichever comes first, so a genuinely hung statement cannot pin a deleted datasource's pool forever. Each hard close logs one WARN naming the datasource and the connections it took down, and increments `datapipelines.datasource.pool.hard_closed` ([Observability §4.1](observability.md#41-metric-naming)).
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.datasources.retire-ceiling-seconds` | `derived` | Seconds a retired pool may hold connections before it is hard-closed. **`derived` means `datapipelines.executor.node-query-timeout-seconds` + 30** (so `90` with the shipped defaults) — the longest a well-behaved node statement can run, plus slack for it to return its connection. Set it explicitly only when this deployment's datasources carry their own longer `query_timeout_seconds` |
+
+**Why the default is derived rather than a number.** The ceiling and the node query timeout are the same fact seen twice: a deployment that raises `node-query-timeout-seconds` to 600 and leaves a literal `90` here would start hard-closing pools out from under statements that are still legitimately running, and nothing would tell it. Deriving makes the two move together; an explicit value opts out.
+
 ---
 
 ## 4. Precedence

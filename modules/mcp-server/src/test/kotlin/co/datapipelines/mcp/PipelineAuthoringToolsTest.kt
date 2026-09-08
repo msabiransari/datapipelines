@@ -51,7 +51,7 @@ class PipelineAuthoringToolsTest {
 
     private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
 
-    private fun createTool() = PipelinesCreateTool(McpFixtures.pipelineService(pipelines, validator, guard))
+    private fun createTool() = PipelinesCreateTool(McpFixtures.pipelineService(pipelines, validator, guard), pipelines)
 
     private fun updateTool() = PipelinesUpdateTool(McpFixtures.pipelineService(pipelines, validator, guard, drafts = drafts))
 
@@ -190,6 +190,7 @@ class PipelineAuthoringToolsTest {
         val tool =
             PipelinesCreateTool(
                 McpFixtures.pipelineService(pipelines, validator, co.datapipelines.pipeline.AuthoringGuard(false)),
+                pipelines,
             )
 
         val error =

@@ -1,8 +1,11 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceProperties
+import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceTestOutcome
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.web.datasources.DatasourcePoolForm
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -194,6 +197,194 @@ class DatasourcesTemplateRenderTest {
         html shouldNotContain "hx-swap-oob=\""
     }
 
+// ------------------------------------------------------------- 094 §A: the pool section
+
+    @Test
+    fun `the register modal carries the collapsed pool section, prefilled and labelled by layer`() {
+        val html = engine().process("datasources/list", context().apply { fillPageModel() })
+
+        // Collapsed by default: a <details> with no `open`, so the eight fields cost the
+        // operator nothing until they want them.
+        html shouldContain "Connection pool — defaults"
+        Regex("""<details[^>]*\sopen""").containsMatchIn(html) shouldBe false
+        // Every catalogued key is rendered under the `pool.` form prefix…
+        html shouldContain "name=\"pool.maximumPoolSize\""
+        html shouldContain "name=\"pool.leakDetectionThreshold\""
+        // …prefilled with the effective default, and SAYING which layer supplied it.
+        html shouldContain "value=\"10\""
+        // Thymeleaf escapes the apostrophe (`&#39;`), so the assertion stops before it — the
+        // layer's NAME is the fact under test, not the entity encoding.
+        html shouldContain "Default 10 — HikariCP"
+        html shouldContain "Default 2 — this server"
+        // The dialect select re-fetches the section, because the default is per dialect. The
+        // swap target is the PAGE's own wrapper, so the id exists whatever a controller
+        // remembers to put in the model — the htmx render audit checks exactly that.
+        html shouldContain "id=\"ds-pool-fields\""
+        html shouldContain "hx-get=\"/partials/datasources/pool-fields\""
+        html shouldContain "hx-target=\"#ds-pool-fields\""
+        html shouldContain "hx-swap=\"innerHTML\""
+    }
+
+    @Test
+    fun `no refused key is ever rendered as a pool input`() {
+        // §5.6: readOnly, connectionInitSql and the credential slots are server-managed. The
+        // section mirrors `readOnly` as a DISABLED field and offers no input for the others.
+        // Rendered through the PAGE, because the fragment takes its id prefix as a parameter
+        // and a fragment rendered outside a caller has none.
+        val html = engine().process("datasources/list", context().apply { fillPageModel() })
+
+        html shouldNotContain "name=\"pool.readOnly\""
+        html shouldNotContain "name=\"pool.connectionInitSql\""
+        html shouldNotContain "name=\"pool.password\""
+        html shouldContain "id=\"ds-pool-readonly\""
+        html shouldContain "disabled"
+    }
+
+    // ------------------------------------------------------------- 094 §A: the edit dialog
+
+    @Test
+    fun `the edit dialog is a whole backdrop, keeps the name and dialect fixed, and prefills the pool`() {
+        val html = engine().process("partials/datasource-edit", context().apply { fillEditModel() })
+
+        // Fetched as a complete backdrop: `.u-backdrop` is display:flex, so nothing opens it.
+        html shouldContain "class=\"u-backdrop\""
+        html shouldContain "hx-post=\"/partials/datasources/pg-prod\""
+        // The immutable pair is shown, disabled — never a select that could repoint a live row.
+        html shouldNotContain "name=\"dialect\""
+        html shouldNotContain "name=\"name\""
+        // A blank secret keeps the stored credential; the stored one is never rendered back.
+        html shouldContain "Leave the secret blank to keep the stored credential."
+        html shouldNotContain "s3cret"
+        // The pool section is here too, prefilled from the ROW where it has values.
+        html shouldContain "name=\"pool.maximumPoolSize\""
+        html shouldContain "Set on this datasource."
+        // …and it carries NO id: only the register modal's section is a swap target, so an id
+        // here would be a duplicate the moment this dialog opened over the list page.
+        html shouldNotContain "id=\"ds-pool-fields\""
+        html shouldContain "id=\"ds-edit-maximumPoolSize\""
+    }
+
+    @Test
+    fun `only an admin's edit form can write the global flag`() {
+        val admin = engine().process("partials/datasource-edit", context().apply { fillEditModel() })
+        val member =
+            engine().process(
+                "partials/datasource-edit",
+                context().apply {
+                    fillEditModel()
+                    setVariable("isAdmin", false)
+                },
+            )
+
+        // The hidden companion is what makes an UNCHECKED box a deliberate write; without it a
+        // member's post can never carry the flag at all.
+        admin shouldContain "name=\"globalPresent\""
+        admin shouldContain "name=\"global\""
+        member shouldNotContain "name=\"globalPresent\""
+        member shouldNotContain "name=\"global\""
+    }
+
+    // ------------------------------------------------------------- 094 §B: the delete dialog
+
+    @Test
+    fun `a datasource in use renders its usages and offers NO confirm button`() {
+        val html =
+            engine().process(
+                "partials/datasource-delete",
+                context().apply {
+                    fillDeleteModel()
+                    setVariable(
+                        "usages",
+                        listOf(
+                            DatasourceReference("sales_daily", 3, "RELEASED", "extract"),
+                            DatasourceReference("sales_daily", 4, "DRAFT", "extract"),
+                        ),
+                    )
+                    setVariable("usedByPipelines", listOf("sales_daily"))
+                },
+            )
+
+        html shouldContain "id=\"ds-delete-in-use\""
+        html shouldContain "sales_daily"
+        html shouldContain "extract"
+        html shouldContain "(v3 released)"
+        html shouldContain "(v4 draft)"
+        // The refusal cannot be clicked past: there is no form and no button on this branch.
+        html shouldNotContain "hx-post=\"/partials/datasources/pg-prod/delete\""
+        html shouldNotContain "ds-button-danger"
+    }
+
+    @Test
+    fun `an unused datasource renders a confirm that names it`() {
+        val html = engine().process("partials/datasource-delete", context().apply { fillDeleteModel() })
+
+        html shouldContain "id=\"ds-delete-confirm-text\""
+        html shouldContain "hx-post=\"/partials/datasources/pg-prod/delete\""
+        html shouldContain "Delete pg-prod"
+        html shouldContain "ds-button-danger"
+        // The promise the retire-then-close lifecycle now keeps (§5.2).
+        html shouldContain "queries already running finish first"
+    }
+
+    @Test
+    fun `a member looking at a global datasource is told, and offered nothing`() {
+        val html =
+            engine().process(
+                "partials/datasource-delete",
+                context().apply {
+                    fillDeleteModel()
+                    setVariable("forbidden", "Deleting the global datasource 'pg-prod' requires admin.")
+                },
+            )
+
+        html shouldContain "id=\"ds-delete-forbidden\""
+        html shouldContain "requires admin"
+        html shouldNotContain "ds-button-danger"
+        html shouldNotContain "id=\"ds-delete-usages\""
+    }
+
+    @Test
+    fun `the saved response closes the dialog, refreshes the list OOB and toasts`() {
+        val html =
+            engine().process(
+                "partials/datasource-saved",
+                context().apply {
+                    fillListModel()
+                    setVariable("savedName", "pg-prod")
+                    setVariable("savedVerb", "deleted")
+                    setVariable("oob", true)
+                },
+            )
+
+        // The marker the screen's script closes on — a refusal never carries it.
+        html shouldContain "data-ds-saved=\"true\""
+        html shouldContain "Datasource pg-prod deleted."
+        Regex("""<div[^>]*id="datasource-list-wrapper"[^>]*hx-swap-oob="true"""")
+            .containsMatchIn(html) shouldBe true
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldContain "Datasource deleted"
+    }
+
+    private fun WebContext.fillEditModel() {
+        val row =
+            datasource("pg-prod").copy(
+                properties = DatasourceProperties(hikari = mapOf("maximumPoolSize" to 25)),
+            )
+        setVariable("datasource", row)
+        setVariable("dialects", listOf("POSTGRES", "MYSQL"))
+        setVariable("credentialKinds", listOf("password", "token", "none"))
+        setVariable("poolFields", DatasourcePoolForm.fields(row))
+        setVariable("poolReadonly", row.isReadonly)
+        setVariable("isAdmin", true)
+    }
+
+    private fun WebContext.fillDeleteModel() {
+        setVariable("datasource", datasource("pg-prod"))
+        setVariable("forbidden", null)
+        setVariable("usages", emptyList<DatasourceReference>())
+        setVariable("usedByPipelines", emptyList<String>())
+    }
+
     private fun WebContext.fillListModel() {
         setVariable("datasources", listOf(datasource("pg-prod", isReadonly = true), datasource("sample-trips")))
         setVariable("q", "trip")
@@ -221,6 +412,10 @@ class DatasourcesTemplateRenderTest {
         setVariable("memberDatasourcesEnabled", false)
         setVariable("canRegister", true)
         setVariable("bindingHint", "Bound to your active workspace: acme")
+        // 094 §A: the register modal's pool section, prefilled for the dialect its select shows
+        // first — the same model DatasourceUiController.list adds.
+        setVariable("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
+        setVariable("poolReadonly", false)
         setVariable("datasources", listOf(datasource("pg-prod")))
         setVariable("q", "")
         setVariable("offset", 0)

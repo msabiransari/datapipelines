@@ -4,11 +4,15 @@ import co.datapipelines.datasources.crypto.CredentialDecryptionException
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
+import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
 import java.sql.SQLException
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The production [DatasourceRegistry]: validation + encryption + persistence + pooling + the
@@ -32,13 +36,19 @@ import java.util.UUID
  * delete. The pool-build path deliberately does **not** read the cache: it needs the encrypted
  * credential, which the cache never holds.
  *
- * ## Cross-instance pool invalidation (§5.7, 050/R1)
+ * ## Cross-instance pool invalidation (§5.7, 050/R1, 094)
  *
- * Every save/delete evicts the local pool synchronously and then hands the datasource name to
- * [invalidation] so peer instances drop their pools for it too — without it, a replica serves a
- * stale pool (old credentials, old URL) until restart (ARCH-AUDIT M3). Local eviction never
- * waits on the channel: this instance's pool is gone the moment save returns, and the publisher
- * must not rely on receiving its own message back.
+ * Every save/delete RETIRES the local pool synchronously — out of the map at once, closed when
+ * it has drained (§5.2) — and then hands the datasource name to [invalidation] so peer instances
+ * retire theirs too; without it, a replica serves a stale pool (old credentials, old URL) until
+ * restart (ARCH-AUDIT M3). Local retirement never waits on the channel: this instance's pool is
+ * unreachable the moment save returns, and the publisher must not rely on receiving its own
+ * message back.
+ *
+ * [reconcilePools] is the backstop the channel cannot be: a peer that was disconnected when the
+ * message went out never receives it, so on boot and on every (re)subscription it compares the
+ * `updated_at` its live pools were built from against the rows and retires the stale ones. That
+ * is a QUERY, not a queue — no Redis key, no TTL, nothing to expire wrong (094 ruling 3).
  */
 class DefaultDatasourceRegistry(
     private val repository: DatasourceRepository,
@@ -56,8 +66,21 @@ class DefaultDatasourceRegistry(
      * egress-free deployment never issues an `INSTALL`, on a test-connection click either.
      */
     private val duckdbExtensionDirectory: String? = null,
+    private val poolMetrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
+    private val retireCeiling: Duration = ConnectionPoolManager.DEFAULT_RETIRE_CEILING,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
+
+    /**
+     * The row version (`updated_at`) each LIVE pool was built from — the whole state
+     * [reconcilePools] needs, and the reason it needs no Redis key. Written inside the pool
+     * factory, where the row is already in hand; cleared whenever the pool is retired.
+     *
+     * A name may be absent here while a pool exists only for the instant between
+     * `computeIfAbsent` publishing the pool and the factory's own bookkeeping — reconcile then
+     * skips it and catches it on its next run, which is what "backstop" means.
+     */
+    private val poolRowVersions = ConcurrentHashMap<String, Instant>()
 
     /**
      * Decrypts inside the pool-build factory only (§7.4). `computeIfAbsent` runs this at most
@@ -73,11 +96,25 @@ class DefaultDatasourceRegistry(
      * above), so eviction alone is the whole rebuild mechanism.
      */
     private val poolManager =
-        ConnectionPoolManager { datasource ->
-            val withCredential = loadWithCredential(datasource.name)
-            audit(DatasourceAuditEvents.POOL_BUILD, datasource.name, DatasourceAuditEvent.SYSTEM_ACTOR)
-            ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential), duckdbExtensionDirectory)
-        }
+        ConnectionPoolManager(
+            poolFactory = { datasource ->
+                val row =
+                    requireNotNull(repository.findByName(datasource.name)) {
+                        "datasource '${datasource.name}' not found for pool build"
+                    }
+                poolRowVersions[datasource.name] = row.updatedAt
+                audit(DatasourceAuditEvents.POOL_BUILD, datasource.name, DatasourceAuditEvent.SYSTEM_ACTOR)
+                val withCredential = row.toDatasource(decryptOrNull(row))
+                // 089 phase B: a LAKE datasource's per-table views ride the same connectionInitSql
+                // slot, appended after the adapter's own statements; 089 §D's bundled extension
+                // directory keeps a hardened deployment INSTALL-free. Both are no-ops for every
+                // other dialect. 094: the row version recorded above is what reconcile-on-subscribe
+                // compares, so a table registered on another instance rebuilds this pool too.
+                ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential), duckdbExtensionDirectory)
+            },
+            retireCeiling = retireCeiling,
+            metrics = poolMetrics,
+        )
 
     /** Phase B's view statements for a LAKE datasource; nothing for every other dialect. */
     private fun lakeViewStatements(datasource: Datasource): List<String> =
@@ -209,12 +246,14 @@ class DefaultDatasourceRegistry(
             val row =
                 repository.update(toPersist, encrypted)
                     ?: error("datasource '${toPersist.name}' vanished during update")
-            // Drain the old pool; it rebuilds lazily on the next lease under the new config
+            // Retire the old pool; it rebuilds lazily on the next lease under the new config
             // (§5.2). Deliberately not eager — a save must not require the database to be
-            // reachable (§5.4). The audit event is conditional on a pool having existed: §7.4
-            // audits credential *decryption*, and evicting nothing decrypted nothing (the
-            // subsequent lazy build emits its own `pool_build`).
-            if (poolManager.evict(toPersist.name)) {
+            // reachable (§5.4) — and deliberately not a close: an execution mid-statement
+            // against the old row finishes on the connection it already holds (094). The audit
+            // event is conditional on a pool having existed: §7.4 audits credential
+            // *decryption*, and retiring nothing decrypted nothing (the subsequent lazy build
+            // emits its own `pool_build`).
+            if (retirePool(toPersist.name)) {
                 audit(DatasourceAuditEvents.POOL_REBUILD, toPersist.name, actor.toString())
             }
             cache.invalidate(toPersist.name)
@@ -245,7 +284,7 @@ class DefaultDatasourceRegistry(
         }
         val deleted = repository.softDelete(name)
         if (deleted) {
-            poolManager.evict(name)
+            retirePool(name)
             cache.invalidate(name)
             // Same §5.7 contract as update: peers learn the row is gone and drop their pools,
             // so a soft-deleted datasource stops serving queries on every instance (M3's
@@ -255,8 +294,47 @@ class DefaultDatasourceRegistry(
         return DeleteResult(deleted = deleted, name = name)
     }
 
-    /** The subscriber's target (§5.7, 050/R1): same drain the local save/delete paths run. */
-    override fun evictPool(name: String): Boolean = poolManager.evict(name)
+    /** The subscriber's target (§5.7, 050/R1): the same retirement the local save/delete paths run. */
+    override fun retirePool(name: String): Boolean {
+        poolRowVersions.remove(name)
+        return poolManager.retire(name)
+    }
+
+    /** The assembling layer's scheduled tick (§5.2): close what has drained, and what is over its ceiling. */
+    override fun reapRetiredPools(): ReapOutcome = poolManager.reapRetiring()
+
+    /**
+     * §5.7's reconcile — run on boot and on every (re)subscription to the invalidation channel.
+     *
+     * ONE query (`SELECT name, updated_at FROM datasources WHERE is_deleted = FALSE`) against a
+     * table with tens of rows, compared with the versions this instance's live pools were built
+     * from. A pool whose row moved, or whose row is gone, is retired; everything else is left
+     * alone. This is the missed-message backstop, and it is deliberately a comparison rather
+     * than a replayable queue: a queue has to decide how long to keep an unacknowledged message,
+     * and every answer to that is wrong on some deployment (094 ruling 3).
+     *
+     * @return how many pools were retired.
+     */
+    override fun reconcilePools(): Int {
+        val liveVersions = repository.liveRowVersions()
+        var retired = 0
+        poolManager.livePoolNames().forEach { name ->
+            val builtFrom = poolRowVersions[name] ?: return@forEach
+            val current = liveVersions[name]
+            if (current != builtFrom) {
+                if (retirePool(name)) {
+                    retired++
+                    log.info(
+                        "event=datasource.pool_reconciled datasource={} reason=\"{}\" " +
+                            "message=\"a pool built from a row this instance never saw change was retired\"",
+                        name,
+                        if (current == null) "row deleted" else "row updated",
+                    )
+                }
+            }
+        }
+        return retired
+    }
 
     override fun poolFor(datasource: Datasource): ConnectionPool = poolManager.poolFor(datasource)
 
@@ -355,7 +433,7 @@ class DefaultDatasourceRegistry(
         // The credential changed: the same three-step every save does (§5.2/§5.7) — drain the
         // local pool, drop the cached row, tell the peers. A pool built during startup from
         // the OLD ciphertext would otherwise outlive the fix.
-        if (poolManager.evict(name)) {
+        if (retirePool(name)) {
             audit(DatasourceAuditEvents.POOL_REBUILD, name, DatasourceAuditEvent.SYSTEM_ACTOR)
         }
         cache.invalidate(name)
@@ -379,11 +457,6 @@ class DefaultDatasourceRegistry(
 
     /** Closes every pool (application shutdown). */
     fun shutdown() = poolManager.close()
-
-    private fun loadWithCredential(name: String): Datasource {
-        val row = requireNotNull(repository.findByName(name)) { "datasource '$name' not found for pool build" }
-        return row.toDatasource(decryptOrNull(row))
-    }
 
     /**
      * The row's plaintext credential, or null when it has none ([CredentialKind.NONE], V13).

@@ -4,6 +4,8 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineFolder
+import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
@@ -13,15 +15,19 @@ import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.LibraryResolver
+import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRegistry
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -63,6 +69,9 @@ class McpFolderRequiredTest {
             shouldThrow<PipelineValidationException> {
                 PipelinesCreateTool(
                     McpFixtures.pipelineService(mockk<PipelineRepository>(), pipelineValidator, AuthoringGuard(true)),
+                    // The 094 new-root rule never reaches the tree here: a FOLDERLESS name has no
+                    // root to judge, which is the exemption that keeps the two refusals distinct.
+                    mockk<PipelineRepository>(),
                 ).call(McpArguments(pipelineArgs("scratch")), ctx)
             }
 
@@ -77,6 +86,9 @@ class McpFolderRequiredTest {
             shouldThrow<PipelineValidationException> {
                 PipelinesCreateTool(
                     McpFixtures.pipelineService(mockk<PipelineRepository>(), pipelineValidator, AuthoringGuard(true)),
+                    // The 094 new-root rule never reaches the tree here: a FOLDERLESS name has no
+                    // root to judge, which is the exemption that keeps the two refusals distinct.
+                    mockk<PipelineRepository>(),
                 ).call(McpArguments(pipelineArgs("_helper")), ctx)
             }
 
@@ -119,8 +131,10 @@ class McpFolderRequiredTest {
         // `pattern` at all until 077 — it advertised the pre-043 flat rule in prose (audit
         // T129) — so this asserts the value, not merely that a key exists.
         val pipelineSchema =
-            PipelinesCreateTool(McpFixtures.pipelineService(mockk<PipelineRepository>(), pipelineValidator, AuthoringGuard(true)))
-                .definition
+            PipelinesCreateTool(
+                McpFixtures.pipelineService(mockk<PipelineRepository>(), pipelineValidator, AuthoringGuard(true)),
+                mockk<PipelineRepository>(),
+            ).definition
                 .inputSchema()
                 .toString()
         val templateSchema =
@@ -134,6 +148,62 @@ class McpFolderRequiredTest {
         // …and it is the folder-bearing pattern: the repetition has a lower bound of one now.
         PipelineNameGrammar.matches("scratch") shouldBe false
         TemplateNameGrammar.matches("scratch") shouldBe false
+    }
+
+// -------------------------------------------------- 094: the new-root confirmation, WIRED
+
+    @Test
+    fun `pipelines_create refuses a NEW root, naming the roots that exist`() {
+        // The rule object has its own unit suite; this asserts it is actually CALLED by the tool
+        // — the difference between a guard and a guard behind a branch nothing reaches. It fires
+        // BEFORE validation, so the empty-collaborator validator above never gets a say.
+        val tree = mockk<PipelineRepository>()
+        every { tree.listFolder(any(), null, any(), any(), any()) } returns
+            PipelineFolderLevel(
+                folders = listOf(PipelineFolder("finance", "finance", 3), PipelineFolder("nyc", "nyc", 1)),
+                foldersTruncated = false,
+                pipelines = emptyList(),
+                total = 0,
+                hasMore = false,
+            )
+
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                PipelinesCreateTool(
+                    McpFixtures.pipelineService(mockk<PipelineRepository>(), pipelineValidator, AuthoringGuard(true)),
+                    tree,
+                ).call(McpArguments(pipelineArgs("analytics/revenue")), ctx)
+            }
+
+        refusal.code shouldBe PipelineErrorCodes.Validation.NEW_ROOT_REQUIRES_CONFIRMATION
+        refusal.details["existing_roots"] shouldBe listOf("finance", "nyc")
+    }
+
+    @Test
+    fun `templates_create refuses a NEW root, and takes the confirmation`() {
+        val templates = mockk<TemplateRepository>()
+        every { templates.listChildFolders(any(), null, any(), any(), any()) } returns
+            listOf(TemplateFolder("finance", "finance", 2))
+
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                TemplatesCreateTool(templates, AuthoringGuard(true), templateValidator)
+                    .call(McpArguments(templateArgs("analytics/revenue.sql")), ctx)
+            }
+
+        refusal.code shouldBe PipelineErrorCodes.Template.NEW_ROOT_REQUIRES_CONFIRMATION
+
+        // Confirmed, the rule steps aside — and the call proceeds far enough to reach the REAL
+        // create, which this fixture's repository does not stub. Reaching a different failure is
+        // the proof that the new-root refusal is behind us.
+        val afterConfirmation =
+            shouldThrow<Throwable> {
+                TemplatesCreateTool(templates, AuthoringGuard(true), templateValidator)
+                    .call(McpArguments(templateArgs("analytics/revenue.sql") + mapOf("confirm_new_root" to true)), ctx)
+            }
+
+        (afterConfirmation as? DatapipelinesException)?.code shouldNotBe
+            PipelineErrorCodes.Template.NEW_ROOT_REQUIRES_CONFIRMATION
     }
 
     private fun pipelineArgs(name: String): Map<String, Any?> =

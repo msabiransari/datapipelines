@@ -1,6 +1,6 @@
 ---
 name: datapipelines
-description: "Author, maintain, and execute declarative SQL data pipelines on the datapipelines.co server. Use when the user asks to create, update, run, debug, or inspect pipelines, templates, datasources, or executions — or when MCP tools like pipelines_create, pipelines_execute, templates_render, templates_create, datasources_test, datasources_create, datasources_get_schemas, datasources_get_tables, datasources_get_columns, executions_get_result, or prompts like analyze_pipeline / create_pipeline_for_question / debug_failed_execution are available. Covers the pipeline JSON schema, Freemarker SQL templates, node types, execution semantics, error handling, and scopes."
+description: "Author, maintain, and execute declarative SQL data pipelines on the datapipelines.co server. Use when the user asks to create, update, run, debug, or inspect pipelines, templates, datasources, or executions — or when MCP tools like pipelines_create, pipelines_execute, templates_render, templates_create, datasources_test, datasources_get_schemas, datasources_get_tables, datasources_get_columns, executions_get_result, or prompts like analyze_pipeline / create_pipeline_for_question / debug_failed_execution are available. Covers the pipeline JSON schema, Freemarker SQL templates, node types, execution semantics, error handling, and scopes."
 ---
 
 # datapipelines
@@ -246,12 +246,12 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
   `/mcp`. REST lives at `/api/v1/**` with `DP-`-prefixed custom headers and a JSON
   envelope (`{"data": ...}` / `{"error": {code, user_message, details}}`).
 
-- **31 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
+- **30 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
   `pipelines_execute_node`, `pipelines_create`, `pipelines_update`, `templates_list`,
   `templates_get`, `templates_used_by`, `templates_create`, `templates_render`,
   `datasources_list`, `datasources_get`, `datasources_test`,
   `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`,
-  `datasources_preview_rows`, `datasources_create`, `executions_list`,
+  `datasources_preview_rows`, `executions_list`,
   `executions_get`, `executions_get_result`, `endpoints_create`, `endpoints_list`,
   `endpoints_get`, `endpoints_delete`, `calculators_list`, `calculators_get`,
   `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`.
@@ -273,31 +273,34 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
 
 - **Scopes** (hierarchical: `admin ⊃ author ⊃ execute ⊃ read`): `read` = list/get;
   `execute` = run; `author` = create/update pipelines + templates (also template render,
-  datasource test, schema introspection, datasource REGISTRATION, the three `lake_tables_*`
-  dp-lake registry writes, and workspace-bound datasource mutation). Update and delete of a
-  datasource are REST/UI only; `datasources_create` is the one datasource WRITE on the MCP
-  surface. Binding a datasource `global: true` — or mutating a GLOBAL datasource's lake
-  registry — needs `admin` either way. A tool or endpoint rejects with
+  datasource test, schema introspection, the three `lake_tables_*` dp-lake registry writes,
+  and workspace-bound datasource mutation). Creating, updating and deleting a datasource are
+  REST/UI only — **no credential travels through an agent** (094): ask a person to add the
+  datasource in the UI, then use it by name. Mutating a GLOBAL datasource's lake registry needs
+  `admin`. A tool or endpoint rejects with
   `auth.scope.insufficient` when the key's scope is too low.
 
-- **Registering a datasource from an agent — read this before using `datasources_create`.**
-  A secret passed through an agent transits the agent's context, its transcript, and any
-  logging the client does. That is a property of handing a secret to an agent; the server
-  cannot undo it, and the tool does not refuse. **Prefer registering a datasource that has a
-  real credential in the UI or over REST.** Use `datasources_create` from an agent only with a
-  credential the user is willing to have in that transcript — a read-only role, or a
-  short-lived token they will rotate afterwards. Say so before you ask for one. The
-  secret never comes back: the result carries `credential.kind` and `password_set`, and no
-  secret field at any depth. Follow a create with `datasources_test` on the new name.
+- **You cannot register a datasource, and there is no tool that lets you.** **No credential
+  travels through an agent.** A secret passed through you transits your context, your transcript
+  and any logging the client does — a property of handing a secret to an agent, which no server
+  can undo. So datasource create, update and delete are UI/REST-only. If the datasource you need
+  does not exist, **ask the person to add it in the UI**, then read it back with
+  `datasources_list`. (There was a `datasources_create` tool; it carried a warning in its own
+  description, and a description is not a control, so it was removed.)
 
-- **The credential block.** `credential: {kind, username?, secret?}` says WHAT the credential is:
-  `password` (a login — username and secret both required), `token` (a bearer or personal access
-  token — secret required, username optional), `private_key` and `service_account_json` (in the
-  contract for the warehouse connectors; no shipped dialect accepts them yet), and `none` — an
-  IAM role, OS auth, or a FILE database with no authentication at all, which carries neither
-  field. The legacy top-level `username`/`password` pair still works and means `kind: password`;
-  sending both shapes is refused. A kind the dialect's driver cannot use is refused at save with
-  the dialect's accepted kinds named — so read the error rather than retrying with a guess.
+- **What you CAN do with a datasource:** `datasources_list` / `datasources_get` to find one,
+  `datasources_test` to confirm it connects, `datasources_get_schemas` / `_get_tables` /
+  `_get_columns` to read its shape, `datasources_preview_rows` for up to 50 rows of a table.
+  That is everything authoring a pipeline needs. `datasources_get` also reports the connection
+  POOL's effective settings (`pool`: each value with its unit and which layer supplied it), which
+  is what a pool-timeout failure is usually explained by.
+
+- **`credential.kind`, on the read side.** `datasources_get` reports WHAT a datasource
+  authenticates with, never the secret: `password` (a login), `token` (a bearer or personal
+  access token), `private_key` and `service_account_json` (in the contract for the warehouse
+  connectors; no shipped dialect accepts them yet), and `none` — an IAM role, OS auth, or a FILE
+  database with no authentication at all. It is the fact that explains an authentication failure
+  you are asked to diagnose.
 
 - **Namespaces, not just schemas.** `datasources_get_schemas` returns `entries: [{namespace,
   label}]`. `namespace` is the ordered path (outermost first) and `label` is its last segment. On
@@ -365,8 +368,12 @@ GROUP BY pickup_date, pu_location_id
 
 0. **Pick the folder.** `pipelines_list {"prefix": ""}` and `templates_list {"prefix": ""}`
    to see which roots this workspace already uses, then drill in with `{"prefix": "<root>"}`.
-   Reuse a root; ask the human before minting a new one. Everything you create in the steps
-   below goes under the prefix you settle on here — and it cannot be moved later.
+   Reuse a root. **A new root is refused until you confirm it: ask the person first, then pass
+   `confirm_new_root: true`** — `pipelines_create` and `templates_create` answer
+   `pipeline.validation.new_root_requires_confirmation` /
+   `template.validation.new_root_requires_confirmation` with `details.existing_roots` listing
+   what already exists. `test/` never needs it. Everything you create in the steps below goes
+   under the prefix you settle on here — and it cannot be moved later.
 1. **Verify the source.** `datasources_test` (or `datasources_list`/`datasources_get`)
    to confirm name + dialect + connectivity, then introspect the schema:
    `datasources_get_schemas` → `datasources_get_tables(namespace)` →

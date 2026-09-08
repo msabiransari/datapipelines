@@ -152,7 +152,7 @@ class LakeTableRegistryServiceTest {
     fun `register stores the validated row, then evicts and publishes`() {
         val stored = mutableListOf<LakeTableRegistration>()
         every { tables.insert(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>().also(stored::add)) }
-        every { registry.evictPool(any()) } answers {
+        every { registry.retirePool(any()) } answers {
             evicted += firstArg<String>()
             true
         }
@@ -203,7 +203,7 @@ class LakeTableRegistryServiceTest {
     @Test
     fun `a successful mutation drops phase C's introspection cache beside the pool eviction`() {
         every { tables.insert(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>()) }
-        every { registry.evictPool(any()) } returns true
+        every { registry.retirePool(any()) } returns true
         seedCacheEntry()
 
         service.register(
@@ -245,7 +245,7 @@ class LakeTableRegistryServiceTest {
     @Test
     fun `unregister deletes and invalidates - an absent triple is the catalogued 404`() {
         every { tables.delete(any(), any(), any()) } returns true andThen false
-        every { registry.evictPool(any()) } answers {
+        every { registry.retirePool(any()) } answers {
             evicted += firstArg<String>()
             true
         }
@@ -266,7 +266,7 @@ class LakeTableRegistryServiceTest {
     @Test
     fun `import registers the inline tables block and reports duplicates idempotently`() {
         every { tables.insertIfAbsent(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>()) } andThenAnswer { null }
-        every { registry.evictPool(any()) } answers {
+        every { registry.retirePool(any()) } answers {
             evicted += firstArg<String>()
             true
         }
@@ -312,7 +312,7 @@ class LakeTableRegistryServiceTest {
         fetched["https://datapipelines-co.s3.us-east-1.amazonaws.com/sample-data/lake/v1/manifest.json"] = manifest
         val inserted = mutableListOf<LakeTableRegistration>()
         every { tables.insertIfAbsent(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>().also(inserted::add)) }
-        every { registry.evictPool(any()) } answers {
+        every { registry.retirePool(any()) } answers {
             evicted += firstArg<String>()
             true
         }

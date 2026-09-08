@@ -20,6 +20,7 @@ import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
+import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineRepository
@@ -69,6 +70,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     IdempotencyProperties::class,
     PipelineProperties::class,
     ExecutionsProperties::class,
+    DatasourcesProperties::class,
 )
 class DomainConfiguration {
     @Bean
@@ -84,8 +86,9 @@ class DomainConfiguration {
             .DatasourceWorkspaceRules(workspaceService, workspacesProperties)
 
     /**
-     * The ONE validated datasource-registration path, shared by `POST /api/v1/datasources` and
-     * the `datasources_create` MCP tool (049's principle: two entry points, one path).
+     * The ONE validated datasource-registration path behind `POST /api/v1/datasources` (049's
+     * principle: one validated path, however many entry points). It had two callers until 094
+     * removed `datasources_create` from the MCP surface; REST is the remaining one.
      *
      * The D8 binding rule is passed as a method reference rather than the whole component: the
      * service lives in `application`, which sits below `web` and cannot import
@@ -208,6 +211,9 @@ class DomainConfiguration {
         invalidation: PoolInvalidationPublisher,
         lakeTables: LakeTableCatalog,
         environment: Environment,
+        poolMetrics: PoolLifecycleMetrics,
+        datasourcesProperties: DatasourcesProperties,
+        executorProperties: ExecutorProperties,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -223,6 +229,10 @@ class DomainConfiguration {
             // has nothing bundled); the shipped image sets it via the Dockerfile's ENV.
             duckdbExtensionDirectory =
                 environment.getProperty("datapipelines.duckdb.extension-directory")?.ifBlank { null },
+            poolMetrics = poolMetrics,
+            // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
+            // why the two properties meet here rather than inside either binding class.
+            retireCeiling = datasourcesProperties.ceiling(executorProperties.nodeQueryTimeoutSeconds),
         )
 
     /**

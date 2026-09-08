@@ -252,7 +252,7 @@ class LakeTableRegistryService(
      */
     private fun refreshConnections(datasourceName: String) {
         introspectionCache.invalidate(datasourceName)
-        datasources.evictPool(datasourceName)
+        datasources.retirePool(datasourceName)
         invalidation.publish(datasourceName)
     }
 

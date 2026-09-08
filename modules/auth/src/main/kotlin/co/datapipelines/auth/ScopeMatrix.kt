@@ -178,10 +178,10 @@ object ScopeMatrix {
             "datasources_get_tables" to Scope.AUTHOR,
             "datasources_get_columns" to Scope.AUTHOR,
             "datasources_preview_rows" to Scope.AUTHOR,
-            // 068 — registering a connection sits on the same floor as testing one; `global: true`
-            // additionally requires admin, which is a D8 rule inside the shared create service,
-            // not a scope (auth.md §7.6: admin-ness is not a scope).
-            "datasources_create" to Scope.AUTHOR,
+            // 094 ruling 4: `datasources_create` is GONE from this matrix because it is gone
+            // from the surface. Registering a datasource means handing over a live database
+            // credential, and no credential travels through an agent — people add datasources in
+            // the UI, operators over REST or the bootstrap file, and agents use them by name.
             "pipelines_execute_node" to Scope.AUTHOR,
             // 072 — the calculator catalog is a property of the build: no workspace data, no
             // customer rows, the same answer for every caller. `read` is the honest floor.

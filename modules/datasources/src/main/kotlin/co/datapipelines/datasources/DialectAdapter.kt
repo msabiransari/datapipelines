@@ -26,6 +26,21 @@ interface DialectAdapter {
      */
     val defaultProperties: Map<String, String>
 
+    /**
+     * POOL defaults this dialect overrides (datasources.md §5, 094) — HikariCP property names,
+     * applied before [DatasourceProperties.hikari] so a caller can still override them.
+     *
+     * The sibling of [defaultProperties] one layer up: that one is the DRIVER's connection
+     * properties, this one is the POOL's. It is empty for every dialect shipped today, and the
+     * seam exists rather than being notional because the create/edit dialog prefills each field
+     * with the EFFECTIVE default and names which layer supplied it. Without a real dialect layer
+     * that sentence would be a description of nothing — and the first embedded-engine dialect
+     * that wants a single-connection pool would have nowhere to say so except by re-deriving it
+     * in the form.
+     */
+    val defaultHikariProperties: Map<String, String>
+        get() = emptyMap()
+
     /** JDBC column metadata → canonical types (type-system.md §5), via `TypeMappers.forDialect`. */
     val typeMapper: IngressTypeMapper
 

@@ -101,6 +101,20 @@ class WebPropertiesSpecDriftTest {
     }
 
     @Test
+    fun `datasources property defaults match configuration-md section 3-24`() {
+        val props = DatasourcesProperties()
+        // The documented default is the WORD `derived`, because the number is not a constant.
+        documented.getValue("datapipelines.datasources.retire-ceiling-seconds") shouldBe "derived"
+        props.retireCeilingSeconds shouldBe null
+        // …so the derivation itself is what this guard has to pin: the table cell cannot hold
+        // it, and "derived from the node query timeout + 30" is exactly the sentence a future
+        // edit could break silently. 60 + 30 = 90 with the shipped executor default.
+        props.ceiling(ExecutorProperties().nodeQueryTimeoutSeconds).seconds shouldBe 90L
+        // An explicit value opts out of the derivation entirely.
+        DatasourcesProperties(retireCeilingSeconds = 600).ceiling(60).seconds shouldBe 600L
+    }
+
+    @Test
     fun `org property defaults match configuration-md section 3-21`() {
         val props = OrgProperties()
         documented.getValue("datapipelines.org.currency.name") shouldBe props.currency.name

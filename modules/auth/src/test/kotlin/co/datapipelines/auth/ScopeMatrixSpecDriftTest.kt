@@ -53,12 +53,13 @@ class ScopeMatrixSpecDriftTest {
     fun `every MCP tool minimum scope matches auth-md §7-6`() {
         val fromDoc = parseMcpTable(RepoFiles.read(RepoFiles.AUTH_SPEC_PATH))
 
-        // All 31 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
+        // All 30 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
         // data-visibility pair, 20 → 21 with 040's `templates_used_by`, 21 → 22 with 068's
         // `datasources_create`, 22 → 24 with 072's `calculators_list` / `calculators_get`,
         // 24 → 28 with 074's four `endpoints_*` tools, 28 → 31 with 089's three
-        // `lake_tables_*` tools.
-        fromDoc.size shouldBe 31
+        // `lake_tables_*` tools, and 31 → 30 with 094 REMOVING `datasources_create`
+        // (no credential travels through an agent).
+        fromDoc.size shouldBe 30
         ScopeMatrix.MCP_TOOL_MIN_SCOPE shouldContainExactly fromDoc
     }
 
@@ -136,6 +137,8 @@ class ScopeMatrixSpecDriftTest {
         // tools…"), which 068 made false by shipping `datasources_create` — and the parser then
         // ran on past §7.6 and died on `dpk_` in the key-anatomy prose. An end marker that is a
         // sentence about the CONTENT is a guard that breaks whenever the content is right.
+        // (094 removed that tool again, which would have made the OLD marker true once more —
+        // and is exactly why the marker is still structural rather than a sentence.)
         val section =
             buildString {
                 var seenRow = false

@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
@@ -87,7 +88,9 @@ class TemplatesCreateTool(
                     "listing them in 'imports'; the body must NOT contain import or include directives, they are " +
                     "synthesized from the imports array. The 'type' is chosen here and never changes afterwards: " +
                     "'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect " +
-                    "and renders through an auto-escaping engine.",
+                    "and renders through an auto-escaping engine. A NEW top-level folder is refused until you " +
+                    "confirm it: reuse an existing root, or ask the person first and then pass " +
+                    "confirm_new_root: true.",
             schema = SCHEMA,
         )
 
@@ -98,6 +101,13 @@ class TemplatesCreateTool(
         // versioning §5.5: creation is authoring — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
         val workspaceId = ctx.principal.requireWorkspace().id
+        // 094 addendum. An OMITTED id is generated under `test/`, which needs no confirmation —
+        // the rule reads null as "no root to mint" rather than guessing at the generated one.
+        NewRootConfirmation.require(
+            name = args.string("id"),
+            confirmed = args.boolean(NewRootConfirmation.ARG),
+            code = PipelineErrorCodes.Template.NEW_ROOT_REQUIRES_CONFIRMATION,
+        ) { templates.listChildFolders(workspaceId).map { it.segment } }
         val type =
             args
                 .enumString("type", TemplateType.WIRE_VALUES.toSet(), TemplateType.SQL.wire)
@@ -164,7 +174,8 @@ class TemplatesCreateTool(
                   }
                 },
                 "is_library": {"type": "boolean", "default": false, "description": "$IS_LIBRARY_DESC"},
-                "body": {"type": "string", "description": "$BODY_DESC"}
+                "body": {"type": "string", "description": "$BODY_DESC"},
+                "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"}
               },
               "additionalProperties": false
             }

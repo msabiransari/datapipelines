@@ -61,12 +61,12 @@ class LakePoolViewsIntegrationTest {
             )
         val ds = lakeDatasource("lake_views")
         val manager =
-            ConnectionPoolManager { datasource ->
+            ConnectionPoolManager(poolFactory = { datasource ->
                 ConnectionPoolManager.buildHikariPool(
                     datasource,
                     LakeViewStatements.forTables(rows.toList(), adapter),
                 )
-            }
+            })
 
         manager.use {
             val firstPool = manager.poolFor(ds)
@@ -86,9 +86,11 @@ class LakePoolViewsIntegrationTest {
                 runsSql(connection, "SELECT count(*) FROM hvfhv_zone_day") shouldBe false
             }
 
-            // …until refreshConnections' eviction: the next poolFor rebuilds from the fresh
-            // registry rows, and the new connection's init SQL carries BOTH views.
-            manager.evict(ds.name) shouldBe true
+            // …until the registry change retires the pool (094: soft-evict, then the reaper
+            // closes it once no connection is out — here none is): the next poolFor rebuilds
+            // from the fresh registry rows, and the new connection's init SQL carries BOTH views.
+            manager.retire(ds.name) shouldBe true
+            manager.reapRetiring()
             (firstPool as HikariConnectionPool).isClosed shouldBe true
             manager.poolFor(ds).leaseConnection().use { connection ->
                 withClue("the second registration was not visible after evict + rebuild") {
@@ -103,9 +105,9 @@ class LakePoolViewsIntegrationTest {
     fun `a tableless registry adds no ATTACH and no views - the pool still opens`() {
         val ds = lakeDatasource("lake_empty")
         val manager =
-            ConnectionPoolManager { datasource ->
+            ConnectionPoolManager(poolFactory = { datasource ->
                 ConnectionPoolManager.buildHikariPool(datasource, LakeViewStatements.forTables(emptyList(), adapter))
-            }
+            })
 
         manager.use {
             manager.poolFor(ds).leaseConnection().use { connection ->

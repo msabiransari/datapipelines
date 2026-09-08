@@ -61,7 +61,7 @@ class McpServerWiringTest {
                 datasources,
                 co.datapipelines.datasources.SqlRunner(datasources),
             ),
-            PipelinesCreateTool(service),
+            PipelinesCreateTool(service, pipelines),
             PipelinesUpdateTool(service),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
@@ -75,7 +75,6 @@ class McpServerWiringTest {
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, co.datapipelines.datasources.SqlRunner(datasources)),
-            DatasourcesCreateTool(mockk<co.datapipelines.application.datasources.DatasourceCreateService>()),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),
@@ -95,12 +94,13 @@ class McpServerWiringTest {
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 31 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 30 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
-     * documented capability that does not exist.
+     * documented capability that does not exist. (28 → 27 with 094 removing
+     * `datasources_create`.)
      */
     @Test
-    fun `the tool surface is exactly the 31 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 30 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
@@ -110,7 +110,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 31 tools and all three prompts registered`() {
+    fun `the server builds with all 30 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

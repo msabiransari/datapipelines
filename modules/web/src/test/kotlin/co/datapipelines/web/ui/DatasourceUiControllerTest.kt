@@ -77,6 +77,7 @@ class DatasourceUiControllerTest {
                 mockk(relaxed = true),
                 co.datapipelines.auth.WorkspacesProperties(),
             ),
+            co.datapipelines.datasources.DatasourceReferences.NONE,
         )
 
     @Test
@@ -268,6 +269,7 @@ class DatasourceUiControllerTest {
                 null,
                 false,
                 false,
+                emptyMap(),
             )
 
         // A VIEW, not an HX-Redirect: the screen never navigates, so the toast survives.
@@ -295,6 +297,7 @@ class DatasourceUiControllerTest {
                 null,
                 false,
                 false,
+                emptyMap(),
             ) as ResponseEntity<*>
 
         result.statusCode shouldBe HttpStatus.BAD_REQUEST

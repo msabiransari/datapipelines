@@ -16,7 +16,7 @@ import org.junit.jupiter.api.assertAll
 
 /**
  * [DatasourcePayloadBinder] — the ONE reader of the datasources.md §3.1 body, for REST §9.1/§9.4
- * and the `datasources_create` MCP tool alike.
+ * alike — and, until 094 removed it from the MCP surface, `datasources_create` too.
  *
  * Every rejection here is a catalogued §13 code carried on a plain [DatapipelinesException]: this
  * layer sits below both surfaces, so it raises no `ApiException` and no MCP wire type, and REST's

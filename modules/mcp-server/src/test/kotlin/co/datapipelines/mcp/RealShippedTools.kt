@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.ExecutionLauncher
-import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
@@ -49,7 +48,6 @@ fun realShippedTools(): List<McpTool> {
         environment = StandardEnvironment(),
         executionRunner = executionRunner,
         launcher = launcher,
-        datasourceCreateService = mockk<DatasourceCreateService>(),
         endpointPublishService = mockk<EndpointPublishService>(),
         lakeTableRegistryService = mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
     )

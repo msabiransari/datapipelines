@@ -1,0 +1,93 @@
+<!-- The datasource EDIT dialog (ui-screens.md §4.5, round 094 §A).
+
+     Delivered as a whole backdrop rather than as a body swapped into a
+     pre-rendered shell: the screen keeps ONE empty `#ds-dialog` container, this
+     fragment lands in it, and `.u-backdrop` is `display: flex` by default — so
+     the dialog is visible the moment htmx swaps it, with no script to open it
+     and nothing to get out of step. Closing is `#ds-dialog.innerHTML = ''`.
+
+     The form posts to /partials/datasources/{name}, which runs the SAME
+     DatasourceWorkspaceRules gates and the SAME registry.save boundary as
+     PUT /api/v1/datasources/{name}. The `name` and `dialect` are shown but not
+     editable: the name is immutable (§11.1) and changing the dialect would
+     repoint a live datasource at a different driver while every pipeline that
+     references it by name silently followed. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" id="ds-edit-modal">
+  <div class="ds-card app-modal app-modal-md">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" onclick="closeDsDialog()">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md">Edit <span th:text="${datasource.name}">pg-prod</span></h2>
+
+    <form th:attr="hx-post=@{/partials/datasources/{name}(name=${datasource.name})}"
+          hx-target="#ds-dialog-result"
+          hx-swap="innerHTML">
+      <div class="u-mb-md">
+        <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-dialect">Dialect</label>
+        <input class="ds-input" id="ds-edit-dialect" type="text" disabled th:value="${datasource.dialect.wire}">
+        <p class="u-muted u-text-xs u-mt-0">The name and the dialect are fixed once a datasource exists.</p>
+      </div>
+      <div class="u-mb-md">
+        <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-display">Display name</label>
+        <input class="ds-input" id="ds-edit-display" type="text" name="displayName" th:value="${datasource.displayName}">
+      </div>
+      <div class="u-mb-md">
+        <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-url">JDBC URL</label>
+        <input class="ds-input" id="ds-edit-url" type="text" name="jdbcUrl" required th:value="${datasource.jdbcUrl}">
+      </div>
+      <div class="u-mb-md">
+        <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-kind">Credential</label>
+        <select class="ds-input" id="ds-edit-kind" name="credentialKind">
+          <option th:each="k : ${credentialKinds}" th:value="${k}" th:text="${k}"
+                  th:selected="${k == datasource.credentialKind.wire}">password</option>
+        </select>
+      </div>
+      <div class="u-flex u-gap-md u-mb-md">
+        <div class="u-grow">
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-user">Username</label>
+          <input class="ds-input" id="ds-edit-user" type="text" name="username" th:value="${datasource.username}">
+        </div>
+        <div class="u-grow">
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-secret">Secret</label>
+          <input class="ds-input" id="ds-edit-secret" type="password" name="password" autocomplete="new-password">
+        </div>
+      </div>
+      <!-- §9.4: a blank secret KEEPS the stored one. The stored value is never rendered back
+           (§7.1), so "unchanged" is the only thing a blank field can honestly mean. -->
+      <p class="u-secondary u-text-sm u-mb-md u-mt-0">
+        Leave the secret blank to keep the stored credential.
+      </p>
+      <div class="u-mb-md">
+        <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-description">Description (optional)</label>
+        <input class="ds-input" id="ds-edit-description" type="text" name="description" th:value="${datasource.description}">
+      </div>
+      <div class="u-row-top u-gap-lg u-mb-md">
+        <label class="u-row u-gap-xs u-secondary u-text-sm">
+          <input type="checkbox" name="readonly" value="true" th:checked="${datasource.isReadonly}"> Readonly
+        </label>
+        <!-- An unchecked checkbox posts nothing, so the hidden companion is what tells the
+             controller the admin MEANT to write the flag (either way). Members do not get it,
+             and a forged one is refused by the same admin-only D8 rule REST applies. -->
+        <th:block th:if="${isAdmin}">
+          <input type="hidden" name="globalPresent" value="true">
+          <label class="u-row u-gap-xs u-secondary u-text-sm" title="Visible to every workspace">
+            <input type="checkbox" name="global" value="true" th:checked="${datasource.workspaceName} == null"> Global
+          </label>
+        </th:block>
+        <span class="u-muted u-text-xs" th:unless="${isAdmin}"
+              th:text="${datasource.workspaceName} != null ? 'Bound to ' + ${datasource.workspaceName} : 'Global'">Bound</span>
+      </div>
+
+      <details class="u-mb-md">
+        <summary class="u-secondary u-text-sm">Connection pool — defaults</summary>
+        <div class="u-mt-md">
+          <div th:replace="~{partials/datasource-pool-fields :: fields('ds-edit-')}"></div>
+        </div>
+      </details>
+
+      <div id="ds-dialog-result" class="u-mb-md"></div>
+      <button type="submit" class="ds-button ds-button-primary u-full">Save changes</button>
+    </form>
+  </div>
+</div>

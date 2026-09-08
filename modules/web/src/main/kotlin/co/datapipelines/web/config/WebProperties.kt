@@ -3,6 +3,7 @@ package co.datapipelines.web.config
 import co.datapipelines.executor.ErrorDetail
 import co.datapipelines.pipeline.OrgContext
 import org.springframework.boot.context.properties.ConfigurationProperties
+import java.time.Duration
 
 /**
  * The `datapipelines.sse.*` keys ([Configuration §3.6](../../../../../../../docs/configuration.md)).
@@ -194,6 +195,47 @@ data class StagingH2Properties(
 data class IdempotencyProperties(
     val ttlSeconds: Long = 86_400,
 )
+
+/**
+ * The `datapipelines.datasources.*` keys ([Configuration §3.22](../../../../../../../docs/configuration.md)).
+ *
+ * Defaults here MUST equal configuration.md §3.22 — that document is the single authority, and
+ * a binding class that quietly disagrees with it is a second authority.
+ * `WebPropertiesSpecDriftTest` fails the build on any divergence, and pins the DERIVATION too,
+ * which is the part a table cell cannot hold.
+ */
+@ConfigurationProperties(prefix = "datapipelines.datasources")
+data class DatasourcesProperties(
+    /**
+     * `retire-ceiling-seconds` — how long a retired connection pool may keep connections out
+     * before it is closed anyway ([Datasources §5.2](../../../../../../../docs/datasources.md)).
+     *
+     * Null (the default, documented as `derived`) means **the executor's
+     * `node-query-timeout-seconds` plus [CEILING_SLACK_SECONDS]** — the longest a well-behaved
+     * node statement can run, plus enough slack that a statement finishing right at its own
+     * timeout still returns its connection voluntarily. A derived default rather than a literal
+     * because the two numbers are the same fact: raising the query timeout without raising this
+     * would start hard-closing pools out from under statements that are still legitimately
+     * running. A deployment whose datasources set their own longer `query_timeout_seconds`
+     * overrides it explicitly.
+     */
+    val retireCeilingSeconds: Long? = null,
+) {
+    init {
+        retireCeilingSeconds?.let {
+            require(it > 0) { "datapipelines.datasources.retire-ceiling-seconds must be > 0" }
+        }
+    }
+
+    /** The configured ceiling, or the derivation from [nodeQueryTimeoutSeconds]. */
+    fun ceiling(nodeQueryTimeoutSeconds: Int): Duration =
+        Duration.ofSeconds(retireCeilingSeconds ?: (nodeQueryTimeoutSeconds + CEILING_SLACK_SECONDS))
+
+    companion object {
+        /** The slack the derived default adds to the node query timeout (§5.2). */
+        const val CEILING_SLACK_SECONDS = 30L
+    }
+}
 
 /**
  * The `datapipelines.executions.*` keys ([Configuration §3.11](../../../../../../../docs/configuration.md)).

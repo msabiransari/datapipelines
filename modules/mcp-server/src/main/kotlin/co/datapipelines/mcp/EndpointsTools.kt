@@ -26,10 +26,10 @@ import io.modelcontextprotocol.spec.McpSchema
  *
  * The design assumed one exists and gains `kind`/`bindings`; the tree has no such tool, and this
  * round does not add one. Minting an API key returns a live credential, and a credential returned
- * through a tool call transits the agent's context, its transcript and whatever the client logs —
- * the hazard `datasources_create` documents for a password it merely ACCEPTS. Creating an
- * agent-facing credential mint is a decision the design did not actually take, so endpoint keys
- * are minted over REST or in the UI and bound there; these tools publish, read and unpublish.
+ * through a tool call transits the agent's context, its transcript and whatever the client logs.
+ * 094 turned that reasoning into the surface's standing rule — **no credential travels through an
+ * agent** — and removed the one tool that had accepted one. Endpoint keys are minted over REST or
+ * in the UI and bound there; these tools publish, read and unpublish.
  */
 object EndpointsTools {
     /** The four tools, in `tools/list` order. */

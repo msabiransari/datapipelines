@@ -124,15 +124,23 @@ class ApiErrorCatalogSpecDriftTest {
          * (six `datasource.validation.lake_*` 400s, the 409 duplicate and the 404 not-found),
          * landed in the SAME commit as their constants and catalog rows. Re-derived from the
          * document's own parse.
+         *
+         * 138 → 139 with 091 (`auth.api_key.expiry_invalid`, §13.7) and 139 → 140 with 094
+         * (`template.validation.new_root_requires_confirmation`, §13.9 — its pipeline twin is a
+         * §12 code counted by [SECTION_12_CODE_COUNT]). Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 139
+        const val SECTION_13_ROW_COUNT = 140
 
         /**
          * §12's distinct validation codes.
          *
          * 48 → 58 with 072: §12.10's ten CALCULATOR-node rules, landed in the SAME commit as
          * their constants. Re-derived from the document's own parse.
+         *
+         * 58 → 59 with 094: `pipeline.validation.new_root_requires_confirmation` — the MCP
+         * surface's refusal of a name that mints a new top-level folder without confirmation.
+         * A 400 like every other §12 code; landed in the SAME commit as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 58
+        const val SECTION_12_CODE_COUNT = 59
     }
 }

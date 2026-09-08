@@ -6,6 +6,8 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DialectAdapters
+import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
@@ -68,9 +70,13 @@ class DatasourcesController(
      * workspace. `readonly` settable by whoever may create.
      *
      * The whole sequence — bind, D8 binding, duplicate-name check, registry save — is
-     * [DatasourceCreateService], because the `datasources_create` MCP tool (mcp-server.md
-     * §6.2.22) calls the SAME path: 049's rule, two entry points and one validated path. What
-     * is left here is the HTTP shape (201, the §3.2 envelope) and nothing else.
+     * [DatasourceCreateService]. It was extracted in 068 because an MCP `datasources_create`
+     * called the same path (049's rule: two entry points, one validated path); 094 removed that
+     * tool — no credential travels through an agent — so REST is the only programmatic caller
+     * again. The extraction stays: the sequence is the same one the bootstrap registrar and the
+     * UI form must not diverge from, and folding it back inline would make "one validated path"
+     * a claim rather than a structure. What is left here is the HTTP shape (201, the §3.2
+     * envelope) and nothing else.
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -262,6 +268,13 @@ class DatasourcesController(
             // is also today's default behavior for every pre-existing datasource.
             if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
             put("properties", mapOf("hikari" to properties.hikari, "jdbc" to properties.jdbc))
+            // §5 (094) — additive, and NOT a duplicate of `properties.hikari`: that map is what
+            // this row STORES (empty for almost every datasource), while `pool` is what the pool
+            // actually RUNS with — each catalogued setting's effective value, its unit, and the
+            // layer that supplied it (`configured` / `dialect_default` / `application_default` /
+            // `hikari_default`). The camelCase keys are HikariCP's own, which is also what a
+            // caller writes back under `properties.hikari.*`.
+            put("pool", PoolSettings.wire(this@toResponse, DialectAdapters.forDialect(dialect)))
             // Workspaces design §9 — additive: the bound workspace's NAME (null = global)
             // and the readonly flag (machine-readable, D6).
             put("workspace", workspaceName)

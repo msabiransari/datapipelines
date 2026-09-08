@@ -27,6 +27,14 @@ object PipelineErrorCodes {
         /** §12.1 — `name` matches `[a-z0-9_]+`, length 1–63. */
         const val NAME_INVALID = "pipeline.validation.name_invalid"
 
+        /**
+         * §13.1 (094) — an AGENT asked to create a pipeline under a top-level folder that has
+         * nothing in it yet, without `confirm_new_root: true`. `details.existing_roots` lists
+         * the roots that do exist. MCP-only: a person choosing a folder in the UI, and an
+         * operator over REST, have already decided.
+         */
+        const val NEW_ROOT_REQUIRES_CONFIRMATION = "pipeline.validation.new_root_requires_confirmation"
+
         /** §12.1 — all node `id` values are unique. */
         const val DUPLICATE_NODE_ID = "pipeline.validation.duplicate_node_id"
 
@@ -483,6 +491,13 @@ object PipelineErrorCodes {
         const val SYNTAX_ERROR = "template.validation.syntax_error"
         const val DANGEROUS_CONSTRUCT = "template.validation.dangerous_construct"
         const val ID_INVALID = "template.validation.id_invalid"
+
+        /**
+         * §13.9 (094) — the template twin of
+         * [Validation.NEW_ROOT_REQUIRES_CONFIRMATION]: an AGENT asked to create a template
+         * under a top-level folder that has nothing in it yet, without `confirm_new_root: true`.
+         */
+        const val NEW_ROOT_REQUIRES_CONFIRMATION = "template.validation.new_root_requires_confirmation"
         const val DIALECT_INVALID = "template.validation.dialect_invalid"
 
         /**
