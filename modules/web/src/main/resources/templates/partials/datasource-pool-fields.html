@@ -1,12 +1,16 @@
 <!-- The "Connection pool" fields of the create/edit dialogs (ui-screens.md §4.5,
      datasources.md §5, round 094).
 
-     The ROOT carries id="ds-pool-fields" and is its own swap target: the create
-     dialog's dialect select re-fetches this fragment on change, because the
-     prefilled value is the EFFECTIVE default for the CHOSEN dialect and the
-     dialect is picked in the same form. `hx-swap="outerHTML"` therefore needs
-     the id to survive every swap — the same stable-root contract the list
-     fragment uses.
+     The ROOT's id comes from `poolFieldsId`, and only the CREATE dialog sets it
+     ("ds-pool-fields"): that dialog's dialect select re-fetches this fragment on
+     change, because the prefilled value is the EFFECTIVE default for the CHOSEN
+     dialect and the dialect is picked in the same form, so `hx-swap="outerHTML"`
+     needs the id to survive every swap — the same stable-root contract the list
+     fragment uses. The EDIT dialog renders the same fields with NO id, because
+     its dialect is fixed and nothing swaps them: an id set unconditionally would
+     put TWO elements with the same id in one document the moment an edit dialog
+     opened over the list page, which is both invalid HTML and an ambiguous
+     hx-target.
 
      Every input is prefilled with the effective default and its help line names
      the LAYER that supplied it ("HikariCP's own" / "this server's" / "this
@@ -18,27 +22,29 @@
      flag mirrored here so the section reads as complete, never a second place to
      set it — `properties.hikari.readOnly` is §5.6-refused, so a free field would
      be an input whose every value the validator rejects. -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="fields" id="ds-pool-fields">
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fields" th:id="${poolFieldsId}"
+     th:with="idPrefix=${poolFieldsId} != null ? 'ds-' : 'ds-edit-'">
   <div class="u-mb-md" th:each="f : ${poolFields}">
     <label class="u-block u-secondary u-text-sm u-mb-xs"
-           th:for="'ds-' + ${f.key}">
+           th:for="${idPrefix} + ${f.key}">
       <span th:text="${f.label}">Maximum pool size</span>
       <span class="u-muted u-text-xs" th:text="'(' + ${f.unit} + ')'">(count)</span>
     </label>
     <input class="ds-input" type="number" min="0" step="1"
-           th:id="'ds-' + ${f.key}"
+           th:id="${idPrefix} + ${f.key}"
            th:name="${f.name}"
            th:value="${f.value}"
-           th:attr="aria-describedby='ds-' + ${f.key} + '-help'">
-    <p class="u-muted u-text-xs u-mt-0" th:id="'ds-' + ${f.key} + '-help'">
+           th:attr="aria-describedby=${idPrefix} + ${f.key} + '-help'">
+    <p class="u-muted u-text-xs u-mt-0" th:id="${idPrefix} + ${f.key} + '-help'">
       <span th:text="${f.meaning}">What it does.</span>
       <span th:text="${f.help}">Default 10 — HikariCP's own.</span>
     </p>
   </div>
 
   <div class="u-mb-md">
-    <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-pool-readonly">Read only</label>
-    <input class="ds-input" id="ds-pool-readonly" type="text" disabled
+    <label class="u-block u-secondary u-text-sm u-mb-xs"
+           th:for="${poolFieldsId} != null ? 'ds-pool-readonly' : 'ds-edit-pool-readonly'">Read only</label>
+    <input class="ds-input" th:id="${poolFieldsId} != null ? 'ds-pool-readonly' : 'ds-edit-pool-readonly'" type="text" disabled
            th:value="${poolReadonly} ? 'true' : 'false'">
     <p class="u-muted u-text-xs u-mt-0">
       Mirrors this datasource's <code>readonly</code> flag above — the pool is built with it and it

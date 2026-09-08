@@ -218,6 +218,8 @@ class DatasourcePartialController(
         // The create dialog has no datasource yet, so the readonly mirror reads from the form's
         // own checkbox rather than from a row — rendered by the caller, not here.
         model.addAttribute("poolReadonly", false)
+        // This IS the swap target, so it keeps the id across every re-fetch.
+        model.addAttribute("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
         return "partials/datasource-pool-fields"
     }
 

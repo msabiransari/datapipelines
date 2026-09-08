@@ -253,6 +253,10 @@ class DatasourcesTemplateRenderTest {
         // The pool section is here too, prefilled from the ROW where it has values.
         html shouldContain "name=\"pool.maximumPoolSize\""
         html shouldContain "Set on this datasource."
+        // …and it carries NO id: only the register modal's section is a swap target, so an id
+        // here would be a duplicate the moment this dialog opened over the list page.
+        html shouldNotContain "id=\"ds-pool-fields\""
+        html shouldContain "id=\"ds-edit-maximumPoolSize\""
     }
 
     @Test
@@ -359,6 +363,7 @@ class DatasourcesTemplateRenderTest {
     private fun WebContext.fillPoolModel() {
         setVariable("poolFields", DatasourcePoolForm.fields(Dialect.POSTGRES))
         setVariable("poolReadonly", false)
+        setVariable("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
     }
 
     private fun WebContext.fillEditModel() {
@@ -412,6 +417,7 @@ class DatasourcesTemplateRenderTest {
         // first — the same model DatasourceUiController.list adds.
         setVariable("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
         setVariable("poolReadonly", false)
+        setVariable("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
         setVariable("datasources", listOf(datasource("pg-prod")))
         setVariable("q", "")
         setVariable("offset", 0)
