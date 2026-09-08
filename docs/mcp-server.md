@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.21 (frozen contract — additive-only changes after this point)
+**Status:** v1.22 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-05
@@ -1070,7 +1070,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
 ```json
 {
   "name": "lake_tables_register",
-  "description": "Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table root holding metadata/) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.",
+  "description": "Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table's CURRENT metadata file, e.g. s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so register the file, and re-register it when the table commits) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1113,7 +1113,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
       },
       "location": {
         "type": "string",
-        "description": "s3://bucket/prefix/ (parquet dir/glob; iceberg root) or file:// path. Nothing else; no injection chars."
+        "description": "s3://bucket/prefix/ (parquet dir/glob; iceberg: the current metadata file, not the table root) or file:// path. Nothing else; no injection chars."
       },
       "partition_column": {
         "type": "string",
@@ -1603,3 +1603,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-09-05 | v1.20 | mandatory folders (077) | No new tools; two `pattern`s and two descriptions. §6.2.4/§6.2.5 `pipelines_create`/`pipelines_update` `name` narrows to the 2–10-segment grammar ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) — rendered from `PipelineNameGrammar.pattern` itself, so it moved with the rule. §6.2.8 `templates_create` `id` **gains a `pattern` for the first time** and it is `TemplateNameGrammar.pattern`: the schema had been advertising the pre-043 flat `[a-z0-9_.-]+` in prose, three grammar changes stale (audit T129, 2026-09-05). Both descriptions now state that a folder is required, that `details.reason='folder_required'` is how the refusal is recognised, and that experiments go under `test/`. An omitted `templates_create` id is generated under `test/`. |
 | 2026-09-07 | v1.21 | 087 connector seams | No new tools. §6.2.22 `datasources_create` gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) and drops `username`/`password` from `required` — either shape is accepted, both together are refused; the dialect enum gains `LAKE`; the result carries `credential.kind` and a derived `password_set`. §6.2.16 `datasources_get_schemas` returns `entries: [{namespace, label}]` beside the legacy `schemas` array — two catalogs' same-named schemas are two entries, which a list of bare labels could not express. §6.2.17/§6.2.18 gain a `namespace` array argument beside `schema` (which now also accepts the dotted form), and every table row carries `namespace` beside `schema`. |
 | 2026-09-07 | v1.20 | dp-lake registry (089 §A) | Tool surface 28 → **31**: `lake_tables_register` / `lake_tables_import` / `lake_tables_unregister` (§6.2.29–31) — the dp-lake catalog (metadata-db §4.15): register one table, bulk-import a manifest.json `tables[]` block (inline or fetched server-side from the datasource's OWN endpoint/bucket only — the SSRF boundary), unregister. All three are `author` (auth.md §7.6) and declared `mutating`. |
+| 2026-09-08 | v1.22 | 089 Iceberg location correction | No surface change — two DESCRIPTION strings corrected to the measured rule (datasources.md §8C.7): §6.2.29's tool description and its `location` property now say an Iceberg table's location is the current metadata FILE (`…/metadata/00042-<uuid>.metadata.json`), not the table root — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so an agent following the old text registered a location whose view fails at connect. The code strings and the fence moved together (the §6.2 fences are drift-pinned to the shipped schemas). |

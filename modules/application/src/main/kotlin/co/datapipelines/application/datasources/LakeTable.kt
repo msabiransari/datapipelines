@@ -19,7 +19,7 @@ data class LakeTable(
     val namespace: List<String>,
     val name: String,
     val format: LakeTableFormat,
-    /** `s3://bucket/prefix[/glob]` (Iceberg: the table root holding `metadata/`) or a `file://` path. */
+    /** `s3://bucket/prefix[/glob]` (Iceberg: the current metadata FILE, not the table root — datasources.md §8C.7) or a `file://` path. */
     val location: String,
     /** Null when the table is not partitioned. */
     val partitionColumn: String?,

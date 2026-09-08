@@ -27,7 +27,7 @@ data class LakeRegisteredTable(
     val name: String,
     /** The metadata-db §4.15 wire value: `parquet` or `iceberg`. */
     val format: String,
-    /** `s3://bucket/prefix[/glob]` (Iceberg: the table root holding `metadata/`) or a `file://` path. */
+    /** `s3://bucket/prefix[/glob]` (Iceberg: the current metadata FILE, not the table root — datasources.md §8C.7) or a `file://` path. */
     val location: String,
 )
 

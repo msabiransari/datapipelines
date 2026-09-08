@@ -794,11 +794,15 @@ egress prices, per run. Set a bucket request-rate or budget alarm before the lak
 demo is announced.
 
 Because there is no loader, the consuming side of this family is a datasource
-registration, and that is round 089
-([Datasources §14](datasources.md#14-open-questions--future-additions)). Until it
-lands, the published objects are inert: nothing in the app reads them, and the
-showcase pipeline that would use them ships in its own examples file
-(`scripts/sample-data/content/examples-lake.json`) that no deployment loads yet.
+registration — shipped in round 089 as the `lake` demo family: the `sample-lake`
+LAKE datasource is registered create-if-absent from
+`deploy/sample-data/bootstrap-datasources-lake.yml`, which also imports the
+published `manifest.json`'s `tables[]` into the dp-catalog registry
+([Datasources §8A.1](datasources.md#8a1-file-shape), §8C). The showcase pipeline
+ships in its own examples file (`scripts/sample-data/content/examples-lake.json`)
+and the seeder loads it exactly when `sample-lake` is registered (the
+`requires_datasources` gate — [environments.md §5](environments.md#5-demo)).
+It needs egress to S3 (or a configured mirror) whenever a lake query runs.
 
 ### Resetting an engine volume desyncs the demo login
 
@@ -917,3 +921,4 @@ operator.
 | 2026-08-07 | v1.2 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.15](SPEC-REVIEW-2026-08.md#215-deploymentmd): §5 env-var tables replaced by the startup-requirements list + pointer to configuration.md; the inline-vs-claim-check threshold key (superseded by the D9 result keys) and every other key configuration.md does not define were deleted [D8]; §4.2 rewritten as the result store with required `maxmemory-policy noeviction` and a sizing model [D9]; §8.3.1/§8.3.2 graceful-shutdown mechanism (readiness fail → drain to `execution-timeout-seconds` → `cancelAll(shutdown)` → exit) with k8s `preStop` + `terminationGracePeriodSeconds`, accepted loss stated [D7]; §6.2 instance-local story updated to cancel-on-disconnect + cross-instance cancel via Redis flag [D7]; Appendix A compose made bootable (OIDC provider env vars, Redis password wired to `requirepass`, noeviction, mounted provider YAML); new §3.5 JDBC driver matrix (bundled vs `-Poracle`/`-Pmysql` vs `lib/` drop-in); new §6.6 resource sizing (heap, container limit, `-XX:MaxRAMPercentage`); `-Duser.timezone=UTC` made normative in the image and bare-JVM entrypoints ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)); §6.2 diagram residue and §11 malformed bullet fixed |
 | 2026-08-29 | v1.3 | local password auth | §5.1 item 5 becomes "at least one authentication method": OIDC provider OR local accounts (auth.md §5A), with the operator's first-admin story for the no-IdP case (hash-seeded one-time credential, forced first-login change, admin resets — no SMTP, no self-registration). Appendix A compose comment and Appendix B quickstart updated: the demo now logs in with a local account (`demo-admin@demo.local` / `demo-admin`, one-time) and needs no OIDC client. |
 | 2026-09-07 | v1.8 | 087 connector seams | §3.5 driver matrix gains **`LAKE`** — bundled, and the same `duckdb_jdbc` jar as `DUCKDB`. It is a distinct dialect rather than a mode because the two need opposite §5.6 postures ([Datasources §4.1](datasources.md#41-dialect-catalog)); nothing about packaging changes, since there is no second driver to ship. |
+| 2026-09-08 | v1.17 | 089 dp-lake consuming side shipped | Appendix B's dp-lake section: the "that is round 089 / until it lands, the published objects are inert" paragraph rewritten as shipped — the `lake` demo family registers `sample-lake` from `deploy/sample-data/bootstrap-datasources-lake.yml` (which imports the published manifest's `tables[]` into the dp-catalog registry), and the seeder loads `examples-lake.json` exactly when `sample-lake` is present (the `requires_datasources` gate, environments.md §5). |

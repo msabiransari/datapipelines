@@ -31,7 +31,8 @@ import co.datapipelines.typesystem.DatapipelinesException
  * character and no whitespace anywhere in the value. A legitimate S3 key needs none of those,
  * and a value that carries one is an injection attempt, not a name to escape.
  *
- * Schemes: `s3://bucket/prefix[/glob]` (Iceberg: the table root holding `metadata/`) and
+ * Schemes: `s3://bucket/prefix[/glob]` (Iceberg: the current metadata FILE, not the table
+ * root — DuckDB 1.5.5 cannot resolve a pyiceberg root; datasources.md §8C.7) and
  * `file://` for an on-prem volume (087's `catalog.kind`-less lake). **No other schemes** — an
  * `https://` location would let author SQL read arbitrary URLs through the engine's httpfs,
  * which is exactly the reach the datasource's own `dialect.endpoint` boundary exists to bound.

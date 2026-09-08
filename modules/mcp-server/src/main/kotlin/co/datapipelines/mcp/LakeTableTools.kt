@@ -39,7 +39,10 @@ class LakeTablesRegisterTool(
                     "POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted " +
                     "'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; " +
                     "partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or " +
-                    "glob; iceberg: the table root holding metadata/) or a file:// path — no other scheme, and " +
+                    "glob; iceberg: the table's CURRENT metadata file, e.g. " +
+                    "s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a " +
+                    "pyiceberg table by its root, so register the file, and re-register it when the table " +
+                    "commits) or a file:// path — no other scheme, and " +
                     "no quotes, backslashes, whitespace or control characters (it is interpolated into the " +
                     "engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template " +
                     "segment grammar without dots. Registering an already-registered (namespace, table) is the " +
@@ -88,7 +91,7 @@ class LakeTablesRegisterTool(
                 "format": {"type": "string", "enum": ["parquet", "iceberg"]},
                 "location": {
                   "type": "string",
-                  "description": "s3://bucket/prefix/ (parquet dir/glob; iceberg root) or file:// path. Nothing else; no injection chars."
+                  "description": "s3://bucket/prefix/ (parquet dir/glob; iceberg: the current metadata file, not the table root) or file:// path. Nothing else; no injection chars."
                 },
                 "partition_column": {"type": "string", "description": "Optional. The hive-style partition column, e.g. pickup_date."}
               }
