@@ -164,9 +164,15 @@ class ConnectionPoolManager(
     private val poolFactory: (Datasource) -> ConnectionPool = ::buildHikariPool,
     /** How long a retired pool may keep connections out before [reapRetiring] closes it anyway. */
     private val retireCeiling: Duration = DEFAULT_RETIRE_CEILING,
-    private val metrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
     /** Injectable so the reaper's state machine can be tested without sleeping. */
     private val clock: () -> Instant = Instant::now,
+    /**
+     * LAST on purpose, and not a function type: Kotlin's trailing-lambda form binds to the last
+     * parameter, so with a `() -> Instant` there the long-standing
+     * `ConnectionPoolManager { ds -> … }` call shape would silently start supplying a CLOCK
+     * instead of a pool factory. A non-SAM interface here makes that a compile error instead.
+     */
+    private val metrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
 ) : AutoCloseable {
     private val pools = ConcurrentHashMap<String, ConnectionPool>()
 

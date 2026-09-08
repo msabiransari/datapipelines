@@ -113,7 +113,7 @@ class AuditCauseIntegrationTest {
         auditSink: DatasourceAuditSink,
     ) : DatasourceRegistry {
         private val pools =
-            ConnectionPoolManager { ds ->
+            ConnectionPoolManager(poolFactory = { ds ->
                 auditSink.record(
                     DatasourceAuditEvent(
                         timestamp = Instant.now(),
@@ -123,7 +123,7 @@ class AuditCauseIntegrationTest {
                     ),
                 )
                 H2Pool(ds)
-            }
+            })
 
         override fun list(dialect: Dialect?): List<Datasource> = listOf(datasource)
 

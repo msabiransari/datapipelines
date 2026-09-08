@@ -91,6 +91,24 @@ class PoolSettingsTest {
     }
 
     @Test
+    fun `every shipped dialect resolves to the SAME effective defaults today`() {
+        // The handback publishes one table "per dialect", and this is what makes that honest:
+        // no shipped adapter declares `defaultHikariProperties`, so the dialect LAYER is empty
+        // everywhere and all eight resolve identically. The day one declares a pool default,
+        // this goes red and the table stops being one table — which is the point.
+        val perDialect =
+            Dialect.entries.associateWith { dialect ->
+                PoolSettings.defaults(DialectAdapters.forDialect(dialect)).associate { it.setting.key to (it.value to it.source) }
+            }
+
+        perDialect.values.distinct().size shouldBe 1
+        perDialect.values
+            .first()
+            .values
+            .none { it.second == PoolSettingSource.DIALECT } shouldBe true
+    }
+
+    @Test
     fun `a dialect declaration outranks the application default`() {
         // The seam is empty on every shipped adapter; this proves the LAYER exists and wins,
         // so the form's "which layer supplied this" label is a fact rather than a description.

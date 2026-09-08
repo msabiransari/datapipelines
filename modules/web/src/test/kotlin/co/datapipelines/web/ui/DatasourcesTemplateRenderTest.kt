@@ -216,17 +216,22 @@ class DatasourcesTemplateRenderTest {
         // layer's NAME is the fact under test, not the entity encoding.
         html shouldContain "Default 10 — HikariCP"
         html shouldContain "Default 2 — this server"
-        // The dialect select re-fetches the section, because the default is per dialect.
+        // The dialect select re-fetches the section, because the default is per dialect. The
+        // swap target is the PAGE's own wrapper, so the id exists whatever a controller
+        // remembers to put in the model — the htmx render audit checks exactly that.
         html shouldContain "id=\"ds-pool-fields\""
         html shouldContain "hx-get=\"/partials/datasources/pool-fields\""
         html shouldContain "hx-target=\"#ds-pool-fields\""
+        html shouldContain "hx-swap=\"innerHTML\""
     }
 
     @Test
     fun `no refused key is ever rendered as a pool input`() {
         // §5.6: readOnly, connectionInitSql and the credential slots are server-managed. The
         // section mirrors `readOnly` as a DISABLED field and offers no input for the others.
-        val html = engine().process("partials/datasource-pool-fields", context().apply { fillPoolModel() })
+        // Rendered through the PAGE, because the fragment takes its id prefix as a parameter
+        // and a fragment rendered outside a caller has none.
+        val html = engine().process("datasources/list", context().apply { fillPageModel() })
 
         html shouldNotContain "name=\"pool.readOnly\""
         html shouldNotContain "name=\"pool.connectionInitSql\""
@@ -360,12 +365,6 @@ class DatasourcesTemplateRenderTest {
         html shouldContain "Datasource deleted"
     }
 
-    private fun WebContext.fillPoolModel() {
-        setVariable("poolFields", DatasourcePoolForm.fields(Dialect.POSTGRES))
-        setVariable("poolReadonly", false)
-        setVariable("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
-    }
-
     private fun WebContext.fillEditModel() {
         val row =
             datasource("pg-prod").copy(
@@ -417,7 +416,6 @@ class DatasourcesTemplateRenderTest {
         // first — the same model DatasourceUiController.list adds.
         setVariable("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
         setVariable("poolReadonly", false)
-        setVariable("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
         setVariable("datasources", listOf(datasource("pg-prod")))
         setVariable("q", "")
         setVariable("offset", 0)

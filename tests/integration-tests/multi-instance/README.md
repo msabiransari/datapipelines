@@ -27,6 +27,19 @@ app containers sharing one metadata Postgres and one Redis:
   (compose project `mi050`, image `datapipelines:local-mi050` via the
   compose file's `MI_IMAGE` override; transcript
   `gate-logs/050-pool-invalidation.log`).
+- **Retire-then-close test (094 §C)** — a `pg_sleep` node running on `app1`,
+  its statement CONFIRMED live in `pg_stat_activity`, while `app2` deletes the
+  pipeline and then the datasource. The execution must still reach
+  `status = SUCCESS` and return its rows: before 094 the delete `close()`d the
+  pool and HikariCP aborted the in-use connection, so it failed. The transcript
+  timestamps every step, because "the delete happened while the query was
+  running" is a claim about ORDER and nothing else would show it. It also asserts
+  the ceiling did NOT fire (a hard close would mean the statement lost its
+  connection after all) and that `app1` logged
+  `event=datasource.pool_invalidated_remotely`. Run separately:
+  `./tests/integration-tests/multi-instance/run-pool-retire.sh`
+  (compose project `mi094`, image `datapipelines:local-mi094`; transcript
+  `gate-logs/094-pool-retire.log`).
 
 ## Last verified
 

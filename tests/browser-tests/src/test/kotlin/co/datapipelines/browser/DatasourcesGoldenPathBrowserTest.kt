@@ -143,6 +143,20 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
         page.locator("#ds-pool-fields").innerText() shouldContain "HikariCP"
         // readOnly is mirrored, never editable: it is a §5.6-refused pool property.
         page.locator("#ds-pool-readonly").isDisabled shouldBe true
+
+        // Changing the dialect re-fetches the section, because the effective default is the
+        // DIALECT's to decide. This is also the only test that drives the fragment endpoint,
+        // whose view name is a parameterized Thymeleaf fragment — a shape a unit test would
+        // assert as a string and never actually render.
+        val refetched =
+            page.waitForResponse("**/partials/datasources/pool-fields**") {
+                page.selectOption("#ds-register-dialect", "POSTGRES")
+            }
+        refetched.status() shouldBe 200
+        page.locator("#ds-pool-fields input[name='pool.maximumPoolSize']").inputValue() shouldBe "10"
+        // The swapped-in fields keep the create dialog's id prefix, so their labels still point
+        // at real inputs — `innerHTML` into the page's own wrapper, not a root the swap replaces.
+        page.locator("#ds-maximumPoolSize").count() shouldBe 1
     }
 
     @Test
@@ -153,8 +167,15 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
 
         page.navigate("$baseUrl/datasources")
         page.click("text=Register Datasource")
+
+        // The dialect is chosen FIRST and its swap awaited: the select re-fetches the pool
+        // section on change, so a pool value typed before the swap lands is wiped by it. That
+        // is correct behaviour (the defaults are per dialect) and a real race for any caller
+        // that types then switches — the reason this fills the pool field last.
+        page.waitForResponse("**/partials/datasources/pool-fields**") {
+            page.selectOption("#register-modal select[name=dialect]", "H2")
+        }
         page.fill("#register-modal input[name=name]", name)
-        page.selectOption("#register-modal select[name=dialect]", "H2")
         page.fill("#register-modal input[name=jdbcUrl]", "jdbc:h2:mem:${name.replace("-", "_")}")
         page.fill("#register-modal input[name=username]", "sa")
         page.fill("#register-modal input[name=password]", "sa")

@@ -274,21 +274,25 @@ class DatasourcePoolInvalidationE2eTest {
     private fun awaitRunningSleepStatement() {
         val deadline = System.nanoTime() + MID_QUERY_BUDGET
         while (System.nanoTime() < deadline) {
-            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-                connection.createStatement().use { statement ->
-                    statement
-                        .executeQuery(
-                            "SELECT COUNT(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep%' AND query NOT LIKE '%pg_stat_activity%'",
-                        ).use { rs ->
-                            rs.next()
-                            if (rs.getInt(1) > 0) return
-                        }
-                }
-            }
+            if (liveSleepStatements() > 0) return
             Thread.sleep(POLL_MILLIS)
         }
         error("the pg_sleep statement never reached the database — the mid-query window never opened")
     }
+
+    /** How many `pg_sleep` statements the metadata Postgres is running right now. */
+    private fun liveSleepStatements(): Int =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement
+                    .executeQuery(
+                        "SELECT COUNT(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep%' AND query NOT LIKE '%pg_stat_activity%'",
+                    ).use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+            }
+        }
 
     /**
      * Repoints a datasource by writing the metadata database DIRECTLY — no HTTP, so no

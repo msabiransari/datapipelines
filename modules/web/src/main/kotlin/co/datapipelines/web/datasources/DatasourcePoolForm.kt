@@ -55,16 +55,6 @@ object DatasourcePoolForm {
     /** The form-field prefix. Dotted so the pool section cannot collide with a top-level field. */
     const val PREFIX = "pool."
 
-    /**
-     * The id the CREATE dialog's pool section carries — its `hx-swap="outerHTML"` target, because
-     * the dialect select re-fetches the section whenever the dialect changes.
-     *
-     * The EDIT dialog renders the same fields with NO id: its dialect is fixed, nothing swaps
-     * them, and setting the id unconditionally would put two elements with the same id in one
-     * document the moment an edit dialog opened over the list page.
-     */
-    const val SWAP_TARGET_ID = "ds-pool-fields"
-
     /** The fields the create dialog renders for [dialect] — defaults only, no datasource yet. */
     fun fields(dialect: Dialect): List<PoolFieldView> = render(PoolSettings.defaults(DialectAdapters.forDialect(dialect)))
 

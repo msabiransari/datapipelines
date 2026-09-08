@@ -49,10 +49,6 @@ class DatasourceUiController(
         model.addAttribute("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
         // Nothing is registered yet, so the mirrored readonly flag is the form's own default.
         model.addAttribute("poolReadonly", false)
-        // Only the register modal's section is a SWAP TARGET (the dialect select re-fetches it),
-        // so only it carries the id — the edit dialog renders the same fields without one, and
-        // the two can therefore be open in the same document without colliding.
-        model.addAttribute("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
         model.addAttribute("scopes", scopes())
         model.addAttribute("isAdmin", isAdmin())
         model.addAttribute("memberDatasourcesEnabled", workspacesProperties.memberDatasourcesEnabled)

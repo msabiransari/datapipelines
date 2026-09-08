@@ -77,7 +77,7 @@
           <select name="dialect" id="ds-register-dialect" class="ds-input" required
                   th:attr="hx-get=@{/partials/datasources/pool-fields}"
                   hx-target="#ds-pool-fields"
-                  hx-swap="outerHTML"
+                  hx-swap="innerHTML"
                   hx-trigger="change">
             <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}">POSTGRES</option>
           </select>
@@ -126,8 +126,12 @@
         </div>
         <details class="u-mb-md">
           <summary class="u-secondary u-text-sm">Connection pool — defaults</summary>
-          <div class="u-mt-md">
-            <div th:replace="~{partials/datasource-pool-fields :: fields}"></div>
+          <!-- The swap target lives HERE, in the page, not in the fragment: the dialect
+               select replaces this wrapper's CONTENTS, so the id survives every swap
+               whatever the fragment renders. An id inside the fragment would also be a
+               duplicate the moment the edit dialog opened over this page. -->
+          <div class="u-mt-md" id="ds-pool-fields">
+            <div th:replace="~{partials/datasource-pool-fields :: fields('ds-')}"></div>
           </div>
         </details>
         <div id="register-result" class="u-mb-md"></div>

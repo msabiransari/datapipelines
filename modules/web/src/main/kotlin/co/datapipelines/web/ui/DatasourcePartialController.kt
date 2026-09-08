@@ -218,8 +218,10 @@ class DatasourcePartialController(
         // The create dialog has no datasource yet, so the readonly mirror reads from the form's
         // own checkbox rather than from a row — rendered by the caller, not here.
         model.addAttribute("poolReadonly", false)
-        // This IS the swap target, so it keeps the id across every re-fetch.
-        model.addAttribute("poolFieldsId", DatasourcePoolForm.SWAP_TARGET_ID)
+        // The template by NAME: the fragment's `idPrefix` parameter is unbound on a
+        // whole-template render and defaults to the create dialog's `ds-`, which is the only
+        // prefix this endpoint ever needs — the edit dialog does not re-fetch (its dialect is
+        // fixed). The swap target itself is the page's own wrapper, not this root.
         return "partials/datasource-pool-fields"
     }
 
