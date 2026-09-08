@@ -18,6 +18,7 @@ import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
+import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineRepository
@@ -67,6 +68,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     IdempotencyProperties::class,
     PipelineProperties::class,
     ExecutionsProperties::class,
+    DatasourcesProperties::class,
 )
 class DomainConfiguration {
     @Bean
@@ -204,6 +206,9 @@ class DomainConfiguration {
         encryptor: CredentialEncryptor,
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
+        poolMetrics: PoolLifecycleMetrics,
+        datasourcesProperties: DatasourcesProperties,
+        executorProperties: ExecutorProperties,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -213,6 +218,10 @@ class DomainConfiguration {
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
+            poolMetrics = poolMetrics,
+            // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
+            // why the two properties meet here rather than inside either binding class.
+            retireCeiling = datasourcesProperties.ceiling(executorProperties.nodeQueryTimeoutSeconds),
         )
 
     /**

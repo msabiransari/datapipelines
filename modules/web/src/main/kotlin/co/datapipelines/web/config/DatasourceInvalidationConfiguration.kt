@@ -11,9 +11,11 @@ import org.springframework.dao.DataAccessException
 import org.springframework.data.redis.connection.Message
 import org.springframework.data.redis.connection.MessageListener
 import org.springframework.data.redis.connection.RedisConnectionFactory
+import org.springframework.data.redis.connection.SubscriptionListener
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.listener.ChannelTopic
 import org.springframework.data.redis.listener.RedisMessageListenerContainer
+import org.springframework.scheduling.annotation.Scheduled
 import java.util.UUID
 
 /**
@@ -34,9 +36,18 @@ import java.util.UUID
  * - **Subscribe** — every instance runs a [RedisMessageListenerContainer] (Spring's container,
  *   not a hand-rolled loop: it re-subscribes after a Redis reconnect, which a hand-rolled read
  *   loop gets silently wrong). On message: parse, ignore the publishing instance's own origin
- *   (the writer already evicted synchronously — acting on its own message would double-evict a
- *   pool an in-flight lease may just have rebuilt), and evict the named pool. Next use rebuilds
+ *   (the writer already retired synchronously — acting on its own message would retire twice a
+ *   pool an in-flight lease may just have rebuilt), and retire the named pool. Next use rebuilds
  *   from the row.
+ * - **Reconcile on (re)subscribe (094)** — a message published while this instance was
+ *   disconnected is simply gone; pub/sub has no replay and this round's ruling is explicitly NO
+ *   retry queue. So the listener also implements [SubscriptionListener], whose
+ *   `onChannelSubscribed` the container fires on the initial subscribe AND after every
+ *   reconnect (verified against the pinned spring-data-redis 3.5.13: the container's
+ *   `dispatchSubscriptionNotification` does an `instanceof SubscriptionListener` on each
+ *   registered listener). Each such callback runs [DatasourceRegistry.reconcilePools], one
+ *   two-column query that retires every pool whose row has moved or gone. A missed ping is
+ *   caught at reconnect, by comparison rather than by replay.
  *
  * ## Startup ordering
  *
@@ -128,18 +139,21 @@ class RedisPoolInvalidationPublisher(
 }
 
 /**
- * The receiving half: evict the named pool unless this instance published the message (its
- * save path already evicted synchronously — reacting again would double-evict a pool that an
+ * The receiving half: retire the named pool unless this instance published the message (its
+ * save path already retired synchronously — reacting again would retire a pool that an
  * in-flight lease may just have rebuilt from the new row).
  *
- * Registered as a plain [MessageListener]; returns are ignored, and every failure path is
- * caught and logged because an exception out of here would kill the subscription thread.
+ * ALSO a [SubscriptionListener], which is what makes the channel safe to miss: every
+ * (re)subscription reconciles this instance's live pools against the rows (094; see the
+ * configuration's KDoc). Returns are ignored, and every failure path is caught and logged
+ * because an exception out of here would kill the subscription thread.
  */
 class DatasourceInvalidationListener(
     private val registry: DatasourceRegistry,
     private val mapper: ObjectMapper,
     private val instanceId: String,
-) : MessageListener {
+) : MessageListener,
+    SubscriptionListener {
     override fun onMessage(
         message: Message,
         pattern: ByteArray?,
@@ -155,12 +169,45 @@ class DatasourceInvalidationListener(
                 return
             }
         if (parsed.origin == instanceId) return
-        if (registry.evictPool(parsed.name)) {
+        if (registry.retirePool(parsed.name)) {
             LOG.info(
                 "event=datasource.pool_invalidated_remotely datasource={} origin={} " +
-                    "message=\"pool evicted after a save on another instance; next use rebuilds from the row\"",
+                    "message=\"pool retired after a save on another instance; next use rebuilds from the row\"",
                 parsed.name,
                 parsed.origin,
+            )
+        }
+    }
+
+    /**
+     * The subscription is live — on boot, and again after every Redis reconnect. Reconcile.
+     *
+     * Deliberately unconditional: at boot this instance holds no pools and the reconcile is one
+     * cheap query returning nothing to do, and after a reconnect it is the ONLY thing that can
+     * notice a save whose message went out while this instance was not listening.
+     *
+     * Wrapped like every other path in this class — an exception escaping a container callback
+     * is not worth a dead subscription, and a failed reconcile is retried at the next
+     * (re)subscription anyway.
+     */
+    @Suppress("TooGenericExceptionCaught") // a callback the container must never see throw
+    override fun onChannelSubscribed(
+        channel: ByteArray,
+        count: Long,
+    ) {
+        try {
+            val retired = registry.reconcilePools()
+            LOG.info(
+                "event=datasource.pool_reconcile_on_subscribe channel={} retired={} " +
+                    "message=\"live pools compared against the rows after (re)subscribing\"",
+                String(channel, Charsets.UTF_8),
+                retired,
+            )
+        } catch (e: RuntimeException) {
+            LOG.warn(
+                "event=datasource.pool_reconcile_failed message=\"{}\" " +
+                    "reason=\"retried at the next (re)subscription\"",
+                e.message,
             )
         }
     }

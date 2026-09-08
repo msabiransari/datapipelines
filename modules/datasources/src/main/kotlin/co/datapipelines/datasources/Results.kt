@@ -137,7 +137,7 @@ enum class CredentialResync {
      * This registry cannot answer — it holds no ciphertext and runs no probe.
      *
      * The default return of [DatasourceRegistry.resyncBootstrapCredential], for the same
-     * reason [DatasourceRegistry.evictPool] defaults to a no-op rather than being abstract
+     * reason [DatasourceRegistry.retirePool] defaults to a no-op rather than being abstract
      * (and unlike the live reads, which are abstract by design, 020 F6): a silent default
      * here cannot re-open a hole, because bootstrap registration only ever runs against the
      * production registry — the in-memory fakes exist to answer read questions in modules

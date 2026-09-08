@@ -91,12 +91,25 @@ Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context f
 | Module | Key log events |
 |---|---|
 | `auth` | login success/failure, key issuance/revocation (via audit log, not general log) |
-| `datasources` | datasource registered/updated/deleted, pool initialized/drained, connection acquisition failures |
+| `datasources` | datasource registered/updated/deleted, pool built/retired/reconciled, connection acquisition failures, and the §3.4A pool hard-close WARN |
 | `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings |
 | `dag` | execution started/completed/failed, node started/completed/failed, cancellation |
 | `templates` | template registered (id + version), render failures |
 | `mcp-server` | tool calls (tool name + caller), transport errors |
 | `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed |
+
+#### 3.4A The pool-retirement events (094)
+
+A datasource that is edited or deleted has its pool RETIRED, not closed on the spot: it leaves the live map immediately, stops handing out connections, and closes once the statements already running on it finish ([Datasources §5.2](datasources.md#52-pool-lifecycle)). Four events name that lifecycle, and the third is the only one that is not routine.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `datasource.pool_invalidated_remotely` | A peer instance saved or deleted the datasource and this instance retired its pool on the message | `datasource`, `origin` |
+| INFO | `datasource.pool_reconciled` | The (re)subscription comparison found a pool built from a row that has since changed or gone, and retired it | `datasource`, `reason` |
+| **WARN** | **`datasource.pool_hard_closed`** | **The retirement ceiling fired while connections were still out — the pool was closed anyway and those statements lost their connection** | `datasource`, `active_connections`, `ceiling_seconds` |
+| INFO | `datasource.pool_reconcile_on_subscribe` | The invalidation channel was (re)subscribed and the reconcile ran | `channel`, `retired` |
+
+**The WARN is the one to alert on.** Every other line is the mechanism working. `pool_hard_closed` means a statement outlived `datapipelines.datasources.retire-ceiling-seconds` ([Configuration §3.24](configuration.md#324-datasource-pools)) — either a genuinely hung query, or a ceiling set below what this deployment's statements really take. It carries the number of connections it took down, which the matching `datapipelines.datasource.pool.hard_closed` counter deliberately does not (an unbounded tag value, §4.3).
 
 ### 3.5 Log destination
 
@@ -128,6 +141,8 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.datasource.pool.active` | gauge | `datasource_name` | Active connections in pool |
 | `datapipelines.datasource.pool.pending` | gauge | `datasource_name` | Threads waiting for a connection |
 | `datapipelines.datasource.pool.timeout_total` | counter | `datasource_name` | Pool-acquisition timeouts |
+| `datapipelines.datasource.pool.retired` | counter | `datasource_name` | Pools taken out of the live map by an edit, a delete, a peer's invalidation message or a reconcile ([Datasources §5.2](datasources.md#52-pool-lifecycle)). One increment per retirement, not per connection |
+| `datapipelines.datasource.pool.hard_closed` | counter | `datasource_name` | Retired pools closed at the `retire-ceiling-seconds` ceiling with connections **still out** — a statement outlived the ceiling and lost its connection. A subset of `retired`; a non-zero rate means either a genuinely hung query or a ceiling set below what this deployment's statements really take. Each one also logs the §3.4A `datasource.pool_hard_closed` WARN |
 | `datapipelines.templates.render.duration` | timer | `template_id`, `template_version` | Template render time |
 | `datapipelines.templates.cache.hits` | counter | (none) | Template cache hits |
 | `datapipelines.templates.cache.misses` | counter | (none) | Template cache misses |

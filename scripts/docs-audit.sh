@@ -9,7 +9,10 @@
 #      docs/observability.md are also allowed).
 #   C. Error-code catalog: every error code used anywhere exists in
 #      docs/pipeline-contract.md (§12/§13, the single catalog). Audit-event
-#      names from enums.md §15 are exempt (events, not error codes).
+#      names from enums.md §15 are exempt (events, not error codes), and so are
+#      STRUCTURED LOG event names defined in observability.md §3.4A — a log line's
+#      `event=` is neither an error code nor an audit row, and observability.md is
+#      its authority the same way it is for metric names in check B.
 #   D. Forbidden legacy spellings (renamed/removed in the 2026-08 campaign, and the
 #      pre-075/pre-081 deployment names) outside Change Log sections. Check D alone
 #      also scans the non-`docs/` files a deployer actually copies from — README.md,
@@ -190,6 +193,15 @@ events = set(re.findall(r"(?:auth|datasource|mcp|endpoint)\.[a-z_]+(?:\.[a-z_]+)
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
+# STRUCTURED LOG events (094). enums.md §15 catalogues AUDIT events — rows written to the
+# audit log — and a structured log line's `event=` name is a different thing that would be a
+# lie in that table. observability.md is their authority, the way it already is for metric
+# names in check B, and §3.4A is the section that names them. Extracted from that section
+# only, so a typo anywhere else still fails: the name has to be DEFINED before it is cited.
+obs_txt = texts.get("docs/observability.md", "")
+sec34a = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
+if sec34a:
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline)\.[a-z0-9_]+)`", sec34a.group(0)))
 # lines stating a removal/rename may cite old spellings
 NEGATION = re.compile(r"removed|renamed|deleted|replaced|superseded|folded|"
                       r"does not exist|no longer|instead of|there is no|no `|"

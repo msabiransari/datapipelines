@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
 import java.util.UUID
 
@@ -150,7 +151,7 @@ interface DatasourceRegistry {
      * invented. It never throws for a connection failure (§8.1: failure is data) and never
      * fails startup: the app must boot so an operator can fix the row.
      *
-     * **Defaulted, not abstract** — the [evictPool] precedent, not the [getLive] one: a
+     * **Defaulted, not abstract** — the [retirePool] precedent, not the [getLive] one: a
      * registry that holds no ciphertext answers [CredentialResync.NOT_APPLICABLE], which
      * cannot re-open a hole because bootstrap registration runs against the production
      * registry alone. Read-only test fakes in other modules keep compiling untouched.
@@ -171,8 +172,14 @@ interface DatasourceRegistry {
     fun poolFor(datasource: Datasource): ConnectionPool
 
     /**
-     * Drains the cached pool for [name] (§5.7's cross-instance invalidation, 050/R1) — the next
-     * [poolFor] rebuilds it from the row. Returns true when a pool existed and was closed.
+     * RETIRES the cached pool for [name] (§5.2/§5.7's cross-instance invalidation, 050/R1, 094)
+     * — the next [poolFor] rebuilds it from the row, while the retired pool stops handing out
+     * connections and closes once the statements already running on it finish. Returns true
+     * when a live pool existed.
+     *
+     * It was `evictPool` and it closed the pool on the spot; that is what cut a mid-query
+     * execution's connection out from under it when someone edited or deleted the datasource
+     * (094 ruling 2). The close now belongs to [reapRetiredPools].
      *
      * [DefaultDatasourceRegistry] calls this synchronously on every save/delete (the writer's own
      * instance); OTHER instances reach it through the Redis invalidation channel their subscriber
@@ -181,10 +188,29 @@ interface DatasourceRegistry {
      *
      * **Default is a deliberate no-op, unlike [getLive]'s abstract-by-design:** the 020 F6 rule
      * makes a live read abstract because a silent default would RE-OPEN a closed hole; here a
-     * fake that has no pool map has nothing to drain, and the production implementation is the
+     * fake that has no pool map has nothing to retire, and the production implementation is the
      * only pool-holder. Read-only test fakes (mcp-server's, dag's) keep compiling untouched.
      */
-    fun evictPool(name: String): Boolean = false
+    fun retirePool(name: String): Boolean = false
+
+    /**
+     * Closes every retired pool that has drained, plus every one past its ceiling (§5.2).
+     *
+     * Driven once per instance by the assembling layer's scheduled tick — the same shape as the
+     * stale-execution sweep, and for the same reason: the work is idempotent, bounded, and has
+     * no owner other than "this JVM". Defaulted for the same reason [retirePool] is.
+     */
+    fun reapRetiredPools(): ReapOutcome = ReapOutcome.NOTHING
+
+    /**
+     * Compares the row version each live pool was built from against the metadata DB and
+     * retires the stale ones (§5.7, 094). Run on boot and on every (re)subscription to the
+     * invalidation channel: a peer that was disconnected when a save published its name never
+     * received the message, and this is what catches it — a comparison, not a retry queue.
+     *
+     * @return how many pools were retired.
+     */
+    fun reconcilePools(): Int = 0
 
     /**
      * Live connectivity probe (§8.1), or **null when no live datasource has this name** — the

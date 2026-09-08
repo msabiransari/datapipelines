@@ -333,6 +333,16 @@ The two variables an organisation sets (round 075). [Environments](environments.
 
 The contract is environment variables, in **two files**: `deploy/env/defaults.env` (tracked — every non-secret variable this build binds, with the value it ships) and `deploy/secrets.env` (git-ignored — every credential, plus every override that belongs to this deployment). `deploy/secrets.env.example` is the template for the second and names every variable you may set. `scripts/compose-env-audit.sh` — which runs on every `./gradlew build` — fails when those files, `deploy/compose.yml` and `application.yml` disagree about which variables exist or what they default to, and when a variable is declared in both tracked files or in neither. Settings are tracked in the repo; secrets never are.
 
+### 3.24 Datasource pools
+
+How long a **retired** connection pool may keep connections out before it is closed regardless ([Datasources §5.2](datasources.md#52-pool-lifecycle), round 094). A datasource that is edited or deleted has its pool taken out of the live map at once and soft-evicted; the pool itself is closed when the statements already running on it finish — or at this ceiling, whichever comes first, so a genuinely hung statement cannot pin a deleted datasource's pool forever. Each hard close logs one WARN naming the datasource and the connections it took down, and increments `datapipelines.datasource.pool.hard_closed` ([Observability §4.1](observability.md#41-metric-naming)).
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.datasources.retire-ceiling-seconds` | `derived` | Seconds a retired pool may hold connections before it is hard-closed. **`derived` means `datapipelines.executor.node-query-timeout-seconds` + 30** (so `90` with the shipped defaults) — the longest a well-behaved node statement can run, plus slack for it to return its connection. Set it explicitly only when this deployment's datasources carry their own longer `query_timeout_seconds` |
+
+**Why the default is derived rather than a number.** The ceiling and the node query timeout are the same fact seen twice: a deployment that raises `node-query-timeout-seconds` to 600 and leaves a literal `90` here would start hard-closing pools out from under statements that are still legitimately running, and nothing would tell it. Deriving makes the two move together; an explicit value opts out.
+
 ---
 
 ## 4. Precedence

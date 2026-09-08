@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.crypto.CredentialEncryptor
+import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
@@ -555,14 +556,66 @@ class DatasourceRegistryIntegrationTest {
     }
 
     @Test
-    fun `evictPool is the subscriber's target - drains a live pool, no-ops without one`() {
+    fun `retirePool is the subscriber's target - retires a live pool, no-ops without one`() {
         val registry = registry()
         registry.save(Fixtures.h2(name = "pooled", jdbcUrl = "jdbc:h2:mem:evict_target", secret = "pw"), owner)
         val ds = registry.get("pooled").shouldNotBeNull()
-        // Build the pool, then drain it through the interface the Redis subscriber calls.
+        // Build the pool, then retire it through the interface the Redis subscriber calls.
         registry.poolFor(ds)
-        registry.evictPool("pooled") shouldBe true
-        registry.evictPool("pooled") shouldBe false
+        registry.retirePool("pooled") shouldBe true
+        registry.retirePool("pooled") shouldBe false
+    }
+
+    @Test
+    fun `reconcilePools retires a pool whose row was changed by another instance`() {
+        // §5.7's missed-message backstop (094). This registry stands in for the peer that was
+        // disconnected when the save published: it never hears the ping, so the ONLY thing that
+        // can notice is the comparison against the row it built its pool from.
+        val peer = registry()
+        val writer = registry()
+        writer.save(Fixtures.h2(name = "recon", jdbcUrl = "jdbc:h2:mem:recon_a", secret = "pw"), owner)
+        peer.poolFor(peer.get("recon").shouldNotBeNull())
+
+        // Nothing changed yet: reconcile is a no-op and the pool survives.
+        peer.reconcilePools() shouldBe 0
+        peer.poolFor(peer.get("recon").shouldNotBeNull())
+
+        // The other instance edits the row. `updated_at` moves; no message reaches the peer.
+        writer.save(Fixtures.h2(name = "recon", jdbcUrl = "jdbc:h2:mem:recon_b", secret = "pw"), owner)
+
+        peer.reconcilePools() shouldBe 1
+        // Idempotent: the stale pool is gone, so a second pass finds nothing to do.
+        peer.reconcilePools() shouldBe 0
+    }
+
+    @Test
+    fun `reconcilePools retires a pool whose row was deleted by another instance`() {
+        val peer = registry()
+        val writer = registry()
+        writer.save(Fixtures.h2(name = "gone", jdbcUrl = "jdbc:h2:mem:recon_gone", secret = "pw"), owner)
+        peer.poolFor(peer.get("gone").shouldNotBeNull())
+
+        writer.delete("gone").deleted shouldBe true
+
+        peer.reconcilePools() shouldBe 1
+    }
+
+    @Test
+    fun `a retired pool is closed by the reaper once it has drained`() {
+        // The lifecycle end to end against a REAL Hikari pool: retire leaves the connection the
+        // caller already holds alive, and the reaper closes the pool after it comes back.
+        val registry = registry()
+        registry.save(Fixtures.h2(name = "reaped", jdbcUrl = "jdbc:h2:mem:reaped_ds", secret = "pw"), owner)
+        val pool = registry.poolFor(registry.get("reaped").shouldNotBeNull())
+        val leased = pool.leaseConnection()
+
+        registry.retirePool("reaped") shouldBe true
+        // Mid-query: the reaper must not touch it, and the connection must still work.
+        registry.reapRetiredPools().closed shouldBe 0
+        leased.createStatement().use { it.execute("SELECT 1") }
+
+        leased.close()
+        registry.reapRetiredPools() shouldBe ReapOutcome(drained = 1, hardClosed = 0)
     }
 
     @Test

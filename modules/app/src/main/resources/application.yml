@@ -356,3 +356,14 @@ datapipelines:
   env: ${DATAPIPELINES_ENV:local}
   posture: ${DATAPIPELINES_POSTURE:}
   demo: ${DATAPIPELINES_DEMO:}
+
+  # 094 — the connection-pool retirement ceiling (configuration.md §3.24, datasources §5.2).
+  # Appended after the whole datapipelines: tree on purpose: a block inserted between two
+  # existing ones reparents its followers silently (MISTAKES.md, the YAML entry).
+  #
+  # EMPTY IS THE SHIPPED DEFAULT and means DERIVED — node-query-timeout-seconds + 30. The two
+  # numbers are one fact: raising the query timeout without raising this would start hard-closing
+  # pools out from under statements that are still legitimately running. Set it only when a
+  # deployment's datasources carry their own longer query_timeout_seconds.
+  datasources:
+    retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS:}
