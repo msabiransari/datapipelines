@@ -2,6 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -53,6 +55,7 @@ class UiController(
     // 033: `/` is the public marketing site (SiteController); the signed-in
     // dashboard lives here. No auto-redirect from `/` — owner decision, 033 §E.
     @GetMapping("/dashboard")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun dashboard(
         model: Model,
         request: HttpServletRequest,

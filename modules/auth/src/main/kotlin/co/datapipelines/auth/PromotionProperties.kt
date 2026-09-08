@@ -110,5 +110,5 @@ object PromotionServerKeys {
  */
 class PromotionRouteMatcher : org.springframework.security.web.util.matcher.RequestMatcher {
     override fun matches(request: jakarta.servlet.http.HttpServletRequest): Boolean =
-        request.requestURI.startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
+        request.appPath().startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
 }

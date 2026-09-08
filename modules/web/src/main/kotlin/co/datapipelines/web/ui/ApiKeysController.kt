@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -23,6 +25,7 @@ class ApiKeysController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/settings/api-keys")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun apiKeys(
         model: Model,
         request: HttpServletRequest,

@@ -46,6 +46,7 @@ class WorkspacesUiController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/workspaces")
+    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
     fun screen(
         model: Model,
         request: HttpServletRequest,

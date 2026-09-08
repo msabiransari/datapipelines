@@ -153,6 +153,16 @@
       "file": "fe93aa65c1fbfc2d00b3c1d59ce3da94fd2245716e694128688d6c50adc0768e"
     }
   },
+  "htmx": {
+    "package": "htmx.org",
+    "version": "2.0.10",
+    "file": "vendor/htmx/htmx.min.js",
+    "sha256": "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de",
+    "source": "org.webjars.npm:htmx.org:2.0.10 -> META-INF/resources/webjars/htmx.org/2.0.10/dist/htmx.min.js",
+    "license": "0BSD",
+    "license_file": "vendor/htmx/LICENSE",
+    "note": "096 \u00a7B \u2014 htmx was the ONLY webjar, served from /webjars/** : a ** glob over a namespace the dependency graph fills rather than this repository. Vendored like Alpine, Cytoscape and dagre so the allowlist loses that entry (MISTAKES.md, 'Frontend Dependencies via CDN' \u2014 a dependency-supplied servlet namespace is the same class of trust as a CDN). The bytes are the webjar's own dist/htmx.min.js, sha256-identical to the artifact this round removed; VendoredHtmxAuditTest pins the hash and refuses any /webjars/ reference in the layouts."
+  },
   "dagre": {
     "version": "0.8.5",
     "file": "vendor/dagre/dagre.min.js",

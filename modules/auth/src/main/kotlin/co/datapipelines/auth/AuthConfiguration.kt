@@ -1,6 +1,8 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -187,12 +189,24 @@ class AuthConfiguration {
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         clientAddressResolver: ClientAddressResolver,
         promotionProperties: PromotionProperties,
+        meterRegistry: ObjectProvider<MeterRegistry>,
     ): AuthFilters =
         AuthFilters(
             apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver),
             jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver),
             oidcSignedInBounce = OidcSignedInBounceFilter(jwtService, userService),
-            loginRateLimit = LoginRateLimitFilter(clientAddressResolver, authProperties, authErrorWriter),
+            loginRateLimit =
+                LoginRateLimitFilter(
+                    clientAddressResolver,
+                    authProperties,
+                    authErrorWriter,
+                    // ObjectProvider, not a required bean: this module is used by test contexts
+                    // that carry no actuator autoconfiguration and therefore no MeterRegistry.
+                    // The fallback is a real in-memory registry, never a no-op double — the
+                    // filter always has somewhere to count, and the deployment (which does have
+                    // actuator) always exports it.
+                    meterRegistry.getIfAvailable { SimpleMeterRegistry() },
+                ),
             promotionServerKey =
                 PromotionServerKeyFilter(
                     promotionProperties,

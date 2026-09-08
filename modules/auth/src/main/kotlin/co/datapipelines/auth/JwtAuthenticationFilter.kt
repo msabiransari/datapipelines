@@ -15,6 +15,20 @@ import java.util.UUID
  * Cookie → JWT → principal (auth.md §6.3). Runs after [ApiKeyFilter]; if a key
  * already authenticated the request (API key wins, §8.4) it does nothing.
  *
+ * ## A PRESENTED key ends the request, valid or not (auth.md §8.4, 096 §E)
+ * [ApiKeyFilter] stashes its rejection on the request and continues, so a request arriving
+ * with a revoked or expired `DP-API-Key` **and** a live `dp_session` used to land here with
+ * an empty `SecurityContext` — and this filter authenticated the cookie. The caller was then
+ * served at SESSION privilege (which is at least `author`, §6.1) by a credential the server
+ * had just refused, and the revocation produced no visible signal at all: the key's owner
+ * saw a working session, and nothing said the key was dead.
+ *
+ * So a stashed [AuthAttributes.AUTH_ERROR] is treated as the end of the credential
+ * negotiation. "API key wins over the cookie" (§8.4) now means the key wins WHATEVER it
+ * decides, not only when it succeeds; [AuthEntryPoint] answers with the key's own
+ * `auth.api_key.invalid` / `auth.api_key.expired`, which is also the only answer that tells
+ * an operator which credential was the problem.
+ *
  * ## `/mcp` accepts no cookies (auth.md §8.5, AUTH-SEC-1)
  * [shouldNotFilter] returns true for `/mcp`, so a `dp_session` cookie presented there
  * authenticates **nobody** — the MCP surface is API-key-only, which is also what makes
@@ -36,7 +50,7 @@ class JwtAuthenticationFilter(
     private val log = LoggerFactory.getLogger(JwtAuthenticationFilter::class.java)
 
     /** `/mcp` is API-key-only — session cookies are never accepted there (§8.5). */
-    override fun shouldNotFilter(request: HttpServletRequest): Boolean = request.requestURI == ApiKeyCredential.MCP_PATH
+    override fun shouldNotFilter(request: HttpServletRequest): Boolean = request.appPath() == ApiKeyCredential.MCP_PATH
 
     override fun doFilterInternal(
         request: HttpServletRequest,
@@ -45,11 +59,17 @@ class JwtAuthenticationFilter(
     ) {
         val jwt = request.cookies?.firstOrNull { it.name == OidcSuccessHandler.SESSION_COOKIE }?.value
         val alreadyAuthenticated = SecurityContextHolder.getContext().authentication != null
-        if (!jwt.isNullOrBlank() && !alreadyAuthenticated) {
+        if (!jwt.isNullOrBlank() && !alreadyAuthenticated && !keyWasRejected(request)) {
             authenticate(jwt, request, response)
         }
         filterChain.doFilter(request, response)
     }
+
+    /**
+     * True when [ApiKeyFilter] refused a credential this request presented. Only that filter
+     * writes the attribute before this one runs — this filter's own [reject] writes it after.
+     */
+    private fun keyWasRejected(request: HttpServletRequest): Boolean = request.getAttribute(AuthAttributes.AUTH_ERROR) != null
 
     private fun authenticate(
         jwt: String,

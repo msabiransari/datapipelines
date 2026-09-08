@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
@@ -19,6 +20,13 @@ import org.springframework.mock.web.MockHttpServletResponse
  */
 class LoginRateLimitFilterTest {
     private val mapper = ObjectMapper()
+
+    /**
+     * A REAL in-memory registry, never a mock: the F8 claim is that a call HAPPENS, and a
+     * strict double makes a missing call the passing state (MISTAKES.md, "A STRICT MOCK
+     * Makes a MISSING Call Unobservable"). The counter is read back below.
+     */
+    private val registry = SimpleMeterRegistry()
     private var nowMillis = 0L
     private val limit = 3
     private val filter =
@@ -26,6 +34,7 @@ class LoginRateLimitFilterTest {
             ClientAddressResolver(emptyList()),
             AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = limit)),
             AuthErrorWriter(mapper),
+            registry,
         ) { nowMillis }
 
     private fun call(
@@ -88,6 +97,7 @@ class LoginRateLimitFilterTest {
                 ClientAddressResolver(listOf("10.0.0.0/8")),
                 AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = limit)),
                 AuthErrorWriter(mapper),
+                SimpleMeterRegistry(),
             ) { nowMillis }
         val path = "/oauth2/authorization/keycloak"
 
@@ -161,6 +171,7 @@ class LoginRateLimitFilterTest {
                 ClientAddressResolver(emptyList()),
                 AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = 0)),
                 AuthErrorWriter(mapper),
+                SimpleMeterRegistry(),
             ) { nowMillis }
         val request = MockHttpServletRequest("GET", "/oauth2/authorization/keycloak")
         request.remoteAddr = "10.0.0.9"
@@ -206,7 +217,56 @@ class LoginRateLimitFilterTest {
     }
 
     private companion object {
+        const val SATURATED = "datapipelines.auth.login_rate_limit.saturated"
+
         /** Mirrors `LoginRateLimitFilter.MAX_TRACKED_CLIENTS`. */
         const val MAX_TRACKED_CLIENTS = 10_000
+    }
+
+    /**
+     * 096 §F (review finding F8): at the ceiling the limiter admits UNMETERED — the correct
+     * failure mode for a damper, and unchanged. What changed is that it now says so on a
+     * dimension an operator can alert on, instead of only in a WARN line that fires
+     * thousands of times a minute during the very flood it reports.
+     *
+     * The ceiling is a constructor seam so the branch is REACHED here rather than reasoned
+     * about; the registry is real, so the assertion is the counter's value.
+     */
+    @Test
+    fun `saturating the tracked-client table increments the saturation counter and still admits`() {
+        val saturating =
+            LoginRateLimitFilter(
+                ClientAddressResolver(emptyList()),
+                AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = limit)),
+                AuthErrorWriter(mapper),
+                registry,
+                maxTrackedClients = 2,
+            ) { nowMillis }
+
+        fun from(ip: String): MockHttpServletResponse {
+            val request = MockHttpServletRequest("GET", "/login")
+            request.remoteAddr = ip
+            val response = MockHttpServletResponse()
+            saturating.doFilter(request, response, MockFilterChain())
+            return response
+        }
+
+        // The counter exists and reads zero on a healthy deployment — an absent series and a
+        // quiet one look identical to a scrape, and only one of them means "it is working".
+        registry.counter(SATURATED).count() shouldBe 0.0
+
+        from("10.0.0.1")
+        from("10.0.0.2")
+        registry.counter(SATURATED).count() shouldBe 0.0
+
+        // The table is full and no window has rolled over: the third client is admitted
+        // unmetered, and that admission is counted.
+        from("10.0.0.3").status shouldBe 200
+        registry.counter(SATURATED).count() shouldBe 1.0
+
+        // Still fails OPEN, over and over — the owner's posture (this round only makes it
+        // visible), so a passing test here must show the admission, not a 429.
+        repeat(5) { from("10.0.0.4").status shouldBe 200 }
+        registry.counter(SATURATED).count() shouldBe 6.0
     }
 }

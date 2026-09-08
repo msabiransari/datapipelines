@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -27,6 +29,7 @@ class ExecutionDetailController(
     private val resultUrlFactory: ResultUrlFactory,
 ) {
     @GetMapping("/executions/{id}")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun detail(
         @PathVariable id: UUID,
         model: Model,

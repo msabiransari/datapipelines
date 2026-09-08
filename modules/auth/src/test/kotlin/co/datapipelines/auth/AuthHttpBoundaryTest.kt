@@ -3,6 +3,7 @@ package co.datapipelines.auth
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -70,6 +71,7 @@ class AuthHttpBoundaryTest {
     private lateinit var user: User
     private lateinit var readKey: String
     private lateinit var expiredKey: String
+    private lateinit var revokedKey: String
     private lateinit var session: String
     private lateinit var mustChangeSession: String
 
@@ -116,14 +118,45 @@ class AuthHttpBoundaryTest {
             fun unannotated() = principalPayload()
 
             /**
-             * A route no allowlist or matrix row has ever heard of — the §5A.4 pin:
-             * the forced password change gate must catch it WITHOUT being told about
-             * it, because that is the whole point of running ahead of every handler.
+             * A route no allowlist has ever heard of — the §5A.4 pin: the forced password
+             * change gate must catch it WITHOUT being told about it, because that is the
+             * whole point of running ahead of every handler.
+             *
+             * It carries the read floor since 096 §C: `ScopeInterceptor` now default-denies
+             * ANY handler the §8.3 allowlist does not make public, so an unannotated one is
+             * a wiring bug everywhere rather than only under `/api` and `/partials`, and
+             * this probe would be one. The pin it exists for is untouched — the gate is
+             * still told nothing about this path.
              */
             @GetMapping("/brand-new-route")
             @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
             @Suppress("FunctionOnlyReturningConstant") // the body is irrelevant — the GATE before it is the assertion
             fun brandNew() = "ok"
+
+            /**
+             * The two authoring screens 096 §C put on the mutation floor, mapped here at
+             * their real paths so the 401/403 boundary is asserted at the WIRE. They render
+             * draft bodies and unreleased versions; a `read` key has no business in either.
+             */
+            @GetMapping("/pipelines/{id}/editor")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+            fun pipelineEditor() = principalPayload()
+
+            @GetMapping("/templates/editor")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+            fun templateEditor() = principalPayload()
+
+            /**
+             * A read-floor page beside them: 096 §C must NOT change what a read key can
+             * render, and the only way to say that is to assert the unchanged case too.
+             */
+            @GetMapping("/pipelines")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            fun pipelineList() = principalPayload()
 
             @PostMapping("/mcp")
             @ResponseBody
@@ -163,6 +196,10 @@ class AuthHttpBoundaryTest {
                     DEFAULT_WORKSPACE_ID,
                     Instant.now().minusSeconds(3600),
                 ).plaintext
+        val revocable =
+            apiKeyService.issue(user.id, "revoked-key", setOf(Scope.READ), setOf(Scope.ADMIN), DEFAULT_WORKSPACE_ID)
+        apiKeyService.revoke(revocable.plaintext.substringBefore('.'), user.id)
+        revokedKey = revocable.plaintext
         session = jwtService.issue(user)
 
         // A user mid forced-change (§5A.4): the gate reads must_change_password
@@ -324,6 +361,86 @@ class AuthHttpBoundaryTest {
         val body = mapper.readValue(response.body, Map::class.java)
         body["auth_method"] shouldBe "API_KEY"
         (body["key_id"] as String) shouldBe readKey.substringBefore('.')
+    }
+
+    /**
+     * 096 §E (review finding F9): "the API key wins" has to mean it wins when it LOSES too.
+     *
+     * [ApiKeyFilter] stashed its rejection and continued; the context was empty, so
+     * [JwtAuthenticationFilter] authenticated the cookie and served the request at SESSION
+     * privilege — at least `author` (§6.1) — on a credential the server had just refused,
+     * with no signal anywhere that the key was dead. Revoking a key did not end the session
+     * a client held beside it.
+     */
+    @Test
+    fun `a revoked api key ends the request even with a live session cookie`() {
+        val response =
+            call(
+                HttpMethod.GET,
+                "/api/v1/probe",
+                headers(apiKey = revokedKey, cookies = listOf("dp_session=$session")),
+            )
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.api_key.invalid"
+    }
+
+    @Test
+    fun `an expired api key ends the request even with a live session cookie`() {
+        val response =
+            call(
+                HttpMethod.GET,
+                "/api/v1/probe",
+                headers(apiKey = expiredKey, cookies = listOf("dp_session=$session")),
+            )
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.api_key.expired"
+    }
+
+    /** The same cookie alone still authenticates — the change refuses a rejected KEY, not the session. */
+    @Test
+    fun `the session cookie still authenticates when no key is presented`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 200
+        mapper.readValue(response.body, Map::class.java)["auth_method"] shouldBe "OIDC"
+    }
+
+    // ------------------------------------------------- the authoring screens (096 §C)
+
+    @Test
+    fun `a read key is refused at the pipeline editor and the template editor`() {
+        listOf("/pipelines/42/editor", "/templates/editor").forEach { path ->
+            val response = call(HttpMethod.GET, path, headers(apiKey = readKey))
+
+            withClue(path) {
+                response.statusCode.value() shouldBe 403
+                code(response) shouldBe "auth.scope.insufficient"
+            }
+        }
+    }
+
+    @Test
+    fun `an anonymous request to an editor is 401, not a scope refusal`() {
+        val response = call(HttpMethod.GET, "/templates/editor")
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.api_key.missing"
+    }
+
+    @Test
+    fun `an author session reaches both editors, and a read key still renders the list page`() {
+        listOf("/pipelines/42/editor", "/templates/editor").forEach { path ->
+            withClue(path) {
+                call(HttpMethod.GET, path, headers(cookies = listOf("dp_session=$session")))
+                    .statusCode
+                    .value() shouldBe 200
+            }
+        }
+        // Unchanged by 096 §C: the read floor on the list screens is what a read key had
+        // implicitly, and it still has it.
+        call(HttpMethod.GET, "/pipelines", headers(apiKey = readKey)).statusCode.value() shouldBe 200
     }
 
     // ---------------------------------------------------------- /mcp (AUTH-SEC-1)

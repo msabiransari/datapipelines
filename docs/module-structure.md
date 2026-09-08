@@ -437,7 +437,12 @@ The per-request `is_active` / revocation re-check (D13) reads through the same 6
 - `org.springframework.boot:spring-boot-starter-data-redis` — post-completion SSE event log (1h), per-user rate-limit counters, and the `dp:datasource-invalidated` pub/sub channel (050 §5.7). The durable 7-day event record is `dag`'s `ExecutionEventRepository`; these are two different stores for two different retention windows (D9).
 - `io.micrometer:micrometer-core`
 - `com.fasterxml.jackson.module:jackson-module-kotlin`
-- `org.webjars.npm:htmx.org` (for reactive UI without writing JS — pairs well with Thymeleaf)
+
+**Vendored front-end libraries:** htmx 2.0.10, Alpine 3.14.1, Cytoscape 3.34.0 (+ `dagre`
+and `node-html-label`), dagre 0.8.5 — all static files under `static/vendor/`, none of them
+a build dependency. htmx was `org.webjars.npm:htmx.org` until 096 §B; a webjar puts a
+`/webjars/` glob on the public allowlist over a namespace the dependency graph fills, so it
+was vendored like the rest (`VendoredHtmxAuditTest` pins the bytes and the licence).
 
 **Styling foundation:** `@acme/design-tokens` (v0.2.0+) — vendored CSS-only design system. NOT an npm dependency; vendored as static files under `static/vendor/design-system/`. Provides semantic tokens (`--surface-*`, `--text-*`, `--accent-*`), 9 swappable themes (default: `saas`), and ~80 `.ds-*` primitive component classes. All UI colors, spacing, typography, shadows, and radii reference design system tokens. No hardcoded hex values anywhere. See [Pipeline Editor spec §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens) for integration details.
 

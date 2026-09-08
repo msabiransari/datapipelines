@@ -13,6 +13,12 @@ dependencies {
     // No BouncyCastle (removed 2026-08-07, security review MEDIUM-6 — see §5.7).
     // Argon2id comes from argon2-jvm; JWT signing from jjwt over the JDK providers.
     implementation(libs.spring.boot.starter.jdbc) // user / key / audit repositories
+    // 096 §F (review F8): the login limiter's saturation counter. Micrometer-core only —
+    // no registry implementation, no actuator; :modules:app supplies the exporting registry
+    // and this module falls back to an in-memory one where none exists (AuthConfiguration).
+    // Same shape as :modules:dag's ExecutorMetrics, and an existing catalog alias, so no new
+    // artifact enters the build.
+    implementation(libs.micrometer.core)
 
     // DEVIATION from §5.7's external-dep list (reported to orchestrator): the §8.1
     // SecurityConfig / ScopeInterceptor code the spec mandates compiles against Spring

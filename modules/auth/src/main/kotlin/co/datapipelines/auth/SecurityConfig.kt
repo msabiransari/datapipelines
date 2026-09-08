@@ -39,8 +39,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * [ApiKeyCredentialMatcher] is the only exemption: a request is exempt when it
  * carries `DP-API-Key`, or when it targets `/mcp` where cookies never authenticate.
  * Cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
- * **everywhere**, the `/api/v1` prefix included — `SameSite=Strict` is defence-in-depth, not
- * the control, because it does not stop a same-site subdomain attacker.
+ * **everywhere**, the `/api/v1` prefix included — `SameSite=Lax` (§5.5: Strict breaks the
+ * cross-site login redirect) is defence-in-depth, not the control, because it stops neither a
+ * same-site subdomain attacker nor a cross-site top-level GET.
  */
 @Configuration
 @EnableWebSecurity
@@ -93,85 +94,23 @@ class SecurityConfig(
                 // the deferred token (the login page) and never rewritten afterwards.
                 csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
             }.authorizeHttpRequests { auth ->
-                auth
-                    // Async re-dispatches (SSE completion, rest-api §6) and error dispatches
-                    // re-enter this chain with no SecurityContext: the auth filters are
-                    // OncePerRequestFilter and do not re-run on them. The REQUEST dispatch
-                    // already authenticated and authorized the request, so these dispatch
-                    // types are permitted — without this, every completed SSE stream dies
-                    // as Access Denied on the completion dispatch and the container aborts
-                    // the (already committed) response mid-chunk.
-                    .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR)
-                    .permitAll()
-                    .requestMatchers(
-                        // 033: the marketing site owns `/` (owner decision 2026-08-31) —
-                        // public by design; the signed-in dashboard moved to /dashboard.
-                        // Constant content only (Decision 4): no DB access, defended by
-                        // cache headers — NO rate limiter (033/D1). The login limiter
-                        // keys on the CLIENT address since R8/T46 ([ClientAddressResolver]
-                        // + `datapipelines.auth.trusted-proxies`), so pointing it at `/`
-                        // is now possible; the no-limiter decision stands on its own
-                        // grounds (immutable content, shared-cache TTL).
-                        "/",
-                        // 033: the marketing site's own assets (css/js/img). The design
-                        // system it references rides the already-public /vendor/** below.
-                        "/site/**",
-                        // 073: the site's intent-cluster pages — one route per thing a
-                        // searcher types. Same shape as `/` and public for the same reason:
-                        // GET-only, constant content, the only live fact is the compile-time
-                        // MCP tool count, and no request on them touches a datastore or a
-                        // principal. Enumerated rather than globbed, so a future route under
-                        // one of these prefixes cannot become public by accident.
-                        "/mcp-server-for-sql-databases",
-                        "/mcp-server/*",
-                        "/add-mcp-server-to-claude-code",
-                        "/ai-data-pipeline",
-                        "/text-to-sql-agent",
-                        "/compare/*",
-                        "/federated-query",
-                        // 089: the dp-lake product page — same shape and same reasoning as the
-                        // 073 cluster pages above.
-                        "/dp-lake",
-                        // 073: the in-product spec set, public. The viewer renders the
-                        // Markdown packaged in the jar — DocsCatalog's only collaborator is a
-                        // ClassLoader, the controller reads no principal and no workspace, and
-                        // no route here reaches a datastore. The identical content is already
-                        // public in the AGPL repository on GitHub, so this exposes nothing new;
-                        // it moves ~25 pages of long-tail documentation from GitHub's index to
-                        // ours. Anonymous requests get the public chrome, signed-in ones keep
-                        // the app chrome (DocsController).
-                        "/docs",
-                        "/docs/*",
-                        // 095: the agent skill, raw. `/skill.md` and `/skill/<reference>.md`
-                        // serve the Markdown packaged in the jar — SkillController reads no
-                        // principal, resolves no workspace and touches no datastore, and the
-                        // identical text is public in the AGPL repository on GitHub. It is the
-                        // MANUAL: a key would mean an agent cannot learn to use its key
-                        // correctly until after it has one. This is the delivery for clients
-                        // that speak no MCP — one curl into .agents/skills/ and the agent has
-                        // the manual for the version this deployment actually runs.
-                        "/skill.md",
-                        "/skill/*",
-                        // 073: crawler infrastructure. robots.txt is a static file; sitemap.xml
-                        // is generated from the page registry and the packaged doc slugs — both
-                        // are, by definition, documents that must be readable without a login.
-                        "/robots.txt",
-                        "/sitemap.xml",
-                        "/health",
-                        "/ready",
-                        "/info",
-                        "/login",
-                        "/login/**",
-                        "/oauth2/**",
-                        "/vendor/**",
-                        "/css/**",
-                        "/js/**",
-                        "/favicon.ico",
-                        "/error",
-                        "/webjars/**",
-                    ).permitAll()
-                    .anyRequest()
-                    .authenticated()
+                // Async re-dispatches (SSE completion, rest-api §6) and error dispatches
+                // re-enter this chain with no SecurityContext: the auth filters are
+                // OncePerRequestFilter and do not re-run on them. The REQUEST dispatch
+                // already authenticated and authorized the request, so these dispatch
+                // types are permitted — without this, every completed SSE stream dies
+                // as Access Denied on the completion dispatch and the container aborts
+                // the (already committed) response mid-chunk.
+                auth.dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                // The permitAll allowlist lives in [PublicPaths] (096 §A, review F1): one row
+                // per pattern WITH the sentence that justifies it, frozen by `PublicPathsTest`,
+                // walked against every request mapping by `PublicRouteWalkerTest`, and rendered
+                // into auth.md §8.3. Nothing else may be permitted here — an inline pattern
+                // would be invisible to all three. Registered one at a time, in ENTRIES order:
+                // a spread of the whole list into the vararg copies the array on every call and
+                // detekt refuses it, and the resulting rules are identical either way.
+                PublicPaths.PATTERNS.forEach { pattern -> auth.requestMatchers(pattern).permitAll() }
+                auth.anyRequest().authenticated()
             }
 
         // OIDC login is wired ONLY when providers are configured (auth.md §5A): a

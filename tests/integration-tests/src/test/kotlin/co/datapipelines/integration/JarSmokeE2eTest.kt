@@ -60,12 +60,23 @@ class JarSmokeE2eTest {
     private var appLog: File? = null
     private var apiKey: String = ""
 
+    /**
+     * 096 §C: the two editor screens declare `MUTATE_PIPELINES_TEMPLATES` — they render
+     * AUTHORING state, so the read key every other screen is fetched with is correctly
+     * refused there (403 `auth.scope.insufficient`). The smoke test's question is "does this
+     * screen render out of the jar", not "who may see it", so those two use an author key.
+     * Keeping the read key for everything else is itself worth asserting: a read-scoped key
+     * renders the whole product EXCEPT the editors.
+     */
+    private var authorKey: String = ""
+
     @BeforeAll
     fun boot() {
         startOidcStub()
         startApp()
         seed()
-        apiKey = mintApiKey()
+        apiKey = mintApiKey("smoke-key", "read")
+        authorKey = mintApiKey("smoke-author-key", "author")
     }
 
     @AfterAll
@@ -165,21 +176,34 @@ class JarSmokeE2eTest {
 
     @Test
     fun `the pipeline editor renders from the jar - the asset-heaviest screen`() {
-        val (body, status) = get("/pipelines/$PIPELINE/editor")
+        val (body, status) = request("/pipelines/$PIPELINE/editor", authorKey)
         status shouldBe 200
         // The seeded pipeline's JSON is embedded for the client-side graph — real content,
         // not an editor shell over a missing record.
         body shouldContain "smoke_pipe"
         body shouldContain "pipeline-editor"
-        noneCarriesErrorMarkers("/pipelines/$PIPELINE/editor")
+        noneCarriesErrorMarkersAs(authorKey, "/pipelines/$PIPELINE/editor")
     }
 
     @Test
     fun `the template editor renders from the jar`() {
-        val (body, status) = get("/templates/editor?name=$SEEDED_TEMPLATE")
+        val (body, status) = request("/templates/editor?name=$SEEDED_TEMPLATE", authorKey)
         status shouldBe 200
         body shouldContain "Smoke Template"
-        noneCarriesErrorMarkers("/templates/editor?name=$SEEDED_TEMPLATE")
+        noneCarriesErrorMarkersAs(authorKey, "/templates/editor?name=$SEEDED_TEMPLATE")
+    }
+
+    /**
+     * The other half of 096 §C, live against the jar: a read key renders every screen above
+     * and is refused at both editors. Asserted here rather than only at the auth boundary,
+     * because this is the deployment artifact people actually run.
+     */
+    @Test
+    fun `a read key is refused at both editors but renders the list screens`() {
+        get("/pipelines/$PIPELINE/editor").second shouldBe 403
+        get("/templates/editor?name=$SEEDED_TEMPLATE").second shouldBe 403
+        get("/pipelines").second shouldBe 200
+        get("/templates").second shouldBe 200
     }
 
     @Test
@@ -364,7 +388,10 @@ class JarSmokeE2eTest {
     }
 
     /** Mints the API key through the real endpoint: session cookie, CSRF double-submit. */
-    private fun mintApiKey(): String {
+    private fun mintApiKey(
+        name: String,
+        scope: String,
+    ): String {
         val csrf =
             HttpRequest
                 .newBuilder(URI.create("$base/settings"))
@@ -385,7 +412,7 @@ class JarSmokeE2eTest {
                 .header("Content-Type", "application/json")
                 .header("Cookie", "dp_session=${sessionJwt()}; dp_csrf=$token")
                 .header("DP-CSRF-Token", token)
-                .POST(HttpRequest.BodyPublishers.ofString("""{"name":"smoke-key","scopes":["read"]}"""))
+                .POST(HttpRequest.BodyPublishers.ofString("""{"name":"$name","scopes":["$scope"]}"""))
                 .build()
         val minted = http.send(mint, HttpResponse.BodyHandlers.ofString())
         check(minted.statusCode() == 201) { "key mint failed ${minted.statusCode()}: ${minted.body()}" }
@@ -412,9 +439,15 @@ class JarSmokeE2eTest {
     }
 
     /** The T34 error markers — none of the screens may carry any of them. */
-    private fun noneCarriesErrorMarkers(vararg paths: String) {
+    private fun noneCarriesErrorMarkers(vararg paths: String) = noneCarriesErrorMarkersAs(apiKey, *paths)
+
+    /** The same sweep with an explicit credential — 096 §C put the two editors above the read floor. */
+    private fun noneCarriesErrorMarkersAs(
+        key: String,
+        vararg paths: String,
+    ) {
         paths.forEach { path ->
-            val (body, _) = get(path)
+            val (body, _) = request(path, key)
             body shouldNotContain "Error resolving fragment"
             body shouldNotContain "Whitelabel"
             body shouldNotContain "URI is not hierarchical"
