@@ -646,21 +646,24 @@ byte in content. The build scripts that produce them live at
 family) and [`scripts/sample-data-lake/`](../scripts/sample-data-lake/README.md)
 (**dp-lake**); everything below is the consuming side.
 
-Two independent families, each behind its own compose profile and app.sh flag —
+Three independent families, each behind its own compose profile and app.sh flag —
 an engineer spins up exactly the data they need:
 
 | Family | Flag / profile | What you get |
 |---|---|---|
-| **nyc** (mobility) | `--demo nyc` / profile `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 2 example pipelines |
+| **nyc** (mobility) | `--demo nyc` / profile `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 6 example pipelines |
 | **trade** (trade/v4) | `--demo trade` / profile `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Federal Reserve H.10 exchange rates on SQLite — 3 datasources + 3 example pipelines |
+| **lake** (dp-lake) | `--demo lake` / profile `demo-lake` | NYC TLC high-volume for-hire trips as Parquet and Iceberg on S3, **read in place** — 1 `LAKE` datasource (`sample-lake`) whose registry is seeded from the published `manifest.json`, + 1 four-engine example pipeline. No loader, nothing downloaded at start |
 
-Both together is fine — the app's bootstrap keys are comma-separated lists built
+Any combination is fine — the app's bootstrap keys are comma-separated lists built
 from the active families, and the MySQL service is shared.
 
-A third family, **dp-lake**, is *published but not yet consumable*: the artifact
-build lands with round 088 and the datasource that reads it (dialect `lake`, name
-`sample-lake`) is round 089. It has no compose profile, no loader and no `--demo`
-flag, because there is nothing to load — see the next section.
+The **lake** family is different in kind from the other two and the difference is
+worth stating before the commands: it has a compose profile and a `--demo` flag
+like its siblings, but **no loader service**, because nothing is loaded. What
+`--profile demo-lake` turns on is the datasource registration and the manifest
+import; the data itself stays in the bucket and is read at query time — see
+"dp-lake — the family with no loader" below.
 
 ### One command
 
@@ -670,30 +673,32 @@ deployment loads is visible in the repository. From a checkout that builds its o
 image, the whole thing is:
 
 ```bash
-./app.sh --start --demo nyc,trade
+./app.sh --start --demo nyc,trade,lake
 ```
 
 For the raw compose path, set the family ON markers your invocation wants and pass
 the same env files `app.sh` does — secrets last:
 
 ```bash
-SAMPLE_NYC_ON=1 SAMPLE_TRADE_ON=1 docker compose \
+SAMPLE_NYC_ON=1 SAMPLE_TRADE_ON=1 SAMPLE_LAKE_ON=1 docker compose \
   -f deploy/compose.yml -f deploy/compose.local-build.yml \
   --env-file deploy/env/defaults.env \
   --env-file deploy/secrets.env \
-  --profile demo-nyc --profile demo-trade up -d --wait
+  --profile demo-nyc --profile demo-trade --profile demo-lake up -d --wait
 ```
 
 `--wait` returns when the app is healthy, and by then the artifacts have been
 downloaded, every checksum verified, the databases restored, the SELECT-only demo
 login created, and the families' datasources registered.
 
-Either family also builds the jar with `-Pmysql` (see the driver note below).
+The `nyc` and `trade` families also build the jar with `-Pmysql` (see the driver
+note below); `lake` alone does not need it.
 `./app.sh --stop` and `--status` take the same `--demo` list, so the demo services
 are not left running invisibly. **Demo is a flag, not an environment**
 ([Environments §5](environments.md#5-demo)): `DATAPIPELINES_DEMO` is the source of
 truth, `--demo` merely sets it, and the `hardened` posture refuses it at boot. The
-per-family `--demo-nyc` / `--demo-trade` switches are gone.
+per-family `--demo-nyc` / `--demo-trade` switches are gone; the families are
+`nyc`, `trade` and `lake`, and an unknown name is refused by name.
 
 **MySQL driver.** MySQL Connector/J is GPL with a FOSS exception and is *not* in
 the default build (§3.5, [Datasources §10.2](datasources.md#102-strategy)). The
@@ -705,7 +710,7 @@ Build with the driver:
 ./gradlew -Pmysql :modules:app:bootJar && docker build -t datapipelines:local .
 ```
 
-or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade]` does the
+or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade[,lake]]` does the
 `-Pmysql` build for you.
 
 ### Point an agent at it — three steps
@@ -898,6 +903,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-08 | v1.18 | 093 announcement-day truth pass | **Appendix B's demo-families preamble corrected against the merged 089 product.** It said dp-lake was *published but not yet consumable* with "no compose profile, no loader and no `--demo` flag" while `app.sh` already accepts `--demo lake` and adds `--profile demo-lake` (app.sh lines 144/209, `SAMPLE_LAKE_ON`) — the paragraph was written at 088 and 089 shipped the consuming side. The families table gains a **lake** row; "Two independent families" becomes three; the nyc row's "2 example pipelines" becomes **6** (`scripts/sample-data/content/examples.json` holds six); the one-command and raw-compose recipes gain the third family; the `-Pmysql` sentence now says which families need it. The "family with no loader" section below is unchanged — it was already correct — and the distinction it draws (a profile and a flag, but nothing to load) is now stated in the preamble too, which is where the contradiction was read. |
 | 2026-09-07 | v1.16 | 089 dp-lake §D extension bundling | **§3.1 gains the bundled DuckDB extensions bullet**: the image now downloads `httpfs`/`aws`/`iceberg`/`avro` for DuckDB core v1.5.5 at build (+108 MB uncompressed, ~39 MB downloaded), gunzips them into `/opt/duckdb/extensions/v1.5.5/<linux_amd64|linux_arm64>/` (the build's `TARGETARCH`), and exports `DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions` — a LAKE datasource then LOADs from disk and never INSTALLs, so a hardened dp-lake deployment needs no egress to `extensions.duckdb.org` (the 089 §7.3 spike's CAN verdict, verified on this exact base image with `--network none`). `deploy/compose.yml` defaults the variable to the same path (declared in `compose-env-audit.sh`'s new `IMAGE_DEFAULT_VARS`, the first compose default that mirrors the image rather than application.yml). The operator key itself is [Configuration §3.25](configuration.md). |
 | 2026-09-07 | v1.15 | 088 dp-lake data | **Appendix B gains a third sample-data family, `dp-lake`** — NYC TLC High Volume FHV (Uber/Lyft/Via/Juno) trips published at `s3://datapipelines-co/sample-data/lake/<version>/` as Parquet partitioned by `pickup_date`, a 1-in-16 sample, a zone/day pre-aggregate and an Apache Iceberg copy of the sample. New section "**dp-lake — the family with no loader**": it is **read in place**, so there is no compose profile, no loader service and no `--demo` flag — the datasource that reads it (dialect `lake`, `sample-lake`) is round 089, and the showcase pipeline ships in its own `scripts/sample-data/content/examples-lake.json` that no deployment loads yet. The drift-guards section gains `scripts/sample-data-lake/check-published.sh --family lake <version>` and says why it is a separate script (no `examples.json`; it checks object hashes, the licence gate and the Iceberg metadata's recorded locations). Egress is stated as the operating cost: bounded by a query's date predicate, unbounded for an unfiltered scan of the ~7 GB table. No application code, no deployment change. |
 | 2026-09-07 | v1.15 | dp-lake v1 published (088) | `s3://datapipelines-co/sample-data/lake/v1/` — 855 objects, 7.57 GB: `hvfhv_trips` (471,851,707 NYC rideshare trips, day-partitioned Parquet), `hvfhv_trips_sample` (1-in-16), `hvfhv_zone_day`, `hvfhs_companies`, `hvfhv_trips_iceberg` (the sample as an Iceberg table). Read in place by the dp-lake datasource (round 089) — no loader, no download at demo start; licence verified 2026-09-07 (NYC Open Data, FHV disclaimer quoted in the manifest). `check-published.sh v1` in the lake family is the proof. |

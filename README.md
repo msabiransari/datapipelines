@@ -13,18 +13,37 @@ API humans use.
 - **Declarative pipelines** — a pipeline is a JSON document: nodes, edges,
   parameters. Each node renders a FreeMarker SQL template and runs it
   against a datasource or the in-memory staging area. No orchestration code.
-- **Seven SQL dialects** — PostgreSQL, MySQL, SQL Server, Oracle, DuckDB,
-  SQLite, H2 — behind one canonical type system, so results and templates
-  are portable across engines.
+- **Eight SQL dialects** — PostgreSQL, MySQL, SQL Server, Oracle, DuckDB,
+  SQLite, H2 and `LAKE` — behind one canonical type system, so results and
+  templates are portable across engines.
+- **dp-lake** — read Parquet and Apache Iceberg tables on S3 (or any
+  S3-compatible store) **in place**: no warehouse, no load step, DuckDB as the
+  engine and the server's own `dp-catalog` registry as the catalog, because the
+  engine cannot list a bucket. A lake table is one node in a pipeline, so it
+  joins your Postgres and MySQL like any other source
+  ([`docs/datasources.md` §8C](docs/datasources.md)).
 - **Per-execution staging** — intermediate results flow through an isolated
   in-memory H2 database per execution; cross-datasource joins without
   landing data anywhere.
 - **MCP-native** — agents get tools for datasources, schema introspection
   (live JDBC metadata, so they stop hallucinating table names), templates,
-  pipelines, executions, and results.
+  pipelines, executions, results, published endpoints and the lake registry.
+- **The agent boundary** — there is deliberately no tool that registers a
+  datasource and none that mints a key. Registering a datasource means handing
+  over a live database credential, and a credential passed through a tool call
+  transits the agent's context, its transcript and whatever the client logs. A
+  human registers the datasource in the UI (or an operator over REST, or the
+  bootstrap file); the agent uses it **by name** and never sees the password
+  ([`docs/mcp-server.md` §6.2.22](docs/mcp-server.md)).
 - **REST + UI** — a full REST API with a uniform cursor for results, SSE
   execution streams, and a browser UI (pipeline editor with DAG
-  visualization, execution history, template editor).
+  visualization, execution history, template explorer, light and dark themes).
+- **One API section** — `/api-console` is everything a program uses to talk to
+  a workspace, in one place: the published `GET /api/x/**` endpoints, the MCP
+  connection block with the live tool count, and the keys page where keys are
+  issued and revoked — Kind (`user` \| `endpoint` \| `server`) → Scope → Name →
+  Expiry → Bindings, the secret shown exactly once
+  ([`docs/ui-screens.md` §4.18](docs/ui-screens.md), [`docs/auth.md` §7.7](docs/auth.md)).
 - **Governed by default** — generic OIDC login for humans, API keys for
   agents, a fail-closed scope matrix (`admin ⊃ author ⊃ execute ⊃ read`),
   encrypted datasource credentials, and every endpoint authenticated unless
@@ -33,10 +52,20 @@ API humans use.
 ## Quick start
 
 ```bash
-./app.sh --start --demo nyc     # builds and runs the whole stack, with sample data
+./app.sh --start --demo nyc,trade,lake   # builds and runs the whole stack, with sample data
 ```
 
 Then open `http://localhost:8080` and sign in with the login it prints.
+
+`--demo` takes any subset of the three published sample-data families:
+**`nyc`** (NYC taxi trips on Postgres, NOAA weather on MySQL, a SQLite
+reference — six example pipelines), **`trade`** (US Census trade on DuckDB, UN
+Comtrade on MySQL, Fed H.10 rates on SQLite) and **`lake`** (dp-lake: 24 months
+of NYC rideshare trips as Parquet and Iceberg on S3, read in place — nothing is
+downloaded, and the four-engine showcase pipeline needs egress to S3 when it
+runs). `./app.sh --start --demo nyc` alone is the smallest useful stack. Every
+artifact's checksum is verified before an engine is touched
+([`docs/deployment.md` Appendix B](docs/deployment.md)).
 
 Deploying it for real is two variables — your name for the environment, and how
 careful the product should be:
@@ -50,9 +79,12 @@ docker compose -f deploy/compose.yml \
   --env-file deploy/secrets.env up -d
 ```
 
-Two env files, in that order, under every loader: `deploy/env/defaults.env` is tracked and
-carries every non-secret default; `deploy/secrets.env` is git-ignored and holds your
-credentials and your differences.
+Two env files, in that order, under every loader — and only two: `deploy/env/defaults.env`
+is tracked and carries every non-secret default, including the pinned sample-data versions,
+so what a deployment loads is visible in the repository; `deploy/secrets.env` is git-ignored
+and holds your credentials and your differences. `./app.sh --scaffold` writes the second one
+from `deploy/secrets.env.example`, generating every secret, and names all the variables it
+does not set. `--start` scaffolds it for you if it is missing.
 
 Full setup and the variable reference: [`docs/environments.md`](docs/environments.md),
 [DEVELOPMENT.md](DEVELOPMENT.md), and the specs under [`docs/`](docs/).

@@ -43,13 +43,14 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [staging.md](staging.md) | v1.10 frozen | Per-execution in-memory H2: lifecycle, identifier safety, mutex-guarded connection behind `withConnection`, memory limits |
 | [dag-executor.md](dag-executor.md) | v1.3 | Coroutine executor: topological execution, fail-fast, cancellation (Redis flag), result materialization |
 | [calculators.md](calculators.md) | v1.0 | The calculator catalogue: 23 pure `kind`s a `CALCULATOR` node can run (calendar/fiscal periods, date arithmetic, rounding, percent change, coalesce/map), the eight always-present Context keys (`org_*`, `current_date`, …), `$name` references vs literals, the topology rule. `calculators_list` returns the same catalogue live; drift-guarded against the registry. |
+| [template-hierarchy-design.md](template-hierarchy-design.md) | normative | The name-is-the-path grammar (2–10 segments since 077, the root holds folders only), virtual folders with no identity, typed templates (`sql` needs a dialect, `html` does not) and the explorer's tree contract |
 
 ### Surfaces
 
 | Doc | Status | One line |
 |---|---|---|
 | [rest-api.md](rest-api.md) | v1.4 frozen | Endpoints, envelopes, SSE execution stream, **uniform result-delivery cursor (§7)**, auth/user-admin endpoints (§16) |
-| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 31 tools, resources, prompts — a thin adapter over REST |
+| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 30 tools, resources, prompts — a thin adapter over REST. There is deliberately **no** datasource-write tool (§6.2.22): no credential travels through an agent |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
 | [versioning.md](versioning.md) | v1.4 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
@@ -62,6 +63,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [environments.md](environments.md) | v1.0 | The two variables an org sets — `DATAPIPELINES_ENV` (their name) and `DATAPIPELINES_POSTURE` (`development` \| `hardened`) — the posture table, the env-var contract, loader recipes, demo as a flag, secrets, first login |
 | [observability.md](observability.md) | v1.1 draft | JSON logs + correlation IDs, metric naming/cardinality rules, redaction (normative), health endpoints |
 | [module-structure.md](module-structure.md) | v1.2 | Gradle modules, exhaustive dependency table, persistence ownership, version catalog + implementation gates |
+| [key-providers.md](key-providers.md) | v1.0 normative | Where the AES keys that encrypt datasource credentials come from: the `KeyProvider` contract, the envelope design, the AWS-KMS recipe, and the provider status table (§7 — only `env` ships today) |
 
 ### Meta
 
@@ -70,6 +72,8 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [ROADMAP.md](ROADMAP.md) | Deferred (v1.1/v2), rejected-with-reasoning, operator responsibilities — prevents re-litigation |
 | [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) | The 2026-08 consistency campaign: findings, ratified decisions D1–D15, per-doc resolutions |
 | [ARCH-AUDIT-2026-08.md](ARCH-AUDIT-2026-08.md) | Service-layer gap + multi-instance readiness audit (2026-08-31): findings M1–M10, S1–S5, drift list — pending review |
+| [TEST-GAP-2026-09.md](TEST-GAP-2026-09.md) | Behaviour-coverage and browser-suite gap audit (2026-09): backfill tiers and the golden-path backlog — findings record, proposed not ratified |
+| [semantic-layer-research.md](semantic-layer-research.md) | Research brief (pre-spec) on semantic layers for agent-facing data — input to a future `semantic-layer.md`, not a commitment |
 | [../DEVELOPMENT.md](../DEVELOPMENT.md) | Developer setup: local infra, OIDC setup, build/run/test, git workflow |
 
 ## House rules (cross-cutting)
