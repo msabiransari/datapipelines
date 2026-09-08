@@ -13,7 +13,7 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   `DATAPIPELINES_ENV=local` under the `development` posture, and `app.sh` prints the login
   that exists after it is healthy. A deployment their organisation runs will be named
   something else and may be `hardened`, which refuses authoring writes — see the
-  `*.authoring.disabled` row in the error table.
+  `*.authoring.disabled` row in `references/error-codes.md`.
 
 - **MCP:** Streamable HTTP at `POST {host}/mcp` — stateless, protocol pinned to
   `2025-06-18`. Auth is API-key-only: `DP-API-Key: dpk_<id>.<secret>` or

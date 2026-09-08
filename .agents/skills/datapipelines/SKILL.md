@@ -41,7 +41,7 @@ quoting: `BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AN
 
 **Dialects** — eight: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE. Templates are
 dialect-specific; a node's template dialect must match what its `source` can execute. `LAKE`
-is object storage read in place — see **dp-lake** below.
+is object storage read in place — see `references/dp-lake.md`.
 
 ## Folders — how you NAME a pipeline or a template
 
@@ -175,8 +175,9 @@ What that means in practice:
 ## Error handling
 
 Every failure is structured — REST envelopes and MCP tool results (`isError: true`)
-carry the same catalogued codes. The registry of record is pipeline-contract.md §13.
-Codes you will meet most often:
+carry the same catalogued codes. The registry of record is pipeline-contract.md §13, and
+`references/error-codes.md` lists the codes you will meet most often with the response
+each one calls for.
 
 Rule of thumb: validation errors are your bug — fix the document, don't retry.
 Reachability and TTL errors are the world's state — probe, then retry once.
@@ -187,7 +188,7 @@ Reachability and TTL errors are the world's state — probe, then retry once.
 failure record in `error` — the same object the UI shows and `error_json` stores.
 Read it in this order:
 
-1. `error.code` — the catalogued code (the table above says what to do with it).
+1. `error.code` — the catalogued code (`references/error-codes.md` says what to do with it).
 2. `error.exception.caused_by` — the ROOT CAUSE IS THE **LAST** ENTRY of the chain
    (the wire is outermost-first). Quote `class` + `message` from that entry.
 3. `error.sql` — the rendered SQL in `:name` form, exactly as it failed
@@ -291,7 +292,7 @@ deployment serves them at `GET /skill/<name>.md`; inside a checkout they are fil
 - `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (31 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (30 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings

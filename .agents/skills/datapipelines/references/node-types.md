@@ -10,7 +10,7 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   `DDL` (CREATE/ALTER/DROP → success/failure), `PIPELINE` (run a pinned child
   pipeline `{"name": "...", "version": N}` as a sub-execution — declares `pipeline`
   plus optional parameter bindings instead of `source`/`template`), or `CALCULATOR`
-  (compute one typed value into the Context — see **Calculators** below)
+  (compute one typed value into the Context — see `references/templates.md`)
 - `source` — a registered datasource name, or the reserved literal `"tempdb"` for the
   per-execution in-memory H2
 - `template` — `{"id": "...sql", "version": N}` (immutable pin)

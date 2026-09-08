@@ -13,15 +13,18 @@ engine cannot list a bucket: a LAKE datasource's tables are exactly the rows you
 
 The workflow is three steps:
 
-1. **Register the bucket.** `datasources_create` with `dialect: "LAKE"`,
+1. **Register the bucket — a HUMAN does this, not you.** Registering a datasource means
+   handing over a live credential, and no credential travels through an agent (see
+   `references/connecting.md`): there is no `datasources_create` tool. Ask the person to add
+   it in the UI (or over REST) with `dialect: "LAKE"`,
    `jdbc_url: "jdbc:duckdb::memory:"`, and `properties.dialect` naming how the data is
    addressed — `catalog.kind: "s3"` + `region` for AWS, plus `endpoint` (and
    `url_style: "path"`) for an S3-compatible store like MinIO. Credentials:
    `credential: {"kind": "none"}` is the IAM credential chain; `{"kind": "password",
    "username": "<key-id>", "secret": "<secret>"}` is an explicit key pair; and a PUBLIC
    bucket adds `unsigned: "true"` — NO S3 secret at all, because the credential chain
-   validates at create time and fails on a credentials-free box. Follow with
-   `datasources_test`.
+   validates at create time and fails on a credentials-free box. Then confirm it yourself
+   with `datasources_test`.
 2. **Register the tables.** `lake_tables_register` for one (`namespace`, `table`, `format`,
    `location`, optional `partition_column`), or `lake_tables_import` for a manifest's
    `tables[]` — inline, or a `manifest_url` fetched server-side from the datasource's OWN
