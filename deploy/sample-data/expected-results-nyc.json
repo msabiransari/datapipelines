@@ -2,8 +2,8 @@
   "schema_version": 1,
   "family": "nyc",
   "artifact_version": "v5",
-  "recorded": "2026-09-07",
-  "how": "Executed against the published mobility/v6 artifacts in an isolated stack (APP_COMPOSE_PROJECT=dp082, APP_HOST_PORT=8092) with the REPO's scripts/sample-data/content/examples.json placed over /srv/sample/examples-nyc.json (the v6-to-be content, 082 §C) - the DATA is the published artifact, only the pipeline definitions are the repo's. Through POST /api/v1/pipelines/{id}/execute with an author-scoped API key, every pipeline at its DEFAULT parameters. row_sha256 is sha256 over json.dumps(rows, sort_keys=True, separators=(',',':')) of the full result page - one canonical encoding on both sides, so no collation or float formatting can make two equal results differ. Only mobility_briefing moved this round: it gained a fiscal_quarter CALCULATOR node whose value is bound as the first column of the caller output.",
+  "recorded": "2026-09-08",
+  "how": "Re-recorded after the defect-100 unsized-numeric fix (type-system v1.3): an exact-numeric expression whose typmod the source engine drops (SUM/AVG/division over NUMERIC(10,2)) now stages as H2 DECFLOAT(100000) instead of DECIMAL(100000, 0), so staged totals keep their cents. Executed against the published mobility artifacts in an isolated stack (APP_COMPOSE_PROJECT=num100, APP_HOST_PORT=18100), through POST /api/v1/pipelines/{id}/execute with an author-scoped API key, every pipeline at its DEFAULT parameters. row_sha256 is sha256 over json.dumps(rows, sort_keys=True, separators=(',',':')) of the full result page - one canonical encoding on both sides. Four pipelines moved: borough_od_matrix, airport_access_by_borough and weather_sensitivity_by_borough stage ROUND(SUM(...), 2) totals that previously truncated to whole dollars on insert, and mobility_briefing inherits the correction because it composes borough_od_matrix (PIPELINE node) and re-aggregates its now-exact totals in tempdb. Every other pipeline's hash is unchanged: check-baselines.sh went green on the pre-fix build against the previous file (all six matched) and on the fixed build against this file.",
   "checked_by": "deploy/sample-data/check-baselines.sh",
   "pipelines": {
     "nyc/mobility/revenue_by_borough": {
@@ -42,7 +42,7 @@
         "revenue_per_trip",
         "miles_per_trip"
       ],
-      "row_sha256": "d3f16810e1c7ea5d2b278cbf6ebbd0a4244944bb4fe03de6a56e39cf34cfd2b6",
+      "row_sha256": "479b2ce8321bc59217dd3475ce0b2a2cffc211accf05f34a4bdc9a4cf9d3f6d1",
       "observed_seconds": 7.91
     },
     "nyc/mobility/airport_access_by_borough": {
@@ -59,7 +59,7 @@
         "flat_fare_trips",
         "pct_flat_fare"
       ],
-      "row_sha256": "3ab8325f6b217fd40bb4d184446820d28d877d3c48e6d37683e65a6b750df51e",
+      "row_sha256": "ce7f1371511eee2e9279a8196f86bed55935a79e91596720e6e28a7f422b3244",
       "observed_seconds": 10.91
     },
     "nyc/mobility/weather_sensitivity_by_borough": {
@@ -73,7 +73,7 @@
         "trips_per_day",
         "revenue_per_trip"
       ],
-      "row_sha256": "c030bbb8f70292b23ce6a4bc50621023a25777d0673b311d4d719373a4cd221e",
+      "row_sha256": "ac7030f3db190847b74eacf90ab399cdd67014dbfcf850ede59ba398a4f7a228",
       "observed_seconds": 4.62
     },
     "nyc/mobility/mobility_briefing": {
@@ -87,7 +87,7 @@
         "pct_within_borough",
         "revenue_per_trip"
       ],
-      "row_sha256": "4e5d987c2dd5954a16e6c42239b8beff1ef2edc75cb80159034eb2c1849ddb30",
+      "row_sha256": "2bb76405762083a498318dd072748267a20d458b402ad4b7928b11e9411db073",
       "observed_seconds": 2.14
     }
   }
