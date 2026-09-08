@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import co.datapipelines.typesystem.DatapipelinesException
 
+private const val HTTP_BAD_REQUEST = 400
 private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
 private const val HTTP_TOO_MANY_REQUESTS = 429
@@ -47,6 +48,13 @@ object AuthErrorCodes {
     const val SESSION_REQUIRED = "auth.session.required"
 
     /**
+     * 091 — an issuance whose EXPIRY is not a usable one: an unknown preset, a custom date
+     * that is not a date, or an expiry already in the past. A 400, unlike every other code
+     * here: nothing is wrong with the caller's credential, the request body is wrong.
+     */
+    const val API_KEY_EXPIRY_INVALID = "auth.api_key.expiry_invalid"
+
+    /**
      * versioning §10.6 — the promotion peer credential. Absent, malformed, mismatched,
      * and "this receiver configured no key at all" all answer with this ONE code: the
      * response must not tell a wrong key apart from a receiver that has promotion
@@ -76,6 +84,7 @@ object AuthErrorCodes {
             LOGIN_BAD_CREDENTIALS,
             LOGIN_LOCKED,
             PASSWORD_CHANGE_REQUIRED,
+            API_KEY_EXPIRY_INVALID,
             SESSION_REQUIRED,
             PROMOTION_KEY_INVALID,
         )
@@ -168,6 +177,28 @@ class SessionExpiredException(
         "Your session has expired. Please sign in again.",
         cause = cause,
     )
+
+/**
+ * 091 — the API-key form's expiry could not be turned into an instant (§7.4).
+ *
+ * [reason] is a stable token (`unknown_preset`, `date_unparseable`, `date_in_past`,
+ * `date_missing`) so a caller can branch, and [detail] is the offending value ECHOED BACK
+ * TRUNCATED — an expiry is not a secret, and a refusal that does not say what it refused
+ * costs a support round trip. 400, not 403: the credential is fine, the body is not.
+ */
+class ApiKeyExpiryInvalidException(
+    reason: String,
+    detail: String? = null,
+) : AuthException(
+        AuthErrorCodes.API_KEY_EXPIRY_INVALID,
+        HTTP_BAD_REQUEST,
+        "API key expiry is not usable: $reason",
+        "That expiry is not one this form can use. Pick one of the listed options, or a future date.",
+        details = mapOf("reason" to reason, "value" to detail?.take(MAX_ECHOED_EXPIRY_CHARS)),
+    )
+
+/** The longest slice of a rejected expiry value that is echoed back. */
+private const val MAX_ECHOED_EXPIRY_CHARS = 32
 
 class ScopeInsufficientException(
     required: Scope,

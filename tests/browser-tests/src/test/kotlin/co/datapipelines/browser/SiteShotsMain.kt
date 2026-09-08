@@ -391,7 +391,9 @@ object SiteShotsMain {
         }
 
         private fun apiKeys() {
-            page.navigate("$baseUrl/settings/api-keys")
+            // 091: keys are issued and revoked on the API screen now — `/settings/api-keys` is
+            // a link. The shot follows the screen, not the old URL.
+            page.navigate("$baseUrl/api-console")
             // The table arrives with the page but the EMPTY state is a different element —
             // wait for whichever landed. Counting rows before either exists reports zero, and
             // this method would mint a fresh key on every run (it minted five before this
@@ -404,17 +406,17 @@ object SiteShotsMain {
             // so an exact-text match on the `td` misses and this method mints a duplicate on
             // every run — which it did, four times, before this selector was corrected.
             if (page.locator("#keys-table-body span:text-is('$name')").count() == 0) {
-                page.click("button:has-text('Generate Key')")
-                page.locator("#create-modal").waitFor()
-                page.fill("#create-modal input[name=name]", name)
+                page.click("button:has-text('New key')")
+                page.locator("#key-modal").waitFor()
+                page.fill("#key-name", name)
                 page.waitForResponse({ it.url().contains("/partials/api-keys") }) {
-                    page.click("#create-modal button[type=submit]")
+                    page.click("#createKeyForm button[type=submit]")
                 }
             }
             // The once-only reveal must be OFF SCREEN before the shutter: a live secret in a
             // published PNG is a leak that no later edit can undo (§B).
             dismissSecretReveal()
-            page.navigate("$baseUrl/settings/api-keys")
+            page.navigate("$baseUrl/api-console")
             waitFor(".ds-table")
             // The listing shows each key's PREFIX (`dpk_` + 12 chars) — an identifier, and the
             // only way to tell two keys apart when revoking one. The SECRET is far longer and

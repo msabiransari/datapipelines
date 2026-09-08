@@ -96,6 +96,45 @@ class EndpointKeyServiceTest {
     }
 
     @Test
+    fun `the kind matrix - each kind accepts exactly what its authority is made of (091)`() {
+        // One table for the whole rule, because the failure it guards against is a kind added
+        // later falling through a check written as "is user" instead of "is not endpoint".
+        stubIssue()
+
+        assertAll(
+            // scopes: only a USER key
+            { service.issue(principal(), "u", setOf(Scope.READ), ApiKeyKind.USER, emptyList(), null) },
+            { refusalFor { service.issue(principal(), "e", setOf(Scope.READ), ApiKeyKind.ENDPOINT, emptyList(), null) } },
+            { refusalFor { service.issue(principal(), "s", setOf(Scope.READ), ApiKeyKind.SERVER, emptyList(), null) } },
+            // bindings: only an ENDPOINT key
+            { service.issue(principal(), "e", emptySet(), ApiKeyKind.ENDPOINT, listOf("/nyc"), null) },
+            { refusalFor { service.issue(principal(), "u", emptySet(), ApiKeyKind.USER, listOf("/nyc"), null) } },
+            { refusalFor { service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, listOf("/nyc"), null) } },
+            // expiry: every kind takes one — a promotion credential that never expires is the
+            // whole problem 091 set out to fix.
+            { service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, emptyList(), Instant.parse("2027-01-01T00:00:00Z")) },
+        )
+    }
+
+    @Test
+    fun `bindings on a SERVER key are refused, and none are written`() {
+        // The specific fall-through the matrix above guards: before 091's fix the binding check
+        // read `kind == USER`, so a server key's bindings would have been written and then
+        // consulted by nothing — an authority the operator believes in and the system ignores.
+        stubIssue()
+
+        val refused =
+            shouldThrow<DatapipelinesException> {
+                service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, listOf("/nyc"), null)
+            }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED },
+            { verify(exactly = 0) { bindings.insert(any()) } },
+        )
+    }
+
+    @Test
     fun `an endpoint key with no bindings is legal — it simply authorises nothing`() {
         // Coherent to mint and bind later, and the §5.2 rule already says an unbound endpoint key
         // authorises nothing. Refusing it here would be a second, contradictory rule.
@@ -166,6 +205,11 @@ class EndpointKeyServiceTest {
                     ),
                 plaintext = "$KEY_ID.secret",
             )
+    }
+
+    /** Asserts the block refuses with the kind-contradiction code. */
+    private fun refusalFor(block: () -> Unit) {
+        shouldThrow<DatapipelinesException> { block() }.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
     }
 
     private fun principal() =

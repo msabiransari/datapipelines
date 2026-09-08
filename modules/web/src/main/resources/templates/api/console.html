@@ -12,8 +12,8 @@
       <p class="app-page-sub">Everything a program uses to talk to this workspace: the endpoints you have
         published, the keys that may call them, and the MCP server your agent connects to.</p>
     </div>
-    <div class="app-page-actions" th:if="${canAuthor}">
-      <a class="ds-button ds-button-secondary" th:href="@{/settings/api-keys}">Manage API keys</a>
+    <div class="app-page-actions">
+      <button type="button" class="ds-button ds-button-primary" onclick="showKeyModal()">New key</button>
     </div>
   </div>
 
@@ -90,50 +90,89 @@
     <div class="app-grid-stack">
 
       <!-- ------------------------------------------------------------- api keys -->
+      <!-- 091 — the ONE key table. Three renders share it: this page, the post-create
+           out-of-band refresh (partials/api-key-created), and the rows a revoke swaps in
+           (partials/api-keys-rows). One fragment, one row model (ApiKeyRows) — before 091
+           the revoke path hand-built its rows in Kotlin and a parity test kept the two
+           markups alike. -->
       <div class="ds-card app-card-table">
         <div class="app-card-h">
           <h2 class="ds-title">API keys</h2>
-          <span class="app-card-note" th:text="${#lists.size(apiKeys)} + ' active'">4 active</span>
+          <span class="app-card-note" th:text="${#lists.size(keys)} + ' total'">4 total</span>
         </div>
 
-        <table class="ds-table" th:if="${not #lists.isEmpty(apiKeys)}">
+        <!-- The one-time secret lands HERE and PERSISTS (§5.1's hard rule — a 6s toast never
+             carries anything the user must keep). Hidden by the `u-hidden` CLASS, never an
+             inline style: 079 §D's script reads the class, and a `style.display` check would
+             see "" forever and the secret would never appear. -->
+        <div id="keyCreated" class="app-card-b u-hidden"></div>
+
+        <table class="ds-table" id="keys-table" th:fragment="keysTable(keys)" th:attr="hx-swap-oob=${oob}">
           <thead>
           <tr>
             <th>Key</th>
+            <th>Kind</th>
             <th>Reach</th>
+            <th>Created</th>
             <th>Expires</th>
+            <th>Last used</th>
+            <th class="num">Actions</th>
           </tr>
           </thead>
-          <tbody>
-          <tr th:each="k : ${apiKeys}">
-            <td>
-              <span class="app-name" th:text="${k.name}">agent</span>
-              <span class="app-path" th:text="${k.prefix} + '…'">dpk_A7Qx…</span>
-            </td>
-            <td>
-              <!-- An `endpoint` key has NO scopes by design (auth §7.7) — its authority is
-                   the paths it is bound to. Showing an empty scope cell for it would read
-                   as "this key can do nothing", which is the opposite of true. -->
-              <span class="app-chip app-chip-mono" th:text="${k.kind}">user</span>
-              <span class="app-chips" th:if="${k.kind == 'user'}">
-                <span class="app-chip app-chip-mono" th:each="s : ${k.scopes}" th:text="${s}">read</span>
-              </span>
-              <span class="app-chips" th:if="${k.kind == 'endpoint'}">
-                <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}" th:text="${p}">/nyc/**</span>
-                <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths)}">no bindings</span>
-              </span>
-            </td>
-            <td th:text="${k.expiresAt != null} ? ${#temporals.format(k.expiresAt, 'yyyy-MM-dd')} : 'never'">never</td>
-          </tr>
+          <tbody id="keys-table-body">
+          <th:block th:fragment="keyRows(keys)">
+            <tr th:if="${keys == null || keys.isEmpty()}">
+              <td colspan="7">
+                <div class="app-empty">
+                  <b>No API keys</b>
+                  A key is how an agent, a program or another deployment authenticates. Create one with
+                  <b>New key</b>.
+                </div>
+              </td>
+            </tr>
+            <tr th:each="k : ${keys}">
+              <td>
+                <span class="app-name" th:text="${k.name}">agent</span>
+                <span class="app-path ds-mono" th:text="${k.prefix}">dpk_RGAX…</span>
+              </td>
+              <td><span class="app-chip app-chip-mono" th:text="${k.kind}">user</span></td>
+              <td>
+                <!-- A key's REACH is whatever decides what it may do, and that differs by kind:
+                     scopes for a user key, bound paths for an endpoint key, a route family for
+                     a server key. An empty scope cell on the last two would read as "this key
+                     can do nothing", which is the opposite of true (auth §7.7). -->
+                <span class="app-chips" th:if="${k.kind == 'user'}">
+                  <span class="app-chip app-chip-mono" th:each="s : ${k.scopes}" th:text="${s}">read</span>
+                </span>
+                <span class="app-chips" th:if="${k.kind == 'endpoint'}">
+                  <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}" th:text="${p} + '/**'">/nyc/**</span>
+                  <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths)}">no bindings — authorises nothing</span>
+                </span>
+                <span class="app-chips" th:if="${k.kind == 'server'}">
+                  <span class="app-chip app-chip-mono">promotion routes</span>
+                </span>
+              </td>
+              <td><span th:title="${k.createdAbsolute}" th:text="${k.createdRelative}">3 days ago</span></td>
+              <td>
+                <span th:if="${k.expiresAbsolute != null}" th:title="${k.expiresAbsolute}" th:text="${k.expiresRelative}">in 84 days</span>
+                <span th:if="${k.expiresAbsolute == null}" th:text="${k.expiresRelative}">never</span>
+              </td>
+              <td>
+                <span th:if="${k.lastUsedAbsolute != null}" th:title="${k.lastUsedAbsolute}" th:text="${k.lastUsedRelative}">2 hours ago</span>
+                <span th:if="${k.lastUsedAbsolute == null}" th:text="${k.lastUsedRelative}">never</span>
+              </td>
+              <td class="num">
+                <button th:if="${k.isLive}" class="ds-button ds-button-ghost ds-button-sm u-danger"
+                        th:attr="hx-delete=@{/partials/api-keys/{id}(id=${k.id})}"
+                        hx-target="#keys-table-body"
+                        hx-confirm="Revoke this key? It stops authenticating within about a minute.">Revoke</button>
+                <span class="app-chip app-chip-bad" th:if="${k.isRevoked}">revoked</span>
+                <span class="app-chip app-chip-warn" th:if="${k.isExpired and not k.isRevoked}">expired</span>
+              </td>
+            </tr>
+          </th:block>
           </tbody>
         </table>
-
-        <div class="app-card-b" th:if="${#lists.isEmpty(apiKeys)}">
-          <div class="app-empty">
-            <b>No API keys</b>
-            A key is how an agent authenticates. Create one on the API keys screen.
-          </div>
-        </div>
       </div>
 
       <!-- ------------------------------------------------------------- mcp server -->
@@ -157,5 +196,153 @@
 
     </div>
   </div>
+
+  <!-- ------------------------------------------------------------------ new key -->
+  <!-- The form's order is the owner's ruling: Kind → Scope → Name → Expiry → Bindings,
+       with scope and bindings CONDITIONAL on the kind. Every option is rendered from
+       ApiKeyForm, which the partial controller also validates against, so a select can
+       never offer a value the server refuses. -->
+  <div id="key-modal" class="u-backdrop u-backdrop-hidden">
+    <div class="ds-card app-modal app-modal-md">
+      <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideKeyModal()">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+      </button>
+      <h2 class="ds-title u-m0 u-mb-md">New API key</h2>
+      <form id="createKeyForm"
+            th:attr="hx-post=@{/partials/api-keys}"
+            hx-target="#keyCreated"
+            hx-swap="innerHTML">
+
+        <!-- 1 — Kind. Radio CARDS: the choice changes what the rest of the form means, so
+             each one says what it is in a sentence rather than naming an enum. -->
+        <fieldset class="app-kinds u-mb-md">
+          <legend class="u-block u-secondary u-text-sm u-mb-xs">Kind</legend>
+          <label class="app-kind" th:each="kc, kcStat : ${kindChoices}">
+            <input type="radio" name="kind" th:value="${kc.wire}" th:checked="${kcStat.first}"
+                   th:attr="data-scope=${kc.takesScope}, data-bindings=${kc.takesBindings}"
+                   onchange="keyKindChanged()">
+            <span class="app-kind-b">
+              <b th:text="${kc.label}">Agent / API key</b>
+              <span th:text="${kc.summary}">what it is</span>
+            </span>
+          </label>
+        </fieldset>
+
+        <!-- 2 — Scope. The CAPABILITIES, each with its meaning; never HTTP verbs (an
+             `execute` is a POST that writes nothing, and an MCP tool has no verb at all).
+             Only the caller's own scopes are offered — the server refuses a superset
+             regardless (§7.4), so this filter is convenience, not the guard. -->
+        <div class="u-mb-md" id="key-scope-field">
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-scope">Scope</label>
+          <select id="key-scope" name="scope" class="ds-input u-full">
+            <option th:each="sc : ${scopeChoices}" th:value="${sc.wire}"
+                    th:text="${sc.label} + ' — ' + ${sc.meaning}">read — list and inspect</option>
+          </select>
+        </div>
+
+        <!-- 3 — Name. Deliberately NOT unique: `api_keys.name` carries no uniqueness
+             constraint, and two people in one workspace may legitimately both have an
+             "agent" key. The hint says so rather than letting a collision surprise. -->
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-name">Name</label>
+          <input id="key-name" type="text" name="name" class="ds-input u-full" placeholder="Claude Desktop" required maxlength="120">
+          <p class="u-text-xs u-m0 u-mt-xs">For you to recognise it later. Names are not unique — the prefix is what identifies a key.</p>
+        </div>
+
+        <!-- 4 — Expiry. A select, plus a date input the last option reveals. Resolved
+             server-side from the same table (ApiKeyForm): a custom date means the END of
+             that day, UTC, and a date already past is refused rather than clamped. -->
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-expiry">Expiry</label>
+          <select id="key-expiry" name="expiry" class="ds-input u-full" onchange="keyExpiryChanged()">
+            <option th:each="ec : ${expiryChoices}" th:value="${ec.wire}" th:text="${ec.label}">Never</option>
+          </select>
+          <input id="key-expiry-date" type="date" name="expiryDate" class="ds-input u-full u-mt-xs u-hidden">
+        </div>
+
+        <!-- 5 — Bindings, endpoint kind only. The nodes are the LITERAL prefixes of this
+             workspace's published paths: the authorizer walks the concrete request path's
+             ancestors, so a node with a {variable} segment would authorise nothing. -->
+        <div class="u-mb-lg u-hidden" id="key-bindings-field">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Bindings</label>
+          <div class="app-picker">
+            <label class="app-picker-row" th:each="node : ${bindingNodes}">
+              <input type="checkbox" name="bindings" th:value="${node}">
+              <span class="ds-mono" th:text="${node == '/'} ? '/** (everything)' : ${node} + '/**'">/nyc/**</span>
+            </label>
+          </div>
+          <p class="u-text-xs u-m0 u-mt-xs">
+            A binding at <span class="ds-mono">/nyc</span> covers everything beneath it; a binding deeper down
+            REPLACES it there. An endpoint key with no binding authorises nothing.
+          </p>
+        </div>
+
+        <button type="submit" class="ds-button ds-button-primary u-full">Create key</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function showKeyModal() {
+      document.getElementById('key-modal').style.display = 'flex';
+    }
+    function hideKeyModal() {
+      document.getElementById('key-modal').style.display = 'none';
+    }
+    // The kind decides which fields exist at all (auth §7.7): a scope on an endpoint or
+    // server key is REFUSED by the server, not dropped, so the form must not carry one.
+    // Disabled inputs are not submitted, which is the point — hiding alone would still
+    // POST a stale value.
+    function keyKindChanged() {
+      var checked = document.querySelector('#createKeyForm input[name=kind]:checked');
+      var wantsScope = checked && checked.getAttribute('data-scope') === 'true';
+      var wantsBindings = checked && checked.getAttribute('data-bindings') === 'true';
+      var scopeField = document.getElementById('key-scope-field');
+      var bindingsField = document.getElementById('key-bindings-field');
+      scopeField.classList.toggle('u-hidden', !wantsScope);
+      document.getElementById('key-scope').disabled = !wantsScope;
+      bindingsField.classList.toggle('u-hidden', !wantsBindings);
+      var boxes = bindingsField.querySelectorAll('input[name=bindings]');
+      for (var i = 0; i < boxes.length; i++) { boxes[i].disabled = !wantsBindings; }
+    }
+    function keyExpiryChanged() {
+      var custom = document.getElementById('key-expiry').value === 'custom';
+      var date = document.getElementById('key-expiry-date');
+      date.classList.toggle('u-hidden', !custom);
+      date.disabled = !custom;
+    }
+    // 076 §D: arm immediately when this fragment arrives in a boosted swap
+    // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
+    var initKeyForm = function() {
+      keyKindChanged();
+      keyExpiryChanged();
+      var created = document.getElementById('keyCreated');
+      if (!created) return;
+      var observer = new MutationObserver(function() {
+        // 079 §D: the panel's initial hidden state is the `u-hidden` CLASS, not an inline
+        // style — reading `created.style.display` would see "" forever and the one-time
+        // secret would never appear. Test the class, and drop it to reveal.
+        if (created.children.length > 0 && created.classList.contains('u-hidden')) {
+          created.classList.remove('u-hidden');
+          hideKeyModal();
+          document.getElementById('createKeyForm').reset();
+          keyKindChanged();
+          keyExpiryChanged();
+          // The create response already refreshed the table out-of-band and pointed a
+          // toast at this panel (030) — no refetch; just select the secret to copy.
+          setTimeout(function() {
+            var secret = created.querySelector('input');
+            if (secret) secret.select();
+          }, 50);
+        }
+      });
+      observer.observe(created, {childList: true, subtree: true});
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initKeyForm);
+    } else {
+      initKeyForm();
+    }
+  </script>
 </th:block>
 </html>

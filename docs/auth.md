@@ -894,6 +894,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 
 | Code | HTTP | Description |
 |---|---|---|
+| `auth.api_key.expiry_invalid` | 400 | Key issuance named an unusable expiry — unknown preset, unparseable date, a date in the past, or `custom` with no date (§7.4). `details.reason` names which |
 | `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist (OIDC) |
 | `auth.login.user_inactive` | 403 | User account deactivated (OIDC or local) |
 | `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical (§5A.5) |

@@ -120,7 +120,7 @@ class ApiErrorCatalogSpecDriftTest {
          * `rate_limit.unavailable`, landed in the SAME commit as its constant and its 429
          * catalog row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 130
+        const val SECTION_13_ROW_COUNT = 131
 
         /**
          * §12's distinct validation codes.

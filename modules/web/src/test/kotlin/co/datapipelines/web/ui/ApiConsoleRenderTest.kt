@@ -1,6 +1,9 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Scope
 import co.datapipelines.mcp.McpToolCatalog
+import io.kotest.assertions.withClue
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -11,7 +14,6 @@ import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
-import java.time.Instant
 
 /**
  * 079 §C — the API section, pinned at the RENDER.
@@ -56,7 +58,7 @@ class ApiConsoleRenderTest {
         context.setVariable("authenticated", true)
         context.setVariable("currentPath", "/api-console")
         context.setVariable("endpoints", emptyList<Any>())
-        context.setVariable("apiKeys", emptyList<Any>())
+        context.setVariable("keys", emptyList<Any>())
         context.setVariable("mcpUrl", "https://app.example/mcp")
         context.setVariable("mcpHeader", "DP-API-Key")
         context.setVariable("keyPrefix", "dpk_")
@@ -68,9 +70,47 @@ class ApiConsoleRenderTest {
         context.setVariable("mcpToolCount", McpToolCatalog.NAMES.size)
         context.setVariable("defaultTimeoutSeconds", 30)
         context.setVariable("canAuthor", true)
+        // 091 — the form's options come from ApiKeyForm on both sides (page and partial),
+        // so the fixtures ARE the production tables rather than a second copy of them.
+        context.setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = false))
+        context.setVariable("scopeChoices", ApiKeyForm.scopeChoices(setOf(Scope.AUTHOR)))
+        context.setVariable("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
+        context.setVariable("expiryCustomWire", ApiKeyForm.CUSTOM)
+        context.setVariable("bindingNodes", ApiKeyForm.bindingNodes(listOf("/nyc/mobility/briefing")))
         context.fill()
         return engine.process("api/console", context)
     }
+
+    @Suppress("LongParameterList") // a row, spelled out
+    private fun row(
+        name: String = "agent",
+        kind: String = "user",
+        scopes: List<String> = listOf("read"),
+        boundPaths: List<String> = emptyList(),
+        createdRelative: String = "3 days ago",
+        createdAbsolute: String = "2026-09-05 09:00 UTC",
+        lastUsedRelative: String = "never",
+        lastUsedAbsolute: String? = null,
+        expiresRelative: String = "never",
+        expiresAbsolute: String? = null,
+        isRevoked: Boolean = false,
+        isExpired: Boolean = false,
+    ) = ApiKeyRows.Row(
+        id = "dpk_A7QxKF2MPLQR",
+        name = name,
+        kind = kind,
+        prefix = "dpk_A7QxKF2MPLQR".take(8) + "…",
+        scopes = scopes,
+        boundPaths = boundPaths,
+        createdRelative = createdRelative,
+        createdAbsolute = createdAbsolute,
+        lastUsedRelative = lastUsedRelative,
+        lastUsedAbsolute = lastUsedAbsolute,
+        expiresRelative = expiresRelative,
+        expiresAbsolute = expiresAbsolute,
+        isRevoked = isRevoked,
+        isExpired = isExpired,
+    )
 
     private fun endpoint(
         url: String = "/api/x/nyc/mobility/briefing",
@@ -137,25 +177,15 @@ class ApiConsoleRenderTest {
     }
 
     @Test
-    fun `a user key shows scopes and an endpoint key shows the paths it is bound to`() {
+    fun `a user key shows scopes, an endpoint key its bindings, a server key its route family`() {
         val html =
             render {
                 setVariable(
-                    "apiKeys",
+                    "keys",
                     listOf(
-                        ApiConsoleController.ApiKeyRow("agent", "user", "dpk_A7Qx", listOf("execute", "read"), emptyList(), null),
-                        // MIDDAY UTC on purpose: `#temporals.format` renders an Instant in the SERVER's
-                        // default zone (pre-existing app-wide behaviour — /settings has always shown
-                        // last-sign-in that way), so a midnight fixture renders as the previous day
-                        // wherever the build runs west of Greenwich.
-                        ApiConsoleController.ApiKeyRow(
-                            "serve",
-                            "endpoint",
-                            "dpk_Kf3m",
-                            emptyList(),
-                            listOf("/nyc/mobility"),
-                            Instant.parse("2027-06-15T12:00:00Z"),
-                        ),
+                        row(name = "agent", kind = "user", scopes = listOf("execute", "read")),
+                        row(name = "serve", kind = "endpoint", boundPaths = listOf("/nyc/mobility")),
+                        row(name = "uat receiver", kind = "server"),
                     ),
                 )
             }
@@ -164,30 +194,115 @@ class ApiConsoleRenderTest {
         html shouldContain ">read<"
         html shouldContain ">execute<"
         // An endpoint key carries NO scopes (auth §7.7); its authority is its bindings, and
-        // that is what the cell must show.
-        html shouldContain "/nyc/mobility"
-        html shouldContain "2027-06-15"
-        html shouldContain ">never<"
+        // that is what the cell must show — in the `/nyc/**` form 074 defined.
+        html shouldContain "/nyc/mobility/**"
+        // A server key has neither, and an empty cell would read as "this key can do nothing".
+        html shouldContain "promotion routes"
     }
 
     @Test
-    fun `the empty states name the way in rather than saying nothing`() {
+    fun `every timestamp is relative in the cell and absolute on hover`() {
+        // Both questions are real: "is this about to expire?" at a glance, "exactly when?" on
+        // hover. A cell with only one of them sends the reader to the database.
+        val html =
+            render {
+                setVariable(
+                    "keys",
+                    listOf(
+                        row(
+                            createdRelative = "3 days ago",
+                            createdAbsolute = "2026-09-05 09:00 UTC",
+                            expiresRelative = "in 84 days",
+                            expiresAbsolute = "2026-12-01 00:00 UTC",
+                            lastUsedRelative = "2 hours ago",
+                            lastUsedAbsolute = "2026-09-08 07:00 UTC",
+                        ),
+                    ),
+                )
+            }
+
+        html shouldContain "title=\"2026-09-05 09:00 UTC\""
+        html shouldContain ">3 days ago<"
+        html shouldContain "title=\"2026-12-01 00:00 UTC\""
+        html shouldContain ">in 84 days<"
+        html shouldContain "title=\"2026-09-08 07:00 UTC\""
+        html shouldContain ">2 hours ago<"
+    }
+
+    @Test
+    fun `a dead key keeps its row and loses its revoke affordance`() {
+        val revoked = render { setVariable("keys", listOf(row(isRevoked = true))) }
+        revoked shouldContain ">revoked<"
+        revoked shouldNotContain "hx-delete"
+
+        val expired = render { setVariable("keys", listOf(row(isExpired = true))) }
+        expired shouldContain ">expired<"
+        expired shouldNotContain "hx-delete"
+
+        // …and a live one HAS it, or the two assertions above would pass on a table with no
+        // revoke button at all.
+        render { setVariable("keys", listOf(row())) } shouldContain "hx-delete"
+    }
+
+    @Test
+    fun `the form's fields are in the owner's order - Kind, Scope, Name, Expiry, Bindings`() {
         val html = render { }
 
-        html shouldContain "No published endpoints"
-        html shouldContain "endpoints_create"
-        html shouldContain "No API keys"
+        val order =
+            listOf(
+                "name=\"kind\"",
+                "id=\"key-scope\"",
+                "id=\"key-name\"",
+                "id=\"key-expiry\"",
+                "id=\"key-bindings-field\"",
+            ).map { html.indexOf(it) }
+
+        withClue("one of the five fields is missing: $order") { order.none { it < 0 } shouldBe true }
+        withClue("the fields render out of order: $order") { order shouldBe order.sorted() }
     }
 
     @Test
-    fun `management links are hidden from a principal without author scope`() {
-        val withAuthor = render { }
-        withAuthor shouldContain "Manage API keys"
+    fun `scope and bindings are conditional on the kind, and the server kind is admin-only`() {
+        val forMember = render { }
+        // The two conditional fields exist for the kinds that take them…
+        forMember shouldContain "id=\"key-scope-field\""
+        forMember shouldContain "id=\"key-bindings-field\""
+        // …and each kind card declares which, so the script has no table of its own to drift.
+        forMember shouldContain "data-scope=\"true\""
+        forMember shouldContain "data-bindings=\"true\""
+        // A non-admin is not offered a kind the server would refuse (§7.7: minting a server
+        // key is admin-only). The UI filter is convenience; ApiKeyService is the guard.
+        forMember shouldNotContain "Server key"
 
-        val readOnly = render { setVariable("canAuthor", false) }
-        // Actions a principal lacks scope for are NOT RENDERED, not merely disabled
-        // (ui-screens.md §4 preamble). The server re-checks regardless.
-        readOnly shouldNotContain "Manage API keys"
+        val forAdmin = render { setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = true)) }
+        forAdmin shouldContain "Server key"
+    }
+
+    @Test
+    fun `the scope select states capabilities, not HTTP verbs`() {
+        val html = render { }
+
+        html shouldContain "list and inspect"
+        html shouldContain "run released pipelines"
+        // The owner asked for verb scopes and the answer is no: `execute` is a POST that
+        // writes nothing, and an MCP tool call has no verb to split on.
+        html shouldNotContain ">GET — "
+        html shouldNotContain "POST scope"
+    }
+
+    @Test
+    fun `the binding picker offers the literal published prefixes and the whole tree`() {
+        val html =
+            render {
+                setVariable("bindingNodes", ApiKeyForm.bindingNodes(listOf("/nyc/revenue/{borough}")))
+            }
+
+        html shouldContain "/** (everything)"
+        html shouldContain "/nyc/**"
+        html shouldContain "/nyc/revenue/**"
+        // A node with a {variable} segment is NOT offered: the authorizer walks the concrete
+        // request path's ancestors, so binding one would authorise nothing at all.
+        html shouldNotContain "{borough}"
     }
 
     @Test

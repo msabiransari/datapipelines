@@ -30,6 +30,13 @@ class UiConfig {
     @Bean
     fun docsCatalog(): DocsCatalog = DocsCatalog(javaClass.classLoader)
 
+    /**
+     * 091: the API-key table's row model, shared by the page and BOTH partial responses —
+     * the post-create refresh and the rows a revoke swaps in (see [ApiKeyRows]).
+     */
+    @Bean
+    fun apiKeyRows(bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository): ApiKeyRows = ApiKeyRows(bindings)
+
     /** 047: the templates screen's one model, shared by the page and the partial controllers. */
     @Bean
     fun templateBrowseModel(templates: TemplateRepository): TemplateBrowseModel = TemplateBrowseModel(templates)
