@@ -10,7 +10,8 @@ import java.util.UUID
  * datapipelines://pipelines/{id}/versions/{version}   datapipelines://templates/{id}/versions/{v}
  * datapipelines://pipelines/{id}/parameters           datapipelines://datasources
  * datapipelines://executions/{execution_id}           datapipelines://datasources/{name}
- * datapipelines://executions/{execution_id}/events
+ * datapipelines://executions/{execution_id}/events   datapipelines://docs/skill
+ *                                                    datapipelines://docs/skill/{reference}
  * ```
  *
  * A sealed hierarchy rather than string matching at the read site: `when` over it is exhaustive,
@@ -66,6 +67,17 @@ sealed interface McpResourceUri {
         val executionId: UUID,
     ) : McpResourceUri
 
+    /** `datapipelines://docs/skill` — the skill's operating core (095 §C2). */
+    data class Skill(
+        override val uri: String,
+    ) : McpResourceUri
+
+    /** `datapipelines://docs/skill/{reference}` — one reference file of the skill. */
+    data class SkillReference(
+        override val uri: String,
+        val reference: String,
+    ) : McpResourceUri
+
     companion object {
         const val SCHEME: String = "datapipelines://"
 
@@ -73,6 +85,10 @@ sealed interface McpResourceUri {
         const val TEMPLATES: String = "templates"
         const val DATASOURCES: String = "datasources"
         const val EXECUTIONS: String = "executions"
+
+        /** The documentation kind: `datapipelines://docs/skill[/{reference}]` (095 §C2). */
+        const val DOCS: String = "docs"
+        const val SKILL: String = "skill"
 
         /** `datapipelines://{kind}/{id}` — the shortest addressable form. */
         private const val ENTITY_SEGMENTS = 2
@@ -102,6 +118,10 @@ sealed interface McpResourceUri {
 
         fun execution(id: UUID): String = "$SCHEME$EXECUTIONS/$id"
 
+        fun skill(): String = "$SCHEME$DOCS/$SKILL"
+
+        fun skillReference(name: String): String = "$SCHEME$DOCS/$SKILL/$name"
+
         /** Parses [uri], or returns null when it is not a §7.1 form. */
         @Suppress("ReturnCount")
         fun parse(uri: String): McpResourceUri? {
@@ -112,6 +132,7 @@ sealed interface McpResourceUri {
                 TEMPLATES -> templateUri(uri, segments)
                 DATASOURCES -> datasourceUri(uri, segments)
                 EXECUTIONS -> executionUri(uri, segments)
+                DOCS -> docsUri(uri, segments)
                 else -> null
             }
         }
@@ -191,6 +212,24 @@ sealed interface McpResourceUri {
                 else -> null
             }
         }
+
+        /**
+         * `datapipelines://docs/skill` and `…/skill/{reference}` — the only two `docs` forms.
+         *
+         * The reference segment is a NAME, never a path: `SkillDocs` looks it up in a map of
+         * packaged files, so a `..` or a slash simply is not a key. Deeper URIs are rejected
+         * here rather than left for the reader to puzzle over.
+         */
+        private fun docsUri(
+            uri: String,
+            segments: List<String>,
+        ): McpResourceUri? =
+            when {
+                segments.getOrNull(ID_INDEX) != SKILL -> null
+                segments.size == ENTITY_SEGMENTS -> Skill(uri)
+                segments.size == SUB_RESOURCE_SEGMENTS -> SkillReference(uri, segments[SUB_INDEX])
+                else -> null
+            }
 
         private fun String.toUuidOrNull(): UUID? = runCatching { UUID.fromString(this) }.getOrNull()
     }

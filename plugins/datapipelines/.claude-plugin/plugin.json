@@ -1,0 +1,27 @@
+{
+  "name": "datapipelines",
+  "description": "Author, run and debug declarative SQL pipelines on a datapipelines.co deployment. Ships the datapipelines agent skill and connects Claude Code to your deployment's MCP server.",
+  "homepage": "https://datapipelines.co",
+  "repository": "https://github.com/msabiransari/datapipelines",
+  "license": "AGPL-3.0-only",
+  "author": {
+    "name": "datapipelines.co",
+    "url": "https://datapipelines.co"
+  },
+  "keywords": ["sql", "data-pipelines", "mcp", "etl", "duckdb", "postgres"],
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Deployment URL",
+      "description": "The base URL of YOUR datapipelines deployment, with no trailing slash — for example https://dp.example.com, or http://localhost:8080 for a local ./app.sh --start. This product is self-hosted: there is no default endpoint.",
+      "required": true
+    },
+    "api_key": {
+      "type": "string",
+      "title": "API key",
+      "description": "A user-kind API key from your deployment's /settings/api-keys page, of the form dpk_<id>.<secret>. Ask for the LOWEST scope that covers your work: read to inspect, execute to run, author to create or change. No MCP tool needs admin.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

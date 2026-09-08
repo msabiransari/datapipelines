@@ -184,7 +184,11 @@ class McpServerWiringTest {
 
         assertAll(
             {
+                // The docs rows (095) lead every listing; the datasource collection URI is the
+                // only entity row an empty instance has.
                 (listed.result() as McpSchema.ListResourcesResult).resources().map { it.uri() } shouldBe
+                    listOf(McpResourceUri.skill()) +
+                    SkillDocs.references.keys.map { McpResourceUri.skillReference(it) } +
                     listOf("datapipelines://datasources")
             },
             { (listed.result() as McpSchema.ListResourcesResult).nextCursor() shouldBe null },

@@ -52,20 +52,36 @@ object McpServerFactory {
      */
     const val IDEMPOTENCY_KEY_HEADER: String = "Idempotency-Key"
 
+    /** Where [SERVER_INSTRUCTIONS] lives — a text file, so it is diffable and byte-assertable. */
+    const val INSTRUCTIONS_RESOURCE: String = "/mcp/server-instructions.txt"
+
     /**
-     * §5.1's `instructions` field (workspaces design §9): the workspace context every
-     * agent needs before its first tool call, so it does not reason about invisible
-     * sibling workspaces (mcp-server.md §2).
+     * §5.1's `instructions` field: the connect-time briefing every client injects into every
+     * session (095 §C1).
+     *
+     * It opens with the workspace context (workspaces design §9) — the fact an agent needs
+     * before its first tool call so it does not reason about invisible sibling workspaces
+     * (mcp-server.md §2) — and continues with the operating core DISTILLED: the introspect →
+     * template → pipeline → execute flow, the folder-path name grammar and
+     * `confirm_new_root`, "agents describe datasources, humans register them", the three
+     * recoveries an agent gets wrong most often, and the pointer to the full manual at
+     * `datapipelines://docs/skill`.
+     *
+     * **Hard cap 4096 bytes** (`ServerInstructionsTest`), because every line is paid for by
+     * every session of every client. Anything that does not change what an agent DOES on its
+     * first five calls belongs in the skill, not here.
+     *
+     * It is a resource file rather than a Kotlin string for two reasons: a reviewer can read
+     * the diff of a paragraph without reading Kotlin string concatenation, and the same BYTES
+     * can be asserted (the packaged copy, the cap, the resource-URI mention) instead of a
+     * reconstruction of them.
      */
-    const val SERVER_INSTRUCTIONS: String =
-        "This server is workspace-scoped: every tool and resource operates inside the workspace " +
-            "the API key is pinned to. Pipelines, templates and executions belong to exactly one " +
-            "workspace; datasources are either bound to that workspace or global (shared). Content " +
-            "in other workspaces does not exist from this connection's point of view — it is not " +
-            "hidden, it is absent: another workspace's pipeline id, template id or datasource name " +
-            "resolves as not-found. Names are per-workspace for pipelines and templates (a name you " +
-            "see is free to reuse only within this workspace), and datasource names are globally " +
-            "unique across the whole server."
+    val SERVER_INSTRUCTIONS: String by lazy {
+        val stream =
+            McpServerFactory::class.java.getResourceAsStream(INSTRUCTIONS_RESOURCE)
+                ?: error("$INSTRUCTIONS_RESOURCE is not on the classpath; the mcp-server jar is built wrong")
+        stream.use { it.readBytes().decodeToString() }.trim()
+    }
 
     /**
      * Builds the transport servlet. Register it at [ENDPOINT]; [McpAuthFilter] must run in front

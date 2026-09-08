@@ -94,6 +94,37 @@ class JarSmokeE2eTest {
         noneCarriesErrorMarkers("/", "/partials/dashboard-stats", "/partials/recent-executions")
     }
 
+    /**
+     * 095 §D — the skill, read out of the PACKAGED jar and served with no credential.
+     *
+     * `SkillDocs` finds `SKILL.md` by class-loader lookup and the references by a
+     * `classpath*:` PATTERN scan. Both work trivially against exploded classes, which is what
+     * every other suite runs against; inside a Spring Boot fat jar the skill lives in a
+     * NESTED jar (`BOOT-INF/lib/mcp-server.jar`) and pattern scanning has to walk it. That is
+     * the difference this whole class exists for (T34), and it is the difference between a
+     * green build and `/skill.md` answering 500 on a real deployment.
+     *
+     * Sent with NO api key on purpose: the route is public, and the packaged-bytes assertion
+     * and the allowlist assertion are the same request.
+     */
+    @Test
+    fun `the agent skill is served from the jar, anonymously, references included`() {
+        val (skill, status) = request("/skill.md", apiKey = null, accept = "text/markdown")
+        status shouldBe 200
+        skill shouldContain "name: datapipelines"
+
+        // The reference map is the file's own list of what else exists — every entry must
+        // resolve, which is what proves the PATTERN scan walked the nested jar rather than
+        // silently returning nothing.
+        val references = Regex("""references/([a-z0-9-]+)\.md""").findAll(skill).map { it.groupValues[1] }.toSet()
+        check(references.size >= MIN_SKILL_REFERENCES) { "the packaged skill advertised only ${references.size} references" }
+        references.forEach { name ->
+            val (body, refStatus) = request("/skill/$name.md", apiKey = null, accept = "text/markdown")
+            check(refStatus == 200) { "/skill/$name.md answered $refStatus from the jar" }
+            check(body.isNotBlank()) { "/skill/$name.md was empty from the jar" }
+        }
+    }
+
     @Test
     fun `settings renders from the jar - the T21 class`() {
         val (body, status) = get("/settings")
@@ -401,6 +432,9 @@ class JarSmokeE2eTest {
         const val SEEDED_DATASOURCE = "smoke_ds"
         const val SEEDED_TEMPLATE = "test/smoke_tpl"
         const val REDIS_PORT = 6379
+
+        /** Non-vacuity floor for the packaged-skill reference sweep (095): the split landed nine. */
+        const val MIN_SKILL_REFERENCES = 8
         const val APP_BOOT_TIMEOUT_MS = 120_000L
 
         val random = SecureRandom()

@@ -53,6 +53,36 @@ class McpResourceReaderTest {
     }
 
     @Test
+    fun `the skill reads as the packaged Markdown, and so does each reference`() {
+        val core = contents(McpResourceUri.skill())
+        val reference = contents(McpResourceUri.skillReference("templates"))
+
+        assertAll(
+            { core.mimeType() shouldBe McpResourceCatalog.MIME_MARKDOWN },
+            // The BYTES, not a rendering of them: this is the same file the checkout holds and
+            // the same one `GET /skill.md` serves.
+            { core.text() shouldBe SkillDocs.skill },
+            { core.text() shouldContain "name: datapipelines" },
+            { reference.mimeType() shouldBe McpResourceCatalog.MIME_MARKDOWN },
+            { reference.text() shouldBe SkillDocs.references.getValue("templates") },
+            // The file name someone copies out of the map works too.
+            { contents(McpResourceUri.skillReference("templates.md")).text() shouldBe reference.text() },
+            // Reading the manual touches no repository — it is workspace-independent content.
+            { verify(exactly = 0) { pipelines.findById(any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `an unknown reference is not-found, in the same shape as an unknown entity`() {
+        assertAll(
+            { shouldThrow<McpError> { reader.read(McpResourceUri.skillReference("nope"), ctx) } },
+            // A path is not a name: nothing here concatenates caller input into a file path.
+            { shouldThrow<McpError> { reader.read("datapipelines://docs/skill/../../etc/passwd", ctx) } },
+            { shouldThrow<McpError> { reader.read("datapipelines://docs/other", ctx) } },
+        )
+    }
+
+    @Test
     fun `a specific pipeline version reads that version`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 5)
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "older")

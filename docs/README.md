@@ -50,7 +50,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [rest-api.md](rest-api.md) | v1.4 frozen | Endpoints, envelopes, SSE execution stream, **uniform result-delivery cursor (§7)**, auth/user-admin endpoints (§16) |
-| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 30 tools, resources, prompts — a thin adapter over REST. There is deliberately **no** datasource-write tool (§6.2.22): no credential travels through an agent |
+| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 30 tools, resources, prompts, the agent skill's four deliveries (§15) — a thin adapter over REST. There is deliberately **no** datasource-write tool (§6.2.22): no credential travels through an agent |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
 | [versioning.md](versioning.md) | v1.4 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
@@ -75,6 +75,8 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [TEST-GAP-2026-09.md](TEST-GAP-2026-09.md) | Behaviour-coverage and browser-suite gap audit (2026-09): backfill tiers and the golden-path backlog — findings record, proposed not ratified |
 | [semantic-layer-research.md](semantic-layer-research.md) | Research brief (pre-spec) on semantic layers for agent-facing data — input to a future `semantic-layer.md`, not a commitment |
 | [../DEVELOPMENT.md](../DEVELOPMENT.md) | Developer setup: local infra, OIDC setup, build/run/test, git workflow |
+| [../.agents/skills/datapipelines/](../.agents/skills/datapipelines/) | The agent skill — `SKILL.md` (the operating core) + `references/`. Its `references/tools.md` is GENERATED from the tool catalog (`./gradlew :modules:mcp-server:skillArtifacts`), and every derived copy is drift-tested. Not a spec: it tells an AGENT how to use the product, while these docs define what the product is |
+| [../plugins/datapipelines/](../plugins/datapipelines/) | The Claude Code plugin — the same skill plus the MCP server entry, installed with `/plugin marketplace add msabiransari/datapipelines`. Its `skills/` directory is a build-time copy of the skill, never a second source |
 
 ## House rules (cross-cutting)
 

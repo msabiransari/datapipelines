@@ -1255,7 +1255,13 @@ datapipelines://datasources/{name}                             → metadata, no 
 datapipelines://datasources                                    → list
 datapipelines://executions/{execution_id}                      → execution metadata
 datapipelines://executions/{execution_id}/events               → SSE event replay as text
+datapipelines://docs/skill                                     → the agent skill's operating core (Markdown)
+datapipelines://docs/skill/{reference}                         → one reference file of the skill
 ```
+
+The `docs` kind is not an entity: it is the manual the server ships (§7.2.4). Every other
+form addresses stored content and is workspace-scoped; `docs/*` is the same bytes for every
+caller on a given build.
 
 ### 7.2 Resource examples
 
@@ -1272,6 +1278,16 @@ Returns the template body (Freemarker SQL), content-type `text/x-freemarker-sql`
 #### 7.2.3 `datapipelines://datasources/{name}`
 
 Returns datasource metadata as JSON, with the password field redacted. Workspace-scoped like every datasource read (§2 principle 6): a name bound to another workspace resolves as not-found; `datapipelines://datasources` lists exactly the pinned workspace's visible set (bound + global).
+
+#### 7.2.4 `datapipelines://docs/skill`
+
+Returns the agent skill's `SKILL.md`, content-type `text/markdown` — the same bytes the
+deployment serves at `GET /skill.md` and the same file the repository holds at
+`.agents/skills/datapipelines/SKILL.md` (§15). `datapipelines://docs/skill/{reference}`
+returns one file of `references/` by name, with or without the `.md` suffix
+(`…/skill/templates` and `…/skill/templates.md` are the same resource); an unknown name is
+`RESOURCE_NOT_FOUND` like any other unknown URI. `{reference}` is a NAME, never a path — it
+is looked up in a map of packaged files, so no caller string reaches a file system.
 
 ### 7.3 Resource discovery
 
@@ -1293,7 +1309,7 @@ Returns a page of resource descriptors (URI, name, description, MIME type) plus 
 - **Page size is fixed at 100** descriptors. It is not client-controllable — an agent asking for "everything" must page.
 - `cursor` is an **opaque server-issued token**. Clients MUST treat it as an opaque string: do not parse, construct, or persist it across server restarts. A cursor the server cannot decode → JSON-RPC `-32602` invalid params.
 - The response omits `nextCursor` on the last page. Presence of `nextCursor` is the only "there is more" signal.
-- Enumeration order is stable within a paging run (pipelines, then templates, then datasources, then executions; each by id). Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
+- Enumeration order is stable within a paging run (docs, then pipelines, then templates, then datasources, then executions; each by id).  The `docs` rows lead because they are the only constant-size kind — the skill plus one row per reference, identical on every server — so they cannot push an entity off a page, and an agent that lists resources at all meets the manual before it meets content. Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
 
 **Scope filtering:** the listing is filtered to what the calling key may read (`read` scope; ownership rules apply to executions) **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, its bound datasources plus global ones), so two agents see different resource sets on the same server.
 
@@ -1534,6 +1550,79 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 
 ---
 
+## 15. The skill: how an agent learns this server
+
+> **Status:** normative (095). One source, four deliveries.
+
+An agent connecting from OUTSIDE a checkout used to get the tool descriptions, the prompts and
+eight lines of workspace context — and not one word about how to author. The skill it needed
+existed only as a file in the repository. It is now a shipped artifact of the server.
+
+**The source.** `.agents/skills/datapipelines/` — `SKILL.md` (the operating core: core
+concepts, the naming grammar and `confirm_new_root`, the golden path, execution semantics,
+promotion, error handling, best practices, and a map of the references) plus `references/*.md`,
+which an agent opens only when it needs them. `.claude/skills/datapipelines` is a symlink to
+that directory. There is exactly one source; everything below is derived from it and
+drift-tested against it.
+
+**Delivery 1 — the handshake (push).** `initialize`'s `instructions` (§5.1) is the operating
+core distilled: the introspection-first flow, the name grammar and `confirm_new_root`, "agents
+describe datasources, humans register them", the three recoveries an agent gets wrong most
+often, the draft rule, and a closing pointer to the resource below. It lives in
+`modules/mcp-server/src/main/resources/mcp/server-instructions.txt` — a file, so the diff is
+readable and the bytes are assertable — and is capped at **4096 bytes**, test-enforced: every
+client injects it into every session, so a line that does not change what an agent DOES on its
+first five calls belongs in the skill instead.
+
+**Delivery 2 — the resource (pull, MCP).** `datapipelines://docs/skill` and
+`datapipelines://docs/skill/{reference}` (§7.1, §7.2.4), `read` scope, listed by
+`resources/list` ahead of the entity kinds.
+
+**Delivery 3 — the URL (pull, HTTP).** `GET /skill.md` and `GET /skill/{reference}.md`,
+`text/markdown`, **unauthenticated** — it is the manual, it holds no secret, and requiring a
+key would mean an agent cannot learn to use its key correctly until after it has one. This is
+the delivery for Cursor, Codex CLI, Copilot and anything else that speaks no MCP: one `curl`
+into `.agents/skills/datapipelines/` and the agent has the manual for the version this
+deployment actually runs. An unknown reference is a `404` in the §4.2 envelope with
+`details.reason: "skill_reference_not_found"`.
+
+*The rendered `/docs` viewer does NOT list the skill, deliberately.* That index is the
+operator-facing spec set, grouped by `DocsCatalog` and link-rewritten to GitHub for anything it
+does not package; the skill is agent-facing, carries YAML front matter that is meaningless as
+HTML, and its reference map would render as dead links. The raw route is the one an agent
+needs, and it is the one that exists.
+
+**Delivery 4 — the Claude Code plugin.** `.claude-plugin/marketplace.json` at the repository
+root and `plugins/datapipelines/`: `/plugin marketplace add msabiransari/datapipelines` then
+`/plugin install datapipelines@datapipelines`. The plugin ships the skill and the MCP server
+entry together; its `skills/datapipelines/` is a build-time COPY, not a symlink, because a
+marketplace is fetched with git and Claude Code skips a symlink pointing out of the plugin
+directory. The deployment URL and the API key are plugin `userConfig` values substituted into
+the server entry — `${user_config.url}` / `${user_config.api_key}` — because a plugin
+`.mcp.json` expands only those and the `${CLAUDE_PLUGIN_*}` path variables, never arbitrary
+shell environment variables.
+
+**Packaging (why it cannot break `main`).** `mcp-server`'s `processResources` packages the
+skill directory into the jar under its own classpath root, `skill/` — never under `docs/`,
+which `web`'s `DocsCatalog` scans and where an ungrouped file fails the application context at
+init. `SkillDocs` is the single reader of those bytes, so the resource and the URL cannot
+answer differently.
+
+**The generated reference.** `references/tools.md` is rendered from `McpToolCatalog` plus each
+tool's `definition` — name, description, arguments with their descriptions, §7.6 scope,
+mutating flag — by `./gradlew :modules:mcp-server:skillArtifacts`, and a drift test fails when
+the committed file is not what the catalog renders. The handwritten sections may NAME tools;
+they may not list them. This is not a hypothetical: three hand-typed tool counts were stale
+simultaneously when this was written.
+
+**The guards**, each able to go red: `SKILL.md` ≤ 400 lines and its front matter unchanged;
+`instructions` ≤ 4096 bytes and naming the resource URI; the packaged copy byte-identical to
+the repo file for every file, both directions; the plugin copy likewise; `tools.md` equal to
+the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /skill.md`
+200 `text/markdown` anonymous and `GET /skill/nope.md` 404 in the envelope.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
@@ -1566,3 +1655,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-09-08 | v1.22 | 089 Iceberg location correction | No surface change — two DESCRIPTION strings corrected to the measured rule (datasources.md §8C.7): §6.2.29's tool description and its `location` property now say an Iceberg table's location is the current metadata FILE (`…/metadata/00042-<uuid>.metadata.json`), not the table root — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so an agent following the old text registered a location whose view fails at connect. The code strings and the fence moved together (the §6.2 fences are drift-pinned to the shipped schemas). |
 | 2026-09-08 | v1.23 | 094 the agent boundary | Tool surface 31 → **30**: `datasources_create` REMOVED. §6.2.22 becomes the policy it was an exception to — **no credential travels through an agent**; the section number is kept so §6.2.23 onward do not shift. 068 accepted the hazard with a warning in the tool's own description; a description is not a control. Datasource create, update and delete are UI/REST-only; every read and probe tool is unchanged. §4.1's scope-enforcement paragraph, §5.1's `listChanged` count, §6.1's list, §6.2.10's scope note, §8's admission-rule count and §14's omission entry all follow. |
 | 2026-09-08 | v1.24 | 094 new-root confirmation | §6.2.4 `pipelines_create` and §6.2.8 `templates_create` gain **`confirm_new_root`** (boolean) and REFUSE a name whose root segment has nothing under it yet — `pipeline.validation.new_root_requires_confirmation` / `template.validation.new_root_requires_confirmation` ([Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog)), with `details.root` and `details.existing_roots` from the same one-level query `pipelines_list`/`templates_list` `{prefix: ""}` serve. `test/` is exempt; an omitted `templates_create` id (generated under `test/`) is exempt. **Agent surface only**: REST, the UI and `pipelines_update` are unchanged, and no tool other than these two accepts the argument. 067/077 had already told an agent to list the roots and ask; this is the same sentence as a guarantee. No tool-count change. |
+| 2026-09-08 | v1.25 | 095 skill distribution | **Additive.** New **§15 The skill: how an agent learns this server** — one source (`.agents/skills/datapipelines/`), four deliveries: the `initialize` handshake (§5.1, now the operating core distilled, capped at 4096 bytes and living in a resource file), the MCP resource, the unauthenticated `GET /skill.md` route, and the Claude Code plugin. §7.1 gains two URI forms — `datapipelines://docs/skill` and `…/skill/{reference}` (§7.2.4) — read-scope Markdown served from the packaged copy; §7.3's enumeration order gains `docs` at the FRONT (the only constant-size kind). No tool surface change: the count stays **30**, and `references/tools.md` is now RENDERED from `McpToolCatalog` rather than typed, drift-tested against the committed file. |

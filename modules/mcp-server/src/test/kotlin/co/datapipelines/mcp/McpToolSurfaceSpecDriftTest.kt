@@ -82,14 +82,15 @@ class McpToolSurfaceSpecDriftTest {
         val parsed = forms.associateWith { McpResourceUri.parse(it.substituteExamples()) }
 
         assertAll(
-            { forms.size shouldBe 9 },
+            // 9 entity forms + the two `docs/skill` forms 095 added.
+            { forms.size shouldBe 11 },
             { parsed.filterValues { it == null }.keys shouldContainExactly emptyList() },
             {
                 parsed.values
                     .mapNotNull { it }
                     .map { it::class.simpleName }
                     .toSet()
-                    .size shouldBe 9
+                    .size shouldBe 11
             },
         )
     }
@@ -129,7 +130,8 @@ class McpToolSurfaceSpecDriftTest {
 
     /** §7.1 writes forms with `{id}` placeholders; substitute values of the right shape. */
     private fun String.substituteExamples(): String =
-        replace("{id}", McpFixtures.PIPELINE_ID.toString())
+        replace("{reference}", "templates")
+            .replace("{id}", McpFixtures.PIPELINE_ID.toString())
             .replace("{execution_id}", McpFixtures.EXECUTION_ID.toString())
             .replace("{version}", "2")
             .replace("{name}", "pg-prod")

@@ -146,6 +146,52 @@ class SiteDocsE2eTest {
         unreachable shouldBe emptyList()
     }
 
+    /**
+     * 095 §C3/§E — the raw skill route, at the wire and ANONYMOUS. It is the delivery for an
+     * agent that speaks no MCP, so the thing under test is precisely that no credential is
+     * needed: the two `permitAll` entries in `SecurityConfig` are what this pins.
+     */
+    @Test
+    fun `the skill and its references are served as markdown without a credential`() {
+        val skill =
+            given()
+                .port(port)
+                .`when`()
+                .get("/skill.md")
+
+        skill.statusCode shouldBe 200
+        skill.contentType shouldContain "text/markdown"
+        skill.asString() shouldContain "name: datapipelines"
+        skill.header("Cache-Control") shouldContain "public"
+
+        // Every reference the skill's own map advertises answers at its own URL — the sweep
+        // that makes the map trustworthy rather than a list of hopes.
+        val references = SKILL_REFERENCE.findAll(skill.asString()).map { it.groupValues[1] }.toSet()
+        check(references.size >= MIN_SKILL_REFERENCES) { "the skill advertised only ${references.size} references" }
+        val unreachable =
+            references.mapNotNull { name ->
+                val status =
+                    given()
+                        .port(port)
+                        .`when`()
+                        .get("/skill/$name.md")
+                        .statusCode
+                if (status == 200) null else "/skill/$name.md answered $status anonymously"
+            }
+        unreachable shouldBe emptyList()
+
+        // A mistyped reference is the §4.2 envelope, not an HTML error page: this route is
+        // curl'ed by agents, and an HTML body would be parsed as the manual.
+        val missing =
+            given()
+                .port(port)
+                .`when`()
+                .get("/skill/nope.md")
+        missing.statusCode shouldBe 404
+        missing.contentType shouldContain ContentType.JSON.toString().substringBefore(";")
+        missing.jsonPath().getString("error.details.reason") shouldBe "skill_reference_not_found"
+    }
+
     @Test
     fun `signed in, the dashboard and the operations manual render`() {
         seedUser()
@@ -214,6 +260,12 @@ class SiteDocsE2eTest {
 
         /** 14 registry pages + the docs index + ~25 packaged docs. */
         private const val MIN_SITEMAP_URLS = 35
+
+        /** The reference map in SKILL.md — `references/<name>.md`, one per reference (095). */
+        private val SKILL_REFERENCE = Regex("""references/([a-z0-9-]+)\.md""")
+
+        /** Non-vacuity floor for the reference sweep: the split landed nine. */
+        private const val MIN_SKILL_REFERENCES = 8
 
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
