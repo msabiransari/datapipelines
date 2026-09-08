@@ -1,5 +1,6 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.Template
@@ -125,7 +126,9 @@ class TemplateImportService(
             val resolved = resolvedAgainstExisting(workspaceId, id, draft)
             templates.appendReleasedVersion(workspaceId, id, resolved, actorId) ?: throw ApiErrors.templateNotFound(id)
         } else {
-            templates.create(workspaceId, draft, actorId)
+            // Not authoring (D55) — see PipelineImportService: promotion and the seeders land
+            // released content through this path.
+            templates.create(workspaceId, draft, actorId, CreateLifecycle.RELEASED)
         }
     }
 

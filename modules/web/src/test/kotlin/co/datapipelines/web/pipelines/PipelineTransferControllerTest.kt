@@ -77,7 +77,7 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), any()) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } returns record
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } returns record
 
         val response = controller.import(body)
         response.statusCode.value() shouldBe 201
@@ -146,7 +146,7 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } throws DuplicateKeyException("pipelines_pkey")
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } throws DuplicateKeyException("pipelines_pkey")
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
         shouldThrow<ApiException> { controller.import(withId) }.code shouldBe PipelineErrorCodes.Import.VERSION_CONFLICT
@@ -162,7 +162,7 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } throws DuplicateKeyException("pipelines_pkey")
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } throws DuplicateKeyException("pipelines_pkey")
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
         val error = shouldThrow<ApiException> { controller.import(withId) }

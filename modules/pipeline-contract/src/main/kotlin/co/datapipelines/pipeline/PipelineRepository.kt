@@ -321,11 +321,18 @@ class PipelineRepository(
             ) { rs, _ -> rs.getString("body_json") }
             .singleOrNull()
 
-    /** The body of the pipeline's current version — `GET /pipelines/{id}` (§14). */
+    /**
+     * The body of the pipeline's current RELEASED version, or null when the pipeline is unknown
+     * **or has never been released** (D55: creation lands a DRAFT, so `current_version` is null
+     * until a human releases). An authoring read wants [PipelineService.findWorking] instead.
+     */
     fun findLatestBody(
         workspaceId: UUID,
         pipelineId: UUID,
-    ): String? = findById(workspaceId, pipelineId)?.let { findVersionBody(workspaceId, it.id, it.currentVersion) }
+    ): String? =
+        findById(workspaceId, pipelineId)?.currentVersion?.let { version ->
+            findVersionBody(workspaceId, pipelineId, version)
+        }
 
     /** Version metadata, newest first — `GET /pipelines/{id}/versions` (§14; lifecycle fields since V6). */
     fun listVersions(
@@ -582,11 +589,12 @@ class PipelineRepository(
         pipeline: NewPipeline,
         bodyJson: String,
         createdBy: UUID,
+        lifecycle: CreateLifecycle,
     ): PipelineRecord =
         mappingDuplicateName(pipeline.name) {
             jdbc
                 .query(
-                    INSERT_PIPELINE_SQL,
+                    if (lifecycle == CreateLifecycle.DRAFT) INSERT_PIPELINE_DRAFT_SQL else INSERT_PIPELINE_SQL,
                     mapOf(
                         "id" to pipeline.id,
                         "name" to pipeline.name,
@@ -1020,6 +1028,40 @@ class PipelineRepository(
             "SELECT $DETAIL_COLUMNS FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id" +
                 " WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE"
 
+        /**
+         * versioning §5.1 — the DRAFT-first create (D55, 099): version 1 lands DRAFT and
+         * `current_version` stays NULL, because nothing is released until a human releases it.
+         *
+         * `updated_by`/`updated_at` are stamped exactly as a draft WRITE stamps them (V6: they
+         * are the last draft writer, and they power the 409's `details`), and `released_at` /
+         * `released_by` stay NULL — a draft has not been released by anyone.
+         *
+         * [INSERT_PIPELINE_SQL] is the other half of the pair and is NOT dead: promotion and
+         * seed imports land RELEASED through it (§9.2, "the not-an-agent path").
+         */
+        val INSERT_PIPELINE_DRAFT_SQL =
+            """
+            WITH new_pipeline AS (
+                INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version)
+                VALUES (:id, :name, :displayName, :description, :ownerId, :workspaceId, NULL)
+                RETURNING $COLUMNS
+            ), new_version AS (
+                INSERT INTO pipeline_versions
+                    (pipeline_id, version, body_json, body_hash, status, created_by, updated_by, updated_at)
+                SELECT id, 1, CAST(:bodyJson AS jsonb), $BODY_HASH_EXPR, 'DRAFT', :createdBy, :createdBy, NOW()
+                  FROM new_pipeline
+                RETURNING pipeline_id
+            )
+            SELECT p.id, p.name, p.display_name, p.description, p.owner_id,
+                   p.current_version, p.is_deleted, p.created_at, p.updated_at
+              FROM new_pipeline p
+              JOIN new_version v ON v.pipeline_id = p.id
+            """.trimIndent()
+
+        /**
+         * versioning §9.2 — the RELEASED create: version 1 lands RELEASED and executable, for
+         * the paths that are not authoring (promotion import, the seeders' import).
+         */
         val INSERT_PIPELINE_SQL =
             """
             WITH new_pipeline AS (
@@ -1268,7 +1310,7 @@ class PipelineRepository(
             """
             WITH bumped AS (
                 UPDATE pipelines
-                   SET current_version = current_version + 1,
+                   SET current_version = COALESCE(current_version, 0) + 1,
                        name = :name,
                        display_name = :displayName,
                        description = :description,
@@ -1325,10 +1367,12 @@ class PipelineRepository(
                 RETURNING $DETAIL_COLS_PLAIN
             ), bumped AS (
                 UPDATE pipelines
-                   SET current_version = GREATEST(current_version, :version),
-                       name = CASE WHEN :version > current_version THEN :name ELSE name END,
-                       display_name = CASE WHEN :version > current_version THEN :displayName ELSE display_name END,
-                       description = CASE WHEN :version > current_version THEN :description ELSE description END,
+                   SET current_version = GREATEST(COALESCE(current_version, 0), :version),
+                       name = CASE WHEN :version > COALESCE(current_version, 0) THEN :name ELSE name END,
+                       display_name =
+                           CASE WHEN :version > COALESCE(current_version, 0) THEN :displayName ELSE display_name END,
+                       description =
+                           CASE WHEN :version > COALESCE(current_version, 0) THEN :description ELSE description END,
                        updated_at = NOW()
                  WHERE id = :pipelineId AND workspace_id = :workspaceId AND is_deleted = FALSE
                    AND EXISTS (SELECT 1 FROM ins)
@@ -1345,7 +1389,9 @@ class PipelineRepository(
                     displayName = rs.getString("display_name"),
                     description = rs.getString("description"),
                     ownerId = rs.getObject("owner_id", UUID::class.java),
-                    currentVersion = rs.getInt("current_version"),
+                    // NULL since V18 = nothing released yet (D55); a sentinel Int would make
+                    // every reader responsible for knowing which number means "no release".
+                    currentVersion = rs.getInt("current_version").takeUnless { rs.wasNull() },
                     isDeleted = rs.getBoolean("is_deleted"),
                     // TIMESTAMPTZ → OffsetDateTime is exact regardless of the JVM zone;
                     // getTimestamp() without a Calendar reads it in the default zone
@@ -1382,7 +1428,7 @@ class PipelineRepository(
                             displayName = rs.getString("b_display_name"),
                             description = rs.getString("b_description"),
                             ownerId = rs.getObject("b_owner_id", UUID::class.java),
-                            currentVersion = rs.getInt("b_current_version"),
+                            currentVersion = rs.getInt("b_current_version").takeUnless { rs.wasNull() },
                             isDeleted = rs.getBoolean("b_is_deleted"),
                             createdAt = rs.getObject("b_created_at", OffsetDateTime::class.java).toInstant(),
                             updatedAt = rs.getObject("b_updated_at", OffsetDateTime::class.java).toInstant(),

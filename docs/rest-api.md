@@ -216,6 +216,16 @@ Response: `201 Created`
 
 Server assigns: `id`, `version` (starts at `1`), `owner` (from auth), `created_at`, `updated_at`.
 
+**Version 1 lands as a DRAFT** (versioning §3.2, ruling D55, 2026-09-08). The response carries
+`status: "DRAFT"`, `version: 1`, that version's `body_hash` (the precondition token for the next
+`PUT`), `current_version: null` — nothing is released yet — and the `draft` pointer, exactly as a
+`PUT` response does. Releasing it is `POST /pipelines/{id}/release` (§5.10) like any other draft,
+and it is a human action (D4). The pipeline is executable immediately regardless: `execute` with no
+`version` runs the working version (§6.1).
+
+The two create paths that are NOT authoring keep landing RELEASED: `POST /pipelines/import` (§5.8,
+promotion) and the seeders that ride it. `POST /templates` (§8.1) mirrors this section exactly.
+
 ### 5.2 Get pipeline (working version)
 
 ```
@@ -328,6 +338,11 @@ Filters:
 - `owner` — limit to pipelines owned by user.
 - `datasource` — limit to pipelines using this datasource name.
 - `q` — full-text search on name, display_name, description. Since names are paths, `q` matches across the **full path**: `q=finance/pay` finds `finance/payments/daily_settlement`.
+Each row carries `version` — the **working** version, the draft's number when the pipeline has a
+draft and the latest released otherwise — and `status` (`DRAFT` or `RELEASED`), because since D55 a
+freshly authored pipeline has no released version to name (both are `null` for a pipeline whose sole
+draft was discarded).
+
 - `prefix` — browse ONE level of the folder tree instead of listing flat (067; same contract as `pipelines_list {prefix}`, [MCP §6.2.1](mcp-server.md)). Present-but-empty (`?prefix=`) is the ROOT. The `data` payload becomes `{prefix, folders, pipelines, total, has_more}`: `folders` lists the prefix's direct sub-folders as `{path, segment, pipeline_count}` (subtree counts), `pipelines` its direct leaves as the same metadata rows as the flat list, `total`/`has_more` page the leaves via `offset`/`limit`. An unknown or illegal prefix answers an EMPTY level with `200` — never a `400`, never a query error. `owner`/`datasource`/`q` are ignored while `prefix` is present: browse and search are different presentations.
 
 ### 5.8 Import pipeline
@@ -382,6 +397,11 @@ Returns a bundle:
 
 `include_templates=true` is the default. Set `false` to export the pipeline only.
 
+**Released only.** An export is what a promotion import consumes, and §9.2's import lands RELEASED
+content, so a pipeline with no released version (D55: every freshly created one) is refused with
+`409 pipeline.promotion.not_released` — "release it from the UI first" — rather than exporting a
+draft or 404-ing on an absent body.
+
 The exported pipeline object carries its lifecycle fields (`version`, `status`,
 `body_hash`, `released_at`) so a preserved-version import on the target can verify and
 re-stamp them; bundled template versions carry their `version`, `status` and `body_hash`.
@@ -400,7 +420,7 @@ Accept: text/event-stream
 Idempotency-Key: ...   (strongly recommended)
 
 {
-  "version": 3,                    // optional; defaults to latest
+  "version": 3,                    // optional; defaults to the WORKING version (§6.1.1)
   "parameters": {                  // required values per pipeline.parameters schema
     "start_date": "2026-01-01",
     "end_date": "2026-03-31",
@@ -408,6 +428,22 @@ Idempotency-Key: ...   (strongly recommended)
   }
 }
 ```
+
+#### 6.1.1 The default version
+
+With no `version` in the body, the execution runs the **working version** (versioning §7.2, ruling
+D56): the DRAFT when one exists, else the latest RELEASED version — "always run the last version".
+On a development server that may be a draft (drafts have been executable since 039); where
+`authoring-enabled=false` no draft can exist at all, so it is always a release
+([environments.md](environments.md)). An explicit `version` is exact and is never clamped: an
+unknown number is `404 pipeline.validation.pipeline_version_not_found`, not a silent run of the
+latest.
+
+The execution record pins the version that actually ran, and every executions surface marks a draft
+run — REST `draft_run` (§10.2), and a `DRAFT` label on the executions list and detail screens
+([ui-screens §4.8](ui-screens.md)). The one pipeline that cannot be run at all is one with no
+version, reachable only by discarding the sole draft of a never-released pipeline (versioning §3.4);
+it answers the same `pipeline_version_not_found`.
 
 Response: `200 OK` with `Content-Type: text/event-stream`.
 

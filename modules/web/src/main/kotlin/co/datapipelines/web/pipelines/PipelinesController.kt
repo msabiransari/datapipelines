@@ -36,8 +36,10 @@ import java.util.UUID
  *
  * `PUT` always writes the DRAFT branch — copy-on-write from the released version on the first
  * write (§5.1), in-place overwrite after (§5.2) — and carries the hash precondition in the
- * `If-Match` header (§4.2). It never appends a released version. `POST` still lands v1
- * RELEASED and immediately executable (creation is not modification).
+ * `If-Match` header (§4.2). It never appends a released version. `POST` lands v1 as a **DRAFT**
+ * with `current_version` null (D55): creation is authoring, and DRAFT → RELEASED is a human step
+ * without exception. It is executable immediately all the same — `execute` with no version runs
+ * the working version.
  *
  * Bodies are accepted as raw JSON (`String`) and bound by the pipeline deserializer rather than by
  * a Spring DTO: the pipeline body is the frozen pipeline-contract shape, and its deserializer is
@@ -57,7 +59,11 @@ import java.util.UUID
 class PipelinesController(
     private val pipelines: PipelineService,
 ) {
-    /** §5.1 — create; the server assigns id, version 1 (RELEASED), owner and timestamps. */
+    /**
+     * §5.1 — create; the server assigns id, version 1 (**DRAFT**, D55), owner and timestamps.
+     * `current_version` comes back null and the `draft` pointer is set: releasing it is a human
+     * action (`POST /pipelines/{id}/release`, the editor's Release button).
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -66,7 +72,7 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val saved = pipelines.create(principal.requireWorkspace().id, body, principal.userId)
-        return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version))
+        return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version, saved.draft))
     }
 
     /**
@@ -207,7 +213,10 @@ class PipelinesController(
         val size = Pagination.clampLimit(limit)
         val workspaceId = currentPrincipal().requireWorkspace().id
         val filtered = pipelines.list(workspaceId, ownerId = owner, datasourceName = datasource, query = q)
-        val items = filtered.drop(page).take(size).map(PipelineResponses::listEntry)
+        val shown = filtered.drop(page).take(size)
+        // One batched draft lookup for the page, so each row can state its working version (D55).
+        val drafts = pipelines.findDrafts(workspaceId, shown.map { it.id })
+        val items = shown.map { PipelineResponses.listEntry(it, drafts[it.id]) }
         val pagination = Pagination.of(page, size, filtered.size.toLong(), items.size)
         return ApiResponse.of(PagedData(items, pagination))
     }
@@ -235,7 +244,10 @@ class PipelinesController(
             mapOf(
                 "prefix" to prefix,
                 "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
-                "pipelines" to level.pipelines.map(PipelineResponses::listEntry),
+                "pipelines" to
+                    pipelines.findDrafts(workspaceId, level.pipelines.map { it.id }).let { drafts ->
+                        level.pipelines.map { PipelineResponses.listEntry(it, drafts[it.id]) }
+                    },
                 "total" to level.total,
                 "has_more" to level.hasMore,
             ),

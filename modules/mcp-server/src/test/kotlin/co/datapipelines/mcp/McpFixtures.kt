@@ -98,7 +98,8 @@ object McpFixtures {
         displayName: String = "Monthly Revenue",
         description: String = "Revenue by customer.",
         owner: UUID = USER,
-        version: Int = 1,
+        /** Null = never released (D55) — what a freshly created pipeline's index row carries. */
+        version: Int? = 1,
     ): PipelineRecord =
         PipelineRecord(
             id = id,

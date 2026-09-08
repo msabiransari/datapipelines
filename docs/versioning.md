@@ -43,6 +43,13 @@ Ratified 2026-08-31, operator + model session:
 | D7 | **No hotfixes.** A bug fix is a new release in the dev environment, promoted like any other. Receiver environments never author. | Local authoring on a receiver destroys number alignment (D5); the process rule keeps sequences globally coherent. |
 | D8 | Promotion is a **separate, UI-driven use case** against a single configured higher environment. | Not an agent action; not automatic; not multi-hop. |
 
+Ratified 2026-09-08, operator ruling (implemented 099):
+
+| # | Decision | Rationale |
+|---|---|---|
+| D55 | **Creation lands version 1 DRAFT**, for pipelines and templates alike, and `current_version` is NULL until a human releases. D4 holds without exception; only the non-authoring create paths (promotion import, the seeders that ride it) land RELEASED. | "Contract says, pipeline will always be DRAFT and from DRAFT to RELEASED is a human step." §3.2's old RELEASED-on-create rule was an unratified assumption whose only justification — executability — has been false since 039 made drafts executable. |
+| D56 | **Execute with no version runs the LAST version — the working version:** the draft when one exists, else the latest release. On a development server that may be a draft; on a hardened (non-authoring) server no draft can exist, so it is always a release by construction. | "We always run the LAST version of the pipeline if no version is specified. On Dev, last version can be RELEASED or even DRAFT. On servers which are not development, we will always have RELEASED pipelines. No DRAFT at all." |
+
 ---
 
 ## 3. Version Lifecycle
@@ -88,9 +95,26 @@ Mechanically, `PUT /pipelines/{id}` resolves the current state of the pipeline a
 exactly one of two branches (§5.1/§5.2). There is no third branch: a PUT never appends a
 released version, and a PUT never touches a RELEASED or DISCARDED row.
 
-**Creation is not a modification** — there is nothing to copy from. `POST /pipelines`
-(still) lands version 1 directly as RELEASED, so an MCP-authored pipeline is executable the
-moment it is created. Every subsequent change is draft-first.
+**Creation is draft-first too, without exception (D55).** There is nothing to copy from, so
+there is no copy-on-write step — but `POST /pipelines`, `pipelines_create`, `POST /templates`
+and `templates_create` all land version 1 as **DRAFT**, and the index row's `current_version`
+stays NULL until a human releases it. DRAFT → RELEASED is a human step; D4 holds with no
+exception, on creation as on every subsequent change.
+
+The pipeline is executable the moment it is created all the same: drafts have been executable
+since 039 (§8), and execute with no version runs the **working** version (§7.2). That is what
+retired the previous rule. Until 2026-09-08 this section said creation "lands version 1 directly
+as RELEASED, so an MCP-authored pipeline is executable the moment it is created" — an assumption
+written on 2026-08-31, never ratified, whose only justification stopped being true when drafts
+became executable. Its cost was real: an agent that created `demo/top_carrier_by_borough`
+followed it to the letter and produced a RELEASED pipeline no human had looked at.
+
+The two create paths that are **not** authoring keep landing RELEASED, and that is the whole
+exception: a promotion import (§9.2) and the seeders that ride the same import services
+(`ExampleContentSeeder`, `LakeBootstrapSeeder`). The content they write was reviewed and released
+where it came from, and the system actor is not an agent asking for a review. The distinction is
+a required argument on both repositories' `create` (`CreateLifecycle`), so a new create path has
+to say which of the two it is and a missed one is a compile error.
 
 ### 3.3 One draft per entity
 
@@ -113,8 +137,21 @@ must re-read and rebase.
   allocation reads the MAX rather than the pointer. The number is stable across all
   in-place writes to that draft.
 - `pipelines.current_version` keeps its existing meaning — **the latest RELEASED version**.
-  It does not move while a draft exists. Every existing reader (execute-default, editor
-  load, datasource joins, MCP get) keeps its semantics unchanged.
+  It does not move while a draft exists. Since D55 it is also **NULL until the first release**
+  (`V18`), because a freshly created pipeline has a version 1 and no release at all; the column
+  is nullable, has no default, and every writer names it. A `v.version = p.current_version`
+  join answers "no released version" with zero rows, which is what the NULL produces, so every
+  released-only reader (promotion inventory and candidates, published endpoints, the export
+  bundle, the datasource joins) keeps its meaning unchanged. The two readers that did
+  ARITHMETIC on the pointer — the version-less import's `current_version + 1` and the
+  preserved-version import's `GREATEST(current_version, :version)` — read it through
+  `COALESCE(…, 0)`, so importing onto a never-released pipeline allocates version 1.
+- What CHANGED is the **execute default and the "which version is this?" reads**: they resolve
+  the **working version** (§7.2), not the pointer. `PipelineService.workingVersion` is the one
+  place that rule lives.
+- A pipeline can have **no version at all**, and there is exactly one way there: discard the
+  sole draft of a never-released pipeline (the hard-delete branch below). Execute, the editor
+  load and `pipelines_get` then answer their ordinary version-not-found refusal.
 - **Discarding a never-executed draft hard-deletes the row; the number returns to the pool.**
 - **Discarding an executed draft is impossible** — the `pipeline_executions` composite FK
   blocks the delete. (The constraint is `fk_executions_pipeline_version` in
@@ -440,11 +477,15 @@ Additive; existing routes keep their shapes. Exact wire contracts land in
 
 | Route | Change |
 |---|---|
-| `POST /api/v1/pipelines` | Unchanged: creates v1 **RELEASED** (§3.2). Response gains `status`/`body_hash`/`current_version`. |
+| `POST /api/v1/pipelines` | Creates v1 **DRAFT** (§3.2, D55). Response carries `status: "DRAFT"`, `version: 1`, `body_hash`, `current_version: null` and the `draft` pointer. Releasing it is `POST …/release` like any other draft. |
 | `PUT /api/v1/pipelines/{id}` | **Semantics change:** always writes the draft branch (§5.1 or §5.2). Never appends a released version. Requires the hash precondition. Response carries the version's `status` and `body_hash`. A body identical to the released one is a **no-op** (§5.1): no draft, no burned number, and the response reports the current RELEASED state with no draft pointer. |
 | `POST /api/v1/pipelines/{id}/release` | New. Hash-guarded (§5.3). UI-only in practice; no MCP tool is exposed for it (D4). |
 | `POST /api/v1/pipelines/{id}/draft/discard` | New. Hash-guarded (§5.4). `204`, both outcomes transparent. |
+| `POST /api/v1/pipelines/{id}/execute` | With no `version`, runs the **working version** (§7.2, D56) — the draft when one exists, else the latest release. An explicit `version` is still exact and never clamped. The execution record pins the version that ran, and the executions screen shows `DRAFT` beside a draft run. |
 | `GET /api/v1/pipelines/{id}` | Read shape gains the version's `status` and `body_hash`, `current_version`, and the `draft` pointer when one exists. **Since 039 the default body is the working version (§7.1): the DRAFT when one exists, else the current released version.** |
+| `GET /api/v1/pipelines` (and `?prefix=`) | Each row's `version` is the **working** version and a new `status` field says `DRAFT` or `RELEASED` — since D55 a listing that reported `current_version` alone would show nothing for every freshly authored pipeline. |
+| `GET /api/v1/pipelines/{id}/export` | A pipeline with no RELEASED version is refused with `pipeline.promotion.not_released` (409, "release it from the UI first"): an export feeds a promotion import, which lands RELEASED content. |
+| `POST /api/v1/endpoints` | Publishing over a pipeline whose `current_version` is null is refused with `endpoint.pipeline_not_released` — the code and the check already existed; since D55 it is an ordinary state rather than an unreachable one. |
 | Templates (`/api/v1/templates/...`) | Mirror of all the above (release = §8.9, discard = §8.10 in rest-api.md) — addressed by name in query/body since rest-api v2.0 (§9.6: the name never travels in a path segment). |
 
 ### 7.1 Authoring reads return the working version (039)
@@ -467,7 +508,8 @@ Three pins:
   section.
 - **Explicit reads still win.** An explicit `version` argument (or versioned URL) returns
   exactly that version; this changes only the DEFAULT, and only for the authoring
-  surfaces. Execution keeps reading `current_version`.
+  surfaces. ~~Execution keeps reading `current_version`.~~ **Superseded by D56 (§7.2):
+  execution's default is the working version too.**
 - The no-op rule (§5.1) is what makes this safe to act on: a draft exists **iff** the
   content genuinely differs, so "the draft is the working version" is never a phantom an
   unchanged save left behind.
@@ -487,6 +529,42 @@ drafts on existing pipelines. An agent iterating produces **one** draft row that
 overwriting — the pile the old PUT-per-save semantics created is gone. A human releases
 from the UI when satisfied (D4). The pipelines list gains a "drafts pending release" badge
 so unreviewed agent work is visible.
+
+### 7.2 Execute with no version runs the working version (D56, 099)
+
+**The default everywhere is the working version: the draft when one exists, else the latest
+release.** It is the rule §7.1 already applied to authoring reads, now applied to running as
+well, and it is what "we always run the LAST version" means:
+
+| Surface | Default with no `version` |
+|---|---|
+| `POST /api/v1/pipelines/{id}/execute` | working version |
+| `pipelines_execute` (MCP) | working version |
+| `datapipelines://pipelines/{id}` (MCP resource, no `/versions/{n}`) | working version |
+| `pipelines_get`, `GET /pipelines/{id}`, the editor | working version (§7.1, unchanged) |
+| A published endpoint (`GET /api/x/…`) | **released only** — a draft is never served (§5.1 of published-endpoints); unchanged |
+| Promotion candidates and the promotion push | **released only** (D6); unchanged |
+
+One place resolves it: `PipelineService.workingVersion(workspaceId, record)`. It was three
+inline copies (the REST execute controller, `PipelineExecuteTool`, `pipelines_get`) before 099,
+which is exactly the drift the D6 refactor removed from the LOOKUP and left in the DEFAULT.
+
+**Posture.** Under `authoring-enabled=false` (the hardened default, configuration.md §244) no
+draft can be created at all — create, update, release and discard are all refused with
+`pipeline.authoring.disabled` (§5.5) — so on a non-development server the working version is a
+RELEASED version by construction, and no configuration says otherwise. That is the ruling's
+second half ("on servers which are not development, we will always have RELEASED pipelines, no
+DRAFT at all") held up by a mechanism rather than by a promise.
+
+Two consequences worth stating:
+
+- **A draft run is marked.** The execution record already pins the version that ran; the
+  executions list and detail render `DRAFT` beside a draft run (§8, ui-screens §4.8) so a
+  reader is never guessing whether a result came from reviewed content.
+- **There is one "nothing to run" case**, and it is not a fresh pipeline: creation always writes
+  version 1, so the only way to a version-less pipeline is discarding the sole draft of a
+  never-released one (§3.4). Execute answers `pipeline.validation.pipeline_version_not_found`
+  there, the same refusal an out-of-range explicit version gets.
 
 ---
 

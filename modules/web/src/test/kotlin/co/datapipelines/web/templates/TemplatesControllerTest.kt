@@ -99,7 +99,7 @@ class TemplatesControllerTest {
     fun `create validates and stores, returning version 1`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId) } returns template()
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns template()
 
         val stored = controller.create(createBody).data
         stored.id shouldBe "test/fetch_orders.sql"
@@ -387,7 +387,7 @@ class TemplatesControllerTest {
     fun `create accepts an html payload without a dialect and echoes the type`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId) } returns
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns
             template().copy(type = TemplateType.HTML, dialect = null)
 
         val stored =
@@ -477,7 +477,7 @@ class TemplatesControllerTest {
         every { repository.findLatest(any(), "test/fetch_orders.sql") } returns template(2)
         every { repository.appendReleasedVersion(any(), "test/fetch_orders.sql", any(), userId) } returns template(2)
         every { repository.existsId(any(), "new.sql") } returns false
-        every { repository.create(any(), any(), userId) } returns template().copy(id = "new.sql")
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns template().copy(id = "new.sql")
 
         val body =
             """{"templates":[

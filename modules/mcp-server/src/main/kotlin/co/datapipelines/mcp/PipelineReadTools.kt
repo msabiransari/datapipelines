@@ -4,6 +4,8 @@ import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineService
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
@@ -51,7 +53,9 @@ class PipelinesListTool(
             name = "pipelines_list",
             description =
                 "List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns " +
-                    "metadata (id, name, display_name, description, version, updated_at) — not the full body. Use " +
+                    "metadata (id, name, display_name, description, version, status, updated_at) — version is the " +
+                    "WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. " +
+                    "Not the full body. Use " +
                     "pipelines_get for the body; pipelines in other workspaces are absent from this listing and " +
                     "resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): " +
                     "pass prefix to BROWSE one level of that tree — prefix:\"\" lists the roots, prefix:\"finance\" lists " +
@@ -90,8 +94,8 @@ class PipelinesListTool(
                 query = args.string("q"),
             ).asSequence()
             .take(limit)
-            .map { it.toMetadata() }
             .toList()
+            .withLifecycle(workspaceId)
     }
 
     /**
@@ -113,7 +117,7 @@ class PipelinesListTool(
         return mapOf(
             "prefix" to prefix.orEmpty(),
             "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
-            "pipelines" to level.pipelines.map { it.toMetadata() },
+            "pipelines" to level.pipelines.withLifecycle(workspaceId),
             "total" to level.total,
             "has_more" to level.hasMore,
         )
@@ -128,13 +132,36 @@ class PipelinesListTool(
             "has_more" to false,
         )
 
-    private fun PipelineRecord.toMetadata(): Map<String, Any?> =
+    /**
+     * The listing rows, each with the version it actually IS and that version's status (D55).
+     *
+     * `version` is the WORKING version — the draft when one exists, else the latest release —
+     * because a listing answers "what are these pipelines", and since creation lands a DRAFT the
+     * latest RELEASED version of a freshly authored pipeline is nothing at all. `status` is the
+     * companion an agent needs to tell `v1 DRAFT` (yours, unreviewed, runnable) from `v1
+     * RELEASED`; without it `version: 1` would read the same in both worlds.
+     *
+     * The drafts come from ONE batched query for the whole page, not one per row.
+     */
+    private fun List<PipelineRecord>.withLifecycle(workspaceId: java.util.UUID): List<Map<String, Any?>> {
+        val drafts = pipelines.findDrafts(workspaceId, map { it.id })
+        return map { it.toMetadata(drafts[it.id]) }
+    }
+
+    private fun PipelineRecord.toMetadata(draft: PipelineVersionDetail?): Map<String, Any?> =
         mapOf(
             "id" to id.toString(),
             "name" to name,
             "display_name" to displayName,
             "description" to description,
-            "version" to currentVersion,
+            "version" to (draft?.version ?: currentVersion),
+            "status" to
+                when {
+                    draft != null -> PipelineVersionStatus.DRAFT.name
+                    currentVersion != null -> PipelineVersionStatus.RELEASED.name
+                    // Nothing to run: the pipeline's only draft was discarded (§5.4).
+                    else -> null
+                },
             "owner_id" to ownerId.toString(),
             "updated_at" to updatedAt,
         )
@@ -206,7 +233,10 @@ class PipelinesGetTool(
         // current_version. Derived, never stored — current_version keeps meaning
         // "latest released" everywhere else.
         val explicit = args.version()
-        val version = explicit ?: pipelines.findDraft(workspaceId, id)?.version ?: record.currentVersion
+        val version =
+            explicit
+                ?: pipelines.workingVersion(workspaceId, record)
+                ?: throw McpNotFound.pipelineVersion(id, 1)
         return body(workspaceId, record, version)
     }
 

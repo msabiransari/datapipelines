@@ -1,6 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.pipeline.ContextKeys
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.Pipeline
@@ -156,6 +157,10 @@ class PipelineImportService(
                         NewPipeline.from(pipeline, ownerId = actorId, id = requestedId ?: UUID.randomUUID()),
                         canonical,
                         actorId,
+                        // Not authoring (D55): an import carries content that was released where it
+                        // came from, and the seeders ride this very path — the system actor is not
+                        // an agent asking for a review, so version 1 lands RELEASED.
+                        CreateLifecycle.RELEASED,
                     )
                 } catch (e: DuplicateKeyException) {
                     throw idAlreadyTaken(requestedId, e)

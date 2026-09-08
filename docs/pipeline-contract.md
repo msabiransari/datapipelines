@@ -1057,8 +1057,8 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 
 | Operation | Method & Path | Notes |
 |---|---|---|
-| Create pipeline | `POST /pipelines` | Body: pipeline JSON without `id`, `version`, `created_at`, `updated_at` (server assigns). |
-| Get pipeline (latest version) | `GET /pipelines/{id}` | Returns highest version. |
+| Create pipeline | `POST /pipelines` | Body: pipeline JSON without `id`, `version`, `created_at`, `updated_at` (server assigns). Version 1 lands **DRAFT** and `current_version` stays null — releasing is a human action ([Versioning §3.2](versioning.md#32-the-one-write-rule-copy-on-write), D55). |
+| Get pipeline (working version) | `GET /pipelines/{id}` | Returns the working version: the DRAFT when one exists, else the latest release. |
 | Get pipeline (specific version) | `GET /pipelines/{id}/versions/{version}` | |
 | List pipeline versions | `GET /pipelines/{id}/versions` | Returns version metadata. |
 | Update pipeline (writes the draft) | `PUT /pipelines/{id}` | Body: full pipeline JSON. Copy-on-write: first change after a release creates a DRAFT of the next version; further changes overwrite the draft in place. Hash-preconditioned. Never appends a released version. See [Versioning](versioning.md). |
@@ -1066,9 +1066,9 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 | Discard draft | `POST /pipelines/{id}/draft/discard` | Deletes the DRAFT (or flips it to DISCARDED if an execution references it). |
 | Delete pipeline | `DELETE /pipelines/{id}` | Soft delete. Executions of deleted pipelines fail with `pipeline.execution.not_found`. |
 | List pipelines | `GET /pipelines` | Filterable by owner, datasource, etc. |
-| Execute pipeline | `POST /pipelines/{id}/execute` | Body: `{parameters: {...}}`. Returns SSE stream. See [REST API spec](rest-api.md). |
+| Execute pipeline | `POST /pipelines/{id}/execute` | Body: `{parameters: {...}}`, optional `version`. With no `version` it runs the **working version** — the draft when one exists, else the latest release ([Versioning §7.2](versioning.md#72-execute-with-no-version-runs-the-working-version-d56-099), D56). Returns SSE stream. See [REST API spec](rest-api.md). |
 | Import pipeline | `POST /pipelines/import` | Body: full pipeline JSON (possibly with id). A carried `version` is honored (preserved-version import, [Versioning §9.2](versioning.md#92-import-with-preserved-versions)); absent, the next local version is allocated. |
-| Export pipeline | `GET /pipelines/{id}/export` | Returns pipeline JSON + manifest of referenced templates. |
+| Export pipeline | `GET /pipelines/{id}/export` | Returns pipeline JSON + manifest of referenced templates. Refused with `409 pipeline.promotion.not_released` when nothing has been released — an export feeds an import that lands RELEASED. |
 
 ---
 

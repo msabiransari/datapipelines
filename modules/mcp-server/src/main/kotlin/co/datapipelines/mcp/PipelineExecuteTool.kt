@@ -118,7 +118,7 @@ class PipelineExecuteTool(
                   "required": ["id", "parameters"],
                   "properties": {
                     "id": {"type": "string", "format": "uuid"},
-                    "version": {"type": "integer"},
+                    "version": {"type": "integer", "description": "Specific version to run. Defaults to the WORKING version: the draft when one exists, else the latest released. Never clamped — an unknown version is refused, not rounded to the latest."},
                     "parameters": {
                       "type": "object",
                       "description": "$PARAMETERS_DESC",
@@ -137,7 +137,12 @@ class PipelineExecuteTool(
         val id = args.requiredUuid("id")
         val record = pipelines.findRecord(workspace.id, id) ?: throw McpNotFound.pipeline(id)
         // B1: never clamped — `{version: 0}` is refused, not silently run as version 1.
-        val version = args.version() ?: record.currentVersion
+        // D55: the default is the WORKING version (the draft when one exists, else the latest
+        // release), resolved by the aggregate — never `current_version` directly.
+        val version =
+            args.version()
+                ?: pipelines.workingVersion(workspace.id, record)
+                ?: throw McpNotFound.pipelineVersion(id, 1)
         // D6: the version resolution is the aggregate's, shared with the REST execute path.
         val executable =
             pipelines.findExecutable(workspace.id, record, version) ?: throw McpNotFound.pipelineVersion(id, version)

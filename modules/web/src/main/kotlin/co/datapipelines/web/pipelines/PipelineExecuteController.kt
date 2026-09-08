@@ -64,7 +64,13 @@ class PipelineExecuteController(
         val record = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
 
         val tree = parseBody(body)
-        val version = versionOf(tree, record.currentVersion)
+        // D56: with no `version` in the body, run the WORKING version — the draft when one
+        // exists, else the latest release. Resolved by the aggregate (PipelineService), the same
+        // call `pipelines_execute` makes; null only for a pipeline whose sole draft was
+        // discarded, which is the ordinary version-not-found refusal.
+        val version =
+            versionOf(tree, pipelines.workingVersion(workspaceId, record))
+                ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), 1)
         val parametersNode = parametersOf(tree)
 
         // D6: the version resolution is the aggregate's, shared with `pipelines_execute`.
@@ -102,12 +108,19 @@ class PipelineExecuteController(
             )
     }
 
-    /** Optional `version` (§6.1); must be a positive integer — never silently clamped to latest. */
+    /**
+     * Optional `version` (§6.1); must be a positive integer — never silently clamped to latest.
+     *
+     * [working] is the default and may be null: a pipeline with no version at all (§3.4's
+     * discarded-sole-draft case). An EXPLICIT version is still validated and returned even then —
+     * the refusal a caller gets must be about the version they asked for, not about the default
+     * they did not use.
+     */
     private fun versionOf(
         tree: ObjectNode,
-        current: Int,
-    ): Int {
-        val node = tree.get("version") ?: return current
+        working: Int?,
+    ): Int? {
+        val node = tree.get("version") ?: return working
         if (!node.isInt || node.asInt() < 1) {
             throw ApiException(
                 PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,

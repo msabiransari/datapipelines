@@ -3,11 +3,13 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineDeserializer
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.api.ApiErrors
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
 import com.fasterxml.jackson.databind.JsonNode
@@ -70,6 +72,18 @@ class PipelineTransferController(
         return ResponseEntity.status(status).body(ApiResponse.of(PipelineResponses.full(imported.record, imported.canonical)))
     }
 
+    /**
+     * §5.9 / §10.3 — the pipeline exists but has never been released, so there is nothing an
+     * export could hand a target: a promotion import lands RELEASED content, and a draft is the
+     * one thing that must not cross environments (D4/D7).
+     */
+    private fun notReleasedForExport(name: String) =
+        ApiException(
+            PipelineErrorCodes.Versioning.PROMOTION_NOT_RELEASED,
+            "Pipeline '$name' has no released version to export. Release it from the UI first.",
+            mapOf("pipeline" to name),
+        )
+
     /** §5.9 — export bundle: pipeline, referenced template versions, manifest. */
     @Suppress("ThrowsCount") // the misses are the same catalogued 404 for different absent reads
     @GetMapping("/{id}/export")
@@ -80,8 +94,13 @@ class PipelineTransferController(
     ): ApiResponse<Map<String, Any?>> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        // Released only, and deliberately: an export bundle is what a promotion import consumes,
+        // and §9.2 lands it RELEASED on the target. Since D55 a never-released pipeline is an
+        // ordinary state rather than an impossible one, so it gets a NAMED refusal instead of the
+        // 404 an absent body would have produced.
+        val exported = record.currentVersion ?: throw notReleasedForExport(record.name)
         val body =
-            pipelines.findVersionBody(workspaceId, id, record.currentVersion)
+            pipelines.findVersionBody(workspaceId, id, exported)
                 ?: throw ApiErrors.pipelineNotFound(id.toString())
         val pipeline = deserializer.readOrThrow(body)
         // The lifecycle fields an import honors (versioning §9.2): the version's number,
@@ -99,7 +118,7 @@ class PipelineTransferController(
                 "manifest" to
                     mapOf(
                         "pipeline_id" to record.id.toString(),
-                        "pipeline_version" to record.currentVersion,
+                        "pipeline_version" to exported,
                         "pipeline_body_hash" to version.bodyHash,
                         "template_count" to bundled.size,
                         "exported_at" to Instant.now().toString(),

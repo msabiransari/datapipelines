@@ -34,7 +34,10 @@
               class="tplx-detail-description" th:text="${pipeline.description}">What this pipeline answers.</span>
       </p>
       <div class="tplx-detail-badges">
-        <span class="ds-badge ds-badge-default" th:text="${'v' + workingVersion}">v1</span>
+        <!-- D55: `workingVersion` is the draft's number for a never-released pipeline, and null
+             only when its sole draft was discarded — then there is no version to name. -->
+        <span class="ds-badge ds-badge-default" th:if="${workingVersion != null}"
+              th:text="${'v' + workingVersion}">v1</span>
         <span class="ds-badge ds-badge-default" th:text="${nodeCount + (nodeCount == 1 ? ' node' : ' nodes')}">3 nodes</span>
         <span th:if="${draftVersion != null}" class="ds-badge ds-badge-warning"
               th:text="'draft v' + ${draftVersion} + ' pending release'"

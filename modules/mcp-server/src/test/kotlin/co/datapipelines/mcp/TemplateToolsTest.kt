@@ -205,7 +205,10 @@ class TemplateToolsTest {
     fun `create validates the draft before storing it and records the caller as author`() {
         val draft = slot<TemplateDraft>()
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
-        every { templates.create(any(), any(), McpFixtures.USER) } returns McpFixtures.template()
+        // D55: DRAFT is part of the expectation — a RELEASED create would not match this stub.
+        every {
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT)
+        } returns McpFixtures.template()
 
         TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
             McpArguments(
@@ -322,7 +325,9 @@ class TemplateToolsTest {
     fun `create passes is_library through and rejects an unsupported engine`() {
         val draft = slot<TemplateDraft>()
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
-        every { templates.create(any(), any(), McpFixtures.USER) } returns McpFixtures.template(isLibrary = true)
+        every {
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT)
+        } returns McpFixtures.template(isLibrary = true)
 
         val library =
             mapOf(

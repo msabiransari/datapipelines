@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
@@ -90,7 +91,9 @@ class TemplatesCreateTool(
                     "'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect " +
                     "and renders through an auto-escaping engine. A NEW top-level folder is refused until you " +
                     "confirm it: reuse an existing root, or ask the person first and then pass " +
-                    "confirm_new_root: true.",
+                    "confirm_new_root: true. Version 1 lands as a DRAFT: a pipeline draft may pin it and render " +
+                    "against it while you iterate, and a human releases it from the UI — a RELEASED pipeline may " +
+                    "only pin RELEASED template versions, so the template is released first.",
             schema = SCHEMA,
         )
 
@@ -127,7 +130,15 @@ class TemplatesCreateTool(
                 body = args.requiredString("body"),
                 isLibrary = args.boolean("is_library") ?: false,
             )
-        return templates.create(workspaceId, validator.validateOrThrow(draft, workspaceId), ctx.principal.userId)
+        // D55: authoring lands version 1 DRAFT — the response's `status` says so, and a human
+        // releases it from the UI. Pinning it from a draft pipeline is legal meanwhile
+        // (versioning §6 only bites when the PIPELINE is released).
+        return templates.create(
+            workspaceId,
+            validator.validateOrThrow(draft, workspaceId),
+            ctx.principal.userId,
+            CreateLifecycle.DRAFT,
+        )
     }
 
     /** `imports: [{id, version, alias}]` (D12). Shape errors are `-32602`, not validation failures. */

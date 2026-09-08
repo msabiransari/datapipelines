@@ -79,7 +79,15 @@ class RepositoryPipelineResolverTest {
         )
 
     private fun save(pipeline: Pipeline) =
-        pipelines.create(DEFAULT_WORKSPACE_ID, NewPipeline.from(pipeline, ownerId = userId), PipelineSerializer().write(pipeline), userId)
+        // The fixtures resolve RELEASED versions by name, so they create released content —
+        // the import path's lifecycle, named explicitly (D55).
+        pipelines.create(
+            DEFAULT_WORKSPACE_ID,
+            NewPipeline.from(pipeline, ownerId = userId),
+            PipelineSerializer().write(pipeline),
+            userId,
+            co.datapipelines.pipeline.CreateLifecycle.RELEASED,
+        )
 
     @Test
     fun `a pinned reference resolves to the parsed body of exactly that version`() {
@@ -103,7 +111,7 @@ class RepositoryPipelineResolverTest {
         val resolver = repositoryPipelineResolver(pipelines)
 
         resolver.resolve(DEFAULT_WORKSPACE_ID, "no_such_pipeline", 1) shouldBe null
-        resolver.resolve(DEFAULT_WORKSPACE_ID, "resolver_versions", record.currentVersion + 9) shouldBe null
+        resolver.resolve(DEFAULT_WORKSPACE_ID, "resolver_versions", checkNotNull(record.currentVersion) + 9) shouldBe null
     }
 
     @Test

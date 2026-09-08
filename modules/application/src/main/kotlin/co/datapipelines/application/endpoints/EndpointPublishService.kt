@@ -214,7 +214,9 @@ class EndpointPublishService(
     private fun notReleased(name: String) =
         DatapipelinesException(
             code = PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED,
-            message = "'$name' has no released version. Release it before publishing an endpoint over it.",
+            // D55: a freshly authored pipeline has NO released version — the commonest case now,
+            // so the message names the way forward instead of restating the rule.
+            message = "'$name' has no released version. Release it from the UI first, then publish an endpoint over it.",
             details = mapOf("pipeline" to name),
         )
 

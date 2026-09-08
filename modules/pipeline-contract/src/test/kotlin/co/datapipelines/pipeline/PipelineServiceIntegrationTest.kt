@@ -344,7 +344,10 @@ class PipelineServiceIntegrationTest {
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
         val record = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
 
-        val executable = checkNotNull(service.findExecutable(WORKSPACE_ID, record, record.currentVersion))
+        // D55: a create lands a DRAFT, so the version to resolve is the WORKING one —
+        // `record.currentVersion` is null here, which is the point of the ruling.
+        val working = checkNotNull(service.workingVersion(WORKSPACE_ID, record))
+        val executable = checkNotNull(service.findExecutable(WORKSPACE_ID, record, working))
 
         executable.version shouldBe 1
         executable.pipeline.name shouldBe "test/monthly_revenue"

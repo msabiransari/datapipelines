@@ -38,7 +38,13 @@ class PipelineEditorController(
         // keeps showing the released name until lock. The default body of the REST GET
         // stays the released version — this is the editor's load, not the API's.
         val draft = pipelines.findDraft(workspaceId, record.id)
-        val shownVersion = draft?.version ?: record.currentVersion
+        // The working version ([PipelineService.workingVersion]'s rule, with the draft already in
+        // hand). Null only when the pipeline's sole draft was discarded (§5.4) and nothing was
+        // ever released — there is no body to edit, which is the same 404 an unknown id gets.
+        val shownVersion =
+            draft?.version
+                ?: record.currentVersion
+                ?: throw NoSuchElementException("Pipeline $id has no version to edit")
         val body =
             pipelines.findVersionBody(workspaceId, record.id, shownVersion)
                 ?: throw NoSuchElementException("Pipeline $id version $shownVersion body not found")

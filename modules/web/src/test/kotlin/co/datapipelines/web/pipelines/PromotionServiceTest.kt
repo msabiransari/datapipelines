@@ -272,7 +272,7 @@ class PromotionServiceTest {
     private fun stubReleased(
         record: PipelineRecord,
         body: String,
-        atVersion: Int = record.currentVersion,
+        atVersion: Int = checkNotNull(record.currentVersion),
         hash: String = "hash-${record.name}",
     ) {
         every { pipelines.findByName(workspaceId, record.name) } returns record
@@ -305,7 +305,7 @@ class PromotionServiceTest {
         status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
     ) = PipelineVersionDetail(
         pipelineId = record.id,
-        version = record.currentVersion,
+        version = checkNotNull(record.currentVersion),
         status = status,
         bodyHash = hash,
         createdAt = EPOCH,

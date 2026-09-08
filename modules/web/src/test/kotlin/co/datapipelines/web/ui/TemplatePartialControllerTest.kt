@@ -143,7 +143,7 @@ class TemplatePartialControllerTest {
     fun `create puts the draft through the same validator and repository as the REST surface`() {
         every { templates.existsId(workspaceId, "acme/new") } returns false
         val draftSlot = CapturingSlot<co.datapipelines.templates.TemplateDraft>()
-        every { templates.create(workspaceId, capture(draftSlot), userId) } returns
+        every { templates.create(workspaceId, capture(draftSlot), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns
             template("acme/new")
 
         val result =
@@ -173,7 +173,7 @@ class TemplatePartialControllerTest {
     fun `an html template never carries a dialect - even if the form sends one`() {
         every { templates.existsId(workspaceId, "acme/page") } returns false
         val draftSlot = CapturingSlot<co.datapipelines.templates.TemplateDraft>()
-        every { templates.create(workspaceId, capture(draftSlot), userId) } returns
+        every { templates.create(workspaceId, capture(draftSlot), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns
             template("acme/page")
 
         controller.create(
@@ -228,7 +228,7 @@ class TemplatePartialControllerTest {
     @Test
     fun `a repository rejection surfaces as the inline refusal, escaped`() {
         every { templates.existsId(workspaceId, "acme/x") } returns false
-        every { templates.create(any(), any(), any()) } throws
+        every { templates.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) } throws
             DatapipelinesException("template.invalid", "body uses <forbidden> construct")
 
         val response =

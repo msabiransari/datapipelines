@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
@@ -381,6 +382,10 @@ class TemplateRepository(
                 SELECT t.name, t.current_version
                   FROM templates t
                  WHERE t.workspace_id = :workspaceId AND t.is_deleted = FALSE AND t.name IN (:names)
+                   -- D55/V18: NULL means never released. A never-released template has no
+                   -- latest-RELEASED version to report, and reporting 0 (getInt's answer for
+                   -- NULL) would name a version that cannot exist.
+                   AND t.current_version IS NOT NULL
                 """.trimIndent(),
                 mapOf("workspaceId" to workspaceId, "names" to ids),
             ) { rs, _ -> rs.getString("name") to rs.getInt("current_version") }
@@ -411,8 +416,14 @@ class TemplateRepository(
         }
 
     /**
-     * Inserts the template and its version 1 — RELEASED on creation (§3.2) — together in
-     * [workspaceId], returning what the database stored.
+     * Inserts the template and its version 1 together in [workspaceId], returning what the
+     * database stored.
+     *
+     * [lifecycle] says which of §3.2's two create paths this is, and it is required: authoring
+     * (`POST /templates`, `templates_create`, the editor) lands version 1 **DRAFT** with
+     * `current_version` NULL (D55 — a human releases), while a promotion or seed import lands it
+     * RELEASED. A pipeline may pin a DRAFT template version while iterating; that pin only
+     * becomes an error when the PIPELINE is released (versioning §6, templates lock first).
      *
      * [draft] `id` is auto-generated when omitted (templates.md §3.2). The final `SELECT` reads
      * back server-assigned `created_at` / `updated_at`, never a hand-built value (metadata-db
@@ -422,6 +433,7 @@ class TemplateRepository(
         workspaceId: UUID,
         draft: TemplateDraft,
         createdBy: UUID,
+        lifecycle: CreateLifecycle,
     ): Template {
         val id = draft.id ?: generateId()
         // §5.3 (046): creation is where a null payload type becomes the explicit `sql` default,
@@ -430,7 +442,7 @@ class TemplateRepository(
         return mappingDuplicateName(id) {
             jdbc
                 .query(
-                    INSERT_SQL,
+                    if (lifecycle == CreateLifecycle.DRAFT) INSERT_DRAFT_SQL else INSERT_SQL,
                     params(workspaceId, id, resolved, createdBy),
                     MAPPER,
                 ).single()
@@ -971,6 +983,37 @@ class TemplateRepository(
                 " v.released_at, v.released_by, v.updated_by, v.updated_at" +
                 " FROM template_versions v JOIN templates t ON t.id = v.template_id" +
                 " WHERE t.workspace_id = :workspaceId AND t.is_deleted = FALSE"
+
+        /**
+         * §3.2 as ruled by D55 — the authoring create: version 1 lands DRAFT,
+         * `templates.current_version` stays NULL, and `updated_by`/`updated_at` are stamped the
+         * way a draft WRITE stamps them (V6) so the 409's `details` are honest from the start.
+         *
+         * [INSERT_SQL] is its RELEASED twin and is NOT dead code: `TemplateImportService`'s
+         * version-less path (promotion, the example/lake seeders) lands released content.
+         */
+        private val INSERT_DRAFT_SQL =
+            """
+            WITH new_template AS (
+                INSERT INTO templates (name, display_name, description, current_version, workspace_id, created_by)
+                VALUES (:name, :displayName, :description, NULL, :workspaceId, :actor)
+                RETURNING id, name, display_name, description
+            ), new_version AS (
+                INSERT INTO template_versions
+                    (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     status, body_hash, created_by, updated_by, updated_at)
+                SELECT id, 1, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
+                  FROM new_template
+                RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
+                          body, created_at, created_by
+            )
+            SELECT t.name AS id, t.display_name, t.description,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.created_by AS version_created_by, 'DRAFT' AS status, $TEMPLATE_HASH_EXPR AS body_hash
+              FROM new_template t
+              JOIN new_version v ON v.template_id = t.id
+            """.trimIndent()
 
         private val INSERT_SQL =
             """

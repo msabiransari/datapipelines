@@ -222,11 +222,20 @@ built-in would invite the belief that interpolation is now safe.
 ### 5.2 Lifecycle
 
 ```
-Create template        → version 1
-Update template body   → version 2 (1 is preserved, immutable)
-Update again           → version 3
-Soft-delete            → version 3 marked deleted; pipelines referencing v1/v2/v3 still work
+Create template        → version 1, DRAFT      (current_version stays null)
+Release (human, UI)    → version 1 RELEASED    (current_version = 1)
+Update template body   → version 2 DRAFT       (1 is preserved, immutable)
+Release again          → version 2 RELEASED    (current_version = 2)
+Soft-delete            → version 2 marked deleted; pipelines referencing v1/v2 still work
 ```
+
+**Creation lands a DRAFT** ([Versioning §3.2](versioning.md#32-the-one-write-rule-copy-on-write),
+ruling D55, 2026-09-08) — `POST /templates`, `templates_create` and the editor's create alike, with
+`status: "DRAFT"` in the response and `templates.current_version` null until a human releases it. A
+DRAFT pipeline may pin a DRAFT template version and render against it while iterating; a pipeline's
+RELEASE is what requires every pinned template version to be RELEASED (§6 of versioning — templates
+lock first), so the ordering is unchanged. The exception is the path that is not authoring:
+`POST /templates/import` (promotion, and the seeders that ride it) lands RELEASED.
 
 ### 5.3 What "update" means
 

@@ -19,6 +19,12 @@ import java.util.UUID
 class ExecutionHistoryPartialController(
     private val executions: ExecutionRepository,
     private val pipelineNames: PipelineNames,
+    /**
+     * Only for §8's draft-run markers, read in ONE batched query for the page — the same
+     * dependency and the same derivation `ExecutionsController` uses for the REST `draft_run`
+     * field. Since D55 a v1 run is routinely a draft run, so the column has to say which.
+     */
+    private val pipelines: co.datapipelines.pipeline.PipelineRepository,
 ) {
     @GetMapping("/executions")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -57,7 +63,15 @@ class ExecutionHistoryPartialController(
         val items = raw.take(pageSize)
         val hasMore = raw.size > pageSize
 
+        val releasedAt = pipelines.releasedAtFor(workspaceId, items.map { it.pipelineId to it.pipelineVersion })
         model.addAttribute("executions", items)
+        model.addAttribute(
+            "draftRuns",
+            items.associate { row ->
+                val at = releasedAt[row.pipelineId to row.pipelineVersion]
+                row.executionId to (at == null || row.startedAt.isBefore(at))
+            },
+        )
         model.addAttribute("pipelineNames", pipelineNames.lookup(workspaceId, items.map { it.pipelineId }))
         model.addAttribute("offset", offset)
         model.addAttribute("pageSize", pageSize)

@@ -30,7 +30,16 @@ import java.util.UUID
 class ExecutionHistoryPartialControllerTest {
     private val executions = mockk<ExecutionRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
-    private val controller = ExecutionHistoryPartialController(executions, pipelineNames)
+
+    /**
+     * Only §8's draft-run markers read this: no release timestamps in these fixtures, so every run
+     * is a draft run — the honest default for a pipeline created under D55.
+     */
+    private val pipelines =
+        mockk<co.datapipelines.pipeline.PipelineRepository>().also {
+            every { it.releasedAtFor(any(), any()) } returns emptyMap()
+        }
+    private val controller = ExecutionHistoryPartialController(executions, pipelineNames, pipelines)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

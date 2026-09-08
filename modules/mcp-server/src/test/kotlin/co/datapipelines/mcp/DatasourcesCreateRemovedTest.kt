@@ -78,7 +78,7 @@ class DatasourcesCreateRemovedTest {
             dispatcher = McpToolDispatcher(realShippedTools(), auditLogger),
             prompts = McpPromptCatalog(),
             catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
-            reader = McpResourceReader(pipelines, templates, datasources, executions, events),
+            reader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events),
             version = "1.0.0",
         )
 
@@ -127,7 +127,7 @@ class DatasourcesCreateRemovedTest {
             dispatcher = McpToolDispatcher(realShippedTools(), auditLogger),
             prompts = McpPromptCatalog(),
             catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
-            reader = McpResourceReader(pipelines, templates, datasources, executions, events),
+            reader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events),
             version = "1.0.0",
         )
 

@@ -80,8 +80,13 @@ internal object PipelineToolPayloads {
             put("description", record.description)
             put("owner_id", record.ownerId.toString())
             put("version", version?.version ?: record.currentVersion)
+            // D55: `current_version` is the latest RELEASED version and is **null** until a
+            // human releases — an agent reading it as "the version I can point an endpoint at"
+            // gets an honest absence rather than the number of a draft nobody reviewed.
             put("current_version", record.currentVersion)
-            put("status", version?.status?.name ?: "RELEASED")
+            // No RELEASED fallback: since D55 a create lands DRAFT, and defaulting the status
+            // of a row we did not read to "RELEASED" is precisely the assumption D55 removed.
+            put("status", version?.status?.name)
             put("body_hash", version?.bodyHash ?: "")
             put("created_at", record.createdAt)
             put("updated_at", record.updatedAt)
@@ -140,7 +145,8 @@ class PipelinesCreateTool(
                     "remember that a node referencing another node's context_key must depend_on it. A NEW top-level " +
                     "folder is refused until you confirm it: reuse an existing root, or ask the person first and " +
                     "then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and " +
-                    "version 1.",
+                    "version 1, which lands as a DRAFT: run it straight away, then STOP — a human releases it from " +
+                    "the UI, and no tool releases anything.",
             schema = SCHEMA,
         )
 
@@ -164,7 +170,9 @@ class PipelinesCreateTool(
                 PipelineToolPayloads.bodyJson(args),
                 ctx.principal.userId,
             )
-        return PipelineToolPayloads.response(saved.record, saved.bodyJson, saved.version)
+        // D55: version 1 landed DRAFT, so the create response carries the draft pointer too —
+        // the same shape an update returns, so an agent's next write reads one place for the hash.
+        return PipelineToolPayloads.response(saved.record, saved.bodyJson, saved.version, saved.draft)
     }
 
     private companion object {

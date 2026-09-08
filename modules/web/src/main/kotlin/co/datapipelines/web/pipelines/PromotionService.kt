@@ -97,8 +97,13 @@ class PromotionService(
                 val target = onTarget[record.name]
                 // Same hash ⇒ nothing to push, whatever the numbers say (§10.2).
                 if (target != null && target.bodyHash == version.bodyHash) return@mapNotNull null
-                if (target != null && record.currentVersion <= target.currentVersion) return@mapNotNull null
-                Candidate(record.name, record.displayName, record.currentVersion, target?.currentVersion ?: 0)
+                if (target != null && version.version <= target.currentVersion) return@mapNotNull null
+                // `version.version` and not `record.currentVersion`: they are the same number by
+                // the §3.4 invariant (this row IS the one the pointer names), and since D55 the
+                // pointer is nullable while the row we just read is not — a never-released
+                // pipeline is filtered out two lines above by having no current version at all,
+                // which is exactly "a never-released pipeline is not a candidate".
+                Candidate(record.name, record.displayName, version.version, target?.currentVersion ?: 0)
             }
         return Plan(
             targetBaseUrl = client.targetBaseUrl,
@@ -246,15 +251,15 @@ class PromotionService(
                 throw notReleased(name, version.version, "its current version is ${version.status}")
             }
             val target = inventory.pipelineByName()[name]
-            if (target != null && record.currentVersion <= target.currentVersion) {
+            if (target != null && version.version <= target.currentVersion) {
                 throw ApiException(
                     PipelineErrorCodes.Versioning.PROMOTION_NOT_NEWER,
-                    "Pipeline '$name' is at version ${record.currentVersion} here and the target already serves " +
+                    "Pipeline '$name' is at version ${version.version} here and the target already serves " +
                         "version ${target.currentVersion}. Same-version pushes are a bug, not a no-op.",
-                    mapOf("pipeline" to name, "version" to record.currentVersion, "target_version" to target.currentVersion),
+                    mapOf("pipeline" to name, "version" to version.version, "target_version" to target.currentVersion),
                 )
             }
-            addPipeline(record.id, name, record.currentVersion)
+            addPipeline(record.id, name, version.version)
         }
 
         /** Walks children first, then templates, then records this pipeline (§10.4 order). */
@@ -400,15 +405,22 @@ class PromotionService(
             (node.output as? NodeOutput.Datasource)?.let { add(it.datasource) }
         }
 
+    /**
+     * [version] is nullable because since D55 the commonest reason a pipeline "has no released
+     * version" is that nobody has released it yet — `current_version` is null, not a number
+     * pointing at a draft. `details.version` then carries an empty string rather than a 0 that
+     * would name a version no pipeline can have.
+     */
     private fun notReleased(
         name: String,
-        version: Int,
+        version: Int?,
         why: String,
     ): ApiException =
         ApiException(
             PipelineErrorCodes.Versioning.PROMOTION_NOT_RELEASED,
-            "Pipeline '$name' cannot be promoted: $why. Drafts are never promoted (versioning §10.3).",
-            mapOf("pipeline" to name, "version" to version),
+            "Pipeline '$name' cannot be promoted: $why. Release it from the UI first — " +
+                "drafts are never promoted (versioning §10.3).",
+            mapOf("pipeline" to name, "version" to (version?.toString() ?: "")),
         )
 
     private companion object {

@@ -91,7 +91,7 @@ class PipelineRepositoryIntegrationTest {
     fun `create inserts the pipeline and version 1 together, returning what the database stored`() {
         val body = Fixtures.pipeline()
 
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         record.currentVersion shouldBe 1
         record.name shouldBe "test/monthly_revenue"
@@ -104,7 +104,7 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `the stored body round-trips through the deserializer`() {
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         val stored = PipelineDeserializer().readOrThrow(checkNotNull(repository.findLatestBody(WORKSPACE_ID, record.id)))
 
@@ -116,7 +116,7 @@ class PipelineRepositoryIntegrationTest {
         // The version-less import path (versioning §9.2: allocate-next-local). The PUT path
         // goes through createDraft/writeDraft — see the lifecycle tests below.
         val v1 = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
         val v2 =
             v1.copy(
                 displayName = "Monthly Revenue v2",
@@ -139,7 +139,7 @@ class PipelineRepositoryIntegrationTest {
     fun `appendReleasedVersion sets updated_at, because this schema has no triggers`() {
         // metadata-db §2: every UPDATE on pipelines sets updated_at in its own SET clause.
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         val updated = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, body, serializer.write(body), owner))
 
@@ -268,7 +268,7 @@ class PipelineRepositoryIntegrationTest {
     private fun seed(vararg names: String) {
         names.forEach { name ->
             val body = Fixtures.pipeline(name = name)
-            repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+            repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
         }
     }
 
@@ -283,7 +283,7 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `findById and findByName both skip soft-deleted pipelines`() {
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         repository.findById(WORKSPACE_ID, record.id) shouldBe record
         repository.findByName(WORKSPACE_ID, "test/monthly_revenue") shouldBe record
@@ -304,9 +304,9 @@ class PipelineRepositoryIntegrationTest {
         val a = Fixtures.pipeline(name = "pipeline_a")
         val b = Fixtures.pipeline(name = "pipeline_b")
         val c = Fixtures.pipeline(name = "pipeline_c")
-        repository.create(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(b, other), serializer.write(b), other)
-        val deleted = repository.create(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(b, other), serializer.write(b), other)
+        val deleted = repository.createReleased(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
         repository.softDelete(WORKSPACE_ID, deleted.id)
 
         repository.findAll(WORKSPACE_ID).map { it.name } shouldContainExactly listOf("pipeline_b", "pipeline_a")
@@ -318,9 +318,9 @@ class PipelineRepositoryIntegrationTest {
         val a = Fixtures.pipeline(name = "pipeline_a")
         val b = Fixtures.pipeline(name = "pipeline_b")
         val c = Fixtures.pipeline(name = "pipeline_c")
-        repository.create(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(b, owner), serializer.write(b), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(b, owner), serializer.write(b), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
 
         repository.findAll(WORKSPACE_ID, null, limit = 2, offset = 0).map { it.name } shouldContainExactly
             listOf("pipeline_c", "pipeline_b")
@@ -343,9 +343,9 @@ class PipelineRepositoryIntegrationTest {
                 name = "output_ds",
                 nodes = listOf(outputNode),
             )
-        repository.create(WORKSPACE_ID, NewPipeline.from(bodyPg, owner), serializer.write(bodyPg), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(bodyMysql, owner), serializer.write(bodyMysql), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(bodyOutput, owner), serializer.write(bodyOutput), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(bodyPg, owner), serializer.write(bodyPg), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(bodyMysql, owner), serializer.write(bodyMysql), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(bodyOutput, owner), serializer.write(bodyOutput), owner)
 
         repository.findAllByDatasource(WORKSPACE_ID, "pg-prod").map { it.name } shouldContainExactly listOf("pg_pipeline")
         repository.findAllByDatasource(WORKSPACE_ID, "mysql-prod").map { it.name } shouldContainExactly listOf("mysql_pipeline")
@@ -367,7 +367,7 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `a datasource referenced ONLY by a historical version is invisible to the listing scan and visible to the any-version scan`() {
         val v1 = Fixtures.pipeline(name = "retiring", nodes = listOf(Fixtures.node(id = "extract", source = "pg-retired")))
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id)).bodyHash
         val v2 = v1.copy(nodes = listOf(Fixtures.node(id = "extract", source = "pg-current")))
         val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), releasedHash, owner))
@@ -407,9 +407,9 @@ class PipelineRepositoryIntegrationTest {
                     ),
             )
         val gone = Fixtures.pipeline(name = "gone", nodes = listOf(Fixtures.node(id = "n1", source = "pg-prod")))
-        repository.create(WORKSPACE_ID, NewPipeline.from(reader, owner), serializer.write(reader), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(writer, owner), serializer.write(writer), owner)
-        val goneRecord = repository.create(WORKSPACE_ID, NewPipeline.from(gone, owner), serializer.write(gone), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(reader, owner), serializer.write(reader), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(writer, owner), serializer.write(writer), owner)
+        val goneRecord = repository.createReleased(WORKSPACE_ID, NewPipeline.from(gone, owner), serializer.write(gone), owner)
         repository.softDelete(WORKSPACE_ID, goneRecord.id)
 
         repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "pg-prod").map { it.pipelineName } shouldContainExactly
@@ -425,9 +425,9 @@ class PipelineRepositoryIntegrationTest {
         val a = Fixtures.pipeline(name = "a", nodes = listOf(Fixtures.node(source = "pg-prod")))
         val b = Fixtures.pipeline(name = "b", nodes = listOf(Fixtures.node(source = "pg-prod")))
         val c = Fixtures.pipeline(name = "c", nodes = listOf(Fixtures.node(source = "pg-prod")))
-        repository.create(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(b, owner), serializer.write(b), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(b, owner), serializer.write(b), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
 
         repository.findAllByDatasource(WORKSPACE_ID, "pg-prod", limit = 2, offset = 0).map { it.name } shouldContainExactly listOf("c", "b")
         repository.findAllByDatasource(WORKSPACE_ID, "pg-prod", limit = 2, offset = 2).map { it.name } shouldContainExactly listOf("a")
@@ -438,8 +438,8 @@ class PipelineRepositoryIntegrationTest {
         val other = insertUser(email = "other@example.com", subject = "sub-2")
         val mine = Fixtures.pipeline(name = "mine", nodes = listOf(Fixtures.node(source = "pg-prod")))
         val theirs = Fixtures.pipeline(name = "theirs", nodes = listOf(Fixtures.node(source = "pg-prod")))
-        repository.create(WORKSPACE_ID, NewPipeline.from(mine, owner), serializer.write(mine), owner)
-        repository.create(WORKSPACE_ID, NewPipeline.from(theirs, other), serializer.write(theirs), other)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(mine, owner), serializer.write(mine), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(theirs, other), serializer.write(theirs), other)
 
         repository.findAllByDatasource(WORKSPACE_ID, "pg-prod", ownerId = owner).map { it.name } shouldContainExactly listOf("mine")
         repository.findAllByDatasource(WORKSPACE_ID, "pg-prod").map { it.name } shouldContainExactly listOf("theirs", "mine")
@@ -449,7 +449,7 @@ class PipelineRepositoryIntegrationTest {
     fun `countAll returns the number of live pipelines`() {
         repository.countAll(WORKSPACE_ID) shouldBe 0
 
-        repository.create(
+        repository.createReleased(
             WORKSPACE_ID,
             NewPipeline.from(Fixtures.pipeline(name = "a"), owner),
             serializer.write(Fixtures.pipeline(name = "a")),
@@ -457,7 +457,7 @@ class PipelineRepositoryIntegrationTest {
         )
         repository.countAll(WORKSPACE_ID) shouldBe 1
 
-        repository.create(
+        repository.createReleased(
             WORKSPACE_ID,
             NewPipeline.from(Fixtures.pipeline(name = "b"), owner),
             serializer.write(Fixtures.pipeline(name = "b")),
@@ -466,7 +466,7 @@ class PipelineRepositoryIntegrationTest {
         repository.countAll(WORKSPACE_ID) shouldBe 2
 
         val bodyC = Fixtures.pipeline(name = "c")
-        val deleted = repository.create(WORKSPACE_ID, NewPipeline.from(bodyC, owner), serializer.write(bodyC), owner)
+        val deleted = repository.createReleased(WORKSPACE_ID, NewPipeline.from(bodyC, owner), serializer.write(bodyC), owner)
         repository.softDelete(WORKSPACE_ID, deleted.id)
         repository.countAll(WORKSPACE_ID) shouldBe 2
     }
@@ -474,7 +474,7 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `an unknown version body reads as null, not as an exception`() {
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         repository.findVersionBody(WORKSPACE_ID, record.id, 99).shouldBeNull()
         repository.findLatestBody(WORKSPACE_ID, UUID.randomUUID()).shouldBeNull()
@@ -484,11 +484,11 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `creating a second pipeline with a taken name raises duplicate_name`() {
         val body = Fixtures.pipeline()
-        repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+                repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
@@ -501,9 +501,9 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `renaming a pipeline onto a taken name raises duplicate_name too`() {
         val taken = Fixtures.pipeline(name = "already_taken")
-        repository.create(WORKSPACE_ID, NewPipeline.from(taken, owner), serializer.write(taken), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(taken, owner), serializer.write(taken), owner)
         val mine = Fixtures.pipeline(name = "mine")
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(mine, owner), serializer.write(mine), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(mine, owner), serializer.write(mine), owner)
         val renamed = mine.copy(name = "already_taken")
 
         val thrown =
@@ -527,12 +527,12 @@ class PipelineRepositoryIntegrationTest {
         // execution history references the name, so a deleted pipeline's name is not reusable
         // until the row is hard-deleted.
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
         repository.softDelete(WORKSPACE_ID, record.id) shouldBe true
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+                repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
@@ -544,12 +544,12 @@ class PipelineRepositoryIntegrationTest {
         // violation to duplicate_name would tell the caller to rename something that is fine.
         val body = Fixtures.pipeline()
         val id = UUID.randomUUID()
-        repository.create(WORKSPACE_ID, NewPipeline.from(body, owner, id), serializer.write(body), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner, id), serializer.write(body), owner)
         val sameIdDifferentName = NewPipeline.from(Fixtures.pipeline(name = "other_name"), owner, id)
 
         val thrown =
             shouldThrow<DuplicateKeyException> {
-                repository.create(WORKSPACE_ID, sameIdDifferentName, serializer.write(body), owner)
+                repository.createReleased(WORKSPACE_ID, sameIdDifferentName, serializer.write(body), owner)
             }
 
         thrown.mostSpecificCause.message?.contains("pipelines_pkey") shouldBe true
@@ -574,7 +574,7 @@ class PipelineRepositoryIntegrationTest {
                     val isolated = PipelineRepository(NamedParameterJdbcTemplate(dataSource()))
                     pool.submit<Throwable?> {
                         start.await()
-                        runCatching { isolated.create(WORKSPACE_ID, NewPipeline.from(body, owner), bodyJson, owner) }
+                        runCatching { isolated.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), bodyJson, owner) }
                             .exceptionOrNull()
                     }
                 }
@@ -597,7 +597,7 @@ class PipelineRepositoryIntegrationTest {
         // metadata-db §2: JSON columns are JSONB, bound as String and CAST in SQL. If the
         // parameter were bound as text into a text column this operator would fail.
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         val nameFromJsonb =
             jdbc.queryForObject(
@@ -626,7 +626,7 @@ class PipelineRepositoryIntegrationTest {
     /** Creates v1 and returns (record, v1 body, v1's stored detail) — the base every lifecycle test starts from. */
     private fun createdPipeline(name: String = "test/monthly_revenue"): Triple<PipelineRecord, Pipeline, PipelineVersionDetail> {
         val body = Fixtures.pipeline(name = name)
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
         return Triple(record, body, detail)
     }
@@ -916,7 +916,7 @@ class PipelineRepositoryIntegrationTest {
     fun `the draft service takes the write branch, checks names early, and maps stale bases to conflicts`() {
         val service = PipelineDraftService(repository, AuthoringGuard(true))
         val other = Fixtures.pipeline(name = "other_name")
-        repository.create(WORKSPACE_ID, NewPipeline.from(other, owner), serializer.write(other), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(other, owner), serializer.write(other), owner)
         val (record, v1, v1Detail) = createdPipeline()
 
         // First write: copy-on-write branch (§5.1) with the released row's hash.
@@ -1138,11 +1138,11 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `findDrafts returns the badge map and releasedAtFor returns both stamps and gaps`() {
         val withDraft = Fixtures.pipeline(name = "has_draft")
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(withDraft, owner), serializer.write(withDraft), owner)
+        val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(withDraft, owner), serializer.write(withDraft), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id)).bodyHash
         repository.createDraft(WORKSPACE_ID, record.id, serializer.write(withDraft.copy(description = "draft")), releasedHash, owner)
         val plain = Fixtures.pipeline(name = "no_draft")
-        val plainRecord = repository.create(WORKSPACE_ID, NewPipeline.from(plain, owner), serializer.write(plain), owner)
+        val plainRecord = repository.createReleased(WORKSPACE_ID, NewPipeline.from(plain, owner), serializer.write(plain), owner)
 
         val drafts = repository.findDrafts(WORKSPACE_ID, listOf(record.id, plainRecord.id))
         drafts.keys shouldContainExactly setOf(record.id)
@@ -1170,9 +1170,9 @@ class PipelineRepositoryIntegrationTest {
     fun `the working-version scan sees a draft that just adopted a pin - a current_version-only scan misses it`() {
         // p1: v1 RELEASED pins t@1; a DRAFT v2 adopts t@2. p2 stays on t@1 released.
         val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
-        val p1Record = repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
+        val p1Record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
         val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
-        repository.create(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
         val draftBody = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         checkNotNull(
@@ -1199,7 +1199,7 @@ class PipelineRepositoryIntegrationTest {
     fun `the any-version scan sees historical pins the working scan reports as gone`() {
         // p1 moves from t@1 (v1) to t@2 (v2, released) — v1's pin is historical but still real.
         val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
-        val p1Record = repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
+        val p1Record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
         val v2Body = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         val draft =
@@ -1230,11 +1230,11 @@ class PipelineRepositoryIntegrationTest {
                         Fixtures.node(id = "again", template = TemplateRef("test/t.sql", 1), output = NodeOutput.Tempdb("stg_again")),
                     ),
             )
-        repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
         val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
-        repository.create(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
         val p3 = Fixtures.pipeline(name = "p3", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
-        repository.create(WORKSPACE_ID, NewPipeline.from(p3, owner), serializer.write(p3), owner)
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(p3, owner), serializer.write(p3), owner)
 
         repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "test/t.sql") shouldBe mapOf(1 to 2, 2 to 1)
 
@@ -1326,3 +1326,19 @@ class PipelineRepositoryIntegrationTest {
         const val CONCURRENCY_TIMEOUT_SECONDS = 30L
     }
 }
+
+/**
+ * The RELEASED create — what every fixture in this suite means (it exercises the released-version
+ * branches: copy-on-write, the pointer, the promotion/import paths).
+ *
+ * Written as an explicitly named extension rather than a default argument on the repository: on the
+ * PRODUCTION signature `lifecycle` is required precisely so a new create path cannot land RELEASED
+ * by forgetting (D55), and a default here would have handed that back through the test source.
+ * The DRAFT create has its own cases, which name [CreateLifecycle.DRAFT] at the call.
+ */
+private fun PipelineRepository.createReleased(
+    workspaceId: java.util.UUID,
+    pipeline: NewPipeline,
+    bodyJson: String,
+    createdBy: java.util.UUID,
+): PipelineRecord = create(workspaceId, pipeline, bodyJson, createdBy, CreateLifecycle.RELEASED)

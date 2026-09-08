@@ -209,7 +209,7 @@ class TemplateTreeQueryIntegrationTest {
 
     @Test
     fun `a soft-deleted template leaves the tree, and its folder with it`() {
-        repository.create(workspaceId, draft("gone/only_one"), actor)
+        repository.createReleased(workspaceId, draft("gone/only_one"), actor)
         repository.listChildFolders(workspaceId).map { it.segment } shouldContainExactly
             listOf("a_b", "acme", "axb", "f1", "f2", "f3", "gone")
 
@@ -223,7 +223,7 @@ class TemplateTreeQueryIntegrationTest {
     private fun create(
         name: String,
         type: TemplateType = TemplateType.SQL,
-    ) = repository.create(workspaceId, draft(name, type), actor)
+    ) = repository.createReleased(workspaceId, draft(name, type), actor)
 
     private fun draft(
         name: String,
@@ -248,3 +248,14 @@ class TemplateTreeQueryIntegrationTest {
         fun leafName(i: Int): String = "leaf_%03d".format(i)
     }
 }
+
+/**
+ * The RELEASED create — what this suite's fixtures mean. Named rather than defaulted for the same
+ * reason as the pipeline side: `lifecycle` is required on the production signature so that no new
+ * create path lands RELEASED by omission (D55).
+ */
+private fun TemplateRepository.createReleased(
+    workspaceId: java.util.UUID,
+    draft: TemplateDraft,
+    createdBy: java.util.UUID,
+): Template = create(workspaceId, draft, createdBy, co.datapipelines.pipeline.CreateLifecycle.RELEASED)

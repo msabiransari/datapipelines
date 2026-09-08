@@ -73,6 +73,15 @@ DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true
 
 That is supported and expected. The default is `false` because the common hardened deployment is a **receiver** — content is built in a lower environment and promoted up (§7).
 
+**What authoring off means for versions.** Every draft-creating write — create, update, release,
+discard, for pipelines and templates — is refused with `pipeline.authoring.disabled` /
+`template.authoring.disabled` where authoring is off ([versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)),
+so **a hardened receiver cannot hold a DRAFT at all**: everything on it arrived RELEASED through
+promotion. That is what makes the execute default safe to state in one sentence everywhere — running
+a pipeline with no version given runs the *working* version (versioning §7.2, D56), which on a
+development deployment may be a draft and on a hardened one is a release by construction, not by
+convention.
+
 ---
 
 ## 3. The variable contract
