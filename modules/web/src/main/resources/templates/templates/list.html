@@ -2,7 +2,6 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <link th:href="@{/css/template-tree.css}" rel="stylesheet">
   <!-- 058: the explorer's keyboard layer — up/down moves selection, right/left expands and
        collapses, Enter opens the editor. The tree's expansion itself stays htmx+<details>
        (047); this script only owns selection, focus and the aria state the layout adds. -->

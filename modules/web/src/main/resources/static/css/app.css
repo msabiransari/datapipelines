@@ -82,15 +82,44 @@
    /css/app.css, so a relative URL survives a non-root context path — the same
    reason partials/theme-swap.html renders `@{...}` instead of a built string.
 
-   `font-display: swap` — text paints immediately in the fallback and reflows
-   once the face arrives; `unicode-range` is left at its default (the full
-   coverage of each file), per the round's brief.
+   090 §B — `font-display: optional`, replacing 079's `swap`.
+
+   `swap` paints in the fallback and REFLOWS when the face lands. Measured (090,
+   chromium, every font response held 1.2s, geometry sampled at the first frame
+   after DOMContentLoaded and again after `document.fonts.ready`):
+
+     /dashboard  the page heading  243.5px -> 251.7px   (+8.2px, +3.4%)
+     /templates  the page heading  611.7px -> 618.2px   (+6.5px, +1.1%)
+
+   Cumulative layout shift stayed low (0 and 0.0075) because the reflow is
+   HORIZONTAL inside a block whose box does not move — which is precisely why CLS
+   was the wrong instrument here and the first-frame geometry is the right one.
+   The owner did not report a jumping page; they reported text that changes after
+   it has already been read ("css is applied after data load"), and 6-8px of
+   re-flowed measure on every heading is that.
+
+   `optional` gives the browser a ~100ms block period and then NO swap window: the
+   face is either ready in time and used from the first paint, or dropped for that
+   page load and used from the next one (the file is already in the HTTP cache by
+   then). Post-paint reflow becomes structurally impossible rather than small. The
+   faces are vendored, same-origin and `<link rel=preload>`ed in both layouts, so
+   the ready-in-time branch is the normal one; the cost is that a first visit over
+   a slow link renders in the fallback stack.
+
+   `fallback` (100ms block + a 3s swap window) is the alternative if that cost is
+   judged too high — it restores the reflow inside a bounded window. Choosing it
+   would want size-adjusted fallback faces first; the ratios are measured and
+   ready (Inter / system-ui = 102.59%, JetBrains Mono / ui-monospace = 109.48%),
+   but the `--_font-sans` stack they must be inserted into lives in the vendored
+   design-system themes, outside this round's fence.
+
+   `unicode-range` is left at its default (the full coverage of each file).
    --------------------------------------------------------------------------- */
 @font-face {
   font-family: "Inter";
   font-style: normal;
   font-weight: 100 900;
-  font-display: swap;
+  font-display: optional;
   src: url("../vendor/fonts/inter/InterVariable.woff2") format("woff2");
 }
 
@@ -98,7 +127,7 @@
   font-family: "Inter";
   font-style: italic;
   font-weight: 100 900;
-  font-display: swap;
+  font-display: optional;
   src: url("../vendor/fonts/inter/InterVariable-Italic.woff2") format("woff2");
 }
 
@@ -106,7 +135,7 @@
   font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 400;
-  font-display: swap;
+  font-display: optional;
   src: url("../vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
 }
 
@@ -114,7 +143,7 @@
   font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 500;
-  font-display: swap;
+  font-display: optional;
   src: url("../vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
 }
 
@@ -1876,4 +1905,82 @@ button.app-busy::after {
   border: 1px solid var(--accent-success);
   border-radius: var(--radius-base);
   background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   090 §B — [x-cloak], APP-WIDE.
+
+   The rule `[x-cloak]{display:none}` is what makes the attribute mean anything:
+   Alpine strips it once `x-data` has initialised, so an element carrying it is
+   hidden exactly for the window in which its bindings are still literal markup.
+   It lived only in `pipeline-editor.css` (924) — a page-scoped sheet — so the
+   attribute was inert on every other screen, and an Alpine root added anywhere
+   else would have flashed its unbound content with no warning. Declaring it here
+   costs one rule and makes the attribute a property of the app rather than of
+   one page. The editor's copy is identical and stays where it is (that sheet is
+   090's out-of-fence surface); duplicate identical declarations cannot disagree.
+   --------------------------------------------------------------------------- */
+[x-cloak] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------------------
+   090 §C — THE AUTHENTICATION LAYOUT (`layouts/auth.html`).
+
+   The ceremony screens' whole chrome: a brand line and a centred card on the
+   page surface. There is no rail and no top bar to reserve space for, so the
+   geometry is a single column rather than the shell's grid — which is the point
+   of the layout existing at all.
+
+   `.app-auth-main` deliberately does NOT reuse `.app-container`: that class is
+   the full-bleed content gutter for a screen sitting beside the rail, and a
+   ceremony screen has nothing to sit beside. `.app-center` (215) still does the
+   vertical centring inside it, so `login.html` and `settings/password.html` keep
+   the markup they had.
+   --------------------------------------------------------------------------- */
+.app-auth-body {
+  background: var(--surface-page);
+  color: var(--text-primary);
+}
+
+.app-auth {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: var(--header-height) 1fr;
+  padding-inline: var(--gap-lg);
+}
+
+/* The brand line reads as a signature, not as navigation: it is the one link on
+   the page that is not the ceremony, so it carries the mark and the wordmark at
+   the rail's own size and nothing else. */
+.app-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  align-self: center;
+  justify-self: start;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.app-auth-main {
+  /* The card centres in the REMAINING height, under the brand line — the row
+     the grid above gives it. `.app-center`'s 70vh floor would otherwise centre
+     against the viewport and push the card below the fold on a short window. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding-block: var(--gap-lg);
+}
+
+/* `.app-center` inside the auth layout has already been centred by the row above;
+   its own 70vh floor would add a second, taller box and reintroduce the scroll it
+   exists to prevent. Scoped so the class keeps its meaning everywhere else. */
+.app-auth-main .app-center {
+  min-height: 0;
+  width: 100%;
 }

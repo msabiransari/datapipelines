@@ -44,6 +44,18 @@ class UserSettingsController(
      * The change-password screen (auth.md §5A.4) — the one place the forced-change
      * gate lets a `must_change_password` user reach. The submit endpoint is the
      * `POST /partials/account/password` partial (scope-governed, §7.6).
+     *
+     * 090 §C — TWO VIEWS over one card. A user held here by `must_change_password` is in
+     * the authentication ceremony, not on an app page: the interceptor refuses every other
+     * route, so the shell's rail would be ten links that all bounce straight back. That
+     * user gets `settings/password-forced`, which decorates with `layouts/auth`; a
+     * voluntary change from Settings keeps `settings/password` and the shell. Both render
+     * `partials/password-card`, so the form itself exists once.
+     *
+     * The choice is made HERE rather than by a conditional decorator in the template
+     * because Thymeleaf resolves `__${...}__` preprocessing at PARSE time and caches the
+     * parsed template — the first request through would have frozen the layout for every
+     * request after it (measured; see partials/password-card.html).
      */
     @GetMapping("/settings/password")
     fun changePassword(
@@ -56,7 +68,7 @@ class UserSettingsController(
         model.addAttribute("mustChange", user?.mustChangePassword == true)
         model.addAttribute("hasLocalPassword", user?.hasLocalPassword == true)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
-        return "settings/password"
+        return if (user?.mustChangePassword == true) "settings/password-forced" else "settings/password"
     }
 
     /**

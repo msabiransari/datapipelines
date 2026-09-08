@@ -211,12 +211,21 @@ class ShellRenderTest {
         html shouldContain "hx-boost=\"false\""
     }
 
+    /**
+     * 090 §C: the forced-change gate moved to its own view (`settings/password-forced`,
+     * decorated with `layouts/auth`), so this asserts the boost marker on the view a locked
+     * user actually gets. The marker is now belt AND braces — the auth layout has no
+     * `hx-boost` anywhere to inherit from — and it stays because the SAME card partial is
+     * rendered inside the shell for a voluntary change, where the marker is load-bearing.
+     */
     @Test
     fun `the forced-change gate is a full navigation`() {
-        val html = engine.process("settings/password", webContext().apply { fillPassword() })
+        val forced = engine.process("settings/password-forced", webContext().apply { fillPassword() })
+        val voluntary = engine.process("settings/password", webContext().apply { fillPassword() })
 
-        html shouldContain "id=\"password-change-form\""
-        html shouldContain "hx-boost=\"false\""
+        forced shouldContain "id=\"password-change-form\""
+        forced shouldContain "hx-boost=\"false\""
+        voluntary shouldContain "hx-boost=\"false\""
     }
 
     @Test

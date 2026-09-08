@@ -30,4 +30,6 @@ data class AuthFilters(
     val workspaceResolution: WorkspaceResolutionFilter,
     /** versioning §10.6 — the promotion peer's credential gate, scoped to its own route. */
     val promotionServerKey: PromotionServerKeyFilter,
+    /** 090 §C — refuses a NEW OIDC ceremony to a session that already exists. */
+    val oidcSignedInBounce: OidcSignedInBounceFilter,
 )

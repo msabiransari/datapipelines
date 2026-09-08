@@ -40,6 +40,15 @@
   <script th:src="@{/js/pipeline-editor/result.js}"></script>
   <script th:src="@{/js/pipeline-editor/a11y.js}"></script>
 
+  <!--/* 090 §B — this root is DELIBERATELY not cloaked, and `AlpineCloakAuditTest` records
+         it as the audit's one named exception rather than letting it look like an
+         oversight. Cloaking it was tried and measured: `[x-cloak]{display:none}` on
+         `.pe-root` hides `#cy-canvas` while Cytoscape initialises against it, so the graph
+         is built in a zero-size container and never recovers — the node cards never appear,
+         and `PipelineEditorDetailsBrowserTest` sat 30s on a `.pe-card-open` that resolved
+         in the DOM and stayed invisible. The six dock panes and the banner inside this root
+         ARE cloaked, which is where the unbound content actually is; the root itself is a
+         flex container whose children are server-rendered chrome. */-->
   <div x-data="pipelineEditor()" x-init="init()" class="pe-root">
 
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
