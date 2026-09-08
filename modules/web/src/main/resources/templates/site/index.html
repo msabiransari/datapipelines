@@ -137,10 +137,10 @@
           <p class="hero-sub">Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).</p>
           <!-- claim: docs/deployment.md Appendix B -->
           <div class="code-block">
-            <pre><code>./app.sh --start --demo nyc</code></pre>
+            <pre><code>./app.sh --start --demo nyc,trade,lake</code></pre>
             <button type="button" class="copy-btn" hidden>Copy</button>
           </div>
-          <p class="hero-note">One command, real NYC data. Add <code>--demo nyc,trade</code> for the second family.</p>
+          <p class="hero-note">One command, three published sample-data families — NYC taxi trips, US trade, and <a th:href="@{/dp-lake}">dp-lake</a>: 24 months of rideshare trips as Parquet on S3, read in place. <code>--demo nyc</code> alone is the smallest useful stack.</p>
           <div class="btn-row">
             <a class="btn btn-primary" th:href="@{/login}">Try Right Now</a>
             <a class="btn btn-secondary" href="#demo">Get started</a>
@@ -153,9 +153,9 @@
           </div>
         </div>
         <figure class="hero-shot ds-animate-fade-in">
-          <!-- screenshot: execution detail of a real SUCCESS run of the seeded nyc/mobility/rainy_vs_dry_ridership pipeline, triggered over REST with an API key (untouched capture) -->
-          <img th:src="@{/site/img/execution-result.png}" width="1440" height="1000" alt="Execution detail for the seeded nyc/mobility/rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
-          <figcaption>A real SUCCESS execution, triggered over REST with an API key — exactly the agent flow. Rows included, so the agent can check its own work.</figcaption>
+          <!-- screenshot: execution detail of a real SUCCESS run of the seeded nyc/mobility/weather_sensitivity_by_borough pipeline — untouched capture from `./gradlew siteShots` (093 §C) -->
+          <img th:src="@{/site/img/execution-result.png}" width="1440" height="900" alt="Execution detail for Weather sensitivity by borough, version 1: a SUCCESS badge, a 12431 ms duration, a correlation ID and Triggered via REST. A node-stats table lists the five nodes — stage_daily_by_zone at 13368 rows, stage_daily_weather at 92, stage_zones at 263, stage_calendar at 92 and weather_sensitivity at 29 — with each node&#39;s duration. Below, the result: 29 rows, 1434 bytes, and the table itself with borough, weather, day type, days, trip count, trips per day and revenue per trip." loading="eager" fetchpriority="high">
+          <figcaption>A real SUCCESS execution of a five-node, three-engine pipeline. Per-node row counts, then the rows themselves — which is how an agent checks its own work instead of asserting it.</figcaption>
         </figure>
       </div>
     </section>
@@ -173,6 +173,8 @@
         <ul class="engine-links">
           <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
         </ul>
+        <!-- claim: docs/datasources.md §4.1 (the LAKE row), §8C -->
+        <p class="engine-strip-more">The dialect catalog holds eight: those six, H2 &mdash; which is also the staging engine &mdash; and <code>LAKE</code>, which reads Parquet and Iceberg on S3 in place. <a th:href="@{/dp-lake}">That one is dp-lake &rarr;</a></p>
         <p class="engine-strip-more"><a th:href="@{/mcp-server-for-sql-databases}">Start with the SQL MCP server overview &rarr;</a></p>
       </div>
     </section>
@@ -188,17 +190,17 @@
           <ol class="steps">
             <li>
               <h3>Mint an API key</h3>
-              <!-- claim: docs/ui-screens.md §4.10, docs/auth.md §7.4 -->
-              <p>Create it in the UI or with <code>POST /api/v1/auth/api-keys</code>.</p>
-              <!-- claim: docs/auth.md §7.1–7.6 -->
-              <p>Keys are shown once, stored Argon2id-hashed, carry hierarchical scopes (<code>read</code>, <code>execute</code>, <code>author</code>, <code>admin</code>) and are pinned to one workspace.</p>
+              <!-- claim: docs/ui-screens.md §4.18, docs/auth.md §7.4 -->
+              <p>Mint it on the <strong>API</strong> section — <code>/api-console</code>, where the endpoints it may call and the MCP connection already live — or with <code>POST /api/v1/auth/api-keys</code>.</p>
+              <!-- claim: docs/auth.md §7.1–7.6, §7.7 -->
+              <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, given an expiry, and carry hierarchical scopes (<code>read</code>, <code>execute</code>, <code>author</code>, <code>admin</code>). An agent's key and a program's key are the same kind of credential.</p>
             </li>
             <li>
               <h3>Point the agent at <code>/mcp</code></h3>
               <!-- claim: docs/mcp-server.md §4.1 -->
               <p>The MCP endpoint authenticates API keys only — <code>DP-API-Key</code> header or <code>Bearer dpk_…</code>. No cookies, no session roulette.</p>
-              <!-- claim: docs/mcp-server.md §6.2.1–6.2.26 -->
-              <p>Exactly <span th:text="${toolCount}">26</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
+              <!-- claim: docs/mcp-server.md §6.1 -->
+              <p>Exactly <span th:text="${toolCount}">30</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, publish endpoints, register lake tables, execute, inspect.</p>
             </li>
             <li>
               <h3>Author as a JSON contract</h3>
@@ -220,7 +222,7 @@
           <figure class="how-figure">
             <svg class="diagram" viewBox="0 0 360 536" role="img" aria-labelledby="flow-title flow-desc">
               <title id="flow-title">Agent-to-engine flow</title>
-              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (28 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
+              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and five more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (30 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
               <defs>
                 <marker id="dg-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
@@ -234,7 +236,7 @@
               <path class="dg-arrow" d="M180 72 V92" marker-end="url(#dg-arrowhead)"/>
 
               <rect class="dg-box-accent" x="30" y="96" width="300" height="56" rx="8"/>
-              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 28 MCP tools</text>
+              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 30 MCP tools</text>
               <text class="dg-sub" x="180" y="138" font-size="11" text-anchor="middle">API-key-only: DP-API-Key or Bearer dpk_…</text>
 
               <path class="dg-arrow" d="M180 152 V172" marker-end="url(#dg-arrowhead)"/>
@@ -256,7 +258,7 @@
               <text class="dg-label" x="70" y="330" font-size="11" text-anchor="middle">PostgreSQL</text>
               <text class="dg-label" x="180" y="330" font-size="11" text-anchor="middle">MySQL</text>
               <text class="dg-label" x="290" y="330" font-size="11" text-anchor="middle">SQLite</text>
-              <text class="dg-sub" x="180" y="348" font-size="10" text-anchor="middle">+ SQL Server, Oracle, DuckDB, H2</text>
+              <text class="dg-sub" x="180" y="348" font-size="10" text-anchor="middle">+ SQL Server, Oracle, DuckDB, H2, LAKE</text>
 
               <path class="dg-arrow" d="M70 352 L174 378" marker-end="url(#dg-arrowhead)"/>
               <path class="dg-arrow" d="M180 358 V378" marker-end="url(#dg-arrowhead)"/>
@@ -275,8 +277,8 @@
           </figure>
         </div>
 
-        <!-- claim: the published demo dataset is ~4.9M sampled NYC taxi rows across three engines (docs/deployment.md Appendix B; scripts/sample-data/README.md) -->
-        <p class="how-footnote">This isn't a toy loop: the published demo set is ~4.9M sampled NYC taxi rows across Postgres, MySQL and SQLite — an agent authors and runs against exactly that.</p>
+        <!-- claim: docs/deployment.md Appendix B (the demo families table and the dp-lake section); the row count is the published lake manifest.json's, recorded in deployment.md Appendix C's dp-lake v1 publication row -->
+        <p class="how-footnote">This isn't a toy loop: the published demo set is ~4.9M sampled NYC taxi rows across Postgres, MySQL and SQLite, US trade at HS-6 grain on DuckDB, and 471,851,707 rideshare trips as Parquet on S3 that nothing downloads. An agent authors and runs against exactly that.</p>
       </div>
     </section>
 
@@ -331,10 +333,12 @@
               <path d="M7 13h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             <!-- claim: docs/template-hierarchy-design.md §4.1, §4.3, §4.5 -->
-            <h3>Template hierarchy &amp; explorer</h3>
-            <p>A template's name <em>is</em> its path — <code>acme/finance/monthly_revenue</code>, up to ten segments. Folders are virtual: derived from name prefixes, with no identity, no CRUD and no rename, because a name is an identity every pin depends on.</p>
+            <h3>Names are paths, and a folder is mandatory</h3>
+            <p>A template's or pipeline's name <em>is</em> its path — <code>nyc/mobility/revenue_by_borough</code>, <strong>2 to 10 segments</strong>, and the first one is a folder: the root holds folders only. A flat name is refused with <code>details.reason = "folder_required"</code>, and scratch work has a home, <code>test/</code>. Folders are virtual — derived from name prefixes, with no identity, no CRUD and no rename, because a name is an identity every pin depends on.</p>
+            <!-- claim: docs/mcp-server.md §6.2.4, §6.2.8 (the confirm_new_root argument) -->
+            <p>An agent that invents a NEW top-level root is refused until it says so on purpose: <code>confirm_new_root</code>, with the roots that already exist in the error's details. Asking a person before minting a namespace is a guarantee here, not advice in a description.</p>
             <!-- claim: docs/ui-screens.md §4.6 -->
-            <p>The explorer is a real tree — one server-side prefix query per level, versions on the right, browse and search as two different presentations.</p>
+            <p>The explorer is a real tree — one server-side prefix query per level, versions on the right, browse and search as two different presentations. The same tree serves pipelines, and the MCP list tools take the same <code>prefix</code>.</p>
           </article>
 
           <article class="card ds-hover-lift">
@@ -370,16 +374,16 @@
           <figure class="shot">
             <!-- screenshot: the /templates explorer, tree expanded two levels with a leaf selected — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/template-explorer.png}" width="1440" height="900" alt="The templates screen: a tree on the left with the nyc folder expanded into lib, mobility, reference and weather, and mobility expanded again to show seven templates with sql and dialect badges. On the right, the selected template nyc/mobility/od_matrix.sql with its description and a versions table showing v1 RELEASED, in use by 1 pipeline." loading="lazy">
+              <img th:src="@{/site/img/template-explorer.png}" width="1440" height="900" alt="The templates screen: a tree on the left with the nyc folder holding 22 templates, expanded into lake (5), lib (1), mobility (11), reference (3) and weather (2), and mobility expanded again to show its eleven templates, each with a sql badge and a dialect badge reading H2 or POSTGRES. Below nyc sit the test (1) and trade (8) folders. On the right, the selected template nyc/mobility/od_matrix.sql with its description and a versions table showing v1, RELEASED, in use by 1 pipeline." loading="lazy">
             </div>
             <figcaption>The template explorer. A template's name <em>is</em> its path, so the browser is a tree — one server-side query per level, versions on the right.</figcaption>
           </figure>
           <figure class="shot">
             <!-- screenshot: the shared zone template's version list with its in-use count — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/template-used-by.png}" width="1440" height="900" alt="The templates screen with sample_zones.sql selected. Its versions table shows version v1, status RELEASED, and an IN USE column reading 6 pipelines." loading="lazy">
+              <img th:src="@{/site/img/template-used-by.png}" width="1440" height="900" alt="The templates screen with nyc/reference/sample_zones.sql selected. Its description reads: reads the 265-row zone lookup from the sample-reference SQLite datasource. Its versions table shows version v1, status RELEASED, and an IN USE column reading 5 pipelines." loading="lazy">
             </div>
-            <figcaption>Used-by, before you change anything: <code>sample_zones.sql</code> v1 is pinned by six pipelines. Delete is refused while that number is not zero.</figcaption>
+            <figcaption>Used-by, before you change anything: <code>nyc/reference/sample_zones.sql</code> v1 is pinned by five pipelines. Delete is refused while that number is not zero.</figcaption>
           </figure>
         </div>
 
@@ -394,10 +398,23 @@
               <path d="M5 6v12a7 2.6 0 0 0 14 0V6M5 12a7 2.6 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
             <!-- claim: docs/datasources.md §4.1 -->
-            <h3>Seven SQL dialects</h3>
-            <p>PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite and H2 — one contract, seven engines.</p>
+            <h3>Eight dialects, one contract</h3>
+            <p>PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite, H2 — and <code>LAKE</code>, object storage read in place. One pipeline contract over all of them.</p>
             <!-- claim: docs/datasources.md §10, docs/deployment.md §3.5 -->
-            <p>Oracle and MySQL drivers are opt-in for license reasons (<code>-Poracle</code>/<code>-Pmysql</code>, or drop the jar in <code>lib/</code>); a missing driver fails at save with <code>datasource.driver_not_loaded</code>.</p>
+            <p>Oracle and MySQL drivers are opt-in for license reasons (<code>-Poracle</code>/<code>-Pmysql</code>, or drop the jar in <code>lib/</code>); a missing driver fails at save with <code>datasource.driver_not_loaded</code>. Everything else is in the published image, the DuckDB extensions included — a hardened deployment needs no egress to an extension repository.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 8.5c0-2 3.6-3.5 8-3.5s8 1.5 8 3.5-3.6 3.5-8 3.5-8-1.5-8-3.5z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M4 8.5v7c0 2 3.6 3.5 8 3.5s8-1.5 8-3.5v-7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M9 15.5h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/datasources.md §8C, §8C.1, §8C.2 -->
+            <h3>dp-lake: Parquet and Iceberg, read in place</h3>
+            <p>A <code>LAKE</code> datasource queries Parquet and Apache Iceberg on S3 or any S3-compatible store with no warehouse and no load step. DuckDB is the engine; the catalog is the server's own registry, <strong>dp-catalog</strong>, because the engine cannot list a bucket — tables are registered over REST or by an agent through the <code>lake_tables_*</code> tools, and each becomes a view at connect.</p>
+            <!-- claim: docs/datasources.md §8C.2, §8C.8 -->
+            <p>Hive-partitioned Parquet is scanned with partition pruning, so a date predicate reads the days it names and not the table. It is a <strong>read</strong> connector: there is no write path to the bucket. <a th:href="@{/dp-lake}">The whole dp-lake story &rarr;</a></p>
           </article>
 
           <article class="card ds-hover-lift">
@@ -425,11 +442,13 @@
               <rect x="13" y="13" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <path d="M11 7.5h3a2 2 0 0 1 2 2V13" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <!-- claim: docs/pipeline-editor.md §5.3 -->
-            <h3>Pipeline graph view</h3>
-            <p>The DAG renders as node <em>cards</em>, with the facts inside the box: name, a type badge, <code>datasource · dialect</code>, <code>template @ version</code>, and — after a run — elapsed time and rows. Colour carries state, the badge carries type, the ring carries selection.</p>
-            <!-- claim: docs/pipeline-editor.md §11.1 -->
-            <p>It executes, streams, cancels, pages results and switches versions. What it deliberately does not do is author: there is no edit mode in v1, because authoring is agent-first.</p>
+            <!-- claim: docs/pipeline-editor.md §5.3, §4.3 -->
+            <h3>The pipeline editor</h3>
+            <p>The DAG renders on a full-bleed canvas as node <em>cards</em>, with the facts inside the box: name, a type badge, <code>datasource · dialect</code>, <code>template @ version</code>, and — after a run — elapsed time and rows. Colour carries state, the badge carries type, the ring carries selection, and a minimap holds your place on a big graph.</p>
+            <!-- claim: docs/pipeline-editor.md §10, §10.2, §8 -->
+            <p>Underneath sits one dock with four tabs — <strong>Details</strong>, <strong>Results</strong>, <strong>Errors</strong>, <strong>Events</strong>. A node's details open from the card itself and carry the SQL <em>resolved</em>; a failure opens Errors; every event of the run is in arrival order under Events.</p>
+            <!-- claim: docs/pipeline-editor.md §11.1, §11.3 -->
+            <p>It executes, streams, cancels, pages results and switches versions. What it deliberately does not do is author: there is no edit mode in v1, because authoring is agent-first. That one is on the roadmap, and it is named there.</p>
           </article>
 
           <article class="card ds-hover-lift">
@@ -449,8 +468,10 @@
               <path d="M3 12h3l2-6 4 12 2-6h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <!-- claim: docs/rest-api.md §6 -->
-            <h3>Live execution streams</h3>
+            <h3>Live execution streams, and a cancel that means it</h3>
             <p><code>POST /api/v1/pipelines/{id}/execute</code> returns <code>text/event-stream</code> with per-milestone events and heartbeats. No stream resumption — a dropped connection cancels the execution rather than orphaning it.</p>
+            <!-- claim: docs/dag-executor.md §8.3.1, §8.3.2 -->
+            <p>Cancel reaches the executing instance through Redis from any instance, and a per-node latch refuses to enter the driver once it has fired. <strong>A cancelled execution cannot come back SUCCESS</strong> — the window where it could was closed and is covered by a test that injects the descheduling rather than racing it.</p>
           </article>
 
           </div>
@@ -458,28 +479,18 @@
 
         <div class="shots">
           <figure class="shot">
-            <!-- screenshot: the editor on the largest showcase pipeline after a successful run, dock open on Results — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <!-- screenshot: the API section at /api-console — untouched capture from `./gradlew siteShots` (093 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/graph-cards.png}" width="1440" height="900" alt="The pipeline editor for nyc/mobility/weather_sensitivity_by_borough after a successful run. Node cards carry a green tick, the node name, a DQL badge, the datasource and dialect (sample-trips POSTGRES, sample-weather MYSQL, tempdb H2), the pinned template and version, and a run line reading 5.7 s and 13368 rows. Curved edges join the staging nodes to the answer node. The results dock is open below, showing borough, weather, day type, days, trip count, trips per day and revenue per trip." loading="lazy">
+              <img th:src="@{/site/img/api-console.png}" width="1440" height="900" alt="The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads 30 tools and holds the connection JSON with a DP-API-Key header." loading="lazy">
             </div>
-            <figcaption>The editor after running <code>nyc/mobility/weather_sensitivity_by_borough</code> — five nodes across Postgres, MySQL and SQLite, staged into one tempdb. Each card carries its own engine, pinned template, elapsed time and row count. The fifth card sits below the results dock at this window size.</figcaption>
+            <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection — with the tool count read from the catalog at request time, exactly as this page reads it.</figcaption>
           </figure>
           <figure class="shot">
-            <!-- screenshot: a node's details panel showing the resolved SQL — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <!-- screenshot: the key-minting modal, Kind → Scope → Name → Expiry → Bindings — untouched capture from `./gradlew siteShots` (093 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/node-inspector.png}" width="1440" height="900" alt="The pipeline editor with the stage_daily_by_zone node selected. A details panel on the right shows the node type DQL, its description, the resolved SQL syntax-highlighted with a :start_date bind parameter visible, and a configuration section giving the source sample-trips, the template nyc/mobility/daily_by_zone.sql at v1, and the output target tempdb table stg_daily_by_zone." loading="lazy">
+              <img th:src="@{/site/img/keys.png}" width="1440" height="900" alt="The New API key modal over the API section. Its fields run in order: Kind, as three radio cards reading Agent / API key, Published-endpoint key and Promotion server key; Scope, a select showing read — list and inspect, runs nothing; Name, with a hint that names are not unique and the prefix is what identifies a key; and Expiry, a select defaulting to Never. The bindings picker is absent, because the selected kind is the scoped one." loading="lazy">
             </div>
-            <figcaption>A node's details, with the SQL <em>resolved</em> — rendered server-side, bind parameters still in <code>:name</code> form because values never enter the SQL text.</figcaption>
-          </figure>
-        </div>
-
-        <div class="shots">
-          <figure class="shot">
-            <!-- screenshot: a real node failure with the exception chain expanded — untouched capture from `./gradlew siteShots` (070 §C) -->
-            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/failure-detail.png}" width="1440" height="900" alt="The pipeline editor after a failed run. The failing node's card is outlined in red with a cross badge, showing probe-trips-readonly POSTGRES and its template. Below, the failure detail shows the error code pipeline.node.datasource_connection_failed, the driver message FATAL: password authentication failed for user demo_probe_ro, a correlation id, the node's own facts, the rendered SQL, and an expanded exception section naming the root cause org.postgresql.util.PSQLException with its stack frames." loading="lazy">
-            </div>
-            <figcaption>A node failure, in full: the catalogued code, the driver's own message, the rendered SQL, and the original exception chain with frames. The same record reaches the SSE event, the stored execution and the agent's <code>executions_get</code>. Produced honestly — a throwaway pipeline whose datasource password was rotated out from under it.</figcaption>
+            <figcaption>Minting a key asks Kind first, because the kind decides what the rest of the form means. Scope and bindings appear only for the kinds that have them.</figcaption>
           </figure>
         </div>
 
@@ -497,8 +508,8 @@
             <!-- claim: docs/versioning.md §10.1, §10.2, §10.3 -->
             <h3>Promotion between environments</h3>
             <p>Push dev → staging → prod from the UI. The screen lists only <strong>released</strong> versions newer than the target's; drafts never leave the authoring environment, and a same-version push is refused as a bug rather than swallowed as a no-op. Templates and child pipelines travel first, as a dependency closure.</p>
-            <!-- claim: docs/versioning.md §10.6, docs/deployment.md §6.3A -->
-            <p>The credential is a <strong>pre-shared server key</strong>, not a principal — no user account, so rotation and offboarding are independent. Absent key means promotion is refused; the receiver validates and never calls back.</p>
+            <!-- claim: docs/auth.md §7.7 (the server kind), docs/versioning.md §10.6, docs/deployment.md §6.3A -->
+            <p>The credential is a <strong><code>server</code>-kind API key</strong>, not a principal — no user account, so rotation and offboarding are independent of any person. An admin mints it, it is Argon2id-hashed and revocable like every other key, and it opens the promotion routes and nothing else. Rotation is: mint a second, set it on the sender, revoke the first — no restart on either side. No key on either side means promotion is refused; the receiver validates and never calls back.</p>
             <!-- claim: docs/auth.md §4.5, docs/versioning.md §10.6 -->
             <p>Imported rows are stamped with a <code>system</code> service account that cannot log in, and the receiver's audit event records the source environment and a fingerprint of the key — never the key.</p>
           </article>
@@ -516,6 +527,44 @@
             <p>Datasource pool invalidation rides a Redis channel: repoint or rotate a credential on one instance and every other evicts its pool and rebuilds from the row, instead of serving stale credentials until restart.</p>
             <!-- claim: docs/deployment.md §6.2 -->
             <p>A crashed instance's in-flight executions are swept to <code>ABORTED</code> by an idempotent stale-execution sweep every replica runs.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M7 14h4M14 14h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/ui-screens.md §4.18 -->
+            <h3>One API section</h3>
+            <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/x/…</code>, the keys that may call them, and the MCP connection block — with the tool count rendered live from the same catalog this page renders it from, never a literal.</p>
+            <!-- claim: docs/ui-screens.md §4.18 (the endpoints card) -->
+            <p>It is honest about what it cannot show. There is no "calls in the last 24 h" column, because nothing in this system counts endpoint serves — so the card says the absence instead of filling it from a sample.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 3v6M12 15v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M5 7l2.5 2.5M19 7l-2.5 2.5M5 17l2.5-2.5M19 17l-2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/datasources.md §5, §5.4 -->
+            <h3>Connection pools you can see and set</h3>
+            <p>Eight HikariCP settings are on the datasource form, each prefilled with its <strong>effective</strong> default and labelled with where that default came from — the library, this server, or the dialect adapter. A field left alone is not persisted, so a later change to a product default still reaches the datasource.</p>
+            <!-- claim: docs/datasources.md §5 (the ranges are refusals) -->
+            <p>Out-of-range values are <em>refused</em>, not accepted. Hikari's own validation silently rewrites a too-small <code>maxLifetime</code> or <code>keepaliveTime</code> to something else; the row would then hold a number the pool never used. Every floor here restates a rewrite Hikari would otherwise perform, and the test that justifies them builds a real pool and watches it happen.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 7h14M5 12h14M5 17h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="18" cy="17" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <!-- claim: docs/datasources.md §5.2 (Retire, then close) -->
+            <h3>A saved datasource never kills a running query</h3>
+            <p>Editing or deleting a datasource <strong>retires</strong> its pool instead of closing it: new leases build a fresh pool from the new row at once, idle connections close now, and a connection still in use closes when its borrower returns it — never mid-statement. A bounded reaper closes what is left, with one WARN naming what it took down.</p>
+            <!-- claim: docs/datasources.md §6.2 -->
+            <p>Delete asks the question first. The dialog runs the <em>any-version</em> usage scan before it offers anything and lists <code>pipeline &rsaquo; node (v3 released)</code> for every reference; on that branch there is no confirm button to click past. The <code>409</code> and the dialog cannot disagree — same scan — and the POST re-runs it anyway, because a screen is never the authority.</p>
           </article>
 
           <article class="card ds-hover-lift">
@@ -552,9 +601,9 @@
           <figure class="shot">
             <!-- screenshot: the /executions history with successes, failures and a composed child run — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/executions.png}" width="1440" height="900" alt="The execution history screen, filtered by pipeline, status and date range. Rows show both outcomes: SUCCESS rows with durations and row counts, and FAILED rows with no rows returned. One row is annotated as spawned by another execution — the child of a composed pipeline." loading="lazy">
+              <img th:src="@{/site/img/executions.png}" width="1440" height="900" alt="The execution history screen, newest first, with filters for pipeline, status and date range. Rows carry the pipeline&#39;s display name above its full path, the version, a status pill, the start time, the duration in milliseconds, the row count and the trigger. Both outcomes are here: Success rows for nyc/mobility/taxi_vs_rideshare at 12 rows and nyc/mobility/weather_sensitivity_by_borough at 29, and Failed rows for test/probe/trip_probe with a dash where the row count would be. Every row reads REST under Via." loading="lazy">
             </div>
-            <figcaption>Execution history across both outcomes. A composed pipeline's child run is listed in its own right and linked back to the parent that spawned it.</figcaption>
+            <figcaption>Execution history across both outcomes, newest first — with what started each run in the last column. A composed pipeline's child run is listed in its own right, linked back to the parent that spawned it.</figcaption>
           </figure>
         </div>
 
@@ -575,6 +624,35 @@
             <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace; roles are owner and member.</p>
             <!-- claim: docs/ui-screens.md §4.13, docs/rest-api.md §17 -->
             <p>The management UI ships: create, switch, manage members, a navbar switcher and add-by-email.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="7" cy="9" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M10 9h11M17 9v3M20 9v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M4 15.5h9M4 19h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/auth.md §7.7 -->
+            <h3>A key has a kind, and the kind decides its reach</h3>
+            <p>Three kinds, and two of them are not scoped at all. A <code>user</code> key is an agent's key and a program's key — one credential, two surfaces — and its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to and consults no scopes. A <code>server</code> key, mintable by an admin only, opens the promotion routes and nothing else.</p>
+            <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
+            <p>The confinement is decided centrally, before any handler's own annotation is read, so a new route cannot quietly become reachable to a scopeless key because someone forgot a check. Asking for scopes on a scopeless kind is refused, not silently dropped.</p>
+            <!-- claim: docs/ui-screens.md §4.18 (the create form) -->
+            <p>The form asks in that order — Kind, then Scope, then Name, then Expiry, then Bindings — with scope and bindings appearing only for the kinds that have them, and the <code>server</code> option rendered only for admins, because a form that offers a refused option lies.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 12h7M20 12h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M14 6v12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="2 3"/>
+              <rect x="17" y="9" width="5" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="6" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <!-- claim: docs/mcp-server.md §6.2.22 -->
+            <h3>The agent never sees a credential</h3>
+            <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that mints a key. Registering a datasource means handing over a live database credential, and a credential passed through a tool call transits the agent's context, its transcript and whatever the client logs. A person adds the datasource in the UI — or an operator over REST, or the bootstrap file — and the agent uses it <em>by name</em>.</p>
+            <!-- claim: docs/mcp-server.md §6.2.22, docs/datasources.md §3.4 -->
+            <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns, preview rows. It can discover a connection, confirm it works, read its shape and look at real values — enough to author a pipeline against it — without one ever being handed a password. A tool once shipped with the hazard written into its own description; a description is not a control, so the tool is gone.</p>
           </article>
 
           <article class="card ds-hover-lift">
@@ -629,16 +707,16 @@
           <figure class="shot">
             <!-- screenshot: the workspaces screen with two workspaces and the navbar switcher — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/workspaces.png}" width="1440" height="900" alt="The workspaces screen. A create form at the top, then a table listing two workspaces — nyc-demo, marked active, and analytics-team — each with the viewer's role of owner and Switch and Delete actions. Below, a members table per workspace with an add-by-email field. A workspace switcher sits in the navigation bar." loading="lazy">
+              <img th:src="@{/site/img/workspaces.png}" width="1440" height="900" alt="The workspaces screen. A create form at the top, a note that the provisioning mode on this server is auto-per-user, then a table listing two workspaces — admin, marked active, and analytics-team — each with the viewer&#39;s role of owner and Switch and Delete actions. Below, a members table per workspace with an add-by-email field. A workspace switcher sits at the top of the sidebar." loading="lazy">
             </div>
             <figcaption>Workspaces, with the navbar switcher. Every request resolves exactly one workspace, and all authored content is scoped to it.</figcaption>
           </figure>
           <figure class="shot">
-            <!-- screenshot: the API keys screen AFTER the once-only secret reveal was dismissed — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <!-- screenshot: the pipelines explorer in the DARK theme, driven through the settings select — untouched capture from `./gradlew siteShots` (093 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/api-keys.png}" width="1440" height="900" alt="The API keys screen listing two keys by name, creation date, last-used date and scope badges reading read and author, each with a Revoke action. No key secret is visible anywhere on the screen." loading="lazy">
+              <img th:src="@{/site/img/shell-dark.png}" width="1440" height="900" alt="The pipelines explorer in the dark theme. The sidebar carries the workspace switcher and the Build, Operate and Organisation groups; the tree shows the nyc folder expanded into mobility with its seven pipelines, each with a v1 badge, and the test and trade folders below it. The right pane reads: select a pipeline." loading="lazy">
             </div>
-            <figcaption>Agent credentials. The secret is shown exactly once, at creation; afterwards only a prefix, the scopes and the last-used time — which is what this capture was taken to show.</figcaption>
+            <figcaption>The same shell in dark. The theme is the account's own setting, not a media query — one toggle in the top bar, remembered per user.</figcaption>
           </figure>
         </div>
 
@@ -651,9 +729,9 @@
     <section class="section" id="demo" aria-labelledby="demo-title">
       <div class="container">
         <p class="kicker">The demo is the quickstart</p>
-        <h2 id="demo-title" class="ds-headline">Real NYC data, one command</h2>
+        <h2 id="demo-title" class="ds-headline">Real data, one command, three families</h2>
         <!-- claim: docs/deployment.md Appendix B -->
-        <p class="section-lede"><code>./app.sh --start --demo nyc</code> builds the jar, downloads the published mobility/v2 sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds 17 templates and six example pipelines into your workspace at first login.</p>
+        <p class="section-lede"><code>./app.sh --start --demo nyc</code> builds the jar, downloads the published <code>mobility/v6</code> sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds 17 templates and six example pipelines into your workspace at first login. <code>--demo nyc,trade,lake</code> takes all three.</p>
 
         <div class="demo-grid">
           <div class="demo-copy">
@@ -664,12 +742,14 @@
               <li><strong>SQLite</strong> — a reference database.</li>
               <li><strong>Deterministic build</strong> — every source URL and SHA-256 pinned; hash-based sampling, never random.</li>
               <li><strong>Checksummed manifest</strong> — with provenance recorded per source, behind a pre-publication license gate.</li>
-              <!-- claim: scripts/sample-data/README.md (the seeded example pipelines), deploy/sample-data/expected-results-nyc.json -->
+              <!-- claim: scripts/sample-data/content/examples.json (the seeded example pipelines), deploy/sample-data/expected-results-nyc.json -->
               <li><strong>Six worked pipelines</strong> — up to five nodes, three engines in one run, a composed child pipeline, and a shared template library. Each one has a recorded expected result, checked by <code>check-baselines.sh</code>.</li>
             </ul>
             <p class="demo-note">Same command, same bytes, same rows — every time. Your agent gets a reproducible sandbox with something real to chew on.</p>
             <!-- claim: docs/deployment.md Appendix B (the demo families table), deploy/sample-data/bootstrap-datasources-census.yml -->
             <p class="demo-note"><strong>A second family ships beside it.</strong> <code>--demo nyc,trade</code> adds US Census monthly imports and exports at HS-6 grain on <strong>DuckDB</strong> — the demo's fourth engine — UN Comtrade mirror statistics on MySQL, and Federal Reserve H.10 exchange rates on SQLite, with three more example pipelines that reconcile what the United States reports against what its partners report. This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.</p>
+            <!-- claim: docs/deployment.md Appendix B (dp-lake — the family with no loader), docs/datasources.md §8C, deploy/sample-data/bootstrap-datasources-lake.yml -->
+            <p class="demo-note"><strong>And a third that downloads nothing at all.</strong> <code>--demo nyc,trade,lake</code> adds <a th:href="@{/dp-lake}">dp-lake</a>: 24 months of NYC high-volume for-hire trips — 471,851,707 of them — published as day-partitioned Parquet on S3, with a pre-aggregated zone-and-day table, a 1-in-16 sample and an Iceberg copy beside them. There is no loader and no restore: the family's whole consuming side is one <code>LAKE</code> datasource whose registry is seeded from the published manifest, and a query fetches only the partitions its predicates name. The showcase pipeline it seeds, <code>nyc/mobility/taxi_vs_rideshare</code>, asks one question across <strong>four engines</strong> — rideshare zone-days from the lake, yellow-taxi trips from Postgres, the borough lookup from SQLite and the day's rainfall from MySQL. It needs egress to S3 when it runs, and an unfiltered scan of the trip table reads about 7&nbsp;GB, so keep the date predicate in.</p>
           </div>
 
           <figure class="demo-figure">
@@ -696,6 +776,7 @@
               <text class="dg-sub" x="180" y="96" font-size="10" text-anchor="middle">NYC weather</text>
               <text class="dg-label" x="290" y="82" font-size="11" text-anchor="middle">SQLite</text>
               <text class="dg-sub" x="290" y="96" font-size="10" text-anchor="middle">reference DB</text>
+              <text class="dg-sub" x="180" y="112" font-size="9" text-anchor="middle">(the lake family adds a fourth source: Parquet on S3)</text>
 
               <path class="dg-arrow" d="M70 104 L168 136" marker-end="url(#dg-arrowhead-2)"/>
               <path class="dg-arrow" d="M180 104 V136" marker-end="url(#dg-arrowhead-2)"/>
@@ -718,9 +799,16 @@
           <figure class="shot">
             <!-- screenshot: the /datasources registry with each datasource's last connection-test outcome — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/datasources.png}" width="1440" height="900" alt="The datasources screen listing four registered datasources: probe-trips-readonly (Postgres) whose last test reads failed, and sample-reference (SQLite), sample-trips (Postgres) and sample-weather (MySQL) whose last tests read ok. All four are marked global and readonly, each with a Test action." loading="lazy">
+              <img th:src="@{/site/img/datasources.png}" width="1440" height="900" alt="The datasources screen listing eight registered datasources with their dialect, workspace, JDBC URL, username and the outcome of their last connection test: sample-trips and sample-weather (Postgres and MySQL, the nyc family), sample-reference and sample-fx (SQLite), sample-trade-us (DuckDB) and sample-trade-world (MySQL) from the trade family, sample-lake (LAKE, which also carries a Tables action), and probe-trips-readonly (Postgres), whose last test reads failed. Every row carries a readonly badge." loading="lazy">
             </div>
-            <figcaption>The demo's three datasources — three engines, one registry, every one governed read-only — beside the deliberately broken fourth used for the failure capture above. The last-test outcome is recorded per datasource.</figcaption>
+            <figcaption>Three demo families, seven datasources, five dialects — one registry, every one of them governed read-only — beside a deliberately broken probe whose credential was rotated out from under it. The last-test outcome is recorded per datasource, so a connection that stopped working says so before a run does.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: the sample-lake datasource's dp-catalog registry — untouched capture from `./gradlew siteShots` (093 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/datasource-lake.png}" width="1440" height="900" alt="The sample-lake datasource page: a LAKE badge, the name sample-lake, and a description of the NYC high-volume for-hire trip data read in place from Parquet on S3. Below it, the registered-tables tree — the nyc namespace holding mobility, holding four tables: hvfhs_companies, hvfhv_trips, hvfhv_trips_sample and hvfhv_zone_day, each with a parquet badge, and hvfhv_trips additionally with a pickup_date partition badge." loading="lazy">
+            </div>
+            <figcaption>dp-catalog: which tables exist in a bucket is <em>declared</em>, because the engine cannot list one. Registered over REST or by an agent through <code>lake_tables_*</code>, read-only on this screen, and each row becomes a view at connect.</figcaption>
           </figure>
         </div>
 
@@ -740,12 +828,24 @@
             <strong>Authenticated by default.</strong> Every endpoint requires auth unless it's explicitly allowlisted.
           </li>
           <li>
+            <!-- claim: docs/environments.md §2 (the posture table), §5 (demo is a flag), docs/deployment.md Appendix B -->
+            <strong>Two variables, two files.</strong> An org sets what it calls the environment (<code>DATAPIPELINES_ENV</code>) and how careful the product should be (<code>DATAPIPELINES_POSTURE</code>: <code>development</code> or <code>hardened</code>). Configuration lives in exactly two files — a tracked <code>deploy/env/defaults.env</code> carrying every non-secret default, and a git-ignored <code>deploy/secrets.env</code> that <code>./app.sh --scaffold</code> writes for you with every secret generated. The <code>hardened</code> posture refuses the demo at boot.
+          </li>
+          <li>
+            <!-- claim: docs/rest-api.md §12.3, docs/pipeline-contract.md §13.11 -->
+            <strong>The rate limiter fails closed.</strong> If Redis — where the counters live — is unreachable, requests are refused with <code>429 rate_limit.unavailable</code> rather than waved through. A limiter that opens under its own outage is not a limit.
+          </li>
+          <li>
             <!-- claim: docs/datasources.md §7.1 -->
             <strong>Encrypted credentials.</strong> Datasource passwords are AES-256-GCM encrypted with the row name bound as AAD — and the app refuses to start without a valid key.
           </li>
           <li>
             <!-- claim: docs/deployment.md Appendix B, §9 -->
             <strong>Least privilege as the documented pattern.</strong> The demo provisions a SELECT-only database login; the same pattern is documented for your own datasources.
+          </li>
+          <li>
+            <!-- claim: docs/deployment.md §3.1 (the bundled-extensions bullet), docs/datasources.md §8C.5, §8C.2 -->
+            <strong>No surprise egress.</strong> The DuckDB extensions dp-lake needs are baked into the published image and loaded from disk, so a hardened deployment never reaches out to an extension repository at runtime. What a lake query costs in bytes is bounded by the query's own predicates, and the docs say so before you turn it on.
           </li>
           <li>
             <strong>TLS is your job.</strong> Terminate TLS at your own proxy — we don't pretend a built-in would fit every network.
@@ -797,13 +897,18 @@
           <ul class="roadmap-list">
             <li class="roadmap-item">
               <h3>Pipeline and template editing in the UI</h3>
-              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Pipeline CRUD and template CRUD in the UI", the first row -->
-              <p>Create, edit and save from the browser. Today both editors display, preview, release and execute; authoring goes through MCP and the REST API. When it lands it rides the existing draft lifecycle — a released version is never the edit target.</p>
+              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Pipeline CRUD and template CRUD in the UI", the first row; docs/pipeline-editor.md §11.3 -->
+              <p>Create, edit and save from the browser. Today both editors display, preview, release and execute; authoring goes through MCP and the REST API, which is a deliberate v1 choice and not an oversight. When it lands it rides the existing draft lifecycle — a released version is never the edit target.</p>
             </li>
             <li class="roadmap-item">
               <h3>DuckDB as a staging engine</h3>
               <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "DuckDB as staging engine (settings.tempdb.engine: \"DUCKDB\")" -->
-              <p><code>settings.tempdb.engine: "DUCKDB"</code> for large analytical joins. DuckDB already ships as a dialect and, since the trade demo family, as a sample-data engine; backing the staging tempdb with it is what remains.</p>
+              <p><code>settings.tempdb.engine: "DUCKDB"</code> for large analytical joins. DuckDB already ships as a dialect, as the trade demo's own engine, and as the engine underneath dp-lake; backing the staging tempdb with it is what remains. Today every execution stages into an in-memory H2.</p>
+            </li>
+            <li class="roadmap-item">
+              <h3>A scheduler</h3>
+              <!-- claim: docs/ROADMAP.md §3.2 ("Pipeline-level scheduling — cron-style declarations"), docs/superpowers/specs/2026-09-07-scheduler-design.md -->
+              <p>Schedules in folders, fired exactly once across instances, with every run a first-class execution — the same history, node stats, events and cancellation a manual run gets. The design is ratified and the engine chosen; <strong>nothing of it is built</strong>. Today a pipeline runs when you run it, when an agent runs it, or when something calls its published endpoint.</p>
             </li>
             <li class="roadmap-item">
               <h3>Auto-created write-back tables</h3>
@@ -812,8 +917,8 @@
             </li>
             <li class="roadmap-item">
               <h3>A shipped KMS key provider</h3>
-              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "A shipped KMS key provider (AWS KMS, GCP KMS, Azure Key Vault, Vault transit)" -->
-              <p>The contract half already ships: credentials carry a key version, <code>datapipelines.db.key-provider</code> selects the source, and one contract test every implementation passes. What is left is a vendor implementation — a written procedure, not a design.</p>
+              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates), docs/key-providers.md §7 (the provider status table) -->
+              <p>The contract half already ships: credentials carry a key version, <code>datapipelines.db.key-provider</code> selects the source, and one contract test every implementation passes. Of the five providers in the catalogue exactly one — <code>env</code>, keys from configuration — is shipped; AWS KMS, GCP KMS, Azure Key Vault and Vault transit are a written procedure and a worked recipe, not a design, and not code you can run yet.</p>
             </li>
           </ul>
         </div>

@@ -618,9 +618,11 @@ Content: current / new / confirm fields with the policy floor stated inline (at 
 | JS | `static/site/js/site.js` — theme toggle + copy-to-clipboard only; fully readable without it |
 | htmx | No |
 
+**The screenshots are a command, not a folder** (070 §C, extended 093). `./gradlew siteShots -PshotsUrl=… -PshotsEmail=… -PshotsPassword=…` drives a REAL demo deployment with Playwright and overwrites `static/site/img/**`; `-PshotsHeroOut=<dir>` additionally writes the hero's poster (2400 px wide, device scale 2) and OG (1200x630) copies somewhere outside the app. It refuses rather than photographs: a promotion screen with no usable target, a full-length key still on screen, and — 093 — a pipeline-editor canvas whose node surface resolved to the brand colour are all SKIPPED with the reason printed, because the site's own rule is that a screen which renders broken is reported, not photographed.
+
 Content: a single static page (`templates/site/index.html` + `static/site/**`), served by the app since v1.15 — the marketing site and the product are one deployment (owner decision 2026-08-31). The only dynamic fact, the MCP tool count, is baked at render time from `McpToolCatalog` (a compile-time constant — no DB access on any public route). Defence is `Cache-Control: public` on both `/` and `/site/**`, deliberately NOT the login rate limiter (OPEN-ITEMS T46: its `remoteAddr` key is the load balancer's address behind the documented deployment, so a limiter would let one client 429 the homepage). Signed-in users hitting `/` get the marketing page too — no auto-redirect; the dashboard is one nav link away at `/dashboard`. Emergency static fallback: `./gradlew :modules:web:websiteExport` renders the same template with facts baked ([Deployment §6.7](deployment.md#67-marketing-site--in-product-docs)).
 
-**Since 073 the public site is fourteen pages, not one.** The homepage keeps its `<h1>`; its `<title>`, meta description, canonical and `og:`/`twitter:` tags now come from the `SitePages` registry, which is also what `/sitemap.xml` lists and what the SEO guards measure — one set of strings, three consumers. Each additional page is a Thymeleaf template under `templates/site/`, served by `SitePagesController` in the same shape as `/`: GET-only, anonymous, constant content, short public cache window, no datastore.
+**Since 073 the public site is fifteen pages, not one** (089 added `/dp-lake`). The homepage keeps its `<h1>`; its `<title>`, meta description, canonical and `og:`/`twitter:` tags now come from the `SitePages` registry, which is also what `/sitemap.xml` lists and what the SEO guards measure — one set of strings, three consumers. Each additional page is a Thymeleaf template under `templates/site/`, served by `SitePagesController` in the same shape as `/`: GET-only, anonymous, constant content, short public cache window, no datastore.
 
 | URL | Template | What it is |
 |---|---|---|
@@ -631,6 +633,7 @@ Content: a single static page (`templates/site/index.html` + `static/site/**`), 
 | `/text-to-sql-agent` | `site/text-to-sql-agent.html` | The after-state a text-to-SQL tool leaves out. States plainly that we do not generate SQL |
 | `/compare/airflow`, `/compare/dbt` | `site/compare-airflow.html`, `site/compare-dbt.html` | Honest comparisons, each leading with "use them instead when…" |
 | `/federated-query` | `site/federated-query.html` | The staging join, with `nyc/mobility/revenue_by_borough`'s real SQL and the limits of an in-memory staging database |
+| `/dp-lake` | `site/dp-lake.html` | dp-lake (089): Parquet and Iceberg on S3 read in place, dp-catalog, partition pruning, the four-engine showcase pipeline, and the honest limits — egress, the Iceberg metadata-file rule, no scheduler |
 
 Chrome is shared: `templates/site/_layout.html` owns the `<head>`, the header and the footer site map, and the homepage uses its header/footer fragments — two copies of a nav is how one of them stops linking a page that exists. The footer's engine column is built from the registry, so a seventh engine page is linked from every page the moment its row lands.
 

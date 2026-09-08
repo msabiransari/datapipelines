@@ -119,13 +119,14 @@
     <div class="container">
       <p class="kicker">The demo</p>
       <h2 id="demo-title" class="ds-headline">Half a billion rideshare trips, read in place</h2>
-      <!-- claim: docs/deployment.md Appendix B (dp-lake — the family with no loader) -->
+      <!-- claim: docs/deployment.md Appendix B (dp-lake — the family with no loader); the count is the published manifest.json's own `row_count`, recorded in deployment.md Appendix C's dp-lake v1 publication row -->
       <p class="section-lede">
         The published demo bucket holds <strong>24 months of NYC TLC high-volume for-hire
-        trips</strong> — Uber, Lyft, Via and Juno, roughly <strong>half a billion rides</strong> —
-        as day-partitioned Parquet, plus a pre-aggregated zone-and-day table and the licence
-        lookup. Nothing is downloaded at demo start: the lake family has no loader, and a query
-        fetches only the partitions it names.
+        trips</strong> — Uber, Lyft, Via and Juno, <strong>471,851,707 rides</strong> — as
+        day-partitioned Parquet, plus a pre-aggregated zone-and-day table, a 1-in-16 sample, an
+        Iceberg copy of that sample and the licence lookup: 855 objects, 7.57&nbsp;GB in all.
+        Nothing is downloaded at demo start: the lake family has no loader, and a query fetches
+        only the partitions it names.
       </p>
       <!-- claim: docs/environments.md §5 -->
       <p>
@@ -134,8 +135,18 @@
         the borough lookup from SQLite and the day's rainfall from MySQL — taxi share versus
         rideshare share, dry days against rainy ones. It ships with
         <code>./app.sh --start --demo nyc,trade,lake</code>, which needs egress to S3 (or a mirror
-        you configure) whenever a lake query runs.
+        you configure) whenever a lake query runs. The demo's registry is seeded from the published
+        manifest and holds four tables; the Iceberg copy is published but not registered.
       </p>
+      <div class="shots">
+        <figure class="shot">
+          <!-- screenshot: the sample-lake datasource's dp-catalog registry — untouched capture from `./gradlew siteShots` (093 §C) -->
+          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+            <img th:src="@{/site/img/datasource-lake.png}" width="1440" height="900" alt="The sample-lake datasource page: a LAKE badge, the name sample-lake, and a description of the NYC high-volume for-hire trip data read in place from Parquet on S3. Below it, the registered-tables tree — the nyc namespace holding mobility, holding four tables: hvfhs_companies, hvfhv_trips, hvfhv_trips_sample and hvfhv_zone_day, each with a parquet badge, and hvfhv_trips additionally with a pickup_date partition badge." loading="lazy">
+          </div>
+          <figcaption>dp-catalog on the demo's own lake datasource. Four registered tables, each with its format and — where it has one — its partition column. Read-only on this screen: registration is REST or <code>lake_tables_*</code>.</figcaption>
+        </figure>
+      </div>
     </div>
   </section>
 
@@ -158,7 +169,7 @@
         </li>
         <li>
           <!-- claim: docs/datasources.md §8C.3 -->
-          <strong>Aggregate in the lake, not in the cursor.</strong> The full trip table is half a billion rows behind a result cap. Push the aggregation into the lake node — that is what the engine and the pruning are for — and let the pipeline carry the answer, not the raw rows.
+          <strong>Aggregate in the lake, not in the cursor.</strong> The full trip table is 471.9 million rows behind a result cap. Push the aggregation into the lake node — that is what the engine and the pruning are for — and let the pipeline carry the answer, not the raw rows.
         </li>
       </ul>
       <p><a th:href="@{/federated-query}">Federated query &rarr;</a> &middot;

@@ -31,7 +31,7 @@
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">Self-hosted, so the first step is yours. The quickstart brings up the app, Postgres, Redis and a seeded demo with real NYC taxi data in one command:</p>
       <div class="code-block">
-        <pre><code>./app.sh --start --demo nyc</code></pre>
+        <pre><code>./app.sh --start --demo nyc,trade,lake</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/deployment.md §3.5 -->
@@ -43,11 +43,14 @@
     <div class="container">
       <p class="kicker">Step 2</p>
       <h2 id="step2-title" class="ds-headline">Mint a key for that one agent</h2>
-      <!-- claim: docs/ui-screens.md §4.10 -->
+      <!-- claim: docs/ui-screens.md §4.18 -->
       <p class="section-lede">
-        Sign in and open <strong>Settings &rarr; API keys</strong>. Give the key the agent's name, tick the scopes it
-        needs, and copy it — the plaintext is shown <em>once</em>, and the panel says so. Afterwards the list shows the
-        prefix only.
+        Sign in and open the <strong>API</strong> section — <code>/api-console</code>, where the endpoints a key may
+        call and the MCP connection block live beside the keys themselves. <strong>New key</strong> asks in this order:
+        the <em>kind</em> (an agent's key is the <code>user</code> kind — the same credential a program uses over REST),
+        the scope, a name for you to recognise it by, and an expiry. Copy the secret — the plaintext is shown
+        <em>once</em>, in a panel that stays put rather than a toast that does not. Afterwards the list shows the prefix
+        only.
       </p>
       <!-- claim: docs/auth.md §7.5 -->
       <p>Scopes are hierarchical, and the smallest one that does the job is the right one:</p>
@@ -63,8 +66,8 @@
           <tr><th scope="row"><code>admin</code></th><td>manage users and global datasources — no MCP tool requires it</td></tr>
         </tbody>
       </table>
-      <!-- claim: docs/ui-screens.md §4.10, docs/auth.md §7.4 -->
-      <p>A key's scopes can never exceed the scopes of whoever issued it, and the checkbox list you see is filtered to your own. Revoking is per-key and takes effect within about a minute — no shared password to rotate.</p>
+      <!-- claim: docs/ui-screens.md §4.18, docs/auth.md §7.4 -->
+      <p>A key's scopes can never exceed the scopes of whoever issued it, and the select you see is filtered to your own — the server refuses a superset regardless, so the filter is convenience rather than the guard. Revoking is per-key and takes effect within about a minute; an expiry does the same thing on a date you set. No shared password to rotate.</p>
     </div>
   </section>
 

@@ -134,9 +134,9 @@
           <p>AES-256-GCM in the metadata database, with the datasource name bound as additional authenticated data. The application refuses to start without a valid encryption key.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/mcp-server.md §6.1 -->
-          <h3>The agent introspects before it writes SQL</h3>
-          <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code> exist so the agent grounds its SQL in your real schema instead of guessing at it.</p>
+          <!-- claim: docs/mcp-server.md §6.1, §6.2.22 -->
+          <h3>The agent introspects, but never registers</h3>
+          <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code> exist so the agent grounds its SQL in your real schema instead of guessing at it. What it cannot do is <em>create</em> a datasource: no credential travels through an agent, so a person registers the connection and the agent uses it by name.</p>
         </article>
       </div>
     </div>
@@ -153,7 +153,7 @@
         <a th:href="@{${engine.demoHref}}">See what it does</a>.
       </p>
       <div class="code-block">
-        <pre><code>./app.sh --start --demo nyc</code></pre>
+        <pre><code>./app.sh --start --demo nyc,trade,lake</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
     </div>
