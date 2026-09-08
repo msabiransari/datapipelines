@@ -52,13 +52,29 @@ object RelativeTime {
         return "in ${coarse(remaining)}"
     }
 
-    /** The largest whole unit that fits, singular-aware. */
+    /**
+     * The largest whole unit that fits, with the count ROUNDED inside it rather than truncated.
+     *
+     * Truncation reads as an off-by-one where it matters most: a key minted seconds ago with a
+     * 30-day expiry is 29 days and 23 hours away, and "in 29 days" beside a form where the
+     * operator picked "30 days" looks like the server disagreed with them. Rounding says 30.
+     */
     private fun coarse(duration: Duration): String =
         when {
-            duration.toDays() > 0 -> plural(duration.toDays(), "day")
-            duration.toHours() > 0 -> plural(duration.toHours(), "hour")
+            duration.toDays() > 0 -> plural(rounded(duration.seconds, SECONDS_PER_DAY), "day")
+            duration.toHours() > 0 -> plural(rounded(duration.seconds, SECONDS_PER_HOUR), "hour")
             else -> plural(duration.toMinutes(), "minute")
         }
+
+    /** [seconds] in units of [unitSeconds], rounded to nearest, never below 1. */
+    private fun rounded(
+        seconds: Long,
+        unitSeconds: Long,
+    ): Long = maxOf(1, (seconds + unitSeconds / 2) / unitSeconds)
+
+    private const val SECONDS_PER_DAY = 86_400L
+
+    private const val SECONDS_PER_HOUR = 3_600L
 
     private fun plural(
         count: Long,

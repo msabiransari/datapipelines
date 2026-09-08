@@ -28,6 +28,11 @@ class RelativeTimeTest {
             { RelativeTime.until(now.plusSeconds(30), now) shouldBe "in under a minute" },
             { RelativeTime.until(now.plusSeconds(3600), now) shouldBe "in 1 hour" },
             { RelativeTime.until(now.plusSeconds(86_400 * 84), now) shouldBe "in 84 days" },
+            // Rounded, not truncated: a 30-day expiry minted a second ago is 29d23h59m away,
+            // and "in 29 days" beside a form where the operator picked "30 days" reads as the
+            // server disagreeing with them.
+            { RelativeTime.until(now.plusSeconds(86_400 * 30 - 1), now) shouldBe "in 30 days" },
+            { RelativeTime.until(now.plusSeconds(86_400 + 3_600), now) shouldBe "in 1 day" },
             // The fact that matters about a past expiry is that it IS past, not how long ago.
             { RelativeTime.until(now.minusSeconds(1), now) shouldBe "expired" },
             { RelativeTime.until(now, now) shouldBe "expired" },

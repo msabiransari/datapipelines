@@ -196,6 +196,8 @@ class ApiConsoleRenderTest {
         // An endpoint key carries NO scopes (auth §7.7); its authority is its bindings, and
         // that is what the cell must show — in the `/nyc/**` form 074 defined.
         html shouldContain "/nyc/mobility/**"
+        // The ROOT binding reads `/**`, never `//**`: it authorises the whole tree.
+        render { setVariable("keys", listOf(row(kind = "endpoint", boundPaths = listOf("/")))) } shouldContain ">/**<"
         // A server key has neither, and an empty cell would read as "this key can do nothing".
         html shouldContain "promotion routes"
     }

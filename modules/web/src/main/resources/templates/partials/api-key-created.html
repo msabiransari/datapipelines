@@ -17,7 +17,8 @@
     <span class="app-chip app-chip-mono" th:text="${keyId}">dpk_RGAXQ7T2MKLP</span>
     <span class="app-chip app-chip-mono" th:text="${keyKind}">user</span>
     <span class="app-chip app-chip-mono" th:each="s : ${keyScopes}" th:text="${s}">read</span>
-    <span class="app-chip app-chip-mono" th:each="b : ${keyBindings}" th:text="${b} + '/**'">/nyc/**</span>
+    <span class="app-chip app-chip-mono" th:each="b : ${keyBindings}"
+          th:text="${b == '/'} ? '/**' : ${b} + '/**'">/nyc/**</span>
     <span class="app-chip app-chip-mono" th:if="${keyKind == 'server'}">promotion routes</span>
     <span class="app-chip app-chip-mono" th:text="${keyExpires != null} ? 'expires ' + ${keyExpires} : 'never expires'">never expires</span>
   </div>

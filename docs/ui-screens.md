@@ -718,7 +718,11 @@ surface is `MANAGE_OWN_API_KEYS` (any authenticated principal, own keys only), e
 partial controllers' own annotation rather than by this page's `read` floor. Actions a principal
 lacks scope for are not rendered (§4 preamble), and the server re-checks regardless.
 
-Three cards:
+Three cards. Since 091 the **API keys** card leads the page and spans it: it is the management
+surface now, and seven columns do not fit the narrow track the read-only version sat in
+(measured on a live stack at 1440 — `Last used` and the revoke action were off the card's right
+edge). The endpoints inventory and the MCP connection keep the two-column row below it. The
+numbering below stays in the order the cards were introduced.
 
 1. **Published endpoints** — from `EndpointPublishService.list(principal)`, one batch lookup
    for pipeline names and one for released versions (never a query per row, the rule

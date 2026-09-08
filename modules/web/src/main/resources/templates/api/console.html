@@ -17,6 +17,99 @@
     </div>
   </div>
 
+  <!-- ------------------------------------------------------------- api keys -->
+  <!-- 091 — FULL WIDTH and first: this card became the management surface, and seven
+       columns do not fit the 1fr track the read-only version sat in (measured on the
+       live stack at 1440 — `Last used` and the revoke action were off the card's right
+       edge, reachable only by scrolling inside it). The endpoints inventory and the MCP
+       connection keep the two-column row below.
+       The ONE key table. Three renders share it: this page, the post-create
+       out-of-band refresh (partials/api-key-created), and the rows a revoke swaps in
+       (partials/api-keys-rows). One fragment, one row model (ApiKeyRows) — before 091
+       the revoke path hand-built its rows in Kotlin and a parity test kept the two
+       markups alike. -->
+  <div class="ds-card app-card-table">
+    <div class="app-card-h">
+      <h2 class="ds-title">API keys</h2>
+      <span class="app-card-note" th:text="${#lists.size(keys)} + ' total'">4 total</span>
+    </div>
+
+    <!-- The one-time secret lands HERE and PERSISTS (§5.1's hard rule — a 6s toast never
+         carries anything the user must keep). Hidden by the `u-hidden` CLASS, never an
+         inline style: 079 §D's script reads the class, and a `style.display` check would
+         see "" forever and the secret would never appear. -->
+    <div id="keyCreated" class="app-card-b u-hidden"></div>
+
+    <table class="ds-table" id="keys-table" th:fragment="keysTable(keys)" th:attr="hx-swap-oob=${oob}">
+      <thead>
+      <tr>
+        <th>Key</th>
+        <th>Kind</th>
+        <th>Reach</th>
+        <th>Created</th>
+        <th>Expires</th>
+        <th>Last used</th>
+        <th class="num">Actions</th>
+      </tr>
+      </thead>
+      <tbody id="keys-table-body">
+      <th:block th:fragment="keyRows(keys)">
+        <tr th:if="${keys == null || keys.isEmpty()}">
+          <td colspan="7">
+            <div class="app-empty">
+              <b>No API keys</b>
+              A key is how an agent, a program or another deployment authenticates. Create one with
+              <b>New key</b>.
+            </div>
+          </td>
+        </tr>
+        <tr th:each="k : ${keys}">
+          <td>
+            <span class="app-name" th:text="${k.name}">agent</span>
+            <span class="app-path ds-mono" th:text="${k.prefix}">dpk_RGAX…</span>
+          </td>
+          <td><span class="app-chip app-chip-mono" th:text="${k.kind}">user</span></td>
+          <td>
+            <!-- A key's REACH is whatever decides what it may do, and that differs by kind:
+                 scopes for a user key, bound paths for an endpoint key, a route family for
+                 a server key. An empty scope cell on the last two would read as "this key
+                 can do nothing", which is the opposite of true (auth §7.7). -->
+            <span class="app-chips" th:if="${k.kind == 'user'}">
+              <span class="app-chip app-chip-mono" th:each="s : ${k.scopes}" th:text="${s}">read</span>
+            </span>
+            <span class="app-chips" th:if="${k.kind == 'endpoint'}">
+              <!-- The root binding reads `/**`, not `//**`: it authorises the whole tree. -->
+              <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}"
+                    th:text="${p == '/'} ? '/**' : ${p} + '/**'">/nyc/**</span>
+              <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths)}">no bindings — authorises nothing</span>
+            </span>
+            <span class="app-chips" th:if="${k.kind == 'server'}">
+              <span class="app-chip app-chip-mono">promotion routes</span>
+            </span>
+          </td>
+          <td><span th:title="${k.createdAbsolute}" th:text="${k.createdRelative}">3 days ago</span></td>
+          <td>
+            <span th:if="${k.expiresAbsolute != null}" th:title="${k.expiresAbsolute}" th:text="${k.expiresRelative}">in 84 days</span>
+            <span th:if="${k.expiresAbsolute == null}" th:text="${k.expiresRelative}">never</span>
+          </td>
+          <td>
+            <span th:if="${k.lastUsedAbsolute != null}" th:title="${k.lastUsedAbsolute}" th:text="${k.lastUsedRelative}">2 hours ago</span>
+            <span th:if="${k.lastUsedAbsolute == null}" th:text="${k.lastUsedRelative}">never</span>
+          </td>
+          <td class="num">
+            <button th:if="${k.isLive}" class="ds-button ds-button-ghost ds-button-sm u-danger"
+                    th:attr="hx-delete=@{/partials/api-keys/{id}(id=${k.id})}"
+                    hx-target="#keys-table-body"
+                    hx-confirm="Revoke this key? It stops authenticating within about a minute.">Revoke</button>
+            <span class="app-chip app-chip-bad" th:if="${k.isRevoked}">revoked</span>
+            <span class="app-chip app-chip-warn" th:if="${k.isExpired and not k.isRevoked}">expired</span>
+          </td>
+        </tr>
+      </th:block>
+      </tbody>
+    </table>
+  </div>
+
   <div class="app-grid app-grid-wide-left">
 
     <!-- ---------------------------------------------------------------- endpoints -->
@@ -89,92 +182,6 @@
 
     <div class="app-grid-stack">
 
-      <!-- ------------------------------------------------------------- api keys -->
-      <!-- 091 — the ONE key table. Three renders share it: this page, the post-create
-           out-of-band refresh (partials/api-key-created), and the rows a revoke swaps in
-           (partials/api-keys-rows). One fragment, one row model (ApiKeyRows) — before 091
-           the revoke path hand-built its rows in Kotlin and a parity test kept the two
-           markups alike. -->
-      <div class="ds-card app-card-table">
-        <div class="app-card-h">
-          <h2 class="ds-title">API keys</h2>
-          <span class="app-card-note" th:text="${#lists.size(keys)} + ' total'">4 total</span>
-        </div>
-
-        <!-- The one-time secret lands HERE and PERSISTS (§5.1's hard rule — a 6s toast never
-             carries anything the user must keep). Hidden by the `u-hidden` CLASS, never an
-             inline style: 079 §D's script reads the class, and a `style.display` check would
-             see "" forever and the secret would never appear. -->
-        <div id="keyCreated" class="app-card-b u-hidden"></div>
-
-        <table class="ds-table" id="keys-table" th:fragment="keysTable(keys)" th:attr="hx-swap-oob=${oob}">
-          <thead>
-          <tr>
-            <th>Key</th>
-            <th>Kind</th>
-            <th>Reach</th>
-            <th>Created</th>
-            <th>Expires</th>
-            <th>Last used</th>
-            <th class="num">Actions</th>
-          </tr>
-          </thead>
-          <tbody id="keys-table-body">
-          <th:block th:fragment="keyRows(keys)">
-            <tr th:if="${keys == null || keys.isEmpty()}">
-              <td colspan="7">
-                <div class="app-empty">
-                  <b>No API keys</b>
-                  A key is how an agent, a program or another deployment authenticates. Create one with
-                  <b>New key</b>.
-                </div>
-              </td>
-            </tr>
-            <tr th:each="k : ${keys}">
-              <td>
-                <span class="app-name" th:text="${k.name}">agent</span>
-                <span class="app-path ds-mono" th:text="${k.prefix}">dpk_RGAX…</span>
-              </td>
-              <td><span class="app-chip app-chip-mono" th:text="${k.kind}">user</span></td>
-              <td>
-                <!-- A key's REACH is whatever decides what it may do, and that differs by kind:
-                     scopes for a user key, bound paths for an endpoint key, a route family for
-                     a server key. An empty scope cell on the last two would read as "this key
-                     can do nothing", which is the opposite of true (auth §7.7). -->
-                <span class="app-chips" th:if="${k.kind == 'user'}">
-                  <span class="app-chip app-chip-mono" th:each="s : ${k.scopes}" th:text="${s}">read</span>
-                </span>
-                <span class="app-chips" th:if="${k.kind == 'endpoint'}">
-                  <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}" th:text="${p} + '/**'">/nyc/**</span>
-                  <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths)}">no bindings — authorises nothing</span>
-                </span>
-                <span class="app-chips" th:if="${k.kind == 'server'}">
-                  <span class="app-chip app-chip-mono">promotion routes</span>
-                </span>
-              </td>
-              <td><span th:title="${k.createdAbsolute}" th:text="${k.createdRelative}">3 days ago</span></td>
-              <td>
-                <span th:if="${k.expiresAbsolute != null}" th:title="${k.expiresAbsolute}" th:text="${k.expiresRelative}">in 84 days</span>
-                <span th:if="${k.expiresAbsolute == null}" th:text="${k.expiresRelative}">never</span>
-              </td>
-              <td>
-                <span th:if="${k.lastUsedAbsolute != null}" th:title="${k.lastUsedAbsolute}" th:text="${k.lastUsedRelative}">2 hours ago</span>
-                <span th:if="${k.lastUsedAbsolute == null}" th:text="${k.lastUsedRelative}">never</span>
-              </td>
-              <td class="num">
-                <button th:if="${k.isLive}" class="ds-button ds-button-ghost ds-button-sm u-danger"
-                        th:attr="hx-delete=@{/partials/api-keys/{id}(id=${k.id})}"
-                        hx-target="#keys-table-body"
-                        hx-confirm="Revoke this key? It stops authenticating within about a minute.">Revoke</button>
-                <span class="app-chip app-chip-bad" th:if="${k.isRevoked}">revoked</span>
-                <span class="app-chip app-chip-warn" th:if="${k.isExpired and not k.isRevoked}">expired</span>
-              </td>
-            </tr>
-          </th:block>
-          </tbody>
-        </table>
-      </div>
-
       <!-- ------------------------------------------------------------- mcp server -->
       <div class="ds-card">
         <div class="app-card-h app-card-h-flush">
@@ -188,8 +195,11 @@
           <pre class="app-code" th:text="${mcpConfigJson}">{}</pre>
           <div class="app-note">
             <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
-            <span>Only <b>user</b> keys reach <span class="ds-mono">/mcp</span>; endpoint keys are confined
-              to the paths they are bound to.</span>
+            <!-- All three kinds are minted on this page now, so the note names all three
+                 (auth §7.7). `/mcp` refuses the other two at the transport, not at a scope
+                 check — a scopeless key would otherwise read the whole tool catalogue. -->
+            <span>Only <b>user</b> keys reach <span class="ds-mono">/mcp</span> — an endpoint key is confined to
+              the paths it is bound to, and a server key to this deployment's promotion routes.</span>
           </div>
         </div>
       </div>
@@ -319,10 +329,13 @@
       var created = document.getElementById('keyCreated');
       if (!created) return;
       var observer = new MutationObserver(function() {
-        // 079 §D: the panel's initial hidden state is the `u-hidden` CLASS, not an inline
-        // style — reading `created.style.display` would see "" forever and the one-time
-        // secret would never appear. Test the class, and drop it to reveal.
-        if (created.children.length > 0 && created.classList.contains('u-hidden')) {
+        // Condition on CONTENT ARRIVING, never on the panel still being hidden: the second
+        // mint of a session finds the panel already visible, and a `contains('u-hidden')`
+        // guard would leave the modal open over it (caught by the three-kind browser case,
+        // which mints three times in one visit). 079 §D still holds for the REVEAL itself —
+        // the initial hidden state is the `u-hidden` CLASS, not an inline style, because
+        // reading `created.style.display` would see "" forever.
+        if (created.children.length > 0) {
           created.classList.remove('u-hidden');
           hideKeyModal();
           document.getElementById('createKeyForm').reset();

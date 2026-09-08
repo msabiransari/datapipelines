@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -70,8 +71,51 @@ class FlywayMigrationIntegrationTest {
                 "13|datasource credential kind|true",
                 // 087 §C — LAKE joins chk_datasource_dialect. No data change.
                 "14|lake dialect|true",
+                // 091 §A — `server` joins chk_api_keys_kind. No data change: no existing row
+                // can hold a value the CHECK did not admit until now.
+                "15|api key kind server|true",
             )
     }
+
+    @Test
+    fun `V15 lets api_keys hold the server kind, and still refuses an unknown one`() {
+        // The CHECK is the database's half of §7.7 (metadata-db §4.10: a bad kind reaching this
+        // table would break every credential decision made from it). Asserted by INSERTING, not
+        // by reading the constraint's text — a constraint that parses and does not admit the
+        // value is exactly the failure a text assertion cannot see. Both rows are rolled back.
+        assertAll(
+            { kindAccepted("server") shouldBe true },
+            { kindAccepted("endpoint") shouldBe true },
+            { kindAccepted("wizard") shouldBe false },
+        )
+    }
+
+    /** True when `api_keys.kind` accepts [kind]; the probe row is always rolled back. */
+    private fun kindAccepted(kind: String): Boolean =
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active)" +
+                            " VALUES (\'$KIND_PROBE_USER\', \'v15-probe@datapipelines.test\', \'V15 probe\'," +
+                            " \'test\', \'v15-probe\', TRUE) ON CONFLICT (id) DO NOTHING",
+                    )
+                    statement.execute(
+                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind)" +
+                            " VALUES (\'dpk_V15PROBE01\', \'$KIND_PROBE_USER\', \'probe\', \'h\', \'{}\'::text[]," +
+                            " (SELECT id FROM workspaces LIMIT 1), \'$kind\')",
+                    )
+                }
+                true
+            } catch (e: java.sql.SQLException) {
+                // The CHECK's own refusal IS the assertion — not an unexpected failure.
+                check(e.message.orEmpty().contains("chk_api_keys_kind")) { "unexpected SQL failure: ${e.message}" }
+                false
+            } finally {
+                connection.rollback()
+            }
+        }
 
     @Test
     fun `V9 adds the last-test-outcome columns to datasources`() {
@@ -704,6 +748,9 @@ class FlywayMigrationIntegrationTest {
         private val redis get() = SharedE2e.redis
 
         private const val SECRET_BYTES = 32
+
+        /** The V15 probe's own user row — rolled back with the probe, never committed. */
+        private const val KIND_PROBE_USER = "f15b0000-0000-0000-0000-000000000015"
 
         /** The seeded `default` workspace (metadata-db §4.11, R2) the V4 assertions pin against. */
         private val DEFAULT_WORKSPACE_UUID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
