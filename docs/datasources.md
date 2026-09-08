@@ -279,14 +279,26 @@ HikariCP is the connection pool. Tuning is expressed as **two namespaced passthr
 
 **`properties.hikari.*` — pool properties.** Every entry is applied **verbatim** to `HikariConfig` using HikariCP's own property names and units (camelCase names; all durations in **milliseconds**, as HikariCP defines them). Any property HikariCP supports is therefore usable without a spec change. Illustrative — *not* exhaustive, *not* an allowlist:
 
-| `properties.hikari` key | Server default when omitted | Description |
-|---|---|---|
-| `maximumPoolSize` | 10 | Max connections to the underlying DB. |
-| `minimumIdle` | 2 | Idle connections kept warm. |
-| `connectionTimeout` | 30000 | Max wait (ms) to acquire a connection from the pool. |
-| `idleTimeout` | 600000 | Idle connection max age (ms). |
-| `maxLifetime` | 1800000 | Connection max age (ms) — forces reconnect. |
-| … any other HikariCP property | HikariCP's own default | e.g. `keepaliveTime`, `validationTimeout`, `leakDetectionThreshold`, `connectionInitSql`, `readOnly`, `transactionIsolation`. |
+**The eight tunable keys (094).** These are what the create/edit dialog renders and what the range rules below police. Every one is HikariCP's own property name; the "Default" column is the EFFECTIVE default this server applies, and the "From" column says which layer supplied it — `dialect` (a `DialectAdapter.defaultHikariProperties` declaration), `server` (this product's), or `HikariCP` (the library's own, read from a fresh `HikariConfig` rather than transcribed). **No shipped dialect overrides a pool setting today**, so the `dialect` layer is empty and the table below is the same for every dialect; the layer exists because the resolution is the adapter's to make and a form that hard-coded today's answer would be silently wrong on the first dialect that disagrees.
+
+| `properties.hikari` key | Unit | Default | From | Floor | Description |
+|---|---|---|---|---|---|
+| `maximumPoolSize` | count | 10 | HikariCP | ≥ 1 | Max connections to the underlying DB. |
+| `minimumIdle` | count | 2 | server | 0 | Idle connections kept warm. `0` = keep nothing warm. Never more than `maximumPoolSize`. |
+| `connectionTimeout` | ms | 30000 | HikariCP | ≥ 250 | Max wait to acquire a connection from the pool. `0` = wait forever. |
+| `idleTimeout` | ms | 600000 | HikariCP | ≥ 10000 | Idle connection max age. `0` = never close an idle connection. Must sit ≥ 1000 ms below `maxLifetime`. |
+| `maxLifetime` | ms | 1800000 | HikariCP | ≥ 30000 | Connection max age — forces reconnect. `0` = no maximum. Keep it under the source DB's own timeout. |
+| `keepaliveTime` | ms | 120000 | HikariCP | ≥ 30000 | Idle-connection ping, so a firewall or proxy does not drop it. `0` = off. Must be less than `maxLifetime`. |
+| `validationTimeout` | ms | 5000 | HikariCP | ≥ 250 | How long the liveness check may take before a connection is considered dead. |
+| `leakDetectionThreshold` | ms | 0 (off) | HikariCP | ≥ 2000 | Log a possible leak when a connection is held longer than this. Must not exceed `maxLifetime`. |
+| … any other HikariCP property | — | HikariCP's own | HikariCP | — | Still accepted as passthrough, judged by the save-time pool build (§5.4). Not offered in the dialog. `connectionInitSql` and `readOnly` are §5.6-refused. |
+
+**The ranges are REFUSALS, and that is the point (094).** `HikariConfig.validateNumerics()` enforces almost all of these floors by logging a WARN and **overwriting** the value: `maxLifetime = 5000` silently becomes 1 800 000, `keepaliveTime = 10000` silently becomes 0 (disabled), `leakDetectionThreshold = 500` silently becomes 0, `minimumIdle = 50` against `maximumPoolSize = 10` silently becomes 10, and an `idleTimeout` within a second of `maxLifetime` is silently disabled. (Only `connectionTimeout`, `validationTimeout`, a `maximumPoolSize` below 1 and a negative `minimumIdle` are hard refusals in HikariCP's own setters.) The value the row stores and the screen shows would then not be the value the pool runs with, and nothing would say so — so every one of them is refused at save with `datasource.validation.properties_invalid`, naming the key and the floor. None of these rules is invented: each restates a rewrite HikariCP would otherwise perform, and the test that justifies them builds a real pool with each out-of-range value and asserts the rewrite.
+
+**A field left at its default is not persisted.** The dialog prefills every field with the effective default; only values that DIFFER are written to `properties.hikari`. Freezing today's defaults into every datasource created through the form would mean a later change to a product default reached nothing.
+
+**Reading the effective settings.** `GET /api/v1/datasources/{name}` and the `datasources_get` MCP tool return a `pool` object beside `properties`: each key's effective value, its unit, and its source (`configured` / `dialect_default` / `application_default` / `hikari_default`). `properties.hikari` is what the row STORES — empty for almost every datasource; `pool` is what the pool RUNS with.
+
 
 **Server-managed keys.** `jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, `metricRegistry`, and `healthCheckRegistry` are derived from the entity and from the dialect adapter. Supplying any of them under `properties.hikari` is a validation failure (`datasource.validation.properties_invalid`) rather than a silent override.
 
@@ -316,13 +328,24 @@ Default 10 is conservative. High-traffic datasources can be tuned up. `datapipel
 
 - Pool created lazily on first lease.
 - Pool kept alive for the datasource's lifetime.
-- On datasource update (PUT), the old pool is drained and a new one initialized.
-- On datasource delete (soft), the pool is drained and refused new leases.
+- On datasource update (PUT), the old pool is **retired** and the next lease builds a new one from the new row.
+- On datasource delete (soft), the pool is **retired** and new leases miss it.
+
+#### Retire, then close (094)
+
+Until 094 a save or delete removed the pool from the map and `close()`d it in the same breath — and `HikariDataSource.close()` **aborts** the connections still in use once its shutdown grace elapses. An execution that happened to be mid-statement against that datasource lost its connection and failed. Retirement splits the two halves that were being conflated:
+
+1. **Retire.** The pool leaves the live map at once (new leases miss it and build a fresh pool from the new row, exactly as before), its `minimumIdle` is set to `0` so the house-keeper stops refilling a pool nobody may lease from, and `HikariPoolMXBean.softEvictConnections()` runs: idle connections close now, in-use connections are marked and close when their borrower returns them — **never mid-statement**.
+2. **Reap.** A per-instance scheduled tick closes each retired pool once its `activeConnections` reaches 0 — or at the **ceiling** (`datapipelines.datasources.retire-ceiling-seconds`, [Configuration §3.24](configuration.md#324-datasource-pools); default = `node-query-timeout-seconds` + 30 s), whichever comes first. A genuinely hung statement must not pin a deleted datasource's pool forever. A ceiling close logs one WARN naming the datasource and the connections it took down ([Observability §3.4A](observability.md#34a-the-pool-retirement-events-094)) and increments `datapipelines.datasource.pool.hard_closed`; every retirement increments `datapipelines.datasource.pool.retired`.
+
+Retiring pools are held in a **queue, not a map keyed by name**: a datasource saved twice in quick succession, with a lease in between, legitimately has two pools draining at once, and a name-keyed map would drop the first one un-closed. Application shutdown closes everything at once — `ExecutionDrainLifecycle` has already cancelled the live statements by then.
+
+**Reconcile on (re)subscribe.** §5.7's Redis channel is fire-and-forget: a message published while an instance was disconnected is gone, and pub/sub has no replay. So every instance also implements the subscription callback its listener container fires on the initial subscribe AND after every reconnect, and each callback compares the `updated_at` its live pools were built from against the rows — retiring every pool whose row has moved or gone. One two-column query, no Redis key, no TTL, nothing to expire wrong. A missed ping is caught at reconnect, by comparison rather than by replay.
 
 **Concurrency.** `poolFor(datasource)` (§6.1) is called from many executor coroutines at once, so lazy initialization must be **atomic**: pools live in a `ConcurrentHashMap<String, ConnectionPool>` keyed by datasource name and are created with `computeIfAbsent`, so exactly one `HikariDataSource` is constructed per datasource even under a concurrent first-lease burst. Two consequences the implementation must respect:
 
 - The mapping function does no blocking I/O beyond `HikariDataSource` construction (Hikari fills the pool asynchronously; `initializationFailTimeout` is left at Hikari's default for runtime pools, so an unreachable DB surfaces as a lease failure, not a map-wide stall).
-- Replacement on update/delete is `remove()`-then-`close()` on the **evicted** pool, never `close()` on a pool still reachable from the map — in-flight leases drain against the old instance while new leases go to the new one.
+- Replacement on update/delete is `remove()`-then-`softEvict()` on the **retired** pool, never anything at all on a pool still reachable from the map — in-flight leases drain against the old instance while new leases go to the new one. The `close()` belongs to the reaper above, not to the save.
 
 ### 5.3 Lease lifecycle
 
@@ -527,6 +550,21 @@ invisible and the delete succeeded.
 The error response carries the distinct pipeline names AND one entry per referencing node with
 the pipeline version and that version's status — the shape `template.in_use` uses — because the
 version is what tells the operator which body to go and change.
+
+**The screen asks the same question, first (094).** The datasources list's **Delete** action opens
+a dialog that runs THIS scan before it offers anything, and renders its rows as
+`pipeline › node (v3 released)`. On the in-use branch there is no confirm button at all, so the
+refusal cannot be clicked past; only an unused datasource gets a confirm, and that confirm names
+it. The dialog and the `409` cannot disagree because they are the same scan — but the POST
+**re-runs** the guard anyway: a pipeline can start referencing the datasource between the dialog
+opening and the button being pressed, and the screen is never the authority. The `readonly` /
+`global` D8 rules apply exactly as they do for update (a member deleting a global datasource is
+told so before the scan even runs).
+
+Deleting a datasource **retires** its pool on every instance rather than closing it (§5.2), so a
+query already running against it finishes on the connection it holds. That is what the dialog's
+"queries already running finish first" sentence promises, and what the two-instance harness
+measures.
 
 ### 6.3 Cache
 
@@ -1081,6 +1119,8 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 - **KMS integration**: AWS KMS / GCP KMS / HashiCorp Vault as an additional **explicit** master-key source (never an implicit fallback — §7.1).
 - **Background health checks**: scheduled polling of datasources with UI health indicators.
+- **Pool settings beyond the eight (§5).** The dialog offers the eight keys a person tunes; the rest of HikariCP stays REST-only passthrough. A dialect that wants its own pool defaults has the seam (`DialectAdapter.defaultHikariProperties`) and no shipped dialect uses it yet — an embedded engine wanting a single-connection pool is the first plausible caller.
+- **A retirement view.** `datapipelines.datasource.pool.retired` / `.hard_closed` (§5.2) are counters; there is no surface that lists what is currently draining on this instance. The reaper's state is in memory and per-instance, which is the right place for it, but it means "why is this pool still open" is answered from logs today.
 - **Datasource groups / failover**: pair primary + replica, fail over on connection failure.
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
@@ -1126,3 +1166,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-09-02 | v2.16 | 020 fix-cycle (044) — the backstop goes fail-closed | §5.7: the executor backstop's **null semantics made normative** — no live row refuses as `pipeline.node.datasource_not_found` (the D10 soft-delete channel), a metadata-DB failure during the live read refuses as `pipeline.execution.aborted` naming the METADATA database (never the healthy target), both replacing 020's "null = no signal" fail-open. **Layer 1 reads live** (`getVisibleLive`/`getLive`, past the §6.3 cache — 020 F4's both-directions stale-save window closed); **layer 2's read is flag-only** (`isReadonlyLive`, one indexed `SELECT is_readonly` — no ciphertext, no properties parse; 020 F7) and a readonly write-back target is refused at CONNECT, before the source query (020 F9); **layer 3's pool-staleness window documented** (no TTL; row-level flips leave the pre-flip pool — M3's within-one-JVM twin, fix deferred to M3's owner decision; 020 F5). §6.1: the interface sketch gains the three live reads; `getLive`/`isReadonlyLive` are abstract (020 F6 — a cached default was the hole). §6.1's registry KDoc wiring example corrected to the `describe`/`DatasourceFacts` SAM (020 F10 — the old `dialectOf` example no longer compiled, verified). |
 | 2026-09-03 | v2.17 | 061 — datasource credentials and references | **§8A.3 gains rule 3** (T84): a bootstrap entry whose FILE credential differs from the STORED one is reconciled by connection-testing both — stored-works keeps the row byte-untouched (rule 1 intact), stored-fails-and-file-works replaces the credential ALONE with a WARN, neither-works and undecryptable both leave the row and log ERROR naming the env key / the encryption key, and a soft-deleted row is never touched. Startup never fails on it. **New §8.1B** (T84): the last connection test's outcome is stored (`last_test_at`/`last_test_ok`/`last_test_message`, V9) and surfaced as the additive `last_test` field (§3.2) and a datasources-screen column — because listing never connects, and on 2026-09-02 the screen said "fine" while every execution failed at CONNECT. That write touches the three columns only and does NOT move `updated_at` (the one documented exception to metadata-db §2), which is what keeps rule 1's byte-untouched guarantee checkable. **§6.2 rewritten** (T79): the delete guard reads the ANY-VERSION reference scan, not the current-version one — a released v1 pinning a datasource that v2 dropped is a live reference (immutable, executable by explicit version) and used to be invisible, so the delete succeeded and v1's next execution failed at connect; the 409 now carries the referencing nodes with their pipeline versions, the way `template.in_use` does. |
 | 2026-09-07 | v2.18 | 087 connector seams | **New §3.4 credential kinds** — `credential: {kind, username?, secret?}` with `kind ∈ password \| token \| private_key \| service_account_json \| none`; the legacy top-level `username`/`password` pair stays accepted and means `kind: password` (§12.1), and a payload carrying both is refused. Which kinds a dialect accepts is its adapter's declaration (`supportedCredentialKinds`), enforced fail-closed; `private_key`/`service_account_json` are catalogued for the reference targets and refused by every shipped adapter. §3.1/§3.2/§3.3 updated; `password_set` is now DERIVED from the kind (V13's CHECK makes `kind = 'none'` ⟺ no stored ciphertext); §8A.1's dummy SQLite password is gone. **§4.2 gains `NamespaceShape`** (`labels`, `levels`, `innermostArrivesInCatalog`) replacing the boolean `schemaArrivesInCatalog`, with the four reference targets' shapes written in as the contract; §7A's listings and filters speak NAMESPACES — `entries: [{namespace, label}]` beside the legacy `schemas`, `namespace` beside `schema` on every table row and filter, dotted `introspection_include_schemas` entries. The catalog argument reaching `getTables`/`getColumns` closes a MEASURED merge (two ATTACHed DuckDB catalogs' same-named schemas listed as one, and an unqualified `getColumns` returned both tables' columns). **New §4.2A**: `connectionInit` wired to HikariCP's previously-unreferenced `connectionInitSql`, and a third reserved `properties` namespace `dialect.*` — TYPED and adapter-validated, refused wholesale by default. `connectionInitSql` joins the §5.6 server-managed set (DS-SEC-22); §5.6 also gains named secret-valued keys the suffix predicate cannot catch (`OAuthPvtKey`, `Auth_AccessToken`, …) and the one-line credential-carrier rule. **New `LAKE` dialect** (§4.1): object storage read in place, DuckDB underneath, without the embedded adapter's `enable_external_access` lock — a distinct dialect, not a mode, because a mode would make the §5.6 refusal set a function of row data. §7B: write-back identifiers quote in the TARGET dialect's vocabulary. |
+| 2026-09-08 | v2.19 | 094 pool settings, delete, retirement | **§5 gains the eight tunable pool keys** with units, effective defaults, the layer each default comes from (`dialect` → `server` → HikariCP's own, read from a fresh `HikariConfig` rather than transcribed) and their FLOORS — refused at save with `datasource.validation.properties_invalid`, because `HikariConfig.validateNumerics()` enforces almost all of them by logging a WARN and OVERWRITING, so the row and the screen would otherwise show numbers the pool never uses. Passthrough is unchanged: the eight are what a PERSON is offered, not an allowlist. A field left at its default is not persisted. `GET /datasources/{name}` and `datasources_get` gain a `pool` object (value + unit + source per key). **§5.2 replaces close-at-once with RETIRE-then-close**: a save or delete removes the pool from the map and soft-evicts it (`minimumIdle = 0`, then `softEvictConnections()` — idle close now, in-use close on return, never mid-statement), and a per-instance reaper closes it once drained or at `datapipelines.datasources.retire-ceiling-seconds` ([Configuration §3.24](configuration.md#324-datasource-pools), default = the node query timeout + 30 s) with one WARN and `datapipelines.datasource.pool.hard_closed`. Retiring pools live in a queue, not a name-keyed map. **Reconcile on (re)subscribe** replaces any notion of a retry queue for missed §5.7 invalidation messages: each instance compares its live pools' row versions against the rows whenever the channel (re)subscribes. **§6.2**: the delete guard's scan is now what the UI's Delete dialog ASKS FIRST — in-use renders the referencing nodes and offers no button; unused gets a confirm that names the datasource; the POST re-runs the guard regardless. |

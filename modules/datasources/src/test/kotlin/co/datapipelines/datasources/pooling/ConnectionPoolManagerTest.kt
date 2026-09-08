@@ -1,9 +1,15 @@
 package co.datapipelines.datasources.pooling
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.Fixtures
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.time.Duration
 import java.time.Instant
@@ -198,12 +204,29 @@ class ConnectionPoolManagerTest {
         manager.reapRetiring() shouldBe ReapOutcome.NOTHING
         pool.closed shouldBe false
 
-        // At the ceiling: closed regardless, with the active count carried into the metric.
+        // At the ceiling: closed regardless, with the active count carried into the metric AND
+        // into one WARN. The log line is the operator's only account of a query that just lost
+        // its connection, so it is asserted, not assumed — observability.md §3.4A catalogues it.
         now = now.plusSeconds(1)
-        manager.reapRetiring() shouldBe ReapOutcome(drained = 0, hardClosed = 1)
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        root.addAppender(appender)
+        try {
+            manager.reapRetiring() shouldBe ReapOutcome(drained = 0, hardClosed = 1)
+        } finally {
+            root.detachAppender(appender)
+            appender.stop()
+        }
+
         pool.closed shouldBe true
         metrics.hardClosed shouldBe listOf("hung_ds" to 3)
         manager.retiringCount() shouldBe 0
+
+        val warnings = appender.list.filter { it.level == Level.WARN }
+        val line = warnings.single { it.formattedMessage.contains("datasource.pool_hard_closed") }
+        line.formattedMessage shouldContain "datasource=hung_ds"
+        line.formattedMessage shouldContain "active_connections=3"
+        line.formattedMessage shouldContain "ceiling_seconds=90"
     }
 
     @Test

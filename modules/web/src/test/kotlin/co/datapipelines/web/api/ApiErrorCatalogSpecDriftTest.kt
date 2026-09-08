@@ -119,15 +119,24 @@ class ApiErrorCatalogSpecDriftTest {
          * 129 → 130 with 083 (the limiter fails closed): §13.11 gains
          * `rate_limit.unavailable`, landed in the SAME commit as its constant and its 429
          * catalog row. Re-derived from the document's own parse.
+         *
+         * 130 → 131 with 094 (the agent's new-root confirmation): §13.9 gains
+         * `template.validation.new_root_requires_confirmation` at 400, landed in the SAME commit
+         * as its constant and its §12/§13 rows. Its pipeline twin lives in §12 and is counted
+         * by [SECTION_12_CODE_COUNT] instead. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 130
+        const val SECTION_13_ROW_COUNT = 131
 
         /**
          * §12's distinct validation codes.
          *
          * 48 → 58 with 072: §12.10's ten CALCULATOR-node rules, landed in the SAME commit as
          * their constants. Re-derived from the document's own parse.
+         *
+         * 58 → 59 with 094: `pipeline.validation.new_root_requires_confirmation` — the MCP
+         * surface's refusal of a name that mints a new top-level folder without confirmation.
+         * A 400 like every other §12 code; landed in the SAME commit as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 58
+        const val SECTION_12_CODE_COUNT = 59
     }
 }

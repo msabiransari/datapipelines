@@ -28,6 +28,8 @@ import java.sql.DriverManager
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * §5.7 cross-instance pool invalidation, live (050/R1, ARCH-AUDIT M3): **two application
@@ -101,20 +103,123 @@ class DatasourcePoolInvalidationE2eTest {
         marker shouldBe "two"
     }
 
+    @Test
+    fun `an execution mid-query on A survives a delete issued on B and completes`() {
+        // 094's whole point. Before it, a delete `close()`d the pool at once and HikariCP
+        // ABORTED the connections still in use once its shutdown grace elapsed — the execution
+        // running against that datasource lost its connection and failed. Retirement means the
+        // pool leaves the map immediately and closes only once the statement finishes.
+        //
+        // The datasource is the metadata Postgres itself, because the query has to be genuinely
+        // SLOW and H2 has no sleep function: `pg_sleep` is the same lever the two-instance shell
+        // harness pulls.
+        seedAuthRows()
+        // Testcontainers' own URL carries driver query parameters; §5.6's URL guard refuses
+        // several of them, so the datasource is registered with the bare host/port/database form.
+        registerDatasource(
+            SLOW_DS,
+            metadataJdbcUrl(),
+            dialect = "POSTGRES",
+            username = postgres.username,
+            password = postgres.password,
+        )
+        createTemplate(SLOW_TEMPLATE, "SELECT 'slept' AS v FROM (SELECT pg_sleep($SLEEP_SECONDS)) s", dialect = "POSTGRES")
+        val pipelineId = createPipeline(name = "test/mi2_slow_read", datasource = SLOW_DS, template = SLOW_TEMPLATE)
+
+        // Warm A's pool, so the execution below is served by a pool that already exists — the
+        // state a real mid-query delete finds.
+        executeOn(port, pipelineId) shouldBe SLEPT
+
+        val running = Executors.newSingleThreadExecutor()
+        try {
+            val execution = running.submit<String?> { executeOn(port, pipelineId) }
+            // Let the statement actually reach the database before anything is deleted. The
+            // assertion below is what makes this a real mid-query test rather than a race:
+            // the pipeline must still be RUNNING when the delete lands.
+            awaitRunningSleepStatement()
+
+            // The in-use guard is real: the pipeline has to go first, which is exactly the
+            // sequence an operator retiring a datasource follows.
+            deleteOn(portB, "/api/v1/pipelines/$pipelineId")
+            deleteOn(portB, "/api/v1/datasources/$SLOW_DS")
+
+            // THE ASSERTION: the execution that was mid-statement finishes, with its rows.
+            execution.get(SLOW_EXECUTION_TIMEOUT_SECONDS, TimeUnit.SECONDS) shouldBe SLEPT
+        } finally {
+            running.shutdownNow()
+        }
+
+        // …and afterwards the datasource is gone — asserted on B, the instance that took the
+        // DELETE, deliberately. A's READ surface serves the §6.3 metadata cache and may keep
+        // answering 200 for up to its 60 s TTL: that is the documented cross-instance bound and
+        // predates this round. It is harmless because every path that would USE the datasource
+        // reads live past that cache (044 F4) — A's pool is already retired by the invalidation
+        // message, and A's executor refuses the name before any lease. Waiting out a 60 s TTL
+        // here would buy a slower test and no new fact.
+        given()
+            .port(portB)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/datasources/$SLOW_DS")
+            .then()
+            .statusCode(404)
+    }
+
+    @Test
+    fun `a peer that never received the invalidation catches up when it re-subscribes`() {
+        // The missed-message backstop (094). Pub/sub has no replay: a message published while
+        // an instance was disconnected is gone forever, and this round's ruling is explicitly NO
+        // retry queue. So the row is changed with NO message published at all — by writing the
+        // metadata DB directly, which is exactly the state a peer is in when it was disconnected
+        // at publish time — and then B's subscriber connection is killed, forcing the
+        // re-subscription whose callback reconciles.
+        seedAuthRows()
+        registerDatasource(RECONCILE_DS, "jdbc:h2:mem:$H2_ONE;DB_CLOSE_DELAY=-1")
+        createTemplate(RECONCILE_TEMPLATE, "SELECT v FROM marker")
+        val pipelineId = createPipeline(name = "test/mi2_reconcile_read", datasource = RECONCILE_DS, template = RECONCILE_TEMPLATE)
+
+        // B's pool is warm, built from the OLD row.
+        executeOnB(pipelineId) shouldBe "one"
+
+        // The row moves with nobody told. `updated_at` moves with it — that is the version the
+        // reconcile compares against, and the reason this needs no Redis key of its own.
+        repointDatasourceInDatabase(RECONCILE_DS, "jdbc:h2:mem:$H2_TWO;DB_CLOSE_DELAY=-1")
+
+        // Force every pub/sub client to reconnect. B's listener container re-SUBSCRIBEs, its
+        // callback runs reconcilePools(), the stale pool is retired, and B's next lease builds
+        // from the new row. Without the reconcile B would serve `one` forever.
+        killPubSubConnections()
+
+        val deadline = System.nanoTime() + RECONCILE_BUDGET
+        var marker: String? = null
+        while (System.nanoTime() < deadline) {
+            marker = executeOnB(pipelineId)
+            if (marker == "two") break
+            Thread.sleep(POLL_MILLIS)
+        }
+        marker shouldBe "two"
+    }
+
     // ------------------------------------------------------------- HTTP on either instance
 
     /** Runs the pipeline on instance B and returns the marker value its result rows carry. */
-    private fun executeOnB(pipelineId: String): String? {
+    private fun executeOnB(pipelineId: String): String? = executeOn(portB, pipelineId)
+
+    /** Runs the pipeline on [targetPort] and returns the single scalar its result rows carry. */
+    private fun executeOn(
+        targetPort: Int,
+        pipelineId: String,
+    ): String? {
         val events =
-            assertTimeoutPreemptively(Duration.ofSeconds(60)) {
-                consumeExecutionStream(portB, pipelineId)
+            assertTimeoutPreemptively(Duration.ofSeconds(SLOW_EXECUTION_TIMEOUT_SECONDS)) {
+                consumeExecutionStream(targetPort, pipelineId)
             }
         events.map { it.first } shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
         val executionId = events.first().second["execution_id"].asText()
         val result =
             given()
-                .port(portB)
+                .port(targetPort)
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
@@ -144,9 +249,76 @@ class DatasourcePoolInvalidationE2eTest {
         return E2eSse.parseEvents(response.body(), mapper)
     }
 
+    /** The metadata Postgres, addressed WITHOUT Testcontainers' driver query parameters (§5.6). */
+    private fun metadataJdbcUrl(): String = postgres.jdbcUrl.substringBefore('?')
+
+    /** A DELETE on one instance, asserting the documented 204. */
+    private fun deleteOn(
+        targetPort: Int,
+        path: String,
+    ) {
+        given()
+            .port(targetPort)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .delete(path)
+            .then()
+            .statusCode(204)
+    }
+
+    /**
+     * Blocks until the `pg_sleep` statement is visible in the metadata Postgres's own
+     * `pg_stat_activity` — proof the execution is genuinely MID-QUERY, not merely submitted.
+     * A test that deleted before the statement started would pass without testing anything.
+     */
+    private fun awaitRunningSleepStatement() {
+        val deadline = System.nanoTime() + MID_QUERY_BUDGET
+        while (System.nanoTime() < deadline) {
+            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection.createStatement().use { statement ->
+                    statement
+                        .executeQuery(
+                            "SELECT COUNT(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep%' AND query NOT LIKE '%pg_stat_activity%'",
+                        ).use { rs ->
+                            rs.next()
+                            if (rs.getInt(1) > 0) return
+                        }
+                }
+            }
+            Thread.sleep(POLL_MILLIS)
+        }
+        error("the pg_sleep statement never reached the database — the mid-query window never opened")
+    }
+
+    /**
+     * Repoints a datasource by writing the metadata database DIRECTLY — no HTTP, so no
+     * invalidation message is published to anyone. `updated_at` moves, which is the row version
+     * the reconcile compares against.
+     */
+    private fun repointDatasourceInDatabase(
+        name: String,
+        jdbcUrl: String,
+    ) {
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.prepareStatement("UPDATE datasources SET jdbc_url = ?, updated_at = NOW() WHERE name = ?").use { ps ->
+                ps.setString(1, jdbcUrl)
+                ps.setString(2, name)
+                ps.executeUpdate() shouldBe 1
+            }
+        }
+    }
+
+    /** Kills every pub/sub client, forcing both instances' listener containers to re-subscribe. */
+    private fun killPubSubConnections() {
+        redis.execInContainer("redis-cli", "CLIENT", "KILL", "TYPE", "pubsub").exitCode shouldBe 0
+    }
+
     private fun registerDatasource(
         name: String,
         jdbcUrl: String,
+        dialect: String = "H2",
+        username: String = H2_USER,
+        password: String = H2_PASSWORD,
     ) {
         given()
             .port(port)
@@ -154,8 +326,8 @@ class DatasourcePoolInvalidationE2eTest {
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .body(
                 """
-                {"name": "$name", "display_name": "MI2 shared", "dialect": "H2",
-                 "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD"}
+                {"name": "$name", "display_name": "MI2 shared", "dialect": "$dialect",
+                 "jdbc_url": "$jdbcUrl", "username": "$username", "password": "$password"}
                 """.trimIndent(),
             ).`when`()
             .post("/api/v1/datasources")
@@ -166,6 +338,7 @@ class DatasourcePoolInvalidationE2eTest {
     private fun createTemplate(
         id: String,
         sql: String,
+        dialect: String = "H2",
     ) {
         given()
             .port(port)
@@ -173,7 +346,7 @@ class DatasourcePoolInvalidationE2eTest {
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .body(
                 """
-                {"id": "$id", "dialect": "H2", "display_name": "MI2 E2E $id",
+                {"id": "$id", "dialect": "$dialect", "display_name": "MI2 E2E $id",
                  "description": "MI2 pool invalidation marker read", "imports": [],
                  "body": ${mapper.writeValueAsString(sql)}}
                 """.trimIndent(),
@@ -183,7 +356,11 @@ class DatasourcePoolInvalidationE2eTest {
             .statusCode(201)
     }
 
-    private fun createPipeline(): String {
+    private fun createPipeline(
+        name: String = "test/mi2_marker_read",
+        datasource: String = DS,
+        template: String = TEMPLATE_SQL,
+    ): String {
         val response =
             given()
                 .port(port)
@@ -191,10 +368,10 @@ class DatasourcePoolInvalidationE2eTest {
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .body(
                     """
-                    {"name": "test/mi2_marker_read", "nodes": [{
+                    {"name": "$name", "nodes": [{
                         "id": "read_marker", "description": "Read the marker table",
-                        "type": "DQL", "source": "$DS",
-                        "template": {"id": "$TEMPLATE_SQL", "version": 1},
+                        "type": "DQL", "source": "$datasource",
+                        "template": {"id": "$template", "version": 1},
                         "output": {"target": "caller"}, "depends_on": []}]}
                     """.trimIndent().replace("\n", " "),
                 ).`when`()
@@ -309,6 +486,29 @@ class DatasourcePoolInvalidationE2eTest {
 
         private const val POLL_MILLIS = 250L
         private const val PROPAGATION_BUDGET = 30_000_000_000L
+
+        /** The slow datasource's fixtures — the metadata Postgres, read through `pg_sleep`. */
+        private const val SLOW_DS = "mi2_slow"
+        private const val SLOW_TEMPLATE = "test/mi2_slow.sql"
+
+        /** Long enough that the delete lands mid-statement; far under the executor's own timeout. */
+        private const val SLEEP_SECONDS = 5
+
+        /** The one value the slow query returns — proof the ROWS came back, not just the stream. */
+        private const val SLEPT = "slept"
+
+        /** The SSE consumer's ceiling — the sleep plus room for a slow container. */
+        private const val SLOW_EXECUTION_TIMEOUT_SECONDS = 60L
+
+        /** How long the mid-query window may take to open before the test calls it a failure. */
+        private const val MID_QUERY_BUDGET = 20_000_000_000L
+
+        /** The reconnect-and-reconcile budget: Spring's container backs off before re-SUBSCRIBEing. */
+        private const val RECONCILE_BUDGET = 60_000_000_000L
+
+        /** The reconcile test's own fixtures, so it cannot collide with the edit test's row. */
+        private const val RECONCILE_DS = "mi2_reconcile"
+        private const val RECONCILE_TEMPLATE = "test/mi2_reconcile.sql"
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000002"
