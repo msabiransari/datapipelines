@@ -24,7 +24,8 @@ import java.util.UUID
 
 /**
  * [DatasourceCreateService] — the ONE validated registration path `POST /api/v1/datasources` and
- * the `datasources_create` MCP tool share (rest-api §9.1, mcp-server §6.2.22).
+ * the bootstrap and UI paths must not diverge from (rest-api §9.1). It also backed the
+ * `datasources_create` MCP tool until 094 removed it from the surface.
  *
  * The D8 binding is a port here, supplied by the surfaces' own `DatasourceWorkspaceRules`, so
  * this suite pins what the SERVICE owns: the payload binding, the binding call it makes, the

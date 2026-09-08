@@ -32,7 +32,8 @@ fun interface DatasourceCreateBinding {
 
 /**
  * Registering a datasource — the ONE validated path behind `POST /api/v1/datasources`
- * (rest-api.md §9.1) and the `datasources_create` MCP tool (mcp-server.md §6.2.22).
+ * (rest-api.md §9.1). It also served the `datasources_create` MCP tool until 094 removed that
+ * tool from the surface — no credential travels through an agent (mcp-server.md §4.1).
  *
  * The sequence is exactly what `DatasourcesController.create` used to inline, moved here whole:
  *

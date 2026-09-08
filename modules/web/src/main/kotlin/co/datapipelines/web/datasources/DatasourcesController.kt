@@ -70,9 +70,13 @@ class DatasourcesController(
      * workspace. `readonly` settable by whoever may create.
      *
      * The whole sequence — bind, D8 binding, duplicate-name check, registry save — is
-     * [DatasourceCreateService], because the `datasources_create` MCP tool (mcp-server.md
-     * §6.2.22) calls the SAME path: 049's rule, two entry points and one validated path. What
-     * is left here is the HTTP shape (201, the §3.2 envelope) and nothing else.
+     * [DatasourceCreateService]. It was extracted in 068 because an MCP `datasources_create`
+     * called the same path (049's rule: two entry points, one validated path); 094 removed that
+     * tool — no credential travels through an agent — so REST is the only programmatic caller
+     * again. The extraction stays: the sequence is the same one the bootstrap registrar and the
+     * UI form must not diverge from, and folding it back inline would make "one validated path"
+     * a claim rather than a structure. What is left here is the HTTP shape (201, the §3.2
+     * envelope) and nothing else.
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

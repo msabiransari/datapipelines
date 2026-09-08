@@ -61,7 +61,12 @@ object McpToolCatalog {
             Entry("datasources_get_tables", mutating = false),
             Entry("datasources_get_columns", mutating = false),
             Entry("datasources_preview_rows", mutating = false),
-            Entry("datasources_create", mutating = true),
+            // 094 ruling 4: there is deliberately no `datasources_create`. Registering a
+            // datasource means handing over a live database credential, and a credential passed
+            // through a tool call transits the agent's context, its transcript and whatever the
+            // client logs. 068 shipped the tool with that hazard documented in its description;
+            // this round decided the hazard is not documentable away. People add datasources in
+            // the UI (or an operator over REST / the bootstrap file); agents use them by name.
             Entry("executions_list", mutating = false),
             Entry("executions_get", mutating = false),
             Entry("executions_get_result", mutating = false),

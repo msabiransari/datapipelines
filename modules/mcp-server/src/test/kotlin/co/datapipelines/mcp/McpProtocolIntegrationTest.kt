@@ -15,12 +15,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.json.McpJsonDefaults
-import io.modelcontextprotocol.server.McpStatelessServerHandler
 import io.modelcontextprotocol.spec.McpSchema
-import io.modelcontextprotocol.spec.McpStatelessServerTransport
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import reactor.core.publisher.Mono
 
 /**
  * Drives the **real SDK request pipeline** in process — the module-structure §5.8 "integration
@@ -202,18 +199,5 @@ class McpProtocolIntegrationTest {
             ).result() as McpSchema.InitializeResult
 
         result.capabilities().logging() shouldBe null
-    }
-
-    /** A transport that only captures the handler the server installs. */
-    private class CapturingTransport : McpStatelessServerTransport {
-        var handler: McpStatelessServerHandler? = null
-
-        override fun setMcpHandler(handler: McpStatelessServerHandler) {
-            this.handler = handler
-        }
-
-        override fun protocolVersions(): List<String> = listOf(McpServerFactory.PROTOCOL_VERSION)
-
-        override fun closeGracefully(): Mono<Void> = Mono.empty()
     }
 }

@@ -84,8 +84,9 @@ class DomainConfiguration {
             .DatasourceWorkspaceRules(workspaceService, workspacesProperties)
 
     /**
-     * The ONE validated datasource-registration path, shared by `POST /api/v1/datasources` and
-     * the `datasources_create` MCP tool (049's principle: two entry points, one path).
+     * The ONE validated datasource-registration path behind `POST /api/v1/datasources` (049's
+     * principle: one validated path, however many entry points). It had two callers until 094
+     * removed `datasources_create` from the MCP surface; REST is the remaining one.
      *
      * The D8 binding rule is passed as a method reference rather than the whole component: the
      * service lives in `application`, which sits below `web` and cannot import
