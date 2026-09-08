@@ -9,6 +9,11 @@
 #   ./app.sh --start [--env <label>] [--posture development|hardened]
 #            [--demo nyc,trade] [--no-build]
 #   ./app.sh --stop [--demo <families>]   stop the stack, demo services included
+#   ./app.sh --clean [--yes]              CLEAN SLATE: stop everything and delete this
+#                                         project's METADATA volume (pipelines, templates,
+#                                         executions, users, keys, workspaces, datasource
+#                                         rows) — demo source data and downloaded artifacts
+#                                         are kept; the next --start re-seeds the demo
 #   ./app.sh --status [--demo <families>] show services + app health + the login
 #   ./app.sh --logs                       follow the app container's logs
 #
@@ -91,12 +96,14 @@ DP_ENV="${DP_ENV:-local}"
 DP_POSTURE="${DATAPIPELINES_POSTURE:-$(from_files DATAPIPELINES_POSTURE)}"
 DP_DEMO="${DATAPIPELINES_DEMO:-$(from_files DATAPIPELINES_DEMO)}"
 POSTURE_FROM_FLAG=0
+CLEAN_CONFIRMED=0
 ARGS=()
 while (($#)); do
   case "$1" in
     --env) shift; [[ ${1:-} ]] || die "--env needs a value (your org's name for this deployment)"; DP_ENV="$1" ;;
     --posture) shift; [[ ${1:-} ]] || die "--posture needs a value: development or hardened"; DP_POSTURE="$1"; POSTURE_FROM_FLAG=1 ;;
     --demo) shift; [[ ${1:-} ]] || die "--demo needs a family list, e.g. --demo nyc or --demo nyc,trade,lake"; DP_DEMO="$1" ;;
+    --yes) CLEAN_CONFIRMED=1 ;;
     --demo-nyc|--demo-trade)
       die "$1 is gone (075). Demo is a FLAG now, one variable for every loader:
     ./app.sh --start --demo nyc
@@ -570,6 +577,51 @@ stop() {
   fi
 }
 
+# --clean: the clean slate the owner asked for (2026-09-08, "I don't want to see any
+# previous pipelines"). Authored content lives in ONE place — the metadata Postgres volume —
+# beside everything else the app owns: users, API keys, workspaces, datasource rows,
+# executions. Deleting that volume is the whole reset; the next --start migrates a fresh
+# database, seeds the local admin from deploy/secrets.env and re-imports the demo families.
+# It does NOT touch:
+#   ${PROJECT}-mysql-data   — demo SOURCE data (weather, Comtrade) the loaders filled;
+#   ${PROJECT}-sample-data  — the downloaded, checksum-verified artifacts (gigabytes).
+# A destructive verb never runs bare (MISTAKES.md, "Destructive-by-Default CLI Verbs"): it
+# prints exactly what it will delete and needs the project name typed back, or --yes when
+# there is no terminal. Names are EXPLICIT — never `down -v`, whose volume set is whatever
+# the interpolated model says it is (the 2026-09-04 lane incident).
+clean() {
+  local volume="${COMPOSE_PROJECT}-postgres-data"
+  echo "==> CLEAN SLATE for compose project '$COMPOSE_PROJECT'"
+  echo "    will stop and remove its containers and network, then DELETE the volume:"
+  echo "      $volume   (metadata: pipelines, templates, executions, users, keys, workspaces, datasources)"
+  echo "    will KEEP: ${COMPOSE_PROJECT}-mysql-data (demo source data), ${COMPOSE_PROJECT}-sample-data (downloaded artifacts)"
+  if ((!CLEAN_CONFIRMED)); then
+    if [[ -t 0 ]]; then
+      local typed
+      read -r -p "    type the project name ($COMPOSE_PROJECT) to confirm: " typed
+      [[ $typed == "$COMPOSE_PROJECT" ]] || die "--clean: '$typed' is not '$COMPOSE_PROJECT'; nothing was removed"
+    else
+      die "--clean deletes data and no terminal is attached to confirm on; re-run with --yes"
+    fi
+  fi
+  # Every profile, so the demo one-shot containers go too — the same all-profiles model
+  # stop() uses for the same reason. `down` removes containers + network and KEEPS volumes.
+  local all=(docker compose -p "$COMPOSE_PROJECT"
+    -f deploy/compose.yml -f deploy/compose.local-build.yml
+    --env-file "$DEFAULTS_ENV")
+  [[ -f $SECRETS_ENV ]] && all+=(--env-file "$SECRETS_ENV")
+  all+=(--profile demo-nyc --profile demo-trade --profile demo-lake)
+  "${all[@]}" down
+  if docker volume inspect "$volume" >/dev/null 2>&1; then
+    docker volume rm "$volume" >/dev/null
+    echo "==> deleted $volume"
+  else
+    echo "==> $volume did not exist (nothing to delete)"
+  fi
+  echo "==> clean. Next: ./app.sh --start${DEMO_FAMILIES:+ --demo $DEMO_FAMILIES} — a fresh database, the demo re-seeded."
+  echo "    Sign-in users are re-created on their next login; API keys are gone and must be minted again."
+}
+
 status() {
   "${COMPOSE[@]}" ps
   echo "env=$DP_ENV posture=$DP_POSTURE demo=${DEMO_FAMILIES:-(none)} project=$COMPOSE_PROJECT"
@@ -591,6 +643,7 @@ case ${1:-} in
     start "$@"
     ;;
   --stop) stop ;;
+  --clean) clean ;;
   --status) status ;;
   --logs) exec "${COMPOSE[@]}" logs -f datapipelines ;;
   *)

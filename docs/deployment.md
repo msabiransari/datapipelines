@@ -694,7 +694,14 @@ login created, and the families' datasources registered.
 The `nyc` and `trade` families also build the jar with `-Pmysql` (see the driver
 note below); `lake` alone does not need it.
 `./app.sh --stop` and `--status` take the same `--demo` list, so the demo services
-are not left running invisibly. **Demo is a flag, not an environment**
+are not left running invisibly. **`./app.sh --clean [--yes]` is the clean slate:** it
+stops and removes the project's containers, then deletes the METADATA volume
+(`<project>-postgres-data` — pipelines, templates, executions, users, API keys,
+workspaces, datasource rows) by explicit name, and keeps `<project>-mysql-data` (demo
+source data) and `<project>-sample-data` (the downloaded artifacts). It asks for the
+project name back on a terminal, or needs `--yes` without one; the next `--start`
+migrates a fresh database and re-seeds the demo. Sign-in users are re-created on their
+next login; API keys must be minted again. **Demo is a flag, not an environment**
 ([Environments §5](environments.md#5-demo)): `DATAPIPELINES_DEMO` is the source of
 truth, `--demo` merely sets it, and the `hardened` posture refuses it at boot. The
 per-family `--demo-nyc` / `--demo-trade` switches are gone; the families are
