@@ -35,11 +35,11 @@
 # endpoint or ref is declared, the allowed root is plain AWS S3, and the https
 # manifest URL passes as an AWS S3 host.
 #
-# ONLY_TABLES excludes the manifest's Iceberg copy (hvfhv_trips_iceberg):
-# catalog.kind s3 loads httpfs+aws but NOT the iceberg extension (089 §D), and
-# a CREATE VIEW over iceberg_scan without it fails the pool build at connect —
-# verified against the pinned DuckDB v1.5.5. The Iceberg read path belongs to
-# 089 §F's MinIO suite, not to the demo datasource.
+# ONLY_TABLES excludes the manifest's Iceberg copy (hvfhv_trips_iceberg) as a
+# DEMO-SCOPE choice: the Iceberg read path is proven by 089 §F's MinIO suite,
+# not by the demo datasource. (It is no longer a limitation — §F made the
+# view seam LOAD the iceberg extension whenever the registry holds an Iceberg
+# table, under every catalog.kind, so registering it here would work.)
 
 datasources:
   - name: sample-lake

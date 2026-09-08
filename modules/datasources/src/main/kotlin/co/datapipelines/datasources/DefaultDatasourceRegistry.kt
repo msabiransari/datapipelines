@@ -86,6 +86,10 @@ class DefaultDatasourceRegistry(
                 LakeViewStatements.forTables(
                     lakeTables.registeredTables(datasource.name),
                     DialectAdapters.forDialect(datasource.dialect),
+                    // 089 §F: a registered Iceberg table prepends the iceberg extension loads,
+                    // honoring §D's bundled-directory mode — the adapter's catalog.kind-keyed
+                    // list cannot see the registry; this seam can.
+                    duckdbExtensionDirectory,
                 )
             }
 

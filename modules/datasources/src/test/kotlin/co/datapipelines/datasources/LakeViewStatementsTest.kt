@@ -106,8 +106,8 @@ class LakeViewStatementsTest {
             )
 
         assertAll(
-            { statements[1] shouldContain "iceberg_scan('s3://b/iceberg/events')" },
-            { statements[2] shouldContain "read_parquet('file://data/clicks/', hive_partitioning = true)" },
+            { statements.any { it.contains("iceberg_scan('s3://b/iceberg/events')") } shouldBe true },
+            { statements.any { it.contains("read_parquet('file://data/clicks/', hive_partitioning = true)") } shouldBe true },
         )
     }
 
@@ -172,5 +172,105 @@ class LakeViewStatementsTest {
         // emitted (verified harmless on a plain file against duckdb_jdbc 1.5.5.1).
         val statements = LakeViewStatements.forTables(listOf(table(listOf("nyc"), "plain")), lake)
         statements.single { it.startsWith("CREATE OR REPLACE VIEW") } shouldContain "hive_partitioning = true"
+    }
+
+    // ----------------------------------------------------------------- 089 §F: the iceberg loads
+
+    @Test
+    fun `an iceberg table prepends INSTALL and LOAD iceberg when no extension directory is set`() {
+        // catalog.kind s3 makes the ADAPTER load httpfs+aws only — the registry-driven need
+        // lives here, under every catalog kind (089 §F, the phase-4 live finding).
+        val statements =
+            LakeViewStatements.forTables(
+                listOf(table(listOf("lake"), "events", format = "iceberg", location = "s3://b/iceberg/events")),
+                lake,
+            )
+
+        statements shouldContainExactly
+            listOf(
+                "INSTALL iceberg",
+                "LOAD iceberg",
+                "CREATE SCHEMA IF NOT EXISTS \"lake\"",
+                "CREATE OR REPLACE VIEW \"lake\".\"events\" AS SELECT * FROM iceberg_scan('s3://b/iceberg/events')",
+                "SET search_path = 'lake'",
+            )
+    }
+
+    @Test
+    fun `an iceberg table under a bundled extension directory gets SET plus bare LOADs and never an INSTALL`() {
+        val statements =
+            LakeViewStatements.forTables(
+                listOf(table(listOf("lake"), "events", format = "iceberg", location = "s3://b/iceberg/events")),
+                lake,
+                duckdbExtensionDirectory = "/opt/datapipelines/duckdb-extensions",
+            )
+
+        assertAll(
+            {
+                statements.take(3) shouldContainExactly
+                    listOf(
+                        "SET extension_directory = '/opt/datapipelines/duckdb-extensions'",
+                        "LOAD avro",
+                        "LOAD iceberg",
+                    )
+            },
+            { statements.none { it.startsWith("INSTALL") } shouldBe true },
+        )
+    }
+
+    @Test
+    fun `a parquet-only registry loads no iceberg extension - with or without a directory`() {
+        assertAll(
+            {
+                LakeViewStatements
+                    .forTables(listOf(table(listOf("nyc"), "trips")), lake)
+                    .none { it.startsWith("INSTALL") || it.startsWith("LOAD") } shouldBe true
+            },
+            {
+                // The bundled directory is not even SET for a registry that never needs it.
+                LakeViewStatements
+                    .forTables(listOf(table(listOf("nyc"), "trips")), lake, duckdbExtensionDirectory = "/opt/x")
+                    .none { it.contains("extension") || it.startsWith("LOAD") || it.startsWith("INSTALL") } shouldBe true
+            },
+        )
+    }
+
+    @Test
+    fun `a mixed registry emits the iceberg loads exactly once`() {
+        val statements =
+            LakeViewStatements.forTables(
+                listOf(
+                    table(listOf("lake"), "events", format = "iceberg", location = "s3://b/iceberg/events"),
+                    table(listOf("lake"), "snapshots", format = "iceberg", location = "s3://b/iceberg/snapshots"),
+                    table(listOf("lake"), "clicks", location = "s3://b/clicks/"),
+                ),
+                lake,
+            )
+        statements.filter { it == "LOAD iceberg" }.size shouldBe 1
+    }
+
+    @Test
+    fun `an unsafe extension directory is refused at this boundary when iceberg tables need it`() {
+        val iceberg = table(listOf("lake"), "events", format = "iceberg", location = "s3://b/iceberg/events")
+        assertAll(
+            // Interpolated into a SQL string literal, so the attack string is refused, not escaped.
+            {
+                shouldThrow<DatapipelinesException> {
+                    LakeViewStatements.forTables(listOf(iceberg), lake, duckdbExtensionDirectory = "/opt/x'; DROP--")
+                }.code shouldBe DatasourceErrorCodes.PROPERTIES_INVALID
+            },
+            {
+                shouldThrow<DatapipelinesException> {
+                    LakeViewStatements.forTables(listOf(iceberg), lake, duckdbExtensionDirectory = "relative/dir")
+                }.code shouldBe DatasourceErrorCodes.PROPERTIES_INVALID
+            },
+            // A parquet-only registry never interpolates the value, so it is never validated
+            // here — the pool-build adapter's own require() stays the refusal for that case.
+            {
+                LakeViewStatements
+                    .forTables(listOf(table(listOf("nyc"), "trips")), lake, duckdbExtensionDirectory = "relative/dir")
+                    .isNotEmpty() shouldBe true
+            },
+        )
     }
 }

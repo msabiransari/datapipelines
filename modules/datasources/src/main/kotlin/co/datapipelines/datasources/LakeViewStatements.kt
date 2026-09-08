@@ -61,19 +61,26 @@ import co.datapipelines.typesystem.DatapipelinesException
  */
 object LakeViewStatements {
     /**
-     * The statements for [tables], in execution order: ATTACHes, schema creations, views, then
-     * the search-path rule. Empty for zero tables — a tableless LAKE datasource gets no extra
-     * statements and no ATTACH. Identifiers are quoted through [adapter]'s
-     * [DialectAdapter.quoteIdentifier].
+     * The statements for [tables], in execution order: the Iceberg extension loads when the
+     * registry demands them, ATTACHes, schema creations, views, then the search-path rule.
+     * Empty for zero tables — a tableless LAKE datasource gets no extra statements and no
+     * ATTACH. Identifiers are quoted through [adapter]'s [DialectAdapter.quoteIdentifier].
+     *
+     * [duckdbExtensionDirectory] is the deployment's bundled extension directory (089 §D,
+     * configuration.md §3.25) — the same value the pool factory forwards to
+     * `DialectAdapters.forDialect`; it decides the Iceberg loads' shape (see
+     * [icebergExtensionStatements]).
      */
     fun forTables(
         tables: List<LakeRegisteredTable>,
         adapter: DialectAdapter,
+        duckdbExtensionDirectory: String? = null,
     ): List<String> {
         if (tables.isEmpty()) return emptyList()
         tables.forEach { requireMappable(it) }
         val namespaces = tables.map { it.namespace }.distinct()
         return buildList {
+            addAll(icebergExtensionStatements(tables, duckdbExtensionDirectory))
             namespaces
                 .filter { it.size >= CATALOG_SEGMENTS }
                 .map { it.first() }
@@ -151,6 +158,64 @@ object LakeViewStatements {
             )
         }
     }
+
+    /**
+     * The 089 §F fix for the gap phase 4 found live: `catalog.kind: s3` makes the ADAPTER load
+     * `httpfs` + `aws` and nothing else, so a registered `format=iceberg` table's
+     * `iceberg_scan` view failed the pool build at connect. The adapter cannot see the
+     * registry — its statement list is keyed on the DECLARED catalog kind — but THIS seam can,
+     * so the rule lives here: ANY registered Iceberg table, under ANY catalog kind, prepends
+     * the extension the views need.
+     *
+     * The shapes honor §D's LOAD-only-vs-INSTALL mode exactly as the adapter's
+     * `extensionStatements` does: a bundled [extensionDirectory] means bare `LOAD`s against
+     * files the image shipped (`avro` before `iceberg`, which auto-loads it — the adapter's
+     * BUNDLED_ICEBERG_EXTENSIONS order, so a forgotten bundle fails naming avro), and no
+     * `INSTALL` ever runs; no directory means the explicit `INSTALL`+`LOAD` pair developer
+     * machines rely on (`INSTALL iceberg` pulls `avro` in as a dependency over the network).
+     * The `SET extension_directory` is emitted even though the adapter may already have — the
+     * adapter emits it only under a declared `catalog.kind`, and a local lake (no kind) with a
+     * bundled directory is a real deployment.
+     *
+     * Parquet-only registries emit NOTHING here: an extension nothing will call is surface for
+     * nothing (the adapter's own rule), and a no-egress deployment must not pay an `INSTALL`
+     * for a table shape it does not have.
+     */
+    private fun icebergExtensionStatements(
+        tables: List<LakeRegisteredTable>,
+        extensionDirectory: String?,
+    ): List<String> {
+        if (tables.none { it.format == "iceberg" }) return emptyList()
+        return when (extensionDirectory) {
+            null -> {
+                listOf("INSTALL iceberg", "LOAD iceberg")
+            }
+
+            else -> {
+                // The directory reaches a SQL string literal HERE, before the pool-build adapter
+                // construction that would `require` it — so the emission boundary refuses a value
+                // that would need escaping itself (the adapter init's grammar, mirrored).
+                if (!isSafeExtensionDirectory(extensionDirectory)) {
+                    throw DatapipelinesException(
+                        DatasourceErrorCodes.PROPERTIES_INVALID,
+                        "datapipelines.duckdb.extension-directory must be an absolute path with no quotes, " +
+                            "backslashes, whitespace or control characters; '$extensionDirectory' is not — " +
+                            "refusing to interpolate it into the Iceberg extension statements.",
+                        mapOf("key" to "datapipelines.duckdb.extension-directory"),
+                    )
+                }
+                listOf(
+                    "SET extension_directory = '$extensionDirectory'",
+                    "LOAD avro",
+                    "LOAD iceberg",
+                )
+            }
+        }
+    }
+
+    /** The adapter init's grammar for the same operator value, mirrored at this boundary. */
+    private fun isSafeExtensionDirectory(value: String): Boolean =
+        value.startsWith("/") && value.none { ch -> ch in "'\"\\" || ch <= ' ' || ch == '\u007F' }
 
     private fun qualified(table: LakeRegisteredTable): String = (table.namespace + table.name).joinToString(".")
 
