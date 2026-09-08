@@ -90,9 +90,11 @@ Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, 
 **Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
 API keys are:
-- Issued per-user-per-agent from the UI (e.g., "Claude Desktop key", "GLM key"); HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only).
+- Issued per-user-per-agent from the UI's API screen (e.g., "Claude Desktop key", "GLM key"); HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only).
 - Revocable, optionally expiring.
 - Scoped `read` / `execute` / `author` / `admin` (hierarchical, [Auth §7.5](auth.md#75-scopes)). A key's scopes are a subset of its creator's scopes at issue time.
+
+**An agent's key is a `user` key — the same kind a program uses over REST.** The UI labels it "Agent / API key" for exactly that reason: one credential kind, two surfaces. The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
 
 **Scope enforcement.** The minimum scope for every MCP tool is defined once in the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative) — this spec restates each tool's requirement in §6.2 for readability but the matrix is authoritative on any conflict. The `admin` scope exists (global datasource management, user administration) but **no MCP tool's minimum scope is `admin`**. `datasources_create` (§6.2.22) sits on `author` like the rest; binding a datasource `global: true` does require admin, but that is a workspaces D8 rule inside the shared create service, not a scope floor — the same rule REST applies. Editing and deleting datasources remain UI/REST-only. An `admin` key still works everywhere, since scopes are hierarchical.
 

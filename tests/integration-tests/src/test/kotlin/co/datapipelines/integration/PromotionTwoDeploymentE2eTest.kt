@@ -317,6 +317,106 @@ class PromotionTwoDeploymentE2eTest {
         assertEquals(before, uatRowCounts(), "uat changed despite a refused batch")
     }
 
+    // ------------------------------------------------------------------ 6. the MINTED server key (091)
+
+    @Test
+    @Order(50)
+    fun `a MINTED server key promotes end to end, and its usage is stamped`() {
+        // 091: the receiver's credential is an `api_keys` row now, not a config value. This is
+        // the whole path — Argon2id verify, kind check, owner liveness — driven by a real HTTP
+        // request against a real deployment, with the CONFIGURED value still in place beside it
+        // (both work for one release).
+        val minted = seedServerKeyOnUat("uat receiver")
+
+        assertEquals(200, inventoryOn(portUat, key = minted.plaintext).statusCode(), "the minted key must open the inventory")
+
+        // TX_OK exists on dev (order 45 built it) and did NOT land on uat — that test proved the
+        // whole batch rolled back. So this is a real, previously-unlanded pipeline, pushed RAW
+        // with the minted credential.
+        val batch =
+            """
+            {"source_env":"dev","key_fingerprint":"none","workspace":"$WORKSPACE","templates":[],
+             "pipelines":[${devPipelinePayload(TX_OK)}]}
+            """.trimIndent()
+
+        val response = pushTo(portUat, key = minted.plaintext, body = batch)
+
+        assertEquals(200, response.statusCode(), "the push was refused: ${response.body()}")
+        assertEquals(1, uatPipelineCount(TX_OK), "the pipeline did not land on uat")
+        // The stamp the config value could never have: "is this promotion key still in use?"
+        assertTrue(
+            uatJdbc.scalar("SELECT (last_used_at IS NOT NULL)::text FROM api_keys WHERE id = '${minted.id}'").toBoolean(),
+            "last_used_at was not stamped on the promotion key",
+        )
+    }
+
+    @Test
+    @Order(51)
+    fun `a user key, a revoked server key and an expired one are all the SAME refusal`() {
+        // Every one of these is a live row in uat's own `api_keys`, so each proves a different
+        // branch of the store's check — and all three answer identically, because a caller must
+        // not be able to classify a credential by presenting it here. Each key is presented for
+        // the FIRST time in this test: a key validated once is cached for the TTL (auth §7.3),
+        // so revoking a key mid-test would prove the cache, not the check.
+        val wrongKind = seedServerKeyOnUat("an ordinary agent key", kind = "user")
+        val revoked = seedServerKeyOnUat("revoked receiver", revoked = true)
+        val expired = seedServerKeyOnUat("expired receiver", expiresAt = "2020-01-01T00:00:00Z")
+
+        assertAll(
+            { assertEquals(401, inventoryOn(portUat, key = wrongKind.plaintext).statusCode(), "a user key opened the promotion route") },
+            { assertEquals(401, inventoryOn(portUat, key = revoked.plaintext).statusCode(), "a revoked server key still works") },
+            { assertEquals(401, inventoryOn(portUat, key = expired.plaintext).statusCode(), "an expired server key still works") },
+            { assertEquals("auth.promotion.key_invalid", errorCodeOf(inventoryOn(portUat, key = revoked.plaintext))) },
+            { assertEquals("auth.promotion.key_invalid", errorCodeOf(inventoryOn(portUat, key = wrongKind.plaintext))) },
+        )
+    }
+
+    @Test
+    @Order(52)
+    fun `a server key authenticates NOTHING on the ordinary API surface`() {
+        // §7.7's confinement, from the outside: presented as an ordinary DP-API-Key, a server
+        // key reaches no route at all. `/mcp` is asserted separately because it is a SERVLET —
+        // the scope interceptor never sees it (P32).
+        val minted = seedServerKeyOnUat("confinement probe")
+
+        listOf("/api/v1/pipelines", "/api/v1/templates", "/api/v1/auth/me", "/api-console", "/mcp").forEach { path ->
+            val response =
+                httpClient.send(
+                    HttpRequest
+                        .newBuilder(URI.create("http://localhost:$portUat$path"))
+                        .header(API_KEY_HEADER, minted.plaintext)
+                        .GET()
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            assertTrue(
+                response.statusCode() == 401 || response.statusCode() == 403,
+                "$path answered ${response.statusCode()} to a server key: ${response.body().take(200)}",
+            )
+        }
+    }
+
+    /**
+     * A `server`-kind key row in uat's own `api_keys` — the credential an admin would mint on
+     * the receiver's API screen, seeded here for the same reason every other key in this module
+     * is: the alternative is driving a browser session to reach a form.
+     */
+    private fun seedServerKeyOnUat(
+        name: String,
+        kind: String = "server",
+        revoked: Boolean = false,
+        expiresAt: String? = null,
+    ): E2eAuth.SeededKey {
+        val key = E2eAuth.generateKey(name, emptyArray())
+        val expiry = expiresAt?.let { "'$it'::timestamptz" } ?: "NULL"
+        uatJdbc.execute(
+            "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind, is_revoked, expires_at)" +
+                " VALUES ('${key.id}', '$ADMIN_USER_ID', '$name', '${key.hash}', '{}'::text[], '$WORKSPACE_ID_TEXT'," +
+                " '$kind', $revoked, $expiry)",
+        )
+        return key
+    }
+
     // ------------------------------------------------------------------ content on dev
 
     /** A parent that runs a child through a PIPELINE node and pins a template that imports a library. */
