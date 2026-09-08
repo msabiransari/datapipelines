@@ -1086,7 +1086,9 @@ come from is the operator key `datapipelines.duckdb.extension-directory`
 ([configuration.md §3.25](configuration.md#325-duckdb-extension-directory-dp-lake)):
 
 - **Set — the shipped image**: the published image bundles the four extensions for DuckDB
-  core **v1.5.5** / `linux_amd64` under `/opt/duckdb/extensions` (+108 MB uncompressed) and
+  core **v1.5.5** under `/opt/duckdb/extensions/v1.5.5/<platform>/` (+108 MB uncompressed),
+  the `<platform>` following the image build's architecture (`linux_amd64` or `linux_arm64`
+  via the Dockerfile's `TARGETARCH` mapping), and
   exports the variable from the Dockerfile. Every lake connection then runs
   `SET extension_directory` plus BARE `LOAD`s and **never an `INSTALL`** — in DuckDB v1.5.5
   `LOAD` strictly loads already-present files (no download code path runs at all, measured in

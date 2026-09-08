@@ -19,16 +19,26 @@ RUN groupadd --system datapipelines && useradd --system --gid datapipelines data
 # `avro` is bundled because `LOAD iceberg` auto-loads it from the directory. The four add
 # ~108 MB uncompressed to the image (~39 MB downloaded at build). The extension repository
 # publishes no checksums for these artifacts, so the pin is the versioned URL itself.
-# linux_amd64 only — the platform string this JRE image reports; a multi-arch image would
-# add a linux_arm64 directory beside it. The layout (<dir>/v<ver>/<platform>/<name>) is what
-# a custom extension_directory still requires, verified by the 089 §7.3 spike on this exact
-# base image with --network none. `|| exit 1` because /bin/sh runs this loop without
-# `set -e`: a failed curl must fail the build, not just one iteration.
+# The platform directory follows the build's TARGETARCH (BuildKit fills it): `docker build`
+# on Apple Silicon produces a linux/arm64 image, whose DuckDB looks for linux_arm64
+# extensions — hard-coding linux_amd64 here made the runtime LOAD-only against an EMPTY
+# directory on arm64 (found by the 089 live gate: pool init failed with
+# ".../v1.5.5/linux_arm64/httpfs.duckdb_extension not found"). The layout
+# (<dir>/v<ver>/<platform>/<name>) is what a custom extension_directory still requires,
+# verified by the 089 §7.3 spike on this exact base image with --network none.
+# `|| exit 1` because /bin/sh runs this loop without `set -e`: a failed curl must fail the
+# build, not just one iteration.
 ARG DUCKDB_CORE_VERSION=1.5.5
-RUN mkdir -p /opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/linux_amd64 && \
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) dp=linux_amd64 ;; \
+      arm64) dp=linux_arm64 ;; \
+      *) echo "unsupported TARGETARCH for the DuckDB extension bundle: '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    mkdir -p /opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/$dp && \
     for ext in httpfs aws iceberg avro; do \
-      curl -fsSL "https://extensions.duckdb.org/v${DUCKDB_CORE_VERSION}/linux_amd64/${ext}.duckdb_extension.gz" \
-        | gunzip > "/opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/linux_amd64/${ext}.duckdb_extension" || exit 1; \
+      curl -fsSL "https://extensions.duckdb.org/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension.gz" \
+        | gunzip > "/opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension" || exit 1; \
     done
 
 # The knob the lake adapter reads (application.yml datapipelines.duckdb.extension-directory):
