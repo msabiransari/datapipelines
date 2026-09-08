@@ -10,6 +10,9 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * [LakeManifestUrl] — the SSRF boundary of the lake-table import (089 §A): a manifest URL is
@@ -18,6 +21,9 @@ import org.junit.jupiter.api.assertAll
  * SSRF hole wearing a green badge.
  */
 class LakeManifestUrlTest {
+    @TempDir
+    lateinit var tempDir: Path
+
     private fun lake(dialect: Map<String, Any?> = emptyMap()) =
         Datasource(
             name = "sample-lake",
@@ -80,6 +86,31 @@ class LakeManifestUrlTest {
             "https://iceberg.internal:8181/manifest.json"
     }
 
+    @Test
+    fun `a file ref declares a local mirror root and only paths under it resolve`() {
+        val ds = lake(mapOf("catalog.ref" to "file:///srv/lake-mirror"))
+        assertAll(
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "file:///srv/lake-mirror/v1/manifest.json") shouldBe
+                    "file:///srv/lake-mirror/v1/manifest.json"
+            },
+            // The root itself is under the root.
+            { LakeManifestUrl.resolveFetchUrl(ds, "file:///srv/lake-mirror") shouldBe "file:///srv/lake-mirror" },
+        )
+    }
+
+    @Test
+    fun `a non-URL catalog ref contributes no root and leaves the plain-AWS rule intact`() {
+        // The adapter's other ref shapes (an s3:// catalog identifier, an ARN, an account id) are
+        // not fetch roots: the datasource stays plain AWS — a regression here would both refuse
+        // the real S3 host and admit the ref's "authority" as a nonsense http root.
+        val ds = lake(mapOf("catalog.kind" to "s3", "catalog.ref" to "s3://datapipelines-co/sample-data/lake", "region" to "us-east-1"))
+        LakeManifestUrl.resolveFetchUrl(ds, "https://datapipelines-co.s3.amazonaws.com/lake/v1/manifest.json") shouldBe
+            "https://datapipelines-co.s3.amazonaws.com/lake/v1/manifest.json"
+        shouldThrow<DatapipelinesException> { LakeManifestUrl.resolveFetchUrl(ds, "https://datapipelines-co/x") }
+            .code shouldBe PipelineErrorCodes.Datasource.LAKE_MANIFEST_URL_FORBIDDEN
+    }
+
     // ---------------------------------------------------------- refusals — each one must throw
 
     @Test
@@ -114,5 +145,39 @@ class LakeManifestUrlTest {
                     .code shouldBe PipelineErrorCodes.Datasource.LAKE_MANIFEST_URL_FORBIDDEN
             }
         }
+    }
+
+    @Test
+    fun `file URLs outside the declared root are refused - the root is the whole boundary`() {
+        val ds = lake(mapOf("catalog.ref" to "file:///srv/lake-mirror"))
+        val noRoot = lake()
+        val cases =
+            listOf(
+                ds to "file:///srv/other/v1/manifest.json", // a different tree
+                ds to "file:///srv/lake-mirror/../etc/passwd", // normalizes OUT of the root
+                ds to "file:///srv/lake-mirror-echo/v1/manifest.json", // prefix lookalike
+                ds to "file://remote-host/srv/lake-mirror/v1/manifest.json", // a host is not the local filesystem
+                noRoot to "file:///srv/lake-mirror/v1/manifest.json", // no declared root at all
+            )
+        cases.forEach { (datasource, url) ->
+            withClue(url) {
+                shouldThrow<DatapipelinesException> { LakeManifestUrl.resolveFetchUrl(datasource, url) }
+                    .code shouldBe PipelineErrorCodes.Datasource.LAKE_MANIFEST_URL_FORBIDDEN
+            }
+        }
+    }
+
+    @Test
+    fun `the production fetcher reads a vetted file URL off the local filesystem`() {
+        val manifest = Files.writeString(tempDir.resolve("manifest.json"), """{"tables": [], "schema_version": 1}""")
+        val tree = LakeManifestFetcher.HTTP.fetch(manifest.toUri().toString())
+        tree.get("schema_version").asInt() shouldBe 1
+    }
+
+    @Test
+    fun `the production fetcher maps a missing local manifest to the unreachable code`() {
+        shouldThrow<DatapipelinesException> {
+            LakeManifestFetcher.HTTP.fetch(tempDir.resolve("absent.json").toUri().toString())
+        }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
     }
 }

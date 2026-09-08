@@ -252,14 +252,18 @@ mobility question and four of its five sources are the mobility family's:
 
 It is a **separate file** from `content/examples.json` on purpose. The seeder
 ([`ExampleContentSeeder`](../../modules/web/src/main/kotlin/co/datapipelines/web/bootstrap/ExampleContentSeeder.kt))
-takes a comma-separated LIST of examples files and has **no per-pipeline gate** — no
-`requires:`, no conditional seeding — and a fixture referencing a datasource the
-deployment lacks fails workspace provisioning and the login with it. So a lake
-pipeline inside `examples.json` would break every `--demo nyc` login today, before the
-`sample-lake` datasource exists. Keeping it in its own file means 089 turns it on by
-adding one path to `DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE` — and by adding the file to
-`SampleDataExamplesContentTest.EXAMPLES_PATHS`, which cannot validate it until the
-`LAKE` dialect and the `sample-lake` bootstrap entry exist.
+takes a comma-separated LIST of examples files and — before 089 — had **no
+per-file gate**: a fixture referencing a datasource the deployment lacks fails
+workspace provisioning and the login with it, so a lake pipeline inside
+`examples.json` would have broken every `--demo nyc` login. 089 §E added the
+gate this file now carries — top-level `"requires_datasources": ["sample-lake",
+"sample-trips", "sample-reference", "sample-weather"]`, so the file's content
+seeds only when every named datasource is registered (all four, not just
+`sample-lake`, because the pipeline's other three nodes read the mobility
+family's datasources: `--demo trade,lake` without `nyc` must skip the file,
+not fail the login). The demo wires it on by adding one path to
+`DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE` under the `demo-lake` profile — and by
+adding the file to `SampleDataExamplesContentTest.EXAMPLES_PATHS`.
 
 ## Layout
 

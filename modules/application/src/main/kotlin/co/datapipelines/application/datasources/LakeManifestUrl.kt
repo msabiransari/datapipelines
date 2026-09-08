@@ -10,6 +10,8 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 
 /**
@@ -25,10 +27,20 @@ import java.time.Duration
  *   ordinary case (the adapter's own `USE_SSL false` precedent).
  * - `dialect.catalog.ref` holding an http(s) URL (an Iceberg REST catalog): the URL's
  *   authority must equal the ref's.
+ * - `dialect.catalog.ref` holding a `file://` URI (089 §E — a mirror of the published layout on
+ *   a mounted volume, the deployment the gate uses while the real upload is pending): a
+ *   `file://` manifest URL is admitted, and only when its normalized path IS the ref's path or
+ *   sits directly underneath it. The ref declares the root — without one, `file://` is refused
+ *   like every other non-http(s) scheme, because an undeclared local read IS the SSRF hole.
  * - Neither declared (plain AWS S3 through the credential chain): `https` only, and the host
  *   must be an AWS S3 host — `s3.amazonaws.com`, `s3.<region>.amazonaws.com`, or
  *   `<bucket>.s3[.<region>].amazonaws.com` (virtual-hosted and path style). `http` is refused:
  *   a downgrade has no legitimate reason here.
+ *
+ * A `catalog.ref` of any OTHER scheme (`s3://…`, an ARN, an account id — the adapter's own
+ * catalogue of ref shapes) contributes no fetch root at all. Before 089 §E its URI "authority"
+ * was treated as an http root, which both admitted a nonsense host (`s3://bucket/…` → host
+ * `bucket`) and DISABLED the plain-AWS rule for a datasource that was plainly AWS.
  *
  * The `s3://` form of a manifest URL is accepted by TRANSLATION, never fetched as-is: with an
  * endpoint it becomes path-style `https://<endpoint>/<bucket>/<key>`, without one it becomes
@@ -65,10 +77,10 @@ object LakeManifestUrl {
             throw forbidden("a manifest URL may not contain quotes, backslashes, whitespace or control characters")
         }
         val roots = AllowedRoots.of(datasource)
-        return if (trimmed.startsWith("s3://")) {
-            translateS3Url(roots, trimmed)
-        } else {
-            vetHttpUrl(roots, trimmed)
+        return when {
+            trimmed.startsWith("s3://") -> translateS3Url(roots, trimmed)
+            trimmed.startsWith("file://") -> vetFileUrl(roots, trimmed)
+            else -> vetHttpUrl(roots, trimmed)
         }
     }
 
@@ -114,6 +126,36 @@ object LakeManifestUrl {
         )
     }
 
+    /**
+     * A `file://` URL, admitted only under the datasource's DECLARED `file://` catalog.ref (089
+     * §E — the mirror deployment). The comparison is on NORMALIZED paths, so a `..` segment that
+     * would climb out of the root resolves before the prefix test, not after it.
+     */
+    @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued 4xx
+    private fun vetFileUrl(
+        roots: AllowedRoots,
+        url: String,
+    ): String {
+        val root =
+            roots.fileRoot
+                ?: throw forbidden(
+                    "a file:// manifest URL needs the datasource's catalog.ref to declare the file:// root it sits under",
+                )
+        val uri = parseUri(url)
+        val authority = uri.authority
+        if (!authority.isNullOrEmpty() && authority != "localhost") {
+            throw forbidden("a file:// manifest URL names no host — 'file://$authority/…' is not the local filesystem")
+        }
+        val path = uri.normalize().path.orEmpty()
+        if (path != root && !path.startsWith("$root/")) {
+            throw forbidden(
+                "'${url.take(MAX_ECHOED_VALUE_CHARS)}' is not under the datasource's declared file root — " +
+                    "a manifest is fetched from the datasource's declared dialect.endpoint / catalog.ref / AWS S3 only",
+            )
+        }
+        return url
+    }
+
     private fun parseUri(url: String): URI =
         try {
             URI(url)
@@ -138,22 +180,35 @@ object LakeManifestUrl {
     private class AllowedRoots(
         val endpoint: String?,
         val refAuthority: String?,
+        val fileRoot: String?,
         val region: String?,
     ) {
         /** No endpoint and no catalog ref — plain AWS S3 through the credential chain. */
-        val isPlainAws: Boolean get() = endpoint == null && refAuthority == null
+        val isPlainAws: Boolean get() = endpoint == null && refAuthority == null && fileRoot == null
 
         companion object {
             fun of(datasource: Datasource): AllowedRoots {
                 val dialect = datasource.properties.dialect
+                val ref = dialect["catalog.ref"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                val refUri = ref?.let { runCatching { URI(it) }.getOrNull() }
                 return AllowedRoots(
                     endpoint = dialect["endpoint"]?.toString()?.trim()?.takeIf { it.isNotEmpty() },
+                    // Only an http(s) ref is an http root. An s3:// or ARN ref used to leak its
+                    // "authority" in here — a nonsense host that also switched the plain-AWS
+                    // rule off (see the class KDoc).
                     refAuthority =
-                        dialect["catalog.ref"]
-                            ?.toString()
-                            ?.trim()
-                            ?.takeIf { it.isNotEmpty() }
-                            ?.let { ref -> runCatching { URI(ref).authority }.getOrNull() },
+                        refUri
+                            ?.takeIf { it.scheme == "https" || it.scheme == "http" }
+                            ?.authority,
+                    // A file:// ref declares the local mirror root (089 §E), as a NORMALIZED
+                    // path with no trailing slash, so the admission test is a plain prefix read.
+                    fileRoot =
+                        refUri
+                            ?.takeIf { it.scheme == "file" }
+                            ?.normalize()
+                            ?.path
+                            ?.trimEnd('/')
+                            ?.takeIf { it.isNotEmpty() },
                     region = dialect["region"]?.toString()?.trim()?.takeIf { it.isNotEmpty() },
                 )
             }
@@ -178,6 +233,10 @@ fun interface LakeManifestFetcher {
          * followed (a redirect could lead off the allowed root — NEVER_FOLLOW is the SSRF
          * boundary's second line).
          *
+         * A `file://` URL — admitted by [LakeManifestUrl] only under the datasource's declared
+         * `file://` catalog.ref (089 §E, the mirror deployment) — is read off the local
+         * filesystem under the same body bound. Everything else goes through java.net.http.
+         *
          * The RuntimeException catch is deliberate (the DS-SEC-6 precedent in
          * `DefaultDatasourceRegistry.probe`): java.net.http reports connect/read failures as
          * both [java.io.IOException] and RuntimeExceptions, and catching only the first would
@@ -186,28 +245,13 @@ fun interface LakeManifestFetcher {
         @Suppress("TooGenericExceptionCaught")
         val HTTP =
             LakeManifestFetcher { url ->
-                val client =
-                    HttpClient
-                        .newBuilder()
-                        .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-                        .followRedirects(HttpClient.Redirect.NEVER)
-                        .build()
-                val request =
-                    HttpRequest
-                        .newBuilder(URI(url))
-                        .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
-                        .GET()
-                        .build()
                 val body =
                     try {
-                        val response = client.send(request, HttpResponse.BodyHandlers.ofByteArray())
-                        if (response.statusCode() !in SUCCESS_RANGE) {
-                            throw unreachable("the manifest endpoint answered HTTP ${response.statusCode()}")
+                        if (url.startsWith("file://")) {
+                            readLocalManifest(url)
+                        } else {
+                            fetchHttpManifest(url)
                         }
-                        if (response.body().size > MAX_MANIFEST_BYTES) {
-                            throw unreachable("the manifest is larger than $MAX_MANIFEST_BYTES bytes")
-                        }
-                        response.body()
                     } catch (e: DatapipelinesException) {
                         throw e
                     } catch (e: IOException) {
@@ -221,6 +265,43 @@ fun interface LakeManifestFetcher {
                     throw unreachable("the fetched manifest is not valid JSON", e)
                 }
             }
+
+        /** The http(s) half of [HTTP] — see its KDoc for the bounds. */
+        private fun fetchHttpManifest(url: String): ByteArray {
+            val client =
+                HttpClient
+                    .newBuilder()
+                    .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
+                    .followRedirects(HttpClient.Redirect.NEVER)
+                    .build()
+            val request =
+                HttpRequest
+                    .newBuilder(URI(url))
+                    .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
+                    .GET()
+                    .build()
+            val response = client.send(request, HttpResponse.BodyHandlers.ofByteArray())
+            if (response.statusCode() !in SUCCESS_RANGE) {
+                throw unreachable("the manifest endpoint answered HTTP ${response.statusCode()}")
+            }
+            if (response.body().size > MAX_MANIFEST_BYTES) {
+                throw unreachable("the manifest is larger than $MAX_MANIFEST_BYTES bytes")
+            }
+            return response.body()
+        }
+
+        /**
+         * The `file://` half of [HTTP]: the URL already crossed [LakeManifestUrl]'s declared-root
+         * check, so this reads exactly the path it is given — bounded like the network read.
+         */
+        private fun readLocalManifest(url: String): ByteArray {
+            val path = Path.of(URI(url))
+            val size = Files.size(path)
+            if (size > MAX_MANIFEST_BYTES) {
+                throw unreachable("the manifest is larger than $MAX_MANIFEST_BYTES bytes")
+            }
+            return Files.readAllBytes(path)
+        }
 
         private val MAPPER = JsonMapper.builder().build()
 

@@ -257,11 +257,12 @@ class SampleDataExamplesContentTest {
     }
 
     private companion object {
-        /** One examples file per sample-data family — both ship and both must validate. */
+        /** One examples file per sample-data family — all three ship and all three must validate. */
         private val EXAMPLES_PATHS =
             listOf(
                 "scripts/sample-data/content/examples.json",
                 "scripts/sample-data-trade/content/examples.json",
+                "scripts/sample-data/content/examples-lake.json",
             )
 
         /** One bootstrap datasources file per family; the app accepts the comma list. */
@@ -269,6 +270,7 @@ class SampleDataExamplesContentTest {
             listOf(
                 "deploy/sample-data/bootstrap-datasources-nyc.yml",
                 "deploy/sample-data/bootstrap-datasources-census.yml",
+                "deploy/sample-data/bootstrap-datasources-lake.yml",
             )
 
         /** The template the falsification poisons — referenced by a pipeline that declares the parameter. */

@@ -413,4 +413,133 @@ class BootstrapDatasourceFileReaderTest {
             }
         }
     }
+
+    // ---------------------------------------------------------------- 089 §E — the lake seed
+
+    private val lakeEntry =
+        """
+        datasources:
+          - name: sample-lake
+            dialect: LAKE
+            jdbc_url: "jdbc:duckdb::memory:"
+            credential:
+              kind: none
+            readonly: true
+            global: true
+        """.trimIndent() + "\n" // the seed-block fixtures below append at column zero
+
+    @Test
+    fun `a LAKE entry's import_manifest seed binds with its namespace and allowlist`() {
+        val yaml =
+            lakeEntry +
+                """
+                |    import_manifest: ${'$'}{SAMPLE_LAKE_MANIFEST_URL}
+                |    namespace: [nyc, mobility]
+                |    only_tables: [hvfhv_zone_day, hvfhs_companies]
+                """.trimMargin()
+        val env = mapOf("SAMPLE_LAKE_MANIFEST_URL" to "s3://datapipelines-co/sample-data/lake/v1/manifest.json")
+
+        val import = reader(env).read(file(yaml)).single().lakeImport
+
+        import shouldNotBe null
+        import!!.manifestUrl shouldBe "s3://datapipelines-co/sample-data/lake/v1/manifest.json"
+        import.tables shouldBe null
+        import.namespace shouldBe listOf("nyc", "mobility")
+        import.onlyTables shouldBe listOf("hvfhv_zone_day", "hvfhs_companies")
+    }
+
+    @Test
+    fun `a LAKE entry's inline tables seed binds, per-row namespace and partition column included`() {
+        val yaml =
+            lakeEntry +
+                """
+                |    tables:
+                |      - namespace: [nyc, mobility]
+                |        name: hvfhv_zone_day
+                |        format: parquet
+                |        location: s3://datapipelines-co/sample-data/lake/v1/hvfhv_zone_day/part-0.parquet
+                |      - name: hvfhv_trips
+                |        format: parquet
+                |        location: s3://datapipelines-co/sample-data/lake/v1/hvfhv_trips/pickup_date=*/part-*.parquet
+                |        partition_column: pickup_date
+                |    namespace: [nyc, mobility]
+                """.trimMargin()
+
+        val import = reader().read(file(yaml)).single().lakeImport
+
+        import shouldNotBe null
+        import!!.manifestUrl shouldBe null
+        import.tables shouldNotBe null
+        val tables = import.tables!!
+        tables shouldHaveSize 2
+        tables[0].namespace shouldBe listOf("nyc", "mobility")
+        tables[0].partitionColumn shouldBe null
+        tables[1].partitionColumn shouldBe "pickup_date"
+        import.namespace shouldBe listOf("nyc", "mobility")
+    }
+
+    @Test
+    fun `an ordinary entry carries no seed - null, not an empty block`() {
+        reader(mapOf("SAMPLE_PG_PASSWORD" to "x")).read(file(twoEntries)).forEach { entry ->
+            entry.lakeImport shouldBe null
+        }
+    }
+
+    @Test
+    fun `the lake seed's shape refusals are all loud - both forms, non-LAKE, a qualifier without a seed, an empty block`() {
+        val both =
+            lakeEntry +
+                """
+                |    import_manifest: s3://b/m.json
+                |    tables:
+                |      - {name: t, format: parquet, location: s3://b/t}
+                """.trimMargin()
+        shouldThrow<BootstrapDatasourceFileException> { reader().read(file(both)) }
+            .message shouldContain "BOTH 'tables' and 'import_manifest'"
+
+        val nonLake =
+            lakeEntry.replace("dialect: LAKE", "dialect: DUCKDB") +
+                """
+                |    import_manifest: s3://b/m.json
+                """.trimMargin()
+        shouldThrow<BootstrapDatasourceFileException> { reader().read(file(nonLake)) }
+            .message shouldContain "only a LAKE entry carries one"
+
+        val qualifierOnly =
+            lakeEntry +
+                """
+                |    namespace: [nyc, mobility]
+                """.trimMargin()
+        shouldThrow<BootstrapDatasourceFileException> { reader().read(file(qualifierOnly)) }
+            .message shouldContain "no seed"
+
+        val emptyTables =
+            lakeEntry +
+                """
+                |    tables: []
+                """.trimMargin()
+        shouldThrow<BootstrapDatasourceFileException> { reader().read(file(emptyTables)) }
+            .message shouldContain "EMPTY 'tables' block"
+    }
+
+    @Test
+    fun `the SHIPPED lake bootstrap file parses with its seed, under the manifest-URL env`() {
+        // The demo's seventh datasource: LAKE, kind none, and the import_manifest seed the
+        // compose flow feeds from the defaults.env pins — never a copy of the file.
+        val env =
+            mapOf(
+                "SAMPLE_LAKE_MANIFEST_URL" to "s3://datapipelines-co/sample-data/lake/v1/manifest.json",
+                "SAMPLE_LAKE_CATALOG_REF" to "",
+            )
+
+        val entry = reader(env).read(TestFiles.repoFile("deploy/sample-data/bootstrap-datasources-lake.yml").toPath()).single()
+
+        entry.datasource.dialect shouldBe Dialect.LAKE
+        entry.datasource.credentialKind shouldBe CredentialKind.NONE
+        entry.datasource.isReadonly shouldBe true
+        entry.lakeImport shouldNotBe null
+        val import = entry.lakeImport!!
+        import.manifestUrl shouldBe "s3://datapipelines-co/sample-data/lake/v1/manifest.json"
+        import.namespace shouldBe listOf("nyc", "mobility")
+    }
 }

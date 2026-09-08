@@ -219,11 +219,14 @@ Demo is a **flag**, not an environment. It is how someone evaluates the product 
 ```bash
 ./app.sh --start --demo nyc          # the NYC mobility family
 ./app.sh --start --demo nyc,trade    # both families
+./app.sh --start --demo nyc,trade,lake   # ... plus the dp-lake family
 ```
 
 or, on any loader, `DATAPIPELINES_DEMO=nyc,trade`.
 
 What it loads: two independent families of published sample data, each downloaded and checksum-verified from object storage, restored into their own databases, registered as **read-only** datasources, and accompanied by a set of example pipelines seeded into the personal workspace of whoever logs in. The versions are pinned in `deploy/env/defaults.env`, which is tracked — a data change is a new version directory and a commit, so what a deployment loads is visible in the repository rather than in someone's local file. [Deployment Appendix B](deployment.md#appendix-b-demo-quickstart--the-published-sample-data) is the full quickstart.
+
+The third family, `lake`, is the exception to "downloaded": it has **no loader** — nothing is fetched or restored at demo start, because dp-lake reads the published Parquet/Iceberg objects **in place over HTTPS** at query time. A demo with `lake` therefore needs egress to S3 (or to a mirror you have configured in its place) not just at load time but whenever a lake query runs.
 
 **The `hardened` posture refuses a non-empty `DATAPIPELINES_DEMO` at boot.** Demo registers datasources and seeds content; that is evaluation, and it does not belong in an environment you have declared hardened.
 
@@ -333,5 +336,6 @@ To evaluate the product instead, on a laptop, the whole thing is one line — `.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-09-07 | v1.2 | **The `lake` demo family.** §5: a third family with no loader — nothing downloads; dp-lake reads the published objects in place over HTTPS at query time, so it needs egress to S3 (or a configured mirror) whenever a lake query runs. The hardened refusal is unchanged. |
 | 2026-09-06 | v1.1 | **One settings file.** `deploy/env/defaults.env` (tracked) and `deploy/secrets.env` (git-ignored) are the whole loader story, in that order, everywhere; `deploy/secrets.env.example` is the template and the list of every variable name. The five files 075 shipped (`laptop.env`, `demo.env`, `example.env`, `posture/development.env`, `posture/hardened.env`) are deleted, and with them the laptop's load-order inversion. The posture's two default rows now live ONLY in the profile ymls, with compose passing them in the valueless form. §3, §4 and §9 rewritten. |
 | 2026-09-05 | v1.0 | First version. The `DATAPIPELINES_ENV` / `DATAPIPELINES_POSTURE` pair, the normative posture table, the environment-variable contract and `deploy/env/example.env`, loader recipes for Compose / bare JAR / systemd / Kubernetes / ECS / Nomad, demo as a flag, the secrets split, promotion, and first login. |

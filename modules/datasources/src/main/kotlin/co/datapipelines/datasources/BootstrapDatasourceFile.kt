@@ -60,6 +60,34 @@ data class BootstrapDatasourceEntry(
      * explicit `false` — both are refused, with different messages (see [toDatasource]).
      */
     val global: Boolean? = null,
+    /**
+     * 089 §E — the dp-lake seed: an inline list of registry rows for a LAKE entry. Mutually
+     * exclusive with [importManifest] (the credential-shape rule: the two can disagree, and no
+     * silent winner is defensible). Ignored by every non-LAKE entry — see [toDatasource], which
+     * REFUSES the combination instead: a `tables:` block under a Postgres entry is a paste error,
+     * and skipping it silently would register a datasource missing the tables the file promised.
+     */
+    val tables: List<BootstrapLakeTable>? = null,
+    /**
+     * 089 §E — the other seed form: the URL of an 088 `manifest.json` whose `tables[]` the
+     * bootstrap imports. Fetched server-side through the §A SSRF path (`LakeManifestUrl` —
+     * restricted to the datasource's own roots; this file cannot turn bootstrap into an
+     * arbitrary URL fetcher).
+     */
+    @JsonProperty("import_manifest") val importManifest: String? = null,
+    /**
+     * The namespace the seed's tables land in when a table row does not name its own (a
+     * manifest's `tables[]` carry none). The demo file pins `[nyc, mobility]` — the 088
+     * content's pipeline expects exactly that.
+     */
+    val namespace: List<String>? = null,
+    /**
+     * Optional name allowlist for the seed: when present, only these table names are imported
+     * and a name the source does not offer FAILS the boot (a typo here must not silently seed
+     * less than the file asked for). The demo uses it to keep the manifest's Iceberg copy out of
+     * the `catalog.kind: s3` datasource — see the file's own comment.
+     */
+    @JsonProperty("only_tables") val onlyTables: List<String>? = null,
 )
 
 /**
@@ -82,6 +110,35 @@ data class BootstrapDatasourcesFile(
 )
 
 /**
+ * 089 §E — one inline registry row of a LAKE entry's `tables:` block: the
+ * `{namespace, name, format, location, partition_column?}` shape the lake-table REST import
+ * takes (metadata-db §4.15). Values pass through UNVALIDATED here — validation is the registry
+ * service's single validated path (049's rule), which the seed runs at registration time; this
+ * type only carries what the file said.
+ */
+data class BootstrapLakeTable(
+    val namespace: List<String>? = null,
+    val name: String,
+    val format: String,
+    val location: String,
+    @JsonProperty("partition_column") val partitionColumn: String? = null,
+)
+
+/**
+ * One entry's dp-lake seed, after the two accepted shapes reconcile (089 §E): EITHER the inline
+ * [tables] OR a [manifestUrl] to fetch the `tables[]` from — never both (refused at parse, the
+ * credential-shape rule), and never on a non-LAKE entry (also refused at parse).
+ * [namespace] is the shared namespace a table row without its own lands in; [onlyTables] is the
+ * optional name allowlist.
+ */
+data class BootstrapLakeImport(
+    val tables: List<BootstrapLakeTable>?,
+    val manifestUrl: String?,
+    val namespace: List<String>?,
+    val onlyTables: List<String>?,
+)
+
+/**
  * One resolved bootstrap entry: the entity to register, plus the ENVIRONMENT VARIABLE its
  * credential named before resolution (061/T84) — `password:` in the legacy shape,
  * `credential.secret:` in the §3.4 one.
@@ -99,6 +156,8 @@ data class BootstrapDatasourcesFile(
 data class BootstrapDatasource(
     val datasource: Datasource,
     val credentialEnvKey: String?,
+    /** The entry's dp-lake seed (089 §E), when it declared one — null for every ordinary entry. */
+    val lakeImport: BootstrapLakeImport? = null,
 )
 
 /**
@@ -166,7 +225,8 @@ class BootstrapDatasourceFileReader(
         // is itself a placeholder would make name-matching wrong in the one case it matters.
         val envKeys = credentialEnvKeys(tree)
         return file.datasources.mapIndexed { index, entry ->
-            BootstrapDatasource(entry.toDatasource(path), envKeys.getOrNull(index))
+            val datasource = entry.toDatasource(path)
+            BootstrapDatasource(datasource, envKeys.getOrNull(index), entry.resolveLakeImport(path, datasource.dialect))
         }
     }
 
@@ -308,6 +368,54 @@ private data class ResolvedBootstrapCredential(
     val username: String?,
     val secret: String?,
 )
+
+/**
+ * 089 §E — one entry's dp-lake seed, after the shape rules. Returns null for an entry that
+ * declares no seed at all (every ordinary entry — the feature is opt-in per entry).
+ *
+ * The refusals, each a startup failure naming the entry, because each is a paste error a silent
+ * skip would hide:
+ * - `tables:` AND `import_manifest:` together (the credential-shape rule — they can disagree);
+ * - either one on a non-LAKE entry (a JDBC database's tables are discovered, never registered —
+ *   the registry service's LAKE-only rule, stated here at parse so the failure arrives
+ *   before the first save);
+ * - `namespace:` / `only_tables:` with NO seed — dead config, never a deliberate choice;
+ * - an explicitly EMPTY `tables:` block — a seed of zero tables is a mistake, not a policy.
+ */
+@Suppress("ThrowsCount") // each throw is a DIFFERENT refusal with a different remedy — see read()
+private fun BootstrapDatasourceEntry.resolveLakeImport(
+    path: Path,
+    dialect: Dialect,
+): BootstrapLakeImport? {
+    if (tables != null && importManifest != null) {
+        throw BootstrapDatasourceFileException(
+            "Bootstrap datasource '$name' in '$path' declares BOTH 'tables' and 'import_manifest'. " +
+                "Use one: the inline registry rows, or the URL of a manifest whose tables[] the bootstrap imports.",
+        )
+    }
+    if (tables == null && importManifest == null) {
+        if (namespace != null || onlyTables != null) {
+            throw BootstrapDatasourceFileException(
+                "Bootstrap datasource '$name' in '$path' declares 'namespace'/'only_tables' but no seed " +
+                    "('tables' or 'import_manifest') — they qualify a seed, they are not one.",
+            )
+        }
+        return null
+    }
+    if (dialect != Dialect.LAKE) {
+        throw BootstrapDatasourceFileException(
+            "Bootstrap datasource '$name' in '$path' is ${dialect.wire} but declares a lake-table seed " +
+                "('tables' or 'import_manifest') — only a LAKE entry carries one.",
+        )
+    }
+    if (tables != null && tables.isEmpty()) {
+        throw BootstrapDatasourceFileException(
+            "Bootstrap datasource '$name' in '$path' declares an EMPTY 'tables' block — " +
+                "remove the block to seed nothing, or list the registry rows.",
+        )
+    }
+    return BootstrapLakeImport(tables = tables, manifestUrl = importManifest, namespace = namespace, onlyTables = onlyTables)
+}
 
 /**
  * §8A.1/§3.4 — reconciles the two accepted credential shapes into one.

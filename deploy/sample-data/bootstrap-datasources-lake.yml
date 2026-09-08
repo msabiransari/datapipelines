@@ -1,0 +1,80 @@
+# Demo sample-data datasource for the LAKE family (lake/v1), registered
+# create-if-absent at startup (datasources.md §8A; sample-data design §6; round
+# 089 §E). ONE entry, and deliberately NO loader service anywhere in this
+# family: dp-lake reads the published objects IN PLACE — nothing is downloaded
+# at demo start (environments.md §5). The compose `demo-lake` profile places
+# this file and the family's examples on the shared sample volume; the app's
+# bootstrap keys pick them up from the SAMPLE_LAKE_ON marker.
+#
+# NO SECRETS HERE. `credential: {kind: none}` is the IAM credential chain
+# (datasources.md §3.4) — the published bucket is public, so the chain finds
+# nothing and the engine's reads go unsigned. `global: true` is REQUIRED
+# (§8A.1); `readonly: true` writes datasources.is_readonly (§5.7).
+#
+# THE REGISTRY SEED (089 §E). The demo's lake tables come from the PUBLISHED
+# manifest: `import_manifest` is fetched server-side at bootstrap through the
+# §A SSRF boundary, restricted to this datasource's OWN roots (LakeManifestUrl:
+# dialect.endpoint / catalog.ref / plain AWS S3 — never an arbitrary URL), and
+# imported through the registry service's idempotent path, so a re-boot
+# re-asserts the registry instead of duplicating it. Both ${VAR} placeholders
+# resolve against the app process's environment by the app's OWN substitution
+# (§8A.2 — the bare form only, exactly like the sibling files); compose derives
+# SAMPLE_LAKE_MANIFEST_URL from the SAMPLE_LAKE_BASE_URL / SAMPLE_LAKE_VERSION
+# pins in deploy/env/defaults.env.
+#
+# THE MIRROR DEPLOYMENT (the gate, while the real upload is pending): set
+#   SAMPLE_LAKE_BASE_URL=file:///srv/lake-mirror
+#   SAMPLE_LAKE_CATALOG_REF=file:///srv/lake-mirror
+# and mount a copy of the published layout into the app container at
+# /srv/lake-mirror. The catalog.ref declares the file root the SSRF boundary
+# admits; each table's RELATIVE manifest path then resolves against the
+# manifest URL's own parent, so the whole registry reads from the mirror —
+# the manifest's embedded publish_prefix describes the CANONICAL publication,
+# not necessarily where this deployment reads (LakeBootstrapSeeder's KDoc).
+# In production SAMPLE_LAKE_CATALOG_REF stays EMPTY (compose's default): no
+# endpoint or ref is declared, the allowed root is plain AWS S3, and the https
+# manifest URL passes as an AWS S3 host.
+#
+# ONLY_TABLES excludes the manifest's Iceberg copy (hvfhv_trips_iceberg):
+# catalog.kind s3 loads httpfs+aws but NOT the iceberg extension (089 §D), and
+# a CREATE VIEW over iceberg_scan without it fails the pool build at connect —
+# verified against the pinned DuckDB v1.5.5. The Iceberg read path belongs to
+# 089 §F's MinIO suite, not to the demo datasource.
+
+datasources:
+  - name: sample-lake
+    display_name: "NYC Rideshare Lake (sample)"
+    description: >-
+      NYC TLC high-volume for-hire trips (Uber, Lyft, Via, Juno), read IN
+      PLACE from Parquet on S3 — nothing was downloaded or restored. Tables:
+      hvfhv_zone_day (trips, fares, tips, driver pay and shared-ride requests
+      per pickup zone x day x company, the table the showcase pipeline reads),
+      hvfhv_trips_sample (a 1-in-16 hash sample of every trip),
+      hvfhv_trips (every trip, day-partitioned — only the partitions a query's
+      date predicate names are read), hvfhs_companies (the licence lookup).
+      These records are generated from the FHV Trip Record submissions made by
+      bases, so we cannot guarantee or confirm their accuracy or completeness.
+    dialect: LAKE
+    # DuckDB is the engine; an in-memory instance per pooled connection. The
+    # per-table views are created at connect from this datasource's registry
+    # rows (089 §B), and the single-namespace search path is what lets the
+    # demo templates read bare table names.
+    jdbc_url: "jdbc:duckdb::memory:"
+    credential:
+      kind: none
+    properties:
+      dialect:
+        catalog.kind: s3
+        # See the header: EMPTY in production (plain AWS root); the mirror
+        # deployment sets file:///srv/lake-mirror to declare the file root.
+        catalog.ref: ${SAMPLE_LAKE_CATALOG_REF}
+        region: us-east-1
+    readonly: true
+    global: true
+    import_manifest: ${SAMPLE_LAKE_MANIFEST_URL}
+    # The manifest's tables carry no namespace; they land here — the 088
+    # content's nyc/mobility pipeline expects exactly this (its bare table
+    # names resolve through the single-namespace search path).
+    namespace: [nyc, mobility]
+    # The Parquet four; the manifest's Iceberg copy is excluded (see the header).
+    only_tables: [hvfhv_trips, hvfhv_trips_sample, hvfhv_zone_day, hvfhs_companies]

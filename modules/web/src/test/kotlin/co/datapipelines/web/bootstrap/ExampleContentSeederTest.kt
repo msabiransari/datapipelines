@@ -2,6 +2,7 @@ package co.datapipelines.web.bootstrap
 
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.web.TestRepoFiles
@@ -40,6 +41,7 @@ class ExampleContentSeederTest {
 
     private val pipelines = mockk<PipelineImportService>(relaxed = true)
     private val templates = mockk<TemplateImportService>(relaxed = true)
+    private val datasources = mockk<DatasourceRegistry>()
     private val mapper = ObjectMapper()
 
     private val workspaceId = UUID.randomUUID()
@@ -47,7 +49,15 @@ class ExampleContentSeederTest {
 
     private fun file(json: String): String = tempDir.resolve("examples.json").also { it.writeText(json) }.toString()
 
-    private fun seeder(examplesFile: String?) = ExampleContentSeeder(BootstrapProperties(examplesFile = examplesFile), pipelines, templates)
+    private fun seeder(examplesFile: String?) =
+        ExampleContentSeeder(BootstrapProperties(examplesFile = examplesFile), pipelines, templates, datasources)
+
+    /** The gate's answer per datasource name: these names are registered and visible, nothing else. */
+    private fun visibleDatasources(vararg names: String) {
+        every { datasources.getVisible(any(), workspaceId) } answers {
+            if (firstArg<String>() in names) mockk() else null
+        }
+    }
 
     /** A file mixing a path name and a legacy flat one — the transparency fixture. */
     private val pathShapedExamples =
@@ -90,6 +100,7 @@ class ExampleContentSeederTest {
             mapOf(
                 "scripts/sample-data/content/examples.json" to "nyc",
                 "scripts/sample-data-trade/content/examples.json" to "trade",
+                "scripts/sample-data/content/examples-lake.json" to "nyc",
             )
 
         val allNames =
@@ -117,6 +128,7 @@ class ExampleContentSeederTest {
                 "nyc/mobility/airport_access_by_borough",
                 "nyc/mobility/weather_sensitivity_by_borough",
                 "nyc/mobility/mobility_briefing",
+                "nyc/mobility/taxi_vs_rideshare",
                 "trade/balance_by_partner",
                 "trade/reconciliation",
                 "trade/fx/imports_in_partner_currency",
@@ -355,6 +367,98 @@ class ExampleContentSeederTest {
 
         verify(exactly = 1) { templates.import(any(), workspaceId, userId) }
         verify(exactly = 2) { pipelines.import(any(), workspaceId, userId) }
+    }
+
+    // ---------------------------------------------------------------- 089 §E: the requires_datasources gate
+
+    private val gatedExamples =
+        """
+        {
+          "requires_datasources": ["sample-lake"],
+          "templates": [
+            {"id": "nyc_lake.sql", "dialect": "LAKE", "display_name": "L", "description": "d", "body": "SELECT 1"}
+          ],
+          "pipelines": [
+            {"schema_version": 1, "name": "nyc/mobility/taxi_vs_rideshare", "display_name": "T", "nodes": []}
+          ]
+        }
+        """.trimIndent()
+
+    @Test
+    fun `a gated file is skipped when its datasource is not registered - no import call, a logged reason`() {
+        visibleDatasources("sample-trips") // sample-lake is NOT among them
+
+        val lines = capturingLogs { seeder(file(gatedExamples)).seed(workspaceId, userId) }
+
+        verify(exactly = 0) { templates.import(any(), any(), any()) }
+        verify(exactly = 0) { pipelines.import(any(), any(), any()) }
+        val skip = lines.single { it.contains("event=workspace.examples_gate_skipped") }
+        skip.shouldContain("missing_datasources=sample-lake")
+    }
+
+    @Test
+    fun `a gated file seeds when every named datasource is registered and visible`() {
+        visibleDatasources("sample-lake")
+        every { templates.import(any(), any(), any()) } returns emptyList()
+        every { pipelines.import(any(), any(), any()) } returns mockk()
+
+        seeder(file(gatedExamples)).seed(workspaceId, userId)
+
+        verify(exactly = 1) { templates.import(any(), workspaceId, userId) }
+        verify(exactly = 1) { pipelines.import(any(), workspaceId, userId) }
+    }
+
+    @Test
+    fun `a file with no requires_datasources key seeds regardless - the pre-089 behaviour`() {
+        // The registry mock is not relaxed: any visibility lookup for an UNGATED file fails the
+        // test, pinning that the gate never consults datasources it was not given.
+        every { templates.import(any(), any(), any()) } returns emptyList()
+        every { pipelines.import(any(), any(), any()) } returns mockk()
+
+        seeder(file(examples)).seed(workspaceId, userId)
+
+        verify(exactly = 1) { templates.import(any(), workspaceId, userId) }
+        verify(exactly = 0) { datasources.getVisible(any(), any()) }
+    }
+
+    @Test
+    fun `a gate failing one of several names skips the file and names only the missing ones`() {
+        visibleDatasources("sample-trips", "sample-reference")
+        val multi =
+            gatedExamples.replace(
+                "\"requires_datasources\": [\"sample-lake\"]",
+                "\"requires_datasources\": [\"sample-trips\", \"sample-reference\", \"sample-lake\", \"sample-weather\"]",
+            )
+
+        val lines = capturingLogs { seeder(file(multi)).seed(workspaceId, userId) }
+
+        verify(exactly = 0) { templates.import(any(), any(), any()) }
+        lines
+            .single { it.contains("event=workspace.examples_gate_skipped") }
+            .shouldContain("missing_datasources=sample-lake,sample-weather")
+    }
+
+    @Test
+    fun `a malformed requires_datasources is a startup refusal, like any other broken field`() {
+        shouldThrow<ExampleContentFileException> { seeder(file("""{"requires_datasources": "sample-lake", "templates": []}""")) }
+            .message!!
+            .shouldContain("must be an array")
+        shouldThrow<ExampleContentFileException> {
+            seeder(file("""{"requires_datasources": [1], "templates": []}"""))
+        }.message!!.shouldContain("must be strings")
+    }
+
+    @Test
+    fun `the SHIPPED lake examples file declares its gate - and the nyc and trade files stay ungated`() {
+        val lake = mapper.readTree(TestRepoFiles.read("scripts/sample-data/content/examples-lake.json"))
+        lake
+            .get("requires_datasources")
+            .map { it.asText() } shouldContainExactlyInAnyOrder
+            listOf("sample-lake", "sample-trips", "sample-reference", "sample-weather")
+
+        // The gate defaults to OFF: the two original families must keep seeding unconditionally.
+        mapper.readTree(TestRepoFiles.read("scripts/sample-data/content/examples.json")).get("requires_datasources") shouldBe null
+        mapper.readTree(TestRepoFiles.read("scripts/sample-data-trade/content/examples.json")).get("requires_datasources") shouldBe null
     }
 
     private fun capturingLogs(block: () -> Unit): List<String> {

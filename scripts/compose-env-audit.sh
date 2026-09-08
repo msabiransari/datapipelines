@@ -140,8 +140,8 @@ DECLARED_OVERRIDES = {
     # DERIVED values (`${OTHER:+literal}` concatenation): the demo's two bootstrap lists
     # are assembled by compose from the family ON markers, because a compose file cannot
     # split a comma list and the app's key IS a comma list (configuration.md §3.18).
-    "DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON",
-    "DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON",
+    "DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON / SAMPLE_LAKE_ON",
+    "DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON / SAMPLE_LAKE_ON",
 }
 
 # Vars whose compose default deliberately mirrors the DOCKERFILE's ENV, not application.yml
@@ -332,12 +332,13 @@ for name, value in sorted(defaults_active.items()):
         failures.append(f"6 {secrets_example} shows `# {name}={secrets_named[name]}` but "
                         f"{defaults_env} sets {value!r} — the commented mirror has drifted")
 
-# The five sample-data pins and the two metadata-DB settings are not DATAPIPELINES_*
+# The sample-data pins and the two metadata-DB settings are not DATAPIPELINES_*
 # variables, so nothing above reaches them; they are named here because
-# scripts/sample-data/check-published.sh and both compose files read them out of
-# defaults.env by name.
+# scripts/sample-data/check-published.sh, scripts/sample-data-lake/check-published.sh
+# (the lake pair, 089 §E) and both compose files read them out of defaults.env by name.
 for name in ("SAMPLE_BASE_URL", "SAMPLE_VERSION", "SAMPLE_TRADE_BASE_URL",
-             "SAMPLE_TRADE_VERSION", "SAMPLE_DB_USER",
+             "SAMPLE_TRADE_VERSION", "SAMPLE_LAKE_BASE_URL", "SAMPLE_LAKE_VERSION",
+             "SAMPLE_DB_USER",
              "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME"):
     if name not in defaults_active:
         failures.append(f"5 {defaults_env} is missing {name} — check-published.sh and the "

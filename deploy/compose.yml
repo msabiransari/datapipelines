@@ -124,8 +124,8 @@ services:
       # effective configuration is byte-for-byte what it was. The demo profile
       # supplies them from the --demo markers, pointing at the read-only sample volume
       # the one-shot loaders populate.
-      DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/bootstrap-datasources-nyc.yml}${SAMPLE_TRADE_ON:+,/srv/sample/bootstrap-datasources-census.yml}"
-      DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/examples-nyc.json}${SAMPLE_TRADE_ON:+,/srv/sample/examples-trade.json}"
+      DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/bootstrap-datasources-nyc.yml}${SAMPLE_TRADE_ON:+,/srv/sample/bootstrap-datasources-census.yml}${SAMPLE_LAKE_ON:+,/srv/sample/bootstrap-datasources-lake.yml}"
+      DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/examples-nyc.json}${SAMPLE_TRADE_ON:+,/srv/sample/examples-trade.json}${SAMPLE_LAKE_ON:+,/srv/sample/examples-lake.json}"
 
       # The full DATAPIPELINES_* pass-through contract (T32). Every such variable the
       # app binds from its environment is passed here with the SAME default
@@ -257,6 +257,15 @@ services:
       SAMPLE_DB_USER: ${SAMPLE_DB_USER:-dp_demo_ro}
       SAMPLE_PG_PASSWORD: ${SAMPLE_PG_PASSWORD:-}
       SAMPLE_MYSQL_PASSWORD: ${SAMPLE_MYSQL_PASSWORD:-}
+      # The lake family's ${...} placeholders (089 §E — same §8A.2 mechanism as the
+      # credentials above). The manifest URL is DERIVED from the tracked pins, not
+      # pinned itself; SAMPLE_LAKE_CATALOG_REF stays EMPTY in production (the allowed
+      # root is then plain AWS S3) and the mirror deployment sets
+      # file:///srv/lake-mirror — see deploy/sample-data/bootstrap-datasources-lake.yml's
+      # header, which is the contract for both. Also empty and unread without the
+      # demo-lake profile, exactly like the lines above.
+      SAMPLE_LAKE_MANIFEST_URL: ${SAMPLE_LAKE_BASE_URL}/${SAMPLE_LAKE_VERSION}/manifest.json
+      SAMPLE_LAKE_CATALOG_REF: ${SAMPLE_LAKE_CATALOG_REF:-}
     volumes:
       # 075: deploy/application.yml is GONE. Every line it carried was already in the
       # image's own application.yml behind the same placeholders, so the mount was a
@@ -293,6 +302,9 @@ services:
         condition: service_completed_successfully
         required: false
       sample-data-trade-mysql:
+        condition: service_completed_successfully
+        required: false
+      sample-data-lake:
         condition: service_completed_successfully
         required: false
     restart: unless-stopped
@@ -333,28 +345,31 @@ services:
   # ---------------------------------------------------------------- demo profile
   #
   # Everything below runs ONLY under a `demo-*` profile (sample-data design
-  # §5/§7). Two independent sample-data families, each with its own profile —
-  # demo-nyc (mobility) and demo-trade (trade/v1) — so an engineer pays for
-  # exactly the sample data they asked for. Both together is fine: the app's
-  # bootstrap keys are comma-separated lists built by compose from the
-  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON env markers, which app.sh exports from --demo
-  # nyc,trade (the sample-data VERSIONS are pinned in deploy/env/defaults.env).
+  # §5/§7). Three independent sample-data families, each with its own profile —
+  # demo-nyc (mobility), demo-trade (trade/v4) and demo-lake (lake/v1, which
+  # has NO loader — nothing downloads; the app reads the published objects in
+  # place, so the stage below is a two-file copy, 089 §E) — so an engineer pays
+  # for exactly the sample data they asked for. Any combination is fine: the
+  # app's bootstrap keys are comma-separated lists built by compose from the
+  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON / SAMPLE_LAKE_ON env markers, which app.sh
+  # exports from --demo nyc,trade,lake (the sample-data VERSIONS are pinned in
+  # deploy/env/defaults.env).
   #
   # WHAT THE NON-DEMO PATH INHERITS, precisely — Compose has no per-profile env,
   # volume or dependency, so the additions to `datapipelines` above are
   # unconditional and each is inert without a profile:
   #   * the two DATAPIPELINES_BOOTSTRAP_* env keys, built from the ON markers
-  #     (both empty — feature off — while no marker is set), and the three
-  #     SAMPLE_* credential keys the bootstrap files name, also empty;
+  #     (both empty — feature off — while no marker is set), and the
+  #     SAMPLE_* placeholder keys the bootstrap files name, also empty;
   #   * an empty read-only `sample-data` volume mount nothing points at;
-  #   * the four `depends_on` entries marked `required: false`, which Compose
+  #   * the five `depends_on` entries marked `required: false`, which Compose
   #     ignores when the target service is not enabled;
   #   * the `mysql-data` / `sample-data` volume declarations (Compose drops
   #     `mysql-data` from the rendered config entirely without the profiles,
   #     since no enabled service references it).
   #
   #   docker compose -f deploy/compose.yml -f deploy/compose.local-build.yml \
-  #     --profile demo-nyc --profile demo-trade up -d --wait
+  #     --profile demo-nyc --profile demo-trade --profile demo-lake up -d --wait
   #
   # Requires the SAMPLE_* keys (deploy/env/defaults.env + deploy/secrets.env) and, for the MySQL
   # sample, an image built with -Pmysql — Connector/J is not in the default build
@@ -475,6 +490,27 @@ services:
         condition: service_healthy
       sample-data-trade:
         condition: service_completed_successfully
+    restart: "no"
+
+  # The lake family (lake/v1, 089 §E): NO LOADER — nothing is downloaded or
+  # restored; the app reads the published objects in place over HTTPS at query
+  # time. This one-shot only places the family's two REPO files onto the shared
+  # volume: the bootstrap datasources file from this directory, and
+  # examples-lake.json from scripts/sample-data/content — the second mount,
+  # which no other stage needs because the other families' examples arrive as
+  # published artifacts. It runs on the same pinned image as the trade file
+  # stage (the image must be PINNED, not picked for its tools), and the app
+  # gates on it like any other stage, so the bootstrap files exist before boot.
+  sample-data-lake:
+    profiles: [demo-lake]
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    entrypoint: ["/bin/sh", "/opt/sample-data/place-lake.sh"]
+    environment:
+      SAMPLE_DIR: /srv/sample
+    volumes:
+      - ./sample-data:/opt/sample-data:ro
+      - ../scripts/sample-data/content:/opt/lake-content:ro
+      - sample-data:/srv/sample
     restart: "no"
 
 # 071 §I / T116: volume names follow the compose PROJECT, and the project name is

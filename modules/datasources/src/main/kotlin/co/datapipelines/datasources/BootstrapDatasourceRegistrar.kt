@@ -6,6 +6,35 @@ import java.nio.file.Path
 import java.util.UUID
 
 /**
+ * The registrar's view of the dp-lake seed (089 §E), as a port — the module sits BELOW the
+ * registry service (`application`), so it declares the question and `web` answers it with the
+ * one validated import path. [NONE] keeps the registrar constructible without the lake wiring
+ * (tests, and every pre-089 caller).
+ */
+fun interface BootstrapLakeTableSeeder {
+    /**
+     * Seeds [datasource]'s registry from [import], attributed to [actor]
+     * (`lake_tables.registered_by`). Runs through the idempotent import, so the per-boot re-run
+     * the registrar gives it is a no-op rather than a duplicate or a failure. A failure
+     * propagates: the registrar's fail-fast rule covers the seed exactly as it covers the row.
+     */
+    fun seed(
+        datasource: Datasource,
+        import: BootstrapLakeImport,
+        actor: UUID,
+    )
+
+    companion object {
+        val NONE =
+            BootstrapLakeTableSeeder { _, _, _ ->
+                // An entry carrying a seed against a registrar wired with NONE is a wiring bug,
+                // not input — the reader only produces the block for LAKE entries.
+                error("a bootstrap entry declared a lake-table seed but no BootstrapLakeTableSeeder is wired")
+            }
+    }
+}
+
+/**
  * Applies a bootstrap datasources file once per startup (sample-data design §6,
  * datasources.md §8A): **create-if-absent by `name`, never update.**
  *
@@ -57,6 +86,17 @@ import java.util.UUID
  *    showed the datasource as fine — listing does not connect. A clean-machine rehearsal
  *    cannot see this class of defect at all: it only exists on the upgrade path.
  *
+ * ## 089 §E — the dp-lake seed
+ *
+ * A LAKE entry may carry a registry seed (`tables:` inline or an `import_manifest:` URL —
+ * [BootstrapDatasourceEntry]). After the entry's row is in place — registered, kept under rule
+ * 1, or kept after losing the first-boot race — the registrar hands the seed to
+ * [BootstrapLakeTableSeeder], `web`'s adapter over the registry service's idempotent import, so
+ * every boot re-asserts the registry without duplicating it. A soft-deleted row is never seeded
+ * (rule 1's deletion promise covers the tables). A seed failure propagates under rule 2: a
+ * demo whose lake datasource has no tables is half-registered, and half-registered is worse
+ * than loud.
+ *
  * Nothing here logs a credential: entries are named by `name` and `dialect` only, the rule-3
  * lines name an environment variable and never its value, and [Datasource.toString] redacts
  * the password even if one reached a log line by accident.
@@ -65,6 +105,7 @@ class BootstrapDatasourceRegistrar(
     private val registry: DatasourceRegistry,
     private val repository: DatasourceRepository,
     private val reader: BootstrapDatasourceFileReader = BootstrapDatasourceFileReader(),
+    private val lakeSeeder: BootstrapLakeTableSeeder = BootstrapLakeTableSeeder.NONE,
 ) {
     private val log = LoggerFactory.getLogger(BootstrapDatasourceRegistrar::class.java)
 
@@ -85,6 +126,7 @@ class BootstrapDatasourceRegistrar(
         val skipped = mutableListOf<String>()
         val resynced = mutableListOf<String>()
         val broken = mutableListOf<String>()
+        val lakeSeeded = mutableListOf<String>()
         entries.forEach { entry ->
             val datasource = entry.datasource
             if (repository.existsIncludingDeleted(datasource.name)) {
@@ -124,16 +166,47 @@ class BootstrapDatasourceRegistrar(
                     log.debug("bootstrap lost the race for {}", datasource.name, duplicate)
                 }
             }
+            seedLakeRegistry(entry, actor, lakeSeeded)
         }
         log.info(
-            "event=datasource.bootstrap_complete file={} registered={} skipped={} resynced={} broken={}",
+            "event=datasource.bootstrap_complete file={} registered={} skipped={} resynced={} broken={} lake_seeded={}",
             path,
             registered.size,
             skipped.size,
             resynced.size,
             broken.size,
+            lakeSeeded.size,
         )
-        return Summary(registered = registered, skipped = skipped, resynced = resynced, broken = broken)
+        return Summary(registered = registered, skipped = skipped, resynced = resynced, broken = broken, lakeSeeded = lakeSeeded)
+    }
+
+    /**
+     * 089 §E — the dp-lake seed for one entry, AFTER its row is in place. It runs whether the
+     * entry registered, skipped or lost the race: the import is idempotent, and a datasource the
+     * registrar keeps (rule 1) is still owed its registry — a boot that skips the seed because
+     * the row already existed would strand a deployment whose first boot registered the
+     * datasource but failed before the import. The ONE case it does not run: the row is
+     * soft-deleted. The operator deleted the datasource; rule 1's "a datasource they deleted
+     * never resurrects itself" covers its lake tables too.
+     */
+    private fun seedLakeRegistry(
+        entry: BootstrapDatasource,
+        actor: UUID,
+        lakeSeeded: MutableList<String>,
+    ) {
+        val import = entry.lakeImport ?: return
+        val datasource = entry.datasource
+        if (!repository.exists(datasource.name)) {
+            log.info(
+                "event=datasource.bootstrap_lake_seed_skipped name={} reason=soft_deleted " +
+                    "message=\"the datasource row is soft-deleted; its lake-table seed is not applied\"",
+                datasource.name,
+            )
+            return
+        }
+        lakeSeeder.seed(datasource, import, actor)
+        lakeSeeded += datasource.name
+        log.info("event=datasource.bootstrap_lake_seeded name={}", datasource.name)
     }
 
     /**
@@ -207,5 +280,7 @@ class BootstrapDatasourceRegistrar(
         val resynced: List<String> = emptyList(),
         /** Rule 3: rows where NEITHER credential authenticates — left untouched, logged at ERROR. */
         val broken: List<String> = emptyList(),
+        /** 089 §E: entries whose dp-lake seed ran (registered, skipped or race-lost — never soft-deleted). */
+        val lakeSeeded: List<String> = emptyList(),
     )
 }

@@ -1,4 +1,5 @@
 {
+  "requires_datasources": ["sample-lake", "sample-trips", "sample-reference", "sample-weather"],
   "templates": [
     {
       "schema_version": 1,
