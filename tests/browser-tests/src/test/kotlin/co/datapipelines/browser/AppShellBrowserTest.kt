@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Page
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -330,8 +331,10 @@ class AppShellBrowserTest : BrowserSuite() {
             page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
             page.locator("table.ds-table tbody tr").first().waitFor()
             // The rows really are there: a check taken against an empty table is the check the
-            // walk above already makes, and it is what let this regress unseen.
-            page.locator("table.ds-table tbody tr").count() shouldBe 8
+            // walk above already makes, and it is what let this regress unseen. A FLOOR, not an
+            // equality — this module shares one database, and another spec's GLOBAL datasource
+            // is visible from every workspace including this one (measured: 9 rows, not 8).
+            page.locator("table.ds-table tbody tr").count() shouldBeGreaterThanOrEqual 8
             val extra = overflow(page)
             if (extra > 0) offenders += "/datasources at ${w}x$h overflows by ${extra}px — ${culprits(page)}"
         }
