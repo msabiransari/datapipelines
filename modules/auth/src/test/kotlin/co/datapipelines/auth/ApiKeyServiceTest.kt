@@ -31,26 +31,52 @@ class ApiKeyServiceTest {
     private fun activeOwner() =
         User(ownerId, "owner@company.com", "Owner", null, "keycloak", "sub", true, false, Instant.now(), Instant.now(), null)
 
-    /** Stubs `insert` to echo back a record built from its arguments (real keyHash). */
-    private fun echoInsert(): io.mockk.CapturingSlot<String> {
+    /**
+     * Stubs `insert` to echo back a record built from its arguments (real keyHash). [kind] is
+     * matched EXACTLY — mockk turns a defaulted argument into an `eq` matcher, so a stub for
+     * `user` does not answer a `server` mint, which is what we want: a test that meant to mint
+     * one kind and got the other should fail loudly rather than quietly.
+     */
+    private fun echoInsert(kind: ApiKeyKind = ApiKeyKind.DEFAULT): io.mockk.CapturingSlot<String> {
         val hash = slot<String>()
-        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any()) } answers {
-            ApiKey(
+        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any(), kind) } answers {
+            record(
                 id = firstArg(),
-                userId = ownerId,
                 name = thirdArg(),
-                keyHash = hash.captured,
+                hash = hash.captured,
                 scopes = arg(4),
-                isRevoked = false,
-                createdAt = Instant.now(),
-                lastUsedAt = null,
                 expiresAt = arg(5),
                 workspaceId = arg(6),
-                workspaceName = "acme",
+                kind = kind,
             )
         }
         return hash
     }
+
+    /** One `api_keys` row as the repository would return it. */
+    @Suppress("LongParameterList") // a row, spelled out
+    private fun record(
+        id: String,
+        name: String = "key",
+        hash: String = "\$argon2id\$fixture",
+        scopes: Set<Scope> = emptySet(),
+        expiresAt: Instant? = null,
+        workspaceId: UUID = this.workspaceId,
+        kind: ApiKeyKind = ApiKeyKind.DEFAULT,
+    ) = ApiKey(
+        id = id,
+        userId = ownerId,
+        name = name,
+        keyHash = hash,
+        scopes = scopes,
+        isRevoked = false,
+        createdAt = Instant.now(),
+        lastUsedAt = null,
+        expiresAt = expiresAt,
+        workspaceId = workspaceId,
+        workspaceName = "acme",
+        kind = kind,
+    )
 
     @Test
     fun `issue returns a dpk_ plaintext and persists only the hash`() {
@@ -198,6 +224,113 @@ class ApiKeyServiceTest {
         logged.any { it.contains("nonsense") } shouldBe true
         // The good token still applies — one bad entry does not discard the whole list.
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.EXECUTE)
+    }
+
+    // ------------------------------------------------------------------ §7.7 the server kind (091)
+
+    @Test
+    fun `minting a server key requires an ADMIN creator, not merely a subset of scopes`() {
+        // The escalation guard above is VACUOUS for a server key — it has no scopes to be a
+        // subset of — so the floor is on the CREATOR and is a different check. An `author`
+        // session must not be able to mint the credential that opens this deployment's
+        // promotion receiver.
+        echoInsert(kind = ApiKeyKind.SERVER)
+
+        val refusal =
+            shouldThrow<ScopeInsufficientException> {
+                service.issue(
+                    ownerId = ownerId,
+                    name = "uat receiver",
+                    scopes = emptySet(),
+                    creatorScopes = setOf(Scope.AUTHOR),
+                    workspaceId = workspaceId,
+                    kind = ApiKeyKind.SERVER,
+                )
+            }
+        refusal.details["required"] shouldBe Scope.ADMIN.wire
+    }
+
+    @Test
+    fun `an admin mints a server key with NO scopes - the default-scopes fallback never applies`() {
+        val scopes = slot<Set<Scope>>()
+        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any(), ApiKeyKind.SERVER) } answers {
+            record(id = firstArg(), scopes = arg(4), kind = ApiKeyKind.SERVER)
+        }
+
+        val issued =
+            service.issue(
+                ownerId = ownerId,
+                name = "uat receiver",
+                // Asked for, and correctly ignored: a server key's authority is its route family.
+                scopes = setOf(Scope.ADMIN),
+                creatorScopes = setOf(Scope.ADMIN),
+                workspaceId = workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
+
+        scopes.captured shouldBe emptySet()
+        issued.record.scopes shouldBe emptySet()
+        issued.record.isServerKey shouldBe true
+    }
+
+    @Test
+    fun `a server key validates on the API-key path, carrying its kind - the confinement then refuses it`() {
+        // It authenticates: the credential is real. What it may DO is `ScopeInterceptor`'s and
+        // `McpAuthFilter`'s answer (ServerKeyConfinementTest, McpEndpointKeyRefusalTest), and
+        // both need a principal that says SERVER to give it.
+        echoInsert(kind = ApiKeyKind.SERVER)
+        val issued =
+            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+        every { repo.findById(issued.record.id) } returns issued.record
+        every { userService.snapshot(ownerId) } returns activeOwner()
+
+        val principal = service.validate(issued.plaintext)
+
+        principal.keyKind shouldBe ApiKeyKind.SERVER
+        principal.isServerKey shouldBe true
+        principal.scopes shouldBe emptySet()
+    }
+
+    @Test
+    fun `validateServerKey accepts a server key and refuses every other kind with the SAME answer`() {
+        echoInsert(kind = ApiKeyKind.SERVER)
+        val server =
+            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+        echoInsert()
+        val user = service.issue(ownerId, "agent", setOf(Scope.READ), setOf(Scope.ADMIN), workspaceId)
+        every { repo.findById(server.record.id) } returns server.record
+        every { repo.findById(user.record.id) } returns user.record
+        every { userService.snapshot(ownerId) } returns activeOwner()
+
+        service.validateServerKey(server.plaintext).id shouldBe server.record.id
+        // A perfectly valid USER key is not a promotion credential — and it is refused with the
+        // same exception an unknown key gets, so the route cannot classify a stolen key.
+        shouldThrow<ApiKeyInvalidException> { service.validateServerKey(user.plaintext) }
+        shouldThrow<ApiKeyInvalidException> { service.validateServerKey("dpk_UNKNOWNKEYID.AAAAAAAAAAAAAAAAAAAAAAAA") }
+    }
+
+    @Test
+    fun `a revoked server key stops opening the promotion route`() {
+        // The whole point of moving the credential into the key store: revocation exists.
+        echoInsert(kind = ApiKeyKind.SERVER)
+        val issued =
+            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+        every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
+        every { userService.snapshot(ownerId) } returns activeOwner()
+
+        shouldThrow<ApiKeyInvalidException> { service.validateServerKey(issued.plaintext) }
+    }
+
+    @Test
+    fun `an expired server key stops opening the promotion route`() {
+        echoInsert(kind = ApiKeyKind.SERVER)
+        val issued =
+            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+        every { repo.findById(issued.record.id) } returns
+            issued.record.copy(expiresAt = Instant.now().minusSeconds(1))
+        every { userService.snapshot(ownerId) } returns activeOwner()
+
+        shouldThrow<ApiKeyExpiredException> { service.validateServerKey(issued.plaintext) }
     }
 
     /** Collects WARN-level messages emitted by [type]'s logger while [block] runs. */

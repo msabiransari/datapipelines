@@ -724,16 +724,22 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 
 ### 7.7 Key kinds and published-endpoint bindings
 
-Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`), and gives the `endpoint` kind an authorisation model that is not scopes at all.
+Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`); round 091 adds the third. Two of the three have an authorisation model that is not scopes at all.
 
-| Kind | Authority | Where it may go |
-|---|---|---|
-| `user` | Its `scopes`, against the §7.6 matrix, inside its pinned workspace | Everywhere the matrix allows |
-| `endpoint` | Its rows in `endpoint_key_bindings` | `GET /api/x/**`, plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started |
+| Kind | Authenticates where | Authority | Minted by |
+|---|---|---|---|
+| `user` | `DP-API-Key` on the REST API, and `DP-API-Key` / `Authorization: Bearer` on `/mcp` — **one kind, two surfaces**: an agent's key and a program's key are the same thing | Its `scopes`, against the §7.6 matrix, inside its pinned workspace | Any authenticated principal, for itself, at or below its own scope |
+| `endpoint` | `DP-API-Key` on `GET /api/x/**` (plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started) | Its rows in `endpoint_key_bindings` — no scopes are consulted | Any authenticated principal, for itself |
+| `server` | `DP-Promotion-Key` on `/api/v1/promotion/**`, presented by a SENDING deployment | The route family, and nothing else — no scopes, no bindings | `admin` only |
 
-A kind is not a scope and is deliberately not modelled as one: scopes answer "how much may this credential do?", a kind answers "what kind of credential is this?", and the two axes do not compose. An `endpoint` key is issued with **no scopes**, and asking for some is refused rather than quietly dropped — a caller who writes `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to correct out loud.
+A kind is not a scope and is deliberately not modelled as one: scopes answer "how much may this credential do?", a kind answers "what kind of credential is this?", and the two axes do not compose. A scopeless kind (`endpoint`, `server`) is issued with **no scopes**, and asking for some is refused rather than quietly dropped — a caller who writes `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to correct out loud.
 
-**The confinement is central, not per-handler.** `ScopeInterceptor` refuses an `endpoint`-kind principal on every route but the three above, so a new route cannot become reachable to endpoint keys by someone forgetting a check — the same default-deny reasoning as the unannotated-handler rule in §7.6. The scope floor is deliberately not applied on the routes it may reach: its scope set is empty, so any floor would refuse it everywhere.
+**The confinement is central, not per-handler.** `ScopeInterceptor` refuses a scopeless principal on every route outside its own family, so a new route cannot become reachable to one by someone forgetting a check — the same default-deny reasoning as the unannotated-handler rule in §7.6. Two properties of that check are load-bearing:
+
+- It is decided **before** the handler's `@RequiredScope` is read. A UI page carries no annotation and lives outside the governed prefixes, so an annotation-first order would let every screen in the product answer a credential that authorises none of them (091: a scopeless key could render `/settings/api-keys` and read its owner's key list).
+- The scope floor is deliberately **not** applied on the routes a scopeless kind may reach: its scope set is empty, so any floor would refuse it everywhere.
+
+`/mcp` is a **servlet**, not an MVC handler, so the interceptor never sees it; `McpAuthFilter` makes the same refusal again for both scopeless kinds. Without that second refusal such a key could not CALL a tool (every tool's scope check fails) but could still read the whole catalogue through `tools/list`.
 
 #### Hierarchical bindings (ruling R-EP2)
 
@@ -760,6 +766,20 @@ An endpoint key may read the cursor of executions it started. Ownership is prove
 `POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its owner's budget (§12).
 
 Binding and unbinding are audited (`endpoint.key_bound` / `endpoint.key_unbound`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), as is every serve (`endpoint.served`).
+
+#### The `server` kind (091)
+
+Promotion is one deployment writing RELEASED content into another ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)). Its credential has always been a **server key, not a principal**: no `users` row for the credential itself, no scope-matrix entry, and no human it can be traced to. What changes here is only where the key LIVES.
+
+Until 091 it was a pre-shared configuration value — `datapipelines.deployment.promotion.server-key` — which nobody can mint, list, expire or revoke without editing a file and restarting the deployment. A `server` key is the same credential stored like every other key: Argon2id hash, `dpk_` prefix, an owner, an expiry, a revocation flag and a last-used stamp. The configured value is accepted for **one release** and WARNs at boot ([Configuration §3.19](configuration.md#319-deployment)).
+
+- **Minting is `admin`.** The scope-subset guard of §7.4 is vacuous for a key with no scopes, so the floor is on the CREATOR instead: whoever holds this credential can write pipelines, templates and datasource references into the receiving deployment.
+- **Scope: none.** A server key opens the promotion receiver's routes and nothing else. The confinement is the route family, asserted the same way an endpoint key's is.
+- **Presented as `DP-Promotion-Key`, by a deployment.** `PromotionServerKeyFilter` compares the configured value first (constant time — a deployment that has not migrated pays no database read), then validates the header against the key store. Fail-closed is unchanged: no configured value AND no live `server` key ⇒ every push refused. Missing header, malformed header, wrong key, **wrong kind**, revoked, expired, deactivated owner and "nothing configured here" all answer the same `auth.promotion.key_invalid`, so a caller cannot classify a credential by asking.
+- **The actor is still the system service account** (§4.5), never the admin who minted the key: a promoted version must not be stamped with a person who did not perform the promotion. The key's id rides on the principal so the audit trail can name WHICH key across a rotation, and `last_used_at` is stamped like any other key's.
+- **Presented as an ordinary `DP-API-Key` it authenticates a principal that is refused everywhere** — `/api/**`, `/partials/**`, `/mcp` and every UI page — with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
+
+Rotation, which the config value never had: mint a second `server` key, set it on the sender, revoke the first. No restart, on either side.
 
 ---
 
@@ -876,6 +896,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 
 | Code | HTTP | Description |
 |---|---|---|
+| `auth.api_key.expiry_invalid` | 400 | Key issuance named an unusable expiry — unknown preset, unparseable date, a date in the past, or `custom` with no date (§7.4). `details.reason` names which |
 | `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist (OIDC) |
 | `auth.login.user_inactive` | 403 | User account deactivated (OIDC or local) |
 | `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical (§5A.5) |

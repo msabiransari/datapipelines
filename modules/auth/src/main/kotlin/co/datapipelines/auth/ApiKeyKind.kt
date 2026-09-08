@@ -14,6 +14,11 @@ package co.datapipelines.auth
  * That refusal is the security property worth stating plainly: **an endpoint key with no binding
  * on any ancestor of the path it presents at authorises nothing.** The absence of a binding is
  * never a fall-through to the user-key rule.
+ *
+ * A [SERVER] key is the third answer to the same question, and it is confined the same way: its
+ * authority is neither scopes nor bindings but a ROUTE FAMILY — the promotion receiver's
+ * `/api/v1/promotion/` subtree — and it is refused everywhere else, centrally, so a new route
+ * cannot become reachable to it by someone forgetting a check.
  */
 enum class ApiKeyKind {
     /**
@@ -28,6 +33,19 @@ enum class ApiKeyKind {
      * result cursor of executions it started.
      */
     ENDPOINT,
+
+    /**
+     * The promotion peer's credential (auth.md §7.7, versioning §10.6): minted by an admin,
+     * presented as `DP-Promotion-Key` by a SENDING deployment, and accepted by
+     * `PromotionServerKeyFilter` on the promotion receiver's routes and nowhere else.
+     *
+     * No scopes are consulted — asking for some is refused at issuance, as with [ENDPOINT] —
+     * and it authenticates no human: the request acts as R7's system service account, exactly
+     * as a request carrying the deprecated pre-shared config value does. What a stored key adds
+     * over that config value is everything a credential needs and a config value cannot have:
+     * an expiry, a revocation flag, a last-used stamp, and rotation without a restart.
+     */
+    SERVER,
     ;
 
     /** Lowercase wire token, as stored in `api_keys.kind` and sent on the REST surface. */
@@ -36,6 +54,14 @@ enum class ApiKeyKind {
     companion object {
         /** The default for a key minted without a kind — and the V11 backfill for every older row. */
         val DEFAULT = USER
+
+        /**
+         * The kinds that carry NO scopes: their authority is bindings ([ENDPOINT]) or a route
+         * family ([SERVER]), and a scope set on one of them would be a claim nothing reads.
+         * Issuance refuses requested scopes for these rather than dropping them silently, and
+         * the default-scopes fallback never applies to them.
+         */
+        val SCOPELESS: Set<ApiKeyKind> = setOf(ENDPOINT, SERVER)
 
         /** Parses a wire token, or null when it is not one — the surface turns null into a 400. */
         fun fromWireOrNull(token: String?): ApiKeyKind? = entries.firstOrNull { it.wire == token?.lowercase()?.trim() }

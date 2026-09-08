@@ -42,14 +42,27 @@ class ScopeInterceptor(
         handler: Any,
     ): Boolean {
         if (handler !is HandlerMethod) return true
-        val operation = declaredOperation(handler)
-        if (operation == null) {
-            if (!isScopeGoverned(request)) return true
-            return denyUnannotated(request, response, handler)
+        val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
+
+        // §7.7 — the KIND confinement is decided FIRST, before the annotation is even read.
+        // A scopeless kind's reach is a route family, not an operation, so the question "may
+        // this credential be here at all?" is not the annotation's to answer — and asking it
+        // second would leave every UNannotated handler outside the governed prefixes (which is
+        // every UI page: `/dashboard`, `/settings/api-keys`, `/api-console` before it declared
+        // one) as a way around the confinement for a credential that authorises none of them.
+        val confined = principal?.keyKind?.takeIf { it in ApiKeyKind.SCOPELESS }
+        if (principal != null && confined != null && !reachableBy(confined, request.requestURI)) {
+            return denyKind(request, response, principal, confined)
         }
 
-        val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
+        val operation = declaredOperation(handler)
         return when {
+            // No declared operation: allowed off the governed prefixes (the login page, static
+            // assets, health probes are gated by the chain's `permitAll`), default-denied on them.
+            operation == null -> {
+                if (isScopeGoverned(request)) denyUnannotated(request, response, handler) else true
+            }
+
             // Authentication is enforced upstream; reaching a scoped handler without a
             // principal means no credentials were presented (§9 auth.api_key.missing).
             principal == null -> {
@@ -57,12 +70,12 @@ class ScopeInterceptor(
                 false
             }
 
-            // §7.7 — an endpoint key carries NO scopes by design, so the matrix cannot judge it.
-            // Its confinement is a route allowlist instead, and its real authorization is the
-            // path bindings (`EndpointAuthorizer`) or, on the cursor, the execution's own audit
-            // trail. Both are enforced by the handlers below this interceptor.
-            principal.isEndpointKey -> {
-                endpointKeyDecision(request, response, principal)
+            // §7.7 — a scopeless key carries NO scopes by design, so the matrix cannot judge it,
+            // and a floor would refuse it everywhere. Its real authorization on the routes it
+            // DOES reach is the path bindings (`EndpointAuthorizer`), the execution's own audit
+            // trail, or — for a server key — `PromotionServerKeyFilter`, which has already run.
+            confined != null -> {
+                true
             }
 
             !Scope.satisfies(principal.scopes, operation.minScope) -> {
@@ -76,43 +89,38 @@ class ScopeInterceptor(
     }
 
     /**
-     * §7.7 — where an `endpoint`-kind key may go at all.
+     * §7.7 — the refusal a confined kind gets off its own surface.
      *
-     * The allowlist is the whole of an endpoint key's reach: the published-endpoint surface, and
-     * the two execution reads that let a caller collect a result it started. Everything else is
-     * refused HERE rather than by each handler, so a new route cannot become reachable to
-     * endpoint keys by forgetting a check — the same default-deny reasoning the unannotated-
-     * handler branch above exists for.
-     *
-     * A scope floor is deliberately NOT applied on the allowed routes: an endpoint key's scope
-     * set is empty, so any floor would refuse it everywhere, and its authority is the binding.
+     * Refused HERE rather than by each handler, so a new route cannot become reachable to a
+     * scopeless key by forgetting a check — the same default-deny reasoning the unannotated-
+     * handler branch exists for. One error code for both kinds ([ENDPOINT_KEY_KIND_REFUSED],
+     * catalogued as "the key's kind is wrong for what it is doing"); the `reason` detail and
+     * the message say WHICH kind, because that is the part an operator can act on.
      */
-    private fun endpointKeyDecision(
+    private fun denyKind(
         request: HttpServletRequest,
         response: HttpServletResponse,
         principal: AuthenticatedPrincipal,
+        kind: ApiKeyKind,
     ): Boolean {
-        if (reachableByEndpointKey(request.requestURI)) return true
+        val reason = OFF_SURFACE_REASON.getValue(kind)
         auditLogger.log(
             event = "auth.scope.denied",
             userId = principal.userId,
             keyId = principal.keyId,
-            details = mapOf("reason" to "endpoint_key_off_surface", "path" to request.requestURI),
+            details = mapOf("reason" to reason, "path" to request.requestURI),
         )
         errorWriter.write(
             request = request,
             response = response,
             status = HTTP_FORBIDDEN,
             code = ENDPOINT_KEY_KIND_REFUSED,
-            message = "An endpoint key may only call published endpoints and read the results of executions it started.",
+            message = OFF_SURFACE_MESSAGE.getValue(kind),
             userMessage = "This kind of API key can't be used here.",
-            details = mapOf("reason" to "endpoint_key_off_surface"),
+            details = mapOf("reason" to reason),
         )
         return false
     }
-
-    /** The routes §7.7 lets an endpoint key reach. */
-    private fun reachableByEndpointKey(uri: String): Boolean = uri.startsWith(PUBLISHED_ENDPOINT_PREFIX) || EXECUTION_READ.matches(uri)
 
     /** Audits `auth.scope.denied` (§10.1) and writes 403 `auth.scope.insufficient`. */
     private fun denyScope(
@@ -199,6 +207,43 @@ class ScopeInterceptor(
 
         /** §13.14's code, spelled here because `auth` does not depend on `pipeline-contract`. */
         const val ENDPOINT_KEY_KIND_REFUSED = "endpoint.key_kind_refused"
+
+        /**
+         * The whole reach of each scopeless kind (§7.7), in ONE expression: an `endpoint` key
+         * gets the published-endpoint surface plus the two execution reads that let it collect
+         * a result it started; a `server` key gets the promotion receiver's route family and
+         * nothing else. A `user` key is not confined by kind at all — the §7.6 matrix judges it.
+         *
+         * A server key normally reaches the promotion routes through `DP-Promotion-Key`, whose
+         * filter runs upstream and refuses the whole prefix without a valid one; the prefix is
+         * named here so this table states the kind's authority in full rather than relying on
+         * "something else would have stopped it".
+         */
+        fun reachableBy(
+            kind: ApiKeyKind,
+            uri: String,
+        ): Boolean =
+            when (kind) {
+                ApiKeyKind.USER -> true
+                ApiKeyKind.ENDPOINT -> uri.startsWith(PUBLISHED_ENDPOINT_PREFIX) || EXECUTION_READ.matches(uri)
+                ApiKeyKind.SERVER -> uri.startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
+            }
+
+        /** The audit `reason` for each confined kind, off its surface. */
+        private val OFF_SURFACE_REASON: Map<ApiKeyKind, String> =
+            mapOf(
+                ApiKeyKind.ENDPOINT to "endpoint_key_off_surface",
+                ApiKeyKind.SERVER to "server_key_off_surface",
+            )
+
+        /** What the refusal tells the caller — the operator-actionable half. */
+        private val OFF_SURFACE_MESSAGE: Map<ApiKeyKind, String> =
+            mapOf(
+                ApiKeyKind.ENDPOINT to
+                    "An endpoint key may only call published endpoints and read the results of executions it started.",
+                ApiKeyKind.SERVER to
+                    "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment.",
+            )
 
         private const val HTTP_FORBIDDEN = 403
     }

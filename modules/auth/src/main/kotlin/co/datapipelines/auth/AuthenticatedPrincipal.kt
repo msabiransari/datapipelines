@@ -81,6 +81,16 @@ data class AuthenticatedPrincipal(
      */
     val isEndpointKey: Boolean get() = keyKind == ApiKeyKind.ENDPOINT
 
+    /**
+     * True when this principal's authority is the promotion route family (§7.7).
+     *
+     * A server key opens the `/api/v1/promotion/` subtree and nothing else. It reaches that route only
+     * through `DP-Promotion-Key` — presented as an ordinary `DP-API-Key` it authenticates a
+     * principal that [ScopeInterceptor] refuses on every route, `/mcp` included (there by
+     * `McpAuthFilter`, because a servlet never reaches the interceptor).
+     */
+    val isServerKey: Boolean get() = keyKind == ApiKeyKind.SERVER
+
     /** Global admin (D4): bypasses workspace membership checks. Same rule as `ExecutionRecord.visibleTo`. */
     val isAdmin: Boolean get() = Scope.satisfies(scopes, Scope.ADMIN)
 

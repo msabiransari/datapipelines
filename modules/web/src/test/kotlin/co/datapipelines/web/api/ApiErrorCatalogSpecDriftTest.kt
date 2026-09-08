@@ -125,7 +125,7 @@ class ApiErrorCatalogSpecDriftTest {
          * landed in the SAME commit as their constants and catalog rows. Re-derived from the
          * document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 138
+        const val SECTION_13_ROW_COUNT = 139
 
         /**
          * §12's distinct validation codes.

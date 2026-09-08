@@ -413,6 +413,13 @@ object PipelineErrorCodes {
         const val SESSION_REQUIRED = "auth.session.required"
 
         /**
+         * §13.7 (091) — key issuance named an expiry this surface cannot use: an unknown
+         * preset, an unparseable custom date, a date already past, or `custom` with none.
+         * The one `auth.api_key.` code that is a 400: the credential is fine, the body is not.
+         */
+        const val API_KEY_EXPIRY_INVALID = "auth.api_key.expiry_invalid"
+
+        /**
          * §13.7 / versioning §10.6 — the promotion peer's pre-shared server key was absent,
          * malformed, or did not match. The SAME code answers a receiver with no key
          * configured: promotion is disabled there, fail-closed, and one code keeps the

@@ -8,8 +8,8 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
-import org.springframework.http.HttpStatus
-import org.springframework.http.ResponseEntity
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -18,67 +18,104 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import java.time.Instant
-import java.time.temporal.ChronoUnit
 
+/**
+ * Minting and revoking keys from the API screen (ui-screens.md §4.18, auth.md §7.4/§7.7).
+ *
+ * ## One service, one row model, one fragment
+ *
+ * Issuance goes through [EndpointKeyService] — the same call `POST /api/v1/auth/api-keys` makes —
+ * so the two entry points cannot diverge on what a kind means or on when a binding is written.
+ * Both responses render the SAME Thymeleaf fragments the page renders (`api/console :: keysTable`
+ * and `:: keyRows`) from the SAME [ApiKeyRows] model. Before 091 the revoke path hand-built its
+ * rows in Kotlin and a parity test kept the two markups "byte-for-byte" alike; deleting the
+ * builder deletes that whole class of drift.
+ *
+ * ## The form's own validation is server-side, always
+ *
+ * The select elements are rendered from [ApiKeyForm], but nothing here trusts them: the kind,
+ * the scope, the expiry and the bindings are all re-resolved against the same source, and every
+ * refusal is a catalogued code that [UiExceptionHandler] turns into a §5.1 Shape C toast. A
+ * hand-crafted POST gets exactly the answer the form's user would.
+ */
 @Controller
 class ApiKeysPartialController(
     private val apiKeyService: ApiKeyService,
     private val apiKeyRepository: ApiKeyRepository,
-    /** §7.7 — issuance that also writes bindings; the same service `POST /api/v1/auth/api-keys` uses. */
+    /** §7.7 — issuance that also writes bindings; the same service the REST surface calls. */
     private val endpointKeys: EndpointKeyService,
+    private val keyRows: ApiKeyRows,
 ) {
+    /**
+     * The form, in the owner's order: Kind → Scope → Name → Expiry → Bindings. The parameters
+     * are listed in that order too, so the signature reads as the screen does.
+     *
+     * `scope` is SINGULAR: scopes are hierarchical (§7.5), so one choice names the whole set a
+     * key needs, and a multi-select would let an operator build `{read, admin}`, which is just
+     * `admin` written confusingly. The REST surface still takes the list — it has callers that
+     * send one.
+     */
+    @Suppress("LongParameterList") // one parameter per form field; the alternative is a DTO for one call site
     @PostMapping("/partials/api-keys")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
     fun create(
-        @RequestParam name: String,
-        @RequestParam(required = false) scopes: String?,
-        @RequestParam(required = false) expiryDays: Int?,
-        // §7.7 — the two endpoint-key fields. Both optional and both absent by default, so the
-        // form means exactly what it meant before 074 for every operator who ignores them.
         @RequestParam(required = false) kind: String?,
-        @RequestParam(required = false) bindings: String?,
+        @RequestParam(required = false) scope: String?,
+        @RequestParam name: String,
+        @RequestParam(required = false) expiry: String?,
+        @RequestParam(required = false) expiryDate: String?,
+        @RequestParam(required = false) bindings: List<String>?,
         model: Model,
     ): String {
         val principal = requirePrincipal()
-        val requestedScopes =
-            scopes
-                ?.split(",")
-                ?.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
-                ?.map { Scope.fromWire(it) }
-                ?.toSet()
-                .orEmpty()
-        val expiresAt =
-            if (expiryDays != null && expiryDays > 0) {
-                Instant.now().plus(expiryDays.toLong(), ChronoUnit.DAYS)
-            } else {
-                null
-            }
         val requestedKind =
             kind?.trim()?.takeIf { it.isNotEmpty() }?.let {
-                ApiKeyKind.fromWireOrNull(it)
-                    ?: throw IllegalArgumentException("Unknown key kind '$it'")
+                ApiKeyKind.fromWireOrNull(it) ?: throw unknownKind(it)
             } ?: ApiKeyKind.DEFAULT
+        // A scope on a scopeless kind is REFUSED, not dropped — by the service, which owns that
+        // rule for every surface. Here we only avoid manufacturing one: the form disables the
+        // select for those kinds, and a stale value left in a resubmitted form must not become
+        // a refusal the user cannot see the cause of.
+        val requestedScopes =
+            if (requestedKind in ApiKeyKind.SCOPELESS) {
+                emptySet()
+            } else {
+                scope
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { setOf(parseScope(it)) }
+                    .orEmpty()
+            }
+        val expiresAt = ApiKeyForm.resolveExpiry(expiry, expiryDate, Instant.now())
         val bindingPaths =
             bindings
-                ?.split(",")
-                ?.mapNotNull { it.trim().takeIf { path -> path.isNotEmpty() } }
                 .orEmpty()
-        // Through the SAME service the REST surface calls, so the two entry points cannot
-        // diverge on what a kind means or on when a binding is written.
+                .flatMap { it.split(',') }
+                .mapNotNull { it.trim().takeIf { path -> path.isNotEmpty() } }
+
         val issued =
             endpointKeys.issue(
                 principal = principal,
-                name = name,
+                name = name.trim(),
                 scopes = requestedScopes,
                 kind = requestedKind,
                 bindingPaths = bindingPaths,
                 expiresAt = expiresAt,
             )
-        val keys = apiKeyRepository.findByUser(principal.userId)
+
         model.addAttribute("key", issued.plaintext)
         model.addAttribute("keyId", issued.record.id)
         model.addAttribute("keyName", issued.record.name)
-        model.addAttribute("keys", keys)
+        model.addAttribute("keyKind", issued.record.kind.wire)
+        model.addAttribute(
+            "keyScopes",
+            issued.record.scopes
+                .map { it.wire }
+                .sorted(),
+        )
+        model.addAttribute("keyBindings", bindingPaths)
+        model.addAttribute("keyExpires", expiresAt?.let { RelativeTime.absolute(it) })
+        model.addAttribute("keys", rows(principal))
         // The create response refreshes the whole table out-of-band (E2): this flag is
         // what puts hx-swap-oob on the keysTable fragment root for THIS render only.
         model.addAttribute("oob", true)
@@ -89,91 +126,43 @@ class ApiKeysPartialController(
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
     fun revoke(
         @PathVariable keyId: String,
-    ): ResponseEntity<String> {
+        model: Model,
+    ): String {
         val principal = requirePrincipal()
+        // Owner-scoped in SQL; a key id that is not the caller's revokes nothing and still
+        // answers 200, so the response discloses nothing about another user's key ids.
         apiKeyService.revoke(keyId, principal.userId)
-        val keys = apiKeyRepository.findByUser(principal.userId)
-        // The rebuilt rows stay the primary swap; the toast rides along out-of-band
-        // (Shape A, §5.1). No HX-Trigger: keyRevoked never had a listener anywhere.
-        val html = buildKeyTableRows(keys)
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(html + ToastHtml.oob("success", "API key revoked", "The key can no longer authenticate."))
+        model.addAttribute("keys", rows(principal))
+        return "partials/api-keys-rows"
     }
 
-    private fun buildKeyTableRows(keys: List<co.datapipelines.auth.ApiKey>): String {
-        if (keys.isEmpty()) {
-            return EMPTY_ROW_HTML
-        }
-        return keys.joinToString("") { key ->
-            val scopeBadges =
-                key.scopes.joinToString("") { """<span class="ds-badge ds-badge-default">${it.wire}</span>""" }
-            val lastUsed =
-                key.lastUsedAt
-                    ?.toString()
-                    ?.take(TIMESTAMP_TRIM)
-                    ?.replace("T", " ") ?: "never"
-            val createdAt =
-                key.createdAt
-                    .toString()
-                    .take(TIMESTAMP_TRIM)
-                    .replace("T", " ")
-            buildKeyRow(key, createdAt, lastUsed, scopeBadges)
-        }
-    }
+    private fun rows(principal: AuthenticatedPrincipal) =
+        keyRows.of(
+            apiKeyRepository.findByUser(principal.userId),
+            Instant.now(),
+        )
 
     /**
-     * One row, byte-for-byte the shape of the template's `keyRows` fragment
-     * (settings/api-keys.html): plain `<td>`s — the padding lives in `.ds-table`'s CSS —
-     * the revoked marker and scope chips as `ds-badge`s, and the action cell `class="num"`.
-     * The 029 treatment of the admin-users builder: a template-rendered row and a
-     * revoke-rebuilt row must be indistinguishable in the same table (034 E2). The name
-     * is escaped like every other Kotlin-built cell — `th:text` does the same job on the
-     * template side.
+     * One scope wire token, or the same refusal the REST surface gives. Not `Scope.fromWire`
+     * directly: its `IllegalArgumentException` would reach the user as a 500, and an unknown
+     * value in a select is a 400-shaped problem.
      */
-    private fun buildKeyRow(
-        key: co.datapipelines.auth.ApiKey,
-        createdAt: String,
-        lastUsed: String,
-        scopeBadges: String,
-    ): String {
-        val revokeBtn =
-            if (!key.isRevoked) {
-                """<button class="ds-button ds-button-ghost ds-button-sm u-danger" """ +
-                    """hx-delete="/partials/api-keys/${key.id}" """ +
-                    """hx-target="#keys-table-body" hx-confirm="Revoke this key?">Revoke</button>"""
-            } else {
-                ""
-            }
-        val revokedBadge = if (key.isRevoked) """ <span class="ds-badge ds-badge-danger">revoked</span>""" else ""
+    private fun parseScope(raw: String): Scope =
+        Scope.entries.firstOrNull { it.wire == raw.lowercase() }
+            ?: throw DatapipelinesException(
+                code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                message = "Unknown scope '$raw'. Supported: ${Scope.entries.joinToString(", ") { it.wire }}.",
+                details = mapOf("reason" to "scope_unknown"),
+            )
 
-        // §7.7 — an endpoint key behaves nothing like a user key, so the table has to say
-        // which it is. Rendered inside the name cell rather than as a new column, so the
-        // header is unchanged and this builder stays comparable with the Thymeleaf fragment.
-        val kindBadge =
-            if (key.isEndpointKey) """ <span class="ds-badge ds-badge-default">endpoint</span>""" else ""
-        return """<tr>
-          <td><span>${ToastHtml.esc(key.name)}</span>$kindBadge$revokedBadge</td>
-          <td>$createdAt</td>
-          <td>$lastUsed</td>
-          <td>$scopeBadges</td>
-          <td class="num">$revokeBtn</td>
-        </tr>"""
-    }
+    private fun unknownKind(raw: String) =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+            message = "Unknown key kind '$raw'. Supported: ${ApiKeyKind.WIRE_VALUES.joinToString(", ")}.",
+            details = mapOf("reason" to "kind_unknown"),
+        )
 
     private fun requirePrincipal(): AuthenticatedPrincipal =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
             ?: error("No authenticated principal")
-
-    private companion object {
-        /** Trims the ISO instant to the template fragment's `yyyy-MM-dd HH:mm` precision. */
-        const val TIMESTAMP_TRIM = 16
-
-        /** The template fragment's empty state (`ds-empty`), same markup, for a last-key revoke. */
-        const val EMPTY_ROW_HTML =
-            """<tr><td colspan="5"><div class="ds-empty">""" +
-                """<p class="ds-empty-title">No API keys yet</p>""" +
-                """<p class="ds-empty-description">Generate a key to call the REST API.</p>""" +
-                """</div></td></tr>"""
-    }
 }

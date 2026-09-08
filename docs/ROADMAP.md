@@ -236,6 +236,7 @@ When something moves from ROADMAP into a shipped spec — or a spec-level decisi
 | 2026-08-07 | **Cancel-on-disconnect** + explicit cancel (D7) | rest-api v1.3 §6.8/§10.4, dag-executor v1.2 §8.3 | Replaces "executions survive disconnect, poll to recover"; cross-instance cancel via Redis flag |
 | 2026-08-07 | Custom headers → **`DP-` prefix** (D10) | rest-api v1.3 §3.6 | `X-API-Key`/`X-Correlation-Id` renamed; `Idempotency-Key` kept (standard) |
 | 2026-08-07 | Encryption-key **fallback chain removed** (D8) | datasources v1.1 §7.1 | Key is required fail-fast; KMS sourcing stays a v1.1 candidate below — as an explicit alternative source, never an implicit fallback |
+| 2026-09-08 | Promotion's pre-shared **`server-key` config value** replaced by a `server`-kind API key (091) | [auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [configuration §3.19](configuration.md#319-deployment), V15 | The credential moves from a file into `api_keys`: mintable by an admin on the API screen, expiring, revocable, listed, rotatable without a restart. `datapipelines.deployment.promotion.server-key` is accepted for **one release** with a boot WARN and is **removed in the next** — that removal is the tracked item |
 | 2026-08-17 | **Cross-pipeline calls** (v2 §3.2) shipped as the `PIPELINE` node type | pipeline-contract §4.9/§8.5/§12.9, design 2026-08-13-pipeline-node-type | Composition by invocation: a node executes a version-pinned child pipeline as a real, linked child execution (`direct` delivery, lineage columns, family cancellation) |
 
 ---

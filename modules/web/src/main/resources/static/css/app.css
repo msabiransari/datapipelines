@@ -1431,6 +1431,81 @@ button.app-busy::after {
   margin-bottom: var(--space-1);
 }
 
+/* 091 — the API-key form's KIND cards. A radio whose choice changes what the rest of
+   the form means deserves more than a label: each card carries the sentence that says
+   what that kind IS, so the decision is made from the form rather than from the docs. */
+.app-kinds {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.app-kind {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: flex-start;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--gap-xs);
+  cursor: pointer;
+}
+
+.app-kind:hover {
+  border-color: var(--border-default);
+  background: var(--surface-inset);
+}
+
+/* The checked card is the one carrying the form's meaning, so it is marked on the CARD,
+   not only on the dot — `:has()` is the one selector that can say so without a script. */
+.app-kind:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.app-kind input {
+  margin-top: 2px;
+  flex: none;
+}
+
+.app-kind-b {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.app-kind-b b {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+/* 091 — the endpoint-binding picker: a scrollable list of the tree nodes this workspace
+   actually publishes. Bounded height, because a deployment with fifty endpoints must not
+   push the submit button off the modal. */
+.app-picker {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--gap-xs);
+}
+
+.app-picker-row {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+  padding: var(--space-1) var(--gap-xs);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.app-picker-row:hover {
+  background: var(--surface-inset);
+}
+
 /* A definition list of settings rows (the detail pane's key/value pairs). */
 .app-rows {
   font-size: var(--text-sm);

@@ -492,29 +492,27 @@ The panel has exactly three states, decided by the cursor response:
 
 For anything that must outlive the TTL, the answer is not a longer TTL: write it back with `output.target: "datasource"` ([REST §7.1](rest-api.md#71-model)).
 
-### 4.10 API Keys
+### 4.10 API Keys — the link (091)
 
-**079 §C**: this screen remains the place keys are ISSUED and REVOKED. A read-only view of
-the same keys — with their kind, prefix, scopes-or-bindings and expiry — is one of §4.18's
-three cards, which links here for the management actions.
+**This screen is a LINK now.** Issuing, listing and revoking keys moved to §4.18's API section,
+where the endpoints those keys call and the MCP connection they authenticate already live: "the
+keys that may call this deployment" and "the endpoints they may call" are one question, and
+keeping them a page apart made the API screen a read-only shadow of a settings page nobody
+found. This screen renders one sentence and a link to `/api-console`.
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /settings/api-keys` |
-| Auth required | Yes — **any authenticated principal**, own keys only (no scope requirement; see [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)) |
-| Purpose | Issue, view, revoke API keys for agents |
-| Design primitives | `.ds-table`, `.ds-button`, `.ds-modal`, `.ds-badge`, `.ds-code-block` |
-| JS | Light — copy-to-clipboard for newly created key |
-| htmx | Yes — generate key modal (`hx-post="/partials/api-keys"`, the created-key fragment into `#keyCreated`, plus §5.1 Shape A out-of-band pieces: the refreshed `#keys-table` — swapped at TABLE level, because a `tbody` OOB element nested in the response dies in the browser's fragment parser — and an info toast POINTING at the panel), revoke (`hx-delete="/partials/api-keys/{id}"`, rebuilt rows into `#keys-table-body` plus a success toast) |
+| Auth required | Yes — any authenticated principal |
+| Purpose | Point at §4.18. It reads no keys at all |
+| Design primitives | `.ds-card`, `.app-empty`, `.ds-button` |
+| JS | None |
+| htmx | No |
 
-Server-side these partials delegate to the same application service as [REST §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only) (`GET`/`POST /api/v1/auth/api-keys`, `DELETE /api/v1/auth/api-keys/{key_id}`) — identical validation and identical ownership scoping, HTML instead of JSON.
-
-Content:
-- **Key list**: name, key prefix (`dpk_ABCDEF...`), scopes badges, created_at, last_used_at, expires_at, status (active/revoked). Scoped to the caller's own keys — the list endpoint never accepts a user filter, and admins do not get a cross-user view of keys here.
-- **Generate button**: opens modal with name input, scope checkboxes, expiration date picker. On submit: creates key, shows plaintext key **once** with copy button + warning — the panel PERSISTS inline (§5.1's hard rule); the same response refreshes the key table out-of-band and points an info toast at the panel (the toast never carries the plaintext).
-- **Scope checkboxes are filtered to the caller's own scopes.** A key's scopes MUST be a subset of its creator's scopes at issue time ([Auth §7.4](auth.md#74-issuance)) — an `author` session cannot mint an `admin` key. The UI renders only the checkboxes the caller is entitled to; the server independently rejects a superset with `403 auth.scope.insufficient` (the checkbox filter is convenience, the server check is the guard). Default selection: `read`.
-- **Revoke button**: per-row, confirms, sets `is_revoked = true`. Revocation is effective within the validation-cache TTL (~60s, [Auth §7.3](auth.md#73-validation-flow)) — the confirmation copy says so rather than implying instant global effect.
-- **Never shows**: the full key (only the prefix after creation), the hash.
+**Why the route survives.** The avatar menu, `AppNav`'s off-rail breadcrumb table and every
+bookmark point here; answering them with a 404 to save one template would be a worse deal than
+rendering a sentence and a link. (The avatar menu's "API keys" entry and Settings' API card both
+already target `/api-console`, so the only way here is a bookmark.)
 
 ### 4.11 User Settings
 
@@ -699,8 +697,8 @@ Each row shows the pipeline's version here and on the target (`absent` when the 
 | Auth required | Yes — `read` (`ScopeMatrix.RestOperation.READ_RESOURCES`), the same floor `EndpointsController.list` uses |
 | Purpose | Everything a program uses to talk to this workspace, in one place: published endpoints, the keys that may call them, the MCP connection |
 | Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-code`, `.app-empty` |
-| JS | None |
-| htmx | No — the screen is read-only; every action on it is a link |
+| JS | Light — the modal, the kind-conditional fields, and the select-the-secret reveal |
+| htmx | Yes for KEYS (`hx-post="/partials/api-keys"` into `#keyCreated`; `hx-delete="/partials/api-keys/{id}"` into `#keys-table-body`, each with a §5.1 Shape A out-of-band piece). The endpoints and MCP cards stay read-only |
 
 **Why the route is `/api-console` and not something under `/api`.** That prefix is the
 programmatic surface, split in two — the `/api/v1` REST envelope and the `/api/x` published
@@ -713,11 +711,18 @@ prefixes govern only where an UNannotated handler is default-denied), the annota
 gate here — and it is also what refuses an `endpoint`-kind key, which carries no scopes by
 design ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and reaches only the published-endpoint surface.
 
-**Read-only, deliberately.** Publishing, binding and revoking stay on REST/MCP this round —
-074 step 6's intent. `author` sees the management links; `read` does not, because actions a
-principal lacks scope for are not rendered (§4 preamble). The server re-checks regardless.
+**Read-only about ENDPOINTS; the management screen for KEYS (091).** Publishing an endpoint and
+binding an existing key stay on REST/MCP (074 step 6's intent) — the endpoints card is a
+truthful inventory plus links. Keys are different: their whole lifecycle is here. The key
+surface is `MANAGE_OWN_API_KEYS` (any authenticated principal, own keys only), enforced by the
+partial controllers' own annotation rather than by this page's `read` floor. Actions a principal
+lacks scope for are not rendered (§4 preamble), and the server re-checks regardless.
 
-Three cards:
+Three cards. Since 091 the **API keys** card leads the page and spans it: it is the management
+surface now, and seven columns do not fit the narrow track the read-only version sat in
+(measured on a live stack at 1440 — `Last used` and the revoke action were off the card's right
+edge). The endpoints inventory and the MCP connection keep the two-column row below it. The
+numbering below stays in the order the cards were introduced.
 
 1. **Published endpoints** — from `EndpointPublishService.list(principal)`, one batch lookup
    for pipeline names and one for released versions (never a query per row, the rule
@@ -738,10 +743,42 @@ Three cards:
      production reader is a per-execution boolean and whose KDoc argues explicitly against
      broadening it. A column filled from a sample would be a plausible number and a false one,
      so the card states the absence instead. Adding the column means adding the counter first.
-2. **API keys** — the caller's own keys, read-only, with the fields the management screen does
-   not show: kind, prefix, and either scopes (a `user` key) or the paths it is bound to (an
-   `endpoint` key, which has no scopes at all — an empty scope cell would read as "this key
-   can do nothing"). Issue and revoke stay at §4.10, which this card links to.
+2. **API keys** — the caller's own keys, and since 091 the place they are ISSUED and REVOKED
+   (§4.10 is a link now). Columns: key (name + `dpk_RGAX…` prefix), kind, **reach**, created,
+   expires, last used, and a revoke action.
+   - **Reach** is whatever decides what the key may do, and that differs by kind: scopes for a
+     `user` key, the bound paths (`/nyc/**`) for an `endpoint` key, the promotion route family
+     for a `server` key. An empty scope cell on the last two would read as "this key can do
+     nothing", which is the opposite of true ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).
+   - Every timestamp is **relative in the cell, absolute (UTC) on hover**: "is this about to
+     expire?" and "exactly when?" are both real questions, and a cell with one of them sends the
+     reader to the database.
+   - Revoked AND **expired** keys keep their row and lose the revoke affordance. §7.3 refuses
+     both, so a table that showed an expired key as live would disagree with the authenticator.
+   - The list is the caller's OWN keys — the list endpoint never accepts a user filter, and
+     admins get no cross-user view of keys here.
+
+   **The create form** — one modal, in the order the owner ratified: **Kind → Scope → Name →
+   Expiry → Bindings**, with scope and bindings CONDITIONAL on the kind.
+
+   | Field | What it does |
+   |---|---|
+   | **Kind** | Radio cards, one sentence each. `user` is labelled **"Agent / API key"**: one kind, two surfaces (an agent's key over MCP and a program's key over REST are the same credential, and two names would invent a distinction the system does not make). `server` is rendered for **admins only** — `ApiKeyService` refuses it to anyone else, and a form that offers a refused option lies |
+   | **Scope** | A select of the CAPABILITIES with their meanings — `read` (list and inspect, runs nothing), `execute` (run released pipelines, includes read), `author` (create and change templates, pipelines, datasources, includes execute), `admin` (everything, including users and workspaces). Filtered to the caller's own scopes (§7.4's subset rule); the server refuses a superset regardless. **Hidden for `endpoint` and `server`**, whose inputs are DISABLED rather than merely hidden — a disabled input is not submitted, and a scope on a scopeless kind is refused, not dropped |
+   | **Name** | Not unique, and the hint says so: `api_keys.name` carries no uniqueness constraint and two people in one workspace may legitimately both have an "agent" key. The prefix is what identifies a key |
+   | **Expiry** | A select — Never / 1 / 7 / 30 / 90 days / custom date — resolved SERVER-side from the same table the page renders from, so the select cannot offer a value the server refuses. A custom date expires at the **end** of that day, UTC (a human typing a date means "valid through that day"). A bad one is `400 auth.api_key.expiry_invalid` with a stable `details.reason`, never a silent fallback to "never": failing toward a BROADER credential is the wrong way to fail |
+   | **Bindings** | `endpoint` kind only — the published-endpoint picker, showing the tree nodes in the `/nyc/**` form 074 defined. Only **literal** prefixes are offered: `EndpointAuthorizer` walks the ancestors of the CONCRETE request path, so a node containing a `{variable}` segment would be a checkbox that authorises nothing. The root `/` is always offered and always first |
+
+   **The create result** shows the secret ONCE in a persistent inline panel (§5.1's hard rule — a
+   6s toast never carries anything the user must keep), beside the prefix, kind, scope-or-
+   bindings and expiry of what was actually minted. The same response refreshes the whole table
+   out-of-band (at TABLE level: a `tbody` OOB element nested in the response dies in the
+   browser's fragment parser) and points an info toast at the panel.
+
+   **One fragment, three renders.** The page, the post-create refresh and the rows a revoke
+   swaps in all render `api/console :: keysTable` / `:: keyRows` from one row model
+   (`ApiKeyRows`). Before 091 the revoke path hand-built its rows in Kotlin and a parity test
+   kept the two markups "byte-for-byte" alike; there is one markup now.
 3. **MCP server** — the connection JSON, the live tool count and the P32 rule. The count is
    `McpToolCatalog.NAMES.size` at request time, never a literal, exactly as the marketing site
    renders it. The header name is `ApiKeyCredential.HEADER`. The server URL comes from
@@ -887,6 +924,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-08 | v1.29 | 091 keys — one page for three kinds | **§4.10 reduced to a LINK; §4.18 card 2 became the key management screen.** One table, one form, one row model: kind, prefix, reach (scopes \| bindings \| the promotion route family), created, expires and last used — each relative in the cell and absolute UTC on hover — plus revoke. Revoked AND expired keys keep their row and lose the affordance, because §7.3 refuses both. The form's order is the owner's ruling — **Kind → Scope → Name → Expiry → Bindings** — with scope and bindings conditional on the kind and their inputs DISABLED rather than merely hidden (a disabled input is not submitted, and a scope on a scopeless kind is refused, not dropped). Kind renders as radio cards with a sentence each; `user` is labelled "Agent / API key" (one kind, two surfaces) and `server` (091's third kind) is admin-only. Scope lists the CAPABILITIES with their meanings, never HTTP verbs. Expiry is a select resolved server-side from the same table the page renders from, with `400 auth.api_key.expiry_invalid` for anything unusable — never a silent fallback to "never". The binding picker offers only LITERAL published prefixes, because the authorizer walks the concrete request path's ancestors and a `{variable}` node would authorise nothing. The Kotlin row builder and its parity test are deleted: the page, the post-create OOB refresh and the post-revoke rows now render one fragment. |
 | 2026-09-07 | v1.28 | UI round 3 — the boosted first frame, the fonts, and a login page that ignores your session (090) | **§3.0 (new, normative): no page template carries its own `<link rel="stylesheet">`.** The explorers' sheet lived inside the `content` fragment — inside `#app-main`, the boosted-swap target — so htmx replaced the region and the browser only then discovered the link; an inserted stylesheet does not block an already-painted document. Measured at the first animation frame after `htmx:afterSwap`: at 1920 the tree painted 1640px wide with the detail pane's left edge EQUAL to its own (the panes stacked), 2280px at 2560 expanded, 2452px collapsed — settling to 480px and a 24px gap a frame later. That unstyled frame is BOTH of the round's reports: "the detail section is very close with the side menu" and "css is applied after data load". `template-tree.css` moved to the layout head. **The reported cause did not reproduce:** the pane's 260px floor was never beaten — six settled measurements (1440/1920/2560 × rail expanded/collapsed) gave 432 or 480px with `min-width` computing 260px, no persisted width existed, and no flex override was in the cascade. **CLS was the wrong instrument** and is recorded as such: `PerformanceObserver('layout-shift')` scored the broken navigation 0.0000, because the panes were inserted wrong rather than moved — `ExplorerPaneGeometryBrowserTest` asserts first-frame geometry at 3 widths × 2 rail states × 2 explorers, and keeps the < 0.05 budget for the font rule. **§3.3 amended: `font-display: optional`** replaces `swap`. With every font response held 1.2s, the `/dashboard` heading went 243.5 → 251.7px (+8.2px) and `/templates` 611.7 → 618.2px on arrival, at CLS 0 and 0.0075 — a horizontal reflow inside a block that does not move, which is text changing after it has been read. `optional` makes post-paint reflow structurally impossible; re-measured, first-frame and settled widths now agree exactly. `fallback` is the recorded alternative, with the size-adjust ratios already measured (Inter/system-ui 102.59%, JetBrains Mono/ui-monospace 109.48%). **§2 principle 4 rewritten, §4.1 and §4.14 amended: two layouts.** `login.html` decorated with `layouts/default`, which renders the shell whenever `authenticated` is true, so a signed-in visitor who opened `/login` in a second tab got the sign-in form inside a working app (owner's walk). New `layouts/auth.html` — brand, card, theme, htmx and the toast stack, no rail, no top bar, no `#app-main`, no `hx-boost`; `GET /login` answers `302 /dashboard` for a live session (on the PRINCIPAL, not on the cookie, so an expired session still gets the form); `OidcSignedInBounceFilter` closes `/oauth2/authorization/*` ahead of Spring Security's redirect filter. The forced-change gate became its own view (`settings/password-forced`) over one shared card partial, because a conditional decorator via `__${...}__` preprocessing is resolved at PARSE time and cached — the first request through would freeze the layout for all of them. **§B, second half:** `[x-cloak]{display:none}` moved from the page-scoped `pipeline-editor.css` to `app.css`, so the attribute is not inert everywhere else, and the editor's Alpine ROOT is cloaked (its six panes already were). New guards: `ExplorerPaneGeometryBrowserTest`, `AuthLayoutRenderTest`, `AlpineCloakAuditTest` (with two non-vacuity floors), `OidcSignedInBounceFilterTest`, four `LoginGoldenPathBrowserTest` cases. Still page-scoped and carrying §3.0's defect, named rather than left to be rediscovered: `pipeline-editor.css`, `template-editor.css`, `docs.css`. |
 | 2026-09-07 | v1.27 | shell polish — a signal for every server trip (085 §D) | §5.1's Loading state rewritten: the 2px `#app-progress` bar was boosted-navigation only; the owner asked for "some kind of an indicator" on every trip, so the bar now shows for EVERY htmx request as an in-flight COUNT between `htmx:beforeRequest` and `htmx:afterRequest` (afterRequest is the one terminal event htmx 2.0.10 fires on success, error status, network error, abort AND timeout — afterSettle never fires for an aborted request, which is why the old settle/error listener set could have stranded the bar on). The originating control goes busy under the shell's OWN `.app-busy` marker — htmx 2.0.10's `.htmx-request` lands on the `hx-indicator` target instead when the element carries `hx-indicator` (the tree leaves do), so it cannot mark the control itself. A busy `<button>` gets `pointer-events: none` plus an absolutely-positioned `::after` spinner ring (the `.ds-spinner` idiom, no layout shift; a tree row's trailing badges go `visibility:hidden` for the flight to make room), and `shell.js` sets `aria-disabled="true"` — never the `disabled` property, which would drop focus mid-flight. Folder summaries are the exception: they stay operable mid-fetch (the §C hammer pins collapse/re-expand while a level loads) and their signal is the chevron spinning in the row's own icon slot. A request still in flight after 150ms marks its swap target `aria-busy="true"` and appends ONE `.ds-skeleton` row (`.app-target-skeleton`), per-target paired, removed by the terminal event before the swap — slow swaps show a skeleton, fast swaps never flash one. Reduced motion keeps every state and drops every motion (dashed-static ring, static accent chevron, the vendored skeleton's own static surface). §3.2's boosted-bar passage now points at §5.1. Pinned by four new `shell.test.mjs` cases (counter interleave, `.app-busy`/aria-disabled set and cleared, skeleton only after the delay, per-target pairing) and the new `ShellBusyBrowserTest` (bar active during a throttled expand and gone after settle, the in-flight control non-interactive, the skeleton present past 150ms and absent on a fast swap, and the bar provably not stuck after an hx-sync replace abort). |
 | 2026-09-07 | v1.26 | shell polish — tree guides + one icon set (085) | **§A — the explorer trees draw real guide geometry** (owner: "connecting lines are not accurate"): the vertical guide was a `border-left` on the level CONTAINER that neither met the parent chevron nor stopped at the last child; it is now `::before`/`::after` on each row's `<li>` — the vertical starts at the parent row's chevron centre and stops at the LAST row's own centre even when that row is an expanded folder (the li wraps the subtree, so a bottom-anchored line would run down inside it), and every row carries a horizontal tick into its chevron/file icon. All lengths derive from tokens (`--tpl-indent`/`--tpl-row-h`/`--tpl-guide-x` on `.tplx-tree`); the unicode ▸ disclosure marker is the sprite's chevron-right rotated on `details[open]` (reduced-motion keeps the state, drops the transition), folder rows gain folder/folder-open (two icons, CSS picks one) and leaves file-code; the per-row border-bottom hairline is gone — the mock draws rows with whitespace and a hover tint, and no component boundary loses its line. Search results stay a flat, guide-free list. **§B — one icon source for the whole app** (owner: "probably we need different icons which can look more professional"): the sprite grows 12 → 40 glyphs, exactly the referenced set, per-icon SHA-256 in `vendor-manifest.json`, the ISC text vendored as `LICENSE.lucide`; the sixteen ad-hoc inline shell SVGs, the eight `&times;` close glyphs and the five `&larr;`/`&rarr;`/`→` arrows are all sprite references now (toast's client builder kept in parity — `ToastMarkupParityTest` + `toast.test.mjs`), and `graph.js`'s CALCULATOR draws `calculator` instead of the `file` stand-in. The size mapping (sm = chrome/actions, md = canvas, xs = tight inline) is recorded in §3.4; `IconSpriteAuditTest` enforces referenced = vendored = manifest-subset in both directions. |

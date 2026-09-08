@@ -261,6 +261,16 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
   tools, then author it), `debug_failed_execution` (walk a failed execution to a
   diagnosis).
 
+- **Which key you need, and why not `admin`.** Your credential is a **`user` key** — the kind
+  the UI calls "Agent / API key" (one kind, two surfaces: MCP and REST). Ask for the LOWEST
+  scope that covers what you were asked to do: `read` to inspect, `execute` to run, `author` to
+  create or change. **Do not ask for `admin`.** No MCP tool requires it, so it buys you nothing
+  you can use — and it turns a key that lives in a config file, a transcript and a client's logs
+  into one that can manage users and workspaces. If a tool answers `auth.scope.insufficient`,
+  name the ONE scope you need and why. The other two key kinds are not yours: an `endpoint` key
+  serves published endpoints, a `server` key is one deployment's credential for another, and
+  `/mcp` refuses both with `endpoint.key_kind_refused`.
+
 - **Scopes** (hierarchical: `admin ⊃ author ⊃ execute ⊃ read`): `read` = list/get;
   `execute` = run; `author` = create/update pipelines + templates (also template render,
   datasource test, schema introspection, datasource REGISTRATION, the three `lake_tables_*`
@@ -432,8 +442,9 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
 Moving released content from one deployment to another (dev → uat → prod) is **promotion**,
 and it is a **human action from the UI, deliberately**. There is no MCP tool for it, there is
 no schedule that runs it, and there is no REST endpoint you can call for it: the promotion
-route accepts only a pre-shared key that one deployment holds for another, never an API key
-and never a session. This is a design decision, not a gap — a release reaching production is
+route accepts only a `server`-kind key that one deployment holds for another, presented as
+`DP-Promotion-Key` — never your API key and never a session (a server key presented as an
+ordinary `DP-API-Key` is refused everywhere, this surface included). This is a design decision, not a gap — a release reaching production is
 a decision a person makes.
 
 What that means in practice:

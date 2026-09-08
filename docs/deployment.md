@@ -314,12 +314,12 @@ What each setting buys, and what goes wrong without it:
 | Setting | Consequence if wrong |
 |---|---|
 | `posture: hardened` (or an explicit `authoring-enabled: false`) on the receiver | With it `true`, promotion into it is **refused** (`pipeline.promotion.target_is_authoring`) — deliberately, because drafts belong in the authoring environment. Startup also REFUSES on a receiver that already holds drafts, naming them ([Configuration §7](configuration.md#7-config-validation)) |
-| `server-key` on the receiver | **Absent means promotion is refused, always.** Fail closed: a deployment that never configured a key does not silently accept pushes |
+| A promotion credential on the receiver | **Nothing configured means promotion is refused, always.** Fail closed. Since 091 the credential is a `server`-kind API key an `admin` mints on the receiver's API screen ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)); the older `server-key` config value still works for one release and WARNs at boot |
 | `target.base-url` + `target.server-key` on the sender | A base-url without a key **refuses startup**, naming both. A key that does not match the receiver's gets `401 auth.promotion.key_invalid` at push time |
 | Matching workspace NAMES on both | Promotion addresses workspaces by name (names are a global namespace; ids are not). A workspace that does not exist on the receiver is `404 workspace.not_found` — create it there first |
 | The datasources the promoted pipelines reference, registered on the receiver | Pre-validated before anything is pushed; a missing one fails the whole batch with `pipeline.promotion.missing_datasources` and leaves the receiver untouched. **Register them with the receiver's own credentials** — a pipeline body never carries environment-specific connection details |
 
-**Rotation** is: set the new value on both sides, restart both. No user account is involved, so offboarding a human can never break production promotion, and revoking the key revokes nothing else.
+**Minting the receiver's key** (091): on the RECEIVER, sign in as an admin → **API** → New key → kind **Server** → name it after the sender (`dev → uat`) → copy the plaintext, shown once. Paste it into the SENDER's `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY`. **Rotation** is then receiver-side and needs no restart anywhere: mint a second `server` key, set it on the sender, revoke the first. (With the deprecated config value instead: set the new value on both sides and restart both.) No user account is involved either way, so offboarding a human can never break production promotion, and revoking the key revokes nothing else.
 
 **Direction is one-way by construction.** The receiver validates; it never calls the sender. A compromised receiver cannot reach back into the authoring environment.
 

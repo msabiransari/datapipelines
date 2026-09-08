@@ -10,15 +10,26 @@
     </div>
     <p class="u-danger u-text-xs u-m0 u-mt-xs">Copy this key now. You won't see it again.</p>
   </div>
-  <p class="u-secondary u-text-sm u-m0">Key <span th:text="${keyId}" class="u-mono">dpk_xxx</span> (<span th:text="${keyName}">name</span>) created successfully.</p>
-  <!-- E2: the create response is the ONLY chance to refresh the table without a reload;
-       `keys` was already in the model and rendered nowhere. Same table markup as the
-       page (settings/api-keys :: keysTable) — extracted, never duplicated. The OOB
-       element is the WHOLE TABLE (the controller set oob=true, which puts
-       hx-swap-oob="true" on it for THIS render only): a tbody-level OOB element nested
-       in this div is destroyed by the browser's fragment parser (030 — table-only tags
-       outside table context are dropped tokens), so the refresh would silently never
+  <!-- 091 — what was actually minted, in the same terms the table uses: the prefix that
+       identifies it afterwards, its kind, and the reach that kind gives it. A create
+       result that only says "created successfully" leaves the operator to go and check. -->
+  <div class="app-chips u-mb-xs">
+    <span class="app-chip app-chip-mono" th:text="${keyId}">dpk_RGAXQ7T2MKLP</span>
+    <span class="app-chip app-chip-mono" th:text="${keyKind}">user</span>
+    <span class="app-chip app-chip-mono" th:each="s : ${keyScopes}" th:text="${s}">read</span>
+    <span class="app-chip app-chip-mono" th:each="b : ${keyBindings}"
+          th:text="${b == '/'} ? '/**' : ${b} + '/**'">/nyc/**</span>
+    <span class="app-chip app-chip-mono" th:if="${keyKind == 'server'}">promotion routes</span>
+    <span class="app-chip app-chip-mono" th:text="${keyExpires != null} ? 'expires ' + ${keyExpires} : 'never expires'">never expires</span>
+  </div>
+  <p class="u-secondary u-text-sm u-m0"><span th:text="${keyName}">name</span> created.</p>
+  <!-- E2: the create response is the ONLY chance to refresh the table without a reload.
+       Same table markup as the page (api/console :: keysTable) — extracted, never
+       duplicated. The OOB element is the WHOLE TABLE (the controller set oob=true, which
+       puts hx-swap-oob="true" on it for THIS render only): a tbody-level OOB element
+       nested in this div is destroyed by the browser's fragment parser (030 — table-only
+       tags outside table context are dropped tokens), so the refresh would silently never
        happen. outerHTML (inline) OOB form: the new table replaces #keys-table. -->
-  <th:block th:replace="~{settings/api-keys :: keysTable(${keys})}"></th:block>
+  <th:block th:replace="~{api/console :: keysTable(${keys})}"></th:block>
   <div th:replace="~{partials/toast-oob :: oob('info', 'API key created', 'The key is shown once on this screen — copy it now.')}"></div>
 </div>

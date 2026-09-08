@@ -94,6 +94,9 @@ object ApiErrorCatalog {
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
+            // 091 §13.7: the one `auth.api_key.` code that is not 401. The credential is fine;
+            // the ISSUANCE BODY named an expiry that is not usable, which is a 400.
+            co.datapipelines.auth.AuthErrorCodes.API_KEY_EXPIRY_INVALID to HttpStatus.BAD_REQUEST,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,

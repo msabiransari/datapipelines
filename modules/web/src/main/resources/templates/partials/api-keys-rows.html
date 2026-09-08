@@ -1,0 +1,8 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="content">
+  <!-- 091 — the revoke response: the rebuilt rows swapped into #keys-table-body, plus the
+       §5.1 Shape A toast riding along out-of-band. The rows are the PAGE's fragment, not a
+       second copy of the markup — the Kotlin row builder this replaces existed only to
+       imitate it, and a parity test existed only to police the imitation. -->
+  <th:block th:replace="~{api/console :: keyRows(${keys})}"></th:block>
+  <div th:replace="~{partials/toast-oob :: oob('success', 'API key revoked', 'It stops authenticating within about a minute.')}"></div>
+</th:block>

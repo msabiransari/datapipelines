@@ -1324,7 +1324,7 @@ Flows and rules are specified in [Auth](auth.md) (§7.4 issuance, §7.6 scope ma
 ```
 GET /auth/api-keys
 ```
-Lists the caller's keys (id, name, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets.
+Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets.
 
 ```
 POST /auth/api-keys
@@ -1341,14 +1341,27 @@ Content-Type: application/json
   "data": {
     "id": "dpk_ab12cd34ef56",
     "name": "claude-desktop",
+    "kind": "user",
     "scopes": ["read", "execute"],
+    "bindings": [],
     "key": "dpk_ab12cd34ef56.9f8e7d6c...",
+    "created_at": "2026-09-08T09:00:00Z",
     "expires_at": "2027-08-07T00:00:00Z"
   }
 }
 ```
 
 `key` is the full plaintext, returned **exactly once** — it is never retrievable again.
+
+**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `user` (the default and every key minted before 074), `endpoint`, or `server`. It changes what the rest of the body means:
+
+| `kind` | `scopes` | `bindings` | Who may mint |
+|---|---|---|---|
+| `user` | Required in effect — absent falls back to the configured default | Refused (`403 endpoint.key_kind_refused`) | Any authenticated principal, at or below its own scopes |
+| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted | Any authenticated principal |
+| `server` | **Refused if present** — a server key's authority is a route family | Refused | `admin` only (`403 auth.scope.insufficient` otherwise) |
+
+An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
 
 ```
 DELETE /auth/api-keys/{key_id}
@@ -1455,9 +1468,18 @@ Owner or global admin. Removing a member with the `owner` role is refused with `
 
 The RECEIVER half of promotion ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)). Two endpoints, and they are the only routes under `/api/v1/promotion/`.
 
-**Authentication is different here, and deliberately narrower.** These routes are gated by the pre-shared server key of §10.6, presented as `DP-Promotion-Key`. The key is read on this prefix and no other, so it authenticates nothing anywhere else and grants no read access outside this pair. The converse also holds: an API key or a session cookie does **not** open these routes — promotion is a deployment-to-deployment channel, not a privileged human one. A receiver with no `datapipelines.deployment.promotion.server-key` configured refuses every request here (fail closed, [Configuration §3.19](configuration.md#319-deployment)).
+**Authentication is different here, and deliberately narrower.** These routes are gated by the server key of §10.6, presented as `DP-Promotion-Key`. The header is read on this prefix and no other, so the credential authenticates nothing anywhere else and grants no read access outside this pair. The converse also holds: an ordinary API key or a session cookie does **not** open these routes — promotion is a deployment-to-deployment channel, not a privileged human one.
 
-Every refusal on this prefix — missing header, malformed header, wrong key, and "no key configured on this deployment" — is the same `401 auth.promotion.key_invalid` with the same body, so a caller cannot tell a wrong key from a receiver that has promotion disabled.
+**How the receiver mints one (091).** On the receiver, an `admin` opens the API screen, creates a key of kind **`server`** (no scope, no bindings — the form hides both for this kind) and copies the plaintext, which is shown once. That value goes into the SENDER's `datapipelines.deployment.promotion.target.server-key`. Equivalently over REST, on the receiver:
+
+```
+POST /auth/api-keys   {"name": "uat receiver", "kind": "server"}
+→ 201 {"data": {"id": "dpk_…", "kind": "server", "scopes": [], "key": "dpk_….<secret>"}}
+```
+
+Rotation is then a receiver-side act with no restart on either side: mint a second `server` key, set it on the sender, revoke the first. The older pre-shared config value (`datapipelines.deployment.promotion.server-key`) is still accepted for one release and WARNs at boot ([Configuration §3.19](configuration.md#319-deployment)).
+
+**Fail closed.** A receiver with no configured value AND no live `server` key refuses every request here. Every refusal on this prefix — missing header, malformed header, wrong key, a key of the wrong KIND, a revoked or expired key, and "nothing configured on this deployment" — is the same `401 auth.promotion.key_invalid` with the same body, so a caller can tell none of them apart.
 
 There is **no MCP twin** for either endpoint and no schedule that calls them ([Versioning §10.1](versioning.md#101-policy) D8: promotion is a human action).
 
