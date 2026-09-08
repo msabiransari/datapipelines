@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.typesystem.Dialect
@@ -26,6 +28,7 @@ class TemplateUiController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/templates")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         model: Model,
         request: HttpServletRequest,

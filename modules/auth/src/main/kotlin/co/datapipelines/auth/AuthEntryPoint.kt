@@ -50,7 +50,7 @@ class AuthEntryPoint(
      * `/login` itself is `permitAll` and never reaches the entry point, so no loop exists.
      */
     private fun redirectsToLogin(request: HttpServletRequest): Boolean {
-        val path = request.requestURI.substring(request.contextPath.length)
+        val path = request.appPath()
         if (path.startsWith("/api/") || path.startsWith("/mcp")) return false
         return request.getHeader("Accept")?.contains("text/html") == true
     }

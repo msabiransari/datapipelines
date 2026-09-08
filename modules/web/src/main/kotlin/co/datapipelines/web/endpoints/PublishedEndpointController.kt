@@ -3,6 +3,7 @@ package co.datapipelines.web.endpoints
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.appPath
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrorResponse
 import co.datapipelines.web.api.currentPrincipal
@@ -94,7 +95,7 @@ class PublishedEndpointController(
      * wants, and what keeps `%2F` from smuggling an extra segment past the grammar.
      */
     private fun pathOf(request: HttpServletRequest): String {
-        val beneath = request.requestURI.removePrefix(request.contextPath).removePrefix(ROOT)
+        val beneath = request.appPath().removePrefix(ROOT)
         return beneath.ifEmpty { "/" }
     }
 

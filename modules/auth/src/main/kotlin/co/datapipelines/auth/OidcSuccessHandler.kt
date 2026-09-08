@@ -12,7 +12,15 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
  * OIDC login callback (auth.md §5.5). Fully provider-agnostic — reads
  * `authorizedClientRegistrationId` (whatever the deployment named the provider) and
  * the ID-token claims, provisions/links the user, issues the internal JWT, and sets
- * the `dp_session` cookie (HttpOnly, Secure, SameSite=Strict, §5.5/§8).
+ * the `dp_session` cookie (HttpOnly, Secure, **SameSite=Lax**, §5.5/§8).
+ *
+ * Lax, not Strict, and deliberately so (T33, observed live 2026-08-28): the post-login
+ * landing arrives over the cross-site redirect chain from the IdP, where Strict withholds
+ * the cookie — and a reload of that landing re-uses the cross-site initiator, so the user
+ * stays logged out forever. The full reasoning is at [sessionCookie]. This KDoc and
+ * auth.md §8.4 both claimed Strict until 096 §F while the code had set Lax since T33;
+ * two texts leaning on a defence the code does not provide is worse than the weaker
+ * defence, because the CSRF argument in §8.4 was written on top of them.
  *
  * ## Rejection paths (§4.2/§4.3) — each audited, each issuing NO session cookie
  * | Condition | Audit event | Redirect |

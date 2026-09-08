@@ -43,7 +43,7 @@ class OidcSignedInBounceFilter(
     private val log = LoggerFactory.getLogger(OidcSignedInBounceFilter::class.java)
 
     /** Inert everywhere but the authorization entry point. */
-    override fun shouldNotFilter(request: HttpServletRequest): Boolean = !request.requestURI.startsWith(AUTHORIZATION_PREFIX)
+    override fun shouldNotFilter(request: HttpServletRequest): Boolean = !request.appPath().startsWith(AUTHORIZATION_PREFIX)
 
     override fun doFilterInternal(
         request: HttpServletRequest,

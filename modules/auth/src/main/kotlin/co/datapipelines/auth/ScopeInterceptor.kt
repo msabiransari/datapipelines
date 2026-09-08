@@ -3,9 +3,12 @@ package co.datapipelines.auth
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
+import org.springframework.http.server.PathContainer
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.method.HandlerMethod
 import org.springframework.web.servlet.HandlerInterceptor
+import org.springframework.web.util.pattern.PathPattern
+import org.springframework.web.util.pattern.PathPatternParser
 
 /**
  * Enforces the §7.6 scope matrix on controller handlers (auth.md §8.1, filter step 7)
@@ -13,22 +16,28 @@ import org.springframework.web.servlet.HandlerInterceptor
  * operation's [ScopeMatrix.RestOperation.minScope] is the minimum.
  *
  * ## Default deny (AUTH-SEC-9)
- * A handler under the `/api` or `/partials` prefixes or on `/mcp` that carries **no**
+ * A handler the §8.3 allowlist does **not** make public and that carries **no**
  * `@RequiredScope` — on the method or on its controller class — is **denied**, not served.
  * Forgetting the annotation is the realistic failure mode (a new endpoint, a hurried
  * refactor), and fail-open there means an unscoped endpoint ships silently. The denial is
  * logged at ERROR naming the handler, because it is a wiring bug an operator must see, not a
  * user error.
  *
- * `/partials` joined the governed prefixes in the 022b fix round (review F6): the htmx
- * partials are reachable with an API key like any other route, so a mutating partial
- * without the floor bypassed its REST twin's scope — a `read` key could register a
- * datasource. Every partial declares its REST twin's §7.6 operation.
+ * The rule was three prefixes until 096 §C: `/api`, `/partials` (added in the 022b fix round,
+ * review F6 — a mutating partial without the floor bypassed its REST twin's scope, so a
+ * `read` key could register a datasource) and `/mcp`. That left THIRTEEN authenticated UI
+ * pages in neither the allowlist nor the governed set: the chain authenticated them and
+ * nothing scoped them, so any `user` key reached them at the implicit read floor, and a
+ * future mutation on a page route would have been unguarded (review finding F3). The rule is
+ * now stated the only way that cannot leave a gap: **public, or governed.** The three old
+ * prefixes are a strict subset of it — none of them appears in the allowlist — so nothing
+ * that was governed before is ungoverned now.
  *
- * Outside those prefixes an unannotated handler is allowed through: the login page,
- * static assets and health probes are gated by the filter chain's `permitAll`
- * list (§8.3), not by the scope matrix. An ANNOTATED handler is enforced on any path —
- * the prefixes govern only the default-deny.
+ * The public handlers are still allowed through unannotated, which was the original reason
+ * for stopping at the prefixes and is preserved exactly: the login page, the static assets,
+ * the marketing site, the packaged docs and the health probes are gated by the filter chain's
+ * `permitAll` list ([PublicPaths]), not by the scope matrix. An ANNOTATED handler is enforced
+ * on any path, public included — the allowlist governs only the default-deny.
  */
 class ScopeInterceptor(
     private val errorWriter: AuthErrorWriter,
@@ -51,7 +60,7 @@ class ScopeInterceptor(
         // every UI page: `/dashboard`, `/settings/api-keys`, `/api-console` before it declared
         // one) as a way around the confinement for a credential that authorises none of them.
         val confined = principal?.keyKind?.takeIf { it in ApiKeyKind.SCOPELESS }
-        if (principal != null && confined != null && !reachableBy(confined, request.requestURI)) {
+        if (principal != null && confined != null && !reachableBy(confined, request.appPath())) {
             return denyKind(request, response, principal, confined)
         }
 
@@ -150,11 +159,28 @@ class ScopeInterceptor(
         handler.getMethodAnnotation(RequiredScope::class.java)?.value
             ?: handler.beanType.getAnnotation(RequiredScope::class.java)?.value
 
-    /** True on the surfaces the §7.6 matrix governs: the REST API, the htmx partials and the MCP endpoint. */
-    private fun isScopeGoverned(request: HttpServletRequest): Boolean =
-        request.requestURI.startsWith(API_PREFIX) ||
-            request.requestURI.startsWith(PARTIALS_PREFIX) ||
-            request.requestURI == ApiKeyCredential.MCP_PATH
+    /**
+     * True on every surface the §7.6 matrix governs — which, since 096 §C, is **everything
+     * the §8.3 allowlist does not make public**.
+     *
+     * It used to be three prefixes: `/api/`, `/partials/` and `/mcp`. The KDoc's stated
+     * reason for stopping there was that the handlers OUTSIDE them are the ones the filter
+     * chain's `permitAll` list gates — the login page, the static assets, the health probes
+     * — and that reason is honoured exactly, not overridden: those handlers are still
+     * allowed through, because they are still on [PublicPaths.ENTRIES]. What the prefixes
+     * got wrong was everything else in that "outside" — thirteen authenticated UI pages
+     * that no allowlist and no matrix row had ever heard of, which the chain authenticated
+     * and then nobody scoped (review finding F3). Stating the rule as "public, or governed"
+     * closes that gap and removes the approximation: a future page route cannot land in a
+     * fourth URL space and be ungoverned by accident.
+     *
+     * The three old prefixes are a strict subset of the new rule — none of them appears in
+     * the allowlist — so no request that was governed before is ungoverned now.
+     */
+    private fun isScopeGoverned(request: HttpServletRequest): Boolean {
+        val path = request.appPath()
+        return PUBLIC_PATTERNS.none { it.matches(PathContainer.parsePath(path)) }
+    }
 
     private fun denyUnannotated(
         request: HttpServletRequest,
@@ -191,6 +217,14 @@ class ScopeInterceptor(
          */
         const val API_PREFIX = "/api/"
         const val PARTIALS_PREFIX = "/partials/"
+
+        /**
+         * The §8.3 allowlist, parsed once with the SAME parser Spring Security's chain
+         * matches those patterns with — so "is this handler public?" gets the same answer
+         * here as it got two filters earlier, rather than a second, drifting spelling of it.
+         */
+        private val PUBLIC_PATTERNS: List<PathPattern> =
+            PathPatternParser.defaultInstance.let { parser -> PublicPaths.PATTERNS.map(parser::parse) }
 
         /**
          * The published-endpoint subtree (ruling R-EP1). Engineers own everything beneath it;

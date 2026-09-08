@@ -393,6 +393,17 @@ class OidcSuccessHandler(
 }
 ```
 
+**`SameSite=Lax`, and it stays Lax (T33, 096 §F).** Strict is the instinctive choice here and
+it does not work: the post-login landing arrives over the cross-site redirect chain from the
+identity provider, where a Strict cookie is withheld — and a browser RELOAD of that landing
+re-uses the cross-site initiator, so the user never becomes logged in and the failure looks
+like "login is broken", not like a cookie attribute. Observed live 2026-08-28. Lax still
+withholds the cookie on cross-site POSTs; the control for state change is the `dp_csrf`
+double-submit token (§8.4), which does not depend on SameSite at all. This paragraph exists
+because the KDoc on `OidcSuccessHandler` and §8.4 both said Strict for three rounds while the
+code said Lax, and a text that leans on a defence the code does not provide invites someone
+to "fix" the code to match it.
+
 The success handler is **fully provider-agnostic.** It reads `authorizedClientRegistrationId` from the authentication token — that's whatever provider name the deployment configured. It doesn't know or care whether it's Google, Okta, or Keycloak.
 
 ---
@@ -543,6 +554,15 @@ After OIDC login, the server issues its own JWT:
 - **Signing secret:** `DATAPIPELINES_JWT_SECRET` env var (≥ 32 bytes random, base64). Required at startup.
 
 **Scope derivation at token issue (v1 rule):** the `scopes` claim is derived from the user record at login: `is_admin = true` → `["read", "execute", "author", "admin"]`; every other active user → `["read", "execute", "author"]`. Finer per-user scope assignment and IdP group sync are future work (§15). API-key scopes are chosen at key creation (§7.4) and are independent of this rule, bounded by the creator's scopes.
+
+A browser session is therefore **the broadest credential in the product** — at least `author`,
+and switchable across every workspace the user belongs to (§5.6), where an API key's workspace
+is pinned at issue and immutable. There is no read-only session: the §7.6 matrix cannot express
+"this principal is a browser" or "this principal is a key", so the four gates that need that
+distinction are written outside it, by hand — `requireSessionAdmin` on the credential-minting
+admin actions (§5A.7), `changeOwnPassword` refusing keys (§5A.4), `POST /workspace/switch`
+(§5.6), and `/api/x` refusing sessions (§7.7). Anything that must distinguish the two is a
+fifth one, not a scope.
 
 ### 6.2 Why not use OIDC tokens directly?
 
@@ -936,9 +956,19 @@ All `/api/v1/**` endpoints accept either:
 - `DP-API-Key: dpk_...` header (agents, programmatic clients).
 - `Cookie: dp_session=<jwt>` (browser UI calling REST directly).
 
-The filter chain tries API key first, then JWT. If both present, API key wins.
+The filter chain tries API key first, then JWT. **If both are present the API key decides the
+request — including when it decides to refuse it** (096 §E, review finding F9). A presented
+`DP-API-Key` that fails validation ends the request with its own code
+(`auth.api_key.invalid` / `auth.api_key.expired`); `JwtAuthenticationFilter` declines to
+authenticate the cookie behind it, and `AuthEntryPoint` answers with the key's stashed error.
 
-CSRF exemption is scoped by **credential type, never by path**: a request is exempt only when it carries an API key (`DP-API-Key` header, or `Authorization: Bearer dpk_` on `/mcp`) — a credential a hostile browser context cannot forge, with no cookie involved. A state-changing request authenticated by the `dp_session` cookie requires the `dp_csrf` double-submit token (`DP-CSRF-Token` header) **wherever it occurs**: `/partials/**` ([UI Screens §3](ui-screens.md#3-common-layout)), `POST /logout`, and cookie-authenticated calls to `/api/v1/**` alike. `/mcp` accepts no cookies at all (§8.5), so CSRF never arises there. `dp_session`'s `SameSite=Strict` (§5.5) is defense-in-depth, not the control — it does not defend against a same-site subdomain attacker. In the §8.1 chain this is a `RequestMatcher` over the credential carrier, not a path glob. A CSRF failure returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). All three cookies this module mints (`dp_session`, `dp_csrf`, `dp_oauth2_authz`) carry the `Secure` flag keyed off `datapipelines.auth.base-url`'s scheme (T33): `https://` — or no base-url at all — keeps `Secure`; an explicit `http://` base-url drops it so local development login works over plain HTTP. **Production MUST be https** — the wrong default would silently drop sessions there, so absent configuration fails secure. The `dp_csrf` cookie is **stable for the life of the browsing session**: it is minted by the first response that renders a CSRF token (the login page) and is never rotated or deleted afterwards — the chain's CSRF config pins `NullAuthenticatedSessionStrategy`, because Spring's default `CsrfAuthenticationStrategy` rotates-or-deletes the cookie on every security-context change, which (with per-request JWT authentication, §4.2) is every authenticated request and would strand each rendered page's `hx-headers` token against a rotated cookie (found 027). (History: v2.2's prose and sketch contradicted each other; v2.3 briefly resolved toward path-based exemption + `SameSite=Strict`; v2.4 supersedes both after two Gate C seats independently flagged the subdomain gap — exemption follows the credential, not the path.)
+Until 096 the rejection was stashed and the chain continued, so a revoked or expired key
+presented alongside a live `dp_session` was served at SESSION privilege — at least `author`
+(§6.1) — by a credential the server had just refused, and revoking a key produced no visible
+signal to a client holding both. Not browser-exploitable (a custom header forces a preflight
+this deployment does not grant), but it meant revocation did not end the session beside it.
+
+CSRF exemption is scoped by **credential type, never by path**: a request is exempt only when it carries an API key (`DP-API-Key` header, or `Authorization: Bearer dpk_` on `/mcp`) — a credential a hostile browser context cannot forge, with no cookie involved. A state-changing request authenticated by the `dp_session` cookie requires the `dp_csrf` double-submit token (`DP-CSRF-Token` header) **wherever it occurs**: `/partials/**` ([UI Screens §3](ui-screens.md#3-common-layout)), `POST /logout`, and cookie-authenticated calls to `/api/v1/**` alike. `/mcp` accepts no cookies at all (§8.5), so CSRF never arises there. `dp_session`'s `SameSite=Lax` (§5.5 — Strict withholds the cookie on the IdP's cross-site redirect chain and strands every login) is defense-in-depth, not the control: it defends against neither a same-site subdomain attacker nor a cross-site top-level GET. In the §8.1 chain this is a `RequestMatcher` over the credential carrier, not a path glob. A CSRF failure returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). All three cookies this module mints (`dp_session`, `dp_csrf`, `dp_oauth2_authz`) carry the `Secure` flag keyed off `datapipelines.auth.base-url`'s scheme (T33): `https://` — or no base-url at all — keeps `Secure`; an explicit `http://` base-url drops it so local development login works over plain HTTP. **Production MUST be https** — the wrong default would silently drop sessions there, so absent configuration fails secure. The `dp_csrf` cookie is **stable for the life of the browsing session**: it is minted by the first response that renders a CSRF token (the login page) and is never rotated or deleted afterwards — the chain's CSRF config pins `NullAuthenticatedSessionStrategy`, because Spring's default `CsrfAuthenticationStrategy` rotates-or-deletes the cookie on every security-context change, which (with per-request JWT authentication, §4.2) is every authenticated request and would strand each rendered page's `hx-headers` token against a rotated cookie (found 027). (History: v2.2's prose and sketch contradicted each other; v2.3 briefly resolved toward path-based exemption + `SameSite=Strict`; v2.4 supersedes both after two Gate C seats independently flagged the subdomain gap — exemption follows the credential, not the path.)
 
 ### 8.5 MCP endpoint (`/mcp`)
 
@@ -1137,6 +1167,21 @@ Validated API keys and owner-liveness results are cached in-memory per instance 
 
 All auth config keys (allowlist domains, JWT TTL, cache TTL, default key scopes, login rate limit) are defined in [Configuration §3.4](configuration.md#34-auth) — the single config authority. This spec does not restate names or defaults.
 
+**The login limiter's window is per INSTANCE (096 §F, review finding F8).** It is an in-memory
+fixed one-minute window per client address, held in each replica's own heap — so N replicas
+behind a load balancer give a client that lands on all of them an effective budget of
+**N × `login-per-minute`**. Deliberate: this is a brute-force damper, not a distributed quota,
+and a shared store on the login path costs more than it buys.
+
+It also **fails OPEN** at its ceiling: the table is bounded at 10,000 tracked clients, and once
+it is full (after sweeping rolled-over windows) a new client is admitted UNMETERED rather than
+the map being grown, so a spoofed-source-IP flood can never exhaust the heap. That is the
+owner's posture and it is unchanged; what 096 added is that each such admission increments
+`datapipelines.auth.login_rate_limit.saturated` ([Observability §4.1](observability.md#41-metric-naming)),
+so saturation is a rate to alert on rather than a WARN line lost inside the flood that caused
+it. The per-user API/MCP limiter ([Configuration §3.7](configuration.md#37-rate-limiting)) is
+a different budget with a different key and fails CLOSED — the two are not interchangeable.
+
 ---
 
 ## 12. Implementation Notes
@@ -1177,7 +1222,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 - [ ] `DATAPIPELINES_JWT_SECRET` is high-entropy (≥ 32 bytes random).
 - [ ] Email domain allowlist configured for internal-only deployments.
 - [ ] API keys hashed with Argon2id, never stored plaintext.
-- [ ] Session cookies `HttpOnly`, `Secure`, `SameSite=Strict`.
+- [ ] Session cookies `HttpOnly`, `Secure`, `SameSite=Lax` (§5.5 — Strict is unusable with an IdP redirect chain; CSRF, not SameSite, is the control).
 - [ ] CSRF protection on all state-changing UI endpoints.
 - [ ] No `/actuator/*` path reachable without auth on the application port; `/actuator/prometheus` served only on the separate management port ([Observability §4.2](observability.md#42-exposure)). Root `/health`, `/ready`, `/info` are the only public probes.
 - [ ] All auth events audited.

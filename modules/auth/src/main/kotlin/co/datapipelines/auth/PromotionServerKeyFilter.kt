@@ -206,7 +206,7 @@ class PromotionServerKeyFilter(
         )
     }
 
-    private fun isPromotionRoute(request: HttpServletRequest): Boolean = request.requestURI.startsWith(PROMOTION_PREFIX)
+    private fun isPromotionRoute(request: HttpServletRequest): Boolean = request.appPath().startsWith(PROMOTION_PREFIX)
 
     companion object {
         /**

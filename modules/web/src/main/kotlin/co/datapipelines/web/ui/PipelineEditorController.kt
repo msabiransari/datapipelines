@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.api.currentPrincipal
@@ -24,6 +26,10 @@ class PipelineEditorController(
     private val mapper: ObjectMapper = PipelineJson.objectMapper()
 
     @GetMapping("/pipelines/{id}/editor")
+    // 096 §C: the editors render AUTHORING state (draft bodies, unreleased versions),
+    // so a read key has no business here — the floor is the mutation operation the
+    // screen exists to perform, not the read that paints it.
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun editor(
         @PathVariable id: UUID,
         model: Model,

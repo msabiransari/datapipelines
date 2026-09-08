@@ -150,6 +150,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.mcp.tool.calls` | counter | `tool_name`, `status` | MCP tool invocations |
 | `datapipelines.auth.login.attempts` | counter | `outcome` (`success`/`domain_not_allowed`/`user_inactive`/`oidc_error`) | Login attempts. Outcomes mirror the audit events in [Auth §10.1](auth.md#101-events). There is **no** lockout outcome: authentication is OIDC-only, the product stores no local passwords, and no lockout mechanism exists to count. |
 | `datapipelines.auth.api_key.validations` | counter | `outcome` (success/invalid/expired/revoked) | API key validations |
+| `datapipelines.auth.login_rate_limit.saturated` | counter | (none) | Login rate-limit admissions made with the tracked-client table FULL — the limiter's fail-open branch ([Auth §11.5](auth.md#115-other-auth-configuration-keys)). The table is bounded at 10,000 client addresses; past that a new client is admitted unmetered rather than the map grown, so a spoofed-IP flood cannot exhaust the heap. Registered eagerly, so a healthy deployment reports `0` rather than an absent series. Any sustained non-zero rate means the login surface is unmetered for new clients right now. No tags: it is one closed condition, and §4.3 forbids inventing a dimension that is not a bounded set |
 
 **Result delivery, SSE and idempotency** ([REST API §7](rest-api.md#7-result-delivery), D9):
 

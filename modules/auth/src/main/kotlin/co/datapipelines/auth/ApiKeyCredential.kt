@@ -46,7 +46,7 @@ object ApiKeyCredential {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.let { return it }
-        if (request.requestURI != MCP_PATH) return null
+        if (request.appPath() != MCP_PATH) return null
         val authorization = request.getHeader("Authorization")?.trim().orEmpty()
         if (!authorization.startsWith(BEARER_PREFIX)) return null
         return authorization.substring(BEARER_PREFIX.length).trim().takeIf { it.startsWith(KEY_PREFIX) }
@@ -70,11 +70,22 @@ object ApiKeyCredential {
  *   rather than a misleading 403 CSRF error.
  *
  * Everything else — including cookie-authenticated `POST` under the `/api/v1` prefix — requires the
- * `dp_csrf` double-submit token. `SameSite=Strict` on `dp_session` is
+ * `dp_csrf` double-submit token. `SameSite=Lax` on `dp_session` is
  * defence-in-depth only: it does not stop a same-site subdomain attacker.
+ *
+ * ## Why keying on PRESENCE is safe (096 §E)
+ * The exemption fires on the header being THERE, not on it being valid, which reads like a
+ * hole: send `DP-API-Key: garbage` alongside a stolen cookie and CSRF is skipped. It was one
+ * until 096 §E, because [ApiKeyFilter] used to stash its rejection and continue, and
+ * [JwtAuthenticationFilter] then authenticated the cookie — so the forged header bought a
+ * CSRF-exempt request at SESSION privilege. That fall-through is closed: a presented-and-
+ * rejected key ends the request with the key's own 401, and no cookie authenticates behind
+ * it. A bad header can therefore no longer reach a cookie session at all, which is what
+ * makes presence-keyed exemption sound rather than merely convenient — the exemption and the
+ * only credential it could have protected can never both be live on one request.
  */
 class ApiKeyCredentialMatcher : RequestMatcher {
     override fun matches(request: HttpServletRequest): Boolean =
         !request.getHeader(ApiKeyCredential.HEADER).isNullOrBlank() ||
-            request.requestURI == ApiKeyCredential.MCP_PATH
+            request.appPath() == ApiKeyCredential.MCP_PATH
 }

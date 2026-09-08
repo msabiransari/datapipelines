@@ -63,7 +63,7 @@ class ForcedPasswordChangeInterceptor(
                 userService.snapshot(principal.userId)?.mustChangePassword == true
         if (!gated) return true
 
-        val path = request.requestURI
+        val path = request.appPath()
         when {
             path.startsWith(API_PREFIX) || path == ApiKeyCredential.MCP_PATH -> {
                 authErrorWriter.write(request, response, PasswordChangeRequiredException())

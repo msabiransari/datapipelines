@@ -26,6 +26,7 @@ class UserSettingsController(
     private val localPasswordService: LocalPasswordService,
 ) {
     @GetMapping("/settings")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun settings(
         model: Model,
         request: HttpServletRequest,
@@ -58,6 +59,7 @@ class UserSettingsController(
      * request after it (measured; see partials/password-card.html).
      */
     @GetMapping("/settings/password")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun changePassword(
         model: Model,
         request: HttpServletRequest,

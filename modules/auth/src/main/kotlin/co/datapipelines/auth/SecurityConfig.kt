@@ -39,8 +39,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * [ApiKeyCredentialMatcher] is the only exemption: a request is exempt when it
  * carries `DP-API-Key`, or when it targets `/mcp` where cookies never authenticate.
  * Cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
- * **everywhere**, the `/api/v1` prefix included — `SameSite=Strict` is defence-in-depth, not
- * the control, because it does not stop a same-site subdomain attacker.
+ * **everywhere**, the `/api/v1` prefix included — `SameSite=Lax` (§5.5: Strict breaks the
+ * cross-site login redirect) is defence-in-depth, not the control, because it stops neither a
+ * same-site subdomain attacker nor a cross-site top-level GET.
  */
 @Configuration
 @EnableWebSecurity

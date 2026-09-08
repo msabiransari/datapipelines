@@ -36,6 +36,10 @@ class TemplateEditorController(
     private val drafts: TemplateDraftService,
 ) {
     @GetMapping("/templates/editor")
+    // 096 §C: the editors render AUTHORING state (draft bodies, unreleased versions),
+    // so a read key has no business here — the floor is the mutation operation the
+    // screen exists to perform, not the read that paints it.
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun editor(
         @RequestParam name: String,
         @RequestParam(required = false) version: Int?,

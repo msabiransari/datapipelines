@@ -39,6 +39,7 @@ class DatasourceDetailUiController(
      * the datasources listing.
      */
     @GetMapping("/datasources/{name}")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun detail(
         model: Model,
         request: HttpServletRequest,
