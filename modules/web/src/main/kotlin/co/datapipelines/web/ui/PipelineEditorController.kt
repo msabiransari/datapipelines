@@ -23,6 +23,10 @@ class PipelineEditorController(
     // ObjectMapperDefaultParameterKonsistTest.
     private val mapper: ObjectMapper = PipelineJson.objectMapper()
 
+    // Three 404s, three distinct absences: no pipeline, no version to edit (D55/§3.4), no body for
+    // the version we resolved. The editor's own tolerance for a missing DETAIL row is what keeps
+    // them separate — see the narrow-reads comment below.
+    @Suppress("ThrowsCount")
     @GetMapping("/pipelines/{id}/editor")
     fun editor(
         @PathVariable id: UUID,

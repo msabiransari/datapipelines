@@ -251,7 +251,9 @@ class TemplatesRenderTool(
         workspaceId: java.util.UUID,
         id: String,
     ): Int {
-        val version = args.version() ?: return templates.findLatest(workspaceId, id)?.version ?: throw McpNotFound.template(id)
+        // The working version (D55/§7.1): a template created and not yet released has only a
+        // draft, and defaulting to the released one would refuse to render it.
+        val version = args.version() ?: return templates.findWorking(workspaceId, id)?.version ?: throw McpNotFound.template(id)
         if (templates.lookupVersion(workspaceId, id, version) == null) {
             throw if (templates.existsId(workspaceId, id)) McpNotFound.templateVersion(id, version) else McpNotFound.template(id)
         }

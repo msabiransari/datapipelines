@@ -105,6 +105,24 @@ class TemplateRepository(
                 MAPPER,
             ).singleOrNull()
 
+    /**
+     * The **working version's** projection (versioning §7.1): the DRAFT when one exists, else the
+     * current RELEASED version. Null only when the template is unknown or soft-deleted.
+     *
+     * [findLatest] answers "what is released"; this answers "what is the template right now", and
+     * since D55 the two differ for every template between its creation and its first release —
+     * where [findLatest] is null, so an authoring read built on it would 404 on a template the
+     * caller had just created. Composed from two existing reads rather than a third SQL predicate:
+     * the draft pointer is a single-row lookup and the exact-version read is already the honest one.
+     */
+    fun findWorking(
+        workspaceId: UUID,
+        id: String,
+    ): Template? =
+        findDraftDetail(workspaceId, id)
+            ?.let { findVersion(workspaceId, id, it.version) }
+            ?: findLatest(workspaceId, id)
+
     /** A specific stored version's full record, including of a soft-deleted template (§5.1). */
     fun findVersion(
         workspaceId: UUID,
@@ -907,7 +925,15 @@ class TemplateRepository(
             """.trimIndent()
 
         /**
-         * The live-at-current-version page predicate of [list], shared with [count] (034 E3)
+         * The working-version page predicate of [list], shared with [count] (034 E3)
+         *
+         * **The COALESCE is D55.** `current_version` is NULL until a human releases, so a plain
+         * `v.version = t.current_version` made every freshly created template INVISIBLE — absent
+         * from the explorer, from `templates_list` and from its own count. The pointer still wins
+         * whenever there IS a release (a template with a draft over a release lists its RELEASED
+         * projection, and the `drafts` badge is what says a draft exists); the draft fills the gap
+         * only where nothing has been released at all, because there it is the only version the
+         * template has.
          * so the page and its total can never disagree. Every optional filter is CAST in the
          * SQL: a bare `? IS NULL` gives Postgres no type to infer and the statement will not
          * even prepare.
@@ -916,7 +942,11 @@ class TemplateRepository(
             """
             WHERE t.is_deleted = FALSE
               AND t.workspace_id = :workspaceId
-              AND v.version = t.current_version
+              AND v.version = COALESCE(
+                    t.current_version,
+                    (SELECT MAX(d.version) FROM template_versions d
+                      WHERE d.template_id = t.id AND d.status = 'DRAFT')
+                  )
               AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
               AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
               AND (
@@ -929,9 +959,10 @@ class TemplateRepository(
             """.trimIndent()
 
         /**
-         * The live-at-current-version predicate of ONE tree level, shared by
-         * [listChildFolders], [listChildTemplates] and [countChildTemplates] so a level, its
-         * folders and its total can never disagree.
+         * The working-version predicate of ONE tree level, shared by [listChildFolders],
+         * [listChildTemplates] and [countChildTemplates] so a level, its folders and its total can
+         * never disagree. It carries [LIST_WHERE]'s D55 COALESCE for the same reason: a
+         * never-released template must still have a row in the tree.
          *
          * It is [LIST_WHERE] minus the `q` clause (browse and search are different
          * presentations, §9.2) plus the prefix scope. Every optional filter is CAST in the
@@ -942,7 +973,11 @@ class TemplateRepository(
             """
             WHERE t.is_deleted = FALSE
               AND t.workspace_id = :workspaceId
-              AND v.version = t.current_version
+              AND v.version = COALESCE(
+                    t.current_version,
+                    (SELECT MAX(d.version) FROM template_versions d
+                      WHERE d.template_id = t.id AND d.status = 'DRAFT')
+                  )
               AND t.name LIKE CAST(:namePattern AS TEXT) ESCAPE '\'
               AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
               AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))

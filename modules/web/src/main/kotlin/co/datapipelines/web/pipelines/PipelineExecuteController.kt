@@ -49,6 +49,7 @@ class PipelineExecuteController(
      * pre-stream error (404, 400 parameter binding) toward a client sending only
      * `Accept: text/event-stream` cannot render the §4.2 envelope and falls out as a 406.
      */
+    @Suppress("ThrowsCount") // unknown pipeline, no version to run at all (D55/§3.4), unknown version
     @PostMapping(
         "/{id}/execute",
         produces = [MediaType.TEXT_EVENT_STREAM_VALUE, MediaType.APPLICATION_JSON_VALUE],

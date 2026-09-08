@@ -121,6 +121,32 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `a never-released template is still listed, still browsable and still readable`() {
+        // The defect this predicate exists to prevent, asserted at the three reads that would
+        // otherwise have made a template an agent just created INVISIBLE: `v.version =
+        // t.current_version` matches nothing while the pointer is NULL (D55). Caught by a browser
+        // test whose templates tree came up empty — no unit test looked at it.
+        repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT)
+
+        withClue("the flat listing and its count") {
+            repository.list(workspaceId, offset = 0, limit = 10).map { it.id } shouldContainExactly
+                listOf("test/fetch_orders.sql")
+            repository.count(workspaceId) shouldBe 1
+        }
+        withClue("one level of the tree — the folder and its leaf") {
+            repository.listChildFolders(workspaceId, prefix = null).map { it.segment } shouldContainExactly listOf("test")
+            repository.listChildTemplates(workspaceId, prefix = "test").map { it.id } shouldContainExactly
+                listOf("test/fetch_orders.sql")
+        }
+        withClue("and the working-version read, which is what every authoring surface calls") {
+            checkNotNull(repository.findWorking(workspaceId, "test/fetch_orders.sql")).version shouldBe 1
+            withClue("while the RELEASED projection is honestly null — nothing is released") {
+                repository.findLatest(workspaceId, "test/fetch_orders.sql").shouldBeNull()
+            }
+        }
+    }
+
+    @Test
     fun `an omitted id is auto-generated inside the identifier rule`() {
         val stored = repository.createReleased(workspaceId, draft(id = null), actor)
         isValidTemplateName(stored.id) shouldBe true

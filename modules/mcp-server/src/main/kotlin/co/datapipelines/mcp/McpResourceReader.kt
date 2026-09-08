@@ -102,6 +102,10 @@ class McpResourceReader(
         return McpSchema.ReadResourceResult.builder(listOf(contents)).build()
     }
 
+    // Three absences, one answer: unknown pipeline, no version to serve at all (D55/§3.4), and a
+    // version whose body is gone. Each is the SAME catalogued not-found, and merging them into one
+    // branch would hide which read actually came back empty.
+    @Suppress("ThrowsCount")
     private fun pipelineBody(
         workspaceId: UUID,
         id: UUID,
@@ -132,7 +136,10 @@ class McpResourceReader(
     ): McpSchema.TextResourceContents {
         val body =
             if (version == null) {
-                templates.findLatest(workspaceId, id)?.body
+                // D55/§7.1: the WORKING version — `findLatest` is null for a template nobody has
+                // released yet, and the resource would have answered not-found for one an agent
+                // had just created.
+                templates.findWorking(workspaceId, id)?.body
             } else {
                 templates.lookupVersion(workspaceId, id, version)?.body
             } ?: throw notFound(uri)

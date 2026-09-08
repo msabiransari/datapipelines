@@ -115,7 +115,9 @@ class TemplatePartialController(
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
         model.addAttribute("templateId", name)
-        model.addAttribute("template", templates.findLatest(workspaceId, name))
+        // D55/§7.1: the working version — a never-released template has no released projection,
+        // and the detail pane must show the draft rather than an empty card.
+        model.addAttribute("template", templates.findWorking(workspaceId, name))
         model.addAttribute("versions", templates.listVersions(workspaceId, name))
         model.addAttribute("draftVersion", templates.findDraftDetail(workspaceId, name)?.version)
         model.addAttribute("inUse", usage.inUseCounts(workspaceId, name))

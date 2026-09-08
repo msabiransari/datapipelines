@@ -213,7 +213,9 @@ class TemplateImportService(
         draft: TemplateDraft,
     ): TemplateDraft {
         val established =
-            templates.findLatest(workspaceId, id)?.type
+            // The working version: a local template that exists only as a draft still has an
+            // established type, and §5.3 inherits it (D55).
+            templates.findWorking(workspaceId, id)?.type
                 ?: throw ApiErrors.templateNotFound(id)
         return TemplateTypeRule.forExisting(draft, established)
     }

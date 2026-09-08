@@ -46,8 +46,11 @@ class TemplateDraftService(
         // §5.5: the template mirror of the pipeline guard — fail-closed at the write path.
         authoring.requireTemplateAuthoring()
 
+        // The WORKING version, not the released one (D55): between a template's creation and its
+        // first release there IS no released projection, and reading one would refuse the second
+        // write to a draft the same caller had just created.
         val latest =
-            templates.findLatest(workspaceId, id) ?: throw notFound(id)
+            templates.findWorking(workspaceId, id) ?: throw notFound(id)
 
         // 046 §5.3: the draft inherits the template's established type; a payload carrying a
         // different one is refused here, and every row the write paths below store carries the
