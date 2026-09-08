@@ -2,6 +2,8 @@ package co.datapipelines.mcp
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DialectAdapters
+import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.typesystem.Dialect
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -36,7 +38,10 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
         if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
         put("readonly", isReadonly)
         put("workspace", workspaceName)
-        put("pool", properties.hikari)
+        // §5 (094): the EFFECTIVE pool settings, not the row's usually-empty `properties.hikari`
+        // map — each value with its unit and the layer that supplied it, so an agent explaining
+        // a pool-timeout failure can read the number the pool actually runs with.
+        put("pool", PoolSettings.wire(this@toMcpMetadata, DialectAdapters.forDialect(dialect)))
     }
 
 /** `datasources_list` (mcp-server.md §6.2.10). Scope: `read`. */

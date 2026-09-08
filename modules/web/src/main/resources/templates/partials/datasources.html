@@ -95,6 +95,16 @@
                       th:attr="hx-post=@{/partials/datasources/{name}/test(name=${ds.name})}, hx-target='#toast', hx-swap='beforeend'"
                       hx-disabled-elt="this"
                       th:text="'Test'">Test</button>
+              <!-- 094 §A/§B. Both fetch a whole backdrop into the page's one empty
+                   #ds-dialog container: `.u-backdrop` is display:flex by default, so the
+                   dialog is on screen the moment htmx swaps it — no open() script to get
+                   out of step with the markup, and closing is emptying the container. -->
+              <button class="ds-button ds-button-secondary ds-button-sm"
+                      th:attr="hx-get=@{/partials/datasources/{name}/edit(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
+                      hx-disabled-elt="this">Edit</button>
+              <button class="ds-button ds-button-secondary ds-button-sm"
+                      th:attr="hx-get=@{/partials/datasources/{name}/delete(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
+                      hx-disabled-elt="this">Delete</button>
             </th:block>
           </td>
         </tr>

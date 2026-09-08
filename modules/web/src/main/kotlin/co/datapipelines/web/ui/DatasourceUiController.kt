@@ -6,6 +6,7 @@ import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.web.datasources.DatasourcePoolForm
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -42,6 +43,12 @@ class DatasourceUiController(
         // is a better answer than a silently short list that hides the contract.
         model.addAttribute("credentialKinds", CredentialKind.entries.map { it.wire })
         model.addAttribute("selectedDialect", dialect ?: "")
+        // 094 §A: the register modal's collapsed "Connection pool" section, prefilled for the
+        // dialect its select shows FIRST — the same list, same order, so the initial render and
+        // the fragment the select re-fetches on change cannot start out disagreeing.
+        model.addAttribute("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
+        // Nothing is registered yet, so the mirrored readonly flag is the form's own default.
+        model.addAttribute("poolReadonly", false)
         model.addAttribute("scopes", scopes())
         model.addAttribute("isAdmin", isAdmin())
         model.addAttribute("memberDatasourcesEnabled", workspacesProperties.memberDatasourcesEnabled)

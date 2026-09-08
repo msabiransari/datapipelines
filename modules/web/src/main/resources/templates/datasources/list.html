@@ -47,6 +47,12 @@
        so the swap target survives every refresh — this div is only a placeholder. -->
   <div th:replace="~{partials/datasources :: fragment}"></div>
 
+  <!-- 094: the ONE container the edit and delete dialogs are fetched into. It is empty
+       until a row action fills it; the fetched fragment IS the backdrop, and `.u-backdrop`
+       is display:flex, so nothing has to open it. Closing empties the container, which is
+       also what the success path does. -->
+  <div id="ds-dialog"></div>
+
   <div id="register-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-md">
       <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideRegisterModal()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
@@ -63,8 +69,16 @@
           <input type="text" name="displayName" class="ds-input" placeholder="Production Postgres">
         </div>
         <div class="u-mb-md">
-          <label class="u-block u-secondary u-text-sm u-mb-xs">Dialect</label>
-          <select name="dialect" class="ds-input" required>
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-register-dialect">Dialect</label>
+          <!-- 094 §A: the pool section is prefilled with the EFFECTIVE default for the CHOSEN
+               dialect (adapter default -> app default -> HikariCP's own), so the select re-fetches
+               it on change. `hx-include` is deliberately absent: this control's own value is the
+               only input, and including the form would post the secret to a GET. -->
+          <select name="dialect" id="ds-register-dialect" class="ds-input" required
+                  th:attr="hx-get=@{/partials/datasources/pool-fields}"
+                  hx-target="#ds-pool-fields"
+                  hx-swap="outerHTML"
+                  hx-trigger="change">
             <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}">POSTGRES</option>
           </select>
         </div>
@@ -110,6 +124,12 @@
           </label>
 <span class="u-muted u-text-xs" th:text="${bindingHint}"></span>
         </div>
+        <details class="u-mb-md">
+          <summary class="u-secondary u-text-sm">Connection pool — defaults</summary>
+          <div class="u-mt-md">
+            <div th:replace="~{partials/datasource-pool-fields :: fields}"></div>
+          </div>
+        </details>
         <div id="register-result" class="u-mb-md"></div>
         <button type="submit" class="ds-button ds-button-primary u-full">Register</button>
       </form>
@@ -117,6 +137,13 @@
   </div>
 
   <script>
+    // 094 §A/§B: the edit and delete dialogs live in #ds-dialog. Emptying it is the ONLY
+    // close path — no display toggling, so the container can never be left holding a hidden
+    // dialog whose stale form would post on the next Enter.
+    function closeDsDialog() {
+      document.getElementById('ds-dialog').innerHTML = '';
+    }
+
     function showRegisterModal() {
       document.getElementById('register-result').removeAttribute('data-error');
       document.getElementById('register-result').innerHTML = '';
@@ -161,10 +188,46 @@
       });
       if (result) observer.observe(result, {childList: true, subtree: true});
     };
+    // 094: the edit/delete dialogs use the SAME success/refusal contract as the register
+    // modal (022/F9) — a 4xx refusal renders inline and must NOT close the dialog, while the
+    // success node's arrival closes it. The dialog's markup is fetched, so this listener is
+    // delegated on document.body rather than bound to an element that may not exist yet.
+    var initDsDialog = function() {
+      var container = document.getElementById('ds-dialog');
+
+      document.body.addEventListener('htmx:responseError', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#ds-dialog')) return;
+        var result = container.querySelector('#ds-dialog-result');
+        if (!result) return;
+        result.setAttribute('data-error', 'true');
+        result.innerHTML = event.detail.xhr.responseText;
+      });
+
+      document.body.addEventListener('htmx:beforeRequest', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#ds-dialog')) return;
+        var result = container.querySelector('#ds-dialog-result');
+        if (!result) return;
+        result.removeAttribute('data-error');
+        result.innerHTML = '';
+      });
+
+      // The success node carries data-ds-saved; the refusal never does. Closing on the
+      // ATTRIBUTE rather than on "the result box is non-empty" is what keeps a refusal on
+      // screen — the same distinction the register modal draws with data-error.
+      document.body.addEventListener('htmx:afterSwap', function(event) {
+        if (!container.contains(event.target)) return;
+        if (event.target.querySelector('[data-ds-saved]')) closeDsDialog();
+      });
+    };
+
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initRegisterModal);
+      document.addEventListener('DOMContentLoaded', function() {
+        initRegisterModal();
+        initDsDialog();
+      });
     } else {
       initRegisterModal();
+      initDsDialog();
     }
   </script>
 </th:block>

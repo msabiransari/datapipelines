@@ -1,0 +1,66 @@
+<!-- The datasource DELETE dialog (ui-screens.md §4.5, round 094 §B).
+
+     It answers "where is this used?" BEFORE it offers anything. Three exclusive
+     branches, and only the last one has a button:
+
+       1. D8 refuses (a member on a global datasource) — say so, offer nothing.
+       2. Pipelines reference it — list them, node by node, with the version that
+          carries the reference and that version's status, exactly as the REST
+          409 `datasource.in_use` details do (061/T79). The confirm button is not
+          rendered at all on this branch, so the refusal cannot be clicked past.
+       3. Nothing references it — a confirm that NAMES the datasource.
+
+     The usage rows come from the same DatasourceReferences scan the 409 uses, so
+     the dialog and the refusal cannot disagree. The delete itself re-runs the
+     guard: a pipeline can start referencing this datasource between the dialog
+     opening and the button being pressed, and the screen is never the authority. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" id="ds-delete-modal">
+  <div class="ds-card app-modal app-modal-md">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" onclick="closeDsDialog()">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md">Delete <span th:text="${datasource.name}">pg-prod</span>?</h2>
+
+    <!-- 1. D8 -->
+    <th:block th:if="${forbidden} != null">
+      <p class="u-secondary u-text-sm" id="ds-delete-forbidden" th:text="${forbidden}">Admin required.</p>
+    </th:block>
+
+    <th:block th:if="${forbidden} == null">
+      <!-- 2. In use -->
+      <th:block th:unless="${#lists.isEmpty(usages)}">
+        <p class="u-secondary u-text-sm" id="ds-delete-in-use">
+          <strong th:text="${datasource.name}">pg-prod</strong> cannot be deleted: it is referenced by
+          <span th:text="${#lists.size(usedByPipelines)}">2</span> pipeline(s) across
+          <span th:text="${#lists.size(usages)}">3</span> node(s), including historical pipeline versions.
+          Remove or repoint those nodes first.
+        </p>
+        <ul class="u-text-sm u-mb-md" id="ds-delete-usages">
+          <li th:each="u : ${usages}">
+            <a th:href="@{/pipelines(q=${u.pipelineName})}" th:text="${u.pipelineName}">sales_daily</a>
+            <span class="u-muted">›</span>
+            <span class="u-mono" th:text="${u.nodeId}">extract</span>
+            <span class="u-muted u-text-xs"
+                  th:text="'(v' + ${u.pipelineVersion} + ' ' + ${#strings.toLowerCase(u.versionStatus)} + ')'">(v3 released)</span>
+          </li>
+        </ul>
+      </th:block>
+
+      <!-- 3. Unused — the only branch with a button -->
+      <th:block th:if="${#lists.isEmpty(usages)}">
+        <p class="u-secondary u-text-sm" id="ds-delete-confirm-text">
+          No pipeline references <strong th:text="${datasource.name}">pg-prod</strong> in any stored version.
+          Deleting it closes its connection pool on every instance — queries already running finish first.
+        </p>
+        <form th:attr="hx-post=@{/partials/datasources/{name}/delete(name=${datasource.name})}"
+              hx-target="#ds-dialog-result"
+              hx-swap="innerHTML">
+          <div id="ds-dialog-result" class="u-mb-md"></div>
+          <button type="submit" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+                  th:text="'Delete ' + ${datasource.name}">Delete pg-prod</button>
+        </form>
+      </th:block>
+    </th:block>
+  </div>
+</div>

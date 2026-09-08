@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.ValidationResult.ValidationError
+import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -347,6 +348,15 @@ class DatasourceValidator(
         props.hikari
             .filterKeys { it.lowercase() !in RefusedPropertyKeys.SERVER_MANAGED }
             .forEach { (key, value) -> probeHikariKey(key, value, propertyErrors) }
+        // §5 RANGE rules over the catalogued pool keys (094). HikariCP enforces almost all of
+        // its own floors by logging a WARN and OVERWRITING the value, so a row can store — and
+        // a screen can show — a number the pool never uses. These refuse instead. Only keys the
+        // per-key probe accepted are ranged: a non-numeric value is one problem, not two.
+        val probeFailed = propertyErrors.mapTo(mutableSetOf()) { it.field }
+        PoolSettings.validate(datasource, adapters(datasource.dialect)).forEach { violation ->
+            val field = "properties.hikari.${violation.key.truncateForError()}"
+            if (field !in probeFailed) propertyErrors += propertiesError(field, violation.message)
+        }
 
         errors += propertyErrors
 

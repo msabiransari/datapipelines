@@ -5,8 +5,11 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceProperties
+import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.web.datasources.DatasourcePoolForm
 import co.datapipelines.web.datasources.DatasourceWorkspaceRules
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -29,6 +32,13 @@ import org.springframework.web.bind.annotation.RequestParam
 class DatasourcePartialController(
     private val datasources: DatasourceRegistry,
     private val rules: DatasourceWorkspaceRules,
+    /**
+     * The SAME any-version reverse scan the REST delete's `409 datasource.in_use` reports
+     * (061/T79). The delete dialog asks it FIRST and renders its rows, so "where is this used"
+     * is answered before anything is at stake — and by the one authority, not a second query
+     * that could disagree with the refusal the user would hit a moment later.
+     */
+    private val references: DatasourceReferences,
 ) {
     @GetMapping("/partials/datasources")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -135,6 +145,7 @@ class DatasourcePartialController(
         @RequestParam(required = false) description: String?,
         @RequestParam(required = false, defaultValue = "false") global: Boolean,
         @RequestParam(required = false, defaultValue = "false") readonly: Boolean,
+        @RequestParam params: Map<String, String>,
     ): Any {
         val principal = principal() ?: error("No authenticated principal")
         return try {
@@ -160,6 +171,10 @@ class DatasourcePartialController(
                     secret = password?.takeIf { it.isNotEmpty() },
                     isReadonly = readonly,
                     workspaceId = workspaceId,
+                    // 094 §A: only the pool fields the operator CHANGED. A field left at the
+                    // prefilled default is not persisted, so a later change to a product default
+                    // still reaches datasources created through this form.
+                    properties = DatasourceProperties(hikari = DatasourcePoolForm.toHikari(params, resolvedDialect)),
                 )
             if (datasources.exists(datasource.name)) {
                 return refused("A datasource named '${datasource.name}' already exists.")
@@ -176,6 +191,204 @@ class DatasourcePartialController(
             refused(e.message ?: "The connection details were rejected.")
         }
     }
+
+    // ------------------------------------------------------------------ §4.5 pool fields (094)
+
+    /**
+     * The create dialog's "Connection pool" fields for one dialect (datasources.md §5).
+     *
+     * A fetch rather than eight static inputs because the prefilled value is the EFFECTIVE
+     * default for the CHOSEN dialect, and the dialect is chosen in the same form: the select
+     * swaps this fragment on change. Every shipped dialect happens to resolve to the same
+     * numbers today — no adapter overrides a pool setting — but the resolution is the adapter's
+     * to make, and a form that hard-coded today's answer would be wrong on the first dialect
+     * that disagrees, silently.
+     */
+    @GetMapping("/partials/datasources/pool-fields")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    fun poolFields(
+        model: Model,
+        @RequestParam(required = false) dialect: String?,
+    ): String {
+        val resolved =
+            dialect?.trim()?.takeIf { it.isNotEmpty() }?.let { wire ->
+                Dialect.entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) }
+            } ?: Dialect.entries.first()
+        model.addAttribute("poolFields", DatasourcePoolForm.fields(resolved))
+        // The create dialog has no datasource yet, so the readonly mirror reads from the form's
+        // own checkbox rather than from a row — rendered by the caller, not here.
+        model.addAttribute("poolReadonly", false)
+        return "partials/datasource-pool-fields"
+    }
+
+    // ------------------------------------------------------------------ §4.5 edit (094)
+
+    /** The edit dialog, prefilled from the row — including its effective pool settings. */
+    @GetMapping("/partials/datasources/{name}/edit")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    fun editForm(
+        model: Model,
+        @PathVariable name: String,
+    ): Any {
+        val datasource = visible(name) ?: return notFoundDialog(name)
+        model.addAttribute("datasource", datasource)
+        model.addAttribute("dialects", Dialect.entries.map { it.wire })
+        model.addAttribute("credentialKinds", CredentialKind.entries.map { it.wire })
+        model.addAttribute("poolFields", DatasourcePoolForm.fields(datasource))
+        model.addAttribute("poolReadonly", datasource.isReadonly)
+        model.addAttribute("isAdmin", principal()?.isAdmin == true)
+        return "partials/datasource-edit"
+    }
+
+    /**
+     * The edit dialog's action — the UI twin of `PUT /api/v1/datasources/{name}` (§9.4), through
+     * the SAME [DatasourceWorkspaceRules] gates and the SAME `registry.save` boundary.
+     *
+     * `password` blank means KEEP the stored credential (§9.4): the form never renders one back,
+     * so a blank field is "unchanged", never "clear it".
+     *
+     * `pool.*` fields are collected from the whole parameter map rather than declared one by one:
+     * the catalog is [co.datapipelines.datasources.pooling.PoolSettings]'s, and a controller
+     * signature that re-listed the eight keys would be a second place to add the ninth.
+     */
+    @Suppress("LongParameterList") // the edit form's fields, one parameter each (the §5 form idiom)
+    @PostMapping("/partials/datasources/{name}")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    fun update(
+        model: Model,
+        @PathVariable name: String,
+        @RequestParam jdbcUrl: String,
+        @RequestParam(required = false, defaultValue = "password") credentialKind: String,
+        @RequestParam(required = false) username: String?,
+        @RequestParam(required = false) password: String?,
+        @RequestParam(required = false) displayName: String?,
+        @RequestParam(required = false) description: String?,
+        @RequestParam(required = false, defaultValue = "false") global: Boolean,
+        @RequestParam(required = false, defaultValue = "false") globalPresent: Boolean,
+        @RequestParam(required = false, defaultValue = "false") readonly: Boolean,
+        @RequestParam params: Map<String, String>,
+    ): Any {
+        val principal = principal() ?: error("No authenticated principal")
+        val existing = visible(name) ?: return refused("Datasource '$name' is not visible in the active workspace.")
+        return try {
+            val kind =
+                CredentialKind.fromWireOrNull(credentialKind.trim().lowercase())
+                    ?: return refused("Unknown credential kind '$credentialKind'.")
+            rules.requireGlobalMutationAllowed(principal, existing, name)
+            rules.requireMemberDatasourcesGate(principal)
+            // An unchecked HTML checkbox posts NOTHING, which is indistinguishable from "the
+            // field was not on the form at all" — so an admin could never un-global a datasource
+            // through a bare checkbox. `globalPresent` is the companion hidden field the admin
+            // form renders (and a member form does not): present ⇒ the checkbox's value is a
+            // deliberate write, absent ⇒ keep the stored binding. A member forging it is refused
+            // by the same admin-only rule REST applies.
+            val globalRequested = if (globalPresent) global else null
+            rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
+            // The dialect is immutable on this surface: changing it would repoint a live
+            // datasource at a different driver under the same name, and every pipeline that
+            // references it by name would silently follow. REST does not allow it either.
+            val updated =
+                existing.copy(
+                    displayName = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: name,
+                    description = description?.trim()?.takeIf { it.isNotEmpty() },
+                    jdbcUrl = jdbcUrl.trim(),
+                    username = username?.trim()?.takeIf { it.isNotEmpty() },
+                    credentialKind = kind,
+                    secret = password?.takeIf { it.isNotEmpty() },
+                    isReadonly = readonly,
+                    workspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, null),
+                    properties =
+                        existing.properties.copy(
+                            hikari = DatasourcePoolForm.toHikari(params, existing.dialect, existing.properties.hikari),
+                        ),
+                )
+            datasources.save(updated, principal.userId)
+            listModel(model, null, null, null)
+            model.addAttribute("savedName", name)
+            model.addAttribute("savedVerb", "updated")
+            model.addAttribute("oob", true)
+            "partials/datasource-saved"
+        } catch (e: co.datapipelines.typesystem.DatapipelinesException) {
+            refused(e.message ?: "The connection details were rejected.")
+        }
+    }
+
+    // ------------------------------------------------------------------ §4.5 delete (094 §B)
+
+    /**
+     * The delete dialog. It asks the USAGE question first and, when the answer is "yes", offers
+     * nothing else — the confirm button does not exist on that branch, so the refusal cannot be
+     * clicked past. The same rows the REST 409's `details` carries (061/T79), rendered.
+     */
+    @GetMapping("/partials/datasources/{name}/delete")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    fun deleteDialog(
+        model: Model,
+        @PathVariable name: String,
+    ): Any {
+        val principal = principal() ?: error("No authenticated principal")
+        val datasource = visible(name) ?: return notFoundDialog(name)
+        model.addAttribute("datasource", datasource)
+        // D8 first: a member looking at a global datasource is told so instead of being shown a
+        // confirm button whose POST would refuse. Same rule as update (admin for global).
+        val forbidden =
+            when {
+                datasource.workspaceId == null && !principal.isAdmin -> {
+                    "Deleting the global datasource '$name' requires admin."
+                }
+
+                else -> {
+                    null
+                }
+            }
+        model.addAttribute("forbidden", forbidden)
+        val usages = if (forbidden == null) references.referencesTo(name) else emptyList()
+        model.addAttribute("usages", usages)
+        model.addAttribute("usedByPipelines", usages.map { it.pipelineName }.distinct())
+        return "partials/datasource-delete"
+    }
+
+    /**
+     * The confirmed delete — the UI twin of `DELETE /api/v1/datasources/{name}` (§9.5), through
+     * the same D8 gates and the same `registry.delete`, whose in-use guard runs again here.
+     *
+     * The guard is re-run rather than trusted from the dialog on purpose: a pipeline can start
+     * referencing this datasource between the dialog opening and the button being pressed, and
+     * the authority for "is it still unused" is the delete itself, never the screen.
+     */
+    @PostMapping("/partials/datasources/{name}/delete")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    fun delete(
+        model: Model,
+        @PathVariable name: String,
+    ): Any {
+        val principal = principal() ?: error("No authenticated principal")
+        val existing = visible(name) ?: return refused("Datasource '$name' is not visible in the active workspace.")
+        return try {
+            rules.requireGlobalMutationAllowed(principal, existing, name)
+            rules.requireMemberDatasourcesGate(principal)
+            val result = datasources.delete(name)
+            if (!result.deleted) {
+                return refused(
+                    "'$name' is still used by ${result.referencingPipelines.size} pipeline(s) across " +
+                        "${result.references.size} node(s). Remove or repoint them first.",
+                )
+            }
+            listModel(model, null, null, null)
+            model.addAttribute("savedName", name)
+            model.addAttribute("savedVerb", "deleted")
+            model.addAttribute("oob", true)
+            "partials/datasource-saved"
+        } catch (e: co.datapipelines.typesystem.DatapipelinesException) {
+            refused(e.message ?: "The datasource could not be deleted.")
+        }
+    }
+
+    /** The active workspace's view of [name], or null — §5.3 visibility, never a post-filter. */
+    private fun visible(name: String): Datasource? = principal()?.workspace?.id?.let { datasources.getVisible(name, it) }
+
+    /** A dialog body saying the datasource is not there — a 404 inside a modal, not an error page. */
+    private fun notFoundDialog(name: String): ResponseEntity<String> = refused("Datasource '$name' is not visible in the active workspace.")
 
     /** The refusal the modal renders inline — never an error page for an expected 4xx. */
     private fun refused(why: String): ResponseEntity<String> =

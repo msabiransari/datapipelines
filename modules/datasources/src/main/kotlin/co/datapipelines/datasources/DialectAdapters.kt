@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.IngressTypeMapper
 import co.datapipelines.typesystem.TypeMappers
@@ -49,25 +50,28 @@ abstract class AbstractDialectAdapter(
                 }
             }
 
-        // `hikari.*` goes through the Properties constructor so HikariCP resolves each name
-        // reflectively — an unknown name or a value that will not parse to the setter's type
-        // throws HERE, which is exactly the save-time signal §5.4 wants.
+        // ONE `Properties`, layered LOWEST-first, then ONE `HikariConfig` built from it — the
+        // §5 default order the create/edit dialog renders and names: HikariCP's own (implicit,
+        // whatever this map does not carry), then this application's, then this dialect's, then
+        // the caller's `properties.hikari`. Later `setProperty` calls overwrite earlier ones, so
+        // the layering IS the map's insertion order and there is no second place to get it wrong.
+        //
+        // `minimumIdle` is the one application default today: HikariCP's own is
+        // `maximumPoolSize` (10) — 5x the number §5 publishes — so leaving it unset would
+        // silently contradict the spec. `PoolSettings` owns that number; this is its consumer.
+        //
+        // Building the config from the merged map (rather than assigning defaults onto a config
+        // afterwards) is what keeps the caller's value winning: HikariCP resolves each name
+        // reflectively HERE, so an unknown name — including a mis-cased `minimumidle` that would
+        // otherwise sit unnoticed beside the real key — throws at exactly the save-time moment
+        // §5.4 wants.
         val hikariProps = Properties()
+        PoolSettings.APPLICATION_DEFAULTS.forEach { (key, value) -> hikariProps.setProperty(key, value.toString()) }
+        defaultHikariProperties.forEach { (key, value) -> hikariProps.setProperty(key, value) }
         datasource.properties.hikari.forEach { (key, value) ->
             hikariProps.setProperty(key, value?.toString() ?: "")
         }
         val config = HikariConfig(hikariProps)
-
-        // §5's documented default. HikariCP's own is `maximumPoolSize` (10 by default) — 5x the
-        // number this spec publishes — so leaving it unset would silently contradict §5. Applied
-        // only when the caller did not set it: 0 is a legitimate "keep nothing warm" choice, so
-        // the test is key-presence, not value. (HikariCP resolves names case-sensitively, so a
-        // mis-cased key never reaches here — the ignoreCase match is belt-and-braces.)
-        if (datasource.properties.hikari.keys
-                .none { it.equals("minimumIdle", ignoreCase = true) }
-        ) {
-            config.minimumIdle = DEFAULT_MINIMUM_IDLE
-        }
 
         // Server-managed fields — derived from the entity and adapter, never from properties.*.
         config.jdbcUrl = datasource.jdbcUrl
@@ -104,8 +108,14 @@ abstract class AbstractDialectAdapter(
     }
 
     companion object {
-        /** datasources.md §5: the server's documented `minimumIdle` default. */
-        const val DEFAULT_MINIMUM_IDLE = 2
+        /**
+         * datasources.md §5: the server's documented `minimumIdle` default.
+         *
+         * The VALUE lives in [PoolSettings.APPLICATION_DEFAULTS] — the same map the create/edit
+         * dialog prefills from, so the form and the pool cannot publish different numbers. This
+         * alias is kept because it is the name the adapter tests read.
+         */
+        const val DEFAULT_MINIMUM_IDLE: Int = PoolSettings.DEFAULT_MINIMUM_IDLE.toInt()
     }
 }
 

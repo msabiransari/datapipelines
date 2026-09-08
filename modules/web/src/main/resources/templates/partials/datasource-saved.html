@@ -1,0 +1,16 @@
+<!-- The edit/delete success response (ui-screens.md §5.1 Shape A) — the twin of
+     partials/datasource-registered, and deliberately the same shape: the success
+     node lands in the dialog's own #ds-dialog-result (whose arrival closes the
+     dialog, 022/F9), while the refreshed list and the toast ride along
+     out-of-band. No HX-Redirect: a full-page navigation would discard the toast. -->
+<div xmlns:th="http://www.thymeleaf.org">
+  <p class="u-success u-text-sm" data-ds-saved="true"
+     th:text="'Datasource ' + ${savedName} + ' ' + ${savedVerb} + '.'">updated</p>
+  <!-- outerHTML OOB: the fragment root already carries id="datasource-list-wrapper";
+       the controller set oob=true, which puts hx-swap-oob="true" on it for THIS
+       render only (never baked into partials/datasources). -->
+  <th:block th:replace="~{partials/datasources :: fragment}"></th:block>
+  <div th:replace="~{partials/toast-oob :: oob('success',
+                     ${savedVerb} == 'deleted' ? 'Datasource deleted' : 'Datasource updated',
+                     ${savedName} + ' was ' + ${savedVerb} + '.')}"></div>
+</div>
