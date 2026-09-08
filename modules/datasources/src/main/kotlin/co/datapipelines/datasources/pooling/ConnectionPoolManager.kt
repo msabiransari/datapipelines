@@ -107,12 +107,18 @@ class ConnectionPoolManager(
          * limits → views), inside the same `connectionInitSql` slot, so the save-time test pool
          * build — which passes none — stays byte-identical to the pre-view config (§4.2's
          * "built the same way" invariant covers the adapter's half; views are runtime-only).
+         *
+         * [duckdbExtensionDirectory] is the deployment's bundled DuckDB extension directory
+         * (089 §D, configuration.md §3.25): forwarded to [DialectAdapters.forDialect], which
+         * only a LAKE build honors — the adapter then SETs `extension_directory` and emits bare
+         * `LOAD`s, never an `INSTALL`.
          */
         fun buildHikariPool(
             datasource: Datasource,
             additionalConnectionInit: List<String> = emptyList(),
+            duckdbExtensionDirectory: String? = null,
         ): ConnectionPool {
-            val config = DialectAdapters.forDialect(datasource.dialect).buildHikariConfig(datasource)
+            val config = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory).buildHikariConfig(datasource)
             if (additionalConnectionInit.isNotEmpty()) {
                 config.connectionInitSql =
                     listOfNotNull(config.connectionInitSql, additionalConnectionInit.joinToString("; "))

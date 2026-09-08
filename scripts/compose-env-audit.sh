@@ -144,6 +144,16 @@ DECLARED_OVERRIDES = {
     "DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON",
 }
 
+# Vars whose compose default deliberately mirrors the DOCKERFILE's ENV, not application.yml
+# (089 §D). A bare `java -jar` — which deploy/env/defaults.env also feeds — has no bundled
+# DuckDB extension directory, so the app default is empty; the shipped image pre-populates
+# the path below, and compose's `${VAR:-<path>}` fills it in only when the variable is unset
+# or empty, so an explicit operator value in deploy/secrets.env still wins. defaults.env
+# keeps the empty app default and check 5 compares THAT against application.yml as usual.
+IMAGE_DEFAULT_VARS = {
+    "DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY": "/opt/duckdb/extensions",
+}
+
 # A value assembled ENTIRELY from `${OTHER:+literal}` fragments — the concatenation form.
 # Recognised so check 3 reports it as DERIVED rather than as a stray literal, and so a
 # fragment that accidentally references the key ITSELF is still caught.
@@ -227,7 +237,12 @@ for name, value in sorted(passed.items()):
         # only place it matters (the process environment), identical. 072: the org currency
         # symbol is the first default in the file that needed it.
         default = (m.group(1) or "").replace("$$", "$")
-        if default != bound.get(name):
+        if name in IMAGE_DEFAULT_VARS:
+            if default != IMAGE_DEFAULT_VARS[name]:
+                failures.append(f"2 compose default for {name} is '{default}' but the image bundles "
+                                f"'{IMAGE_DEFAULT_VARS[name]}' — mirror the Dockerfile ENV, or drop "
+                                f"this script's IMAGE_DEFAULT_VARS entry for it")
+        elif default != bound.get(name):
             failures.append(f"2 compose default for {name} is '{default}' but application.yml ships "
                             f"'{bound.get(name)}' — the compose default must mirror the app default")
     elif name in DECLARED_OVERRIDES:

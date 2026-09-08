@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
@@ -29,10 +30,11 @@ import java.sql.DriverManager
  *
  * The S3 path is asserted at the level of the SQL the adapter GENERATES, not against a bucket.
  * That is deliberate and stated in the round's report: a real S3 needs cloud credentials a lane
- * must not have, and `INSTALL httpfs` needs egress to DuckDB's extension repository — whether
- * that works from the app's container, and whether the three extensions should be bundled into
- * the image instead, is the spike the warehouse-and-lake design note §7.3 names. Generating the
- * statements is this round's job; running them against a bucket is the lake connector's.
+ * must not have, and `INSTALL httpfs` needs egress to DuckDB's extension repository. The §7.3
+ * spike the design note named has since answered the bundling question (089 §D: CAN — the
+ * image ships the four extensions and the bundled-directory branch emits bare LOADs, asserted
+ * here at the same generation level); running either branch against a bucket remains the lake
+ * connector's job.
  */
 class LakeDialectAdapterTest {
     @TempDir
@@ -47,6 +49,10 @@ class LakeDialectAdapterTest {
      * 8 GiB / 4 = 2048MB, comfortably inside the 64 MiB–4 GiB clamp.
      */
     private val lakeFixed = LakeDialectAdapter { 8L * 1024 * 1024 * 1024 }
+
+    /** [lakeFixed] bound to the image's bundled extension directory (089 §D). */
+    private val lakeBundled =
+        LakeDialectAdapter(extensionDirectory = "/opt/duckdb/extensions") { 8L * 1024 * 1024 * 1024 }
 
     @Test
     fun `a local ATTACH lake opens through the real pool and reports both catalogs`() {
@@ -163,6 +169,103 @@ class LakeDialectAdapterTest {
             )
 
         init.filter { it.startsWith("LOAD") } shouldContainExactly listOf("LOAD httpfs", "LOAD aws", "LOAD iceberg")
+    }
+
+    @Test
+    fun `a bundled extension directory turns the S3 setup into SET + bare LOADs - never an INSTALL`() {
+        // 089 §D (the §7.3 spike's CAN verdict): with the directory set, the statements are
+        // SET extension_directory first, then bare LOADs — in DuckDB v1.5.5 LOAD reads only
+        // already-present files, so an INSTALL would be the ONLY network path, and it is gone.
+        val init =
+            lakeBundled.connectionInit(
+                lakeDatasource(
+                    credentialKind = CredentialKind.NONE,
+                    dialectProperties = mapOf("catalog.kind" to "s3", "region" to "us-east-1"),
+                ),
+            )
+
+        init shouldContainExactly
+            listOf(
+                "SET extension_directory = '/opt/duckdb/extensions'",
+                "LOAD httpfs",
+                "LOAD aws",
+                "CREATE OR REPLACE SECRET dp_lake (TYPE s3, PROVIDER credential_chain, REGION 'us-east-1')",
+                "SET memory_limit = '2048MB'",
+                "SET preserve_insertion_order = false",
+            )
+    }
+
+    @Test
+    fun `the bundled Iceberg setup LOADs avro before iceberg, which auto-loads it`() {
+        // The spike's hidden-dependency finding: LOAD iceberg auto-loads avro FROM THE
+        // DIRECTORY, so a bundle without avro fails iceberg's init — the explicit LOAD avro
+        // first keeps that failure about avro.
+        val init =
+            lakeBundled.connectionInit(
+                lakeDatasource(
+                    credentialKind = CredentialKind.NONE,
+                    dialectProperties = mapOf("catalog.kind" to "glue", "catalog.ref" to "123456789012"),
+                ),
+            )
+
+        init.filter { it.startsWith("LOAD") } shouldContainExactly
+            listOf("LOAD httpfs", "LOAD aws", "LOAD avro", "LOAD iceberg")
+        init.none { it.startsWith("INSTALL") } shouldBe true
+    }
+
+    @Test
+    fun `a bundled local lake still emits no extension statements at all`() {
+        // The directory knob does not reopen what the catalog.kind conditional closes: a lake
+        // over reachable paths needs no extensions, and SET extension_directory would be noise.
+        lakeBundled.connectionInit(lakeDatasource()).none { it.contains("extension") || it.startsWith("LOAD") } shouldBe true
+    }
+
+    @Test
+    fun `a directory that would need escaping inside a SQL literal is refused at construction`() {
+        // The temp_directory grammar's twin: the value interpolates into SET extension_directory
+        // = '<dir>', so quotes, backslashes, whitespace, control characters and relative paths
+        // are refused, not escaped — an operator value, refused anyway as defense in depth.
+        listOf(
+            "opt/duckdb/extensions",
+            "/opt/duckdb/extensions ' OR '1'='1",
+            "/opt/duckdb/my extensions",
+            "/opt/duckdb\\extensions",
+            "/opt/duckdb\\extensions",
+            "/opt/duckdb\textensions",
+        ).forEach { bad ->
+            val failure = shouldThrow<IllegalArgumentException> { LakeDialectAdapter(extensionDirectory = bad) }
+            withClue("refusal for '$bad' names the key") {
+                failure.message.orEmpty() shouldContain "datapipelines.duckdb.extension-directory"
+            }
+        }
+    }
+
+    @Test
+    fun `DialectAdapters binds the directory only for LAKE and only when set`() {
+        assertAll(
+            // LAKE + directory -> the bundled adapter, whose init leads with the SET.
+            {
+                DialectAdapters
+                    .forDialect(Dialect.LAKE, "/opt/duckdb/extensions")
+                    .connectionInit(
+                        lakeDatasource(
+                            credentialKind = CredentialKind.NONE,
+                            dialectProperties = mapOf("catalog.kind" to "s3"),
+                        ),
+                    ).first() shouldBe "SET extension_directory = '/opt/duckdb/extensions'"
+            },
+            // LAKE without one -> the same directory-free singleton as ever.
+            { DialectAdapters.forDialect(Dialect.LAKE, null) shouldBe DialectAdapters.forDialect(Dialect.LAKE) },
+            // Every other dialect ignores the parameter outright.
+            {
+                DialectAdapters.forDialect(Dialect.POSTGRES, "/opt/duckdb/extensions") shouldBe
+                    DialectAdapters.forDialect(Dialect.POSTGRES)
+            },
+            {
+                DialectAdapters.forDialect(Dialect.DUCKDB, "/opt/duckdb/extensions") shouldBe
+                    DialectAdapters.forDialect(Dialect.DUCKDB)
+            },
+        )
     }
 
     @Test

@@ -207,6 +207,13 @@ services:
       DATAPIPELINES_ENV: ${DATAPIPELINES_ENV:-local}
       DATAPIPELINES_POSTURE: ${DATAPIPELINES_POSTURE:-}
       DATAPIPELINES_DEMO: ${DATAPIPELINES_DEMO:-}
+      # 089 §D — the bundled DuckDB extension directory (configuration.md §3.25). The ONE
+      # default in this block that mirrors the IMAGE, not application.yml: a bare `java -jar`
+      # has nothing bundled (empty = the adapter's INSTALL+LOAD, with egress), while this
+      # image pre-populates /opt/duckdb/extensions and never INSTALLs. Declared in
+      # compose-env-audit.sh's IMAGE_DEFAULT_VARS; set the variable in deploy/secrets.env
+      # to point at a self-populated directory instead.
+      DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:-/opt/duckdb/extensions}
       #
       # THE TWO POSTURE-DEPENDENT KEYS, and the one place in this file that is NOT a
       # `${VAR:-default}` pass-through (081 §B). Their default IS the posture, and it is

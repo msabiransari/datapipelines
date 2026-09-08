@@ -207,6 +207,7 @@ class DomainConfiguration {
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
         lakeTables: LakeTableCatalog,
+        environment: Environment,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -217,6 +218,11 @@ class DomainConfiguration {
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
             lakeTables = lakeTables,
+            // configuration.md §3.25 (089 §D): the bundled DuckDB extension directory. Empty =
+            // unset — the LAKE adapter keeps its explicit INSTALL+LOAD pairs (a bare `java -jar`
+            // has nothing bundled); the shipped image sets it via the Dockerfile's ENV.
+            duckdbExtensionDirectory =
+                environment.getProperty("datapipelines.duckdb.extension-directory")?.ifBlank { null },
         )
 
     /**

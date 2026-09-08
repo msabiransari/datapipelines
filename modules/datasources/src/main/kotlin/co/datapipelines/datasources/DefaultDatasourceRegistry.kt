@@ -49,6 +49,13 @@ class DefaultDatasourceRegistry(
     private val cache: DatasourceMetadataCache = DatasourceMetadataCache(),
     private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
     private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
+    /**
+     * The deployment's bundled DuckDB extension directory (089 §D, configuration.md §3.25),
+     * bound once from `datapipelines.duckdb.extension-directory` at wiring. Forwarded to every
+     * connect path this class builds — the pool factory below AND [probe] — so a bundled,
+     * egress-free deployment never issues an `INSTALL`, on a test-connection click either.
+     */
+    private val duckdbExtensionDirectory: String? = null,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
 
@@ -69,7 +76,7 @@ class DefaultDatasourceRegistry(
         ConnectionPoolManager { datasource ->
             val withCredential = loadWithCredential(datasource.name)
             audit(DatasourceAuditEvents.POOL_BUILD, datasource.name, DatasourceAuditEvent.SYSTEM_ACTOR)
-            ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential))
+            ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential), duckdbExtensionDirectory)
         }
 
     /** Phase B's view statements for a LAKE datasource; nothing for every other dialect. */
@@ -414,7 +421,7 @@ class DefaultDatasourceRegistry(
     private fun probe(datasource: Datasource): TestResult =
         try {
             val config =
-                DialectAdapters.forDialect(datasource.dialect).buildHikariConfig(datasource).apply {
+                DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory).buildHikariConfig(datasource).apply {
                     maximumPoolSize = 1
                     connectionTimeout = PROBE_CONNECTION_TIMEOUT_MS
                     initializationFailTimeout = -1

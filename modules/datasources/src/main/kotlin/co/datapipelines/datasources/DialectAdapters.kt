@@ -397,9 +397,9 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  *    never by letting `properties.jdbc` set it, because `properties.jdbc` is applied AFTER
  *    `defaultProperties` and a settable sandbox switch is row data deciding a security posture.
  *  - `autoload_known_extensions` / `autoinstall_known_extensions` stay `false`. Extensions are
- *    loaded by [connectionInit]'s EXPLICIT `INSTALL`/`LOAD`, which is a list this adapter
- *    generates — never an implicit fetch triggered by whatever function author SQL happens to
- *    call.
+ *    loaded by [connectionInit]'s EXPLICIT statements — `INSTALL`+`LOAD`, or bare `LOAD` against
+ *    the bundled [extensionDirectory] (089 §D) — which is a list this adapter generates, never
+ *    an implicit fetch triggered by whatever function author SQL happens to call.
  *
  * ## The typed configuration
  *
@@ -446,11 +446,31 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  */
 class LakeDialectAdapter(
     /**
+     * 089 §D — the deployment's bundled extension directory (configuration.md §3.25,
+     * `datapipelines.duckdb.extension-directory`). When set, [extensionStatements] emits
+     * `SET extension_directory` plus BARE `LOAD`s and never an `INSTALL`: the §7.3 spike
+     * measured that `LOAD` reads only files already present in the directory (no download code
+     * path runs at all), so a deployment whose image ships the extensions connects with zero
+     * egress. Null keeps the explicit `INSTALL`+`LOAD` pairs developer machines rely on.
+     */
+    private val extensionDirectory: String? = null,
+    /**
      * The container's total memory in bytes, read once per pool build when `memory_limit` is
      * unset — injectable so tests pin the default computation (see the class KDoc's §D block).
      */
     private val containerMemoryBytes: () -> Long = ::detectContainerMemoryBytes,
 ) : AbstractDialectAdapter(Dialect.LAKE, "duckdb") {
+    init {
+        // The directory is interpolated into a SQL string literal, so — the same grammar as
+        // properties.dialect.temp_directory below — a value that would need escaping is
+        // refused, not escaped. It is an OPERATOR value, but the refusal is defense in depth:
+        // a mistyped path fails at pool build with this message, not as a DuckDB parse error.
+        require(extensionDirectory == null || isSafeExtensionDirectory(extensionDirectory)) {
+            "datapipelines.duckdb.extension-directory must be an absolute path with no quotes, " +
+                "backslashes, whitespace or control characters; '$extensionDirectory' is not."
+        }
+    }
+
     /** §4.2: two BROWSABLE levels — `ATTACH` is allowed here, so catalogs are real. */
     override val namespaceShape: NamespaceShape = NamespaceShape.CATALOG_AND_SCHEMA
 
@@ -567,7 +587,7 @@ class LakeDialectAdapter(
     ) = ValidationResult.ValidationError(DatasourceErrorCodes.PROPERTIES_INVALID, "properties.dialect.$key", message)
 
     /**
-     * `INSTALL`/`LOAD` for the extensions the declared catalog kind needs — and NOTHING when no
+     * The extension statements the declared catalog kind needs — and NOTHING when no
      * `catalog.kind` is declared.
      *
      * That conditional is the difference between two real deployments, not a convenience.
@@ -582,15 +602,35 @@ class LakeDialectAdapter(
      * These are EXPLICIT statements and not autoloads on purpose: the adapter decides what the
      * engine may fetch, rather than whatever function name reaches the parser.
      *
-     * **Not proven against a live S3 in this round.** Whether `duckdb_jdbc` can `INSTALL`/`LOAD`
-     * these three from the app's container, what egress that needs, and whether they should be
-     * bundled into the image instead, is the spike the warehouse-and-lake design note §7.3 names.
-     * What IS proven here is the local path — see `LakeDialectAdapterTest`.
+     * ## Bundled-directory mode (089 §D — the §7.3 spike's verdict: CAN)
+     *
+     * With [extensionDirectory] set (configuration.md §3.25 — the shipped image sets it), the
+     * statements are `SET extension_directory = '<dir>'` followed by BARE `LOAD`s, **never an
+     * `INSTALL`**. The spike measured the semantics this relies on: in DuckDB v1.5.5 `LOAD`
+     * strictly loads already-present files — a missing one fails in ~1 ms with no download code
+     * path running at all — so when the image pre-populates the directory (`httpfs`, `aws`,
+     * `iceberg`, `avro` under `<dir>/v1.5.5/linux_amd64/`), a lake pool connects with zero
+     * egress. `avro` appears in this mode's Iceberg list because `LOAD iceberg` auto-loads it
+     * from the directory, and an explicit `LOAD avro` first keeps a forgotten bundle's failure
+     * message about avro, not about iceberg's init function. With the directory unset the
+     * `INSTALL`+`LOAD` pairs are exactly what earlier rounds shipped — `INSTALL iceberg` pulls
+     * `avro` in as a dependency over the network.
      */
     private fun extensionStatements(properties: Map<String, Any?>): List<String> {
         val kind = properties["catalog.kind"]?.toString()?.lowercase() ?: return emptyList()
-        val extensions = if (kind in ICEBERG_KINDS) listOf("httpfs", "aws", "iceberg") else listOf("httpfs", "aws")
-        return extensions.flatMap { listOf("INSTALL $it", "LOAD $it") }
+        val iceberg = kind in ICEBERG_KINDS
+        val directory = extensionDirectory
+        return when {
+            directory != null -> {
+                val extensions = if (iceberg) BUNDLED_ICEBERG_EXTENSIONS else BUNDLED_S3_EXTENSIONS
+                listOf("SET extension_directory = '$directory'") + extensions.map { "LOAD $it" }
+            }
+
+            else -> {
+                val extensions = if (iceberg) listOf("httpfs", "aws", "iceberg") else listOf("httpfs", "aws")
+                extensions.flatMap { listOf("INSTALL $it", "LOAD $it") }
+            }
+        }
     }
 
     /**
@@ -688,6 +728,12 @@ class LakeDialectAdapter(
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")
         val URL_STYLES = setOf("path", "vhost")
 
+        /** Bundled-directory LOAD list for `catalog.kind: s3` — `httpfs` before `aws`. */
+        val BUNDLED_S3_EXTENSIONS = listOf("httpfs", "aws")
+
+        /** The Iceberg kinds' list — `avro` BEFORE `iceberg`, which auto-loads it (089 §7.3). */
+        val BUNDLED_ICEBERG_EXTENSIONS = listOf("httpfs", "aws", "avro", "iceberg")
+
         /** DuckDB's size grammar, restricted to byte units — a `%` of an unknown base is refused. */
         val MEMORY_LIMIT_VALUE = Regex("^\\d+(\\.\\d+)?\\s?(B|KB|MB|GB|TB)$", RegexOption.IGNORE_CASE)
 
@@ -701,6 +747,14 @@ class LakeDialectAdapter(
         const val MEMORY_LIMIT_FLOOR_MB = 64L
 
         const val BYTES_PER_MB = 1024L * 1024L
+
+        /**
+         * The `temp_directory` grammar's twin ([limitValueError]), applied to the operator-level
+         * extension directory: absolute, and carrying no character a SQL string literal would
+         * need escaping for.
+         */
+        private fun isSafeExtensionDirectory(value: String): Boolean =
+            value.startsWith("/") && value.none { ch -> ch in "'\"\\" || ch <= ' ' || ch == '\u007F' }
     }
 }
 
@@ -737,6 +791,28 @@ object DialectAdapters {
 
     /** The adapter for [dialect]. Throws only if a dialect is added without an adapter. */
     fun forDialect(dialect: Dialect): DialectAdapter = BY_DIALECT[dialect] ?: error("No DialectAdapter registered for dialect $dialect")
+
+    /**
+     * The adapter for [dialect], bound to the deployment's bundled DuckDB extension directory
+     * (089 §D, configuration.md §3.25). Only [Dialect.LAKE] honors the directory — it is the
+     * only DuckDB-family dialect whose connection setup loads extensions — so every other
+     * dialect gets the same singleton [forDialect] returns, directory or not. A LAKE lookup
+     * with a null directory also returns the singleton: the save-time config check (§5.4,
+     * which never connects) and every non-pool caller see the same statements either way.
+     */
+    fun forDialect(
+        dialect: Dialect,
+        duckdbExtensionDirectory: String?,
+    ): DialectAdapter =
+        when {
+            dialect == Dialect.LAKE && duckdbExtensionDirectory != null -> {
+                LakeDialectAdapter(extensionDirectory = duckdbExtensionDirectory)
+            }
+
+            else -> {
+                forDialect(dialect)
+            }
+        }
 
     /** All registered adapters — the completeness-test surface. */
     fun all(): Collection<DialectAdapter> = BY_DIALECT.values
