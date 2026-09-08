@@ -1,4 +1,4 @@
-# Publishing a pipeline as a GET endpoint
+# Published endpoints
 
 Open when a released read-only pipeline has to answer a plain HTTP GET.
 
