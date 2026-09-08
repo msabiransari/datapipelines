@@ -8,8 +8,17 @@ import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
+import org.springframework.security.web.csrf.CsrfToken
+import org.springframework.security.web.csrf.DefaultCsrfToken
+import org.springframework.security.web.servlet.support.csrf.CsrfRequestDataValueProcessor
+import org.springframework.web.context.WebApplicationContext
+import org.springframework.web.context.support.GenericWebApplicationContext
+import org.springframework.web.servlet.support.RequestContext
 import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.spring6.context.webmvc.SpringWebMvcThymeleafRequestContext
+import org.thymeleaf.spring6.expression.ThymeleafEvaluationContext
+import org.thymeleaf.spring6.naming.SpringContextVariableNames
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
@@ -151,4 +160,76 @@ class AuthLayoutRenderTest {
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
         )
+
+    /**
+     * 098 §D — the login form renders EXACTLY ONE `_csrf` hidden input.
+     *
+     * Measured on the demo stack before the fix (2026-09-08):
+     * `curl -s http://localhost:18098/login | grep -c 'name="_csrf"'` answered **2**. One was
+     * written by hand in `login.html`; the other is Thymeleaf's, because `th:action` on a
+     * `method="post"` form asks Spring's `RequestDataValueProcessor` for the extra hidden fields
+     * and Spring Security's `CsrfRequestDataValueProcessor` supplies the token. Two inputs with
+     * the same value are harmless today; two with DIFFERENT values would not be, and nothing
+     * said which of them the browser would send.
+     *
+     * The processor is registered in this render context on purpose: without it Thymeleaf writes
+     * no hidden field at all, so a test on the plain engine would count 0 and pass for the wrong
+     * reason. That is also the FALSIFICATION — remove the automatic half by writing a plain
+     * `action="/login"` instead of `th:action`, and this test counts 0. The other half of the
+     * falsification is at the wire: `AuthHttpBoundaryTest`'s "a cookie-authenticated state change
+     * with the matching double-submit token succeeds" is the case that fails 403 when the token
+     * the form carries is not the one the filter expects.
+     */
+    @Test
+    fun `the login form renders exactly one csrf hidden input`() {
+        val html = engine.process("login", securityWebContext().apply { fillLogin() })
+
+        Regex("name=\"_csrf\"").findAll(html).count() shouldBe 1
+        // …and it is the real token, not an empty attribute.
+        html shouldContain "value=\"tok-098\""
+    }
+
+    /**
+     * A render context wired the way the running application is: a `RequestDataValueProcessor`
+     * bean reachable from the ServletContext, and a `CsrfToken` on the request. This is what
+     * makes `th:action` emit the hidden field, and therefore what makes the count above mean
+     * anything.
+     */
+    private fun securityWebContext(): WebContext {
+        val servletContext = MockServletContext()
+        val applicationContext = GenericWebApplicationContext(servletContext)
+        applicationContext.beanFactory.registerSingleton("requestDataValueProcessor", CsrfRequestDataValueProcessor())
+        applicationContext.refresh()
+        servletContext.setAttribute(WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, applicationContext)
+
+        val request = MockHttpServletRequest(servletContext)
+        val response = MockHttpServletResponse()
+        val token: CsrfToken = DefaultCsrfToken("X-CSRF-TOKEN", "_csrf", "tok-098")
+        request.setAttribute(CsrfToken::class.java.name, token)
+        val context =
+            WebContext(
+                JakartaServletWebApplication
+                    .buildApplication(servletContext)
+                    .buildExchange(request, response),
+            )
+        // The two variables `ThymeleafView` sets in production, and the ONLY route by which
+        // `th:action` reaches a RequestDataValueProcessor: `SpringContextUtils.getRequestContext`
+        // reads `thymeleafRequestContext`, and `RequestDataValueProcessorUtils.getExtraHiddenFields`
+        // returns null without it — a bare `engine.process()` sets neither, and the form then
+        // renders with NO hidden field at all, which would make this test pass at 0 for the
+        // wrong reason. (Verified by reading the two classes out of thymeleaf-spring6 3.1.5
+        // rather than assuming: the lookups are by variable name, not by servlet context.)
+        context.setVariable(
+            ThymeleafEvaluationContext.THYMELEAF_EVALUATION_CONTEXT_CONTEXT_VARIABLE_NAME,
+            ThymeleafEvaluationContext(applicationContext, null),
+        )
+        context.setVariable(
+            SpringContextVariableNames.THYMELEAF_REQUEST_CONTEXT,
+            SpringWebMvcThymeleafRequestContext(
+                RequestContext(request, response, servletContext, mutableMapOf()),
+                request,
+            ),
+        )
+        return context
+    }
 }

@@ -32,8 +32,17 @@
            enabled; an OIDC-only deployment renders exactly what it always has. One
            form, then a divider, then the provider buttons — never tabs.
            076 §B: /login and the OIDC redirects are full navigations, never boosted. -->
+      <!--/* 098 §D: NO hand-written CSRF hidden input here. `th:action` on a `method="post"`
+           form asks Spring's RequestDataValueProcessor for the extra hidden fields, and Spring
+           Security's CsrfRequestDataValueProcessor supplies the token one — so the hand-written
+           one made the shipped page carry TWO. Two with the same value are harmless; two with
+           different values would not be, and nothing said which the browser would send.
+           The automatic one is the load-bearing half: replace `th:action` with a plain
+           `action="/login"` and the form carries no token at all, which the double-submit
+           filter refuses 403. `AuthLayoutRenderTest` pins the count at 1.
+           A PARSER comment, not an HTML one: an ordinary <!-- --> is passed through to the
+           response, and this one would then be counted by the very grep it describes. */-->
       <form th:if="${localEnabled}" method="post" th:action="@{/login}" class="u-left" hx-boost="false">
-        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}" />
         <label for="login-email" class="u-block u-text-sm u-secondary u-mb-xs">Email</label>
         <input id="login-email" type="email" name="email" class="ds-input u-full u-mb-sm"
                required autocomplete="username" />
