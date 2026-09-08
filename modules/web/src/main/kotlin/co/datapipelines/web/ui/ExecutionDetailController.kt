@@ -82,8 +82,8 @@ class ExecutionDetailController(
         val releasedAt =
             pipelines
                 .releasedAtFor(workspaceId, listOf(record.pipelineId to record.pipelineVersion))[
-                    record.pipelineId to record.pipelineVersion,
-                ]
+                record.pipelineId to record.pipelineVersion,
+            ]
         return releasedAt == null || record.startedAt.isBefore(releasedAt)
     }
 

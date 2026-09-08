@@ -149,7 +149,11 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `lookupVersion round-trips imports and dialect`() {
-        repository.createReleased(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 3, "d")), dialect = Dialect.MYSQL), actor)
+        repository.createReleased(
+            workspaceId,
+            draft(imports = listOf(TemplateImport("test/lib.sql", 3, "d")), dialect = Dialect.MYSQL),
+            actor,
+        )
 
         val version = repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1)
 
@@ -367,7 +371,13 @@ class TemplateRepositoryIntegrationTest {
         // The old assertion used limit=Int.MAX over 3 rows, so the clamp half was vacuous — the
         // query would have returned the same 3 rows unclamped (NEW-4a). With more rows than the
         // maximum, only a real clamp produces this result.
-        (1..TemplateRepository.MAX_PAGE_LIMIT + 25).forEach { repository.createReleased(workspaceId, draft(id = "t%04d.sql".format(it)), actor) }
+        (1..TemplateRepository.MAX_PAGE_LIMIT + 25).forEach {
+            repository.createReleased(
+                workspaceId,
+                draft(id = "t%04d.sql".format(it)),
+                actor,
+            )
+        }
 
         repository.list(workspaceId, limit = 500).size shouldBe TemplateRepository.MAX_PAGE_LIMIT
     }

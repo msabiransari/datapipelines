@@ -4,8 +4,8 @@ import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineVersionDetail
-import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionRecord
+import co.datapipelines.pipeline.PipelineVersionStatus
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 
@@ -102,12 +102,12 @@ object PipelineResponses {
             "description" to record.description,
             "owner" to record.ownerId.toString(),
             "version" to (draft?.version ?: record.currentVersion),
+            // Null in one case only: the sole draft of a never-released pipeline was discarded
+            // (§5.4), so there is no version to name and nothing to run.
             "status" to
                 when {
                     draft != null -> PipelineVersionStatus.DRAFT.name
                     record.currentVersion != null -> PipelineVersionStatus.RELEASED.name
-                    // The sole draft of a never-released pipeline was discarded (§5.4): there is
-                    // no version to name and nothing to run.
                     else -> null
                 },
             "created_at" to record.createdAt.toString(),

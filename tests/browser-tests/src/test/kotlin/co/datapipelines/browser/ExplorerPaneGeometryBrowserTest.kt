@@ -228,11 +228,19 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
 
         val leaf = page.locator("button.tpl-leaf").first()
         withClue("the version badge", "a never-released pipeline names its DRAFT's version, not 'vnull'") {
-            leaf.locator(".ds-badge-default").first().textContent().trim() shouldBe "v1"
+            leaf
+                .locator(".ds-badge-default")
+                .first()
+                .textContent()
+                .trim() shouldBe "v1"
         }
         withClue("the draft badge", "unreleased work stays visible from first paint (versioning §7)") {
             leaf.locator(".ds-badge-warning").count() shouldBe 1
-            leaf.locator(".ds-badge-warning").first().getAttribute("title").shouldContain("pending release")
+            leaf
+                .locator(".ds-badge-warning")
+                .first()
+                .getAttribute("title")
+                .shouldContain("pending release")
         }
     }
 

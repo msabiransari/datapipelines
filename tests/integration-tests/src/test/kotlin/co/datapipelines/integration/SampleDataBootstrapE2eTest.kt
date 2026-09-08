@@ -9,13 +9,6 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import java.nio.file.Files
-import java.nio.file.Path
-import java.security.SecureRandom
-import java.sql.DriverManager
-import java.util.Base64
-import java.util.UUID
-import kotlin.io.path.writeText
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.slf4j.LoggerFactory
@@ -30,6 +23,13 @@ import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.SecureRandom
+import java.sql.DriverManager
+import java.util.Base64
+import java.util.UUID
+import kotlin.io.path.writeText
 
 /**
  * Sample data, slice A, end to end (design 2026-08-16-sample-data §6/§6.1/D9): the WHOLE

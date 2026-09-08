@@ -417,16 +417,6 @@ open class PipelineService(
     // -------------------------------------------------------------------------------------
 
     /**
-     * The execute path's resolution (D6): the body of [version] and the [Pipeline] parsed from
-     * it. Null when that version has no stored body — the surface reports it as its own
-     * version-not-found.
-     *
-     * The version is never clamped: a caller asking for a version that does not exist is
-     * refused, not silently run at the working version (the REST and MCP surfaces each validate
-     * the requested number before calling, and both default to [workingVersion] when none was
-     * given).
-     */
-    /**
      * **The working version's NUMBER** (versioning §7, D55): the DRAFT's when one exists, else
      * the current RELEASED version's. This is the execute default on every surface — REST
      * `POST /pipelines/{id}/execute`, `pipelines_execute`, the MCP body resource — so that
@@ -449,6 +439,16 @@ open class PipelineService(
         record: PipelineRecord,
     ): Int? = pipelines.findDraftDetail(workspaceId, record.id)?.version ?: record.currentVersion
 
+    /**
+     * The execute path's resolution (D6): the body of [version] and the [Pipeline] parsed from
+     * it. Null when that version has no stored body — the surface reports it as its own
+     * version-not-found.
+     *
+     * The version is never clamped: a caller asking for a version that does not exist is
+     * refused, not silently run at the working version (the REST and MCP surfaces each validate
+     * the requested number before calling, and both default to [workingVersion] when none was
+     * given).
+     */
     open fun findExecutable(
         workspaceId: UUID,
         record: PipelineRecord,

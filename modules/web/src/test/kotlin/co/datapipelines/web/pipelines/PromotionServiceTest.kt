@@ -12,8 +12,8 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk

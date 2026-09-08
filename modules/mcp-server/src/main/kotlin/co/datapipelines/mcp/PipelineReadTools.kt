@@ -4,9 +4,9 @@ import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.PipelineService
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
@@ -155,11 +155,11 @@ class PipelinesListTool(
             "display_name" to displayName,
             "description" to description,
             "version" to (draft?.version ?: currentVersion),
+            // Null in one case only — nothing to run: the pipeline's only draft was discarded (§5.4).
             "status" to
                 when {
                     draft != null -> PipelineVersionStatus.DRAFT.name
                     currentVersion != null -> PipelineVersionStatus.RELEASED.name
-                    // Nothing to run: the pipeline's only draft was discarded (§5.4).
                     else -> null
                 },
             "owner_id" to ownerId.toString(),
