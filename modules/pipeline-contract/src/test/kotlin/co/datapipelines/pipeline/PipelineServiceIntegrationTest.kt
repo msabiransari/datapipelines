@@ -70,7 +70,12 @@ class PipelineServiceIntegrationTest {
             releases =
                 PipelineReleaseService(
                     repository,
-                    TemplateVersionStatuses { _, _, _ -> templateStatus },
+                    // Per-ID, not one answer for everything: a BLANK id is not a template at all
+                    // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
+                    // answer for it is "no such version". Without that distinction the
+                    // no-template-pin test below could not go red — the empty ref would come back
+                    // RELEASED along with the real one.
+                    TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus },
                     validator,
                     authoring,
                 ),
@@ -331,6 +336,31 @@ class PipelineServiceIntegrationTest {
         withClue("nothing was released: the draft is still there") {
             service.findDraft(WORKSPACE_ID, created.record.id) shouldNotBe null
         }
+    }
+
+    @Test
+    fun `a node with no template pin does not block the release`() {
+        // §6 checks TEMPLATE pins, and a CALCULATOR node has none (a PIPELINE node likewise pins a
+        // child pipeline instead). Asking the registry about the empty default `@0` answers
+        // MISSING, which refused the release of every pipeline containing one — naming
+        // `template_id: ""`, a template that cannot exist. Latent since composition shipped (such a
+        // pipeline was born RELEASED and only a re-release met the check); load-bearing since D55,
+        // because now EVERY pipeline has to be released once.
+        //
+        // The port answers per-ID (see `serviceWith`): RELEASED for the real pin, MISSING for the
+        // calculator's empty ref — so a release that still asked about that ref fails this test.
+        val calculator = Fixtures.calculatorNode()
+        val withCalculator =
+            Fixtures.pipeline(
+                nodes = listOf(calculator, Fixtures.node(id = "reads", dependsOn = listOf(calculator.id))),
+            )
+        val created = service.create(WORKSPACE_ID, body(withCalculator), owner)
+
+        val released =
+            service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
+
+        released.version.status shouldBe PipelineVersionStatus.RELEASED
+        released.record.currentVersion shouldBe 1
     }
 
     @Test
