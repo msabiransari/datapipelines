@@ -4,6 +4,9 @@ import co.datapipelines.application.datasources.LakeTableMutationGate
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.datasources.LakeTableRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeIntrospectionCache
+import co.datapipelines.datasources.LakeRegisteredTable
+import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -21,6 +24,34 @@ class LakeConfiguration {
     fun lakeTableRepository(jdbc: NamedParameterJdbcTemplate): LakeTableRepository = LakeTableRepository(jdbc)
 
     /**
+     * The `datasources`-module port over the registry (089 §B/§C — the [datasourceReferences]
+     * precedent: the module declares the question, this layer answers it). ONE bean serves both
+     * readers: the pool factory's per-table view generation and the introspector's
+     * registry-backed listings. The mapping is a dumb projection — validation already happened
+     * at registration, and the view generator re-refuses a bad location at the SQL boundary.
+     */
+    @Bean
+    fun lakeTableCatalog(tables: LakeTableRepository): LakeTableCatalog =
+        LakeTableCatalog { datasourceName ->
+            tables.findByDatasource(datasourceName).map { row ->
+                LakeRegisteredTable(
+                    namespace = row.namespace,
+                    name = row.name,
+                    format = row.format.wire,
+                    location = row.location,
+                )
+            }
+        }
+
+    /**
+     * ONE instance shared by the introspector (which serves from it) and the registry service
+     * (which invalidates it on every mutation) — two instances would silently never invalidate
+     * the one being read.
+     */
+    @Bean
+    fun lakeIntrospectionCache(): LakeIntrospectionCache = LakeIntrospectionCache()
+
+    /**
      * The ONE validated lake-table path, shared by the REST `/tables` endpoints and the
      * `lake_tables_*` MCP tools (049's principle). The D8 mutation gate is the same
      * [co.datapipelines.web.datasources.DatasourceWorkspaceRules] instance the datasource CUD
@@ -35,13 +66,16 @@ class LakeConfiguration {
         lakeTables: LakeTableRepository,
         invalidation: PoolInvalidationPublisher,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
+        introspectionCache: LakeIntrospectionCache,
     ): LakeTableRegistryService =
         LakeTableRegistryService(
             datasources = datasources,
             tables = lakeTables,
             invalidation = invalidation,
-            mutationGate = LakeTableMutationGate { principal, datasource ->
-                rules.requireGlobalMutationAllowed(principal, datasource, datasource.name)
-            },
+            mutationGate =
+                LakeTableMutationGate { principal, datasource ->
+                    rules.requireGlobalMutationAllowed(principal, datasource, datasource.name)
+                },
+            introspectionCache = introspectionCache,
         )
 }

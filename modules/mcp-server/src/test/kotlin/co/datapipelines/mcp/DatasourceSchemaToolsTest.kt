@@ -90,6 +90,35 @@ class DatasourceSchemaToolsTest {
     }
 
     @Test
+    fun `get_tables on a LAKE datasource serves the registry rows with their namespaces`() {
+        // Through a REAL introspector wired with the dp-lake catalog port (089 §C): the wire's
+        // `namespace` carries the registered namespace — no new field, the 087 shape.
+        val lake = McpFixtures.datasource(name = "sample-lake", dialect = co.datapipelines.typesystem.Dialect.LAKE)
+        val registry = FakeDatasourceRegistry(listOf(lake))
+        val catalog =
+            co.datapipelines.datasources.LakeTableCatalog {
+                listOf(
+                    co.datapipelines.datasources
+                        .LakeRegisteredTable(listOf("nyc", "mobility"), "hvfhv_zone_day", "parquet", "s3://b/z/part-0.parquet"),
+                )
+            }
+        val real = SchemaIntrospector(registry, catalog)
+
+        val payload =
+            DatasourcesGetTablesTool(real, registry)
+                .call(McpArguments(mapOf("name" to "sample-lake")), authorCtx)
+
+        @Suppress("UNCHECKED_CAST")
+        val tables = (payload as Map<String, Any?>)["tables"] as List<Map<String, Any?>>
+        assertAll(
+            { tables.single()["namespace"] shouldBe listOf("nyc", "mobility") },
+            { tables.single()["name"] shouldBe "hvfhv_zone_day" },
+            { tables.single()["type"] shouldBe "VIEW" },
+            { tables.single()["remarks"] shouldBe "parquet" },
+        )
+    }
+
+    @Test
     fun `an unknown datasource is the catalogued not-found on every introspection tool`() {
         // A real introspector over a registry that knows no such name — the true failure path.
         val registry = mockk<DatasourceRegistry>()

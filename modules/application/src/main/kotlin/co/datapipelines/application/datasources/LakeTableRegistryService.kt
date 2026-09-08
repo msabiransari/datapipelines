@@ -3,6 +3,7 @@ package co.datapipelines.application.datasources
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -57,12 +58,11 @@ fun interface LakeTableMutationGate {
  * A registry change must rebuild the datasource's pooled connections, because phase B's per-table
  * views are created in `LakeDialectAdapter.connectionInit` at pool build: a pool built before a
  * registration serves connections that cannot see the new table. So every successful mutation
- * here calls [refreshConnections] — `DatasourceRegistry.evictPool(name)` for this instance and
- * [PoolInvalidationPublisher.publish] for the peers, the SAME pair `DefaultDatasourceRegistry`
- * runs on every save/delete (§5.7). The `DatasourceMetadataCache` half has nothing to drop: a
- * lake-table write changes no datasource ROW. Phase C's introspection-over-registry cache joins
- * this seam when it exists — [refreshConnections] is the single place to extend, which is the
- * point of naming it.
+ * here calls [refreshConnections] — phase C's [LakeIntrospectionCache] drop,
+ * `DatasourceRegistry.evictPool(name)` for this instance and [PoolInvalidationPublisher.publish]
+ * for the peers, the SAME pair `DefaultDatasourceRegistry` runs on every save/delete (§5.7). The
+ * `DatasourceMetadataCache` half has nothing to drop: a lake-table write changes no datasource
+ * ROW. [refreshConnections] is the single place to extend, which is the point of naming it.
  */
 class LakeTableRegistryService(
     private val datasources: DatasourceRegistry,
@@ -70,6 +70,7 @@ class LakeTableRegistryService(
     private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
     private val manifestFetcher: LakeManifestFetcher = LakeManifestFetcher.HTTP,
     private val mutationGate: LakeTableMutationGate = LakeTableMutationGate.NONE,
+    private val introspectionCache: LakeIntrospectionCache = LakeIntrospectionCache.NONE,
 ) {
     /** The datasource's registered tables, in tree order. Read-only; LAKE-only like the writes. */
     fun list(datasource: Datasource): List<LakeTable> {
@@ -243,12 +244,14 @@ class LakeTableRegistryService(
     }
 
     /**
-     * The invalidation seam (see the class KDoc): local pool eviction, then the §5.7 fan-out —
-     * AFTER the row write returned, the same ordering `DefaultDatasourceRegistry` keeps, so a
-     * subscriber never rebuilds from a state that is not yet durable. Phase B's view creation
-     * and phase C's registry-backed introspection cache extend THIS method and no other.
+     * The invalidation seam (see the class KDoc): phase C's introspection cache, local pool
+     * eviction, then the §5.7 fan-out — AFTER the row write returned, the same ordering
+     * `DefaultDatasourceRegistry` keeps, so a subscriber never rebuilds from a state that is
+     * not yet durable. Phase B's view creation and phase C's registry-backed introspection
+     * cache extend THIS method and no other.
      */
     private fun refreshConnections(datasourceName: String) {
+        introspectionCache.invalidate(datasourceName)
         datasources.evictPool(datasourceName)
         invalidation.publish(datasourceName)
     }
@@ -284,7 +287,11 @@ class LakeTableRegistryService(
             }
 
             node.isTextual -> {
-                node.asText().split('.').map { it.trim() }.filter { it.isNotEmpty() }
+                node
+                    .asText()
+                    .split('.')
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
             }
 
             else -> {
@@ -295,13 +302,17 @@ class LakeTableRegistryService(
     private fun requiredText(
         body: JsonNode,
         field: String,
-    ): String =
-        optionalText(body, field) ?: throw shape("'$field' is required")
+    ): String = optionalText(body, field) ?: throw shape("'$field' is required")
 
     private fun optionalText(
         body: JsonNode,
         field: String,
-    ): String? = body.get(field)?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
+    ): String? =
+        body
+            .get(field)
+            ?.takeIf { it.isTextual }
+            ?.asText()
+            ?.takeIf { it.isNotBlank() }
 
     private fun shape(why: String): DatapipelinesException =
         DatapipelinesException(

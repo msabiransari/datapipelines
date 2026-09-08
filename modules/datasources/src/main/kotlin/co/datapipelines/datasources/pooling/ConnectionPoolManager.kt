@@ -97,9 +97,27 @@ class ConnectionPoolManager(
     }
 
     companion object {
-        /** The production pool factory: a real Hikari pool built through the dialect adapter. */
-        fun buildHikariPool(datasource: Datasource): ConnectionPool {
+        /**
+         * The production pool factory: a real Hikari pool built through the dialect adapter.
+         *
+         * [additionalConnectionInit] carries statements derived OUTSIDE the adapter — today
+         * exactly one producer: phase B's per-table lake views ([LakeViewStatements]), which
+         * need the registry rows only the registry's pool factory can reach. They are appended
+         * AFTER the adapter's own `connectionInit` statements (extensions → secret → attach →
+         * limits → views), inside the same `connectionInitSql` slot, so the save-time test pool
+         * build — which passes none — stays byte-identical to the pre-view config (§4.2's
+         * "built the same way" invariant covers the adapter's half; views are runtime-only).
+         */
+        fun buildHikariPool(
+            datasource: Datasource,
+            additionalConnectionInit: List<String> = emptyList(),
+        ): ConnectionPool {
             val config = DialectAdapters.forDialect(datasource.dialect).buildHikariConfig(datasource)
+            if (additionalConnectionInit.isNotEmpty()) {
+                config.connectionInitSql =
+                    listOfNotNull(config.connectionInitSql, additionalConnectionInit.joinToString("; "))
+                        .joinToString("; ")
+            }
             return HikariConnectionPool(datasource.name, HikariDataSource(config))
         }
     }

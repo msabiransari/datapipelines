@@ -7,6 +7,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -51,6 +52,9 @@ class LakeTableRegistryServiceTest {
             gated += datasource
         }
 
+    /** The real cache, so the invalidation seam is proven behaviorally, not by a recorded call. */
+    private val introspectionCache = LakeIntrospectionCache()
+
     private val service =
         LakeTableRegistryService(
             datasources = registry,
@@ -58,6 +62,7 @@ class LakeTableRegistryServiceTest {
             invalidation = invalidation,
             manifestFetcher = LakeManifestFetcher { url -> fetched[url] ?: error("unexpected fetch $url") },
             mutationGate = gate,
+            introspectionCache = introspectionCache,
         )
 
     private val fetched = mutableMapOf<String, com.fasterxml.jackson.databind.JsonNode>()
@@ -176,6 +181,7 @@ class LakeTableRegistryServiceTest {
     @Test
     fun `register maps the unique violation to the catalogued 409 and evicts nothing`() {
         every { tables.insert(any(), any(), any()) } throws DuplicateKeyException("uq_lake_tables_datasource_namespace_name")
+        seedCacheEntry()
 
         val e =
             shouldThrow<DatapipelinesException> {
@@ -189,8 +195,34 @@ class LakeTableRegistryServiceTest {
             { e.code shouldBe PipelineErrorCodes.Datasource.LAKE_TABLE_DUPLICATE },
             { evicted shouldBe emptyList() },
             { published shouldBe emptyList() },
+            // A refused write invalidates nothing: the cached introspection entry survives.
+            { cacheEntrySurvives() shouldBe true },
         )
     }
+
+    @Test
+    fun `a successful mutation drops phase C's introspection cache beside the pool eviction`() {
+        every { tables.insert(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>()) }
+        every { registry.evictPool(any()) } returns true
+        seedCacheEntry()
+
+        service.register(
+            lake(),
+            body("""{"namespace": "nyc.mobility", "name": "hvfhv_zone_day", "format": "parquet", "location": "s3://b/x"}"""),
+            principal,
+        )
+
+        // The seam ran: the next read re-derives instead of serving the pre-mutation entry.
+        cacheEntrySurvives() shouldBe false
+    }
+
+    /** A pre-mutation introspection entry for the datasource, as the introspector would leave one. */
+    private fun seedCacheEntry() {
+        introspectionCache.get("sample-lake", "tables", "") { "cached" } shouldBe "cached"
+    }
+
+    /** True when the seeded entry is still served — i.e. refreshConnections did NOT run. */
+    private fun cacheEntrySurvives(): Boolean = introspectionCache.get("sample-lake", "tables", "") { "re-derived" } == "cached"
 
     @Test
     fun `register refuses an injection-bearing location before any store call`() {
@@ -329,7 +361,10 @@ class LakeTableRegistryServiceTest {
     @Test
     fun `import validates every entry before the first insert - all-or-nothing`() {
         var insertCalls = 0
-        every { tables.insertIfAbsent(any(), any(), any()) } answers { insertCalls++; row(secondArg<LakeTableRegistration>()) }
+        every { tables.insertIfAbsent(any(), any(), any()) } answers {
+            insertCalls++
+            row(secondArg<LakeTableRegistration>())
+        }
 
         val e =
             shouldThrow<DatapipelinesException> {

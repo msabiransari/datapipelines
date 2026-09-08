@@ -4,6 +4,7 @@ import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.IngressTypeMapper
 import co.datapipelines.typesystem.TypeMappers
 import com.zaxxer.hikari.HikariConfig
+import java.lang.management.ManagementFactory
 import java.util.Properties
 
 /**
@@ -415,6 +416,25 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  * | `endpoint` | An S3-compatible endpoint (MinIO, on-prem) — host[:port], no scheme. |
  * | `url_style` | `path` or `vhost`, for S3-compatible endpoints. |
  * | `attach` | `alias=path` pairs, comma-separated: catalogs to ATTACH read-only. |
+ * | `memory_limit` | The engine's memory budget, e.g. `2GB` / `512MB` (§5 of the design record). |
+ * | `threads` | The engine's worker threads — a positive integer. |
+ * | `temp_directory` | Spill directory for oversized operators; a path under the app's data volume. |
+ *
+ * ## Limits (089 §D — compute is on the app's box)
+ *
+ * Every connection a lake pool builds gets the engine limits as `SET` statements (after the
+ * extension/secret/attach setup, before phase B's views): `memory_limit`, `threads` and
+ * `temp_directory` when declared, and `preserve_insertion_order = false` ALWAYS — insertion
+ * order costs the engine memory and temp-file discipline it would otherwise spend on a
+ * guarantee a read-only lake never asks for.
+ *
+ * The DEFAULT memory limit, when `memory_limit` is unset, is **25 % of the container's memory
+ * as DuckDB sees it**: the cgroup limit reported by the container-aware
+ * `OperatingSystemMXBean.totalMemorySize` (the same figure DuckDB's own 80 % default reads),
+ * hard-capped at 4 GiB and floored at 64 MiB — DuckDB shares the box with the JVM, and an
+ * uncapped fraction of a large host would let one lake query evict the app itself. The
+ * computation is injectable ([containerMemoryBytes]) so tests pin it; the operator paragraph
+ * with the numbers lives in configuration.md's lake-limits section.
  *
  * ## Credentials (§3.4)
  *
@@ -424,7 +444,13 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  * [connectionInit], never through `properties.jdbc`, which §5.6 refuses precisely because it is
  * stored plaintext and returned to `read` scope.
  */
-class LakeDialectAdapter : AbstractDialectAdapter(Dialect.LAKE, "duckdb") {
+class LakeDialectAdapter(
+    /**
+     * The container's total memory in bytes, read once per pool build when `memory_limit` is
+     * unset — injectable so tests pin the default computation (see the class KDoc's §D block).
+     */
+    private val containerMemoryBytes: () -> Long = ::detectContainerMemoryBytes,
+) : AbstractDialectAdapter(Dialect.LAKE, "duckdb") {
     /** §4.2: two BROWSABLE levels — `ATTACH` is allowed here, so catalogs are real. */
     override val namespaceShape: NamespaceShape = NamespaceShape.CATALOG_AND_SCHEMA
 
@@ -458,6 +484,7 @@ class LakeDialectAdapter : AbstractDialectAdapter(Dialect.LAKE, "duckdb") {
             addAll(extensionStatements(dialectProperties))
             secretStatement(datasource, dialectProperties)?.let { add(it) }
             addAll(attachStatements(dialectProperties))
+            addAll(limitStatements(dialectProperties))
         }
 
     override fun validateDialectProperties(properties: Map<String, Any?>): ValidationResult {
@@ -473,8 +500,71 @@ class LakeDialectAdapter : AbstractDialectAdapter(Dialect.LAKE, "duckdb") {
                 }.toMutableList()
         enumValue(properties, "catalog.kind", CATALOG_KINDS)?.let { errors += it }
         enumValue(properties, "url_style", URL_STYLES)?.let { errors += it }
+        limitValueError(properties)?.let { errors += it }
         return ValidationResult.of(errors)
     }
+
+    /**
+     * §D's engine limits as `SET` statements, in a fixed order: `memory_limit` (explicit, or
+     * the class-KDoc default), `threads` and `temp_directory` when declared, and
+     * `preserve_insertion_order = false` always. Every value reached here already passed
+     * [validateDialectProperties] at save — the memory-limit regex admits no quote, `threads`
+     * is a bare integer, and `temp_directory` carries none of the refused characters — so the
+     * interpolation into the two string literals cannot break out of them.
+     */
+    private fun limitStatements(properties: Map<String, Any?>): List<String> =
+        buildList {
+            val memoryLimit = properties["memory_limit"]?.toString()?.trim()
+            add("SET memory_limit = '${memoryLimit ?: "${defaultMemoryLimitMb()}MB"}'")
+            properties["threads"]?.toString()?.trim()?.let { add("SET threads = $it") }
+            properties["temp_directory"]?.toString()?.trim()?.let { add("SET temp_directory = '$it'") }
+            add("SET preserve_insertion_order = false")
+        }
+
+    /** The class KDoc's default: 25 % of the container's memory, floored and hard-capped. */
+    private fun defaultMemoryLimitMb(): Long =
+        (containerMemoryBytes() / MEMORY_LIMIT_FRACTION_DIVISOR / BYTES_PER_MB)
+            .coerceIn(MEMORY_LIMIT_FLOOR_MB, MEMORY_LIMIT_CAP_MB)
+
+    /**
+     * The §D values' per-key validation — one error for the FIRST bad key found, mirroring
+     * [enumValue]'s shape: unknown keys are already reported above; these refuse bad VALUES.
+     */
+    private fun limitValueError(properties: Map<String, Any?>): ValidationResult.ValidationError? {
+        properties["memory_limit"]?.toString()?.trim()?.let { value ->
+            if (!MEMORY_LIMIT_VALUE.matches(value)) {
+                return error(
+                    "memory_limit",
+                    "properties.dialect.memory_limit must be a size like '512MB' or '2GB' " +
+                        "(B, KB, MB, GB or TB); '$value' is not.",
+                )
+            }
+        }
+        properties["threads"]?.toString()?.trim()?.let { value ->
+            val threads = value.toIntOrNull()
+            if (threads == null || threads <= 0) {
+                return error("threads", "properties.dialect.threads must be a positive integer; '$value' is not.")
+            }
+        }
+        properties["temp_directory"]?.toString()?.trim()?.let { value ->
+            // The location-grammar refusal (LakeTableValidator's twin): interpolated into a
+            // SQL string literal, so a value that would need escaping is refused, not escaped.
+            val carriesRefusedChar = value.any { ch -> ch in "'\"\\" || ch <= ' ' || ch == '\u007F' }
+            if (!value.startsWith("/") || carriesRefusedChar) {
+                return error(
+                    "temp_directory",
+                    "properties.dialect.temp_directory must be an absolute path under the app's data volume " +
+                        "with no quotes, backslashes, whitespace or control characters; '$value' is not.",
+                )
+            }
+        }
+        return null
+    }
+
+    private fun error(
+        key: String,
+        message: String,
+    ) = ValidationResult.ValidationError(DatasourceErrorCodes.PROPERTIES_INVALID, "properties.dialect.$key", message)
 
     /**
      * `INSTALL`/`LOAD` for the extensions the declared catalog kind needs — and NOTHING when no
@@ -582,11 +672,49 @@ class LakeDialectAdapter : AbstractDialectAdapter(Dialect.LAKE, "duckdb") {
     private fun quoted(value: String): String = "'" + value.replace("'", "''") + "'"
 
     private companion object {
-        val DIALECT_KEYS = setOf("catalog.kind", "catalog.ref", "region", "endpoint", "url_style", "attach")
+        val DIALECT_KEYS =
+            setOf(
+                "catalog.kind",
+                "catalog.ref",
+                "region",
+                "endpoint",
+                "url_style",
+                "attach",
+                "memory_limit",
+                "threads",
+                "temp_directory",
+            )
         val CATALOG_KINDS = setOf("s3", "glue", "s3_tables", "rest")
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")
         val URL_STYLES = setOf("path", "vhost")
+
+        /** DuckDB's size grammar, restricted to byte units — a `%` of an unknown base is refused. */
+        val MEMORY_LIMIT_VALUE = Regex("^\\d+(\\.\\d+)?\\s?(B|KB|MB|GB|TB)$", RegexOption.IGNORE_CASE)
+
+        /** The default memory limit is 1/4 of the container's memory (the class KDoc's 25 %). */
+        const val MEMORY_LIMIT_FRACTION_DIVISOR = 4L
+
+        /** The hard cap on the DEFAULT — an explicit `memory_limit` is the operator's own number. */
+        const val MEMORY_LIMIT_CAP_MB = 4096L
+
+        /** Below this the engine cannot usefully spill or scan; the default never goes lower. */
+        const val MEMORY_LIMIT_FLOOR_MB = 64L
+
+        const val BYTES_PER_MB = 1024L * 1024L
     }
+}
+
+/**
+ * The container's total memory as the JVM reports it: `OperatingSystemMXBean.totalMemorySize`,
+ * which is cgroup-aware on every JDK this app ships on (so it reads the CONTAINER's limit, not
+ * the host's — the same figure DuckDB's own default reads), with `Runtime.maxMemory()` as the
+ * fallback when the MX bean is not the HotSpot one. [LakeDialectAdapter] injects this so tests
+ * never depend on the machine they run on.
+ */
+private fun detectContainerMemoryBytes(): Long {
+    val mxBean = ManagementFactory.getOperatingSystemMXBean() as? com.sun.management.OperatingSystemMXBean
+    val total = mxBean?.totalMemorySize ?: 0L
+    return if (total > 0) total else Runtime.getRuntime().maxMemory()
 }
 
 /**

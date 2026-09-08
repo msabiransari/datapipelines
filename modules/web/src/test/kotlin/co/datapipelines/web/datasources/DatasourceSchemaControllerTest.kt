@@ -116,6 +116,38 @@ class DatasourceSchemaControllerTest {
     }
 
     @Test
+    fun `tables on a LAKE datasource serves the registry rows with their namespaces`() {
+        // Through a REAL introspector wired with the dp-lake catalog port (089 §C): the REST
+        // twin of the MCP proof — `namespace` shows for lake tables with no new wire field.
+        val lake =
+            Datasource(
+                name = "sample-lake",
+                displayName = "Lake",
+                dialect = co.datapipelines.typesystem.Dialect.LAKE,
+                jdbcUrl = "jdbc:duckdb:",
+            )
+        every { registry.getVisible("sample-lake", workspaceId) } returns lake
+        val catalog =
+            co.datapipelines.datasources.LakeTableCatalog {
+                listOf(
+                    co.datapipelines.datasources
+                        .LakeRegisteredTable(listOf("nyc", "mobility"), "hvfhv_zone_day", "parquet", "s3://b/z/part-0.parquet"),
+                )
+            }
+        val lakeController = DatasourceSchemaController(SchemaIntrospector(registry, catalog), registry)
+
+        val data = lakeController.tables("sample-lake", schema = null).data
+
+        @Suppress("UNCHECKED_CAST")
+        val tables = data["tables"] as List<Map<String, Any?>>
+        assertAll(
+            { tables.single()["namespace"] shouldBe listOf("nyc", "mobility") },
+            { tables.single()["name"] shouldBe "hvfhv_zone_day" },
+            { tables.single()["type"] shouldBe "VIEW" },
+        )
+    }
+
+    @Test
     fun `an unknown datasource surfaces the catalogued not-found`() {
         // Workspaces §5.3: the controller's visibility pre-check answers not-found BEFORE the
         // introspector is reached — an invisible datasource and an unknown one are the same 404.

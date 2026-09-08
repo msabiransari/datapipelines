@@ -141,10 +141,11 @@ class LakeTableRepository(
                     datasourceId = rs.getString("datasource_id"),
                     namespace = (rs.getArray("namespace").array as Array<*>).map { it.toString() },
                     name = rs.getString("name"),
-                    format = LakeTableFormat.fromWireOrNull(rs.getString("format"))
-                        // The CHECK makes this unreachable; a corrupt row fails loudly here
-                        // rather than deserializing into a value that generates SQL later.
-                        ?: error("lake_tables row ${rs.getObject("id")} holds an unknown format"),
+                    format =
+                        LakeTableFormat.fromWireOrNull(rs.getString("format"))
+                            // The CHECK makes this unreachable; a corrupt row fails loudly here
+                            // rather than deserializing into a value that generates SQL later.
+                            ?: error("lake_tables row ${rs.getObject("id")} holds an unknown format"),
                     location = rs.getString("location"),
                     partitionColumn = rs.getString("partition_column"),
                     registeredBy = rs.getObject("registered_by", UUID::class.java),

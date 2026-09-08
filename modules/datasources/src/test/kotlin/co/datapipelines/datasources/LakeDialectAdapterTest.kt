@@ -41,6 +41,13 @@ class LakeDialectAdapterTest {
     private val lake = DialectAdapters.forDialect(Dialect.LAKE)
     private val embedded = DialectAdapters.forDialect(Dialect.DUCKDB)
 
+    /**
+     * An adapter with the container memory pinned at 8 GiB — the default `memory_limit` is a
+     * function of the machine otherwise, and the exact-statement assertions below must not be.
+     * 8 GiB / 4 = 2048MB, comfortably inside the 64 MiB–4 GiB clamp.
+     */
+    private val lakeFixed = LakeDialectAdapter { 8L * 1024 * 1024 * 1024 }
+
     @Test
     fun `a local ATTACH lake opens through the real pool and reports both catalogs`() {
         seedDuckDbFile("one", "one_col")
@@ -112,17 +119,21 @@ class LakeDialectAdapterTest {
         // `INSTALL httpfs` would need egress to DuckDB's extension repository, and `TYPE s3`
         // needs httpfs loaded. Emitting either for a lake over paths the process can already
         // reach would turn a working air-gapped configuration into a connect failure.
-        lake.connectionInit(attachLake()) shouldContainExactly
+        // The trailing two SETs are 089 §D's always-on engine limits (memory default pinned
+        // by lakeFixed; preserve_insertion_order unconditional).
+        lakeFixed.connectionInit(attachLake()) shouldContainExactly
             listOf(
                 "ATTACH '${tempDir.resolve("one.db")}' AS \"a1\" (READ_ONLY)",
                 "ATTACH '${tempDir.resolve("two.db")}' AS \"a2\" (READ_ONLY)",
+                "SET memory_limit = '2048MB'",
+                "SET preserve_insertion_order = false",
             )
     }
 
     @Test
     fun `an S3 lake with the IAM chain loads httpfs and aws and creates a credential-chain secret`() {
         val init =
-            lake.connectionInit(
+            lakeFixed.connectionInit(
                 lakeDatasource(
                     credentialKind = CredentialKind.NONE,
                     dialectProperties = mapOf("catalog.kind" to "s3", "region" to "us-east-1"),
@@ -136,6 +147,8 @@ class LakeDialectAdapterTest {
                 "INSTALL aws",
                 "LOAD aws",
                 "CREATE OR REPLACE SECRET dp_lake (TYPE s3, PROVIDER credential_chain, REGION 'us-east-1')",
+                "SET memory_limit = '2048MB'",
+                "SET preserve_insertion_order = false",
             )
     }
 
@@ -180,11 +193,13 @@ class LakeDialectAdapterTest {
 
     @Test
     fun `the pool config carries the init statements joined into HikariCP's single slot`() {
-        val config = lake.buildHikariConfig(attachLake())
+        val config = lakeFixed.buildHikariConfig(attachLake())
 
         config.connectionInitSql shouldBe
             "ATTACH '${tempDir.resolve("one.db")}' AS \"a1\" (READ_ONLY); " +
-            "ATTACH '${tempDir.resolve("two.db")}' AS \"a2\" (READ_ONLY)"
+            "ATTACH '${tempDir.resolve("two.db")}' AS \"a2\" (READ_ONLY); " +
+            "SET memory_limit = '2048MB'; " +
+            "SET preserve_insertion_order = false"
     }
 
     @Test
@@ -226,6 +241,91 @@ class LakeDialectAdapterTest {
             { lake.namespaceShape.levels shouldBe 2 },
             { embedded.namespaceShape.levels shouldBe 1 },
         )
+    }
+
+    // ---------------------------------------------------------- 089 §D: engine limits
+
+    @Test
+    fun `declared limit properties become SET statements after the attach setup`() {
+        val init =
+            lakeFixed.connectionInit(
+                lakeDatasource(
+                    dialectProperties =
+                        mapOf(
+                            "memory_limit" to "512MB",
+                            "threads" to 4,
+                            "temp_directory" to "${tempDir.absolutePath}/spill",
+                        ),
+                ),
+            )
+
+        init shouldContainExactly
+            listOf(
+                "SET memory_limit = '512MB'",
+                "SET threads = 4",
+                "SET temp_directory = '${tempDir.absolutePath}/spill'",
+                "SET preserve_insertion_order = false",
+            )
+    }
+
+    @Test
+    fun `the default memory limit is 25 percent of the container, floored at 64MB and capped at 4GB`() {
+        fun defaultFor(totalBytes: Long): String =
+            LakeDialectAdapter { totalBytes }
+                .connectionInit(lakeDatasource())
+                .single { it.startsWith("SET memory_limit") }
+
+        assertAll(
+            // 8 GiB / 4 = 2048MB — the plain fraction.
+            { defaultFor(8L * 1024 * 1024 * 1024) shouldBe "SET memory_limit = '2048MB'" },
+            // 64 GiB / 4 = 16 GiB, hard-capped: an uncapped fraction of a large host would let
+            // one lake query evict the JVM it shares the box with.
+            { defaultFor(64L * 1024 * 1024 * 1024) shouldBe "SET memory_limit = '4096MB'" },
+            // 128 MiB / 4 = 32MB, floored: below 64MB the engine cannot usefully spill or scan.
+            { defaultFor(128L * 1024 * 1024) shouldBe "SET memory_limit = '64MB'" },
+        )
+    }
+
+    @Test
+    fun `bad limit values are refused at validation, and the valid ones pass`() {
+        val validator = DatasourceValidator()
+
+        fun errorsOf(properties: Map<String, Any?>) =
+            validator
+                .validate(lakeDatasource(dialectProperties = properties), isCreate = true)
+                .errors
+
+        assertAll(
+            { errorsOf(mapOf("memory_limit" to "lots")).single().field shouldBe "properties.dialect.memory_limit" },
+            // A percentage of an unknown base is not a size this adapter will set.
+            { errorsOf(mapOf("memory_limit" to "25%")).single().field shouldBe "properties.dialect.memory_limit" },
+            { errorsOf(mapOf("threads" to 0)).single().field shouldBe "properties.dialect.threads" },
+            { errorsOf(mapOf("threads" to -2)).single().field shouldBe "properties.dialect.threads" },
+            { errorsOf(mapOf("threads" to "abc")).single().field shouldBe "properties.dialect.threads" },
+            // Relative, and an injection-shaped value — the string-literal boundary's refusal.
+            { errorsOf(mapOf("temp_directory" to "relative/path")).single().field shouldBe "properties.dialect.temp_directory" },
+            { errorsOf(mapOf("temp_directory" to "/tmp/with space")).single().field shouldBe "properties.dialect.temp_directory" },
+            { errorsOf(mapOf("temp_directory" to "/tmp/x'); DROP")).single().field shouldBe "properties.dialect.temp_directory" },
+            {
+                validator
+                    .validate(
+                        lakeDatasource(
+                            dialectProperties = mapOf("memory_limit" to "1.5GB", "threads" to 8, "temp_directory" to "/data/spill"),
+                        ),
+                        isCreate = true,
+                    ).valid shouldBe true
+            },
+        )
+    }
+
+    @Test
+    fun `the limit keys are declared - a typo in one is still an unknown-key refusal`() {
+        val errors =
+            DatasourceValidator()
+                .validate(lakeDatasource(dialectProperties = mapOf("memory_lmit" to "2GB")), isCreate = true)
+                .errors
+
+        errors.single { it.field == "properties.dialect.memory_lmit" }.message shouldContain "memory_limit"
     }
 
     private fun attachLake(): Datasource =

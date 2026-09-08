@@ -48,6 +48,7 @@ class DefaultDatasourceRegistry(
     private val auditSink: DatasourceAuditSink = DatasourceAuditSink.NONE,
     private val cache: DatasourceMetadataCache = DatasourceMetadataCache(),
     private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
+    private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
 
@@ -55,12 +56,35 @@ class DefaultDatasourceRegistry(
      * Decrypts inside the pool-build factory only (§7.4). `computeIfAbsent` runs this at most
      * once per datasource, so the credential is decrypted once per pool build, not per lease —
      * and the `pool_build` audit event is emitted exactly there, on the same at-most-once path.
+     *
+     * For a LAKE datasource the factory also reads the dp-lake registry ([lakeTables]) and
+     * appends phase B's per-table view statements (089 §B) — captured into the pool's
+     * `connectionInitSql` HERE, at pool build, which is exactly why a registry mutation must
+     * evict the pool for a new table to become visible: [evictPool] drops the cached pool and
+     * the next [poolFor] re-runs this factory against the fresh rows. Nothing else caches the
+     * init SQL — this method bypasses the metadata cache by design (the credential reason
+     * above), so eviction alone is the whole rebuild mechanism.
      */
     private val poolManager =
         ConnectionPoolManager { datasource ->
             val withCredential = loadWithCredential(datasource.name)
             audit(DatasourceAuditEvents.POOL_BUILD, datasource.name, DatasourceAuditEvent.SYSTEM_ACTOR)
-            ConnectionPoolManager.buildHikariPool(withCredential)
+            ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential))
+        }
+
+    /** Phase B's view statements for a LAKE datasource; nothing for every other dialect. */
+    private fun lakeViewStatements(datasource: Datasource): List<String> =
+        when (datasource.dialect) {
+            Dialect.LAKE -> {
+                LakeViewStatements.forTables(
+                    lakeTables.registeredTables(datasource.name),
+                    DialectAdapters.forDialect(datasource.dialect),
+                )
+            }
+
+            else -> {
+                emptyList()
+            }
         }
 
     override fun list(dialect: Dialect?): List<Datasource> = repository.findAll(dialect).map { it.toDatasource() }
