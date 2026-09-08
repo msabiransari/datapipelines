@@ -85,6 +85,27 @@ terminal state into `schedule_runs`. No streaming consumer: the run is observed 
 - **Health**: the scheduler's state (role, running, last poll, overdue count) in `/health`; metrics
   `scheduler.fires`, `scheduler.reclaims`, `scheduler.skipped`.
 
+### 5.1 UI requirements (held to the 079/080 standard — no new visual language)
+- **Frame**: the 079 shell's page header, cards, chips, tables; the explorer is the SAME tree component as pipelines and
+  templates (folders, counts, guides, search). Operate › Schedules in the sidebar with a count.
+- **Form, top to bottom**: Pipeline (searchable picker over released pipelines, folder path shown) → Version (released
+  only, newest default, pinned; never "latest") → **When**: preset cards first — Every 15 min · Hourly · Daily at … ·
+  Weekdays at … · Weekly on … · Monthly on … · Custom cron — each expanding only the fields it needs; the custom field
+  validates as you type with the error under it → Timezone (searchable select; default = the org timezone
+  `datapipelines.org.timezone`; the browser's zone offered) → **Next five fire times** live in that zone, computed by the
+  engine's own parser → Parameters (typed inputs generated from the pinned version's declared parameters — DATE/NUMBER/
+  STRING widgets, defaults prefilled, required marked; derived calculator inputs shown as optional overrides, D35) →
+  Catch-up (skip default; one sentence each) → Enabled. Save = toast (Shape A) + detail.
+- **Detail**: facts card; status chip (Enabled / Paused / Disabled — creator deactivated); next fire relative + absolute
+  on hover; actions Pause/Resume, Run now (confirm), Edit, Delete (confirm naming the schedule); **Runs** table: fire
+  time, outcome chip (queued / running / succeeded / failed / aborted / skipped / reclaimed), duration, via, picked-by,
+  execution link; a failed row shows its catalogued code inline; running rows update on the 5 s poll the executions list
+  already uses.
+- **States**: empty explorer ("No schedules yet — schedule a released pipeline"), skeleton rows while loading (085),
+  toasts per action, nothing paints half-initialised (090: stylesheets in the head, `x-cloak`).
+- **Ad-hoc**: "Run in background" on a pipeline's detail returns at once with a toast linking to the run.
+- **Evidence**: screenshots at 1440 and 2560, light and dark — explorer, form (two presets + custom), detail with runs.
+
 ## 6. Configuration (`configuration.md §3.x`)
 `datapipelines.scheduler.role` (both|api|worker), `threads` (default 2), `polling-interval` (10 s), `heartbeat-interval`
 (30 s), `missed-heartbeats-limit` (6), `shutdown-max-wait` (60 s) — mapped onto the starter's `db-scheduler.*`; hardened
