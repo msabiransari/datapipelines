@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.CauseChain
 import co.datapipelines.typesystem.DatapipelinesException
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -92,8 +93,29 @@ class ApiExceptionHandler {
         )
     }
 
-    /** A body Jackson could not read, or the wrong content type (rest-api §3.3). */
-    @ExceptionHandler(HttpMessageNotReadableException::class, HttpMediaTypeNotSupportedException::class)
+    /**
+     * A body Jackson could not read, or the wrong content type (rest-api §3.3).
+     *
+     * ## Why [MismatchedInputException] is listed beside the Spring exception (098 §C)
+     * The message converter wraps Jackson's failures in [HttpMessageNotReadableException] — but
+     * only the failures IT causes. `PipelineService.validate` re-reads the already-bound tree
+     * through `PipelineDeserializer.readOrThrow`, so a body whose `source` is an object instead
+     * of a string throws a RAW `MismatchedInputException` from inside the service, past this
+     * handler and into the `Throwable` backstop. Measured on the demo stack, 2026-09-08:
+     * `POST /api/v1/pipelines` with `"source": {"name": "sample-trips"}` answered **500**
+     * `pipeline.execution.aborted` / "Unexpected server error." — the envelope that tells a
+     * caller their own malformed body was OUR fault, plus an ERROR line and a stack trace in
+     * the operator's log for a request that never should have left the caller's machine.
+     *
+     * The subclass, not `JsonProcessingException` or `DatabindException`: "the JSON's shape does
+     * not match the target type" is exactly the caller-error family. A serialization failure on
+     * the way OUT is our bug and must keep its 500.
+     */
+    @ExceptionHandler(
+        HttpMessageNotReadableException::class,
+        MismatchedInputException::class,
+        HttpMediaTypeNotSupportedException::class,
+    )
     fun onUnreadableBody(
         error: Exception,
         request: HttpServletRequest,
@@ -268,7 +290,19 @@ class ApiExceptionHandler {
     private fun malformedBodyCodeFor(uri: String): String =
         when {
             uri.startsWith("$API_PREFIX/templates") -> PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED
+
             uri.startsWith("$API_PREFIX/datasources") -> PipelineErrorCodes.Datasource.PROPERTIES_INVALID
+
+            // 098 §C: without this row an unreadable endpoint body fell through to the pipeline
+            // family and answered `pipeline.validation.schema_version_unsupported` with "This
+            // pipeline isn't valid yet" — measured on `POST /api/v1/endpoints` with `path`
+            // omitted, which is a defect in an ENDPOINT payload and names no pipeline at all.
+            // `endpoint.path_invalid` is the endpoint family's own 400 for a malformed create,
+            // exactly as `template.schema_version_unsupported` and `datasource.properties_invalid`
+            // stand in for their families; `details.reason: malformed_json` and the message carry
+            // what the code cannot.
+            uri.startsWith("$API_PREFIX/endpoints") -> PipelineErrorCodes.Endpoint.PATH_INVALID
+
             else -> PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED
         }
 

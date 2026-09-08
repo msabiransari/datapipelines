@@ -46,6 +46,11 @@ class SiteRenderTest {
         // Assets resolve through the app's own static surface, never the retired website/ copy.
         html shouldContain "href=\"/vendor/design-system/tokens.css\""
         html shouldContain "href=\"/site/css/site.css\""
+        // 098 §G: the hero is the EDITOR now — the shot 093 could not take, because the canvas
+        // painted every node in --brand and the driver refuses a broken canvas rather than
+        // photographing it. `execution-result.png` did not go away; it moved to the executions
+        // card, and both are asserted so a later round cannot silently drop either.
+        html shouldContain "src=\"/site/img/editor-hero.png\""
         html shouldContain "src=\"/site/img/execution-result.png\""
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.

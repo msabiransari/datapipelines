@@ -9,6 +9,7 @@ import co.datapipelines.auth.LocalAuthService
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceService
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -17,8 +18,12 @@ import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.time.Instant
 import java.util.UUID
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post as mvcPost
 
 /**
  * [LocalLoginController] — the form half of the login ceremony, in the unit layer beside
@@ -158,5 +163,66 @@ class LocalLoginControllerTest {
 
         verify { localAuthService.authenticate("  LOCAL@X.TEST ", "pw", any(), any()) }
         response.cookies.single().value shouldBe "jwt"
+    }
+
+    /**
+     * 098 §C — a login POST whose form does not bind answers what a WRONG PASSWORD answers.
+     *
+     * Driven through a real MVC pipeline, because the defect lives in the binding step: calling
+     * `controller.login(...)` directly, as every test above does, can never reproduce it — the
+     * arguments are already there. Measured on the demo stack before the fix (2026-09-08):
+     * `POST /login` with `username=x&password=y` answered **500** and logged
+     * `500 POST /login: unhandled …` with a stack trace, on a public unauthenticated route
+     * (093 §5, 095 §5.3). The reference answer, measured in the same run, is
+     * `302 Location: /login?error=credentials`.
+     *
+     * `UiExceptionHandler` is registered as the advice here exactly as it is in production, so
+     * this also pins that the controller's own handler WINS over it — the advice's general
+     * answer for an unbindable UI form is a 400 page, and the login ceremony's is this redirect.
+     */
+    @Test
+    fun `a login post with no email field is the same 302 a wrong password gets, and logs no ERROR`() {
+        val mvc =
+            MockMvcBuilders
+                .standaloneSetup(controller)
+                .setControllerAdvice(UiExceptionHandler())
+                .build()
+
+        val uiLog = org.slf4j.LoggerFactory.getLogger(UiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val loginLog = org.slf4j.LoggerFactory.getLogger(LocalLoginController::class.java) as ch.qos.logback.classic.Logger
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        uiLog.addAppender(appender)
+        loginLog.addAppender(appender)
+        try {
+            mvc
+                .perform(mvcPost("/login").param("username", "x").param("password", "y"))
+                .andExpect(status().isFound)
+                .andExpect(redirectedUrl("/login?error=credentials"))
+
+            appender.list.map { it.level.toString() } shouldNotContain "ERROR"
+            appender.list.none { it.throwableProxy != null } shouldBe true
+        } finally {
+            uiLog.detachAppender(appender)
+            loginLog.detachAppender(appender)
+        }
+    }
+
+    /** The same wire, the reference answer — so the two are compared, not asserted separately. */
+    @Test
+    fun `a wrong password over the same wire is that identical 302`() {
+        stubAuthenticate(LocalAuthService.LocalLoginResult.BadCredentials)
+        val mvc =
+            MockMvcBuilders
+                .standaloneSetup(controller)
+                .setControllerAdvice(UiExceptionHandler())
+                .build()
+
+        mvc
+            .perform(mvcPost("/login").param("email", "who@x.test").param("password", "nope"))
+            .andExpect(status().isFound)
+            .andExpect(redirectedUrl("/login?error=credentials"))
     }
 }

@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.CorrelationId
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
@@ -132,5 +134,58 @@ class UiExceptionHandlerTest {
         val body = toast.body as String
         body shouldContain "pipeline.execution.datasource_unreachable"
         body shouldNotContain "internal-host"
+    }
+
+    /**
+     * 098 §C — a form that does not bind is the CALLER's error: 400, `error/400`, and a DEBUG
+     * line without a trace. It used to reach [UiExceptionHandler.onUnexpected]: 500,
+     * `error/500`'s "Something went wrong on our side", and an ERROR line with a stack trace.
+     * (`POST /login`'s own answer is [LocalLoginController]'s redirect — a handler method on the
+     * controller wins over an advice, and `LocalLoginControllerTest` pins that at the wire.)
+     */
+    @Test
+    fun `an unbindable request is a 400 page, not the 500 backstop`() {
+        val error = MissingServletRequestParameterException("email", "String")
+
+        val page = handler.onUnbindableRequest(error, mockRequest()).shouldBeInstanceOf<ModelAndView>()
+
+        page.viewName shouldBe "error/400"
+        page.status shouldBe HttpStatus.BAD_REQUEST
+    }
+
+    @Test
+    fun `an unbindable htmx request is a 400 toast, and neither logs ERROR or a stack`() {
+        val logger = org.slf4j.LoggerFactory.getLogger(UiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            val toast =
+                handler
+                    .onUnbindableRequest(MissingServletRequestParameterException("email", "String"), mockRequest(htmx = true))
+                    .shouldBeInstanceOf<ResponseEntity<*>>()
+
+            toast.statusCode shouldBe HttpStatus.BAD_REQUEST
+            toast.headers.getFirst("HX-Retarget") shouldBe "#toast"
+
+            appender.list.map { it.level.toString() } shouldNotContain "ERROR"
+            appender.list.none { it.throwableProxy != null } shouldBe true
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    /** A BindException from an `@Valid` form takes the same road. */
+    @Test
+    fun `a bind failure takes the same 400`() {
+        val binding = org.springframework.validation.BeanPropertyBindingResult(Any(), "form")
+        binding.reject("bad")
+
+        handler
+            .onUnbindableRequest(org.springframework.validation.BindException(binding), mockRequest())
+            .shouldBeInstanceOf<ModelAndView>()
+            .status shouldBe HttpStatus.BAD_REQUEST
     }
 }

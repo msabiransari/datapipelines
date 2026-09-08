@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!-- 098 §C — the UI's answer to a malformed REQUEST, as opposed to a broken server.
+     `UiExceptionHandler` had no case for a missing or unbindable form field, so a bad POST
+     fell to the `Throwable` backstop and got HTTP 500, the server-fault page, and an ERROR
+     line with a stack trace in the operator's log. A caller's malformed form is a 400 and a
+     DEBUG line (rules/02, and the discipline `ApiExceptionHandler`'s own KDoc states). This
+     is `error/404`'s shape with that copy. NOTE this is an ordinary HTML comment, like the
+     one at the top of `datasources/detail.html`: it ships to the browser, so it says nothing
+     it would be wrong to serve. -->
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div class="app-center u-modal-tall">
+    <div class="ds-card app-card-auth u-center">
+      <h2 class="ds-headline u-mb-sm">400</h2>
+      <h3 class="u-text-lg u-mb-md">That request could not be read</h3>
+      <p class="u-secondary u-text-sm u-mb-lg">
+        Something in the form that was sent is missing or malformed. Go back and try again.
+      </p>
+      <a th:href="@{/dashboard}" class="ds-button ds-button-secondary">Go to Dashboard</a>
+    </div>
+  </div>
+</th:block>
+</html>
