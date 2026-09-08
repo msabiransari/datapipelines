@@ -37,6 +37,20 @@ dependencies {
     // Konsist cross-module architecture guards (module-structure.md §7.8): they scan
     // every module's sources, so they live in the cross-module test suite.
     testImplementation(libs.konsist)
+
+    // The 089 §F four-engine E2E registers a MYSQL datasource and the app resolves the
+    // Connector/J driver BY NAME at pool build. The driver is flag-gated (-Pmysql) out of
+    // the production runtime (datasources §10.2), so the test JVM adds it to the test
+    // runtime explicitly — the same declared exception modules/datasources makes for its
+    // own per-dialect container suites, and likewise excluded from lock state below.
+    testRuntimeOnly(libs.mysql.connector.j)
+}
+
+// mysql-connector-j is on this module's test runtime WITHOUT the -Pmysql flag (see the
+// dependency's note above), and the ONE committed gradle.lockfile must validate both flag
+// states — modules/datasources' ignoredDependencies block is the authority for the pattern.
+dependencyLocking {
+    ignoredDependencies.add("com.mysql:mysql-connector-j")
 }
 
 // 025 B4: the jar smoke (JarSmokeE2eTest) boots the REAL bootJar — the packaged
