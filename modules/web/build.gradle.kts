@@ -69,29 +69,56 @@ dependencies {
 }
 
 // 033 — the spec set ships IN THE JAR: docs served in-product always describe the version
-// they run on (the round's structural argument). Packaged = root docs/*.md MINUS the
-// excluded set (owner decision: docs/superpowers/ is unshipped-work plans,
-// semantic-layer-research.md and SPEC-REVIEW-2026-08.md are research/contributor material).
-// The exclusion is what makes link rewriting mandatory (033 §A): packaged docs link to
+// they run on (the round's structural argument). 096 §G (review finding F4) INVERTED the
+// selection: it was `include("*.md")` minus five excludes, which is a DENYLIST — a new
+// `docs/*.md` was published to the world the moment it landed, and the only thing standing
+// between a contributor note and the public site was somebody remembering to add an exclude.
+// That is the exact inversion `rules/04-configuration.md`'s PUBLIC_ENDPOINTS principle
+// forbids (and auth.md §8.3 now applies to routes): the default is private, the exceptions
+// are enumerated, and each one is a decision somebody took. The list below IS that decision
+// record — a new doc is private until its filename is added here, which is a visible diff on
+// a line whose whole job is to be read.
+//
+// The exclusion is also what makes link rewriting mandatory (033 §A): packaged docs link to
 // non-packaged targets, and those links must not ship dead. DocsRenderer rewrites them to
 // canonical GitHub URLs; DocsRenderingTest asserts every relative link resolves one way or
-// the other. scripts/docs-audit.sh keeps guarding the source set — this copies, never edits.
+// the other. DocsCatalog still fails fast at startup on a packaged doc with no index group,
+// so adding a filename here without grouping it is a boot failure, not a silent publish.
+// scripts/docs-audit.sh keeps guarding the source set — this copies, never edits.
+//
+// NOT packaged, and why: semantic-layer-research.md, SPEC-REVIEW-2026-08.md,
+// ARCH-AUDIT-2026-08.md and TEST-GAP-2026-09.md are contributor material (research notes,
+// review records, findings pending review) — an operator running this deployment is not the
+// audience, and shipping "pending review" findings in the product jar would read as product
+// documentation. template-hierarchy-design.md proposes schema and contract that does not
+// exist yet, so shipping it would describe a version nobody runs.
 tasks.named<ProcessResources>("processResources") {
     from(rootProject.layout.projectDirectory.dir("docs")) {
         into("docs")
-        include("*.md")
-        // Contributor material, not product documentation: research notes, the spec-review
-        // record, and audit findings records pending review. An operator running this
-        // deployment is not the audience, and shipping "pending review" findings in the
-        // product jar would read as product docs.
-        exclude(
-            "semantic-layer-research.md",
-            "SPEC-REVIEW-2026-08.md",
-            "ARCH-AUDIT-2026-08.md",
-            "TEST-GAP-2026-09.md",
-            // Not-yet-normative design docs: they propose schema and contract that does not
-            // exist yet, so shipping them in-product would describe a version nobody runs.
-            "template-hierarchy-design.md",
+        include(
+            "auth.md",
+            "calculators.md",
+            "configuration.md",
+            "dag-executor.md",
+            "datasources.md",
+            "deployment.md",
+            "enums.md",
+            "environments.md",
+            "key-providers.md",
+            "mcp-server.md",
+            "metadata-db.md",
+            "module-structure.md",
+            "observability.md",
+            "pipeline-contract.md",
+            "pipeline-editor.md",
+            "README.md",
+            "rest-api.md",
+            "ROADMAP.md",
+            "staging.md",
+            "templates.md",
+            "type-system.md",
+            "ui-screens.md",
+            "versioning.md",
         )
     }
 }
