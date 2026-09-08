@@ -48,16 +48,23 @@
   min-height: 0;
 }
 
-/* The tree pane. The width is viewport-based (clamped to ~30% of the full-bleed
-   canvas), NOT a percentage of the grid track — an auto track sizes itself from
-   this width, so a percentage resolves against its own track and collapses into
-   the floor (measured at 1280: a 260px pane and 81px of dead space between the
+/* The tree pane. The width is viewport-based (a SHARE of the full-bleed canvas),
+   NOT a percentage of the grid track — an auto track sizes itself from this
+   width, so a percentage resolves against its own track and collapses into the
+   floor (measured at 1280: a 260px pane and 81px of dead space between the
    panes). The resize ceiling is viewport-relative for the same reason (076 §A
    deleted the canvas token it used to derive from). `overflow: auto` is also
    what arms the native resizer — and each level swaps INSIDE it, so the pane
-   (and the detail pane beside it) never move. */
+   (and the detail pane beside it) never move.
+
+   No pixel ceiling (2026-09-08, owner's 3491px window): the former
+   `clamp(260px, 30vw, 480px)` capped the pane at 480px, so on a wide monitor the
+   tree took 14% and the detail sprawled over the rest — "narrowed panes" beside
+   the list screens, whose tables simply use the width. 26vw is the share at every
+   size (1440 → 374, 1920 → 500, 2560 → 666, 3491 → 908); the resizer still runs
+   from the floor to 40vw. */
 .tplx-tree {
-  width: clamp(260px, 30vw, 480px);
+  width: clamp(260px, 26vw, 40vw);
   min-width: 260px;
   max-width: 60vw;
   min-height: 0;

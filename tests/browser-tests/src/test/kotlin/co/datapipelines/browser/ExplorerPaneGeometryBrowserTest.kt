@@ -130,6 +130,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
           const lb = label ? label.getBoundingClientRect() : null;
           return {
             treeWidth: tb.width,
+            viewport: window.innerWidth,
             detailLeft: db.left,
             treeRight: tb.right,
             gap: db.left - tb.right,
@@ -172,6 +173,15 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         val labelWidth = (m["labelWidth"] as Number?)?.toDouble()
 
         withClue(label, "tree pane below its 260px floor: $m") { treeWidth shouldBeGreaterThanOrEqual TREE_FLOOR }
+        // The pane is a SHARE of the viewport, not a capped pixel width: on the owner's
+        // 3491px window the former 480px ceiling left the tree 14% of the canvas. The floor
+        // wins below 1000px; above it the pane tracks 26vw.
+        val viewport = (m["viewport"] as Number).toDouble()
+        if (viewport * TREE_SHARE > TREE_FLOOR) {
+            withClue(label, "tree pane is not its ${TREE_SHARE}vw share of the viewport: $m") {
+                treeWidth shouldBeGreaterThanOrEqual viewport * TREE_SHARE - 1.0
+            }
+        }
         // The detail pane starts at least one shell gap right of the tree's edge. `>=` and not
         // `==`: the rule is that the panes never overlap or crowd, and a future layout may
         // legitimately open the gap further.
@@ -200,7 +210,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         ready()
         seedBothTrees()
 
-        for (width in listOf(1440, 1920, 2560)) {
+        for (width in WIDTHS) {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
                 for (route in listOf("/templates", "/pipelines")) {
@@ -230,7 +240,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         ready()
         seedBothTrees()
 
-        for (width in listOf(1440, 1920, 2560)) {
+        for (width in WIDTHS) {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
                 for (section in listOf("/templates", "/pipelines")) {
@@ -290,6 +300,12 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     private companion object {
         /** `template-tree.css`'s declared floor for the pane. */
         const val TREE_FLOOR = 260.0
+
+        /** …and its declared share of the viewport (`26vw`). */
+        const val TREE_SHARE = 0.26
+
+        /** The three review widths plus the owner's monitor, where the 480px ceiling showed. */
+        val WIDTHS = listOf(1440, 1920, 2560, 3491)
 
         /** A row label narrower than this is the badge-only pane the owner reported. */
         const val MIN_LABEL_WIDTH = 40.0
