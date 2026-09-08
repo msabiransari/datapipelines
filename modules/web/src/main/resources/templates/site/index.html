@@ -479,18 +479,11 @@
 
         <div class="shots">
           <figure class="shot">
-            <!-- screenshot: the API section at /api-console — untouched capture from `./gradlew siteShots` (093 §C) -->
+            <!-- screenshot: the pipelines explorer in the DARK theme, driven through the settings select — untouched capture from `./gradlew siteShots` (093 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/api-console.png}" width="1440" height="900" alt="The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads 30 tools and holds the connection JSON with a DP-API-Key header." loading="lazy">
+              <img th:src="@{/site/img/shell-dark.png}" width="1440" height="900" alt="The pipelines explorer in the dark theme. The sidebar carries the workspace switcher and the Build, Operate and Organisation groups; the tree shows the nyc folder expanded into mobility with its seven pipelines, each with a v1 badge, and the test and trade folders below it. The right pane reads: select a pipeline." loading="lazy">
             </div>
-            <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection — with the tool count read from the catalog at request time, exactly as this page reads it.</figcaption>
-          </figure>
-          <figure class="shot">
-            <!-- screenshot: the key-minting modal, Kind → Scope → Name → Expiry → Bindings — untouched capture from `./gradlew siteShots` (093 §C) -->
-            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/keys.png}" width="1440" height="900" alt="The New API key modal over the API section. Its fields run in order: Kind, as three radio cards reading Agent / API key, Published-endpoint key and Promotion server key; Scope, a select showing read — list and inspect, runs nothing; Name, with a hint that names are not unique and the prefix is what identifies a key; and Expiry, a select defaulting to Never. The bindings picker is absent, because the selected kind is the scoped one." loading="lazy">
-            </div>
-            <figcaption>Minting a key asks Kind first, because the kind decides what the rest of the form means. Scope and bindings appear only for the kinds that have them.</figcaption>
+            <figcaption>Where a run starts: the pipelines explorer, a folder tree over the same 2&ndash;10-segment names an agent authors under. Shown in dark, because the theme is the account's own setting rather than a media query — one toggle in the top bar, remembered per user.</figcaption>
           </figure>
         </div>
 
@@ -597,6 +590,13 @@
               <img th:src="@{/site/img/executions.png}" width="1440" height="900" alt="The execution history screen, newest first, with filters for pipeline, status and date range. Rows carry the pipeline&#39;s display name above its full path, the version, a status pill, the start time, the duration in milliseconds, the row count and the trigger. Both outcomes are here: Success rows for nyc/mobility/taxi_vs_rideshare at 12 rows and nyc/mobility/weather_sensitivity_by_borough at 29, and Failed rows for test/probe/trip_probe with a dash where the row count would be. Every row reads REST under Via." loading="lazy">
             </div>
             <figcaption>Execution history across both outcomes, newest first — with what started each run in the last column. A composed pipeline's child run is listed in its own right, linked back to the parent that spawned it.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: the API section at /api-console — untouched capture from `./gradlew siteShots` (093 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/api-console.png}" width="1440" height="900" alt="The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads 30 tools and holds the connection JSON with a DP-API-Key header." loading="lazy">
+            </div>
+            <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection — with the tool count read from the catalog at request time, exactly as this page reads it.</figcaption>
           </figure>
         </div>
 
@@ -705,11 +705,11 @@
             <figcaption>Workspaces, with the navbar switcher. Every request resolves exactly one workspace, and all authored content is scoped to it.</figcaption>
           </figure>
           <figure class="shot">
-            <!-- screenshot: the pipelines explorer in the DARK theme, driven through the settings select — untouched capture from `./gradlew siteShots` (093 §C) -->
+            <!-- screenshot: the key-minting modal, Kind → Scope → Name → Expiry → Bindings — untouched capture from `./gradlew siteShots` (093 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/shell-dark.png}" width="1440" height="900" alt="The pipelines explorer in the dark theme. The sidebar carries the workspace switcher and the Build, Operate and Organisation groups; the tree shows the nyc folder expanded into mobility with its seven pipelines, each with a v1 badge, and the test and trade folders below it. The right pane reads: select a pipeline." loading="lazy">
+              <img th:src="@{/site/img/keys.png}" width="1440" height="900" alt="The New API key modal over the API section. Its fields run in order: Kind, as three radio cards reading Agent / API key, Published-endpoint key and Promotion server key; Scope, a select showing read — list and inspect, runs nothing; Name, with a hint that names are not unique and the prefix is what identifies a key; and Expiry, a select defaulting to Never. The bindings picker is absent, because the selected kind is the scoped one." loading="lazy">
             </div>
-            <figcaption>The same shell in dark. The theme is the account's own setting, not a media query — one toggle in the top bar, remembered per user.</figcaption>
+            <figcaption>Minting a key asks Kind first, because the kind decides what the rest of the form means. Scope and bindings appear only for the kinds that have them.</figcaption>
           </figure>
         </div>
 
