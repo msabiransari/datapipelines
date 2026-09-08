@@ -38,11 +38,16 @@ class H2EgressMapperTest {
     }
 
     @Test
-    fun `an unbounded BIGDECIMAL stages at the H2 ceiling`() {
-        // §4 + §6: the envelope keeps reporting precision as omitted; only the storage
-        // gets a bound, and the bound is H2's documented maximum.
-        H2EgressMapper.toH2Type(ColumnSchema("c", LogicalType.BIGDECIMAL, precision = null, scale = 0)) shouldBe
-            "DECIMAL(100000, 0)"
+    fun `an exact-unsized BIGDECIMAL stages as DECFLOAT at the H2 ceiling`() {
+        // §4 + §6: the envelope keeps reporting precision AND scale as omitted; the storage
+        // is H2's exact arbitrary-scale decimal at its precision ceiling. DECIMAL(100000, 0)
+        // was the truncation defect — it forced scale 0 onto a value whose scale is unknown.
+        H2EgressMapper.toH2Type(ColumnSchema("c", LogicalType.BIGDECIMAL, precision = null, scale = null)) shouldBe
+            "DECFLOAT(100000)"
+        // The bind code is unchanged: H2 reads DECFLOAT back as NUMERIC and accepts a
+        // BigDecimal bound as DECIMAL (measured on the pinned H2).
+        H2EgressMapper.h2SqlType(ColumnSchema("c", LogicalType.BIGDECIMAL, precision = null, scale = null)) shouldBe
+            Types.DECIMAL
         H2EgressMapper.MAX_H2_DECIMAL_PRECISION shouldBe 100_000
     }
 
@@ -117,9 +122,9 @@ class H2EgressMapperTest {
                 arrayOf("DECIMAL(p) approximate", ColumnSchema("c", LogicalType.DECIMAL, precision = 15), "DOUBLE"),
                 arrayOf("BIGDECIMAL(p, s)", ColumnSchema("c", LogicalType.BIGDECIMAL, 20, 4), "DECIMAL(20, 4)"),
                 arrayOf(
-                    "BIGDECIMAL unbounded",
-                    ColumnSchema("c", LogicalType.BIGDECIMAL, precision = null, scale = 0),
-                    "DECIMAL(100000, 0)",
+                    "BIGDECIMAL exact-unsized",
+                    ColumnSchema("c", LogicalType.BIGDECIMAL, precision = null, scale = null),
+                    "DECFLOAT(100000)",
                 ),
                 arrayOf("STRING", ColumnSchema("c", LogicalType.STRING), "VARCHAR"),
                 arrayOf("BINARY", ColumnSchema("c", LogicalType.BINARY), "VARBINARY"),

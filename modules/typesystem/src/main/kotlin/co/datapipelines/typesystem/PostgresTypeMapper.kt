@@ -15,12 +15,15 @@ import java.sql.Types
  *  - `Types.BIT` is reported both for `bool` (canonical `BOOLEAN`) and for `bit(n)` /
  *    `varbit(n)` (canonical `STRING`, the bit-string text form), so the name decides.
  *
- * ## Unsized `numeric` (§4, adjudicated in v1.1)
+ * ## Unsized `numeric` (§4, adjudicated in v1.1; scale amended 2026-09-08, defect 100)
  *
  * PostgreSQL's `numeric`/`decimal` declared without precision is genuinely unbounded,
- * and the driver reports precision `0`. The envelope then carries `BIGDECIMAL` with the
- * **precision key absent** and `scale: 0`. That is the one rule for the unbounded case:
- * neither PostgreSQL's internal maximum nor another dialect's default may stand in — a
+ * and the driver reports precision `0` — as it does for any expression whose typmod is
+ * gone (`SUM(fare)`, `AVG(fare)`, `fare/2` over a sized numeric). The envelope then
+ * carries `BIGDECIMAL` with the **precision and scale keys both absent**: the reported
+ * scale is 0 for *unknown*, and declaring `scale: 0` asserted "integer" — the first
+ * exact store truncated every fraction (defect 100). Neither PostgreSQL's internal
+ * maximum nor another dialect's default may stand in for the precision either — a
  * fabricated bound would be a lie about the source column and would break clients that
  * size local decimal buffers from it.
  *
@@ -78,8 +81,9 @@ object PostgresTypeMapper : DialectTypeMapper() {
         return when {
             name == "money" -> MONEY
 
-            // exactNumeric routes an unreported precision (PG's unsized numeric) to the
-            // §4 unbounded encoding — precision omitted, scale kept.
+            // exactNumeric routes an unreported precision (PG's unsized numeric, and
+            // any typmod-less expression) to the §4 exact-unsized encoding — precision
+            // and scale omitted.
             sqlType == Types.NUMERIC -> exactNumeric(precision, scale)
 
             sqlType == Types.BIT -> if (name in BIT_STRING_TYPE_NAMES) AS_STRING else AS_BOOLEAN

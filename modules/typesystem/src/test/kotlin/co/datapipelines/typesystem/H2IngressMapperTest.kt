@@ -102,26 +102,28 @@ class H2IngressMapperTest {
     }
 
     @Test
-    fun `an unbounded BIGDECIMAL comes back unbounded, not at the storage ceiling`() {
-        // §6 round-trip rule (normative). Staging must impose a bound to create the H2
-        // column, but that bound is a storage fact, not a fact about the source. Reading
-        // it back as BIGDECIMAL(100000, 0) would republish the synthetic ceiling §4
-        // forbids — the fabricated bound would look identical on the wire to a real one,
-        // and a client sizing a decimal buffer from it would be misled.
-        val source = ColumnSchema("unbounded_total", LogicalType.BIGDECIMAL, precision = null, scale = 0)
+    fun `an exact-unsized BIGDECIMAL comes back exact-unsized, not at the storage ceiling`() {
+        // §6 round-trip rule (normative). Staging must choose a concrete H2 type, but that
+        // choice is a storage fact, not a fact about the source. Reading it back as
+        // BIGDECIMAL(100000, 0) would republish the synthetic ceiling §4 forbids — the
+        // fabricated bound would look identical on the wire to a real one, and a client
+        // sizing a decimal buffer from it would be misled.
+        val source = ColumnSchema("unbounded_total", LogicalType.BIGDECIMAL, precision = null, scale = null)
 
-        H2EgressMapper.toH2Type(source) shouldBe "DECIMAL(100000, 0)"
+        H2EgressMapper.toH2Type(source) shouldBe "DECFLOAT(100000)"
 
         val readBack =
             H2IngressMapper.fromH2(
                 label = source.name,
                 jdbcType = H2EgressMapper.h2SqlType(source),
-                // What H2's ResultSetMetaData reports for the column the DDL above created.
+                // What H2's ResultSetMetaData reports for a DECFLOAT(100000) column
+                // (measured on the pinned H2: code NUMERIC, precision 100000, scale 0).
                 precision = H2EgressMapper.MAX_H2_DECIMAL_PRECISION,
                 scale = 0,
             )
 
         readBack.precision shouldBe null
+        readBack.scale shouldBe null
         readBack.isUnboundedPrecision shouldBe true
         readBack shouldBe source
     }
@@ -135,7 +137,17 @@ class H2IngressMapperTest {
         H2IngressMapper.fromH2("c", Types.DECIMAL, 100_000, 0).precision shouldBe null
         H2IngressMapper.fromH2("c", Types.DECIMAL, 100_001, 0).precision shouldBe null
         // Same rule via the name-dispatched path, not just the code-dispatched one.
-        H2IngressMapper.map(Types.OTHER, 100_000, 2, "DECIMAL") shouldBe unbounded(scale = 2)
+        H2IngressMapper.map(Types.OTHER, 100_000, 2, "DECIMAL") shouldBe unbounded()
+    }
+
+    @Test
+    fun `a DECFLOAT column is exact-unsized whatever its declared precision`() {
+        // DECFLOAT is H2's exact arbitrary-scale decimal: the declared precision counts
+        // digits, the scale is genuinely undeclared (RSMD reports scale 0 for "none").
+        // Mapping DECFLOAT(38) as BIGDECIMAL(38, 0) would truncate its fractions at the
+        // next exact store — the same lie the §4 encoding exists to prevent.
+        H2IngressMapper.map(Types.NUMERIC, 38, 0, "DECFLOAT") shouldBe unbounded()
+        H2IngressMapper.map(Types.NUMERIC, 100_000, 0, "DECFLOAT(100000)") shouldBe unbounded()
     }
 
     private companion object {
@@ -144,6 +156,7 @@ class H2IngressMapperTest {
 
         /** The §5.5 table, one case per row, in document order. */
         @JvmStatic
+        @Suppress("LongMethod")
         private fun tableRows(): List<MappingCase> =
             listOf(
                 MappingCase("TINYINT", Types.TINYINT, INTEGER, typeName = "TINYINT"),
@@ -166,6 +179,13 @@ class H2IngressMapperTest {
                     precision = 20,
                     scale = 2,
                     typeName = "DECIMAL",
+                ),
+                MappingCase(
+                    "DECFLOAT (exact, arbitrary scale)",
+                    Types.NUMERIC,
+                    unbounded(),
+                    precision = 38,
+                    typeName = "DECFLOAT",
                 ),
                 MappingCase("REAL", Types.REAL, SINGLE, typeName = "REAL"),
                 MappingCase("DOUBLE", Types.DOUBLE, DOUBLE, typeName = "DOUBLE"),

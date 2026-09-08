@@ -57,13 +57,14 @@ class OracleTypeMapperTest {
     }
 
     @Test
-    fun `an unsized NUMBER reports Oracle's documented 38-digit default, not unbounded`() {
-        // §4: Oracle DOES define a default, so — unlike PG — the precision is reported.
-        // Emitting the unbounded (precision-omitted) encoding here would be wrong.
-        val mapping = OracleTypeMapper.map(Types.NUMERIC, 0, 0, "NUMBER")
-
-        mapping shouldBe bigDecimal(38, 0)
-        mapping.precision shouldBe 38
+    fun `an unsized NUMBER takes the exact-unsized encoding, both reported shapes`() {
+        // Measured against ojdbc (Oracle 21c XE, 2026-09-08): a bare NUMBER column reports
+        // precision=0 scale=-127 (scale-unspecified — exact decimal, NOT a binary float),
+        // and a typmod-less expression (SUM/AVG/division over a sized NUMBER) reports
+        // precision=0 scale=0. Both mean "unknown"; the old BIGDECIMAL(38, 0) asserted
+        // integer scale and truncated a bare NUMBER's fractions at the first exact store.
+        OracleTypeMapper.map(Types.NUMERIC, 0, -127, "NUMBER") shouldBe unbounded()
+        OracleTypeMapper.map(Types.NUMERIC, 0, 0, "NUMBER") shouldBe unbounded()
     }
 
     @Test
@@ -91,7 +92,13 @@ class OracleTypeMapperTest {
                 MappingCase("NUMBER(p) p > 18, scale 0", Types.NUMERIC, bigDecimal(20, 0), precision = 20),
                 MappingCase("NUMBER(p,s) s > 0, p <= 15", Types.NUMERIC, decimal(12, 4), precision = 12, scale = 4),
                 MappingCase("NUMBER(p,s) s > 0, p > 15", Types.NUMERIC, bigDecimal(20, 4), precision = 20, scale = 4),
-                MappingCase("NUMBER (no precision/scale)", Types.NUMERIC, bigDecimal(38, 0), typeName = "NUMBER"),
+                MappingCase(
+                    "NUMBER (no precision/scale — driver reports -127)",
+                    Types.NUMERIC,
+                    unbounded(),
+                    scale = -127,
+                    typeName = "NUMBER",
+                ),
                 MappingCase("FLOAT(p) — binary bits, double precision", Types.FLOAT, DOUBLE, precision = 126),
                 MappingCase("BINARY_FLOAT", Types.REAL, SINGLE),
                 MappingCase("BINARY_DOUBLE", Types.DOUBLE, DOUBLE),

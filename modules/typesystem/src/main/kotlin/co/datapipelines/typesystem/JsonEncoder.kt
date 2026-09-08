@@ -90,7 +90,9 @@ object JsonEncoder {
 
     /**
      * `BIGDECIMAL` is a plain-decimal JSON string with trailing zeros preserved **to its
-     * declared scale** — `"12345.60"`, not `"12345.6"`.
+     * declared scale** — `"12345.60"`, not `"12345.6"`. An exact-unsized column (scale
+     * omitted, §4) renders each value with the value's own scale: there is no declared
+     * scale to pad to, and 0 would mean "integer", which is exactly the lie §4 forbids.
      *
      * A value carrying MORE fractional digits than the declared scale is left alone
      * rather than rounded: the encoder's job is rendering, and quietly discarding digits

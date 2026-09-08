@@ -81,5 +81,5 @@ fun bigDecimal(
     scale: Int,
 ): LogicalTypeMapping = LogicalTypeMapping(LogicalType.BIGDECIMAL, precision, scale)
 
-/** `BIGDECIMAL` with precision **omitted** — the §4 unbounded encoding. */
-fun unbounded(scale: Int = 0): LogicalTypeMapping = LogicalTypeMapping(LogicalType.BIGDECIMAL, precision = null, scale = scale)
+/** `BIGDECIMAL` with precision **and** scale omitted — the §4 exact-unsized encoding. */
+fun unbounded(): LogicalTypeMapping = LogicalTypeMapping(LogicalType.BIGDECIMAL, precision = null, scale = null)
