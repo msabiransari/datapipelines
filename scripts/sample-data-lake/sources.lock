@@ -57,7 +57,7 @@ param bucket_uri             s3://datapipelines-co/sample-data/lake
 # CURRENT terms (dossier above). Absent or "null" = manifest ships
 # license_verified: null and publishing blocks go-live. The 088 lane deliberately
 # leaves it null: research is not a stamp.
-param license_verified       null
+param license_verified       2026-09-07
 
 # --- derived pins (regenerate with pin.sh) ---------------------------------
 

@@ -108,7 +108,29 @@ lake_checksum_parquet() {
   # hvfhv_trips, `*` under hive_partitioning also brings pickup_date back in from
   # the path — harmless, and it means the partition a row landed in is inside the
   # fingerprint too.)
-  "$(duckdb_bin)" -noheader -list -c \
-    "SELECT * FROM read_parquet('$1', union_by_name = true, hive_partitioning = true) ORDER BY $2;" < /dev/null \
-    | shasum -a 256 | awk '{print $1}'
+  #
+  # A hive-partitioned glob (`…/<col>=*/…`) is streamed PARTITION BY PARTITION, in
+  # sorted partition order, each partition sorted on its own: the concatenation is
+  # byte-identical to one global `ORDER BY` because the ordering key's first column
+  # (`pickup_at`) determines the partition (`pickup_date = date(pickup_at)`), so no
+  # row of a later partition can sort before a row of an earlier one. What it buys:
+  # a global sort of ~470M rows spills tens of GB of DuckDB temp storage and died
+  # with "No space left on device" on the first full build (2026-09-07); a
+  # per-partition sort holds ~700K rows. Same hash, same contract, bounded memory.
+  case "$1" in
+    *=\**)
+      local base="${1%%=\**}"          # …/hvfhv_trips/pickup_date
+      local rest="${1#*=\*/}"          # part-*.parquet
+      local dir
+      for dir in $(ls -d "${base}="* | sort); do
+        "$(duckdb_bin)" -noheader -list -c \
+          "SELECT * FROM read_parquet('$dir/$rest', union_by_name = true, hive_partitioning = true) ORDER BY $2;" < /dev/null
+      done | shasum -a 256 | awk '{print $1}'
+      ;;
+    *)
+      "$(duckdb_bin)" -noheader -list -c \
+        "SELECT * FROM read_parquet('$1', union_by_name = true, hive_partitioning = true) ORDER BY $2;" < /dev/null \
+        | shasum -a 256 | awk '{print $1}'
+      ;;
+  esac
 }
