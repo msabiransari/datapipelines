@@ -69,21 +69,33 @@ class PipelineReleaseService(
         validator.validateOrThrow(pipeline, workspaceId)
 
         // §6: templates lock first — a DRAFT template pin blocks the pipeline's release.
-        pipeline.nodes.map { it.template }.forEach { ref ->
-            val status = templates.statusOf(workspaceId, ref.id, ref.version)
-            if (status != PipelineVersionStatus.RELEASED) {
-                throw DatapipelinesException(
-                    code = PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED,
-                    message = "Template '${ref.id}' version ${ref.version} is not released; release the template first.",
-                    details =
-                        mapOf(
-                            "template_id" to ref.id,
-                            "template_version" to ref.version,
-                            "template_status" to (status?.name ?: "MISSING"),
-                        ),
-                )
+        //
+        // Only the nodes that HAVE a template pin. A PIPELINE node pins a child pipeline and a
+        // CALCULATOR node evaluates a catalog function; neither declares a template, so
+        // `node.template` is the empty default there and asking the registry about `@0` answers
+        // MISSING — which refused the release of every pipeline containing one, naming
+        // `template_id: ""`. Latent since composition shipped (a composite pipeline could be
+        // created, but never re-released after an edit) and unmissable since D55, because now
+        // EVERY pipeline needs a release. Found by `PromotionTwoDeploymentE2eTest`, whose parent
+        // pipeline has a PIPELINE node.
+        pipeline.nodes
+            .filter { it.type != NodeType.PIPELINE && it.type != NodeType.CALCULATOR }
+            .map { it.template }
+            .forEach { ref ->
+                val status = templates.statusOf(workspaceId, ref.id, ref.version)
+                if (status != PipelineVersionStatus.RELEASED) {
+                    throw DatapipelinesException(
+                        code = PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED,
+                        message = "Template '${ref.id}' version ${ref.version} is not released; release the template first.",
+                        details =
+                            mapOf(
+                                "template_id" to ref.id,
+                                "template_version" to ref.version,
+                                "template_status" to (status?.name ?: "MISSING"),
+                            ),
+                    )
+                }
             }
-        }
 
         val released =
             pipelines.releaseDraft(

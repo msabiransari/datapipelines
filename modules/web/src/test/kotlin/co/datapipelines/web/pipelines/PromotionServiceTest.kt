@@ -12,6 +12,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -106,6 +107,24 @@ class PromotionServiceTest {
         every { client.inventory(workspace) } returns inventory()
 
         service.plan(workspaceId, workspace).promotable.shouldBeEmptyList()
+    }
+
+    @Test
+    fun `a never-released pipeline is not a promotion candidate`() {
+        // D55's everyday shape — created, never released, `current_version` null. Promotion still
+        // pushes released versions only (D6), so this pipeline simply is not offered; the rule did
+        // not change, but the state it excludes is now the one every new pipeline starts in.
+        val fresh = record("fresh", version = 1).copy(currentVersion = null)
+        every { pipelines.findAll(workspaceId) } returns listOf(fresh)
+        every { pipelines.findCurrentVersionDetail(workspaceId, fresh.id) } returns null
+        every { client.inventory(workspace) } returns inventory()
+
+        val plan = service.plan(workspaceId, workspace)
+
+        plan.promotable.shouldBeEmptyList()
+        withClue("it was examined, so 'nothing to promote' is a finding rather than a blind spot") {
+            plan.examined shouldBe 1
+        }
     }
 
     // ------------------------------------------------------------------ §10.3, the push guards
@@ -272,7 +291,7 @@ class PromotionServiceTest {
     private fun stubReleased(
         record: PipelineRecord,
         body: String,
-        atVersion: Int = record.currentVersion,
+        atVersion: Int = checkNotNull(record.currentVersion),
         hash: String = "hash-${record.name}",
     ) {
         every { pipelines.findByName(workspaceId, record.name) } returns record
@@ -305,7 +324,7 @@ class PromotionServiceTest {
         status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
     ) = PipelineVersionDetail(
         pipelineId = record.id,
-        version = record.currentVersion,
+        version = checkNotNull(record.currentVersion),
         status = status,
         bodyHash = hash,
         createdAt = EPOCH,

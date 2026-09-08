@@ -47,7 +47,12 @@ import kotlin.enums.EnumEntries
 
 class ExecutionControllerTest {
     private val executions = mockk<ExecutionRepository>()
-    private val pipelines = mockk<PipelineRepository>()
+    private val pipelines =
+        mockk<PipelineRepository>().also {
+            // §8's draft-run markers: no release timestamps in these fixtures, so every run is a
+            // draft run — which is the honest default for a pipeline created under D55.
+            every { it.releasedAtFor(any(), any()) } returns emptyMap()
+        }
     private val resultStore = mockk<ResultStore>()
     private val resultUrls = mockk<ResultUrlFactory>()
     private val cursor = mockk<ResultCursor>()
@@ -55,7 +60,7 @@ class ExecutionControllerTest {
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
 
     private val pageController = ExecutionHistoryController(pipelines)
-    private val partialController = ExecutionHistoryPartialController(executions, pipelineNames)
+    private val partialController = ExecutionHistoryPartialController(executions, pipelineNames, pipelines)
     private val detailController = ExecutionDetailController(executions, pipelines, resultStore, resultUrls)
     private val detailPartialController = ExecutionDetailPartialController(executions, resultStore, cursor, cancellation)
 

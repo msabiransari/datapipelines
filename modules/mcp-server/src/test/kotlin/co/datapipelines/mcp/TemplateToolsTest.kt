@@ -205,7 +205,10 @@ class TemplateToolsTest {
     fun `create validates the draft before storing it and records the caller as author`() {
         val draft = slot<TemplateDraft>()
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
-        every { templates.create(any(), any(), McpFixtures.USER) } returns McpFixtures.template()
+        // D55: DRAFT is part of the expectation — a RELEASED create would not match this stub.
+        every {
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT)
+        } returns McpFixtures.template()
 
         TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
             McpArguments(
@@ -247,8 +250,10 @@ class TemplateToolsTest {
     }
 
     @Test
-    fun `render previews the SQL of the latest version without storing anything`() {
-        every { templates.findLatest(any(), "test/revenue.sql") } returns McpFixtures.template(version = 3)
+    fun `render previews the SQL of the working version without storing anything`() {
+        // D55: the default version to render is the WORKING one — a template created and not yet
+        // released has only a draft, and rendering it is the whole point of the preview step.
+        every { templates.findWorking(any(), "test/revenue.sql") } returns McpFixtures.template(version = 3)
         val ref = slot<TemplateRef>()
         every { engine.render(capture(ref), any(), any()) } returns "SELECT 1 WHERE month = '2026-07'"
 
@@ -322,7 +327,9 @@ class TemplateToolsTest {
     fun `create passes is_library through and rejects an unsupported engine`() {
         val draft = slot<TemplateDraft>()
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
-        every { templates.create(any(), any(), McpFixtures.USER) } returns McpFixtures.template(isLibrary = true)
+        every {
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT)
+        } returns McpFixtures.template(isLibrary = true)
 
         val library =
             mapOf(

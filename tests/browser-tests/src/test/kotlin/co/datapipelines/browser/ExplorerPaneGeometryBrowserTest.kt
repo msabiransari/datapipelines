@@ -4,6 +4,7 @@ import com.microsoft.playwright.options.LoadState
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -202,6 +203,45 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         block()
     } catch (e: AssertionError) {
         throw AssertionError("$label — $clue", e)
+    }
+
+    /**
+     * D55 in the browser: the pipeline this suite creates over REST is a brand-new one, so the
+     * explorer must render it as **v1 with the pending-release badge** — the state every pipeline
+     * now starts in. It is asserted here rather than in a new suite because the fixture already
+     * exists: `seedBothTrees` posts a pipeline and `openFirstFolder` puts its leaf on screen.
+     *
+     * What it would catch: the badge read `p.currentVersion` alone, which is null before the
+     * first release — the row rendered the literal `vnull` in a page no unit test looks at.
+     */
+    @Test
+    fun `a freshly created pipeline renders as v1 with the pending-release badge`() {
+        startTrace()
+        ready()
+        seedBothTrees()
+
+        page.setViewportSize(WIDTHS.first(), 900)
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector(".tplx-tree")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+        openFirstFolder()
+
+        val leaf = page.locator("button.tpl-leaf").first()
+        withClue("the version badge", "a never-released pipeline names its DRAFT's version, not 'vnull'") {
+            leaf
+                .locator(".ds-badge-default")
+                .first()
+                .textContent()
+                .trim() shouldBe "v1"
+        }
+        withClue("the draft badge", "unreleased work stays visible from first paint (versioning §7)") {
+            leaf.locator(".ds-badge-warning").count() shouldBe 1
+            leaf
+                .locator(".ds-badge-warning")
+                .first()
+                .getAttribute("title")
+                .shouldContain("pending release")
+        }
     }
 
     @Test

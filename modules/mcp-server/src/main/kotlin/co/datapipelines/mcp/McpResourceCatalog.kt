@@ -160,7 +160,14 @@ class McpResourceCatalog(
                 descriptor(
                     uri = McpResourceUri.pipeline(it.id),
                     name = it.name,
-                    description = "${it.displayName} — pipeline body, version ${it.currentVersion}.",
+                    // D55: `current_version` is null until a human releases, so the catalogue
+                    // names the released version when there is one and says so when there is
+                    // not — never "version null". The resource itself serves the WORKING
+                    // version (McpResourceReader), which is what the second sentence tells a
+                    // reader who is deciding whether to fetch it.
+                    description =
+                        it.currentVersion?.let { v -> "${it.displayName} — pipeline body, released version $v." }
+                            ?: "${it.displayName} — pipeline body, not released yet (the draft is served).",
                     mimeType = MIME_JSON,
                 )
             }

@@ -5,6 +5,7 @@ import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionRecord
+import co.datapipelines.pipeline.PipelineVersionStatus
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 
@@ -81,15 +82,34 @@ object PipelineResponses {
             "released_at" to (version.releasedAt?.toString() ?: ""),
         )
 
-    /** One entry of the pipelines listing (rest-api §5.7): metadata, not the body. */
-    fun listEntry(record: PipelineRecord): Map<String, Any?> =
+    /**
+     * One entry of the pipelines listing (rest-api §5.7): metadata, not the body.
+     *
+     * `version` is the WORKING version — [draft]'s number when the pipeline has a draft, else the
+     * latest released — and `status` says which of the two it is. Since D55 a listing that
+     * reported `current_version` alone would show nothing at all for every freshly authored
+     * pipeline, and `version: 1` with no status could not tell a reviewed release from a draft
+     * nobody has looked at. `current_version` keeps its own meaning on the single-pipeline read.
+     */
+    fun listEntry(
+        record: PipelineRecord,
+        draft: PipelineVersionDetail? = null,
+    ): Map<String, Any?> =
         mapOf<String, Any?>(
             "id" to record.id.toString(),
             "name" to record.name,
             "display_name" to record.displayName,
             "description" to record.description,
             "owner" to record.ownerId.toString(),
-            "version" to record.currentVersion,
+            "version" to (draft?.version ?: record.currentVersion),
+            // Null in one case only: the sole draft of a never-released pipeline was discarded
+            // (§5.4), so there is no version to name and nothing to run.
+            "status" to
+                when {
+                    draft != null -> PipelineVersionStatus.DRAFT.name
+                    record.currentVersion != null -> PipelineVersionStatus.RELEASED.name
+                    else -> null
+                },
             "created_at" to record.createdAt.toString(),
             "updated_at" to record.updatedAt.toString(),
         )

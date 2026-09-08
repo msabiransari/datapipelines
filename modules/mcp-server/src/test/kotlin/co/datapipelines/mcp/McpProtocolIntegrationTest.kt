@@ -46,7 +46,7 @@ class McpProtocolIntegrationTest {
             dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(service, usage), PipelinesListTool(service, pipelines)), auditLogger),
             prompts = McpPromptCatalog(),
             catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
-            reader = McpResourceReader(pipelines, templates, datasources, executions, events),
+            reader = McpResourceReader(service, templates, datasources, executions, events),
             version = "1.0.0",
         )
     }

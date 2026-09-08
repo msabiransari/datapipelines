@@ -1,6 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.Scope
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDraftService
@@ -69,21 +70,29 @@ class PipelineAuthoringToolsTest {
         )
 
     @Test
-    fun `create validates before storing and returns id, version and body`() {
+    fun `create validates before storing and returns v1 as a DRAFT with no released pointer`() {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         val stored = slot<String>()
         val row = slot<NewPipeline>()
-        every { pipelines.create(any(), capture(row), capture(stored), McpFixtures.USER) } returns McpFixtures.pipelineRecord()
-        every { pipelines.findCurrentVersionDetail(any(), McpFixtures.PIPELINE_ID) } returns
-            draftDetail(version = 1).copy(status = PipelineVersionStatus.RELEASED)
+        // D55: the lifecycle argument is part of the expectation, so a create that asked the
+        // repository for a RELEASED v1 would not match this stub at all — the mock IS the guard.
+        every {
+            pipelines.create(any(), capture(row), capture(stored), McpFixtures.USER, CreateLifecycle.DRAFT)
+        } returns McpFixtures.pipelineRecord(version = null)
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns draftDetail(version = 1)
 
         @Suppress("UNCHECKED_CAST")
         val payload = createTool().call(args, ctx) as Map<String, Any?>
 
+        @Suppress("UNCHECKED_CAST")
+        val draftPointer = payload["draft"] as Map<String, Any?>
         assertAll(
             { payload["id"] shouldBe McpFixtures.PIPELINE_ID.toString() },
             { payload["version"] shouldBe 1 },
-            { payload["status"] shouldBe "RELEASED" },
+            { payload["status"] shouldBe "DRAFT" },
+            { payload["current_version"] shouldBe null },
+            { draftPointer["version"] shouldBe 1 },
+            { draftPointer["body_hash"] shouldBe "hash-v1" },
             { payload["body_hash"] shouldBe "hash-v1" },
             { payload["owner_id"] shouldBe McpFixtures.USER.toString() },
             { row.captured.ownerId shouldBe McpFixtures.USER },

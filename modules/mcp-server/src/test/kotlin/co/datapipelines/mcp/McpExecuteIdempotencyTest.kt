@@ -47,7 +47,11 @@ import java.util.UUID
  * missing, which is the inverted-double trap.
  */
 class McpExecuteIdempotencyTest {
-    private val repository = mockk<PipelineRepository>()
+    private val repository =
+        mockk<PipelineRepository>().also {
+            // D56: with no `version` the tool resolves the working version — released here.
+            every { it.findDraftDetail(any(), any()) } returns null
+        }
     private val service = McpFixtures.pipelineService(repository)
     private val executor = mockk<PipelineExecutor>()
     private val executions = mockk<ExecutionRepository>()

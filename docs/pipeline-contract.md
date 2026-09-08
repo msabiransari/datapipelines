@@ -1057,8 +1057,8 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 
 | Operation | Method & Path | Notes |
 |---|---|---|
-| Create pipeline | `POST /pipelines` | Body: pipeline JSON without `id`, `version`, `created_at`, `updated_at` (server assigns). |
-| Get pipeline (latest version) | `GET /pipelines/{id}` | Returns highest version. |
+| Create pipeline | `POST /pipelines` | Body: pipeline JSON without `id`, `version`, `created_at`, `updated_at` (server assigns). Version 1 lands **DRAFT** and `current_version` stays null — releasing is a human action ([Versioning §3.2](versioning.md#32-the-one-write-rule-copy-on-write), D55). |
+| Get pipeline (working version) | `GET /pipelines/{id}` | Returns the working version: the DRAFT when one exists, else the latest release. |
 | Get pipeline (specific version) | `GET /pipelines/{id}/versions/{version}` | |
 | List pipeline versions | `GET /pipelines/{id}/versions` | Returns version metadata. |
 | Update pipeline (writes the draft) | `PUT /pipelines/{id}` | Body: full pipeline JSON. Copy-on-write: first change after a release creates a DRAFT of the next version; further changes overwrite the draft in place. Hash-preconditioned. Never appends a released version. See [Versioning](versioning.md). |
@@ -1066,9 +1066,9 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 | Discard draft | `POST /pipelines/{id}/draft/discard` | Deletes the DRAFT (or flips it to DISCARDED if an execution references it). |
 | Delete pipeline | `DELETE /pipelines/{id}` | Soft delete. Executions of deleted pipelines fail with `pipeline.execution.not_found`. |
 | List pipelines | `GET /pipelines` | Filterable by owner, datasource, etc. |
-| Execute pipeline | `POST /pipelines/{id}/execute` | Body: `{parameters: {...}}`. Returns SSE stream. See [REST API spec](rest-api.md). |
+| Execute pipeline | `POST /pipelines/{id}/execute` | Body: `{parameters: {...}}`, optional `version`. With no `version` it runs the **working version** — the draft when one exists, else the latest release ([Versioning §7.2](versioning.md#72-execute-with-no-version-runs-the-working-version-d56-099), D56). Returns SSE stream. See [REST API spec](rest-api.md). |
 | Import pipeline | `POST /pipelines/import` | Body: full pipeline JSON (possibly with id). A carried `version` is honored (preserved-version import, [Versioning §9.2](versioning.md#92-import-with-preserved-versions)); absent, the next local version is allocated. |
-| Export pipeline | `GET /pipelines/{id}/export` | Returns pipeline JSON + manifest of referenced templates. |
+| Export pipeline | `GET /pipelines/{id}/export` | Returns pipeline JSON + manifest of referenced templates. Refused with `409 pipeline.promotion.not_released` when nothing has been released — an export feeds an import that lands RELEASED. |
 
 ---
 
@@ -1289,6 +1289,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-08 | v1.12 | 099 draft-first (D55/D56) | §14's operation table: `POST /pipelines` lands v1 **DRAFT** with a null pointer, `GET /pipelines/{id}` is the working version, `POST …/execute` defaults to the working version, and `GET …/export` refuses a never-released pipeline with `pipeline.promotion.not_released`. No new error code and no §13 row: every refusal reuses a catalogued one. |
 | 2026-09-06 | v1.12 | 078 composition mapping | The parent→child mapping half of the calculator input ruling (v1.11): a PIPELINE node's `parameters` may now map onto a child CALCULATOR `context_key` as well as a declared parameter (supplied → the child's node is skipped, §4.10's rule composed), and a `"${ref}"` value resolves against all three parent Context tiers — a declared parameter, a parent calculator `context_key` (typed by its kind's output), an org/platform key (org STRING, platform canonical) — type-checked against the target with the unchanged codes, messages naming the tiers; an ANY-output key on either side skips the check (typed only by the run, A6's convention). **No auto-passthrough:** identically spelled parent/child calculator keys are not implicitly mapped — only explicit entries cross. The read surfaces list calculator keys under `parameters` as `{"type", "required": false, "derived": true}` (`"ANY"` for ANY-output kinds), derived on read, never stored. Additive per §15.2. |
 | 2026-09-06 | v1.11 | 078 calculator input ruling | A calculator `context_key` is an implicit **optional execute input** (owner ruling 2026-09-05): supplied in the execute request's `parameters` object → the node is skipped and the supplied value (coerced against the kind's output type; an ANY-output key takes any JSON scalar, refusal = `pipeline.execution.invalid_parameter_type`, §13.3) is what downstream nodes bind, marked `provided_by: "caller"` on the node's stats; unsupplied (JSON `null` included) → the node runs and computes it. §7.2's tier 4 widened accordingly (org < platform < parameters < execute-time inputs — now including calculator keys < calculator outputs). The parent→child mapping half of the ruling — a parent maps a calculator key into a child execution explicitly — ships as its own row with the composition change. Additive per §15.2. |
 | 2026-09-06 | v1.10 | 078 contract gaps | §12.6's interpolation refusal set gains every calculator output key (a CALCULATOR node's `context_key`, typed by its kind's output type): `${calc_key}` now fails save with `template.validation.parameter_interpolated` instead of the dry render's wrong code, the `${calc_key!}` shape no longer slips past the scan, and a calculator key is refused in a conditional's test (`<#if x??>`, `<#elseif x>`) as well — a derived value gating SQL structure is the same hole. Additive per §15.2. |

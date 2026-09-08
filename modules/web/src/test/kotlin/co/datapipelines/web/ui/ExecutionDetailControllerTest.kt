@@ -35,7 +35,11 @@ import java.util.UUID
  */
 class ExecutionDetailControllerTest {
     private val executions = mockk<ExecutionRepository>()
-    private val pipelines = mockk<PipelineRepository>()
+    private val pipelines =
+        mockk<PipelineRepository>().also {
+            // §8's draft-run marker: no release timestamps in these fixtures, so the badge shows.
+            every { it.releasedAtFor(any(), any()) } returns emptyMap()
+        }
     private val resultStore = mockk<ResultStore>()
     private val resultUrlFactory = mockk<ResultUrlFactory>(relaxed = true)
     private val controller = ExecutionDetailController(executions, pipelines, resultStore, resultUrlFactory)

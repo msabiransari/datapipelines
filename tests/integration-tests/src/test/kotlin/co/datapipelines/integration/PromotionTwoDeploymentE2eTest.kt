@@ -567,7 +567,31 @@ class PromotionTwoDeploymentE2eTest {
             .post("/api/v1/templates")
             .then()
             .extract()
-            .let { require(it.statusCode() == 201) { "template '$id' create failed ${it.statusCode()}: ${it.body().asString()}" } }
+            .let {
+                require(it.statusCode() == 201) { "template '$id' create failed ${it.statusCode()}: ${it.body().asString()}" }
+                // D55: a create lands a DRAFT, and promotion pushes RELEASED versions only (D6).
+                // The fixture therefore does what a human does — release it — and templates lock
+                // before the pipelines that pin them (§6).
+                releaseTemplateOn(port, id, it.jsonPath().getString("data.body_hash"))
+            }
+    }
+
+    private fun releaseTemplateOn(
+        port: Int,
+        id: String,
+        hash: String,
+    ) {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, keyFor(port))
+            .header("If-Match", hash)
+            .body("""{"name": "$id"}""")
+            .`when`()
+            .post("/api/v1/templates/release")
+            .then()
+            .extract()
+            .let { require(it.statusCode() == 200) { "template '$id' release failed ${it.statusCode()}: ${it.body().asString()}" } }
     }
 
     private fun createPipelineOn(
@@ -594,7 +618,29 @@ class PromotionTwoDeploymentE2eTest {
             .post("/api/v1/pipelines")
             .then()
             .extract()
-            .let { require(it.statusCode() == 201) { "pipeline '$name' create failed ${it.statusCode()}: ${it.body().asString()}" } }
+            .let {
+                require(it.statusCode() == 201) { "pipeline '$name' create failed ${it.statusCode()}: ${it.body().asString()}" }
+                // D55: released, because that is what this suite is ABOUT — a draft is never
+                // promoted, and `PromotionService` refuses one by name (§10.3).
+                releasePipelineOn(port, name, it.jsonPath().getString("data.id"), it.jsonPath().getString("data.body_hash"))
+            }
+    }
+
+    private fun releasePipelineOn(
+        port: Int,
+        name: String,
+        id: String,
+        hash: String,
+    ) {
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, keyFor(port))
+            .header("If-Match", hash)
+            .`when`()
+            .post("/api/v1/pipelines/$id/release")
+            .then()
+            .extract()
+            .let { require(it.statusCode() == 200) { "pipeline '$name' release failed ${it.statusCode()}: ${it.body().asString()}" } }
     }
 
     /** Write a draft (description change — content, not identity) and release it: version + 1. */

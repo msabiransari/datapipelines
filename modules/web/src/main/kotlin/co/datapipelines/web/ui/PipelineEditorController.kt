@@ -25,6 +25,10 @@ class PipelineEditorController(
     // ObjectMapperDefaultParameterKonsistTest.
     private val mapper: ObjectMapper = PipelineJson.objectMapper()
 
+    // Three 404s, three distinct absences: no pipeline, no version to edit (D55/§3.4), no body for
+    // the version we resolved. The editor's own tolerance for a missing DETAIL row is what keeps
+    // them separate — see the narrow-reads comment below.
+    @Suppress("ThrowsCount")
     @GetMapping("/pipelines/{id}/editor")
     // 096 §C: the editors render AUTHORING state (draft bodies, unreleased versions),
     // so a read key has no business here — the floor is the mutation operation the
@@ -44,7 +48,13 @@ class PipelineEditorController(
         // keeps showing the released name until lock. The default body of the REST GET
         // stays the released version — this is the editor's load, not the API's.
         val draft = pipelines.findDraft(workspaceId, record.id)
-        val shownVersion = draft?.version ?: record.currentVersion
+        // The working version ([PipelineService.workingVersion]'s rule, with the draft already in
+        // hand). Null only when the pipeline's sole draft was discarded (§5.4) and nothing was
+        // ever released — there is no body to edit, which is the same 404 an unknown id gets.
+        val shownVersion =
+            draft?.version
+                ?: record.currentVersion
+                ?: throw NoSuchElementException("Pipeline $id has no version to edit")
         val body =
             pipelines.findVersionBody(workspaceId, record.id, shownVersion)
                 ?: throw NoSuchElementException("Pipeline $id version $shownVersion body not found")

@@ -86,6 +86,9 @@ class TemplateEditorControllerTest {
     fun `editor page returns editor view with template and versions`() {
         authenticate()
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        // The write path reads the WORKING version (D55): the editor page reads the released one,
+        // and TemplateDraftService reads what the template IS. Both are stubbed to the same row.
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.listVersions(any(), "test/my_template.sql") } returns sampleVersions
         every { templates.findDraftDetail(any(), any()) } returns null
         every { themeResolver.resolve(any()) } returns "saas"
@@ -187,6 +190,9 @@ class TemplateEditorControllerTest {
     fun `no version parameter shows the working version, editable`() {
         authenticate()
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        // The write path reads the WORKING version (D55): the editor page reads the released one,
+        // and TemplateDraftService reads what the template IS. Both are stubbed to the same row.
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.listVersions(any(), "test/my_template.sql") } returns sampleVersions
         every { templates.findDraftDetail(any(), any()) } returns null
         every { themeResolver.resolve(any()) } returns "saas"
@@ -203,6 +209,9 @@ class TemplateEditorControllerTest {
     fun `selecting an older version loads it read-only with its badge and release metadata`() {
         authenticate()
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        // The write path reads the WORKING version (D55): the editor page reads the released one,
+        // and TemplateDraftService reads what the template IS. Both are stubbed to the same row.
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.findVersion(any(), "test/my_template.sql", 1) } returns olderVersion
         every { templates.findVersionDetail(any(), "test/my_template.sql", 1) } returns releasedDetail(1)
         every { templates.findDraftDetail(any(), any()) } returns null
@@ -223,6 +232,9 @@ class TemplateEditorControllerTest {
         authenticate()
         every { templates.findDraftDetail(any(), "test/my_template.sql") } returns draftDetail(3)
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        // The write path reads the WORKING version (D55): the editor page reads the released one,
+        // and TemplateDraftService reads what the template IS. Both are stubbed to the same row.
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.findVersion(any(), "test/my_template.sql", 3) } returns sampleTemplate.copy(version = 3)
 
         val model = ExtendedModelMap()
@@ -237,6 +249,9 @@ class TemplateEditorControllerTest {
         authenticate()
         every { templates.findDraftDetail(any(), "test/my_template.sql") } returns null
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        // The write path reads the WORKING version (D55): the editor page reads the released one,
+        // and TemplateDraftService reads what the template IS. Both are stubbed to the same row.
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.findVersion(any(), "test/my_template.sql", 99) } returns null
 
         val model = ExtendedModelMap()
@@ -254,6 +269,9 @@ class TemplateEditorControllerTest {
         every { templates.findDraftDetail(any(), "test/my_template.sql") } returns null
         every { templates.findVersion(any(), "test/my_template.sql", 1) } returns olderVersion
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        // The write path reads the WORKING version (D55): the editor page reads the released one,
+        // and TemplateDraftService reads what the template IS. Both are stubbed to the same row.
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.findVersionDetail(any(), "test/my_template.sql", 2) } returns releasedDetail(2)
         val written = slot<TemplateDraft>()
         val expectedHash = slot<String>()

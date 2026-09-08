@@ -157,7 +157,9 @@ class McpServerAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     fun mcpResourceReader(
-        pipelines: PipelineRepository,
+        // The SERVICE, not the repository: the pipeline resource serves the working version
+        // (D56) and that resolution lives in PipelineService.
+        pipelines: PipelineService,
         templates: TemplateRepository,
         datasources: DatasourceRegistry,
         executions: ExecutionRepository,

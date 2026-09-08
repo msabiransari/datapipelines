@@ -4,7 +4,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorJson
-import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.TemplateRepository
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
@@ -32,7 +32,7 @@ import java.util.UUID
  * other resource; an unknown reference is not-found in the same shape as an unknown pipeline.
  */
 class McpResourceReader(
-    private val pipelines: PipelineRepository,
+    private val pipelines: PipelineService,
     private val templates: TemplateRepository,
     private val datasources: DatasourceRegistry,
     private val executions: ExecutionRepository,
@@ -102,14 +102,21 @@ class McpResourceReader(
         return McpSchema.ReadResourceResult.builder(listOf(contents)).build()
     }
 
+    // Three absences, one answer: unknown pipeline, no version to serve at all (D55/§3.4), and a
+    // version whose body is gone. Each is the SAME catalogued not-found, and merging them into one
+    // branch would hide which read actually came back empty.
+    @Suppress("ThrowsCount")
     private fun pipelineBody(
         workspaceId: UUID,
         id: UUID,
         version: Int?,
     ): String {
-        val record = pipelines.findById(workspaceId, id) ?: throw notFound(McpResourceUri.pipeline(id))
-        return pipelines.findVersionBody(workspaceId, id, version ?: record.currentVersion)
-            ?: throw notFound(McpResourceUri.pipeline(id))
+        val record = pipelines.findRecord(workspaceId, id) ?: throw notFound(McpResourceUri.pipeline(id))
+        // D55: with no version in the URI this serves the WORKING version — the draft when one
+        // exists, else the latest release — the same default `pipelines_execute` runs, so an
+        // agent reading the body and then running it sees one pipeline, not two.
+        val resolved = version ?: pipelines.workingVersion(workspaceId, record) ?: throw notFound(McpResourceUri.pipeline(id))
+        return pipelines.findVersionBody(workspaceId, id, resolved) ?: throw notFound(McpResourceUri.pipeline(id))
     }
 
     /** `…/parameters` — the pipeline's parameter declarations only (§7.1). */
@@ -129,7 +136,10 @@ class McpResourceReader(
     ): McpSchema.TextResourceContents {
         val body =
             if (version == null) {
-                templates.findLatest(workspaceId, id)?.body
+                // D55/§7.1: the WORKING version — `findLatest` is null for a template nobody has
+                // released yet, and the resource would have answered not-found for one an agent
+                // had just created.
+                templates.findWorking(workspaceId, id)?.body
             } else {
                 templates.lookupVersion(workspaceId, id, version)?.body
             } ?: throw notFound(uri)

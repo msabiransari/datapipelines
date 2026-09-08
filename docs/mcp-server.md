@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.24 (frozen contract — additive-only changes after this point)
+**Status:** v1.26 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-05
@@ -213,7 +213,7 @@ List pipelines the caller has access to.
 ```json
 {
   "name": "pipelines_list",
-  "description": "List pipelines registered on this datapipelines.co instance, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, updated_at) — not the full body. Use pipelines_get for the body.",
+  "description": "List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, status, updated_at) — version is the WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. Not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:\"\" lists the roots, prefix:\"finance\" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:\"\" to see which roots this workspace already uses before creating a pipeline under a new one.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -228,6 +228,8 @@ List pipelines the caller has access to.
 ```
 
 Returns: array of pipeline metadata objects. Datasource references are per-node and are read from the body via `pipelines_get` — the listing does not aggregate them.
+
+**`version` is the working version, and `status` names it** (D55/D56, 099): the draft's number when the pipeline has a draft, else the latest released one, with `status` = `DRAFT` or `RELEASED`. Since creation lands a DRAFT, a listing that reported the released pointer alone would show nothing at all for every freshly authored pipeline, and `version: 1` on its own could not tell a reviewed release from a draft nobody has looked at. Both fields are also `null` in the one case where a pipeline has no version at all — its sole draft was discarded ([versioning §3.4](versioning.md#34-version-number-allocation-and-discard)).
 
 **Two presentations, chosen by `prefix`** (067). Pipeline names are folder paths ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference), [Template Hierarchy §14](template-hierarchy-design.md)), so an agent needs to BROWSE as well as search:
 
@@ -290,7 +292,7 @@ Execute a pipeline.
     "required": ["id", "parameters"],
     "properties": {
       "id": {"type": "string", "format": "uuid"},
-      "version": {"type": "integer"},
+      "version": {"type": "integer", "description": "Specific version to run. Defaults to the WORKING version: the draft when one exists, else the latest released. Never clamped — an unknown version is refused, not rounded to the latest."},
       "parameters": {
         "type": "object",
         "description": "Object whose keys match the pipeline's declared parameters. Values must match the declared types (BIGINTEGER and BIGDECIMAL as strings, others as JSON native types).",
@@ -317,6 +319,8 @@ MCP **progress notifications** for in-flight nodes are deliberately not implemen
 
 **If the agent abandons the call** (aborts the HTTP request, client crash): a blocking `POST /mcp` gives the servlet no disconnect callback, so the `datapipelines.sse.disconnect-grace-seconds` cancellation that a dropped **REST SSE** stream gets ([REST API §6.8](rest-api.md#68-client-disconnect)) does **not** apply to an abandoned tool call in v1 — the execution runs until it finishes or hits `datapipelines.executor.execution-timeout-seconds`. To stop an in-flight execution deterministically, cancel it out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance — in-flight statements are interrupted and the abandoned tool call returns an `ABORTED` result. There is no resumption path (a reconnecting agent must re-execute) and no MCP cancel *tool* in v1.
 
+**With no `version`, this runs the WORKING version** (D56, 099): the draft when one exists, else the latest release — "always run the LAST version". On a development server that may well be a draft (drafts have been executable since 039); on a hardened server `authoring-enabled=false` refuses every draft-creating write, so the working version is a RELEASED version by construction ([versioning §7.2](versioning.md#72-execute-with-no-version-runs-the-working-version-d56-099)). The execution record pins the version that actually ran and the executions screen marks a draft run, so a result is never ambiguous about what produced it. An explicit `version` is exact and never clamped.
+
 **Scope:** `execute`.
 
 #### 6.2.4 `pipelines_create`
@@ -326,7 +330,7 @@ Create a new pipeline.
 ```json
 {
   "name": "pipelines_create",
-  "description": "Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog function and writes a typed value into the execution Context under context_key, which downstream nodes bind as :context_key — call calculators_list first for the kinds and their input names, and remember that a node referencing another node's context_key must depend_on it. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and version 1.",
+  "description": "Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog function and writes a typed value into the execution Context under context_key, which downstream nodes bind as :context_key — call calculators_list first for the kinds and their input names, and remember that a node referencing another node's context_key must depend_on it. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and version 1, which lands as a DRAFT: run it straight away, then STOP — a human releases it from the UI, and no tool releases anything.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "display_name", "nodes"],
@@ -347,7 +351,10 @@ Create a new pipeline.
 }
 ```
 
-Returns: created pipeline (with id, version, etc.).
+Returns: created pipeline — `id`, `version: 1`, **`status: "DRAFT"`**, `body_hash` (carry it into your next `pipelines_update`), `current_version: null` (nothing released yet) and the `draft` pointer.
+
+**Creation lands a DRAFT (D55, 099).** `POST /pipelines` used to land version 1 RELEASED so that an MCP-authored pipeline was immediately executable; drafts have been executable since 039, so that justification bought nothing and cost a review — an agent following the old rule produced a released pipeline no human had looked at. The golden path for an agent is therefore: create → execute (no `version`, which runs your draft) → read the result → **stop and tell the person it is ready to review**. Releasing is a human action in the UI; there is no release tool and there will not be one (versioning D4).
+
 **A new ROOT folder needs the person's say-so (094).** The root segment says who owns a thing and there is no rename, so this tool REFUSES a name whose first segment has nothing under it yet — `pipeline.validation.new_root_requires_confirmation`, with `details.root` and `details.existing_roots` (the same one-level query `pipelines_list {"prefix": ""}` serves). Reuse one of those roots, or ask the person and retry with `confirm_new_root: true`. `test/` is always allowed. This is an AGENT-surface rule only: REST, the UI and `pipelines_update` are unaffected — a person choosing a folder in a form has already decided, and an update cannot change a name. It replaces an INSTRUCTION with a GUARANTEE: the schema and the SKILL already told an agent to list the roots and ask, and a model that did not, did not.
 
 The whole pipeline is validated before it is stored — no invalid pipeline ever reaches the database ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)). Validation failures come back as a tool result with `isError: true` carrying the pipeline validation code (§9.2); the agent should fix and retry rather than assume partial creation.
@@ -437,7 +444,7 @@ Create a new template.
 ```json
 {
   "name": "templates_create",
-  "description": "Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true.",
+  "description": "Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Version 1 lands as a DRAFT: a pipeline draft may pin it and render against it while you iterate, and a human releases it from the UI — a RELEASED pipeline may only pin RELEASED template versions, so the template is released first.",
   "inputSchema": {
     "type": "object",
     "required": ["display_name", "description", "body"],
@@ -1627,6 +1634,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-08 | v1.26 | 099 draft-first (D55/D56) | **Additive: response VALUES and descriptions, no new tool and no new argument.** §6.2.4 `pipelines_create` lands version 1 as a **DRAFT** — the response carries `status: "DRAFT"`, `current_version: null` and the `draft` pointer, and the description tells an agent to run it and then STOP for a human to release (D4 without exception). §6.2.8 `templates_create` mirrors it. §6.2.5 `pipelines_execute` documents its default in the `version` property: with none given it runs the **WORKING** version — the draft when one exists, else the latest release (D56) — never clamped for an explicit one. §6.2.1 `pipelines_list` rows now state the working `version` and a new `status` (`DRAFT`/`RELEASED`), because a listing that reported the released pointer alone would show nothing for every freshly authored pipeline. The `datapipelines://pipelines/{id}` resource (no `/versions/{n}`) serves the working version too, so reading a body and running it cannot disagree. Tool count unchanged at **30**. |
 | 2026-09-04 | v1.19 | 072 calculators | Tool surface 22 → **24**: new §6.2.23 `calculators_list` and §6.2.24 `calculators_get` (both scope `read`, non-mutating), projecting the `CalculatorRegistry` catalog — typed inputs, output type and a worked example per kind, plus the org and platform Context keys a body may reference without declaring anything. `pipelines_create` / `pipelines_update` need no new arguments (a CALCULATOR node is part of the body) but their descriptions now name the type and point at `calculators_list`. `executions_get` needed no change and gained two things anyway: `parameters` is now the fully resolved Context after the run (org keys, platform keys, parameters, calculator outputs — [DAG Executor §7.3](dag-executor.md#73-the-context-snapshot--pipeline_executionsparameters_json)) and each CALCULATOR node's `node_stats` entry carries `context_key`/`context_value`. §5.1's static-surface count and §8's admission rule updated. |
 | 2026-09-04 | v1.18 | 068 datasources_create | Tool surface 21 → **22**: new §6.2.22 `datasources_create` (scope `author`, **mutating**), which calls the same `DatasourceCreateService` `POST /api/v1/datasources` does — one payload binder, one set of workspaces D8 rules, one duplicate-name refusal. `global: true` still requires admin, refused with `datasource.validation.workspace_forbidden`. The result is the datasources §3.2 shape with `password_set: true` and no password at any depth. The tool's description carries the accepted trade-off: a password passed through an agent transits its context, transcript and client logging — prefer the UI or REST for a real credential. §4.1, §5.1, §6.1 and §8's admission-rule counts updated, and §14's "no datasource management tools" omission narrowed to update/delete. |
 | 2026-09-02 | v1.17 | 040 template used-by | Tool surface 20 → **21**: new §6.2.21 `templates_used_by` (which pipelines pin a template version in their working version — one reference per node with the carrying pipeline version; scope `read`, 040 D7). §6.2.2 `pipelines_get` gains `upgrade_available` (omit-when-empty; node/template/pinned/latest-released rows; surfaced, never applied). §6.1, §5.1 and §8 admission-rule counts updated. |

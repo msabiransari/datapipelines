@@ -18,7 +18,7 @@ There are **30 tools**, in `tools/list` order.
 
 Scope `read` · read-only
 
-List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, updated_at) — not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:"" lists the roots, prefix:"finance" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:"" to see which roots this workspace already uses before creating a pipeline under a new one.
+List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, status, updated_at) — version is the WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. Not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:"" lists the roots, prefix:"finance" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:"" to see which roots this workspace already uses before creating a pipeline under a new one.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -48,7 +48,7 @@ Execute a pipeline with the given input parameters. Returns execution events (no
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `id` | string | required |  |
-| `version` | integer | optional |  |
+| `version` | integer | optional | Specific version to run. Defaults to the WORKING version: the draft when one exists, else the latest released. Never clamped — an unknown version is refused, not rounded to the latest. |
 | `parameters` | object | required | Object whose keys match the pipeline's declared parameters. Values must match the declared types (BIGINTEGER and BIGDECIMAL as strings, others as JSON native types). |
 
 ### `pipelines_execute_node`
@@ -68,7 +68,7 @@ Runs ONE pipeline node's rendered SQL against its own datasource and returns up 
 
 Scope `author` · **writes**
 
-Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog function and writes a typed value into the execution Context under context_key, which downstream nodes bind as :context_key — call calculators_list first for the kinds and their input names, and remember that a node referencing another node's context_key must depend_on it. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and version 1.
+Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog function and writes a typed value into the execution Context under context_key, which downstream nodes bind as :context_key — call calculators_list first for the kinds and their input names, and remember that a node referencing another node's context_key must depend_on it. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and version 1, which lands as a DRAFT: run it straight away, then STOP — a human releases it from the UI, and no tool releases anything.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -140,7 +140,7 @@ Which pipelines pin a given template version in their working version (the draft
 
 Scope `author` · **writes**
 
-Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true.
+Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Version 1 lands as a DRAFT: a pipeline draft may pin it and render against it while you iterate, and a human releases it from the UI — a RELEASED pipeline may only pin RELEASED template versions, so the template is released first.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

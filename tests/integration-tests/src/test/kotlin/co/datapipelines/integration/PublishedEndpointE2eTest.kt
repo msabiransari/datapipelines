@@ -478,7 +478,35 @@ class PublishedEndpointE2eTest {
             .post("/api/v1/templates")
             .then()
             .statusCode(201)
+            .body("data.status", equalTo("DRAFT"))
+
+        // Templates lock first (versioning §6): the pipelines above are RELEASED, and a released
+        // pipeline may only pin RELEASED template versions.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .header("If-Match", releasedHashOfTemplate(id))
+            .body("""{"name": "$id"}""")
+            .`when`()
+            .post("/api/v1/templates/release")
+            .then()
+            .statusCode(200)
     }
+
+    /** The draft hash of the template just created — the precondition its release carries. */
+    private fun releasedHashOfTemplate(id: String): String =
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .queryParam("name", id)
+            .`when`()
+            .get("/api/v1/templates")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getString("data.body_hash")
 
     private fun createPipelines() {
         pipeline(
@@ -521,16 +549,36 @@ class PublishedEndpointE2eTest {
         )
     }
 
+    /**
+     * Creates the pipeline and RELEASES it — an endpoint serves the latest RELEASED version and
+     * nothing else (§5.1), and since D55 a create lands a DRAFT, so a fixture that only created
+     * would be publishing over something this surface is right to refuse. The release is the human
+     * step the product requires, done here the way a person does it.
+     */
     private fun pipeline(body: String) {
+        val created =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .body(body)
+                .`when`()
+                .post("/api/v1/pipelines")
+                .then()
+                .statusCode(201)
+                .body("data.status", equalTo("DRAFT"))
+                .extract()
+
+        val id = created.jsonPath().getString("data.id")
         given()
             .port(port)
-            .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body(body)
+            .header("If-Match", created.jsonPath().getString("data.body_hash"))
             .`when`()
-            .post("/api/v1/pipelines")
+            .post("/api/v1/pipelines/$id/release")
             .then()
-            .statusCode(201)
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
     }
 
     /** The rows the endpoint serves: 3 Manhattan, 2 elsewhere, so a path variable can be seen to filter. */

@@ -274,7 +274,11 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
         dialog shouldContain "cannot be deleted"
         dialog shouldContain pipeline
         dialog shouldContain "read_it"
-        dialog shouldContain "(v1 released)"
+        // D55: the seeded pipeline is freshly created, so its v1 is a DRAFT — and a draft pin is a
+        // real reference (the usage list spans "any pipeline version, ever", templates.md §5.4),
+        // which is exactly why the delete is refused. The label states which, and it was only ever
+        // "released" here because creation used to release.
+        dialog shouldContain "(v1 draft)"
         // THE point: the refusal cannot be clicked past — there is no button on this branch.
         page.locator("#ds-delete-modal .ds-button-danger").count() shouldBe 0
     }

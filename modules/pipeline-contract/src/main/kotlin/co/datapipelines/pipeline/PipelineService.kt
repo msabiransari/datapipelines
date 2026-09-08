@@ -108,8 +108,9 @@ open class PipelineService(
 
     /**
      * What a create or update produced: the index row, the body as stored, the version row it
-     * landed on, and the draft pointer — null when there is no draft (a create, or a no-op
-     * update whose body already equalled the released one, versioning §5.1).
+     * landed on, and the draft pointer — null when there is no draft, which since D55 means a
+     * no-op update whose body already equalled the released one (versioning §5.1) and nothing
+     * else: a CREATE now lands a draft and carries it in BOTH fields.
      */
     data class SavedPipeline(
         val record: PipelineRecord,
@@ -162,8 +163,15 @@ open class PipelineService(
     }
 
     /**
-     * §5.1 — create. Version 1 lands RELEASED and immediately executable (§3.2: creation is
-     * not modification).
+     * §5.1 — create. Version 1 lands **DRAFT** and `current_version` stays null (§3.2 as
+     * ruled by D55): creation is authoring, and DRAFT → RELEASED is a human step with no
+     * exception (D4). The pipeline is executable the moment it is created all the same —
+     * drafts have been executable since 039 — so the "so an MCP-authored pipeline can run"
+     * argument that used to land version 1 RELEASED buys nothing and cost a review.
+     *
+     * The RELEASED create still exists and is reached only by the paths that are not
+     * authoring: promotion imports and the seeders that ride them
+     * ([CreateLifecycle], [PipelineRepository.create]).
      *
      * Transactional because it is two statements: the insert, then the read-back of the row
      * the database actually stored (its server-generated hash and timestamps). Without the
@@ -186,10 +194,13 @@ open class PipelineService(
                 NewPipeline.from(validated.pipeline, ownerId = actor),
                 validated.canonicalJson,
                 actor,
+                CreateLifecycle.DRAFT,
             )
         // Read back the row the database stored (its hash included) — a hand-built detail is
-        // how a default or CHECK becomes invisible (metadata-db §6.1).
-        return SavedPipeline(record, validated.canonicalJson, pipelines.findCurrentVersionDetail(workspaceId, record.id))
+        // how a default or CHECK becomes invisible (metadata-db §6.1). It is the DRAFT detail
+        // now, and it is BOTH the landed version and the draft pointer: one row, two roles.
+        val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        return SavedPipeline(record, validated.canonicalJson, draft, draft)
     }
 
     /**
@@ -406,14 +417,37 @@ open class PipelineService(
     // -------------------------------------------------------------------------------------
 
     /**
+     * **The working version's NUMBER** (versioning §7, D55): the DRAFT's when one exists, else
+     * the current RELEASED version's. This is the execute default on every surface — REST
+     * `POST /pipelines/{id}/execute`, `pipelines_execute`, the MCP body resource — so that
+     * "run it" means "run what the pipeline currently IS", which on a development server may
+     * well be a draft and on a hardened one is a release by construction (no draft can exist
+     * where authoring is disabled).
+     *
+     * Null only for a pipeline that has NO version at all. Creation always writes version 1, so
+     * the only way there is to discard the sole draft of a never-released pipeline: the discard
+     * hard-deletes a never-executed draft row (§5.4) and leaves the index row behind with
+     * nothing to run. The surfaces report that as their version-not-found refusal — the same
+     * answer they already give for `{"version": 7}` on a pipeline that has six.
+     *
+     * The resolution lives HERE and nowhere else: it was three inline copies (the REST execute
+     * controller, `PipelineExecuteTool`, `pipelines_get`) that could drift apart, which is the
+     * D6 lesson applied to the default rather than to the lookup.
+     */
+    open fun workingVersion(
+        workspaceId: UUID,
+        record: PipelineRecord,
+    ): Int? = pipelines.findDraftDetail(workspaceId, record.id)?.version ?: record.currentVersion
+
+    /**
      * The execute path's resolution (D6): the body of [version] and the [Pipeline] parsed from
      * it. Null when that version has no stored body — the surface reports it as its own
      * version-not-found.
      *
      * The version is never clamped: a caller asking for a version that does not exist is
-     * refused, not silently run at `current_version` (the REST and MCP surfaces each validate
-     * the requested number before calling, and both default to [PipelineRecord.currentVersion]
-     * when none was given).
+     * refused, not silently run at the working version (the REST and MCP surfaces each validate
+     * the requested number before calling, and both default to [workingVersion] when none was
+     * given).
      */
     open fun findExecutable(
         workspaceId: UUID,

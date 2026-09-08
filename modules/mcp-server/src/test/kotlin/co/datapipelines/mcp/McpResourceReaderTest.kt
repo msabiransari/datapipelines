@@ -34,7 +34,7 @@ class McpResourceReaderTest {
     private val events = mockk<ExecutionEventRepository>()
     private val ctx = McpFixtures.ctx(Scope.READ)
 
-    private val reader = McpResourceReader(pipelines, templates, datasources, executions, events)
+    private val reader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events)
 
     private fun contents(uri: String): McpSchema.TextResourceContents =
         reader.read(uri, ctx).contents().single() as McpSchema.TextResourceContents
@@ -42,6 +42,8 @@ class McpResourceReaderTest {
     @Test
     fun `a pipeline reads as its JSON body`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        // D56: no version in the URI ⇒ the WORKING version, so the reader asks for a draft first.
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
 
         val contents = contents(McpResourceUri.pipeline(McpFixtures.PIPELINE_ID))
@@ -94,6 +96,7 @@ class McpResourceReaderTest {
     @Test
     fun `the parameters resource carries only the parameter declarations`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
 
         val text = contents("datapipelines://pipelines/${McpFixtures.PIPELINE_ID}/parameters").text()
@@ -106,7 +109,9 @@ class McpResourceReaderTest {
 
     @Test
     fun `a template reads as its Freemarker body`() {
-        every { templates.findLatest(any(), "test/revenue.sql") } returns McpFixtures.template()
+        // D55: the version-less template resource serves the WORKING version, so that a template
+        // nobody has released yet is readable at all (§7.1).
+        every { templates.findWorking(any(), "test/revenue.sql") } returns McpFixtures.template()
 
         val contents = contents(McpResourceUri.template("test/revenue.sql"))
 
@@ -227,7 +232,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `an unknown entity is a resource-not-found protocol error`() {
-        every { templates.findLatest(any(), "nope") } returns null
+        every { templates.findWorking(any(), "nope") } returns null
 
         shouldThrow<McpError> { reader.read(McpResourceUri.template("nope"), ctx) }
     }
@@ -245,7 +250,7 @@ class McpResourceReaderTest {
                 McpFixtures.template(id = "acme/versions/report.sql"),
                 McpFixtures.template(id = "a/b/c/d/e/deep.sql"),
             )
-        advertised.forEach { template -> every { templates.findLatest(any(), template.id) } returns template }
+        advertised.forEach { template -> every { templates.findWorking(any(), template.id) } returns template }
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns advertised
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()

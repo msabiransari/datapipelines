@@ -76,7 +76,10 @@ class PromotionInventoryService(
             .findAll(workspaceId)
             .mapNotNull { record ->
                 pipelines.findCurrentVersionDetail(workspaceId, record.id)?.let { version ->
-                    PromotionWire.Entry(record.name, record.currentVersion, version.bodyHash)
+                    // The row the pointer names, so the entry's number comes from the row itself
+                    // (D55: `record.currentVersion` is nullable now; a pipeline with no release
+                    // has no inventory entry, which is what `mapNotNull` already says).
+                    PromotionWire.Entry(record.name, version.version, version.bodyHash)
                 }
             }.sortedBy { it.name }
 

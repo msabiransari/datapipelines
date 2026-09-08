@@ -71,24 +71,52 @@ class TemplateAddressingE2eTest {
         deleteTemplate(name)
     }
 
-    /** create — POST /api/v1/templates (unchanged: it never carried a name in the path). */
+    /**
+     * create — POST /api/v1/templates (unchanged: it never carried a name in the path) — **and
+     * then release**, which is what returns the RELEASED hash this walk needs.
+     *
+     * D55: creation lands version 1 as a DRAFT. Without the release the PUT below would overwrite
+     * that draft in place (still v1) instead of opening v2, and the walk's subject — every route,
+     * including the release route, over a hierarchical name — would quietly lose its second
+     * version. The release goes through the same `POST /templates/release` the walk asserts later.
+     */
     private fun createTemplate(
         name: String,
         bodyV1: String,
-    ): String =
-        given()
+    ): String {
+        val draftHash =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .body(bodyV1)
+                .`when`()
+                .post("/api/v1/templates")
+                .then()
+                .statusCode(201)
+                .body("data.id", equalTo(name))
+                .body("data.status", equalTo("DRAFT"))
+                .body("data.version", equalTo(1))
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
+
+        return given()
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body(bodyV1)
+            .header("If-Match", draftHash)
+            .body("""{"name": "$name"}""")
             .`when`()
-            .post("/api/v1/templates")
+            .post("/api/v1/templates/release")
             .then()
-            .statusCode(201)
-            .body("data.id", equalTo(name))
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
+            .body("data.version", equalTo(1))
             .extract()
             .jsonPath()
             .getString("data.body_hash")
+    }
 
     /** The two shapes of GET /api/v1/templates: single-resource with `name`, paged list without. */
     private fun assertBothGetShapes(name: String) {

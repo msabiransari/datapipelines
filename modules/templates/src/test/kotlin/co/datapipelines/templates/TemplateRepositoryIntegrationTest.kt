@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.Dialect
@@ -86,7 +87,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `create inserts the template and version 1 together, returning what the database stored`() {
-        val stored = repository.create(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 1, "l"))), actor)
+        val stored = repository.createReleased(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 1, "l"))), actor)
 
         stored.version shouldBe 1
         stored.id shouldBe "test/fetch_orders.sql"
@@ -96,14 +97,64 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `the DRAFT create lands version 1 as a draft that no released-only read can see`() {
+        // D55: `templates_create`, `POST /templates` and the editor all land a DRAFT; only the
+        // import path (promotion, seeders) lands RELEASED. Asserted against the database, and
+        // against the reads that are supposed to mean "latest RELEASED".
+        val stored = repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT)
+
+        stored.version shouldBe 1
+        stored.status shouldBe PipelineVersionStatus.DRAFT
+        checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).version shouldBe 1
+        withClue("nothing is released, so the latest-released lookup reports nothing at all") {
+            repository.findCurrentVersions(workspaceId, listOf("test/fetch_orders.sql")) shouldBe emptyMap()
+            repository.findVersionStatus(workspaceId, "test/fetch_orders.sql", 1) shouldBe PipelineVersionStatus.DRAFT
+        }
+
+        val released = repository.releaseDraft(workspaceId, "test/fetch_orders.sql", stored.bodyHash, actor)
+
+        withClue("the first release is an ordinary release: the pointer moves to 1") {
+            checkNotNull(released).status shouldBe PipelineVersionStatus.RELEASED
+            repository.findCurrentVersions(workspaceId, listOf("test/fetch_orders.sql")) shouldBe
+                mapOf("test/fetch_orders.sql" to 1)
+        }
+    }
+
+    @Test
+    fun `a never-released template is still listed, still browsable and still readable`() {
+        // The defect this predicate exists to prevent, asserted at the three reads that would
+        // otherwise have made a template an agent just created INVISIBLE: `v.version =
+        // t.current_version` matches nothing while the pointer is NULL (D55). Caught by a browser
+        // test whose templates tree came up empty — no unit test looked at it.
+        repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT)
+
+        withClue("the flat listing and its count") {
+            repository.list(workspaceId, offset = 0, limit = 10).map { it.id } shouldContainExactly
+                listOf("test/fetch_orders.sql")
+            repository.count(workspaceId) shouldBe 1
+        }
+        withClue("one level of the tree — the folder and its leaf") {
+            repository.listChildFolders(workspaceId, prefix = null).map { it.segment } shouldContainExactly listOf("test")
+            repository.listChildTemplates(workspaceId, prefix = "test").map { it.id } shouldContainExactly
+                listOf("test/fetch_orders.sql")
+        }
+        withClue("and the working-version read, which is what every authoring surface calls") {
+            checkNotNull(repository.findWorking(workspaceId, "test/fetch_orders.sql")).version shouldBe 1
+            withClue("while the RELEASED projection is honestly null — nothing is released") {
+                repository.findLatest(workspaceId, "test/fetch_orders.sql").shouldBeNull()
+            }
+        }
+    }
+
+    @Test
     fun `an omitted id is auto-generated inside the identifier rule`() {
-        val stored = repository.create(workspaceId, draft(id = null), actor)
+        val stored = repository.createReleased(workspaceId, draft(id = null), actor)
         isValidTemplateName(stored.id) shouldBe true
     }
 
     @Test
     fun `update appends a new immutable version and bumps current_version`() {
-        repository.create(workspaceId, draft(body = "SELECT 1"), actor)
+        repository.createReleased(workspaceId, draft(body = "SELECT 1"), actor)
 
         val v2 = repository.appendReleasedVersion(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), actor)
 
@@ -124,7 +175,11 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `lookupVersion round-trips imports and dialect`() {
-        repository.create(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 3, "d")), dialect = Dialect.MYSQL), actor)
+        repository.createReleased(
+            workspaceId,
+            draft(imports = listOf(TemplateImport("test/lib.sql", 3, "d")), dialect = Dialect.MYSQL),
+            actor,
+        )
 
         val version = repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1)
 
@@ -136,7 +191,7 @@ class TemplateRepositoryIntegrationTest {
     @Test
     fun `existsId reflects whether any version exists`() {
         repository.existsId(workspaceId, "test/fetch_orders.sql") shouldBe false
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         repository.existsId(workspaceId, "test/fetch_orders.sql") shouldBe true
     }
 
@@ -144,12 +199,12 @@ class TemplateRepositoryIntegrationTest {
     fun `findCurrentVersions answers latest released per id, absent for deleted, empty for no ids`() {
         // 040 D5's lookup: current_version IS the latest released version by the lifecycle's
         // invariant, and a draft must not move the answer.
-        repository.create(workspaceId, draft(id = "test/a.sql", body = "SELECT 1"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/a.sql", body = "SELECT 1"), actor)
         val a = repository.findLatest(workspaceId, "test/a.sql")!!
         val aDraft =
             repository.createDraft(workspaceId, "test/a.sql", draft(id = "test/a.sql", body = "SELECT 2"), a.bodyHash, actor)!!
-        repository.create(workspaceId, draft(id = "test/b.sql"), actor)
-        repository.create(workspaceId, draft(id = "test/c.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/b.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/c.sql"), actor)
         repository.softDelete(workspaceId, "test/c.sql")
         checkNotNull(aDraft)
 
@@ -160,7 +215,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `a soft-deleted template disappears from findLatest but its versions still resolve`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
 
         repository.softDelete(workspaceId, "test/fetch_orders.sql") shouldBe true
 
@@ -178,7 +233,7 @@ class TemplateRepositoryIntegrationTest {
         // template must not gain new ones — the UPDATE's `is_deleted = FALSE` predicate is the
         // only thing enforcing that, and a CTE whose first leg matches no row must not leave the
         // INSERT leg to run on its own.
-        repository.create(workspaceId, draft(body = "SELECT 1"), actor)
+        repository.createReleased(workspaceId, draft(body = "SELECT 1"), actor)
         repository.softDelete(workspaceId, "test/fetch_orders.sql")
 
         repository.appendReleasedVersion(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), actor).shouldBeNull()
@@ -195,7 +250,7 @@ class TemplateRepositoryIntegrationTest {
         // original creator for someone else's edit — and disagree with `listVersions`, which reads
         // the version row, about the very same version.
         val updater = insertUser(email = "editor@example.com", subject = "sub-2")
-        repository.create(workspaceId, draft(body = "SELECT 1"), actor)
+        repository.createReleased(workspaceId, draft(body = "SELECT 1"), actor)
 
         val v2 = repository.appendReleasedVersion(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), updater)
 
@@ -215,10 +270,10 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `list returns live templates at their current version, id-ordered`() {
-        repository.create(workspaceId, draft(id = "test/b.sql"), actor)
-        repository.create(workspaceId, draft(id = "test/a.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/b.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/a.sql"), actor)
         repository.appendReleasedVersion(workspaceId, "test/a.sql", draft(id = "test/a.sql", body = "SELECT 2"), actor)
-        repository.create(workspaceId, draft(id = "test/gone.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/gone.sql"), actor)
         repository.softDelete(workspaceId, "test/gone.sql")
 
         val page = repository.list(workspaceId)
@@ -229,16 +284,16 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `list filters by dialect`() {
-        repository.create(workspaceId, draft(id = "test/pg.sql", dialect = Dialect.POSTGRES), actor)
-        repository.create(workspaceId, draft(id = "test/my.sql", dialect = Dialect.MYSQL), actor)
+        repository.createReleased(workspaceId, draft(id = "test/pg.sql", dialect = Dialect.POSTGRES), actor)
+        repository.createReleased(workspaceId, draft(id = "test/my.sql", dialect = Dialect.MYSQL), actor)
 
         repository.list(workspaceId, dialect = Dialect.MYSQL).map { it.id } shouldContainExactly listOf("test/my.sql")
     }
 
     @Test
     fun `list searches id, display name and description case-insensitively`() {
-        repository.create(workspaceId, draft(id = "test/orders_daily.sql"), actor)
-        repository.create(
+        repository.createReleased(workspaceId, draft(id = "test/orders_daily.sql"), actor)
+        repository.createReleased(
             workspaceId,
             TemplateDraft(
                 id = "unrelated.sql",
@@ -261,8 +316,8 @@ class TemplateRepositoryIntegrationTest {
     fun `a search term's LIKE metacharacters are matched literally`() {
         // Unescaped, a `q` of "%" matches every row and "_" matches any single character — a
         // search box that silently becomes a full scan (and a wrong result).
-        repository.create(workspaceId, draft(id = "test/plain.sql"), actor)
-        repository.create(
+        repository.createReleased(workspaceId, draft(id = "test/plain.sql"), actor)
+        repository.createReleased(
             workspaceId,
             TemplateDraft(
                 id = "discount.sql",
@@ -286,8 +341,8 @@ class TemplateRepositoryIntegrationTest {
         // search rule (029: a screen's search covers every rendered column) requires the dialect
         // wire value to be searchable. These two templates share no name/display-name/description
         // substring with "sqlite" — a hit can only come from the dialect column.
-        repository.create(workspaceId, draft(id = "test/inventory.sql", dialect = Dialect.SQLITE), actor)
-        repository.create(workspaceId, draft(id = "test/fetch_orders.sql", dialect = Dialect.POSTGRES), actor)
+        repository.createReleased(workspaceId, draft(id = "test/inventory.sql", dialect = Dialect.SQLITE), actor)
+        repository.createReleased(workspaceId, draft(id = "test/fetch_orders.sql", dialect = Dialect.POSTGRES), actor)
 
         repository.list(workspaceId, q = "sqlite").map { it.id } shouldContainExactly listOf("test/inventory.sql")
     }
@@ -297,9 +352,9 @@ class TemplateRepositoryIntegrationTest {
         // 034 E3: the pager's "of M" comes from this count, so it must agree with list()
         // under EVERY filter combination — the two share one WHERE (LIST_WHERE) to make
         // drift structural, and this test is the behavior proof of the sharing.
-        repository.create(workspaceId, draft(id = "test/a.sql"), actor)
-        repository.create(workspaceId, draft(id = "test/b.sql", dialect = Dialect.MYSQL), actor)
-        repository.create(
+        repository.createReleased(workspaceId, draft(id = "test/a.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/b.sql", dialect = Dialect.MYSQL), actor)
+        repository.createReleased(
             workspaceId,
             TemplateDraft(
                 id = "rollup.sql",
@@ -312,7 +367,7 @@ class TemplateRepositoryIntegrationTest {
             ),
             actor,
         )
-        repository.create(workspaceId, draft(id = "test/gone.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/gone.sql"), actor)
         repository.softDelete(workspaceId, "test/gone.sql")
 
         repository.count(workspaceId) shouldBe 3
@@ -328,7 +383,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `list pages with limit and offset`() {
-        listOf("test/a.sql", "test/b.sql", "test/c.sql").forEach { repository.create(workspaceId, draft(id = it), actor) }
+        listOf("test/a.sql", "test/b.sql", "test/c.sql").forEach { repository.createReleased(workspaceId, draft(id = it), actor) }
 
         repository.list(workspaceId, limit = 2).map { it.id } shouldContainExactly listOf("test/a.sql", "test/b.sql")
         repository.list(workspaceId, offset = 2, limit = 2).map { it.id } shouldContainExactly listOf("test/c.sql")
@@ -342,7 +397,13 @@ class TemplateRepositoryIntegrationTest {
         // The old assertion used limit=Int.MAX over 3 rows, so the clamp half was vacuous — the
         // query would have returned the same 3 rows unclamped (NEW-4a). With more rows than the
         // maximum, only a real clamp produces this result.
-        (1..TemplateRepository.MAX_PAGE_LIMIT + 25).forEach { repository.create(workspaceId, draft(id = "t%04d.sql".format(it)), actor) }
+        (1..TemplateRepository.MAX_PAGE_LIMIT + 25).forEach {
+            repository.createReleased(
+                workspaceId,
+                draft(id = "t%04d.sql".format(it)),
+                actor,
+            )
+        }
 
         repository.list(workspaceId, limit = 500).size shouldBe TemplateRepository.MAX_PAGE_LIMIT
     }
@@ -352,7 +413,7 @@ class TemplateRepositoryIntegrationTest {
         // TPL-API-6 had no regression test. rest-api §8.4 allows a template's dialect to change
         // across versions precisely because existing pipelines pin a version — which only holds if
         // the stored per-version value is what is read back.
-        repository.create(workspaceId, draft(id = "test/shift.sql", dialect = Dialect.POSTGRES), actor)
+        repository.createReleased(workspaceId, draft(id = "test/shift.sql", dialect = Dialect.POSTGRES), actor)
 
         val v2 =
             repository.appendReleasedVersion(
@@ -371,7 +432,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `imports are stored as JSONB and queryable as such`() {
-        repository.create(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 1, "l"))), actor)
+        repository.createReleased(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 1, "l"))), actor)
 
         val alias =
             jdbc.queryForObject(
@@ -394,7 +455,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `createDraft copies the released version to a draft and leaves the released row untouched`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
         val detail =
@@ -421,7 +482,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `a no-op createDraft - content identical to released - returns RELEASED, creates no draft, still moves metadata`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
         // Same CONTENT (§4.1's field object), new metadata — the no-op is defined on the
@@ -459,7 +520,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `a no-op createDraft with a stale hash writes nothing - the no-op arm carries the guard`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
         repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 1"), "stale", actor).shouldBeNull()
@@ -470,7 +531,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `identical content while a draft exists is a stale base, not a no-op`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val draft =
             checkNotNull(
@@ -485,7 +546,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `a draft edited back to its released parent is left alone - never auto-discarded`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val draft =
             checkNotNull(
@@ -501,7 +562,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `writeDraft overwrites the draft in place - no new row`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val first =
             checkNotNull(
@@ -524,7 +585,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `stale hashes write nothing on every template mutation`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
 
@@ -539,7 +600,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `releaseDraft flips the draft and bumps current_version`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val draftDetail =
             checkNotNull(
@@ -564,7 +625,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `discardDraft hard-deletes the draft and returns the number to the pool`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val draftDetail =
             checkNotNull(
@@ -593,7 +654,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `a second DRAFT row violates the one-draft partial unique index`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
 
@@ -621,7 +682,7 @@ class TemplateRepositoryIntegrationTest {
     @Test
     fun `the template draft service branches, and a stale base is a version conflict`() {
         val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true))
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
         val first = service.write(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
@@ -648,7 +709,7 @@ class TemplateRepositoryIntegrationTest {
         // (promotion) land RELEASED rows without ever opening a draft — if any import
         // statement below grew draft-creation logic, this is the test that goes red.
         val disabled = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(false))
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
         val refused =
@@ -680,7 +741,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `findAllDraftTemplateNames names every draft - the boot check's evidence`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
 
@@ -693,7 +754,7 @@ class TemplateRepositoryIntegrationTest {
         // serializes every getter, including TemplateImport's computed `key`, so the wire
         // form of an import is richer than its declared fields.
         val imports = listOf(TemplateImport("test/lib.sql", 1, "l"))
-        repository.create(workspaceId, draft(imports = imports), actor)
+        repository.createReleased(workspaceId, draft(imports = imports), actor)
         val stored = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
         stored.bodyHash shouldBe
@@ -795,7 +856,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `findVersionStatus answers for the pin check and findDrafts feeds the badge`() {
-        repository.create(workspaceId, draft(), actor)
+        repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         templates_statusHelpers(released)
     }
@@ -832,3 +893,14 @@ class TemplateRepositoryIntegrationTest {
     private fun existsRows(table: String): Int =
         checkNotNull(jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
 }
+
+/**
+ * The RELEASED create — what this suite's fixtures mean. Named rather than defaulted for the same
+ * reason as the pipeline side: `lifecycle` is required on the production signature so that no new
+ * create path lands RELEASED by omission (D55).
+ */
+private fun TemplateRepository.createReleased(
+    workspaceId: java.util.UUID,
+    draft: TemplateDraft,
+    createdBy: java.util.UUID,
+): Template = create(workspaceId, draft, createdBy, co.datapipelines.pipeline.CreateLifecycle.RELEASED)

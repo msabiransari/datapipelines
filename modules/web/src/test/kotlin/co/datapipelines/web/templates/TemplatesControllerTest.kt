@@ -99,7 +99,7 @@ class TemplatesControllerTest {
     fun `create validates and stores, returning version 1`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId) } returns template()
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns template()
 
         val stored = controller.create(createBody).data
         stored.id shouldBe "test/fetch_orders.sql"
@@ -137,6 +137,9 @@ class TemplatesControllerTest {
     fun `get latest and get specific version`() {
         authenticate()
         every { repository.findLatest(any(), "test/fetch_orders.sql") } returns template(2)
+        // The import's type inheritance and the draft service both read the WORKING version (D55);
+        // the released read stays for the paths that mean "what is released".
+        every { repository.findWorking(any(), "test/fetch_orders.sql") } returns template(2)
         every { repository.findDraftDetail(any(), "test/fetch_orders.sql") } returns null
         val latest = controller.get("test/fetch_orders.sql").data
         latest.get("version").asInt() shouldBe 2
@@ -387,7 +390,7 @@ class TemplatesControllerTest {
     fun `create accepts an html payload without a dialect and echoes the type`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId) } returns
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns
             template().copy(type = TemplateType.HTML, dialect = null)
 
         val stored =
@@ -404,6 +407,9 @@ class TemplatesControllerTest {
         authenticate()
         val latest = template()
         every { repository.findLatest(any(), "test/fetch_orders.sql") } returns latest
+        // The import's type inheritance and the draft service both read the WORKING version (D55);
+        // the released read stays for the paths that mean "what is released".
+        every { repository.findWorking(any(), "test/fetch_orders.sql") } returns latest
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         // The refusal lives in the REAL draft service (TemplateTypeRule.forExisting), so this
         // one test wires it instead of the mocked `drafts` the other update tests use.
@@ -475,9 +481,15 @@ class TemplatesControllerTest {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every { repository.existsId(any(), "test/fetch_orders.sql") } returns true
         every { repository.findLatest(any(), "test/fetch_orders.sql") } returns template(2)
+        // The import's type inheritance and the draft service both read the WORKING version (D55);
+        // the released read stays for the paths that mean "what is released".
+        every { repository.findWorking(any(), "test/fetch_orders.sql") } returns template(2)
         every { repository.appendReleasedVersion(any(), "test/fetch_orders.sql", any(), userId) } returns template(2)
         every { repository.existsId(any(), "new.sql") } returns false
-        every { repository.create(any(), any(), userId) } returns template().copy(id = "new.sql")
+        // D55: the IMPORT path is not authoring — it lands RELEASED, and the stub says so, so a
+        // regression that routed an import through the authoring create would not match here.
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } returns
+            template().copy(id = "new.sql")
 
         val body =
             """{"templates":[

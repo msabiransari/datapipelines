@@ -42,7 +42,15 @@
                  th:text="${'spawned by ' + r.parentExecutionId.toString().substring(0, 8) + '...'}">spawned by</a>
             </div>
           </td>
-          <td th:text="${r.pipelineVersion}">1</td>
+          <!-- versioning §8 / D55: the version alone is ambiguous now that v1 is normally a
+               DRAFT, so a draft run is labelled. `data-draft-run` is what a test reads; the
+               word is what a person reads. -->
+          <td>
+            <span th:text="${r.pipelineVersion}">1</span>
+            <span class="app-chip app-chip-warn u-text-xs"
+                  th:if="${draftRuns != null and draftRuns[r.executionId]}"
+                  th:attr="data-draft-run=true">DRAFT</span>
+          </td>
           <td>
             <!-- The chip shows prose ("Success"); the ENUM rides on data-status, which is
                  what a test or a script should read. Asserting on display text makes a copy

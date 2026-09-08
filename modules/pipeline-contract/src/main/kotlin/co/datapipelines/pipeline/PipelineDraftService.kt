@@ -128,11 +128,11 @@ class PipelineDraftService(
     private fun staleBase(
         workspaceId: UUID,
         pipelineId: UUID,
-        currentVersion: Int,
+        currentVersion: Int?,
     ): DatapipelinesException {
         val current =
             pipelines.findDraftDetail(workspaceId, pipelineId)
-                ?: pipelines.findVersionDetail(workspaceId, pipelineId, currentVersion)
+                ?: currentVersion?.let { pipelines.findVersionDetail(workspaceId, pipelineId, it) }
         return conflict(current, "Pipeline was modified by someone else after you loaded it.")
     }
 

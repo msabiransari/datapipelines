@@ -2,6 +2,7 @@ package co.datapipelines.web.templates
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
@@ -91,7 +92,9 @@ class TemplatesController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
-        return ApiResponse.of(templates.create(workspaceId, draft, principal.userId))
+        // D55: authoring lands version 1 DRAFT (`status: "DRAFT"` in the response); a human
+        // releases it. The RELEASED create belongs to the import path alone.
+        return ApiResponse.of(templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT))
     }
 
     /**

@@ -267,7 +267,9 @@ class TemplateUiControllerTest {
     fun `the versions endpoint answers the DETAIL fragment for the explorer's right pane`() {
         authenticate()
         val name = "acme/finance/monthly_revenue"
-        every { repository.findLatest(workspaceId, name) } returns template(name)
+        // D55/§7.1: the detail pane reads the WORKING version — a never-released template has
+        // no released projection, and the pane must show its draft rather than an empty card.
+        every { repository.findWorking(workspaceId, name) } returns template(name)
         every { repository.listVersions(workspaceId, name) } returns
             listOf(co.datapipelines.templates.TemplateVersionSummary(name, 1, java.time.Instant.parse("2026-09-01T00:00:00Z"), userId))
         every { repository.findDraftDetail(workspaceId, name) } returns null
@@ -276,7 +278,7 @@ class TemplateUiControllerTest {
         val model = ExtendedModelMap()
         val viewName = partialController.versions(model, name)
 
-        // 058: a selection fills the RIGHT pane — header (from findLatest) + versions table.
+        // 058: a selection fills the RIGHT pane — header (from the working read) + versions table.
         viewName shouldBe "partials/template-detail"
         model["templateId"] shouldBe name
         model["template"] shouldBe template(name)
@@ -287,7 +289,7 @@ class TemplateUiControllerTest {
     @Test
     fun `a name with no live template answers the quiet not-found detail, not an error`() {
         authenticate()
-        every { repository.findLatest(workspaceId, "gone.sql") } returns null
+        every { repository.findWorking(workspaceId, "gone.sql") } returns null
         every { repository.listVersions(workspaceId, "gone.sql") } returns emptyList()
         every { repository.findDraftDetail(workspaceId, "gone.sql") } returns null
         every { pipelines.countWorkingTemplatePinsByPinnedVersion(workspaceId, "gone.sql") } returns emptyMap()

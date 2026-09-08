@@ -73,6 +73,15 @@ DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true
 
 That is supported and expected. The default is `false` because the common hardened deployment is a **receiver** — content is built in a lower environment and promoted up (§7).
 
+**What authoring off means for versions.** Every draft-creating write — create, update, release,
+discard, for pipelines and templates — is refused with `pipeline.authoring.disabled` /
+`template.authoring.disabled` where authoring is off ([versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)),
+so **a hardened receiver cannot hold a DRAFT at all**: everything on it arrived RELEASED through
+promotion. That is what makes the execute default safe to state in one sentence everywhere — running
+a pipeline with no version given runs the *working* version (versioning §7.2, D56), which on a
+development deployment may be a draft and on a hardened one is a release by construction, not by
+convention.
+
 ---
 
 ## 3. The variable contract
@@ -336,6 +345,7 @@ To evaluate the product instead, on a laptop, the whole thing is one line — `.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-09-08 | v1.2 | §2: what authoring OFF means for versions — every draft-creating write is refused, so a hardened receiver holds no drafts at all and the execute default (versioning §7.2, D56) is a RELEASED version by construction rather than by convention. |
 | 2026-09-07 | v1.2 | **The `lake` demo family.** §5: a third family with no loader — nothing downloads; dp-lake reads the published objects in place over HTTPS at query time, so it needs egress to S3 (or a configured mirror) whenever a lake query runs. The hardened refusal is unchanged. |
 | 2026-09-06 | v1.1 | **One settings file.** `deploy/env/defaults.env` (tracked) and `deploy/secrets.env` (git-ignored) are the whole loader story, in that order, everywhere; `deploy/secrets.env.example` is the template and the list of every variable name. The five files 075 shipped (`laptop.env`, `demo.env`, `example.env`, `posture/development.env`, `posture/hardened.env`) are deleted, and with them the laptop's load-order inversion. The posture's two default rows now live ONLY in the profile ymls, with compose passing them in the valueless form. §3, §4 and §9 rewritten. |
 | 2026-09-05 | v1.0 | First version. The `DATAPIPELINES_ENV` / `DATAPIPELINES_POSTURE` pair, the normative posture table, the environment-variable contract and `deploy/env/example.env`, loader recipes for Compose / bare JAR / systemd / Kubernetes / ECS / Nomad, demo as a flag, the secrets split, promotion, and first login. |

@@ -83,7 +83,7 @@ class TemplateCreatePartialTest {
         val captured = slot<TemplateDraft>()
         every { repository.existsId(any(), any()) } returns false
         every { validator.validateOrThrow(capture(captured), any()) } answers { captured.captured }
-        every { repository.create(any(), any(), any()) } answers {
+        every { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) } answers {
             val d = secondArg<TemplateDraft>()
             Template(
                 id = d.id!!,
@@ -167,7 +167,7 @@ class TemplateCreatePartialTest {
 
         (response as ResponseEntity<*>).statusCode shouldBe HttpStatus.BAD_REQUEST
         response.body.toString() shouldContain "already exists"
-        verify(exactly = 0) { repository.create(any(), any(), any()) }
+        verify(exactly = 0) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) }
     }
 
     @Test
@@ -178,14 +178,14 @@ class TemplateCreatePartialTest {
 
         (response as ResponseEntity<*>).statusCode shouldBe HttpStatus.BAD_REQUEST
         response.body.toString() shouldContain "Unknown template type"
-        verify(exactly = 0) { repository.create(any(), any(), any()) }
+        verify(exactly = 0) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) }
     }
 
     @Test
     fun `the versions fragment derives DRAFT from the one draft pointer`() {
         authenticate()
         every { repository.listVersions(any(), "acme/x") } returns emptyList()
-        every { repository.findLatest(any(), "acme/x") } returns null
+        every { repository.findWorking(any(), "acme/x") } returns null
         every { repository.findDraftDetail(any(), "acme/x") } returns null
         every { pipelines.countWorkingTemplatePinsByPinnedVersion(any(), "acme/x") } returns emptyMap()
 

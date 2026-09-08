@@ -18,6 +18,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DuplicateKeyException
@@ -77,7 +78,8 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), any()) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } returns record
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } returns
+            record
 
         val response = controller.import(body)
         response.statusCode.value() shouldBe 201
@@ -146,7 +148,8 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } throws DuplicateKeyException("pipelines_pkey")
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } throws
+            DuplicateKeyException("pipelines_pkey")
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
         shouldThrow<ApiException> { controller.import(withId) }.code shouldBe PipelineErrorCodes.Import.VERSION_CONFLICT
@@ -162,7 +165,8 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } throws DuplicateKeyException("pipelines_pkey")
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } throws
+            DuplicateKeyException("pipelines_pkey")
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
         val error = shouldThrow<ApiException> { controller.import(withId) }
@@ -172,6 +176,21 @@ class PipelineTransferControllerTest {
         error.message!!.shouldContain("another workspace")
         error.message!!.shouldContain("without")
         error.details["pipeline_id"] shouldBe pipelineId.toString()
+    }
+
+    @Test
+    fun `export refuses a pipeline that has never been released, and says how to fix it`() {
+        // D55 made this an ORDINARY state: every freshly authored pipeline is here until a human
+        // releases it. An export feeds a promotion import, which lands RELEASED content, so the
+        // refusal is named rather than the 404 an absent released body used to produce.
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record.copy(currentVersion = null)
+
+        val error = shouldThrow<ApiException> { controller.export(pipelineId, includeTemplates = true) }
+
+        error.code shouldBe "pipeline.promotion.not_released"
+        error.message.shouldContain("Release it from the UI first")
+        verify(exactly = 0) { pipelines.findVersionBody(any(), any(), any()) }
     }
 
     @Test

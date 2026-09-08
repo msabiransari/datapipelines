@@ -48,6 +48,10 @@ class ExecutionDetailController(
 
         model.addAttribute("record", record)
         model.addAttribute("pipeline", pipeline)
+        // versioning §8, and now the everyday case (D55/D56): the version this ran may have been
+        // a DRAFT, so the screen says so instead of leaving "v1" to mean two different things.
+        // Same derivation as the REST `draft_run` field — no released_at, or started before it.
+        model.addAttribute("draftRun", draftRun(workspaceId, record))
         model.addAttribute("resultState", resultState)
         model.addAttribute("resultUrl", resultUrlFactory.urlFor(record.executionId))
         model.addAttribute("resultView", resultView)
@@ -71,6 +75,19 @@ class ExecutionDetailController(
         ExecutionErrorView.attributes(errorJson).forEach { (k, v) -> model.addAttribute(k, v) }
 
         return "executions/detail"
+    }
+
+    /** §8's draft-run derivation for one execution: `started_at < released_at`, or no release. */
+    private fun draftRun(
+        workspaceId: UUID,
+        record: ExecutionRecord,
+    ): Boolean {
+        val releasedAt =
+            pipelines
+                .releasedAtFor(workspaceId, listOf(record.pipelineId to record.pipelineVersion))[
+                record.pipelineId to record.pipelineVersion,
+            ]
+        return releasedAt == null || record.startedAt.isBefore(releasedAt)
     }
 
     private fun resultStateOf(

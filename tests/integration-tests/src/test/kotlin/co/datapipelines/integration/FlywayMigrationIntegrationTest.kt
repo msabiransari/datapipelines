@@ -79,6 +79,10 @@ class FlywayMigrationIntegrationTest {
                 // 091 §A — `server` joins chk_api_keys_kind. No data change: no existing row
                 // can hold a value the CHECK did not admit until now.
                 "17|api key kind server|true",
+                // 099 — D55: `pipelines.current_version` / `templates.current_version` become
+                // nullable and lose their DEFAULT 0 (NULL = never released). The two UPDATEs are
+                // expected to touch zero rows — no writer ever left the sentinel behind.
+                "18|draft first create|true",
             )
     }
 
@@ -93,6 +97,29 @@ class FlywayMigrationIntegrationTest {
             { kindAccepted("endpoint") shouldBe true },
             { kindAccepted("wizard") shouldBe false },
         )
+    }
+
+    @Test
+    fun `V18 makes both current_version pointers nullable with no default`() {
+        // D55's schema half, read from the SHIPPED database rather than from the migration text:
+        // NULL is how "never released" is stored, and the DEFAULT is GONE — a column whose absence
+        // means "not released" is one an accidental INSERT could get right by luck.
+        val columns =
+            query(
+                """
+                SELECT table_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public' AND column_name = 'current_version'
+                   AND table_name IN ('pipelines', 'templates')
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "pipelines|YES|NONE",
+                "templates|YES|NONE",
+            )
     }
 
     /** True when `api_keys.kind` accepts [kind]; the probe row is always rolled back. */

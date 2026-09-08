@@ -22,7 +22,18 @@ data class PipelineRecord(
     val displayName: String,
     val description: String,
     val ownerId: UUID,
-    val currentVersion: Int,
+    /**
+     * The latest RELEASED version, or **null when nothing has been released yet** (D55, since
+     * V18): creation lands version 1 as a DRAFT, so a pipeline an agent just authored has a
+     * version 1 and no release pointer at all. It still does not move while a draft exists
+     * (versioning §3.4) — a released pipeline with an open draft reads `current_version = 1`
+     * and a draft at 2.
+     *
+     * Every read that means "what would a release serve" (promotion candidates, published
+     * endpoints, the promotion inventory) uses THIS; every read that means "what is the
+     * pipeline right now" uses [PipelineService.workingVersion] instead.
+     */
+    val currentVersion: Int?,
     val isDeleted: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,

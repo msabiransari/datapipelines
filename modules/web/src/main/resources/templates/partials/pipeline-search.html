@@ -36,7 +36,16 @@
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${p.name}" th:title="${p.name}">nyc/mobility/revenue_by_borough</span>
-        <span class="ds-badge ds-badge-default" th:text="${'v' + p.currentVersion}">v1</span>
+        <!-- D55/D56: the working version — the draft's number when one exists (a freshly
+             created pipeline has only a draft, and `currentVersion` is null). -->
+        <!-- The binding goes on a wrapping th:block, never beside th:if on one element:
+             th:with is precedence 500 and th:if is 300, so a same-element binding is not yet in
+             scope when the condition runs (the trap partials/executions.html records). -->
+        <th:block th:with="d=${drafts != null ? drafts[p.id] : null}">
+          <span class="ds-badge ds-badge-default"
+                th:if="${d != null or p.currentVersion != null}"
+                th:text="${'v' + (d != null ? d.version : p.currentVersion)}">v1</span>
+        </th:block>
         <!-- versioning §7 (the 035 regression): unreleased — often agent — work must be
              VISIBLE from first paint. The flat list has room for the version number, so it
              says the whole thing; the tree's leaf keeps the compact badge. -->

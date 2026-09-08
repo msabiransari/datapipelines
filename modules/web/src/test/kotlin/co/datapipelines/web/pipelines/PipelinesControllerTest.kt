@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineFolder
@@ -37,7 +38,12 @@ import java.util.UUID
  * release/discard endpoints' error mapping.
  */
 class PipelinesControllerTest {
-    private val repository = mockk<PipelineRepository>()
+    private val repository =
+        mockk<PipelineRepository>().also {
+            // D55: every listing row states its working version and status, so the controller reads
+            // the page's drafts in one batched call. These fixtures have none.
+            every { it.findDrafts(any(), any()) } returns emptyMap()
+        }
     private val validator = mockk<PipelineValidator>()
     private val drafts = mockk<PipelineDraftService>()
     private val releases = mockk<PipelineReleaseService>()
@@ -102,21 +108,28 @@ class PipelinesControllerTest {
     }
 
     @Test
-    fun `create validates, stores and returns the merged projection with version 1 RELEASED`() {
+    fun `create validates, stores and returns the merged projection with version 1 DRAFT`() {
         authenticate()
         val body =
             """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
                 """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any<NewPipeline>(), any(), any()) } returns record
-        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns releasedDetail
+        // D55: the lifecycle argument is part of the expectation — a create that asked for a
+        // RELEASED v1 would not match this stub, so the mock is the guard for the ruling.
+        every {
+            repository.create(any(), any<NewPipeline>(), any(), any(), CreateLifecycle.DRAFT)
+        } returns record.copy(currentVersion = null)
+        every { repository.findDraftDetail(any(), pipelineId) } returns
+            releasedDetail.copy(status = PipelineVersionStatus.DRAFT, releasedAt = null, releasedBy = null)
 
         val response = controller.create(body)
 
         val data = response.data
         data.get("id").asText() shouldBe pipelineId.toString()
         data.get("version").asInt() shouldBe 1
-        data.get("status").asText() shouldBe "RELEASED"
+        data.get("status").asText() shouldBe "DRAFT"
+        data.get("current_version").isNull shouldBe true
+        data.get("draft").get("version").asInt() shouldBe 1
         data.get("body_hash").asText() shouldBe "hash-v1"
         data.get("owner").asText() shouldBe userId.toString()
         data.get("name").asText() shouldBe "monthly_revenue"

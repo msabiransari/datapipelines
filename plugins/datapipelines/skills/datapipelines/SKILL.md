@@ -20,9 +20,11 @@ path** — see *Folders* below), `display_name`, `description`, `parameters` (ty
 map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on
 create.
 
-**Versioning** — create lands v1 RELEASED and immediately executable; every later save is
-draft-first: the first save after a release opens a DRAFT (copy-on-write), later saves
-overwrite that one draft in place. A save whose body is identical to the released one is a
+**Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT
+(`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later save
+is draft-first too: the first save after a release opens a DRAFT (copy-on-write), later saves
+overwrite that one draft in place. DRAFT → RELEASED is a human step, with no exception —
+including on creation. A save whose body is identical to the released one is a
 no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"`
 with no draft pointer; that is success, not an error. Your updates are NOT published until
 a human releases the draft from the UI — **leave the draft for a human to release** (by
@@ -117,14 +119,16 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    required/defaults — remember `DECIMAL` needs `precision`), nodes referencing the
    template `{id, version}`, `depends_on` wiring, and `output` blocks for
    staging/write-back. Save-time validation dry-renders every template against the
-   declared parameters and rejects anything that would not run. Create lands v1 RELEASED —
-   the pipeline is executable immediately.
-5. **Iterate on the DRAFT.** `pipelines_update` (requires the `expected_hash` you read —
-   see Best practices) writes a DRAFT: first update opens it, later updates overwrite it,
-   so iterating never piles up versions. Execute the draft to test (`pipelines_execute`
-   runs the released version by default — but note the draft's version from your update's
-   result if you need to pin it). **Stop here**: leave the draft for a human to release.
-   Never claim your change is live — it is not until released.
+   declared parameters and rejects anything that would not run. **Create lands v1 as a
+   DRAFT** — executable immediately, and not published: `current_version` comes back null and
+   the response carries the `draft` pointer with the `body_hash` for your next write.
+5. **Iterate on the DRAFT, and run it.** `pipelines_update` (requires the `expected_hash` you
+   read — see Best practices) writes the DRAFT: the first update opens it, later updates
+   overwrite it, so iterating never piles up versions. `pipelines_execute` with no `version`
+   runs the **working version** — your draft when one exists, else the latest release — so
+   testing your own work needs no version argument at all. **Then stop**: leave the draft for a
+   human to release from the UI. Never claim your change is live — it is not until released,
+   and no tool you have releases anything.
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
    Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
    TTL** — afterwards the result is gone (`result.expired`).
@@ -251,7 +255,17 @@ here.
 12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
-13. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
+13. **Parameters wear the question's vocabulary; technical inputs are derived.** Declare the
+    parameter the PERSON asked in — a question asked in quarters takes `quarter` (`2024-Q4`),
+    not a `start_date`/`end_date` pair the caller has to compute. Derive the technical inputs
+    inside the pipeline with a CALCULATOR node (a `quarter_bounds`-style catalog function
+    writing `start_date`/`end_date` into the execution Context, which downstream SQL binds as
+    `:start_date` / `:end_date`) — see `calculators_list` and
+    [calculators.md](../../../docs/calculators.md). A raw date range as the ONLY door makes
+    every caller re-derive what the pipeline already knows, and every caller derive it slightly
+    differently. Both doors may exist: a derived Context key is an optional execute input, so
+    supplying `start_date` directly skips the calculator.
+14. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
     H2 fails to match the GROUP BY expression to the identical SELECT expression when it
     contains a parameter marker — `Column "w.prcp_mm" must be in the GROUP BY list`
     (SQLState 90016), a lie that sends you chasing the wrong fix. Compute the classified

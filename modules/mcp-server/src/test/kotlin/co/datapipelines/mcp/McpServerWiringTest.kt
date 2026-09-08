@@ -118,7 +118,7 @@ class McpServerWiringTest {
                 McpToolDispatcher(tools(), auditLogger),
                 McpPromptCatalog(),
                 McpResourceCatalog(pipelines, templates, datasources, executions),
-                McpResourceReader(pipelines, templates, datasources, executions, events),
+                McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events),
                 version = "1.0.0",
             )
 
@@ -219,7 +219,7 @@ class McpServerWiringTest {
 
     private fun catalog() = McpResourceCatalog(pipelines, templates, datasources, executions)
 
-    private fun reader() = McpResourceReader(pipelines, templates, datasources, executions, events)
+    private fun reader() = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events)
 
     private fun context(): McpTransportContext =
         McpTransportContext.create(
