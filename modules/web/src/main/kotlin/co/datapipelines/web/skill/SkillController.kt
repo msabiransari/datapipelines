@@ -44,6 +44,16 @@ import java.util.concurrent.TimeUnit
  * `UiExceptionHandler` is scoped to that package at `HIGHEST_PRECEDENCE`, so a failure raised
  * there renders an HTML error page. A `curl` of a mistyped reference must come back as the
  * §4.2 JSON envelope, which is what `ApiExceptionHandler` gives every other package.
+ *
+ * ## The 404's `user_message` says "pipeline", knowingly
+ *
+ * `pipeline.execution.not_found` is the nearest catalogued code (the same one
+ * `ApiExceptionHandler.onNoResource` reuses for an unknown address), and a
+ * `DatapipelinesException` cannot carry its own user message — the catalog supplies one per
+ * code. Raising a `ResponseStatusException` instead would buy the right prose and lose
+ * `details.reason`, which is the field that separates "no such reference" from "no such
+ * route" and the only one an agent can branch on. The precise `reason` won. If §13 ever
+ * gains a docs-side not-found code, this is the one throw site to change.
  */
 @Controller
 class SkillController {
