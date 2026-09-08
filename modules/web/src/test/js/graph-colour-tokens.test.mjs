@@ -88,7 +88,14 @@ function withDom(rootVars, opts) {
     // The probe: a browser resolves whatever `var(--x)` it was handed. `computedAs`
     // chooses the SERIALISATION, which is the whole point of these tests.
     const m = /^var\((--[a-z-]+)\)$/.exec(el.style.color || "");
-    const value = m && !options.probeBlind ? (options.computedAs || RESOLVED)[m[1]] || "" : "";
+    let value = m && !options.probeBlind ? (options.computedAs || RESOLVED)[m[1]] || "" : "";
+    // 093's browser: a REUSED element keeps answering the first colour it was ever
+    // asked for (an in-flight colour transition serialises the old value). A fresh
+    // element per read is the only shape that survives this.
+    if (options.stickyProbe) {
+      if (el.__first === undefined) el.__first = value;
+      value = el.__first;
+    }
     return { color: value, getPropertyValue: () => "" };
   };
   return { body, created };
@@ -198,8 +205,10 @@ test("the probe is removed again — the page keeps no measuring element", () =>
   const dom = withDom(ROOT_VARS);
   loadGraph().readDesignTokens();
 
-  assert.equal(dom.created.length, 1, "one probe per read");
-  assert.equal(dom.body.children.length, 0, "…and it is taken back out");
+  // 093: one probe per TOKEN read now (a reused one answered its first colour for all
+  // twelve on the site3 stack) — and every one of them is taken back out.
+  assert.ok(dom.created.length >= 6, "one probe per token read");
+  assert.equal(dom.body.children.length, 0, "…and every one is taken back out");
 });
 
 test("an UNDECLARED token still falls back to the mock's hex", () => {
@@ -231,4 +240,21 @@ test("Cytoscape is initialised with the DEFAULT wheel sensitivity", () => {
     .filter((line) => !/^\s*\/\//.test(line)) // the comment explaining the removal names it
     .join("\n");
   assert.ok(!/wheelSensitivity\s*:/.test(config), "wheelSensitivity is back in the cytoscape config");
+});
+
+test("093: twelve tokens read through a browser that answers a reused probe with its first colour are still twelve DISTINCT colours", () => {
+  // The site3 capture: every card, edge and label in --brand. One span, twelve inline
+  // writes, every getComputedStyle after the first returned the FIRST value.
+  const { created } = withDom(ROOT_VARS, { stickyProbe: true });
+  const { readDesignTokens } = loadGraph();
+  const tokens = readDesignTokens();
+
+  assert.equal(tokens.nodeSurface, "rgb(255, 255, 255)", "the node surface is the brand colour again");
+  assert.equal(tokens.brand, "rgb(47, 107, 255)");
+  assert.notEqual(tokens.edgeIdle, tokens.brand);
+  const colours = Object.values(tokens).filter((v) => typeof v === "string" && /^rgb/.test(v));
+  assert.ok(new Set(colours).size >= 6, `expected distinct colours, got ${JSON.stringify(tokens)}`);
+  // …because every read got its own element, none of which outlived the call.
+  assert.ok(created.filter((el) => el.style.color).length >= 6, "one probe element per read");
+  assert.equal(created.filter((el) => el.parentNode).length, 0, "no probe left in the document");
 });

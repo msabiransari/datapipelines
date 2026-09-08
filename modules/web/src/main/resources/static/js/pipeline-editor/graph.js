@@ -42,8 +42,8 @@
    * in-document element makes the browser do the whole computation — `var()`
    * substitution, `color-mix()`, the theme currently in force — and `getComputedStyle`
    * hands back an `rgb(…)`/`rgba(…)` string every colour consumer understands. One
-   * probe serves every token in a read; it is removed before returning, so nothing
-   * outlives the call.
+   * FRESH probe per token (093 — see `probeFor`); each is removed before the next read,
+   * so nothing outlives the call.
    *
    * The fallback contract is unchanged: a token that is NOT DECLARED at all still
    * yields the mock's light hex, so a stale theme file cannot blank the graph.
@@ -76,14 +76,25 @@
     if (typeof document === "undefined" || !document.createElement || !document.body) {
       return { resolve: function (_n, raw) { return raw; }, done: function () {} };
     }
-    var probe = document.createElement("span");
-    probe.setAttribute("aria-hidden", "true");
-    probe.style.position = "absolute";
-    probe.style.width = "0";
-    probe.style.height = "0";
-    probe.style.visibility = "hidden";
-    probe.style.pointerEvents = "none";
-    document.body.appendChild(probe);
+    // ONE PROBE PER READ, never a reused one. 093 photographed every card, edge and label
+    // in the brand colour: one span, twelve `style.color = 'var(--x)'` writes, and every
+    // getComputedStyle after the first answered the FIRST colour — reported as oklab(),
+    // which is what an in-flight colour transition serialises to. A fresh, detached-again
+    // element has no previous colour to transition from and no cached style to serve, so
+    // it can only answer the token it was asked for. `transition: none` belts the braces.
+    function probeFor(name) {
+      var probe = document.createElement("span");
+      probe.setAttribute("aria-hidden", "true");
+      probe.style.position = "absolute";
+      probe.style.width = "0";
+      probe.style.height = "0";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      probe.style.transition = "none";
+      probe.style.color = "var(" + name + ")";
+      document.body.appendChild(probe);
+      return probe;
+    }
 
     // The general fallback for any colour syntax `toLegacyRgb` does not know: paint it
     // on a 1x1 canvas and read the pixel back. Whatever the browser understood, this
@@ -113,16 +124,14 @@
 
     return {
       resolve: function (name, raw) {
-        probe.style.color = "";
-        probe.style.color = "var(" + name + ")";
+        var probe = probeFor(name);
         var computed = getComputedStyle(probe).color;
+        probe.parentNode.removeChild(probe);
         // The raw token is the last resort — exactly the pre-082 behaviour, never a
         // blank canvas.
         return toLegacyRgb(computed) || sample(computed) || raw;
       },
-      done: function () {
-        if (probe.parentNode) probe.parentNode.removeChild(probe);
-      },
+      done: function () {},
     };
   }
 
