@@ -27,7 +27,8 @@ dependencies {
 //
 //   ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
 //                       -PshotsEmail=you@example.com -PshotsPassword=… \
-//                       [-PshotsSet=app] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>]
+//                       [-PshotsSet=app] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>] \
+//                       [-PshotsHeroOut=<dir>]
 tasks.register<JavaExec>("siteShots") {
     group = "documentation"
     description = "Captures the marketing site's screenshots from a running demo deployment (070 §C)."
@@ -48,6 +49,10 @@ tasks.register<JavaExec>("siteShots") {
             "dp.shots.out" to "shotsOut",
             "dp.shots.set" to "shotsSet",
             "dp.shots.failingPipeline" to "shotsFailingPipeline",
+            // 093 §B: where the hero's poster (2400 wide, device scale 2) and OG (1200x630)
+            // copies land. Absent = they are not produced at all — they do not ship with the
+            // app and must never be written into static/site/img.
+            "dp.shots.heroOut" to "shotsHeroOut",
         ).forEach { (systemProperty, projectProperty) ->
             (project.findProperty(projectProperty) as String?)?.let { systemProperty(systemProperty, it) }
         }
