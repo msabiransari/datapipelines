@@ -53,7 +53,8 @@ class ApiKeyRowsTest {
             { row.createdRelative shouldBe "3 days ago" },
             { row.createdAbsolute shouldBe "2026-09-05 09:00 UTC" },
             { row.lastUsedRelative shouldBe "2 hours ago" },
-            { row.expiresRelative shouldBe "in 83 days" },
+            // 83 days and 12 hours — ROUNDED, as `RelativeTime` does inside its unit.
+            { row.expiresRelative shouldBe "in 84 days" },
             { row.expiresAbsolute shouldBe "2026-12-01 00:00 UTC" },
             { row.isLive shouldBe true },
         )
