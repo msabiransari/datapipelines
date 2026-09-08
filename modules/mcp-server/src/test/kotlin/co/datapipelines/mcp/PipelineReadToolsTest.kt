@@ -18,7 +18,12 @@ import org.junit.jupiter.api.assertAll
 import java.util.UUID
 
 class PipelineReadToolsTest {
-    private val pipelines = mockk<PipelineRepository>()
+    private val pipelines =
+        mockk<PipelineRepository>().also {
+            // D55: a listing row states the WORKING version and its status, so the tool reads the
+            // page's drafts in one batched call. These fixtures are released pipelines.
+            every { it.findDrafts(any(), any()) } returns emptyMap()
+        }
     private val service = McpFixtures.pipelineService(pipelines)
 
     // 040: the upgrade-signal service. Relaxed so the existing get-tests see an empty signal

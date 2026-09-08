@@ -477,7 +477,10 @@ class TemplatesControllerTest {
         every { repository.findLatest(any(), "test/fetch_orders.sql") } returns template(2)
         every { repository.appendReleasedVersion(any(), "test/fetch_orders.sql", any(), userId) } returns template(2)
         every { repository.existsId(any(), "new.sql") } returns false
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns template().copy(id = "new.sql")
+        // D55: the IMPORT path is not authoring — it lands RELEASED, and the stub says so, so a
+        // regression that routed an import through the authoring create would not match here.
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } returns
+            template().copy(id = "new.sql")
 
         val body =
             """{"templates":[

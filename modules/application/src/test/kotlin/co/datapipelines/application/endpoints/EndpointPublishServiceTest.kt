@@ -91,6 +91,33 @@ class EndpointPublishServiceTest {
     }
 
     @Test
+    fun `a freshly created pipeline - never released, no pointer at all - is refused as not released`() {
+        // The D55 shape, which is now the state EVERY new pipeline starts in: `current_version` is
+        // null, so there is no current-version row to read at all. The publish path must refuse it
+        // by the same catalogued code, and the message must name the way forward.
+        every { pipelineRepository.findByName(WORKSPACE, PIPELINE_NAME) } returns
+            PipelineRecord(
+                id = PIPELINE_ID,
+                name = PIPELINE_NAME,
+                displayName = "Revenue",
+                description = "",
+                ownerId = ACTOR,
+                currentVersion = null,
+                isDeleted = false,
+                createdAt = Instant.EPOCH,
+                updatedAt = Instant.EPOCH,
+            )
+        every { pipelines.findCurrentVersion(WORKSPACE, PIPELINE_ID) } returns null
+
+        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/b", PIPELINE_NAME, null, "") }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED },
+            { refused.message.shouldContain("Release it from the UI first") },
+        )
+    }
+
+    @Test
     fun `a pipeline that writes is refused, naming the node`() {
         stubPipeline(writes = true)
 

@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.Dialect
@@ -93,6 +94,30 @@ class TemplateRepositoryIntegrationTest {
         stored.imports shouldContainExactly listOf(TemplateImport("test/lib.sql", 1, "l"))
         stored.createdBy shouldBe actor
         repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1).shouldNotBeNull()
+    }
+
+    @Test
+    fun `the DRAFT create lands version 1 as a draft that no released-only read can see`() {
+        // D55: `templates_create`, `POST /templates` and the editor all land a DRAFT; only the
+        // import path (promotion, seeders) lands RELEASED. Asserted against the database, and
+        // against the reads that are supposed to mean "latest RELEASED".
+        val stored = repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT)
+
+        stored.version shouldBe 1
+        stored.status shouldBe PipelineVersionStatus.DRAFT
+        checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).version shouldBe 1
+        withClue("nothing is released, so the latest-released lookup reports nothing at all") {
+            repository.findCurrentVersions(workspaceId, listOf("test/fetch_orders.sql")) shouldBe emptyMap()
+            repository.findVersionStatus(workspaceId, "test/fetch_orders.sql", 1) shouldBe PipelineVersionStatus.DRAFT
+        }
+
+        val released = repository.releaseDraft(workspaceId, "test/fetch_orders.sql", stored.bodyHash, actor)
+
+        withClue("the first release is an ordinary release: the pointer moves to 1") {
+            checkNotNull(released).status shouldBe PipelineVersionStatus.RELEASED
+            repository.findCurrentVersions(workspaceId, listOf("test/fetch_orders.sql")) shouldBe
+                mapOf("test/fetch_orders.sql" to 1)
+        }
     }
 
     @Test

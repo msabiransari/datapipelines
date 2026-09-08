@@ -1,5 +1,7 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.auth.Scope
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecuteRequest
@@ -53,6 +55,9 @@ class PipelineExecuteToolTest {
 
     private fun storedPipeline() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        // D56: with no `version` argument the tool resolves the WORKING version, so it asks for a
+        // draft first. This fixture is a released pipeline with none.
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
     }
 
@@ -229,6 +234,60 @@ class PipelineExecuteToolTest {
             { request.captured.pipeline.name shouldBe "v3_snapshot" },
             { payload["pipeline_version"] shouldBe 3 },
         )
+    }
+
+    @Test
+    fun `with no version, a pipeline with a draft runs the DRAFT, not the release`() {
+        // "We always run the LAST version if no version is specified" (D56). Release v1, draft v2:
+        // the draft is what the pipeline currently IS, so it is what runs. Before 099 this ran v1
+        // and an agent testing its own edit silently exercised the old body.
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 1)
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns
+            PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 2,
+                status = PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "draft_body")
+        val request = slot<ExecuteRequest>()
+        coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
+
+        @Suppress("UNCHECKED_CAST")
+        val payload = tool.call(args, ctx) as Map<String, Any?>
+
+        assertAll(
+            { request.captured.pipelineVersion shouldBe 2 },
+            { request.captured.pipeline.name shouldBe "draft_body" },
+            { payload["pipeline_version"] shouldBe 2 },
+        )
+    }
+
+    @Test
+    fun `with no version, a freshly created pipeline runs its v1 DRAFT`() {
+        // The D55 shape: `current_version` is null and version 1 is a draft. There is no released
+        // version to fall back on, and "nothing to run" would be the wrong answer.
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = null)
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns
+            PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 1,
+                status = PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v1",
+                createdAt = Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        val request = slot<ExecuteRequest>()
+        coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
+
+        @Suppress("UNCHECKED_CAST")
+        val payload = tool.call(args, ctx) as Map<String, Any?>
+
+        request.captured.pipelineVersion shouldBe 1
+        payload["pipeline_version"] shouldBe 1
     }
 
     @Test

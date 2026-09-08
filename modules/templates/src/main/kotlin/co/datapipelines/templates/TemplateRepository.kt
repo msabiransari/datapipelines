@@ -369,7 +369,9 @@ class TemplateRepository(
      * latest-RELEASED lookup (040 D5). By the version lifecycle's invariant `current_version`
      * IS the latest released version (a draft never moves it), so this read needs no status
      * filter; soft-deleted templates are absent, which the upgrade signal reads as "nothing to
-     * upgrade to". Empty [ids] short-circuits — an `IN ()` list would not even prepare.
+     * upgrade to". Since D55 a NEVER-RELEASED template is absent too (its pointer is NULL) —
+     * there is no latest-released version to report, and reporting `getInt`'s 0 would name a
+     * version that cannot exist. Empty [ids] short-circuits — an `IN ()` list would not even prepare.
      */
     fun findCurrentVersions(
         workspaceId: UUID,

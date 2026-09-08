@@ -38,7 +38,12 @@ import java.util.UUID
  * release/discard endpoints' error mapping.
  */
 class PipelinesControllerTest {
-    private val repository = mockk<PipelineRepository>()
+    private val repository =
+        mockk<PipelineRepository>().also {
+            // D55: every listing row states its working version and status, so the controller reads
+            // the page's drafts in one batched call. These fixtures have none.
+            every { it.findDrafts(any(), any()) } returns emptyMap()
+        }
     private val validator = mockk<PipelineValidator>()
     private val drafts = mockk<PipelineDraftService>()
     private val releases = mockk<PipelineReleaseService>()

@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
@@ -99,6 +100,62 @@ class PipelineRepositoryIntegrationTest {
         // Server-generated, not asserted from a hand-built object (metadata-db §6.1).
         record.createdAt shouldNotBe null
         repository.findVersionBody(WORKSPACE_ID, record.id, 1) shouldNotBe null
+    }
+
+    @Test
+    fun `the DRAFT create lands version 1 as a draft with a null pointer, and the RELEASED create does not`() {
+        // The two halves of D55 asserted against the DATABASE, side by side: the authoring create
+        // and the import create differ in exactly two stored facts, and both are read back from
+        // the row rather than from what the caller passed.
+        val body = Fixtures.pipeline()
+        val drafted = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner, CreateLifecycle.DRAFT)
+        val released =
+            repository.create(
+                WORKSPACE_ID,
+                NewPipeline.from(Fixtures.pipeline(name = "test/imported"), owner),
+                serializer.write(Fixtures.pipeline(name = "test/imported")),
+                owner,
+                CreateLifecycle.RELEASED,
+            )
+
+        withClue("authoring: version 1 is a DRAFT and nothing is released") {
+            drafted.currentVersion.shouldBeNull()
+            val detail = checkNotNull(repository.findDraftDetail(WORKSPACE_ID, drafted.id))
+            detail.version shouldBe 1
+            detail.status shouldBe PipelineVersionStatus.DRAFT
+            withClue("stamped like any other draft write, so the 409 details are honest from the start") {
+                detail.updatedBy shouldBe owner
+                detail.updatedAt shouldNotBe null
+                detail.releasedAt.shouldBeNull()
+                detail.releasedBy.shouldBeNull()
+            }
+            repository.findCurrentVersionDetail(WORKSPACE_ID, drafted.id).shouldBeNull()
+            withClue("a never-released pipeline has no released body to read") {
+                repository.findLatestBody(WORKSPACE_ID, drafted.id).shouldBeNull()
+            }
+        }
+        withClue("the import path: version 1 is RELEASED and the pointer names it") {
+            released.currentVersion shouldBe 1
+            repository.findDraftDetail(WORKSPACE_ID, released.id).shouldBeNull()
+            checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, released.id)).status shouldBe
+                PipelineVersionStatus.RELEASED
+        }
+    }
+
+    @Test
+    fun `appendReleasedVersion onto a never-released pipeline allocates version 1`() {
+        // The COALESCE in the import path's `current_version + 1`: with a NULL pointer the
+        // arithmetic would produce NULL and the import would silently write nothing.
+        val body = Fixtures.pipeline()
+        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner, CreateLifecycle.DRAFT)
+        // Discard the draft first: v1 is taken by it, and this asserts the pointer arithmetic,
+        // not the one-draft rule.
+        repository.discardDraft(WORKSPACE_ID, record.id, checkNotNull(repository.findDraftDetail(WORKSPACE_ID, record.id)).bodyHash)
+
+        val appended = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, body, serializer.write(body), owner))
+
+        appended.currentVersion shouldBe 1
+        repository.listVersions(WORKSPACE_ID, record.id).map { it.version } shouldContainExactly listOf(1)
     }
 
     @Test

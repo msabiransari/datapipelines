@@ -4,10 +4,18 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.SecureRandom
+import java.sql.DriverManager
+import java.util.Base64
+import java.util.UUID
+import kotlin.io.path.writeText
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.slf4j.LoggerFactory
@@ -22,13 +30,6 @@ import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
-import java.nio.file.Files
-import java.nio.file.Path
-import java.security.SecureRandom
-import java.sql.DriverManager
-import java.util.Base64
-import java.util.UUID
-import kotlin.io.path.writeText
 
 /**
  * Sample data, slice A, end to end (design 2026-08-16-sample-data §6/§6.1/D9): the WHOLE
@@ -149,6 +150,25 @@ class SampleDataBootstrapE2eTest {
             "SELECT v.body_json::text FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id" +
                 " WHERE p.workspace_id = '$workspaceId'",
         ).shouldContain(BOOT_RO)
+
+        // D55: authoring lands a DRAFT, but seeding is NOT authoring — it rides the same import
+        // services promotion uses, so a freshly provisioned workspace holds released content and
+        // ZERO drafts. A person opening a brand-new workspace must not find a "pending release"
+        // badge on content they never wrote.
+        withClue("the seeded workspace has no drafts at all") {
+            scalar<Long>(
+                "SELECT COUNT(*) FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id" +
+                    " WHERE p.workspace_id = '$workspaceId' AND v.status <> 'RELEASED'",
+            ) shouldBe 0L
+            scalar<Long>(
+                "SELECT COUNT(*) FROM template_versions v JOIN templates t ON t.id = v.template_id" +
+                    " WHERE t.workspace_id = '$workspaceId' AND v.status <> 'RELEASED'",
+            ) shouldBe 0L
+        }
+        withClue("and its released pointers name a real version, never NULL") {
+            scalar<Int>("SELECT current_version FROM pipelines WHERE workspace_id = '$workspaceId'") shouldBe 1
+            scalar<Int>("SELECT current_version FROM templates WHERE workspace_id = '$workspaceId'") shouldBe 1
+        }
     }
 
     @Test

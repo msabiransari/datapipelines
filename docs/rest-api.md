@@ -436,14 +436,14 @@ D56): the DRAFT when one exists, else the latest RELEASED version — "always ru
 On a development server that may be a draft (drafts have been executable since 039); where
 `authoring-enabled=false` no draft can exist at all, so it is always a release
 ([environments.md](environments.md)). An explicit `version` is exact and is never clamped: an
-unknown number is `404 pipeline.validation.pipeline_version_not_found`, not a silent run of the
-latest.
+unknown number is `404 pipeline.execution.not_found` (`details.pipeline_version` names it), not a
+silent run of the latest.
 
 The execution record pins the version that actually ran, and every executions surface marks a draft
 run — REST `draft_run` (§10.2), and a `DRAFT` label on the executions list and detail screens
 ([ui-screens §4.8](ui-screens.md)). The one pipeline that cannot be run at all is one with no
 version, reachable only by discarding the sole draft of a never-released pipeline (versioning §3.4);
-it answers the same `pipeline_version_not_found`.
+it answers that same `404 pipeline.execution.not_found`.
 
 Response: `200 OK` with `Content-Type: text/event-stream`.
 
@@ -1740,6 +1740,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-08 | v2.8 | 099 draft-first (D55/D56) | **§5.1** — `POST /pipelines` lands v1 as a **DRAFT**: `status: "DRAFT"`, `current_version: null`, the `draft` pointer, and release is `POST …/release` like any other draft ([Versioning §3.2](versioning.md)). **New §6.1.1** — execute with no `version` runs the WORKING version (the draft when one exists, else the latest release); an explicit version stays exact and never clamped. **§5.7** — listing rows carry the working `version` plus a new `status` field. **§5.9** — export is released-only and refuses a never-released pipeline with `409 pipeline.promotion.not_released`. §8.1 (templates) mirrors §5.1. Response VALUES change; no request shape and no route does. |
 | 2026-09-02 | v1.18 | 051 auth/config sweep | §10.1 gains its field table (T19): the listing's items were documented only by cross-reference to §10.2. The table is the shared metadata projection minus `result_url`/`result_expires_at`, including the fields §10.2's example omitted (`draft_run`, `error`, `failed_node_id`, `correlation_id`), plus the ownership sentence |
 | 2026-08-05 | v1.0 | initial draft | Initial REST API + SSE specification: endpoints, envelopes, SSE event schemas, claim-check pattern, pagination, rate limits, CORS |
 | 2026-08-05 | v1.1 | propagation | Updated create-pipeline example to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`, node has `type`/`output`). |

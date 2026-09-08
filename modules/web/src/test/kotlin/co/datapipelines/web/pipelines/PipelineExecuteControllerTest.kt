@@ -84,6 +84,8 @@ class PipelineExecuteControllerTest {
     fun `no version defaults to the pipeline's current version`() {
         authenticate()
         every { pipelines.findById(any(), pipelineId) } returns record
+        // D56: no version ⇒ the WORKING version, so the draft is looked up first. Released only here.
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns null
         every { pipelines.findVersionBody(any(), pipelineId, 5) } returns bodyJson
         val launch = slot<ExecuteLaunch>()
         every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
@@ -94,6 +96,52 @@ class PipelineExecuteControllerTest {
         launch.captured.resultTtlSeconds shouldBe 900L
         launch.captured.idempotencyKey shouldBe "k-1"
     }
+
+    @Test
+    fun `no version runs the DRAFT when one exists, and a fresh pipeline runs its v1 draft`() {
+        // D56 — "always run the LAST version": release v5 + draft v6 runs v6, and a pipeline that
+        // has never been released (D55's shape: `current_version` null) runs its v1 draft rather
+        // than answering that there is nothing to run.
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns draftDetail(version = 6)
+        every { pipelines.findVersionBody(any(), pipelineId, 6) } returns bodyJson
+        val launch = slot<ExecuteLaunch>()
+        every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
+
+        controller.execute(pipelineId, "{}", request())
+        launch.captured.pipelineVersion shouldBe 6
+
+        every { pipelines.findById(any(), pipelineId) } returns record.copy(currentVersion = null)
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns draftDetail(version = 1)
+        every { pipelines.findVersionBody(any(), pipelineId, 1) } returns bodyJson
+
+        controller.execute(pipelineId, "{}", request())
+        launch.captured.pipelineVersion shouldBe 1
+    }
+
+    @Test
+    fun `a pipeline with no version at all is the version 404, not a 500`() {
+        // The only "nothing to run" state (versioning §3.4): the sole draft of a never-released
+        // pipeline was discarded. It is the same refusal an out-of-range explicit version gets.
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record.copy(currentVersion = null)
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns null
+
+        shouldThrow<ApiException> { controller.execute(pipelineId, "{}", request()) }
+            .code shouldBe "pipeline.execution.not_found"
+        verify(exactly = 0) { launcher.launch(any()) }
+    }
+
+    private fun draftDetail(version: Int) =
+        co.datapipelines.pipeline.PipelineVersionDetail(
+            pipelineId = pipelineId,
+            version = version,
+            status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+            bodyHash = "hash-v$version",
+            createdAt = Instant.EPOCH,
+            createdBy = userId,
+        )
 
     @Test
     fun `a pinned version is used, and a non-positive version is a 400`() {
