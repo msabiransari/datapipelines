@@ -1295,6 +1295,18 @@ button.app-busy::after {
   overflow-wrap: anywhere;
 }
 
+/* 098 §A — the same rule where the identifier IS the cell rather than a span inside it.
+   /datasources renders the JDBC URL and the username as `<td class="u-mono">`, so the two
+   selectors above (which address a CHILD of the cell) never reached them: one
+   `jdbc:postgresql://postgres:5432/datapipelines` set the table's minimum width, the table
+   stopped fitting its column, and the overflow escaped to <html> — measured 1618px on a
+   1440px viewport with eight rows. Breaking a URL mid-string is ugly; a page that scrolls
+   sideways and hides the Actions column is worse (the 091/093 ruling). */
+.app-card-table td.u-mono,
+.app-card-table td.ds-mono {
+  overflow-wrap: anywhere;
+}
+
 /* A header may wrap inside a table that has to fit a card column; the vendored
    `white-space: nowrap` is right for a full-width table and wrong here. */
 .app-card-table .ds-table th {

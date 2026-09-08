@@ -298,4 +298,92 @@ class AppShellBrowserTest : BrowserSuite() {
         fontRequests.map { it.substringBefore(" ") }.toSet() shouldContain "200"
         fontRequests.any { it.contains("InterVariable.woff2") } shouldBe true
     }
+
+    /**
+     * 098 §A — the overflow walk above signs in as a FRESH user, so `/datasources` renders its
+     * empty state and cannot overflow anything. The screen the owner photographed had eight
+     * rows, and the overflow came from one of them: the JDBC URL cell is a mono string with no
+     * spaces, it set the table's minimum width, and the bare `.ds-table` had no scroll container
+     * to keep that inside the card.
+     *
+     * Measured on the demo stack before the fix (2026-09-08, seven seeded rows at 1440x900):
+     * `document.scrollWidth 1575` against `innerWidth 1440`, table right edge 1551, the table's
+     * wrapper `overflow-x: visible`, and `HEADER.app-topbar [232..1575]` among the culprits —
+     * the top bar dragged wide with the page, its search box clipped. 093 §3 measured 1618 with
+     * eight rows on the same screen.
+     *
+     * Eight rows, registered through the screen's own htmx endpoint (the register modal posts
+     * exactly this), with URLs as long as a real deployment's — a short `jdbc:h2:mem:x` would
+     * fit at any width and the walk would pass without measuring anything.
+     */
+    @Test
+    fun `the datasources list with eight rows does not scroll the document sideways`() {
+        startTrace()
+        signedIn("dsovf")
+
+        seedDatasources(8) shouldBe 8
+
+        val offenders = mutableListOf<String>()
+        listOf(1440 to 900, 2560 to 1440).forEach { (w, h) ->
+            page.setViewportSize(w, h)
+            page.navigate("$baseUrl/datasources")
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            page.locator("table.ds-table tbody tr").first().waitFor()
+            // The rows really are there: a check taken against an empty table is the check the
+            // walk above already makes, and it is what let this regress unseen.
+            page.locator("table.ds-table tbody tr").count() shouldBe 8
+            val extra = overflow(page)
+            if (extra > 0) offenders += "/datasources at ${w}x$h overflows by ${extra}px — ${culprits(page)}"
+        }
+        offenders shouldBe emptyList()
+    }
+
+    /**
+     * Registers [count] datasources through `POST /partials/datasources` — the endpoint the
+     * register modal posts to — from inside the page, so the session cookie and the
+     * `DP-CSRF-Token` header the layout carries both apply. Returns how many were accepted.
+     *
+     * Registration does not connect, so the hosts and ports need not exist; the point of the
+     * fixture is the WIDTH of what a real row renders.
+     */
+    private fun seedDatasources(count: Int): Int {
+        page.navigate("$baseUrl/datasources")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        return (
+            page.evaluate(
+                """async (count) => {
+                  const headers = JSON.parse(document.body.getAttribute('hx-headers') || '{}');
+                  const shapes = [
+                    ['POSTGRES', 'jdbc:postgresql://analytics-primary.internal.example.com:5432/dp_sample_trips'],
+                    ['MYSQL', 'jdbc:mysql://warehouse-replica.internal.example.com:3306/dp_sample_weather'],
+                    ['POSTGRES', 'jdbc:postgresql://reporting-standby.internal.example.com:5432/dp_reporting'],
+                    ['MYSQL', 'jdbc:mysql://trade-archive.internal.example.com:3306/dp_sample_trade'],
+                  ];
+                  let accepted = 0;
+                  for (let i = 0; i < count; i++) {
+                    const [dialect, url] = shapes[i % shapes.length];
+                    const body = new URLSearchParams({
+                      name: 'seeded-datasource-' + i,
+                      displayName: 'Seeded datasource ' + i,
+                      dialect,
+                      jdbcUrl: url,
+                      credentialKind: 'password',
+                      username: 'dp_demo_readonly',
+                      password: 'not-a-real-secret-' + i,
+                      description: 'A seeded row whose JDBC URL is as long as a real one.',
+                    });
+                    const res = await fetch('/partials/datasources', {
+                      method: 'POST',
+                      credentials: 'same-origin',
+                      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+                      body,
+                    });
+                    if (res.ok) accepted++;
+                  }
+                  return accepted;
+                }""",
+                count,
+            ) as Number
+        ).toInt()
+    }
 }

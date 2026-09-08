@@ -25,96 +25,106 @@
   </th:block>
 
   <th:block th:unless="${#lists.isEmpty(datasources)}">
-    <!-- .ds-table brings its own border, radius, header fill and row hover (app.css) —
-         no wrapper div, no zebra striping, no per-cell padding. -->
-    <table class="ds-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Dialect</th>
-          <th>Workspace</th>
-          <th>URL</th>
-          <th>Username</th>
-          <th>Last test</th>
-          <th class="num">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr th:each="ds : ${datasources}">
-          <td>
-            <span th:text="${ds.name}">pg-prod</span>
-            <span th:if="${ds.isReadonly}"
-                  class="ds-badge ds-badge-warning"
-                  title="Write-shaped pipeline uses of this datasource are refused">readonly</span>
-          </td>
-          <td>
-            <span class="ds-badge ds-badge-default" th:text="${ds.dialect.wire}"></span>
-          </td>
-          <td>
-            <span th:if="${ds.workspaceName} != null" th:text="${ds.workspaceName}">team</span>
-            <span th:if="${ds.workspaceName} == null" title="Visible to every workspace">global</span>
-          </td>
-          <!-- §3.3/§4.5: the JDBC URL and the username are the two mono columns on this
-               screen — both are machine strings a reader compares character by character
-               (a wrong host, a wrong port, a trailing space). They rendered in the body
-               face. -->
-          <td class="u-mono" th:text="${ds.jdbcUrl}"></td>
-          <!-- §3.4: the username, or the credential KIND when this kind has none — an empty
-               cell would read as "nobody filled it in" rather than "there is no login". -->
-          <td class="u-mono" th:if="${ds.username} != null" th:text="${ds.username}"></td>
-          <td th:if="${ds.username} == null">
-            <span class="ds-badge ds-badge-default"
-                  th:text="${ds.credentialKind.wire}"
-                  th:title="'This datasource authenticates with credential kind ' + ${ds.credentialKind.wire} + ', which has no username'">none</span>
-          </td>
-          <!-- §8.1B (061/T84): the outcome of the LAST connection test, on the screen that
-               said "fine" on 2026-09-02 while every execution failed at connect — listing a
-               datasource never connects to it, so without this column the row cannot be
-               wrong, only silent. The driver's message rides in the title attribute
-               (already redaction-scrubbed at the probe: no password, no credential-bearing
-               URL) so a failing row explains itself on hover without widening the table. -->
-          <td class="u-nowrap">
-            <th:block th:if="${ds.lastTest} == null">
-              <span class="ds-badge ds-badge-default" title="No connection test has been run against this datasource yet">never tested</span>
-            </th:block>
-            <th:block th:if="${ds.lastTest} != null">
-              <span th:if="${ds.lastTest.ok}" class="ds-badge ds-badge-success"
-                    th:title="${ds.lastTest.message} ?: 'The last connection test succeeded'">ok</span>
-              <span th:unless="${ds.lastTest.ok}" class="ds-badge ds-badge-danger"
-                    th:title="${ds.lastTest.message} ?: 'The last connection test failed'">failed</span>
-              <span class="u-muted u-text-xs"
-                    th:text="${#temporals.format(ds.lastTest.testedAt, 'yyyy-MM-dd HH:mm')}">2026-09-03 10:00</span>
-            </th:block>
-          </td>
-          <td class="num u-nowrap">
-            <!-- 089 §A: a LAKE datasource has a catalog to show — its registered tables live
-                 on the read-only detail page. Discovered-schema dialects have nothing there. -->
-            <a th:if="${ds.dialect.wire == 'LAKE'}"
-               class="ds-button ds-button-secondary ds-button-sm"
-               th:href="@{/datasources/{name}(name=${ds.name})}">Tables</a>
-            <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
-              <!-- Result goes to the #toast stack; the row and table are never
-                   touched, so the table layout cannot break. hx-disabled-elt
-                   blocks the double-submit (§5.1 Loading state). -->
-              <button class="ds-button ds-button-secondary ds-button-sm"
-                      th:attr="hx-post=@{/partials/datasources/{name}/test(name=${ds.name})}, hx-target='#toast', hx-swap='beforeend'"
-                      hx-disabled-elt="this"
-                      th:text="'Test'">Test</button>
-              <!-- 094 §A/§B. Both fetch a whole backdrop into the page's one empty
-                   #ds-dialog container: `.u-backdrop` is display:flex by default, so the
-                   dialog is on screen the moment htmx swaps it — no open() script to get
-                   out of step with the markup, and closing is emptying the container. -->
-              <button class="ds-button ds-button-secondary ds-button-sm"
-                      th:attr="hx-get=@{/partials/datasources/{name}/edit(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
-                      hx-disabled-elt="this">Edit</button>
-              <button class="ds-button ds-button-secondary ds-button-sm"
-                      th:attr="hx-get=@{/partials/datasources/{name}/delete(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
-                      hx-disabled-elt="this">Delete</button>
-            </th:block>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- 098 §A — the table lives in an `app-card-table` CARD, the shape /api-console and the
+         dashboard already use. Measured on the demo stack at 1440x900 with eight rows, the bare
+         `.ds-table` made the DOCUMENT 1618px wide: the JDBC URL column is a mono string with no
+         spaces, so one cell set the table's minimum width, nothing upstream was willing to be
+         narrower than its content, and the overflow escaped to <html> — the Actions column off
+         screen and the top bar scrolling sideways with the page. The card's `overflow-x: auto`
+         keeps any residual width scrolling INSIDE the card (app.css's `.app-card-table` block
+         states the rule and why `hidden` is the wrong half of it).
+         .ds-table brings its own border, radius, header fill and row hover (app.css) —
+         no zebra striping, no per-cell padding; inside a card it drops its own border. -->
+    <div class="ds-card app-card-table">
+      <table class="ds-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Dialect</th>
+            <th>Workspace</th>
+            <th>URL</th>
+            <th>Username</th>
+            <th>Last test</th>
+            <th class="num">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="ds : ${datasources}">
+            <td>
+              <span th:text="${ds.name}">pg-prod</span>
+              <span th:if="${ds.isReadonly}"
+                    class="ds-badge ds-badge-warning"
+                    title="Write-shaped pipeline uses of this datasource are refused">readonly</span>
+            </td>
+            <td>
+              <span class="ds-badge ds-badge-default" th:text="${ds.dialect.wire}"></span>
+            </td>
+            <td>
+              <span th:if="${ds.workspaceName} != null" th:text="${ds.workspaceName}">team</span>
+              <span th:if="${ds.workspaceName} == null" title="Visible to every workspace">global</span>
+            </td>
+            <!-- §3.3/§4.5: the JDBC URL and the username are the two mono columns on this
+                 screen — both are machine strings a reader compares character by character
+                 (a wrong host, a wrong port, a trailing space). They rendered in the body
+                 face. -->
+            <td class="u-mono" th:text="${ds.jdbcUrl}"></td>
+            <!-- §3.4: the username, or the credential KIND when this kind has none — an empty
+                 cell would read as "nobody filled it in" rather than "there is no login". -->
+            <td class="u-mono" th:if="${ds.username} != null" th:text="${ds.username}"></td>
+            <td th:if="${ds.username} == null">
+              <span class="ds-badge ds-badge-default"
+                    th:text="${ds.credentialKind.wire}"
+                    th:title="'This datasource authenticates with credential kind ' + ${ds.credentialKind.wire} + ', which has no username'">none</span>
+            </td>
+            <!-- §8.1B (061/T84): the outcome of the LAST connection test, on the screen that
+                 said "fine" on 2026-09-02 while every execution failed at connect — listing a
+                 datasource never connects to it, so without this column the row cannot be
+                 wrong, only silent. The driver's message rides in the title attribute
+                 (already redaction-scrubbed at the probe: no password, no credential-bearing
+                 URL) so a failing row explains itself on hover without widening the table. -->
+            <td class="u-nowrap">
+              <th:block th:if="${ds.lastTest} == null">
+                <span class="ds-badge ds-badge-default" title="No connection test has been run against this datasource yet">never tested</span>
+              </th:block>
+              <th:block th:if="${ds.lastTest} != null">
+                <span th:if="${ds.lastTest.ok}" class="ds-badge ds-badge-success"
+                      th:title="${ds.lastTest.message} ?: 'The last connection test succeeded'">ok</span>
+                <span th:unless="${ds.lastTest.ok}" class="ds-badge ds-badge-danger"
+                      th:title="${ds.lastTest.message} ?: 'The last connection test failed'">failed</span>
+                <span class="u-muted u-text-xs"
+                      th:text="${#temporals.format(ds.lastTest.testedAt, 'yyyy-MM-dd HH:mm')}">2026-09-03 10:00</span>
+              </th:block>
+            </td>
+            <td class="num u-nowrap">
+              <!-- 089 §A: a LAKE datasource has a catalog to show — its registered tables live
+                   on the read-only detail page. Discovered-schema dialects have nothing there. -->
+              <a th:if="${ds.dialect.wire == 'LAKE'}"
+                 class="ds-button ds-button-secondary ds-button-sm"
+                 th:href="@{/datasources/{name}(name=${ds.name})}">Tables</a>
+              <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
+                <!-- Result goes to the #toast stack; the row and table are never
+                     touched, so the table layout cannot break. hx-disabled-elt
+                     blocks the double-submit (§5.1 Loading state). -->
+                <button class="ds-button ds-button-secondary ds-button-sm"
+                        th:attr="hx-post=@{/partials/datasources/{name}/test(name=${ds.name})}, hx-target='#toast', hx-swap='beforeend'"
+                        hx-disabled-elt="this"
+                        th:text="'Test'">Test</button>
+                <!-- 094 §A/§B. Both fetch a whole backdrop into the page's one empty
+                     #ds-dialog container: `.u-backdrop` is display:flex by default, so the
+                     dialog is on screen the moment htmx swaps it — no open() script to get
+                     out of step with the markup, and closing is emptying the container. -->
+                <button class="ds-button ds-button-secondary ds-button-sm"
+                        th:attr="hx-get=@{/partials/datasources/{name}/edit(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
+                        hx-disabled-elt="this">Edit</button>
+                <button class="ds-button ds-button-secondary ds-button-sm"
+                        th:attr="hx-get=@{/partials/datasources/{name}/delete(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
+                        hx-disabled-elt="this">Delete</button>
+              </th:block>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <th:block th:with="prevUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})},
                        nextUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}">
