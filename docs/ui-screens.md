@@ -20,7 +20,8 @@ These are standard CRUD + list/detail screens. They don't need pipeline-editor-l
 1. **Server-rendered by default.** Thymeleaf renders full HTML pages. htmx handles partial updates (search, filter, pagination, form submission) without full page reload. Navigation is boosted (§3.2): a section click fetches the SAME full page and swaps only the main region — the MPA is the design, the document-per-click feel is not required by it.
 2. **htmx for these screens, fetch for the pipeline editor.** htmx is the right tool for "server renders partial HTML, swap it in" patterns. The pipeline editor is the exception (graph + SSE requires vanilla JS).
 3. **Design system everywhere.** Every screen uses `@acme/design-tokens` tokens and `.ds-*` primitives. No exceptions, no hardcoded colors. Where a class named below has no counterpart in the vendored `primitives.css` (`.ds-spinner`, `.ds-toast*`, `.ds-empty-state` and `.ds-avatar` are the candidates — the roster is ~80 classes and is not enumerated in these docs), the app defines it in `app.css` **derived from design tokens**, never from literal values ([Pipeline Editor §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens)). Confirm against the vendored file at implementation time before adding an app-level class.
-4. **Consistent layout shell.** Every page (except login) shares a common nav bar + sidebar layout, defined in a Thymeleaf layout fragment.
+4. **Two layouts, and only two (090 §C, normative).** App screens share the shell — rail, top bar, boosted `<main id="app-main">` — from `layouts/default.html`. **Ceremony screens** — the login page and the forced-password-change gate — use `layouts/auth.html`: brand line, centred card, the resolved theme, htmx and the toast stack, and *nothing else*. No rail, no top bar, no workspace switcher, no `#app-main`, no `hx-boost` anywhere in the layout. A ceremony screen exists to move a visitor across the session boundary; until that move completes there is nothing to navigate to, so a shell around it is a menu of dead ends — and, since `#app-main` is the boosted swap target, a shell around it is also a screen that can be swapped into an app page. `AuthLayoutRenderTest` pins both layouts, including that the login page renders no shell even when handed an authenticated model.
+   *Before 090 the login page decorated with `layouts/default`, which renders the shell whenever `authenticated` is true, so a signed-in visitor who opened `/login` in a second tab got the sign-in form inside a working app (owner's walk, 2026-09-07). Both halves are closed: the layout above, and the redirect in §4.1.*
 5. **Three URL spaces, never mixed.** Pages, HTML fragments, and JSON live under distinct prefixes — see §2.1.
 6. **The server holds no UI state.** The app is stateless behind a load balancer with no sticky sessions ([Deployment](deployment.md)); every user preference that must survive a request lives on the `users` row, never in an `HttpSession`.
 7. **Scopes are not asserted here.** The per-screen scope column in §4 is a convenience view of the authoritative matrix in [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative).
@@ -98,6 +99,35 @@ The layout also wires three things once, for every page:
 
 htmx is **vendored** (webjar) like the rest of the frontend stack — no CDN references, and no htmx extensions ([Pipeline Editor §4.2](pipeline-editor.md)).
 
+### 3.0 Every app stylesheet loads from the layout head (090 §A/§B, normative)
+
+**No page template may carry its own `<link rel="stylesheet">`.** The `content` fragment renders *inside*
+`#app-main`, which is the boosted-swap target (§3.2): htmx replaces that region's markup and the browser only
+then discovers the link. An inserted stylesheet does not block the already-painted document, so the screen
+paints at least one frame with none of its own rules — cached sheet or not.
+
+Measured on the explorers (090, chromium, seeded tree, geometry read at the first animation frame after
+`htmx:afterSwap`, `template-tree.css` still page-scoped):
+
+| viewport | rail | first frame after the swap | settled |
+|---|---|---|---|
+| 1920 | expanded | tree 1640px, detail's left edge EQUAL to the tree's — the panes stacked | tree 480px, detail at tree.right + 24 |
+| 2560 | expanded | tree 2280px, stacked | tree 480px, gapped |
+| 2560 | collapsed | tree 2452px, stacked | tree 480px, gapped |
+
+That unstyled frame is both of the round's reports at once — "css is applied after data load", and a detail
+pane sitting hard against the rail. `template-tree.css` moved to `layouts/default.html`'s `<head>` and the two
+list templates' own links are gone; `ExplorerPaneGeometryBrowserTest` asserts the pane contract at the FIRST
+FRAME, not only on the settled page, at 1440/1920/2560 × rail expanded/collapsed × both explorers.
+
+**Cumulative layout shift is not the instrument for this.** `PerformanceObserver('layout-shift')` scored the
+broken navigation at 0.0000: the panes were *inserted* in the wrong geometry rather than moved out of a right
+one, and an insertion is not a shift. The CLS budget (< 0.05 across a boosted navigation) is still asserted —
+it is the right instrument for the font rule in §3.3 — but first-frame geometry is what pins this.
+
+`pipeline-editor.css`, `template-editor.css` and `docs.css` are still page-scoped and carry the same defect.
+The fix is identical (hoist the link) and belongs to whichever round owns those surfaces.
+
 ### 3.1 Shell and width policy (076, normative)
 
 Measured on the owner's ~3,000px window (2026-09-05): four content widths across eleven screens — a 1600px cap on most, bespoke narrower columns on Settings, full-bleed on Templates and the editor. The policy that replaces them:
@@ -111,7 +141,7 @@ Measured on the owner's ~3,000px window (2026-09-05): four content widths across
 `hx-boost="true"` on the `<nav>` and on `<main id="app-main">`. A section click — or any in-content navigation — fetches the SAME full page (there is no second template variant) and swaps only the main region; the nav, the workspace switcher and the toast stack persist, the URL pushes, back/forward ride htmx history.
 
 - **The swap policy lives in `static/js/shell.js`, not in attributes.** `hx-target`/`hx-select`/`hx-swap` are deliberately NOT set on `<main>`: htmx inherits them into every child request, which would retarget the screens' partial swaps (search results, tree levels, dashboard stats) at `#app-main`. Instead `shell.js` listens for `htmx:beforeSwap` and, only for requests htmx flags as boosted, retargets at `#app-main` with `select="#app-main"` and `outerHTML show:window:top`.
-- **Full navigations remain** — marked `hx-boost="false"` and pinned by `ShellRenderTest`: `/login`, `/logout`, the OIDC redirects, the forced-change gate (`/settings/password` under `mustChange`) and file downloads (external links too — htmx 2 rejects cross-origin requests).
+- **Full navigations remain** — marked `hx-boost="false"` and pinned by `ShellRenderTest`: `/logout`, the OIDC redirects and file downloads (external links too — htmx 2 rejects cross-origin requests). **Amended 090 §C:** `/login` and the forced-change gate no longer opt OUT of boosting; they render `layouts/auth`, which has no `hx-boost` and no `#app-main` at all, so there is no boosting to opt out of. Removing the machinery beats marking each link.
 - **The progress signal.** A document load used to say "loading" with a white flash; a swap must not flash, so one 2px bar under the nav (`#app-progress`, tokens only, reduced-motion respected) does the talking. Since 085 §D it shows for EVERY htmx request, boosted or partial, counted in flight between `htmx:beforeRequest` and `htmx:afterRequest` — the full loading-state contract (busy control, delayed skeleton) is §5.1's.
 - **Active-section state.** Server-computed from `currentPath` for the first paint; after swaps `shell.js` mirrors the same rule (Dashboard exact, others prefix) off `data-nav-section` + `window.location.pathname`.
 - **Scripts re-arm per swap.** Page scripts whose tags ride inside `#app-main` re-execute on arrival; anything document-level installs ONCE per session. The pipeline editor tears down on host-replacing swaps — the execution stream's reader is ABORTED (never `cancel()`: the run continues server-side, visible on `/executions`), the Cytoscape instance is destroyed, timers and document listeners come off — and re-binds through Alpine on `htmx:afterSettle` when a history restore brings its DOM back without re-executing scripts. `toast.js` and `template-explorer.js` follow the same idempotent-init contract; `editorJsTest` pins all three.
@@ -214,9 +244,24 @@ neither, and the two themes the mode toggle switches between — `light` and `da
 (`minimal` likewise). So every machine without Inter installed rendered the app in its system UI font, which is
 why the running app never looked like the approved mocks. `app.css` therefore restates `--font-sans`/`--font-mono`
 at the app level with the vendored faces first and the design system's own stacks behind them, so a blocked or
-failed download degrades to exactly the previous rendering. Four `@font-face` blocks, all `font-display: swap`;
-the upright sans and the regular mono are `<link rel="preload" as="font" crossorigin>`ed in the layout, the italic
+failed download degrades to exactly the previous rendering. Four `@font-face` blocks;
+the upright sans and the regular mono are `<link rel="preload" as="font" crossorigin>`ed in **both** layouts, the italic
 sans and the mono 500 are not (the app renders almost no italic, and an unused preload is a wasted request).
+
+**`font-display: optional`, amended 090 §B (was `swap`).** `swap` paints in the fallback and REFLOWS when the face
+lands. Measured (090, chromium, every font response held 1.2s, geometry sampled at the first animation frame after
+`DOMContentLoaded` and again after `document.fonts.ready`): the `/dashboard` page heading went 243.5px → 251.7px
+(+8.2px, +3.4%) and the `/templates` heading 611.7px → 618.2px (+6.5px). CLS stayed at 0 and 0.0075 — the reflow is
+HORIZONTAL inside a block whose box does not move, which is why the budget alone could not see it. The owner did not
+report a jumping page; they reported text that changes after it has been read, and 6–8px of re-flowed measure on
+every heading is that. `optional` gives a ~100ms block period and NO swap window: the face is either ready in time
+and used from the first paint, or dropped for that page load and used from the next one, by which point the file is
+in the HTTP cache. Post-paint reflow becomes structurally impossible rather than small. Verified by re-running the
+same held-font measurement: first-frame and settled widths now agree exactly (238.4/238.4 and 611.7/611.7), CLS 0.
+The cost is that a first visit over a slow link renders in the fallback stack. `fallback` (100ms block + a 3s swap
+window) is the alternative if that is judged too high; it would want size-adjusted fallback faces first, and the
+ratios are measured and ready — Inter / `system-ui` = **102.59%**, JetBrains Mono / `ui-monospace` = **109.48%** —
+but the `--_font-sans` stack they must be inserted into lives in the vendored design-system themes.
 `VendoredFontsAuditTest` fails the build if a file goes missing, a hash drifts, an `OFL.txt` disappears, or any
 stylesheet or template starts naming a font host over the network. The marketing site (`site/**`) does not load
 `app.css` and keeps the system fallback this round.
@@ -247,13 +292,25 @@ stylesheet or template starts naming a font host over the network. The marketing
 | Attribute | Value |
 |---|---|
 | URL | `GET /login` (page), `POST /login` (local password form) |
-| Auth required | No |
+| Auth required | No — and a signed-in visitor is **redirected to `/dashboard`** (090 §C) |
+| Layout | `layouts/auth` (§2 principle 4) — brand line and card, no shell |
 | Purpose | Sign-in — one username/password form, then a divider, then one button per configured OIDC provider; only the enabled methods render |
 | Design primitives | `.ds-card`, `.ds-input`, `.ds-button--primary`, `.ds-button--secondary` |
 | JS | None (plain form POST to `/login`; static links to `/oauth2/authorization/{provider-name}`) |
 | htmx | None |
 
 Content: centered card with app logo. When local accounts are enabled ([Auth §5A](auth.md#5a-local-password-accounts-optional)), an email+password form (with the `_csrf` hidden field) comes first; a plain "or" divider separates it from the provider buttons — one form, then the divider, then the buttons, never tabs. Only the methods actually enabled render: an OIDC-only deployment shows just the buttons (no form, no divider, exactly as before); a local-only deployment shows just the form. Provider buttons are **dynamic** — the controller reads the `ClientRegistrationRepository` and passes the provider list to Thymeleaf; button text is the `display-name` from the provider config ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.3](auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)). No hardcoded provider names anywhere in the UI.
+
+**A live session never sees this screen (090 §C).** `/login` is `permitAll`, so the JWT filter authenticates a
+valid `dp_session` before the request reaches `UiController` — which is why the form used to render inside the app
+shell for a signed-in visitor who opened it in a second tab. The GET now answers `302 /dashboard` whenever the
+SecurityContext holds an `AuthenticatedPrincipal`. The check is on the PRINCIPAL, not on the cookie's presence: an
+expired, tampered or deactivated session leaves the context empty and still gets the form, which is exactly what
+`?error=expired` exists for. `/oauth2/authorization/{provider}` — the other door, reachable by bookmark — is closed
+by `OidcSignedInBounceFilter`, installed ahead of Spring Security's `OAuth2AuthorizationRequestRedirectFilter`
+(which is ordered BEFORE this chain's own credential filters, so the filter validates the cookie itself through the
+same `JwtService.validate` + `UserService.isActive` pair the JWT filter uses). Everything that is not a live
+session — no cookie, expired, invalid, deactivated owner — proceeds to the provider untouched.
 
 Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not_allowed`, `oidc_error` (OIDC); `credentials` (unknown email or wrong password — deliberately identical, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)), `locked` (per-account lockout), `inactive` (deactivated account, either method).
 
@@ -530,12 +587,15 @@ The **switcher in the navbar** (§3) drives the active workspace; the screen's S
 |---|---|
 | URL | `GET /settings/password` |
 | Auth required | Yes (any authenticated session with a local password) |
+| Layout | `layouts/default` for a voluntary change; **`layouts/auth`** when `must_change_password` is set (090 §C) — the controller returns `settings/password-forced`, and both views render one `partials/password-card` fragment |
 | Purpose | Self-service password change — and the one screen the §5A.4 forced-change gate lets a `must_change_password` user reach |
 | Design primitives | `.ds-card`, `.ds-input`, `.ds-button--primary` |
 | JS | None |
 | htmx | Yes — `hx-post="/partials/account/password"` (success is §5.1 Shape B, toast-only; failures stay inline in `#password-change-result` via the screen's own 4xx listener) |
 
 Content: current / new / confirm fields with the policy floor stated inline (at least 12 characters, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)). A `must_change_password` user additionally sees the one-time-password warning banner — every other route redirects here until the change succeeds ([Auth §5A.4](auth.md#5a4-forced-password-change)). An account without a local password (OIDC-only) sees an explanatory note instead of the form. Success is a §5.1 toast (Shape B); failure outcomes are field-level/credential validation and stay INLINE in `#password-change-result` — wrong current password, policy violation, confirmation mismatch — delivered by the screen's own `htmx:responseError` listener, because htmx never swaps 4xx and these refusals deliberately carry no `HX-Retarget` (this is the one screen where Shape B and inline errors coexist); the forced-change gate releases on the next navigation.
+
+**Two views, one card (090 §C).** A user held here by `must_change_password` is inside the authentication ceremony, not on an app page: the §5A.4 interceptor refuses every other route, so the shell's rail would be ten links that all bounce straight back. That user gets `settings/password-forced` and the auth layout; a voluntary change from Settings keeps the shell. The choice is made in `UserSettingsController`, **not** by a conditional decorator in the template — Thymeleaf resolves `__${...}__` preprocessing while PARSING and caches the parsed template, so the first request through would freeze the layout for every request after it (measured, 090).
 
 ### 4.15 Marketing site (public)
 
@@ -827,6 +887,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-07 | v1.28 | UI round 3 — the boosted first frame, the fonts, and a login page that ignores your session (090) | **§3.0 (new, normative): no page template carries its own `<link rel="stylesheet">`.** The explorers' sheet lived inside the `content` fragment — inside `#app-main`, the boosted-swap target — so htmx replaced the region and the browser only then discovered the link; an inserted stylesheet does not block an already-painted document. Measured at the first animation frame after `htmx:afterSwap`: at 1920 the tree painted 1640px wide with the detail pane's left edge EQUAL to its own (the panes stacked), 2280px at 2560 expanded, 2452px collapsed — settling to 480px and a 24px gap a frame later. That unstyled frame is BOTH of the round's reports: "the detail section is very close with the side menu" and "css is applied after data load". `template-tree.css` moved to the layout head. **The reported cause did not reproduce:** the pane's 260px floor was never beaten — six settled measurements (1440/1920/2560 × rail expanded/collapsed) gave 432 or 480px with `min-width` computing 260px, no persisted width existed, and no flex override was in the cascade. **CLS was the wrong instrument** and is recorded as such: `PerformanceObserver('layout-shift')` scored the broken navigation 0.0000, because the panes were inserted wrong rather than moved — `ExplorerPaneGeometryBrowserTest` asserts first-frame geometry at 3 widths × 2 rail states × 2 explorers, and keeps the < 0.05 budget for the font rule. **§3.3 amended: `font-display: optional`** replaces `swap`. With every font response held 1.2s, the `/dashboard` heading went 243.5 → 251.7px (+8.2px) and `/templates` 611.7 → 618.2px on arrival, at CLS 0 and 0.0075 — a horizontal reflow inside a block that does not move, which is text changing after it has been read. `optional` makes post-paint reflow structurally impossible; re-measured, first-frame and settled widths now agree exactly. `fallback` is the recorded alternative, with the size-adjust ratios already measured (Inter/system-ui 102.59%, JetBrains Mono/ui-monospace 109.48%). **§2 principle 4 rewritten, §4.1 and §4.14 amended: two layouts.** `login.html` decorated with `layouts/default`, which renders the shell whenever `authenticated` is true, so a signed-in visitor who opened `/login` in a second tab got the sign-in form inside a working app (owner's walk). New `layouts/auth.html` — brand, card, theme, htmx and the toast stack, no rail, no top bar, no `#app-main`, no `hx-boost`; `GET /login` answers `302 /dashboard` for a live session (on the PRINCIPAL, not on the cookie, so an expired session still gets the form); `OidcSignedInBounceFilter` closes `/oauth2/authorization/*` ahead of Spring Security's redirect filter. The forced-change gate became its own view (`settings/password-forced`) over one shared card partial, because a conditional decorator via `__${...}__` preprocessing is resolved at PARSE time and cached — the first request through would freeze the layout for all of them. **§B, second half:** `[x-cloak]{display:none}` moved from the page-scoped `pipeline-editor.css` to `app.css`, so the attribute is not inert everywhere else, and the editor's Alpine ROOT is cloaked (its six panes already were). New guards: `ExplorerPaneGeometryBrowserTest`, `AuthLayoutRenderTest`, `AlpineCloakAuditTest` (with two non-vacuity floors), `OidcSignedInBounceFilterTest`, four `LoginGoldenPathBrowserTest` cases. Still page-scoped and carrying §3.0's defect, named rather than left to be rediscovered: `pipeline-editor.css`, `template-editor.css`, `docs.css`. |
 | 2026-09-07 | v1.27 | shell polish — a signal for every server trip (085 §D) | §5.1's Loading state rewritten: the 2px `#app-progress` bar was boosted-navigation only; the owner asked for "some kind of an indicator" on every trip, so the bar now shows for EVERY htmx request as an in-flight COUNT between `htmx:beforeRequest` and `htmx:afterRequest` (afterRequest is the one terminal event htmx 2.0.10 fires on success, error status, network error, abort AND timeout — afterSettle never fires for an aborted request, which is why the old settle/error listener set could have stranded the bar on). The originating control goes busy under the shell's OWN `.app-busy` marker — htmx 2.0.10's `.htmx-request` lands on the `hx-indicator` target instead when the element carries `hx-indicator` (the tree leaves do), so it cannot mark the control itself. A busy `<button>` gets `pointer-events: none` plus an absolutely-positioned `::after` spinner ring (the `.ds-spinner` idiom, no layout shift; a tree row's trailing badges go `visibility:hidden` for the flight to make room), and `shell.js` sets `aria-disabled="true"` — never the `disabled` property, which would drop focus mid-flight. Folder summaries are the exception: they stay operable mid-fetch (the §C hammer pins collapse/re-expand while a level loads) and their signal is the chevron spinning in the row's own icon slot. A request still in flight after 150ms marks its swap target `aria-busy="true"` and appends ONE `.ds-skeleton` row (`.app-target-skeleton`), per-target paired, removed by the terminal event before the swap — slow swaps show a skeleton, fast swaps never flash one. Reduced motion keeps every state and drops every motion (dashed-static ring, static accent chevron, the vendored skeleton's own static surface). §3.2's boosted-bar passage now points at §5.1. Pinned by four new `shell.test.mjs` cases (counter interleave, `.app-busy`/aria-disabled set and cleared, skeleton only after the delay, per-target pairing) and the new `ShellBusyBrowserTest` (bar active during a throttled expand and gone after settle, the in-flight control non-interactive, the skeleton present past 150ms and absent on a fast swap, and the bar provably not stuck after an hx-sync replace abort). |
 | 2026-09-07 | v1.26 | shell polish — tree guides + one icon set (085) | **§A — the explorer trees draw real guide geometry** (owner: "connecting lines are not accurate"): the vertical guide was a `border-left` on the level CONTAINER that neither met the parent chevron nor stopped at the last child; it is now `::before`/`::after` on each row's `<li>` — the vertical starts at the parent row's chevron centre and stops at the LAST row's own centre even when that row is an expanded folder (the li wraps the subtree, so a bottom-anchored line would run down inside it), and every row carries a horizontal tick into its chevron/file icon. All lengths derive from tokens (`--tpl-indent`/`--tpl-row-h`/`--tpl-guide-x` on `.tplx-tree`); the unicode ▸ disclosure marker is the sprite's chevron-right rotated on `details[open]` (reduced-motion keeps the state, drops the transition), folder rows gain folder/folder-open (two icons, CSS picks one) and leaves file-code; the per-row border-bottom hairline is gone — the mock draws rows with whitespace and a hover tint, and no component boundary loses its line. Search results stay a flat, guide-free list. **§B — one icon source for the whole app** (owner: "probably we need different icons which can look more professional"): the sprite grows 12 → 40 glyphs, exactly the referenced set, per-icon SHA-256 in `vendor-manifest.json`, the ISC text vendored as `LICENSE.lucide`; the sixteen ad-hoc inline shell SVGs, the eight `&times;` close glyphs and the five `&larr;`/`&rarr;`/`→` arrows are all sprite references now (toast's client builder kept in parity — `ToastMarkupParityTest` + `toast.test.mjs`), and `graph.js`'s CALCULATOR draws `calculator` instead of the `file` stand-in. The size mapping (sm = chrome/actions, md = canvas, xs = tight inline) is recorded in §3.4; `IconSpriteAuditTest` enforces referenced = vendored = manifest-subset in both directions. |
 | 2026-09-06 | v1.25 | the §3.3 faces, applied (082 §D) | §3.3's decision table had been prose for three rounds while the MARKUP disagreed with it in six cells. Swept mechanically, not eyeballed, and fixed: **§4.9 node stats** renders its node id in mono (it was in the body face) and its Context `key → value` under `.u-mono` rather than `.num` — `.num` is the NUMERIC column treatment (right-aligned, one size down, mono), and only the mono third of it was ever right for an identifier; **§4.5 datasources** sets its JDBC URL and username in mono; **§4.13 workspaces** sets the workspace name in mono; **§4.17 promotion** gives the pipeline path the same `.app-path` treatment the execution lists use. The **Started** column reported as monospace is not: verified against 079's own screenshots and the stylesheets, dates render in Inter with `tabular-nums`, which is §3.3.2 exactly — the wide, even figures are tabular numerals, not a mono face, and no change was made. New guard `TableTypeFaceAuditTest`: the date rule swept over every app template (no timestamp may sit in a mono/`.num` cell) plus §3.3's mono list transcribed as data. Explicitly NOT changed: the admin-users ID column and the execution-family UUID links, which §3.3 does not list as mono columns. |
