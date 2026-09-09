@@ -14,6 +14,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineService
@@ -174,6 +175,7 @@ class EndpointsConfiguration {
         endpointsProperties: EndpointsProperties,
         audit: AuditEventSink,
         executionScope: WebSurfaceConfiguration.ExecutionCoroutineScope,
+        authoringGuard: AuthoringGuard,
     ): PublishedEndpointServeService =
         PublishedEndpointServeService(
             registry = registry,
@@ -187,6 +189,7 @@ class EndpointsConfiguration {
             resultConfig = resultConfig,
             endpointsProperties = endpointsProperties,
             audit = audit,
+            authoring = authoringGuard,
             scope = executionScope,
         )
 

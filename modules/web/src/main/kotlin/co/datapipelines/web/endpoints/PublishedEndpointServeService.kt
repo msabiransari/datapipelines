@@ -17,6 +17,7 @@ import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -71,6 +72,7 @@ class PublishedEndpointServeService(
     private val resultConfig: ResultConfig,
     private val endpointsProperties: EndpointsProperties,
     private val audit: AuditEventSink,
+    private val authoring: AuthoringGuard,
     private val scope: CoroutineScope,
 ) {
     private val log = LoggerFactory.getLogger(PublishedEndpointServeService::class.java)
@@ -122,7 +124,7 @@ class PublishedEndpointServeService(
 
         val matched = registry.matcher().match(path) ?: return notFound()
         val endpoint = matched.endpoint
-        val version = releasedVersion(endpoint) ?: return notReleased(endpoint)
+        val version = pointedVersion(endpoint) ?: return notReleased(endpoint)
 
         val readOnly = readOnlyRule.check(version.pipeline, endpoint.workspaceId)
         if (!readOnly.isValid) {
@@ -271,13 +273,25 @@ class PublishedEndpointServeService(
                 ),
         )
 
-    /** §5.1 — the latest RELEASED version, never a draft. */
-    private fun releasedVersion(endpoint: PublishedEndpoint): PipelineService.ExecutablePipeline? {
+    /**
+     * §5.1 — the version the pipeline's POINTER names (D60), when it is eligible for this posture
+     * (D63, 2026-09-09): a RELEASED version always; a DRAFT only under the development posture,
+     * where the pointer may legitimately fall back to (or be switched to) a draft so the endpoint
+     * can be tested BEFORE the release — "we should be able to point the API to any version in
+     * dev". A non-development deployment holds no drafts, so it serves releases by construction,
+     * not by this check. A NULL pointer, or a pointer at a version this posture may not serve,
+     * is the §5.6 `pipeline_not_released` refusal.
+     */
+    private fun pointedVersion(endpoint: PublishedEndpoint): PipelineService.ExecutablePipeline? {
         val record = pipelines.findRecord(endpoint.workspaceId, endpoint.pipelineId) ?: return null
         val detail = pipelines.findCurrentVersion(endpoint.workspaceId, endpoint.pipelineId) ?: return null
-        if (detail.status != PipelineVersionStatus.RELEASED) return null
+        if (!servable(detail.status)) return null
         return pipelines.findExecutable(endpoint.workspaceId, record, detail.version)
     }
+
+    /** The D63 rule, on its own so a test can read it: released always, a draft in development only. */
+    internal fun servable(status: PipelineVersionStatus): Boolean =
+        PipelineVersionStatus.eligibleForPointer(status, draftsEligible = authoring.developmentPosture)
 
     private fun authorize(
         path: String,

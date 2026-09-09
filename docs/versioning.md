@@ -58,6 +58,7 @@ Ratified 2026-09-08, operator ruling (implemented 101):
 | D58 | **A PIPELINE node may pin only a RELEASED child version** — `pipeline.validation.pipeline_reference_not_released` at save. Template pins keep their rule (draft pins legal while the parent is a draft; release requires them released). | Composition references reviewed content; a draft child can be purged out from under a parent, which an exact pin must never allow. |
 | D59 | **Names are unique forever.** A discarded pipeline/template keeps its name; restore always works; no second entity may take the name. The partial-index idea is withdrawn; `uq_pipelines_workspace_name` / `uq_templates_workspace_name` stay as they are. | A name is an identity other environments and histories reference; recycling it re-points them at a different thing. |
 | D60 | **`current_version` is sticky and event-driven.** It moves only on release, discard-of-current, restore-above-current, manual switch, and purge-of-current-draft; when it moves it picks the highest-numbered ELIGIBLE live version (RELEASED always; DRAFT only under development posture), else NULL. An import never moves an existing pointer — the human switches — except the first import of an entity with no current at all. | "`current_version` helps us in fallback." The pointer is what dependents run; it must move deliberately, never as a side effect. |
+| D63 | **A published endpoint serves whatever the pointer names in development, a draft included** (owner 2026-09-09: "we have to test it before the release, so we should be able to point the API to any version in dev"). Non-development holds no drafts, so released-only there by construction. | The endpoint is the thing under test; a 503 on the dev fallback made the testable path untestable. |
 
 ---
 
@@ -189,6 +190,13 @@ hardened postures is the only thing it can name.
 time — the endpoint row is not deleted, and an entity whose status is DISCARDED answers
 the same refusal rather than a 404; a schedule (092) records a refused run; promotion has
 nothing to push.
+
+**A draft pointer (D63, 2026-09-09).** Under the development posture the pointer may name a
+DRAFT (the D60 fallback, or a manual switch), and a published endpoint **serves it** — the
+endpoint has to be testable before the release, so in development the API can be pointed at
+any live version. Outside development no draft exists, so a release is served by
+construction; the serve path checks the same eligibility rule the pointer uses
+(`PipelineVersionStatus.eligibleForPointer`), never a status of its own.
 
 ### 3.5 The lifecycle table
 

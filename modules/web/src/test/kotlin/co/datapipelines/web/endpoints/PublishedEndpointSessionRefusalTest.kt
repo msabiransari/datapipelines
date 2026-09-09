@@ -10,6 +10,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ResultConfig
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.config.EndpointsProperties
 import io.kotest.matchers.shouldBe
@@ -48,6 +49,7 @@ class PublishedEndpointSessionRefusalTest {
             resultConfig = ResultConfig(),
             endpointsProperties = EndpointsProperties(),
             audit = mockk(relaxed = true),
+            authoring = AuthoringGuard(enabled = true),
             scope = CoroutineScope(Dispatchers.Default),
         )
 
