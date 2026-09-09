@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.microsoft.playwright.options.LoadState
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThan
+import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -132,6 +133,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
           return {
             treeWidth: tb.width,
             viewport: window.innerWidth,
+            detailPadding: parseFloat(getComputedStyle(document.querySelector('.tplx-detail')).paddingLeft),
             detailLeft: db.left,
             treeRight: tb.right,
             gap: db.left - tb.right,
@@ -178,10 +180,16 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         // 3491px window the former 480px ceiling left the tree 14% of the canvas. The floor
         // wins below 1000px; above it the pane tracks 26vw.
         val viewport = (m["viewport"] as Number).toDouble()
-        if (viewport * TREE_SHARE > TREE_FLOOR) {
-            withClue(label, "tree pane is not its ${TREE_SHARE}vw share of the viewport: $m") {
-                treeWidth shouldBeGreaterThanOrEqual viewport * TREE_SHARE - 1.0
+        val expected = minOf(viewport * TREE_SHARE, TREE_CEILING)
+        if (expected > TREE_FLOOR) {
+            withClue(label, "tree pane is not min(${TREE_SHARE}vw, ${TREE_CEILING}px): $m") {
+                treeWidth shouldBeGreaterThanOrEqual expected - 1.0
+                treeWidth shouldBeLessThanOrEqual expected + 1.0
             }
+        }
+        // The detail's content stands off the divider (2026-09-08): the pane's left padding.
+        withClue(label, "detail content sits on the divider: $m") {
+            ((m["detailPadding"] as Number?)?.toDouble() ?: 0.0) shouldBeGreaterThanOrEqual DETAIL_INSET
         }
         // The detail pane starts at least one shell gap right of the tree's edge. `>=` and not
         // `==`: the rule is that the panes never overlap or crowd, and a future layout may
@@ -341,8 +349,12 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         /** `template-tree.css`'s declared floor for the pane. */
         const val TREE_FLOOR = 260.0
 
-        /** …and its declared share of the viewport (`26vw`). */
-        const val TREE_SHARE = 0.26
+        /** …and its declared share of the viewport (`22vw`), capped at 40rem (640px at 16px). */
+        const val TREE_SHARE = 0.22
+        const val TREE_CEILING = 640.0
+
+        /** `--gap-lg` at the default scale: the detail's inset from the divider. */
+        const val DETAIL_INSET = 24.0
 
         /** The three review widths plus the owner's monitor, where the 480px ceiling showed. */
         val WIDTHS = listOf(1440, 1920, 2560, 3491)
