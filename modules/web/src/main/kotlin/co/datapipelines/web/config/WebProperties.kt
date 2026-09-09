@@ -140,6 +140,12 @@ data class ExecutorProperties(
     val maxConcurrentExecutionsGlobal: Int? = null,
     val nodeQueryTimeoutSeconds: Int = 60,
     val executionTimeoutSeconds: Long = 600,
+    /** `node-timeout-seconds` (108) — the per-node WALL-CLOCK deadline the executor enforces. */
+    val nodeTimeoutSeconds: Long = 300,
+    /** `node-timeout-max-seconds` (108) — the ceiling a node's own `settings.timeout_seconds` may not exceed. */
+    val nodeTimeoutMaxSeconds: Int = 900,
+    /** `cancel-grace-seconds` (108) — how long a cancelled statement is waited on before it is abandoned. */
+    val cancelGraceSeconds: Long = 5,
 ) {
     /**
      * What the executor runs with: the alias's value while it is set (the one-release bridge),
@@ -160,6 +166,9 @@ data class ExecutorProperties(
         }
         require(nodeQueryTimeoutSeconds > 0) { "datapipelines.executor.node-query-timeout-seconds must be > 0" }
         require(executionTimeoutSeconds > 0) { "datapipelines.executor.execution-timeout-seconds must be > 0" }
+        require(nodeTimeoutSeconds > 0) { "datapipelines.executor.node-timeout-seconds must be > 0" }
+        require(nodeTimeoutMaxSeconds > 0) { "datapipelines.executor.node-timeout-max-seconds must be > 0" }
+        require(cancelGraceSeconds > 0) { "datapipelines.executor.cancel-grace-seconds must be > 0" }
     }
 }
 

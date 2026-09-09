@@ -135,8 +135,12 @@ class ApiErrorCatalogSpecDriftTest {
          * (`template.version.not_released` / `not_discarded` / `last_release` / `not_eligible`),
          * landed in the SAME commit as their constants and catalog rows. Re-derived from the
          * document's own parse.
+         *
+         * 150 → 151 with 108 (`pipeline.node.timeout`, §13.4 — the executor's own wall-clock
+         * bound on a node, 504 like its statement-level sibling), landed in the SAME commit as
+         * its constant and catalog row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 150
+        const val SECTION_13_ROW_COUNT = 151
 
         /**
          * §12's distinct validation codes.
@@ -151,7 +155,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 59 → 60 with 101: `pipeline.validation.pipeline_reference_not_released` — a PIPELINE
          * node pinning a child version that is not RELEASED (D58). Landed in the SAME commit
          * as its constant.
+         *
+         * 60 → 61 with 108: `pipeline.validation.node_timeout_invalid` — a node's own
+         * `settings.timeout_seconds` outside `1..node-timeout-max-seconds` (§4.11). Landed in
+         * the SAME commit as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 60
+        const val SECTION_12_CODE_COUNT = 61
     }
 }

@@ -85,6 +85,10 @@ class EngineConfiguration {
             maxConcurrentExecutionsPerInstance = executor.effectiveMaxConcurrentExecutionsPerInstance,
             nodeQueryTimeoutSeconds = executor.nodeQueryTimeoutSeconds,
             executionTimeoutSeconds = executor.executionTimeoutSeconds,
+            // 108: the middle of the three budgets — one node, wall clock, executor-enforced.
+            nodeTimeoutSeconds = executor.nodeTimeoutSeconds,
+            nodeTimeoutMaxSeconds = executor.nodeTimeoutMaxSeconds,
+            cancelGraceSeconds = executor.cancelGraceSeconds,
             stagingMaxMemoryMb = staging.maxMemoryMb,
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.

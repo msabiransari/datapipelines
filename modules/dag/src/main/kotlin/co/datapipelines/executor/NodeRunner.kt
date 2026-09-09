@@ -107,6 +107,12 @@ data class NodeExecutionContext(
      * no longer see (025 A5).
      */
     val workspaceId: UUID,
+    /**
+     * Which phase each node of this execution is currently inside (108) — read by the node
+     * wall-clock deadline to name the phase on `pipeline.node.timeout`. Defaulted so every
+     * existing construction site (four in `web`, every fixture) is unchanged.
+     */
+    val phases: NodePhases = NodePhases(),
 )
 
 /**
@@ -242,7 +248,7 @@ class NodeRunner(
         if (node.type == NodeType.CALCULATOR) {
             return runCalculator(node, ctx, startedAt)
         }
-        val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
+        val sql = phase(ctx, NodePhase.RENDER, node.id) { render(node, ctx) }
         return dispatchRendered(node, ctx, startedAt, sql)
     }
 
@@ -262,7 +268,7 @@ class NodeRunner(
             // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
             // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
             // never on a statement that half-executed with a silent null.
-            val bound = phase(NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
+            val bound = phase(ctx, NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
             when (node.source) {
                 is NodeSource.Tempdb -> runOnTempdb(node, bound, ctx, startedAt)
                 is NodeSource.Datasource -> runOnDatasource(node, node.source.name, bound, ctx, startedAt)
@@ -353,13 +359,13 @@ class NodeRunner(
             }
 
             is NodeOutput.Caller -> {
-                phase(NodePhase.MATERIALIZE, node.id) {
+                phase(ctx, NodePhase.MATERIALIZE, node.id) {
                     tempdbCursor(node, bound, ctx, timeout) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
                 }
             }
 
             is NodeOutput.Datasource -> {
-                phase(NodePhase.WRITEBACK, node.id) {
+                phase(ctx, NodePhase.WRITEBACK, node.id) {
                     tempdbCursor(node, bound, ctx, timeout) { rs ->
                         NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId), startedAt)
                     }
@@ -444,7 +450,7 @@ class NodeRunner(
                 SqlIdentifiers.requireValidTable(output.table, PipelineErrorCodes.Node.STAGING_FAILED),
             )
         val rows =
-            phase(NodePhase.STAGE, node.id) {
+            phase(ctx, NodePhase.STAGE, node.id) {
                 // 042 C1: the executed statement is the assembled `CREATE TABLE … AS <sql>`, so the
                 // translation runs over the FULL text here — the run()-level BoundSql carried the
                 // node SQL alone, and a prepared statement's placeholders must line up with the
@@ -497,7 +503,7 @@ class NodeRunner(
         timeout: Int,
     ): NodeResult {
         val affected =
-            phase(NodePhase.EXECUTE, node.id) {
+            phase(ctx, NodePhase.EXECUTE, node.id) {
                 ctx.staging.withConnection { connection ->
                     statementFor(connection, bound).use { statement ->
                         statement.queryTimeout = timeout
@@ -527,7 +533,7 @@ class NodeRunner(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
     ) {
-        val usedBytes = phase(NodePhase.STAGE, node.id) { ctx.staging.stats().memoryUsedBytes }
+        val usedBytes = phase(ctx, NodePhase.STAGE, node.id) { ctx.staging.stats().memoryUsedBytes }
         if (usedBytes / BYTES_PER_KB > ctx.stagingMaxMemoryMb * KB_PER_MB) {
             val overflow = StagingMemoryLimitException(usedBytes, ctx.stagingMaxMemoryMb)
             throw NodeFailedSignal(ErrorCodeMapper.map(overflow, NodePhase.STAGE, node.id), overflow)
@@ -549,7 +555,7 @@ class NodeRunner(
         // pipeline was saved is the same `datasource_not_found` an unknown name gets (no
         // existence oracle), instead of executing against a row the workspace cannot see.
         val datasource =
-            phase(NodePhase.CONNECT, node.id) {
+            phase(ctx, NodePhase.CONNECT, node.id) {
                 datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw datasourceNotFound(name)
             }
         return withResolvedDatasource(node, datasource, bound, ctx, startedAt)
@@ -599,7 +605,7 @@ class NodeRunner(
         // metadata-DB failure during the read refuses naming the METADATA db (carried code
         // `pipeline.execution.aborted`), never the healthy target. See [ReadonlyBackstop].
         if (node.type == NodeType.DML || node.type == NodeType.DDL) {
-            phase(NodePhase.CONNECT, node.id) { enforceSourceReadonly(datasource.name, node) }
+            phase(ctx, NodePhase.CONNECT, node.id) { enforceSourceReadonly(datasource.name, node) }
         }
         // A DQL node whose output is a datasource target is a write too (the third §5.7 shape),
         // and its refusal must not wait for the SOURCE query to finish (020 F9): during a flip
@@ -608,11 +614,11 @@ class NodeRunner(
         // same CONNECT phase, mirrors the DML/DDL check; the write-back shell re-checks at
         // write time (that check is authoritative — this one is the cheap early refusal).
         (node.output as? NodeOutput.Datasource)?.takeIf { node.type == NodeType.DQL }?.let { target ->
-            phase(NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
+            phase(ctx, NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
         }
         val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
         val connection =
-            phase(NodePhase.CONNECT, node.id) {
+            phase(ctx, NodePhase.CONNECT, node.id) {
                 // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
                 // `poolFor`'s `computeIfAbsent`, not from `leaseConnection` — resolving the pool
                 // first meant the ThreadLocal was still unset when the event fired, so
@@ -700,7 +706,10 @@ class NodeRunner(
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                val rs = phase(NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) } }
+                val rs =
+                    phase(ctx, NodePhase.EXECUTE, node.id) {
+                        ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) }
+                    }
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
             }
@@ -716,7 +725,7 @@ class NodeRunner(
         when (val output = requireOutput(node)) {
             is NodeOutput.Tempdb -> {
                 val staged =
-                    phase(NodePhase.STAGE, node.id) {
+                    phase(ctx, NodePhase.STAGE, node.id) {
                         // The SOURCE node's dialect, never H2's (staging §3.2) — mapping a Postgres
                         // or Oracle cursor through H2's table picks the wrong storage type and
                         // loses data before egress re-derivation can see it.
@@ -734,11 +743,11 @@ class NodeRunner(
             }
 
             is NodeOutput.Caller -> {
-                phase(NodePhase.MATERIALIZE, node.id) { deliverToCaller(node, rs, ctx, startedAt, dialect) }
+                phase(ctx, NodePhase.MATERIALIZE, node.id) { deliverToCaller(node, rs, ctx, startedAt, dialect) }
             }
 
             is NodeOutput.Datasource -> {
-                phase(NodePhase.WRITEBACK, node.id) {
+                phase(ctx, NodePhase.WRITEBACK, node.id) {
                     NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect, ctx.workspaceId), startedAt)
                 }
             }
@@ -825,7 +834,7 @@ class NodeRunner(
             if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
             ctx.handle.withStatement(node.id, statement) {
                 val affected =
-                    phase(NodePhase.EXECUTE, node.id) {
+                    phase(ctx, NodePhase.EXECUTE, node.id) {
                         ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
                     }
                 NodeResult.of(node.id, affected, startedAt)
@@ -843,7 +852,7 @@ class NodeRunner(
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                phase(NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { executeDdl(statement, bound) } }
+                phase(ctx, NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { executeDdl(statement, bound) } }
                 NodeResult.of(node.id, 0L, startedAt)
             }
         }
@@ -955,13 +964,23 @@ class NodeRunner(
             details = mapOf("datasource" to target.datasource, "table" to target.table),
         )
 
-    /** Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code. */
+    /**
+     * Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code —
+     * and recording the phase entry, so a node stopped by its wall-clock deadline can say WHERE
+     * its budget went (108, [NodePhases]).
+     *
+     * The record is written here rather than at each call site for the reason every such record
+     * should be: this is the one function every phase already passes through, so a phase added
+     * later cannot forget to announce itself.
+     */
     private suspend fun <T> phase(
+        ctx: NodeExecutionContext,
         phase: NodePhase,
         nodeId: String,
         body: suspend () -> T,
     ): T =
         try {
+            ctx.phases.enter(nodeId, phase)
             body()
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,

@@ -116,6 +116,7 @@ object ApiErrorCatalog {
             // §13.4 — the node's statement outlived its JDBC query timeout: 504 like its sibling
             // `pipeline.execution.timeout`, not the 502 a wrong query earns.
             PipelineErrorCodes.Node.QUERY_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
+            PipelineErrorCodes.Node.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
             // §13.4 — 500 like the pipeline.node family default, wired explicitly so the code
             // owns a row rather than being absorbed by the default (the 025 A2 convention).
             PipelineErrorCodes.Node.SQL_PARAMETER_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,

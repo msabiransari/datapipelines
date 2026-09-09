@@ -79,6 +79,24 @@ interface CancellationHandle {
     fun cancelStatements()
 
     /**
+     * The per-NODE half of [cancelStatements] (108): interrupts only the statements registered
+     * against [nodeId], and marks the execution neither aborted nor unwinding.
+     *
+     * This is what a node's own wall-clock deadline calls. Using [cancelStatements] there would
+     * be flatly wrong: one node exceeding ITS budget says nothing about its siblings, and
+     * cancelling their statements would fail nodes that were still inside their own deadline —
+     * the failure would then be reported against the wrong node.
+     *
+     * @return the number of statements that were registered for [nodeId] when the sweep ran —
+     *   the assertion surface for "the deadline really had a live statement to interrupt", and
+     *   what the grace-expiry log line reports as leaked.
+     */
+    fun cancelStatements(nodeId: String): Int
+
+    /** Statements currently registered against [nodeId] — 0 when it has none in flight. */
+    fun registeredStatements(nodeId: String): Int
+
+    /**
      * Registers [stmt] against [nodeId] for the duration of [body], then deregisters it.
      *
      * `body` is **suspending**, where §8.3.1 writes `() -> T`. It has to be: the caller node's
@@ -166,11 +184,23 @@ class InMemoryCancellationRegistry : CancellationRegistry {
         handles.keys.toList().forEach { cancel(it, reason) }
     }
 
+    /** One registered statement and the node that owns it — see [ExecutionCancellationHandle]. */
+    private data class RegisteredStatement(
+        val nodeId: String,
+        val statement: Statement,
+    )
+
     /** The handle for one execution; also the registry's per-execution state. */
     private class ExecutionCancellationHandle(
         private val executionId: UUID,
     ) : CancellationHandle {
-        private val statements = ConcurrentHashMap<Long, Statement>()
+        /**
+         * Registration id → (node id, statement). The node id rides in the VALUE rather than in a
+         * second map keyed by node: a node may hold more than one statement at a time (the CTAS
+         * and its row count), registrations come and go concurrently, and one map cannot go out
+         * of step with itself the way two can.
+         */
+        private val statements = ConcurrentHashMap<Long, RegisteredStatement>()
         private val registrationIds = AtomicLong()
         private val job = AtomicReference<Job?>()
         private val reason = AtomicReference<AbortReason?>()
@@ -188,9 +218,22 @@ class InMemoryCancellationRegistry : CancellationRegistry {
 
         /** §8.3.2 step 1 without step 2 — see [CancellationHandle.cancelStatements]. */
         override fun cancelStatements() {
-            statements.values.forEach(::cancelQuietly)
+            statements.values.forEach { cancelQuietly(it.statement) }
             scheduleReissue()
         }
+
+        override fun cancelStatements(nodeId: String): Int {
+            val mine = statements.values.filter { it.nodeId == nodeId }
+            mine.forEach { cancelQuietly(it.statement) }
+            // The same re-issue watcher the execution-wide path uses (086 A1): one `cancel()` is a
+            // hope, because a thread descheduled inside the driver's own parse-and-plan prologue
+            // holds a statement that is executing from our side and cancellable from nobody's.
+            // It stops when the map drains, which is exactly when the blocking call returned.
+            if (mine.isNotEmpty()) scheduleReissue()
+            return mine.size
+        }
+
+        override fun registeredStatements(nodeId: String): Int = statements.values.count { it.nodeId == nodeId }
 
         override suspend fun <T> withStatement(
             nodeId: String,
@@ -199,7 +242,7 @@ class InMemoryCancellationRegistry : CancellationRegistry {
         ): T {
             reason.get()?.let { throw ExecutionAbortedException(it) }
             val id = registrationIds.incrementAndGet()
-            statements[id] = stmt
+            statements[id] = RegisteredStatement(nodeId, stmt)
             // A cancel() that swept the map between the check above and the put would leave this
             // statement unregistered and uninterruptible; re-reading the reason closes that race.
             reason.get()?.let {
@@ -325,7 +368,7 @@ class InMemoryCancellationRegistry : CancellationRegistry {
                 repeat(REISSUE_ATTEMPTS) {
                     Thread.sleep(REISSUE_INTERVAL_MS)
                     if (statements.isEmpty()) return
-                    statements.values.forEach(::cancelQuietly)
+                    statements.values.forEach { cancelQuietly(it.statement) }
                 }
                 LOG.debug("Cancel re-issue gave up for execution {}; queryTimeout is the backstop", executionId)
             } catch (e: InterruptedException) {

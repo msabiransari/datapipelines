@@ -13,6 +13,7 @@ import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeSource
+import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.Staging
@@ -21,11 +22,14 @@ import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.typesystem.DatapipelinesException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -35,6 +39,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.Instant
@@ -256,6 +261,107 @@ class PipelineExecutor(
         }
     }
 
+    /**
+     * Runs the node under its own WALL-CLOCK deadline (§5.3, 108) — RENDER → CONNECT → EXECUTE →
+     * STAGE → MATERIALIZE, staging included, because staging a result IS the node's work.
+     *
+     * ## Why the body runs in its own scope
+     *
+     * `withTimeout` cancels a coroutine; it cannot take a thread back out of a blocking JDBC
+     * call. So the deadline has two halves, and both are needed. Expiry (a) interrupts the
+     * statements THIS node registered — which is what actually stops the query on the source
+     * server — and (b) waits at most `cancel-grace-seconds` for the driver to return. A driver
+     * that honours neither `queryTimeout` nor `cancel()` is then **abandoned**: the node fails on
+     * schedule and the leaked statement is logged once with the execution id. That is the §8.3.2
+     * residual overshoot, now with a bound and a log line instead of an admission.
+     *
+     * Abandoning is only safe because the body is a detached [async] whose value nobody reads
+     * afterwards: a late completion resolves a `Deferred` no one awaits, records nothing and
+     * emits nothing (the stats write and `node_completed` are the CALLER's, deliberately outside
+     * this function), so it cannot put a second outcome on a stream whose terminal event has
+     * already gone. `SupervisorJob` keeps a late failure from reaching an unrelated handler.
+     *
+     * ## Whose deadline fired
+     *
+     * kotlinx passes a cancellation cause that is already a `CancellationException` to children
+     * **unwrapped**, so the execution's own `withTimeout` — or an ancestor's — arrives here as
+     * this exact type (see [cancelledByAncestor], and MISTAKES' coroutine entry). The
+     * discriminator is scope liveness, never exception shape: our own `withTimeout` cancels only
+     * the scope INSIDE it, so the node's context is still active exactly when the node's own
+     * deadline is what fired.
+     *
+     * A PIPELINE node that declared no deadline of its own is deliberately exempt: its work is a
+     * CHILD EXECUTION, already bounded by `execution-timeout-seconds` one level down, and the
+     * default node deadline (300 s) sits BELOW the default execution timeout (600 s) — bounding
+     * it here would stop legal children early and report `pipeline.node.timeout` for a child that
+     * never exceeded any budget anyone set. An author who writes `settings.timeout_seconds` on a
+     * PIPELINE node means it, and gets it.
+     */
+    private suspend fun runWithNodeDeadline(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+        startedAt: Instant,
+    ): NodeResult {
+        if (node.type == NodeType.PIPELINE && node.timeoutSeconds == null) return nodeRunner.run(node, ctx, startedAt)
+        val seconds = config.nodeTimeoutSecondsFor(node.timeoutSeconds)
+        val scope = CoroutineScope(dispatcher.context + SupervisorJob())
+        val body = scope.async { nodeRunner.run(node, ctx, startedAt) }
+        try {
+            return withTimeout(seconds.seconds) { body.await() }
+        } catch (e: TimeoutCancellationException) {
+            if (cancelledByAncestor()) throw e
+            throw nodeDeadlineExpired(node, ctx, run, seconds, startedAt, body)
+        } finally {
+            // Every non-timeout exit too: a sibling's failure, a cancel, an ancestor's deadline.
+            // The body is done on the success path, so this is a no-op there; on every other it is
+            // the same guarantee the deadline gives — the node's statements stop when the node
+            // stops, rather than running on against a source database nobody is waiting for.
+            if (body.isActive) {
+                ctx.handle.cancelStatements(node.id)
+                body.cancel()
+            }
+            scope.cancel()
+        }
+    }
+
+    /**
+     * The node's deadline fired: interrupt its statements, wait out the grace, and build the
+     * failure.
+     *
+     * The wait is on the BODY, not on the query — `join()` returns the moment the coroutine
+     * completes however it completed, and the driver error the interrupt provoked is discarded
+     * with it (the node's outcome is already decided, and a `57014` reported instead of
+     * `pipeline.node.timeout` is exactly the mislabelling T202 fixed one level down).
+     */
+    private suspend fun nodeDeadlineExpired(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+        seconds: Long,
+        startedAt: Instant,
+        body: Deferred<NodeResult>,
+    ): Exception {
+        val interrupted = ctx.handle.cancelStatements(node.id)
+        val returned = withTimeoutOrNull(config.cancelGraceSeconds.seconds) { body.join() }
+        if (returned == null) {
+            LOG.warn(
+                "event=node.statement_abandoned execution_id={} node_id={} timeout_seconds={} grace_seconds={} " +
+                    "interrupted_statements={} still_registered={} correlation_id={} " +
+                    "message=\"the driver did not return after cancel(); the node failed on schedule and this " +
+                    "statement is no longer waited on\"",
+                run.executionId,
+                node.id,
+                seconds,
+                config.cancelGraceSeconds,
+                interrupted,
+                ctx.handle.registeredStatements(node.id),
+                run.request.correlationId,
+            )
+        }
+        return NodeTimeoutException(seconds, Duration.between(startedAt, Instant.now()).toMillis(), ctx.phases.current(node.id))
+    }
+
     /** Records the failure a cancellation stood in front of, if there was one (F8). */
     private fun recordSuppressedFailure(
         node: ExecutableNode,
@@ -273,7 +379,7 @@ class PipelineExecutor(
         run: ExecutionRun,
         startedAt: Instant,
     ): NodeResult {
-        val result = nodeRunner.run(node, ctx, startedAt)
+        val result = runWithNodeDeadline(node, ctx, run, startedAt)
         run.stats.completed(result)
         metrics.nodeFinished(run.request.pipelineId, node.id, node.source, Duration.ofMillis(result.durationMs), result.rowsOut)
         emit(NodeCompleted(run.executionId, node.id, NodeStats.of(result)))

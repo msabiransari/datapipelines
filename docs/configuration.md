@@ -67,6 +67,19 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.executor.max-concurrent-executions-global` | `unset` | **Deprecated alias** for `max-concurrent-executions-per-instance` (one release, 050/R2). Set alone → its value runs and startup logs one WARN naming the new key; set together with the new key and differing → startup refuses. The limit was always per JVM — the old name was false at N replicas |
 | `datapipelines.executor.node-query-timeout-seconds` | `60` | Per-node JDBC query timeout. A datasource's own `query_timeout_seconds`, when set, overrides this for nodes on that datasource ([Datasources §5](datasources.md#5-connection-pool-configuration)) |
 | `datapipelines.executor.execution-timeout-seconds` | `600` | Overall execution timeout |
+| `datapipelines.executor.node-timeout-seconds` | `300` | **The per-node WALL-CLOCK deadline** the executor enforces: RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE, staging included. Overridable per node by `node.settings.timeout_seconds` ([pipeline-contract §4.11](pipeline-contract.md)). Unlike `node-query-timeout-seconds`, which is the DRIVER's bound on one `execute*` call, this one is the executor's own and fires whatever the driver does |
+| `datapipelines.executor.node-timeout-max-seconds` | `900` | The ceiling a node's own `settings.timeout_seconds` may not exceed. A pipeline declaring more is refused at SAVE with `pipeline.validation.node_timeout_invalid` — refused rather than clamped, so an author who asks for 4 hours is not left debugging a silent 15 minutes |
+| `datapipelines.executor.cancel-grace-seconds` | `5` | After a node's deadline fires, how long the executor waits for the cancelled statement to actually return before abandoning it. Past it the node fails **on schedule** and the leaked statement is logged once with the execution id (`event=node.statement_abandoned`). Never a wait on the query itself — a driver that ignores `cancel()` cannot extend a node's budget, only leak a connection until its own pool reclaims it |
+
+**Three budgets, one precedence** (the same table appears in [pipeline-contract §4.11](pipeline-contract.md#411-settingstimeout_seconds--the-nodes-own-deadline) and [dag-executor §5.3](dag-executor.md)):
+
+| Bound | Setting | Scope | Enforced by |
+|---|---|---|---|
+| Execution | `datapipelines.executor.execution-timeout-seconds` (600) | the whole execution | the executor |
+| Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node, wall clock, all five phases | the executor |
+| Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
+
+Read downward. The statement bound is the driver's and drivers honour it unevenly — measured on the shipped drivers (108 §1), which is precisely why the middle row exists. The executor refuses to start if `node-timeout-seconds` sits above `execution-timeout-seconds` — a bound that can never be reached is configuration that does nothing, and "the timeout I set has no effect" is the hardest failure to diagnose from outside. Setting it BELOW `node-query-timeout-seconds` is legal and simply stronger: the executor stops the node before the driver would have. `node-timeout-max-seconds` is deliberately NOT constrained against the execution timeout — it bounds what an author may ASK for, not what a run may take.
 
 ### 3.3 Staging (tempdb)
 
@@ -493,6 +506,9 @@ datapipelines:
     max-concurrent-executions-per-instance: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_INSTANCE:100}
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
+    node-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_SECONDS:300}
+    node-timeout-max-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_MAX_SECONDS:900}
+    cancel-grace-seconds: ${DATAPIPELINES_EXECUTOR_CANCEL_GRACE_SECONDS:5}
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}

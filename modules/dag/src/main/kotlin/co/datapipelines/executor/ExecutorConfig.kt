@@ -23,6 +23,19 @@ import co.datapipelines.pipeline.OrgContext
  * @property nodeQueryTimeoutSeconds `datapipelines.executor.node-query-timeout-seconds`; a
  *   datasource's own `query_timeout_seconds` overrides it per [queryTimeoutSecondsFor].
  * @property executionTimeoutSeconds `datapipelines.executor.execution-timeout-seconds`.
+ * @property nodeTimeoutSeconds `datapipelines.executor.node-timeout-seconds` (108) — the
+ *   per-node WALL-CLOCK deadline the executor owns, spanning RENDER → CONNECT → EXECUTE →
+ *   STAGE → MATERIALIZE. [nodeQueryTimeoutSeconds] bounds one `execute*` call and is enforced by
+ *   the DRIVER; this bounds the node and is enforced by the executor, so a driver that honours
+ *   neither `queryTimeout` nor `cancel()` still cannot hold a node past its budget. A node may
+ *   lower or raise it within [nodeTimeoutMaxSeconds] through `node.settings.timeout_seconds`.
+ * @property nodeTimeoutMaxSeconds `datapipelines.executor.node-timeout-max-seconds` (108) — the
+ *   ceiling a node's own override may not exceed; save-time validation refuses past it
+ *   (`pipeline.validation.node_timeout_invalid`).
+ * @property cancelGraceSeconds `datapipelines.executor.cancel-grace-seconds` (108) — how long the
+ *   executor waits, AFTER cancelling the node's statements, for a driver to actually return.
+ *   Past it the node fails on schedule and the abandoned statement is logged once with the
+ *   execution id (§8.3.2's residual overshoot, now bounded). Never a wait on the query itself.
  * @property stagingMaxMemoryMb the global `datapipelines.staging.h2.max-memory-mb`; a pipeline's
  *   `settings.tempdb.config.max_memory_mb` overrides it for that pipeline (D6).
  * @property cancelPollIntervalSeconds `datapipelines.sse.heartbeat-interval-seconds` — the
@@ -47,6 +60,9 @@ data class ExecutorConfig(
     val maxConcurrentExecutionsPerInstance: Int = 100,
     val nodeQueryTimeoutSeconds: Int = 60,
     val executionTimeoutSeconds: Long = 600,
+    val nodeTimeoutSeconds: Long = 300,
+    val nodeTimeoutMaxSeconds: Int = 900,
+    val cancelGraceSeconds: Long = 5,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
     val maxCompositionDepth: Int = 5,
@@ -64,6 +80,26 @@ data class ExecutorConfig(
         // so a 0 here silently removes the last per-statement limit in the system.
         require(nodeQueryTimeoutSeconds > 0) { "nodeQueryTimeoutSeconds must be positive, was $nodeQueryTimeoutSeconds" }
         require(executionTimeoutSeconds > 0) { "executionTimeoutSeconds must be positive" }
+        // One half of the §5.3 precedence is enforced, the other is only guidance, and the
+        // difference is which way the mistake hurts. A node deadline ABOVE the execution's own can
+        // never be reached — the execution deadline fires first and reports
+        // `pipeline.execution.timeout` for a node the operator meant to bound individually, so the
+        // setting silently does nothing. A node deadline BELOW the statement timeout is the
+        // opposite: perfectly sensible, and stronger — the executor simply stops the node before
+        // the driver would have, which is the whole point of owning a bound above the driver's.
+        require(nodeTimeoutSeconds > 0) { "nodeTimeoutSeconds must be positive, was $nodeTimeoutSeconds" }
+        require(nodeTimeoutMaxSeconds > 0) { "nodeTimeoutMaxSeconds must be positive, was $nodeTimeoutMaxSeconds" }
+        // Deliberately NOT required to sit under executionTimeoutSeconds, and the shipped defaults
+        // are exactly that case (max 900 > execution 600). The ceiling bounds what an AUTHOR may
+        // ask for; the execution deadline bounds what a RUN may take. A node that declares 900
+        // under a 600 s execution is legal and simply never reaches its own deadline — the
+        // execution's fires first and reports `pipeline.execution.timeout`. Requiring the two to
+        // agree would turn a deployment's decision to raise `execution-timeout-seconds` into a
+        // startup crash for every deployment that had not also raised this one.
+        require(nodeTimeoutSeconds <= executionTimeoutSeconds) {
+            "nodeTimeoutSeconds ($nodeTimeoutSeconds) must not exceed executionTimeoutSeconds ($executionTimeoutSeconds)"
+        }
+        require(cancelGraceSeconds > 0) { "cancelGraceSeconds must be positive, was $cancelGraceSeconds" }
         require(stagingMaxMemoryMb > 0) { "stagingMaxMemoryMb must be positive" }
         require(cancelPollIntervalSeconds > 0) { "cancelPollIntervalSeconds must be positive" }
         require(maxCompositionDepth >= 1) { "maxCompositionDepth must be >= 1, was $maxCompositionDepth" }
@@ -78,6 +114,20 @@ data class ExecutorConfig(
      *   node (tempdb is not a datasource and has no per-datasource override).
      */
     fun queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds: Int?): Int = datasourceQueryTimeoutSeconds ?: nodeQueryTimeoutSeconds
+
+    /**
+     * The wall-clock deadline for one node (§5.3, 108): the node's own
+     * `settings.timeout_seconds` when it declared one, otherwise [nodeTimeoutSeconds].
+     *
+     * Clamped at [nodeTimeoutMaxSeconds] as a run-time backstop only. Save-time validation has
+     * already refused anything above the ceiling (`pipeline.validation.node_timeout_invalid`), so
+     * reaching the clamp means a body saved before the ceiling was lowered — and lowering an
+     * operator ceiling has to bind the pipelines already stored, or it is not a ceiling.
+     *
+     * @param nodeTimeoutSecondsOverride `node.settings.timeout_seconds`, or null.
+     */
+    fun nodeTimeoutSecondsFor(nodeTimeoutSecondsOverride: Int?): Long =
+        (nodeTimeoutSecondsOverride?.toLong() ?: nodeTimeoutSeconds).coerceIn(1, nodeTimeoutMaxSeconds.toLong())
 
     /**
      * The per-execution render output budget passed to `TemplateEngine.render(ref, ctx, budget)`.

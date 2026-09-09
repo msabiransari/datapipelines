@@ -12,6 +12,7 @@ import co.datapipelines.events.ExecutionEvent
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.NodeSettings
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
@@ -47,6 +48,8 @@ object Fixtures {
         output: NodeOutput? = NodeOutput.Caller,
         dependsOn: List<String> = emptyList(),
         template: TemplateRef = TemplateRef(id, 1),
+        /** `node.settings.timeout_seconds` (contract §4.11) — the node's own wall-clock deadline. */
+        timeoutSeconds: Int? = null,
     ): Node =
         Node(
             id = id,
@@ -56,6 +59,7 @@ object Fixtures {
             template = template,
             output = if (type == NodeType.DQL) output else null,
             dependsOn = dependsOn,
+            settings = timeoutSeconds?.let { NodeSettings(timeoutSeconds = it) },
         )
 
     fun pipeline(
@@ -339,6 +343,21 @@ class FakeDatasourceRegistry(
      * leaves connections undecorated and every existing suite unchanged.
      */
     private val driverPrologueMs: (() -> Long)? = null,
+    /**
+     * When true, every statement this registry hands out **swallows `cancel()` and refuses to
+     * carry a `queryTimeout`** — the driver the node wall-clock deadline exists for (108).
+     *
+     * Not a caricature: `StatementCancelDialectTest` measured that a `cancel()` landing while a
+     * statement holds no registered command is dropped by every bundled driver, and a driver
+     * whose `queryTimeout` is unimplemented for the operator in play is an ordinary fact of JDBC
+     * life. This double makes both permanent, so a test can prove that the node still fails ON
+     * SCHEDULE with nothing but the executor's own deadline to do it — which is the only
+     * formulation of "no node runs past its budget" that is worth anything.
+     *
+     * The query underneath is a REAL one and keeps running: that is the leak the grace bound and
+     * the `node.statement_abandoned` log line describe, reproduced rather than papered over.
+     */
+    private val deafToCancel: Boolean = false,
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -387,7 +406,7 @@ class FakeDatasourceRegistry(
     override fun delete(name: String): DeleteResult = DeleteResult(true, name)
 
     override fun poolFor(datasource: Datasource): ConnectionPool =
-        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue)
+        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, deafToCancel)
 
     override fun testConnection(name: String): TestResult? = TestResult(true, Instant.now())
 
@@ -397,6 +416,7 @@ class FakeDatasourceRegistry(
         private val closed: AtomicInteger,
         private val prologueMs: (() -> Long)?,
         private val cancelsInPrologue: AtomicInteger,
+        private val deafToCancel: Boolean,
     ) : ConnectionPool {
         override val name: String get() = datasource.name
 
@@ -405,7 +425,7 @@ class FakeDatasourceRegistry(
             // The password matters once a container-backed source is in play (C4); H2 fixtures
             // leave it null and get the empty string they had before.
             val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.secret ?: "")
-            return CountingConnection(delegate, closed, prologueMs, cancelsInPrologue)
+            return CountingConnection(delegate, closed, prologueMs, cancelsInPrologue, deafToCancel)
         }
 
         override fun close() = Unit
@@ -418,6 +438,7 @@ private class CountingConnection(
     private val closed: AtomicInteger,
     private val prologueMs: (() -> Long)?,
     private val cancelsInPrologue: AtomicInteger,
+    private val deafToCancel: Boolean = false,
 ) : Connection by delegate {
     override fun close() {
         closed.incrementAndGet()
@@ -440,10 +461,18 @@ private class CountingConnection(
     ): java.sql.PreparedStatement = decorate(delegate.prepareStatement(sql, resultSetType, resultSetConcurrency))
 
     private fun decorate(statement: Statement): Statement =
-        prologueMs?.let { DelayedRegistrationStatement(statement, it(), cancelsInPrologue) } ?: statement
+        when {
+            deafToCancel -> DeafStatement(statement)
+            prologueMs != null -> DelayedRegistrationStatement(statement, prologueMs.invoke(), cancelsInPrologue)
+            else -> statement
+        }
 
     private fun decorate(statement: java.sql.PreparedStatement): java.sql.PreparedStatement =
-        prologueMs?.let { DelayedRegistrationPreparedStatement(statement, it(), cancelsInPrologue) } ?: statement
+        when {
+            deafToCancel -> DeafPreparedStatement(statement)
+            prologueMs != null -> DelayedRegistrationPreparedStatement(statement, prologueMs.invoke(), cancelsInPrologue)
+            else -> statement
+        }
 }
 
 /**
@@ -843,4 +872,34 @@ class RecordingSink : DirectResultSink {
         this.schema = schema
         rows.forEach { this.rows += it }
     }
+}
+
+/**
+ * A statement that hears no `cancel()` and keeps no `queryTimeout` — see
+ * [FakeDatasourceRegistry.deafToCancel].
+ *
+ * `getQueryTimeout` returns 0 to stay honest with `setQueryTimeout`'s no-op: a double that
+ * accepted the setter and reported the value back would let `whileExecuting`'s elapsed-time
+ * classification fire and relabel the outcome as `query_timeout`, which is precisely the
+ * rescue this double exists to remove.
+ */
+private class DeafStatement(
+    private val delegate: java.sql.Statement,
+) : java.sql.Statement by delegate {
+    override fun cancel() = Unit
+
+    override fun setQueryTimeout(seconds: Int) = Unit
+
+    override fun getQueryTimeout(): Int = 0
+}
+
+/** [DeafStatement] for the bound-parameter path (`SqlBindTranslator` prepares when `:name` is used). */
+private class DeafPreparedStatement(
+    private val delegate: java.sql.PreparedStatement,
+) : java.sql.PreparedStatement by delegate {
+    override fun cancel() = Unit
+
+    override fun setQueryTimeout(seconds: Int) = Unit
+
+    override fun getQueryTimeout(): Int = 0
 }

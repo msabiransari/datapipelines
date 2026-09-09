@@ -212,6 +212,14 @@ datapipelines:
     max-concurrent-executions-per-instance: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_INSTANCE:100}
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
+    # §3.2 (108) — the three budgets: execution >= node >= statement. `node-timeout-seconds` is
+    # the executor's OWN wall-clock bound on one node (all five phases, staging included), the
+    # one that fires whatever the driver does; `node-query-timeout-seconds` above is the driver's
+    # bound on one statement. `node-timeout-max-seconds` is the ceiling a node's own
+    # `settings.timeout_seconds` may ask for — deliberately NOT tied to the execution timeout.
+    node-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_SECONDS:300}
+    node-timeout-max-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_MAX_SECONDS:900}
+    cancel-grace-seconds: ${DATAPIPELINES_EXECUTOR_CANCEL_GRACE_SECONDS:5}
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}

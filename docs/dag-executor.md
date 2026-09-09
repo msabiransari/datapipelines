@@ -544,6 +544,8 @@ All limits are configured in [Configuration §3.2](configuration.md#32-executor)
 | Max concurrent executions per user | `datapipelines.executor.max-concurrent-executions-per-user` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
 | Max concurrent executions (per instance — 050/R2) | `datapipelines.executor.max-concurrent-executions-per-instance` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
 | JDBC query timeout (per node) | `datapipelines.executor.node-query-timeout-seconds` | `Statement.queryTimeout` on every node statement. A datasource's own `query_timeout_seconds`, when set, overrides it for nodes on that datasource ([Datasources §5](datasources.md#55-query-timeout-precedence)) — this is what `config.nodeQueryTimeoutSeconds(node.source)` resolves. |
+| Node wall-clock deadline (108) | `datapipelines.executor.node-timeout-seconds` | `withTimeout(...)` around the WHOLE node — RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE — in `runWithNodeDeadline`. A node may override it with `settings.timeout_seconds` ([pipeline-contract §4.11](pipeline-contract.md)), bounded at `node-timeout-max-seconds`. |
+| Grace before a cancelled statement is abandoned (108) | `datapipelines.executor.cancel-grace-seconds` | `withTimeoutOrNull(...)` on the node body after its statements were cancelled — see below. |
 | Execution overall timeout | `datapipelines.executor.execution-timeout-seconds` | `withTimeout(...)` wrapping the execution scope (§5.2). On expiry the executor also calls `Statement.cancel()` on every registered statement (§8.3.1) — see below. |
 | Disconnect grace before cancellation | `datapipelines.sse.disconnect-grace-seconds` | SSE layer's grace timer, which calls into the cancellation registry (§8.3) |
 
@@ -552,6 +554,28 @@ When limits are exceeded, the request is rejected with `pipeline.execution.concu
 **The timeout reaches the source query, not just the coroutine.** `withTimeout` cancels the execution scope, but a node blocked inside a blocking JDBC call observes nothing until that call returns — so on its way out the executor invokes `CancellationHandle.cancelStatements()` (§8.3.1), interrupting every registered statement exactly as a cancellation would. This is `cancelStatements()` and **not** `CancellationRegistry.cancel(...)`: the latter would set an abort reason and relabel the timeout as `ABORTED`. The interrupt is hung off the cancel-flag poller's own cancellation rather than a second timer, so there is one deadline, not two that can fire in either order.
 
 **Residual overshoot.** A driver that ignores `Statement.cancel()` (some drivers, some statement kinds) is not waited on: it finishes or hits its own `queryTimeout`. So the worst case is `execution-timeout-seconds` plus up to one `node-query-timeout-seconds` (or the datasource's own `query_timeout_seconds` override) of overshoot on the source server, not an unbounded one. The connection is returned to the pool by `use` either way.
+
+#### Three budgets, one precedence (108)
+
+The same table appears in [Configuration §3.2](configuration.md#32-executor) and [pipeline-contract §4.11](pipeline-contract.md#411-settingstimeout_seconds--the-nodes-own-deadline).
+
+| Bound | Setting | Scope | Enforced by |
+|---|---|---|---|
+| Execution | `datapipelines.executor.execution-timeout-seconds` (600) | the whole execution | the executor |
+| Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node, wall clock, all five phases | the executor |
+| Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
+
+`ExecutorConfig`'s `init` refuses a node deadline ABOVE the execution's — it could never be reached. A node deadline BELOW the statement timeout is legal and simply stronger.
+
+**Why a node bound had to exist.** The statement timeout is the DRIVER's, and drivers honour it unevenly. The measurement this round is built on (108 §1) found a Postgres node stopped cleanly at its statement budget while H2 tempdb nodes in the same pipeline ran 168, 191 and 330 seconds past the same budget. Nothing between the statement and the whole execution had a deadline, so a node whose driver did not cooperate had none at all. Now it does, and the node's promise is unconditional: **no node runs past its budget, whatever the driver, whatever the engine, whatever the phase.**
+
+**How expiry works, and why the body runs in its own scope.** `withTimeout` cancels a coroutine; it cannot take a thread out of a blocking JDBC call. So expiry does two things: it calls `CancellationHandle.cancelStatements(nodeId)` — the per-NODE sweep, never the execution-wide one, because one node blowing its budget says nothing about its siblings — and it then waits at most `cancel-grace-seconds` for the driver to return. Past the grace the statement is **abandoned**: the node fails on schedule with `pipeline.node.timeout` and one WARN line (`event=node.statement_abandoned`) carries the execution id, the node id, the budget and how many statements were still registered. That is the residual overshoot above, now with a bound and a log line.
+
+Abandoning is safe only because the node body is a detached `async` whose value nobody reads afterwards: the stats write and `node_completed` are the CALLER's, deliberately outside the deadline, so a late completion resolves a `Deferred` no one awaits and cannot put a second outcome on a stream whose terminal event has already gone.
+
+**Whose deadline fired.** kotlinx passes a cancellation cause that is already a `CancellationException` to children **unwrapped**, so the execution's own deadline — or an ancestor's — arrives at this handler as the very type the node would raise for its own. The discriminator is scope liveness, never exception shape (the same rule §8.3 applies to `cancelledByAncestor`).
+
+**PIPELINE nodes.** A PIPELINE node that declares no `settings.timeout_seconds` is exempt: its work is a child execution, already bounded by `execution-timeout-seconds` one level down, and the default node deadline sits BELOW the default execution timeout — bounding it here would stop legal children early and report `pipeline.node.timeout` for a child that never exceeded any budget anyone set. One that declares a deadline gets it.
 
 ### 5.4 Why fail-fast (not partial)
 

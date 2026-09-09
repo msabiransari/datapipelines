@@ -73,6 +73,17 @@ data class Node(
      */
     @field:JsonProperty("context_key") @get:JsonProperty("context_key") @param:JsonProperty("context_key")
     val contextKey: String? = null,
+    /**
+     * Per-node execution settings (§6.4) — today only `timeout_seconds`, the node's own
+     * wall-clock deadline.
+     *
+     * Nullable with a null default and `NON_NULL` inclusion, exactly as [kind]/[inputs]/
+     * [contextKey] are, and for the same reason: an existing pipeline's canonical JSON is
+     * byte-identical after this field exists, so no stored version's body hash moves and no
+     * release has to be re-signed (versioning §9.2).
+     */
+    @field:JsonProperty("settings") @get:JsonProperty("settings") @param:JsonProperty("settings")
+    val settings: NodeSettings? = null,
 ) {
     /** The resolved execution target (§4.8) — a registered datasource, or the tempdb literal. */
     @get:JsonIgnore
@@ -115,6 +126,7 @@ data class Node(
             @JsonProperty("kind") kind: String?,
             @JsonProperty("inputs") inputs: Map<String, JsonNode>?,
             @JsonProperty("context_key") contextKey: String?,
+            @JsonProperty("settings") settings: NodeSettings?,
         ): Node =
             Node(
                 id = id.orEmpty(),
@@ -135,9 +147,37 @@ data class Node(
                 kind = kind,
                 inputs = inputs,
                 contextKey = contextKey,
+                // Absent stays absent for the same body-hash reason as the three above: a node
+                // that declared no settings must serialize back with no `settings` key at all.
+                settings = settings,
             )
     }
 }
+
+/**
+ * One node's own execution settings (pipeline-contract §6.4).
+ *
+ * The only member in v1 is [timeoutSeconds] — the node's WALL-CLOCK deadline, overriding
+ * `datapipelines.executor.node-timeout-seconds` for this node alone. It is not the statement
+ * timeout: the statement bound is the datasource's `query_timeout_seconds` (else
+ * `node-query-timeout-seconds`) and bounds ONE `execute*` call, while this bounds the node's
+ * whole lifecycle — render, connect, execute, stage, materialize. §6.4 states the precedence:
+ * `settings.execution.timeout_seconds` >= node deadline >= statement query timeout.
+ *
+ * A legitimately long scan is what this exists for. It is **not** a licence to route around a
+ * timeout by slicing a scan into quarters — the authoring playbook says so in as many words —
+ * and an author who raises it is expected to say why.
+ *
+ * Bounded at save time by `datapipelines.executor.node-timeout-max-seconds`
+ * (`pipeline.validation.node_timeout_invalid`, §12.8): a per-node override that could exceed
+ * the operator's ceiling would let one pipeline hold an execution slot for as long as it liked.
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class NodeSettings(
+    @field:JsonProperty("timeout_seconds") @get:JsonProperty("timeout_seconds") @param:JsonProperty("timeout_seconds")
+    val timeoutSeconds: Int? = null,
+)
 
 /**
  * An immutable reference to one version of one pipeline — the `pipeline` block of a PIPELINE

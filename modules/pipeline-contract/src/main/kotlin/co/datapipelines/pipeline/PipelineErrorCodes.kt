@@ -187,6 +187,16 @@ object PipelineErrorCodes {
         /** §12.8 — `settings.tempdb.config` keys are valid for the chosen engine. */
         const val TEMPDB_CONFIG_INVALID = "pipeline.validation.tempdb_config_invalid"
 
+        /**
+         * §12.8 (108) — a node's `settings.timeout_seconds` is not a positive integer, or it
+         * exceeds `datapipelines.executor.node-timeout-max-seconds` (default 900).
+         *
+         * Refused at SAVE time rather than clamped at run time: an author who asks for 4 hours
+         * and silently gets 15 minutes debugs the wrong thing. `details` carries the requested
+         * value and the ceiling.
+         */
+        const val NODE_TIMEOUT_INVALID = "pipeline.validation.node_timeout_invalid"
+
         /** §12.9 — a PIPELINE node's `pipeline.name` exists in the pipeline registry. */
         const val PIPELINE_NOT_FOUND = "pipeline.validation.pipeline_not_found"
 
@@ -370,6 +380,25 @@ object PipelineErrorCodes {
          * `Statement was canceled`) names none of ours.
          */
         const val QUERY_TIMEOUT = "pipeline.node.query_timeout"
+
+        /**
+         * §13.4 (108) — the node outlived its WALL-CLOCK deadline
+         * (`node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds`)
+         * and the executor stopped it. HTTP 504.
+         *
+         * Distinct from [QUERY_TIMEOUT], which is one *statement's* budget enforced by the
+         * driver. This one is the executor's own, spans the node's whole lifecycle — render,
+         * connect, execute, stage, materialize — and fires whatever the driver does: a driver
+         * that ignores `Statement.cancel()` is not waited on past
+         * `datapipelines.executor.cancel-grace-seconds`, so the node fails on schedule and the
+         * abandoned statement is logged once. That is the difference measured in 108 §1: a
+         * Postgres node stopped at its statement budget while H2 tempdb nodes in the same
+         * pipeline ran minutes past it, because no bound above the statement existed.
+         *
+         * `details` carries `timeout_seconds`, `elapsed_ms` and `phase` — the phase is what
+         * tells an author whether to make the QUERY cheaper or the STAGE smaller.
+         */
+        const val TIMEOUT = "pipeline.node.timeout"
         const val STAGING_FAILED = "pipeline.node.staging_failed"
         const val WRITEBACK_FAILED = "pipeline.node.writeback_failed"
         const val WRITEBACK_TARGET_MISSING = "pipeline.node.writeback_target_missing"
