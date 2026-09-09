@@ -236,11 +236,12 @@ test("the edge curve is the mock's bezier — control offset max(60, dx/2), hori
   assert.ok(flat.weights[0] > 0 && flat.weights[0] <= 0.5, "the first control point extends from the SOURCE port");
   assert.ok(flat.weights[1] >= 0.5 && flat.weights[1] < 1, "the second comes back into the TARGET port");
   // A drop between ranks: the control points stay at the ports' y — horizontal leave/enter.
-  // Reconstructing ctrl from (weight, distance): point = S + w·(T−S) + d·perp(T−S)/|T−S|.
+  // Reconstructing ctrl from (weight, distance): point = S + w·(T−S) + d·(−Δy, Δx)/|T−S|
+  // (cytoscape's perpendicular — the sign 105 verified against the vendored renderer).
   const sx = 132, sy = 100, tx = 500, ty = 300;
   const cp = g.edgeControlPoints(sx, sy, tx, ty);
   const dx = tx - sx, dy = ty - sy, len = Math.hypot(dx, dy);
-  const reconstruct = (w, d) => [sx + w * dx + (d * dy) / len, sy + w * dy - (d * dx) / len];
+  const reconstruct = (w, d) => [sx + w * dx - (d * dy) / len, sy + w * dy + (d * dx) / len];
   const [c1x, c1y] = reconstruct(cp.weights[0], cp.distances[0]);
   const [c2x, c2y] = reconstruct(cp.weights[1], cp.distances[1]);
   assert.equal(Math.round(c1y), sy, "control point 1 sits at the source port's y — the curve leaves horizontally");
