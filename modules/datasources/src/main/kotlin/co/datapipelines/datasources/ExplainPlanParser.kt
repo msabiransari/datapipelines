@@ -59,7 +59,14 @@ internal object ExplainPlanParser {
      * The row estimate is the root's `rows=N` (the output cardinality).
      */
     private fun postgres(rows: List<List<String?>>): ExplainPlanSummary {
-        val lines = rows.mapNotNull { it.firstOrNull()?.trim()?.removePrefix("->")?.trim() }
+        val lines =
+            rows.mapNotNull {
+                it
+                    .firstOrNull()
+                    ?.trim()
+                    ?.removePrefix("->")
+                    ?.trim()
+            }
         val root = lines.firstOrNull().orEmpty()
         val scan =
             when {
