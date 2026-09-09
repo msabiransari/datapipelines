@@ -7,10 +7,18 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.Dialect
 import io.modelcontextprotocol.spec.McpSchema
 
-/** The `dialect` enum, restated in every schema that accepts one (§6.2.6, §6.2.8). */
-internal const val DIALECT_ENUM_JSON: String = """["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"]"""
+/**
+ * The `dialect` enum, restated in every schema that accepts one (§6.2.6, §6.2.8) — DERIVED from
+ * [Dialect.entries], never typed. It was a seven-value literal until 2026-09-08: 087/089 added
+ * `LAKE`, the parser below already accepted it (it reads `Dialect.entries`), but the schema the
+ * CLIENT validates against still said seven — so every `templates_create {dialect: "LAKE"}` was
+ * refused before the server saw it. An agent building on the lake concluded it "kept mistyping",
+ * created thirteen DUCKDB drafts, and finally bypassed MCP over REST (T199). Reserved values are
+ * not in `entries` (enums.md), so the derivation cannot advertise them.
+ */
+internal val DIALECT_ENUM_JSON: String = Dialect.entries.joinToString(prefix = "[", postfix = "]") { "\"${it.wire}\"" }
 
-/** Parses a `dialect` argument against the seven supported values (enums.md §5). */
+/** Parses a `dialect` argument against the supported values (enums.md §5). */
 internal fun McpArguments.dialect(name: String): Dialect? =
     enumString(name, Dialect.entries.map { it.wire }.toSet())?.let { Dialect.fromWire(it) }
 
