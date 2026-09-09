@@ -112,6 +112,11 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    `datasources_get_columns(table, namespace)` for every table the SQL will touch, passing
    each table's reported `namespace` array through. Never write SQL against recalled column
    names.
+1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
+   will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
+   `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
+   `wall_ms` — a `seq` plan on a large table is the timeout you would meet in step 5, found
+   while it is still cheap. Only then write the template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
    (the description is the only discoverability mechanism for parameters).
@@ -146,11 +151,15 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
 - **Drafts are executable, and a draft run is not a release.** Executing your own draft is
   the expected test loop; history marks those runs (`draft_run`) and they never count as
   validation for release — the human decides that.
-- **Cancellation:** no MCP cancel tool in v1. To stop an in-flight run, call
-  `DELETE /api/v1/executions/{id}` out-of-band (REST); the blocked tool call then
-  returns an `ABORTED` result.
+- **Cancellation:** `executions_cancel` cancels a RUNNING execution your own MCP calls
+  started — the same-credential rule: `triggered_via` MCP, your user, and an audit row
+  pairing THIS key with the execution's correlation id (an execution started over REST,
+  the UI, or another key of the same user is refused, and the refusal says which rule
+  fired). Cancellation is requested, not awaited: poll `executions_get` for the terminal
+  `ABORTED`. For anything the rule refuses, the out-of-band REST
+  `DELETE /api/v1/executions/{id}` remains.
 - **Abandoned calls** run to completion — a dropped HTTP request has no disconnect
-  callback on `/mcp`; use the REST cancel or let the timeout handle it.
+  callback on `/mcp`; cancel with `executions_cancel` or let the timeout handle it.
 - **Idempotency:** REST execute accepts `Idempotency-Key`; the MCP tool has no key
   carrier. If you are unsure whether a previous execute landed, check `executions_list`
   rather than firing a duplicate.
@@ -324,7 +333,7 @@ deployment serves them at `GET /skill/<name>.md`; inside a checkout they are fil
 - `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (30 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (34 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings

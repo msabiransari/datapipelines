@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **30 tools**, in `tools/list` order.
+There are **34 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -167,6 +167,16 @@ Render a template against the provided context values and return the SQL it prod
 | `version` | integer | optional | Defaults to latest. |
 | `context` | object | required | Render context: the parameter map a calling pipeline would provide, defaults already applied. Values follow the wire conventions of the Type System (BIGINTEGER/BIGDECIMAL as strings, TIMESTAMP with Z or offset). |
 
+### `templates_purge_draft`
+
+Scope `author` · **writes**
+
+Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, may reference any version of it (the refusal names the pinning pipelines; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `id` | string | required | Template id. |
+
 ## datasources
 
 ### `datasources_list`
@@ -234,6 +244,18 @@ List one table's columns with canonical types, read from the datasource's live J
 | `namespace` | array of string | optional | The table's namespace, outermost first, as datasources_get_tables reported it. An unknown namespace matches nothing. |
 | `schema` | string | optional | Optional single-level filter; accepts the dotted 'catalog.schema' form. Superseded by namespace. |
 
+### `datasources_get_table_stats`
+
+Scope `read` · read-only
+
+One table's catalog statistics: a row estimate, the index list (a lake table's partition column reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds. Every number comes from the engine's own catalog (pg_class, information_schema, parquet footers) — never a scan of the table, so this is safe at any table size. When a dialect holds no catalog stats the stat fields are null and stats_source is "none" — probe an explicit count with sql_probe if you need one. Read this before writing a predicate — an unindexed filter on a large table is the timeout you will hit.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `name` | string | required | Datasource name. |
+| `table` | string | required | Table name exactly as datasources_get_tables returned it. |
+| `namespace` | array of string | optional | The table's namespace, outermost first, as datasources_get_tables reported it. An unknown namespace matches nothing. |
+
 ### `datasources_preview_rows`
 
 Scope `author` · read-only
@@ -247,6 +269,22 @@ Preview up to `limit` rows of one table's data, read live from the datasource. T
 | `schema` | string | optional | Optional schema qualifier. Omitted means the connection's current schema. |
 | `order_by` | array of object | optional | Sort terms applied in order. Each is an object with a column and a direction, never a free SQL string. |
 | `limit` | integer, default `50` | optional |  |
+
+## sql
+
+### `sql_probe`
+
+Scope `author` · read-only
+
+Run ONE read-only SELECT or WITH statement against a datasource and return up to `limit` wire-encoded rows, the canonical column schema, wall_ms of query time, and the EXPLAIN plan captured BEFORE the query ran — a bounded debug probe, not an export. The statement is classified before any connection opens: anything but a single SELECT/WITH, or a denylisted verb (INSERT, DROP, ATTACH, EXPLAIN, INTO, ...) anywhere in it, is refused without touching the datasource. Parameters bind as named :name placeholders through the same binder pipeline SQL uses; every referenced name must be supplied in `parameters` with its canonical type. `tempdb` is refused as a datasource — the staging database exists only inside a full execution (use pipelines_execute). On a timeout the error details carry wall_ms and the plan, so the plan that explains the timeout survives it. The sql text never reaches the audit log — only its SHA-256 and length are recorded.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `name` | string | required | Datasource name. The reserved name tempdb is refused — it exists only inside a full execution (pipelines_execute). |
+| `sql` | string | required | ONE SELECT or WITH statement. A second statement or a denylisted verb is refused before any connection opens. |
+| `parameters` | object | optional | Bind values for the statement's :name placeholders, keyed by name. type is the canonical logical type; value is its wire string (BIGINTEGER/BIGDECIMAL as decimal text, temporal in ISO forms, BINARY as padded base64). A null value binds SQL NULL. |
+| `limit` | integer, default `50` | optional |  |
+| `timeout_seconds` | integer, default `10` | optional |  |
 
 ## executions
 
@@ -284,6 +322,16 @@ Fetch result rows for a completed execution, paginated via offset+limit. Returns
 | `offset` | integer, default `0` | optional |  |
 | `limit` | integer, default `1000` | optional | Rows per page. Defaults to the server's result page size. |
 | `format` | string (`json` \| `arrow` \| `csv`), default `"json"` | optional |  |
+
+### `executions_cancel`
+
+Scope `execute` · **writes**
+
+Request cancellation of a RUNNING execution. This key can cancel ONLY an execution its own MCP calls started: the execution must have been triggered via MCP by this key's user, and an audit row must pair this key with the execution's correlation id — an execution started over REST, the UI, a pipeline node, a published endpoint, or another key of the same user is refused, and the refusal names which rule fired. A non-RUNNING execution is refused with its current status. Cancellation is requested, not awaited: the flag reaches the executing instance within about one poll interval (immediately when same-instance); poll executions_get for the terminal ABORTED status. Mutating.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `execution_id` | string | required |  |
 
 ## calculators
 

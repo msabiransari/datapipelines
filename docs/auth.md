@@ -726,19 +726,19 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler — binding hands a credential authority over a subtree | `author` |
 | Register / import / unregister lake tables of a datasource (the dp-lake catalog) | `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{ns}/{t}` (089 §A; mutating a GLOBAL datasource's registry is admin-only via workspaces D8, enforced in the shared service — the listing `GET /api/v1/datasources/{name}/lake-tables` is covered by the metadata-read row above) | `author` |
 
-**MCP tools** (all 30 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 34 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
-| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get` | `read` |
-| `pipelines_execute` | `execute` |
-| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
-| `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `pipelines_execute_node` | `author` |
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats` | `read` |
+| `pipelines_execute`, `executions_cancel` | `execute` |
+| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render`, `templates_purge_draft` | `author` |
+| `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `pipelines_execute_node`, `sql_probe` | `author` |
 | `endpoints_list`, `endpoints_get` | `read` |
 | `endpoints_create`, `endpoints_delete` | `author` |
 | `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` |
 
-(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. 068's `datasources_create` sat on the `author` row with that hazard written into its own description; 094 decided the hazard is not documentable away and removed the tool, 28 → 27. 25 of the 27 tools operate inside the API key's pinned workspace (design §9); `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
+(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. 068's `datasources_create` sat on the `author` row with that hazard written into its own description; 094 decided the hazard is not documentable away and removed the tool (31 → 30; 107's four probes take the surface to 34). 32 of the 34 tools operate inside the API key's pinned workspace (design §9); `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 
