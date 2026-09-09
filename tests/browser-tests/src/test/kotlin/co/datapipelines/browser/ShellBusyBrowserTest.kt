@@ -275,8 +275,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
             // Settle: every marker comes off — bar, aria-disabled, aria-busy, the skeleton —
             // and the real content lands.
             throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-path")
-            page.locator("#template-detail h2.tplx-detail-path").innerText() shouldBe "nyc/lib/mobility/trips"
+            page.waitForSelector("#template-detail h2.tplx-detail-title")
+            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/trips"
             barHidden()
             page.waitForSelector("#template-detail[aria-busy='true']", Page.WaitForSelectorOptions().setState(WaitForSelectorState.HIDDEN))
             page.locator(".app-target-skeleton").count() shouldBe 0
@@ -308,8 +308,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
         page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
 
         page.click(leafButton("nyc/lib/mobility/trips"))
-        page.waitForSelector("#template-detail h2.tplx-detail-path")
-        page.locator("#template-detail h2.tplx-detail-path").innerText() shouldBe "nyc/lib/mobility/trips"
+        page.waitForSelector("#template-detail h2.tplx-detail-title")
+        page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/trips"
         // The whole point of the 150ms arm: fast swaps pay nothing. After settle the pane
         // carries neither the busy marker nor a skeleton — and with the server this fast the
         // timer can never have fired.
@@ -353,8 +353,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.waitForSelector("#app-progress.active")
 
             throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-path")
-            page.locator("#template-detail h2.tplx-detail-path").innerText() shouldBe "nyc/lib/mobility/stations"
+            page.waitForSelector("#template-detail h2.tplx-detail-title")
+            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/stations"
 
             // The abort itself, pinned: A's held request FAILED (cancelled by the app via
             // hx-sync replace), not merely ordered behind B's. Asserted after the release —
