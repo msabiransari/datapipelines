@@ -255,7 +255,12 @@ class TemplateBrowseModel(
         userId: UUID,
         isAdmin: Boolean,
     ): String {
-        val pipelineIds = usage.referencedAnywhere(workspaceId, id).map { it.pipelineId }.distinct().take(USED_BY_FANOUT)
+        val pipelineIds =
+            usage
+                .referencedAnywhere(workspaceId, id)
+                .map { it.pipelineId }
+                .distinct()
+                .take(USED_BY_FANOUT)
         val rows =
             pipelineIds
                 .flatMap { pipelineId ->

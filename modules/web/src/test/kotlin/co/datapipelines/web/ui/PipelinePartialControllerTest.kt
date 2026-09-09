@@ -287,6 +287,11 @@ class PipelinePartialControllerTest {
 
         detailController.detail(model, id) shouldBe "partials/pipeline-detail"
 
+        assertDetailRegions()
+    }
+
+    /** The three regions, read off the model the one fill left behind. */
+    private fun assertDetailRegions() {
         // ---- header
         (model["pipeline"] as PipelineRecord).name shouldBe "nyc/mobility/revenue_by_borough"
         model["folderPath"] shouldBe "nyc/mobility/"

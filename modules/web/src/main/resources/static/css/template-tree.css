@@ -645,11 +645,20 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 
 /* ---- compact version / run / usage ROWS (never a table in this column) ---- */
 
+/* Chips, then the meta line, then the ACTIONS ON THEIR OWN LINE.
+ *
+ * The actions were inline (`auto auto 1fr auto`, the mock's four tracks) and the first
+ * screenshot at 1440 showed why that cannot hold here: three ghost buttons in an `auto` track
+ * will not shrink, so they took the row and left the meta column about ten pixels — "just now
+ * · Browser User · 0 runs" rendered one CHARACTER per line. The acting column is ~325px at
+ * 1440 and narrower below it; a row with three verbs in it does not fit on one line at that
+ * width, at any font size. Two lines is the honest layout, and it is the same at every width,
+ * so there is no breakpoint at which the row is briefly unreadable. */
 .tplx-vrow,
 .tplx-runrow {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  gap: var(--gap-sm);
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: var(--gap-xs) var(--gap-sm);
   align-items: center;
   padding: var(--gap-sm) 0;
   border-bottom: 1px solid var(--border-faint, var(--border-subtle));
@@ -680,6 +689,7 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 }
 
 .tplx-vacts {
+  grid-column: 1 / -1;
   display: flex;
   gap: var(--gap-xs);
   flex-wrap: wrap;
@@ -710,6 +720,31 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   overflow-x: auto;
+}
+
+/* The explorer's search row, and the two reasons it overflowed the page at 390px — both
+   measured by ExplorerDetailBrowserTest's 390 case, which named the element each time.
+   1. `.ds-input` is `width: 100%` and a flex item does not shrink below its content, so the
+      box plus its indicator ran past the page. The input flexes from a 12rem basis and is
+      allowed to shrink; the row wraps rather than pushing its last control off the screen.
+   2. The indicator ROTATES (`animation: ds-spin`). A rotating square's bounding box is
+      √2 × its side — about 5px wider on each side at 24px — so a spinner sitting flush
+      against the row's right edge overflows the document by 5px even when the LAYOUT is
+      exactly right. The row keeps that rotation slack as end padding; it is geometry, not a
+      nudge. */
+.tplx-search-row {
+  min-width: 0;
+  flex-wrap: wrap;
+  padding-inline-end: var(--gap-sm);
+}
+
+.tplx-search-row > .ds-input {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.tplx-search-row > .ds-spinner {
+  flex: none;
 }
 
 /* ---- the drawer's trigger and backdrop (inert above 1100px) ---- */
@@ -830,13 +865,7 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
     display: none;
   }
 
-  .tplx-vrow,
-  .tplx-runrow {
-    grid-template-columns: auto auto minmax(0, 1fr);
-  }
-
   .tplx-vacts {
-    grid-column: 1 / -1;
     justify-content: flex-start;
   }
 }

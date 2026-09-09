@@ -8,7 +8,6 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -41,7 +40,6 @@ class TemplatePartialControllerTest {
     private val templates = mockk<TemplateRepository>()
     private val browse = mockk<TemplateBrowseModel>(relaxed = true)
     private val validator = mockk<TemplateValidator>(relaxed = true)
-    private val usage = mockk<TemplateUsageService>()
     private val controller =
         TemplatePartialController(templates, browse, validator, AuthoringGuard(true))
 

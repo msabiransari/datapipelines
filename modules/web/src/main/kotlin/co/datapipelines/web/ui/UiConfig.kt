@@ -63,9 +63,8 @@ class UiConfig {
 
     /** 106: per-version run counts for the acting column's Versions tab. */
     @Bean
-    fun pipelineRunStats(
-        jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate,
-    ): PipelineRunStats = PipelineRunStats(jdbc)
+    fun pipelineRunStats(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): PipelineRunStats =
+        PipelineRunStats(jdbc)
 
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
@@ -78,6 +77,5 @@ class UiConfig {
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         actorNames: ActorNames,
         runStats: PipelineRunStats,
-    ): PipelineBrowseModel =
-        PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats)
+    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats)
 }

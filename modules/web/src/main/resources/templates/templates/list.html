@@ -45,7 +45,7 @@
     <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound.
          With three controls instead of two that starved the search box to a few pixels, so
          the selects are sized by their content and only the search box flexes. -->
-    <div class="u-row-md u-wrap u-mb-md">
+    <div class="u-row-md u-wrap u-mb-md tplx-search-row">
       <input type="search" id="template-filter-q" name="q" th:value="${q}"
              placeholder="Search templates..."
              th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"

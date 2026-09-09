@@ -265,7 +265,8 @@ fun pipelineBrowseModelOver(
     actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
     runStats: co.datapipelines.web.ui.PipelineRunStats = io.mockk.mockk(),
 ): co.datapipelines.web.ui.PipelineBrowseModel =
-    co.datapipelines.web.ui.PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats)
+    co.datapipelines.web.ui
+        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats)
 
 /** The templates twin of [pipelineBrowseModelOver], for the same reason. */
 fun templateBrowseModelOver(
@@ -274,7 +275,8 @@ fun templateBrowseModelOver(
     executions: co.datapipelines.executor.ExecutionRepository = io.mockk.mockk(),
     actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
 ): co.datapipelines.web.ui.TemplateBrowseModel =
-    co.datapipelines.web.ui.TemplateBrowseModel(templates, usage, executions, actors)
+    co.datapipelines.web.ui
+        .TemplateBrowseModel(templates, usage, executions, actors)
 
 /**
  * An [co.datapipelines.web.ui.ActorNames] that resolves NOBODY.

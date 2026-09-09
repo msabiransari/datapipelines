@@ -53,7 +53,7 @@
          list fragment into the stable #pipeline-list-wrapper root, so the control is never
          re-rendered and the search keeps focus and value. A non-empty search switches the LEFT
          pane to a flat list of full paths; clearing it returns to the tree. -->
-    <div class="u-row-md">
+    <div class="u-row-md tplx-search-row">
       <input type="search" id="pipeline-filter-q" name="q" th:value="${q}"
              placeholder="Search pipelines..."
              th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'"

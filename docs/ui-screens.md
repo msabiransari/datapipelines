@@ -364,7 +364,7 @@ Since 067 pipeline names are **folder paths** ([Template Hierarchy §14](templat
 - **Browse (no `q`)** renders one tree level per request. A folder shows its own segment as the label with the FULL prefix on `title`, and a badge counting the live pipelines beneath it. Folders are virtual — derived from name prefixes — so there is **no New folder / rename / move / delete control anywhere, and no empty-folder state**: a folder with nothing beneath it does not exist to be rendered.
 - **Search (non-empty `q`)** replaces the tree with a **flat list of full paths**, not a tree pruned to matches (§9.2's decided rule in the hierarchy design). Clearing the box returns to the tree — the same dispatcher fragment answers both, so that is true by construction.
 - **A new pipeline appears as `v1 draft`** (D55, 099). Creation lands version 1 as a DRAFT, so the leaf's version badge names the **working** version — the draft's number when one exists, the released one otherwise — beside the existing `draft` badge whose tooltip says it is pending release. (`p.currentVersion` alone rendered `vnull` the moment creation stopped releasing.) The Release action lives in the editor and renders for a v1 draft exactly as for any later one; nothing on this screen releases.
-- **The detail pane** shows the working version's badges, the tempdb setting, the declared parameters (the pipeline's calling convention), every version with its RELEASED/DRAFT badge, and **Open in editor**. A selection swaps `#pipeline-detail`'s innerHTML and touches nothing in the tree.
+- **The detail pane** is three regions since 106 (§4.3b): a header, a READING column and an ACTING column. A selection swaps `#pipeline-detail`'s innerHTML and touches nothing in the tree.
 - **The screen is READ-ONLY.** The pre-067 "Create Pipeline" button was permanently `disabled` and its tooltip read "Pipeline editor — Phase 2 other worktree" — an affordance the server does not have, advertised with an internal note. Both are gone (T108), replaced by a sentence saying pipelines are authored through agents over the MCP server, with a link to that spec and the fact that browser authoring is on the roadmap.
 - There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled datasources but populated from `${dialects}`, the controller never had the parameter, and `PipelineRecord` carries no datasource field — serving it needs a join through the pipeline definition, so it was deleted rather than half-wired (deferred).
 
@@ -387,6 +387,93 @@ The size lands as ONE CSS custom property, `--tplx-tree-w`, written on `<html>` 
 `InlineWidthAuditTest` is unaffected and stays green: it bans a static `style="…"` attribute in a template, and this is a script setting one custom property on the root — the shape its KDoc now names as the allowed one.
 
 The datasource lake-table tree (§4.5) uses the same pane class and so inherits the remembered width, but has no detail pane beside it and therefore no handle.
+
+#### 4.3b The detail pane — reading and acting (106, owner-approved mock 2026-09-08)
+
+The pane used to be a stack of four tables (badges, Settings, Parameters, Versions) in one
+column. The owner's mock, layout B, splits it into what a reader does and what an operator
+does, and both explorers render the same shape.
+
+**1 — Header.** The folder path is an EYEBROW (`.tplx-detail-path`, mono, muted) and the leaf
+name is the `h2`; the full path still rides on `title`. The actions sit on the right: **Open in
+editor** (primary) plus the lifecycle verbs 101 shipped, rendered by state — `Release v<n>…`
+when a draft exists, **Discard** when a release exists, **Delete** only while the entity's one
+version is a draft (which is the only state 101's entity purge accepts). Each posts to the REST
+verb itself, carries the `If-Match` hash where 101 requires one, and swaps nothing;
+`explorer-detail.js` re-reads the whole fragment on success rather than patching the DOM from a
+guess, and reloads the page for a verb that removes the row (the tree has to lose the leaf, and
+this fragment may never touch the tree). 102's confirm partial had not merged when 106 was
+built, so the confirms are plain `window.confirm` strings on `data-confirm` — that attribute is
+the seam 102 replaces.
+
+**2 — Reading column** (`.tplx-read`, the wider one). *Overview*: the chips (`v<n>`, the draft /
+released state, node count, `tempdb · <engine>`, datasource count), the description at a **78ch
+measure**, and a key/value strip — Datasources (name + dialect, each linked to its detail),
+Templates (`id@version`, each linked into §4.6), Created (when · by whom), Last run (status chip
+· duration · rows · relative time, linking to the execution). *Parameters*: name / type /
+default with a `required` chip, a table **as wide as its content** with its own 22rem scroll.
+The one-row **"Settings" table is gone** — the staging engine is a chip.
+
+There is deliberately **no "via UI / MCP / API" chip on Created**, though the mock shows one:
+nothing records the surface a pipeline CREATE arrived on. There is no `pipeline.created` audit
+event and `pipelines` carries no `triggered_via`, so the chip would have to be inferred. It
+returns when a create is audited with its surface.
+
+**3 — Acting column** (`.tplx-act`, narrower, its own scroll). ONE tabbed card:
+
+| Tab | First paint? | Fragment |
+|---|---|---|
+| Versions | yes | rendered inline with the detail — `partials/pipeline-versions` |
+| Runs | on the tab's first click | `GET /partials/pipelines/{id}/runs` → `partials/pipeline-runs` |
+| Usage | on the tab's first click | `GET /partials/pipelines/{id}/usage` → `partials/pipeline-usage` |
+
+Versions are **compact rows, never a table**: the acting column measures ~260px of content at
+1440, and three ghost buttons in an `auto` track leave a six-column table's meta cell about ten
+pixels (measured — `ExplorerDetailBrowserTest` asserts the meta column's readable width for
+exactly that reason). Each row states version · status · created · who · runs, marks the sticky
+pointer as `current` (D60 — which is not "the latest released"), and carries the verbs 101 would
+accept on THAT row: Release…, Discard draft (the purge), Discard, Restore.
+
+**Runs** is this pipeline's last 20 executions, so reading a pipeline no longer means leaving for
+§4.8 and filtering it back down. Its visibility is §4.8's, unchanged: an admin sees the
+workspace's runs, everyone else their own — a second surface over the same rows is not a wider
+one. **Usage** is the published endpoints serving the pipeline and the live pipeline versions
+pinning it, and it runs the **same query 101's discard refusal runs**
+(`PipelineRepository.findLiveParentsPinningVersion`, the evidence behind
+`pipeline.version.pinned`), so what the user reads before pressing Discard is what the server
+will decide on. Schedules join the list when 092 lands; there is no schedule table to query
+today, and an empty third heading would claim they had been checked.
+
+`PipelineBrowseModel.fillDetail` supplies every region in ONE call, with the lifecycle flags
+computed beside the query that produced the rows — a button is rendered because the server
+would accept it, never because a template read a status string. Two web-side joins sit beside
+`PipelineNames` for its reason (`dag` and `pipeline-contract` own the stamped rows and neither
+may reach into `auth`): `ActorNames` (who made a version — every stamp is a bare `users.id`) and
+`PipelineRunStats` (one `GROUP BY`, not one `COUNT` per row).
+
+#### 4.3c Responsive — both explorers (106 §B)
+
+The breakpoints are defined ONCE, in `template-tree.css`, and honoured by §4.3 and §4.6:
+
+| Width | Panes | Detail | Notes |
+|---|---|---|---|
+| ≥ 1440px | tree \| detail | reading `1.35fr` \| acting `1fr`, gap `--gap-lg` | the acting card sticks and scrolls inside itself |
+| 1100–1439px | tree \| detail | the columns STACK (reading, then acting) | the tab panel's ceiling becomes 28rem |
+| < 1100px | the tree is a **DRAWER** | full width | a "Browse" button in the page header opens it as an overlay over the app's backdrop idiom; selecting a leaf closes it and loads the detail; the header's actions wrap under the title; tables scroll inside their cards, never the page; 104's divider handle is hidden — there is no boundary for it to sit on |
+| < 640px | — | — | chips wrap, the key/value strip is one column, the tab labels drop their counts |
+
+The tree's WIDTH inside its pane stays 104's (`--tplx-tree-w`, its handle and its clamp); 106
+decides only whether the pane is a column or an overlay. `ExplorerDetailBrowserTest` measures
+all seven of the owner's widths — 390, 768, 1100, 1440, 1920, 2560, 3491 — for document
+overflow, the two-column vs stacked geometry, the drawer's open/close, and a layout-shift
+budget of 0.05 on a selection.
+
+**Known, and NOT 106's**: below 768px the app SHELL itself overflows the document on every
+screen, `/dashboard` included (measured on this branch at 390px: dashboard 154px, executions
+139, pipelines 237, templates 257, datasources 275, api-console 75). The rail keeps its full
+`--rail-w` and `HEADER.app-topbar`'s crumbs and controls do not fit beside it. That is
+`app.css` and the shell layout, not the explorers; 106 asserts instead that the explorer REGION
+fits its own box at 390 and that nothing inside the detail sticks out of the detail.
 
 ### 4.4 Pipeline Editor
 
@@ -453,7 +540,8 @@ A template name is a **path** ([template-hierarchy-design §4.1](template-hierar
 |---|---|---|
 | no `prefix` | `partials/templates` — a dispatcher whose one root element is `#template-list-wrapper` in **both** presentations | the filter controls' `hx-target`, `outerHTML` |
 | `prefix=acme/finance` (empty string = the root) | `partials/template-tree-level` — that ONE level: its direct sub-folders and its direct template children | the folder's own child container, `outerHTML` |
-| `GET /partials/templates/versions?name={path}` | `partials/template-detail` — the SELECTED template: header (full path, badges, Open-in-editor, from `findLatest`) above `partials/template-versions`' table | `#template-detail`, `innerHTML` — the tree is untouched |
+| `GET /partials/templates/versions?name={path}` | `partials/template-detail` — the SELECTED template, in 106's three regions (below) | `#template-detail`, `innerHTML` — the tree is untouched |
+| `GET /partials/templates/runs?name={path}` | `partials/template-runs` — the acting column's Runs tab, on its first click | `#template-tab-runs`, `innerHTML` |
 
 Every level is a **server-side prefix query** ([§8](template-hierarchy-design.md#8-repository-registry-loader)). The flat list is never shipped to the browser and no tree is assembled in JS, at any size ([§9.1](template-hierarchy-design.md#91-constraints-the-ui-inherits-normative--none-of-these-are-ui-choices)). A folder expands with `<details>`/`<summary>` — the browser owns open/closed state and the a11y semantics — and the request rides on the **summary** with `hx-trigger="click once"`, targeting the placeholder below it with `next`. The obvious alternative, the request on the placeholder with `hx-trigger="toggle from:closest details"`, works at the root and silently does nothing for a folder that arrived in a swap (measured on the demo stack: the nested level's request never fires); `click` needs no `from:` indirection and no non-bubbling event, and `<summary>` raises it for keyboard activation too. Nested level containers carry an id derived once, server-side, from the prefix (`TemplateBrowseModel.levelId`), so the placeholder a folder renders and the root of the fragment that replaces it cannot disagree; the ROOT level's id is the screen's long-standing `#template-list-wrapper`, so the tree inherits the §4.5/§5 swap contract rather than inventing a second one — and it sits inside the stable `#template-tree-pane`, so every swap replaces level CONTENT and the panes never move. Names never travel in a URL path segment — `prefix` and `name` are query parameters ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)).
 
@@ -462,6 +550,40 @@ Every level is a **server-side prefix query** ([§8](template-hierarchy-design.m
 **Browse and search are different presentations** ([§9.2](template-hierarchy-design.md#92-templates-browser--tree-presentation), decided). Browsing shows the tree. A non-empty `q` shows a **flat result list of full paths** in the LEFT pane — the same row shape as tree leaves, because the pane is 30% wide and a seven-column table is not what it is for — and selecting a result fills the right pane exactly as a tree click does. It is NOT a tree pruned to matching leaves, because pruning means walking the ancestors of every match, which is precisely the whole-list-in-the-browser work the tree exists to avoid, and a flat list of full paths is what someone searching `finance/agg` wants to see. Clearing `q` returns to the tree, by construction: the same dispatcher answers both.
 
 **Paging.** Each level pages its own leaves through the shared §5 pager, targeting that level's own root, so `Showing N of M` is that level's truthful count and not the workspace's. A level renders that pager only when it can act (`offset > 0` or `hasMore`): a tree shows many levels at once and most hold a handful of rows, so an always-on "Showing 1 of 1" with two dead buttons is noise repeated down the whole screen. The flat search list keeps the unconditional pager — there the count is the answer to the search. Sub-folders are a `GROUP BY` over one path segment and are not paged; past 200 at one level the fragment says so rather than cutting silently. The root level holds **folders only** since 077 ([§4.1](template-hierarchy-design.md#41-grammar)): a name carries a folder, so nothing sits directly at the root and neither browse model queries for it. A pre-077 flat PIPELINE can still exist — that name is validated at save only, so it has no migration gate — and it stays reachable by search, by `pipelines_list` and by its own URL; it is simply not a row the root level draws. Nothing is renamed or reorganised — §4.5 forbids it.
+
+**The detail pane is the pipelines explorer's twin (106; the shape and the breakpoints are
+§4.3b and §4.3c, and they are not restated here).** Header: the folder path as an eyebrow, the
+leaf as the title, Open in editor plus 101's verbs (`Release v<n>…`, Discard, Delete). Reading
+column: *Overview* — the chips (`v<n>`, draft/released, `type`, `dialect`, `engine`), the
+description, the **References** row and the first 12 lines of the current body with a jump to
+the Source tab; and *Used by* — every pipeline pinning any version, with the version, from
+`TemplateUsageService.referencedAnywhere`, which is the same evidence the `template.in_use`
+delete guard answers with. Acting column: **Versions · Source · Runs**.
+
+Versions and Source are both in the FIRST PAINT — the working body and the version list are
+already read to render the header, so a second request would buy nothing; only Runs is lazy.
+The Source tab renders the full body read-only in its own `<pre>` and deliberately does NOT
+reuse the editor's `template-source` fragment: that fragment is the editor's source COLUMN, a
+textarea with an Edit button and the preview pane, and putting an edit surface inside a read
+pane is the affordance 067 spent a round removing.
+
+**References is not "parameters".** A template declares no parameter schema anywhere in this
+system — only a pipeline does — so the card lists the identifiers the body INTERPOLATES,
+labelled as that. Directive variables (`<#if …>`, loop variables) are deliberately not scanned:
+a loop variable is not an input, and listing one would invent a contract.
+
+**Runs is derived, and the derivation is stated in the fragment.** An execution row names a
+pipeline and a version, never the templates its nodes rendered, so there is no execution →
+template edge. The pins give the pipelines and the pipelines give their recent runs (the
+fan-out over pinning pipelines is capped — `TemplateBrowseModel.USED_BY_FANOUT`). It answers
+"has anything that uses this template run lately", which is the question someone about to
+change a template is asking; it does not claim each run rendered this body, because a pipeline
+version pinning v1 does not re-render when v2 lands.
+
+The per-version **in-use count stays** (040 D6 — distinct pipelines pinning that version in
+their working version) but it is now a phrase in the row rather than an "In use" table column,
+worded by the model so the pipelines' "7 runs" and the templates' "2 pipelines" cannot be
+confused for one another.
 
 **Filters.** `dialect` and `type` (046's column) are exact matches on the version row and travel with every level and pager request; both narrow the folder derivation too, so a folder whose whole subtree is filtered out is absent rather than empty. The search covers every rendered column (the §5.1 Search rule): id/path, display name, description, and the dialect badge's wire value — the dialect match is repository-level (`ILIKE` on the version's dialect), so a `sqlite` query finds templates whose names never mention it.
 

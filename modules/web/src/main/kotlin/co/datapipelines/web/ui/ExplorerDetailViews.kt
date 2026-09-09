@@ -5,15 +5,13 @@ import co.datapipelines.typesystem.Dialect
 import java.time.Instant
 import java.util.UUID
 
-/**
- * The row shapes the 106 explorer detail renders — one per region, so the markup reads facts
- * off a value and never derives a lifecycle rule for itself.
- *
- * The rule this file exists to hold: **a button is rendered because a FLAG says the server
- * would accept it**, not because a template guessed from a status string. 101 owns the
- * lifecycle (versioning §3/§7, D57–D60); these flags are computed once, next to the query that
- * produced the rows, and the two partials that render them cannot drift apart.
- */
+// The row shapes the 106 explorer detail renders — one per region, so the markup reads facts
+// off a value and never derives a lifecycle rule for itself.
+//
+// The rule this file exists to hold: a button is rendered because a FLAG says the server would
+// accept it, not because a template guessed from a status string. 101 owns the lifecycle
+// (versioning §3/§7, D57–D60); these flags are computed once, next to the query that produced
+// the rows, and the two partials that render them cannot drift apart.
 
 /** One version in the acting column's Versions tab, with the verbs 101 would accept on it. */
 data class VersionRowView(
@@ -44,6 +42,10 @@ data class VersionRowView(
     val canRestore: Boolean,
 ) {
     companion object {
+        // Eight named fields of ONE row. A parameter object here would be this data class
+        // again, one indirection away, and the factory exists precisely so the four lifecycle
+        // flags are derived in a single place rather than at each call site.
+        @Suppress("LongParameterList")
         fun of(
             version: Int,
             status: PipelineVersionStatus,
