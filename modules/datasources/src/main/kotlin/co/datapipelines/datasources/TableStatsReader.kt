@@ -297,7 +297,7 @@ internal class TableStatsReader(
     ): TableStats {
         refuseUnsafeLocation(table)
         connection.createStatement().use { statement ->
-            statement.queryTimeout = statsTimeoutSeconds(datasource)
+            statement.queryTimeout = lakeFooterTimeoutSeconds(datasource)
             val scan =
                 statement
                     .executeQuery(
@@ -389,11 +389,19 @@ internal class TableStatsReader(
     /**
      * [datasource]'s timeout clamped to the catalog-read bound. Catalog reads never scan a
      * table — the whole point of §7C — so they must not wait on a table scan's budget: the
-     * datasource's own `queryTimeoutSeconds` applies only when TIGHTER. The lake's footer read
-     * is the heaviest thing here, and a glob over many Parquet footers is still metadata.
+     * datasource's own `queryTimeoutSeconds` applies only when TIGHTER.
      */
     private fun statsTimeoutSeconds(datasource: Datasource): Int =
         minOf(datasource.queryTimeoutSeconds ?: MAX_STATS_QUERY_TIMEOUT_SECONDS, MAX_STATS_QUERY_TIMEOUT_SECONDS)
+
+    /**
+     * The lake's footer read gets the wider [MAX_LAKE_FOOTER_TIMEOUT_SECONDS] bound: it is
+     * still metadata (no data pages are read), but a day-partitioned table is hundreds of
+     * Parquet footers over object storage — the demo's two-year `hvfhv_trips` table (~700
+     * files, unsigned S3) does not answer inside the catalog bound (measured live, 107).
+     */
+    private fun lakeFooterTimeoutSeconds(datasource: Datasource): Int =
+        minOf(datasource.queryTimeoutSeconds ?: MAX_LAKE_FOOTER_TIMEOUT_SECONDS, MAX_LAKE_FOOTER_TIMEOUT_SECONDS)
 
     private companion object {
         /** The wire's stats_source when the engine has no catalog stats for the table. */
@@ -410,6 +418,9 @@ internal class TableStatsReader(
 
         /** The bound on a stats statement — see [statsTimeoutSeconds]. */
         const val MAX_STATS_QUERY_TIMEOUT_SECONDS = 10
+
+        /** The bound on a lake footer read — see [lakeFooterTimeoutSeconds]. */
+        const val MAX_LAKE_FOOTER_TIMEOUT_SECONDS = 60
 
         /** A footer read's row budget: files × row groups × columns — see [scanFooters]. */
         const val MAX_FOOTER_ROWS = 65536
