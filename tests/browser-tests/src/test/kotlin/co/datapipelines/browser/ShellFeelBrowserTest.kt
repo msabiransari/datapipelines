@@ -247,7 +247,11 @@ class ShellFeelBrowserTest : BrowserSuite() {
                 (pillAt - clickAt) shouldBeGreaterThanOrEqual PILL_DELAY_MILLIS
             }
             page.locator("#app-status-pill").innerText().trim() shouldBe "Loading…"
-            record("ack", "click→is-pending ${"%.1f".format(pendingAt - clickAt)}ms; click→pill ${"%.1f".format(pillAt - clickAt)}ms (arm $PILL_DELAY_MILLIS ms, held boosted GET)")
+            record(
+                "ack",
+                "click→is-pending ${"%.1f".format(pendingAt - clickAt)}ms; " +
+                    "click→pill ${"%.1f".format(pillAt - clickAt)}ms (arm $PILL_DELAY_MILLIS ms, boosted GET held)",
+            )
 
             throttle.release()
             page.waitForURL("**/pipelines")
@@ -335,47 +339,13 @@ class ShellFeelBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ §B the entrance
 
     @Test
-    fun `the swap arrives with an entrance that ends, and reduced motion silences it`() {
+    fun `the swap arrives with an entrance that plays to completion`() {
         startTrace()
         ready()
         page.navigate("$baseUrl/dashboard")
         page.waitForLoadState(LoadState.NETWORKIDLE)
 
-        // The class is transient by design, so it is WATCHED rather than polled for: an
-        // observer records that #app-main carried it and when it came off.
-        page.evaluate(
-            """() => {
-              window.__enterSeen = false;
-              window.__enterGoneAt = null;
-              window.__swapAt = null;
-              window.__trace = [];
-              document.body.addEventListener('htmx:afterSwap', () => {
-                window.__swapAt = performance.now();
-                const snap = (tag) => {
-                  const m = document.getElementById('app-main');
-                  window.__trace.push(tag + ':' + (m ? m.className + '|' + getComputedStyle(m).animationName +
-                    '|dup=' + document.querySelectorAll('#app-main').length : 'none') + '@' + Math.round(performance.now()));
-                };
-                snap('afterSwap');
-                requestAnimationFrame(() => snap('raf1'));
-                setTimeout(() => snap('t50'), 50);
-              });
-              window.__anim = [];
-              for (const t of ['animationstart', 'animationend', 'animationcancel']) {
-                document.body.addEventListener(t, (e) => {
-                  if (e.target && e.target.id === 'app-main') {
-                    window.__anim.push(t + ':' + e.animationName + '@' + Math.round(performance.now()));
-                  }
-                });
-              }
-              new MutationObserver(() => {
-                const main = document.getElementById('app-main');
-                if (!main) return;
-                if (main.classList.contains('app-enter')) window.__enterSeen = true;
-                else if (window.__enterSeen && window.__enterGoneAt === null) window.__enterGoneAt = performance.now();
-              }).observe(document.body, { attributes: true, subtree: true, childList: true, attributeFilter: ['class'] });
-            }""",
-        )
+        armEntranceObservers()
         page.click("a[data-nav-section='/executions']")
         page.waitForURL("**/executions")
         page.waitForFunction("() => window.__enterGoneAt !== null")
@@ -393,11 +363,20 @@ class ShellFeelBrowserTest : BrowserSuite() {
             anim shouldContain "animationend:app-enter"
             anim shouldNotContain "animationcancel"
         }
-        val swapAt = (page.evaluate("() => window.__swapAt") as Number).toDouble()
-        val goneAt = (page.evaluate("() => window.__enterGoneAt") as Number).toDouble()
-        withClue("the entrance class lived ${goneAt - swapAt}ms after the swap") {
-            (goneAt - swapAt) shouldBeLessThan ENTRANCE_BUDGET_MILLIS
+        // The budget is measured on the ANIMATION, start to end — not on the class's life
+        // relative to `afterSwap`. An earlier version did the latter and quietly went vacuous
+        // the moment a second (partial) swap moved the reference point: it recorded
+        // "lived -159.7ms", which is comfortably under any budget and means nothing. A
+        // two-sided bound is what makes it a real check — an entrance that is cut short is as
+        // wrong as one that overstays.
+        val startedAt = (page.evaluate("() => window.__animAt['animationstart']") as Number).toDouble()
+        val endedAt = (page.evaluate("() => window.__animAt['animationend']") as Number).toDouble()
+        val ran = endedAt - startedAt
+        withClue("the entrance ran for ${"%.1f".format(ran)}ms; events: $anim") {
+            ran shouldBeLessThan ENTRANCE_BUDGET_MILLIS
+            ran shouldBeGreaterThanOrEqual ENTRANCE_FLOOR_MILLIS
         }
+        val trace = page.evaluate("() => (window.__trace || []).join(' ; ')") as String
         val duration =
             page.evaluate(
                 "() => { const m = document.getElementById('app-main'); m.classList.add('app-enter'); " +
@@ -405,14 +384,23 @@ class ShellFeelBrowserTest : BrowserSuite() {
             ) as String
         record(
             "entrance",
-            "app-enter lived ${"%.1f".format(goneAt - swapAt)}ms after htmx:afterSwap " +
-                "(budget $ENTRANCE_BUDGET_MILLIS ms); declared duration $duration; swapAt=${"%.0f".format(swapAt)}; events: $anim; trace: " +
-                (page.evaluate("() => (window.__trace || []).join(' ; ')") as String),
+            "animationstart→animationend ${"%.1f".format(ran)}ms of a declared $duration " +
+                "(floor $ENTRANCE_FLOOR_MILLIS ms, budget $ENTRANCE_BUDGET_MILLIS ms); " +
+                "events: $anim; trace: $trace",
         )
+    }
 
-        // Reduced motion is a CSS decision, not a JS one: the class still lands (shell.js has
-        // no business reading a media query), and the stylesheet refuses to animate it. Read
-        // as a computed value, which is the only place the media query's answer exists.
+    @Test
+    fun `reduced motion silences the entrance in CSS, not in JS`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+
+        // shell.js has no business reading a media query, so the class lands either way and
+        // the STYLESHEET refuses to animate it. The computed `animation-name` is the only
+        // place the media query's answer exists — and it is also why shell.js carries a
+        // fallback timer: `animation: none` never fires `animationend`.
         page.evaluate(
             "() => { document.getElementById('app-main').classList.add('app-enter'); " +
                 "return getComputedStyle(document.getElementById('app-main')).animationName; }",
@@ -422,6 +410,53 @@ class ShellFeelBrowserTest : BrowserSuite() {
             "() => getComputedStyle(document.getElementById('app-main')).animationName",
         ) shouldBe "none"
         page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.NO_PREFERENCE))
+    }
+
+    /**
+     * The entrance is transient by design, so it is WATCHED rather than polled for: one
+     * observer records that `#app-main` carried the class and when it came off, and a set of
+     * animation listeners records whether the animation actually PLAYED. The trace snapshots
+     * are what turned "the class is applied" into "the animation was cancelled 15ms in".
+     */
+    private fun armEntranceObservers() {
+        // The class is transient by design, so it is WATCHED rather than polled for: an
+        // observer records that #app-main carried it and when it came off.
+        page.evaluate(
+            """() => {
+              window.__enterSeen = false;
+              window.__enterGoneAt = null;
+              window.__swapAt = null;
+              window.__animAt = {};
+              window.__trace = [];
+              document.body.addEventListener('htmx:afterSwap', () => {
+                if (window.__swapAt === null) window.__swapAt = performance.now();
+                const snap = (tag) => {
+                  const m = document.getElementById('app-main');
+                  window.__trace.push(tag + ':' + (m ? m.className + '|' + getComputedStyle(m).animationName +
+                    '|dup=' + document.querySelectorAll('#app-main').length : 'none') + '@' + Math.round(performance.now()));
+                };
+                snap('afterSwap');
+                requestAnimationFrame(() => snap('raf1'));
+                setTimeout(() => snap('t50'), 50);
+              });
+              window.__anim = [];
+              for (const t of ['animationstart', 'animationend', 'animationcancel']) {
+                document.body.addEventListener(t, (e) => {
+                  if (e.target && e.target.id === 'app-main' && e.animationName === 'app-enter') {
+                    window.__anim.push(t + ':' + e.animationName + '@' + Math.round(performance.now()));
+                    window.__animAt = window.__animAt || {};
+                    window.__animAt[t] = performance.now();
+                  }
+                });
+              }
+              new MutationObserver(() => {
+                const main = document.getElementById('app-main');
+                if (!main) return;
+                if (main.classList.contains('app-enter')) window.__enterSeen = true;
+                else if (window.__enterSeen && window.__enterGoneAt === null) window.__enterGoneAt = performance.now();
+              }).observe(document.body, { attributes: true, subtree: true, childList: true, attributeFilter: ['class'] });
+            }""",
+        )
     }
 
     @Test
@@ -492,10 +527,11 @@ class ShellFeelBrowserTest : BrowserSuite() {
                 val where = m["worstLayer"] as String
                 "$theme: ${"%.2f".format(worst)}:1 on $where".takeIf { worst < TEXT_CONTRAST_FLOOR }
             }
-        val report = measured.entries.joinToString("\n") { (t, m) ->
-            "$t: ${"%.2f".format((m["worst"] as Number).toDouble())}:1 worst layer=${m["worstLayer"]} " +
-                "(base=${m["base"]}, ${m["layers"]} gradient colours: ${m["image"]})"
-        }
+        val report =
+            measured.entries.joinToString("\n") { (t, m) ->
+                "$t: ${"%.2f".format((m["worst"] as Number).toDouble())}:1 worst layer=${m["worstLayer"]} " +
+                    "(base=${m["base"]}, ${m["layers"]} gradient colours: ${m["image"]})"
+            }
         record("contrast", "floor $TEXT_CONTRAST_FLOOR:1 — body text over the backdrop\n" + report)
         withClue(report) { floor shouldBe emptyList() }
     }
@@ -543,6 +579,13 @@ class ShellFeelBrowserTest : BrowserSuite() {
 
         /** 150ms of animation plus shell.js's 250ms fallback, with room for a slow CI box. */
         const val ENTRANCE_BUDGET_MILLIS = 300.0
+
+        /**
+         * …and its other side. A declared 150ms animation that ENDS in 20ms was cancelled, not
+         * completed — which is exactly the defect this round shipped and then caught, so the
+         * floor is not decoration. Set below 150ms only for frame-timing slack on a busy box.
+         */
+        const val ENTRANCE_FLOOR_MILLIS = 120.0
 
         /** ExplorerPaneGeometryBrowserTest's budget, restated so this file fails on its own. */
         const val CLS_BUDGET = 0.05

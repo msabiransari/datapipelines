@@ -2549,6 +2549,14 @@ button.app-busy::after {
   left: calc(var(--app-rail-collapsed) + var(--gap-lg));
 }
 
+/* The anonymous shell (the public docs, the error pages) has no rail at all, and its
+   `#app-main` still boosts — so without this the pill would appear 232px from the left of a
+   page with nothing there. Same reason as the rule above: `--app-rail-width` is a `:root`
+   value the shell overrides on ITSELF, and the pill is a fixed sibling outside it. */
+:root:has(.app-shell-anon) .app-status-pill {
+  left: var(--gap-lg);
+}
+
 .app-status-pill-spinner {
   width: var(--gap-sm);
   height: var(--gap-sm);
