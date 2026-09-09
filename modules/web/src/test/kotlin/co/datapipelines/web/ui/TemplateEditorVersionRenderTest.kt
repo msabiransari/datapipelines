@@ -4,6 +4,8 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -116,6 +118,35 @@ class TemplateEditorVersionRenderTest {
         html shouldNotContain "updateVersion"
     }
 
+    /**
+     * 097 §D — the page renders NO script BODY. Its behaviour was a ~135-line
+     * `<script th:inline="javascript">`: outside StaticJsCsrfAuditTest's `static/js` sweep,
+     * outside `node --test`, and carrying its own CSRF reader, an `innerHTML` row builder and
+     * two blocking browser dialogs. Every `<script>` on this page is now a `src` reference.
+     */
+    @Test
+    fun `the editor page carries no inline script - every script tag is a src reference`() {
+        // The page's OWN content fragment, without the layout: the layout keeps one
+        // deliberate inline snippet (the rail-collapse flash preventer, which must run before
+        // first paint and therefore cannot be a file). This rule is about the screen.
+        val html = COMMENT.replace(engine().process("templates/editor", setOf("content"), context().apply { editorPage() }), "")
+
+        val inline =
+            SCRIPT_TAG
+                .findAll(html)
+                .map { it.value }
+                .filterNot { it.contains("src=") }
+                .toList()
+        inline shouldBe emptyList()
+        // Non-vacuity: the page DOES load scripts, so an empty result above is a fact about
+        // their shape rather than about a regex that stopped matching.
+        SCRIPT_TAG.findAll(html).count() shouldBeGreaterThanOrEqual 4
+        html shouldContain "/js/template-editor/lifecycle.js"
+        html shouldContain "/js/csrf.js"
+        // The one server value the script used to have inlined into it is a data attribute.
+        html shouldContain "data-template-id="
+    }
+
     // ----------------------------------------------------------------- fixtures
 
     private fun WebContext.readOnly(body: String) {
@@ -195,6 +226,9 @@ class TemplateEditorVersionRenderTest {
         }
 
     private companion object {
+        /** An opening script tag, with its attributes — not its body. */
+        val SCRIPT_TAG = Regex("<script[^>]*>")
+
         const val NAME = "acme/revenue.sql"
         const val RELEASED_BODY = "SELECT released_only FROM t"
         val RELEASED_AT: Instant = Instant.parse("2026-08-02T09:30:00Z")
