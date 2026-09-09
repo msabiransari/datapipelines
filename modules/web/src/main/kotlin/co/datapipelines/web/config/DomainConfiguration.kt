@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
@@ -100,6 +101,18 @@ class DomainConfiguration {
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
     ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding)
+
+    /**
+     * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the
+     * §4.5 edit dialog (097 §A). The rules component is passed whole here — unlike create's
+     * single binding rule, an update runs FOUR of them in a fixed order, and that order is the
+     * service's, so the port it implements is the four methods (see [DatasourceUpdateRules]).
+     */
+    @Bean
+    fun datasourceUpdateService(
+        datasources: DatasourceRegistry,
+        rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
+    ): DatasourceUpdateService = DatasourceUpdateService(datasources, rules)
 
     @Bean
     fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)

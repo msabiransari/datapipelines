@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -33,6 +34,11 @@ class DatasourcePartialController(
     private val browse: DatasourceBrowseModel,
     private val datasources: DatasourceRegistry,
     private val rules: DatasourceWorkspaceRules,
+    /**
+     * The gates-binding-save sequence of an update, shared with `PUT /api/v1/datasources/{name}`
+     * (097 §A) — this surface supplies the FORM's input shape, and nothing else.
+     */
+    private val updates: DatasourceUpdateService,
     /**
      * The SAME any-version reverse scan the REST delete's `409 datasource.in_use` reports
      * (061/T79). The delete dialog asks it FIRST and renders its rows, so "where is this used"
@@ -248,8 +254,6 @@ class DatasourcePartialController(
             val kind =
                 CredentialKind.fromWireOrNull(credentialKind.trim().lowercase())
                     ?: return refused("Unknown credential kind '$credentialKind'.")
-            rules.requireGlobalMutationAllowed(principal, existing, name)
-            rules.requireMemberDatasourcesGate(principal)
             // An unchecked HTML checkbox posts NOTHING, which is indistinguishable from "the
             // field was not on the form at all" — so an admin could never un-global a datasource
             // through a bare checkbox. `globalPresent` is the companion hidden field the admin
@@ -257,11 +261,12 @@ class DatasourcePartialController(
             // deliberate write, absent ⇒ keep the stored binding. A member forging it is refused
             // by the same admin-only rule REST applies.
             val globalRequested = if (globalPresent) global else null
-            rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
-            // The dialect is immutable on this surface: changing it would repoint a live
-            // datasource at a different driver under the same name, and every pipeline that
-            // references it by name would silently follow. REST does not allow it either.
-            val updated =
+            // The gates fire in [DatasourceUpdateService], in the order REST runs them; this
+            // surface's job is the form's shape. The dialect is NOT part of it: changing it
+            // would repoint a live datasource at a different driver under the same name, and
+            // every pipeline that references it by name would silently follow. REST does not
+            // allow it either.
+            updates.update(name, existing, principal, globalRequested, null) {
                 existing.copy(
                     displayName = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: name,
                     description = description?.trim()?.takeIf { it.isNotEmpty() },
@@ -270,13 +275,12 @@ class DatasourcePartialController(
                     credentialKind = kind,
                     secret = password?.takeIf { it.isNotEmpty() },
                     isReadonly = readonly,
-                    workspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, null),
                     properties =
                         existing.properties.copy(
                             hikari = DatasourcePoolForm.toHikari(params, existing.dialect, existing.properties.hikari),
                         ),
                 )
-            datasources.save(updated, principal.userId)
+            }
             browse.fillList(model, principal(), null, null, null)
             model.addAttribute("savedName", name)
             model.addAttribute("savedVerb", "updated")

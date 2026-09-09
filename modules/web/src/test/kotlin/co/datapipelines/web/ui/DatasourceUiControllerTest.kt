@@ -28,6 +28,11 @@ import java.util.UUID
 class DatasourceUiControllerTest {
     private val registry = mockk<DatasourceRegistry>()
     private val themeResolver = mockk<ThemeResolver>()
+    private val rules =
+        co.datapipelines.web.datasources.DatasourceWorkspaceRules(
+            mockk(relaxed = true),
+            co.datapipelines.auth.WorkspacesProperties(),
+        )
     private val controller = DatasourceUiController(DatasourceBrowseModel(registry), co.datapipelines.auth.WorkspacesProperties(), themeResolver)
 
     private val userId = UUID.randomUUID()
@@ -74,10 +79,8 @@ class DatasourceUiControllerTest {
         DatasourcePartialController(
             DatasourceBrowseModel(registry),
             registry,
-            co.datapipelines.web.datasources.DatasourceWorkspaceRules(
-                mockk(relaxed = true),
-                co.datapipelines.auth.WorkspacesProperties(),
-            ),
+            rules,
+            co.datapipelines.application.datasources.DatasourceUpdateService(registry, rules),
             co.datapipelines.datasources.DatasourceReferences.NONE,
         )
 

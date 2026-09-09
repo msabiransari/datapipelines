@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
@@ -66,7 +67,12 @@ class DatasourceD8MatrixTest {
         val rules = DatasourceWorkspaceRules(workspaceService, WorkspacesProperties(memberDatasourcesEnabled = gate))
         // 068: the create path is the shared service, built over the same rules instance the
         // assembled application wires — the D8 matrix must be exercised through what actually runs.
-        return DatasourcesController(registry, rules, DatasourceCreateService(registry, rules::resolveCreateBinding))
+        return DatasourcesController(
+            registry,
+            rules,
+            DatasourceCreateService(registry, rules::resolveCreateBinding),
+            DatasourceUpdateService(registry, rules),
+        )
     }
 
     private fun authenticate(admin: Boolean) {

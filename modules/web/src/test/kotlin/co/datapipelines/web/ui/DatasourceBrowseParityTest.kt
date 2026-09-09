@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
@@ -70,13 +71,16 @@ class DatasourceBrowseParityTest {
             ),
         )
 
+    private val rules = DatasourceWorkspaceRules(mockk(relaxed = true), WorkspacesProperties())
+
     private fun pageController() = DatasourceUiController(DatasourceBrowseModel(registry), WorkspacesProperties(), themeResolver)
 
     private fun partialController() =
         DatasourcePartialController(
             DatasourceBrowseModel(registry),
             registry,
-            DatasourceWorkspaceRules(mockk(relaxed = true), WorkspacesProperties()),
+            rules,
+            DatasourceUpdateService(registry, rules),
             DatasourceReferences.NONE,
         )
 

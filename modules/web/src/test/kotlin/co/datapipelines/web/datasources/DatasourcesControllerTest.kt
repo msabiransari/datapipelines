@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
@@ -49,7 +50,7 @@ class DatasourcesControllerTest {
     // mocked service here would test that the controller delegates and nothing about what
     // `POST /api/v1/datasources` actually does.
     private val registrations = DatasourceCreateService(registry, rules::resolveCreateBinding)
-    private val controller = DatasourcesController(registry, rules, registrations)
+    private val controller = DatasourcesController(registry, rules, registrations, DatasourceUpdateService(registry, rules))
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
     private val userId = UUID.randomUUID()
