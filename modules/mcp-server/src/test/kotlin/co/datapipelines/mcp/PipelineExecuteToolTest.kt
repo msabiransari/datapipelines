@@ -351,4 +351,44 @@ class PipelineExecuteToolTest {
         )
         coVerify(exactly = 0) { executor.execute(any()) }
     }
+
+    @Test
+    fun `a launch is audited with the key id and correlation id BEFORE the blocking run`() {
+        // 107: executions_cancel joins key x correlation against the audit log, and the
+        // dispatcher's mcp.tool.called row exists only when this blocking call ENDS — too late
+        // to cancel an in-flight run. The launch row is what the cancel rule reads.
+        storedPipeline()
+        coEvery { executor.execute(any()) } returns result(resultRef = null)
+        val sink = mockk<co.datapipelines.auth.AuditEventSink>(relaxed = true)
+        val withAudit =
+            PipelineExecuteTool(service, executor, executions, resultStore, resultUrls, launchAudit = sink)
+
+        withAudit.call(args, ctx)
+
+        val details = slot<Map<String, Any?>>()
+        io.mockk.verify {
+            sink.log(
+                event = "mcp.execution.launched",
+                userId = ctx.principal.userId,
+                keyId = ctx.principal.keyId,
+                details = capture(details),
+            )
+        }
+        details.captured["correlation_id"] shouldBe ctx.correlationId.toString()
+    }
+
+    @Test
+    fun `a launch-audit failure does not stop the launch`() {
+        storedPipeline()
+        coEvery { executor.execute(any()) } returns result(resultRef = null)
+        val sink = mockk<co.datapipelines.auth.AuditEventSink>()
+        every { sink.log(any(), any(), any(), any(), any(), any()) } throws RuntimeException("audit store down")
+        val withAudit =
+            PipelineExecuteTool(service, executor, executions, resultStore, resultUrls, launchAudit = sink)
+
+        @Suppress("UNCHECKED_CAST")
+        val payload = withAudit.call(args, ctx) as Map<String, Any?>
+
+        payload["status"] shouldBe "SUCCESS"
+    }
 }

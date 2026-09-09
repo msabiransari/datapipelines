@@ -90,6 +90,9 @@ class McpServerAutoConfiguration {
         // read the same-credential rule joins on. Plain parameters, the 068/074 pattern.
         cancellationService: ExecutionCancellationService,
         mcpCallAudit: McpCallAudit,
+        // 107: the launch-time audit row executions_cancel joins on — pipelines_execute blocks
+        // until the execution is terminal, so the dispatcher's end-of-call row comes too late.
+        auditSink: co.datapipelines.auth.AuditEventSink,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -116,6 +119,7 @@ class McpServerAutoConfiguration {
                 launcher = launcher.getIfAvailable(),
                 resultConfig = executorConfig.result,
                 executionRunner = executionRunner.getIfAvailable(),
+                launchAudit = auditSink,
             ),
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner),
             PipelinesCreateTool(pipelineService, pipelines),
