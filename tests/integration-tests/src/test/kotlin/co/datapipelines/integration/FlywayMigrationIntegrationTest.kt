@@ -85,6 +85,7 @@ class FlywayMigrationIntegrationTest {
                 "18|draft first create|true",
                 // 101 — the version lifecycle: discard stamps + the is_deleted retirement.
                 "19|version lifecycle|true",
+                "20|execution heartbeat|true",
             )
     }
 
@@ -305,6 +306,7 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
                 "pipeline_executions.idx_executions_correlation",
+                "pipeline_executions.idx_executions_heartbeat",
                 "pipeline_executions.idx_executions_pipeline",
                 "pipeline_executions.idx_executions_root",
                 "pipeline_executions.idx_executions_status_running",

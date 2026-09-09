@@ -284,6 +284,7 @@ CREATE TABLE pipeline_executions (
     parent_execution_id UUID        REFERENCES pipeline_executions(execution_id), -- spawning execution; NULL for roots (V3)
     parent_node_id      TEXT,                        -- PIPELINE node id in the parent that spawned this execution; NULL for roots (V3)
     root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
+    heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V20 row (V20, §8.3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
     CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE')),  -- 'PIPELINE' added by V3
     CONSTRAINT fk_executions_pipeline_version
@@ -298,6 +299,8 @@ CREATE INDEX idx_executions_user ON pipeline_executions(triggered_by, started_at
 CREATE INDEX idx_executions_correlation ON pipeline_executions(correlation_id)
     WHERE correlation_id IS NOT NULL;
 CREATE INDEX idx_executions_root ON pipeline_executions(root_execution_id);   -- family lookup / cancellation (V3)
+CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    -- the crash sweep's other access path (V20, §8.3)
+    WHERE status = 'RUNNING';
 ```
 
 **Notes:**
@@ -642,7 +645,8 @@ CREATE TABLE lake_tables (
 | `pipeline_versions` | `uq_pipeline_versions_one_draft` | explicit (partial, unique) | The one-DRAFT-per-pipeline rule of versioning §3.3 — the physical concurrency guard behind copy-on-write |
 | `pipeline_executions` | `pipeline_executions_pkey` | via PK | Lookup by `execution_id` |
 | `pipeline_executions` | `idx_executions_pipeline` | explicit | List executions for a pipeline, newest first |
-| `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions — the stale sweep's access path ([§8.3](#83-stale-execution-sweep)) |
+| `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions by AGE — the stale sweep's backstop path for rows with no heartbeat ([§8.3](#83-stale-execution-sweep)) |
+| `pipeline_executions` | `idx_executions_heartbeat` | explicit (partial) | Find in-flight executions by HEARTBEAT — the stale sweep's primary path since V20, and why a 15-second tick stays cheap ([§8.3](#83-stale-execution-sweep)) |
 | `pipeline_executions` | `idx_executions_user` | explicit | List executions by user |
 | `pipeline_executions` | `idx_executions_correlation` | explicit (partial) | Trace lookup by correlation id |
 | `pipeline_executions` | `idx_executions_root` | explicit | The whole execution family (root + descendants) in one lookup — composition lineage and cancellation key off `root_execution_id` (V3) |
