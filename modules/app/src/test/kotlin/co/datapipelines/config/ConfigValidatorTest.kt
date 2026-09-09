@@ -204,6 +204,59 @@ class ConfigValidatorTest {
         report.warnings.single().shouldContain("redis.internal")
     }
 
+    /**
+     * §3.3 / 108 §C — the staging budget is PER EXECUTION, so
+     * `max-concurrent-executions-per-instance × max-memory-mb` is what the JVM can be asked for.
+     *
+     * Three cases, because the check has three interesting answers and only one of them is the
+     * warning: over the ratio warns, under it is silent, and an unsupplied heap (every other test
+     * in this class, and any caller that does not care) skips it entirely. The last one is what
+     * keeps this check from adding a second warning to a dozen assertions that count them.
+     */
+    @Test
+    fun `the staging budget pressure warning fires only over the ratio, and only with a heap`() {
+        // 100 slots × 1024 MB = 100 GB against a 4 GB heap — 25×, the shipped defaults on a
+        // realistic box.
+        val over =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    executorMaxConcurrentPerInstance = "100",
+                    stagingMaxMemoryMb = "1024",
+                    maxHeapMb = 4096,
+                ),
+            )
+        over.violations.shouldBeEmpty()
+        val warning = over.warnings.single { it.contains("tempdb budget") }
+        // All three numbers and the ratio, because an operator who cannot see the arithmetic
+        // cannot decide which of the two keys to move.
+        warning.shouldContain("max-concurrent-executions-per-instance=100")
+        warning.shouldContain("max-memory-mb=1024")
+        warning.shouldContain("4096MB max heap")
+        warning.shouldContain("25.0×")
+
+        // 4 slots × 256 MB = 1 GB against 4 GB — under 0.8×, silent.
+        ConfigValidator
+            .validate(
+                validSnapshot().copy(
+                    executorMaxConcurrentPerInstance = "4",
+                    stagingMaxMemoryMb = "256",
+                    maxHeapMb = 4096,
+                ),
+            ).warnings
+            .none { it.contains("tempdb budget") } shouldBe true
+
+        // The same over-ratio configuration with NO heap supplied says nothing: the check is a
+        // pure function of the snapshot, and a snapshot that did not state a heap has not asked.
+        ConfigValidator
+            .validate(
+                validSnapshot().copy(
+                    executorMaxConcurrentPerInstance = "100",
+                    stagingMaxMemoryMb = "1024",
+                ),
+            ).warnings
+            .none { it.contains("tempdb budget") } shouldBe true
+    }
+
     @Test
     fun `ConfigSnapshot toString redacts secret fields`() {
         val snapshot =

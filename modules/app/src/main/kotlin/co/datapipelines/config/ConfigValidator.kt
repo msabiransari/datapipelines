@@ -642,7 +642,13 @@ class ConfigValidator(
             val slots = snapshot.executorMaxConcurrentPerInstance?.trim()?.toIntOrNull() ?: DEFAULT_MAX_CONCURRENT_PER_INSTANCE
             val budgetMb = snapshot.stagingMaxMemoryMb?.trim()?.toLongOrNull() ?: DEFAULT_STAGING_MAX_MEMORY_MB
             if (slots <= 0 || budgetMb <= 0) return
-            val maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB
+            // The heap comes off the SNAPSHOT, not off `Runtime` — this class's KDoc promises the
+            // checks are pure functions of a `ConfigSnapshot`, and reading the live JVM here broke
+            // that: every existing test that asserts an exact warning count started seeing this
+            // one, because a test JVM's heap is small and the shipped defaults (100 × 1024 MB)
+            // exceed 0.8 × anything reasonable. A null heap means "not supplied" and skips the
+            // check, which is what keeps a snapshot-driven test asserting only what it set up.
+            val maxHeapMb = snapshot.maxHeapMb ?: return
             if (maxHeapMb <= 0) return
             val committedMb = slots.toLong() * budgetMb
             if (committedMb <= (maxHeapMb * STAGING_PRESSURE_RATIO).toLong()) return
@@ -812,6 +818,7 @@ class ConfigValidator(
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
                 stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
+                maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB,
                 // §3.19 promotion (055). The base-url is an ordinary value; both keys are
                 // bearer secrets and are carried as PRESENCE only — the §7 report is logged.
                 promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
@@ -990,6 +997,12 @@ internal data class ConfigSnapshot(
     val executorMaxConcurrentPerInstance: String? = null,
     /** §3.3 — the PER-EXECUTION tempdb budget, read here only for the §C pressure warning. */
     val stagingMaxMemoryMb: String? = null,
+    /**
+     * The JVM's max heap in MB, or null when the caller did not supply one (every unit test that
+     * is not about §C). `snapshotFrom` reads `Runtime.maxMemory()`, which is the container-aware
+     * figure under `UseContainerSupport` — the cgroup limit in production, the `-Xmx` on a laptop.
+     */
+    val maxHeapMb: Long? = null,
     /** §3.19 (055) — the promotion SENDER's target, if any. */
     val promotionTargetBaseUrl: String? = null,
     /** §3.19 (055) — presence ONLY: the target's pre-shared key is a bearer secret. */
@@ -1046,6 +1059,7 @@ internal data class ConfigSnapshot(
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
             "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +
+            "maxHeapMb=$maxHeapMb, " +
             "orgCurrencyName=$orgCurrencyName, " +
             "orgCurrencySymbol=$orgCurrencySymbol, " +
             "orgFiscalStartDate=$orgFiscalStartDate, " +

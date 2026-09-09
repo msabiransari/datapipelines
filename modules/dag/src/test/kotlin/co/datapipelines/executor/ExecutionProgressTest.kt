@@ -110,7 +110,7 @@ class ExecutionProgressTest {
             val progress = RecordingProgress()
             val source = h2Datasource("rows", listOf("CREATE TABLE rows_t (n INT)"))
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(mapOf("stage" to "SELECT x AS n FROM SYSTEM_RANGE(1, $STAGED_ROWS)")),
+                templateEngine = Fixtures.templateEngine(mapOf("stage" to """SELECT "X" AS n FROM SYSTEM_RANGE(1, $STAGED_ROWS)""")),
                 registry = FakeDatasourceRegistry(mapOf("rows" to source)),
                 // Zero throttle: the assertion is that the drain REPORTS, not that the throttle
                 // works — throttling is asserted by its own arithmetic, not by hoping for a gap.
