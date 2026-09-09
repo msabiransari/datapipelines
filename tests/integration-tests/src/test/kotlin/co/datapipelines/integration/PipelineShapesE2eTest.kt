@@ -28,6 +28,7 @@ import java.sql.DriverManager
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 
 @SpringBootTest(
@@ -332,8 +333,7 @@ class PipelineShapesE2eTest {
      * 108 §B/§D end to end: three independent source nodes STAGE AT THE SAME TIME, and the
      * execution's row shows which node is running while it is still running.
      *
-     * Both claims are here rather than in two tests because they are the same round's two halves
-     * and share one (expensive) execution — and because each is the other's non-vacuity floor: an
+     * Both claims share one (expensive) execution, and each is the other's non-vacuity floor: an
      * execution fast enough to make the overlap trivial is too fast to be caught mid-flight, and
      * one slow enough to poll is one where serialized staging would be obvious.
      *
@@ -341,12 +341,17 @@ class PipelineShapesE2eTest {
      * `H2Staging.stage` held the per-execution mutex across the whole source drain — the network
      * wait included — so two source nodes staged strictly one after the other and their
      * `[started_at, completed_at]` intervals were disjoint by construction. The assertion is
-     * pairwise intersection of the three, which is exactly what that shape cannot produce.
+     * pairwise intersection of the three, which that shape cannot produce.
      *
      * **The progress assertion polls a DIFFERENT surface from the one that writes it.** The
-     * executor writes `node_stats_json`; this reads `GET /api/v1/executions/{id}` while the
-     * stream is still open. A test that asserted on the executor's own in-memory collector would
-     * pass with the persistence missing entirely, which is the whole feature.
+     * executor writes `node_stats_json`; this reads `GET /api/v1/executions/{id}` while the stream
+     * is still open. A test asserting on the executor's own in-memory collector would pass with the
+     * persistence missing entirely, which is the whole feature.
+     *
+     * The execution id comes from the STREAM's own `execution_started`, not from a correlation-id
+     * lookup in the listing. The first attempt did the latter and sampled 31 times without ever
+     * seeing a RUNNING row — a lookup that is one more thing to be wrong, on the exact surface the
+     * test is trying to hold still.
      */
     @Test
     fun `three independent source nodes stage concurrently and the row shows progress while running`() {
@@ -356,35 +361,18 @@ class PipelineShapesE2eTest {
         createParallelStagingTemplates()
 
         val pipelineId = createParallelStagingPipeline()
-        val correlationId = UUID.randomUUID().toString()
-
-        val runningStats = java.util.concurrent.CopyOnWriteArrayList<JsonNode>()
-        val poller = Executors.newSingleThreadExecutor()
-        val polling =
-            java.util.concurrent.atomic
-                .AtomicBoolean(true)
-        poller.submit {
-            // Poll the row by CORRELATION id — the execution id is minted by the server and the
-            // stream reader owns it; this thread must not race the reader for it.
-            while (polling.get()) {
-                runCatching { pollRunningNodeStats(correlationId) }.getOrNull()?.let(runningStats::add)
-                Thread.sleep(PROGRESS_POLL_MS)
-            }
-        }
+        val runningSnapshots = CopyOnWriteArrayList<JsonNode>()
 
         val events =
-            try {
-                consumeExecutionStream(pipelineId, ADMIN_KEY.plaintext, correlationId)
-            } finally {
-                polling.set(false)
-                poller.shutdownNow()
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                streamAndPollProgress(pipelineId, runningSnapshots)
             }
 
         val completed = events.single { it.first == "pipeline_completed" }.second
         val stats = completed["node_stats"].associateBy { it["node_id"].asText() }
 
-        // 1. The three sources overlapped. Pairwise, because "some two overlapped" would pass on
-        //    a run where one node was serialized behind the other two.
+        // 1. The three sources overlapped. Pairwise, because "some two overlapped" would pass on a
+        //    run where one node was serialized behind the other two.
         val windows = PARALLEL_SOURCES.map { id -> windowOf(stats.getValue(id)) }
         windows.forEachIndexed { i, a ->
             windows.drop(i + 1).forEach { b ->
@@ -392,13 +380,84 @@ class PipelineShapesE2eTest {
             }
         }
 
-        // 2. The row said RUNNING, with a node named, while the execution was still going. The
-        //    poll is time-based, so the assertion is that it saw progress AT ALL — not how much.
-        val sawRunning =
-            runningStats.any { snapshot ->
-                snapshot.any { it["status"].asText() == "RUNNING" && it["node_id"].asText() in PARALLEL_SOURCES }
+        // 2. The row said RUNNING, with one of the source nodes named, while the execution was
+        //    still going. The poll is time-based, so the claim is that it saw progress AT ALL.
+        runningSnapshots.any { snapshot ->
+            snapshot.any { it["status"].asText() == "RUNNING" && it["node_id"].asText() in PARALLEL_SOURCES }
+        } shouldBe true
+    }
+
+    /**
+     * Opens the execution stream, starts polling the row the moment `execution_started` names it,
+     * and returns every event once the stream closes.
+     */
+    private fun streamAndPollProgress(
+        pipelineId: String,
+        into: MutableList<JsonNode>,
+    ): List<Pair<String, JsonNode>> {
+        val request =
+            HttpRequest
+                .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .POST(HttpRequest.BodyPublishers.ofString("""{"parameters": {}}"""))
+                .build()
+        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream())
+        response.statusCode() shouldBe 200
+
+        val events = mutableListOf<Pair<String, JsonNode>>()
+        val poller = Executors.newSingleThreadExecutor()
+        val polling =
+            java.util.concurrent.atomic
+                .AtomicBoolean(true)
+        try {
+            BufferedReader(InputStreamReader(response.body())).use { reader ->
+                var currentEvent: String? = null
+                for (line in reader.lines()) {
+                    when {
+                        line.startsWith("event:") -> {
+                            currentEvent = line.removePrefix("event:").trim()
+                        }
+
+                        line.startsWith("data:") -> {
+                            val payload = mapper.readTree(line.removePrefix("data:").trim())
+                            events += (currentEvent ?: "unknown") to payload
+                            if (currentEvent == "execution_started") {
+                                val executionId = payload["execution_id"].asText()
+                                poller.submit {
+                                    while (polling.get()) {
+                                        runCatching { nodeStatsOf(executionId) }.getOrNull()?.let(into::add)
+                                        Thread.sleep(PROGRESS_POLL_MS)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        sawRunning shouldBe true
+        } finally {
+            polling.set(false)
+            poller.shutdownNow()
+        }
+        return events
+    }
+
+    /** The node stats on one execution's row, or null while it carries none yet. */
+    private fun nodeStatsOf(executionId: String): JsonNode? {
+        val detail =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/executions/$executionId")
+                .thenReturn()
+        if (detail.statusCode() != 200) return null
+        val body = mapper.readTree(detail.body().asString())["data"]
+        // Only a row that is still RUNNING can prove anything about live progress: a terminal row
+        // carries node stats too, and counting those would make the assertion vacuous.
+        if (body["status"].asText() != "RUNNING") return null
+        return body["node_stats"]?.takeIf { !it.isNull && it.size() > 0 }
     }
 
     /** The `[started_at, completed_at]` window of one node's stats, in epoch millis. */
@@ -409,35 +468,6 @@ class PipelineShapesE2eTest {
             java.time.Instant
                 .parse(stat["completed_at"].asText())
                 .toEpochMilli()
-
-    /**
-     * Reads the node stats of the RUNNING execution carrying [correlationId], or null when there
-     * is no running row yet (or it carries no stats yet — the window this test exists to close).
-     */
-    private fun pollRunningNodeStats(correlationId: String): JsonNode? {
-        val listed =
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-                .`when`()
-                .get("/api/v1/executions")
-                .thenReturn()
-        if (listed.statusCode() != 200) return null
-        val row =
-            mapper
-                .readTree(listed.body().asString())["data"]
-                .firstOrNull { it["correlation_id"]?.asText() == correlationId && it["status"].asText() == "RUNNING" }
-                ?: return null
-        val detail =
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-                .`when`()
-                .get("/api/v1/executions/${row["execution_id"].asText()}")
-                .thenReturn()
-        if (detail.statusCode() != 200) return null
-        return mapper.readTree(detail.body().asString())["data"]["node_stats"]?.takeIf { !it.isNull && it.size() > 0 }
-    }
 
     private fun createParallelStagingTemplates() {
         // Each source node scans the SAME seeded table with a different cross-join width, so the
@@ -784,13 +814,14 @@ class PipelineShapesE2eTest {
         /**
          * The three independent source nodes of the 108 §B/§D test, and the row count each scans.
          *
-         * 400 000 rows is chosen so a node takes long enough to be caught mid-flight by a 50 ms
-         * poll and long enough that serialized staging would triple the execution, while staying
-         * well inside [SSE_BUDGET_MINUTES] on a loaded box.
+         * 120 000 rows: long enough that a node is catchable mid-flight by a 25 ms poll and that
+         * serialized staging would visibly triple the execution, short enough to stay well inside
+         * [SSE_BUDGET_MINUTES] on a box running three other lanes — which is where the first
+         * attempt at 400 000 blew the budget outright.
          */
         private val PARALLEL_SOURCES = listOf("src_a", "src_b", "src_c")
-        private const val PARALLEL_ROWS = 400_000
-        private const val PROGRESS_POLL_MS = 50L
+        private const val PARALLEL_ROWS = 120_000
+        private const val PROGRESS_POLL_MS = 25L
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val EXECUTOR_USER_ID: String = UUID.randomUUID().toString()

@@ -416,16 +416,26 @@ class H2Staging internal constructor(
     }
 
     /**
-     * The §8.2 budget check, on the FIRST batch and then at most once per
-     * [BUDGET_CHECK_INTERVAL_MS] — not on every batch, and the difference is not a micro-
-     * optimisation.
+     * The §8.2 budget check on the drain path: the FIRST batch, then at most once per
+     * [BUDGET_CHECK_INTERVAL_MS] — and **without forcing a collection unless the cheap reading
+     * says it might matter**.
      *
-     * [measureUsedHeapKb] calls `System.gc()`, because that is what makes the reading comparable
-     * with H2's own `MEMORY_USED()`. At the default batch size a 2M-row stage is 2 000 batches, so
-     * a per-batch check is 2 000 full collections on the insert path — the guard would cost more
-     * than the work it guards. The first batch is always checked so a budget already blown before
-     * this stage started is refused immediately (and so the guard is deterministic for a test);
-     * the closing check in [drainBatches] is unconditional.
+     * Both halves were learned the expensive way. [measureUsedHeapKb] calls `System.gc()`, because
+     * that is what makes the reading comparable with H2's own `MEMORY_USED()`; at the default batch
+     * size a 2M-row stage is 2 000 batches, so a per-batch check is 2 000 full collections on the
+     * insert path. Throttling to a time interval fixed the per-batch part and left the other:
+     * §B's whole point is that several nodes now drain CONCURRENTLY, so the interval is paid once
+     * per drain and three concurrent drains at 250 ms are twelve full collections a second. The
+     * first E2E of the three-source pipeline blew a two-minute budget on it.
+     *
+     * So the common path reads used heap WITHOUT collecting. That reading includes garbage, which
+     * means it can only ever be an OVER-estimate — it can raise a false alarm, never miss a real
+     * one. When it is over budget, and only then, [checkMemoryBudget] forces the collection and
+     * decides on the accurate number. Cheap when nothing is wrong, exact when something is.
+     *
+     * The first batch is always checked, so a budget already blown before this stage began is
+     * refused immediately and the guard is deterministic for a test; the closing check in
+     * [drainBatches] is unconditional and always accurate.
      *
      * @return the timestamp of the check that ran, or [lastCheckMs] when none was due.
      */
@@ -435,8 +445,14 @@ class H2Staging internal constructor(
     ): Long {
         val now = System.currentTimeMillis()
         if (batchIndex > 0 && now - lastCheckMs < BUDGET_CHECK_INTERVAL_MS) return lastCheckMs
-        checkMemoryBudget()
+        if (usedHeapKbWithoutCollecting() > config.maxMemoryMb * KB_PER_MB) checkMemoryBudget()
         return now
+    }
+
+    /** Used heap as the JVM reports it right now — garbage included, so only ever an over-estimate. */
+    private fun usedHeapKbWithoutCollecting(): Long {
+        val runtime = Runtime.getRuntime()
+        return (runtime.totalMemory() - runtime.freeMemory()) / BYTES_PER_KB
     }
 
     private fun insertSql(
@@ -610,10 +626,11 @@ class H2Staging internal constructor(
         const val DATA_EXCEPTION_CLASS = "22"
 
         /**
-         * How often the §8.2 budget may be re-measured mid-drain (108 §B). See [checkBudgetIfDue]:
-         * the measurement forces a full GC, so a per-batch check would cost more than the insert.
+         * How often the §8.2 budget may be re-measured mid-drain (108 §B). One second, not 250 ms:
+         * the interval is paid once per CONCURRENT drain, and concurrency is the thing §B added.
+         * See [checkBudgetIfDue] for why the reading at this cadence is also the cheap one.
          */
-        const val BUDGET_CHECK_INTERVAL_MS = 250L
+        const val BUDGET_CHECK_INTERVAL_MS = 1_000L
 
         /**
          * The catalog projection both "current tables" (§10) and the §3.4 cleanup sweep read, so
