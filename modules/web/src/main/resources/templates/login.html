@@ -14,40 +14,67 @@
        hidden and the panel stands alone. */-->
   <div class="app-auth-split">
     <section class="app-auth-stage" aria-hidden="true">
-      <svg class="app-auth-dag" viewBox="0 0 864 414" focusable="false">
+      <svg class="app-auth-dag" viewBox="0 0 928 414" focusable="false">
         <g class="app-auth-dag-rails">
-          <path class="app-auth-rail" d="M196 57 C 216 57, 216 87, 236 87"/>
-          <path class="app-auth-rail" d="M196 157 C 216 157, 216 187, 236 187"/>
-          <path class="app-auth-rail" d="M412 87 C 432 87, 432 122, 452 122"/>
-          <path class="app-auth-rail" d="M412 187 C 432 187, 432 122, 452 122"/>
-          <path class="app-auth-rail" d="M628 122 C 540 122, 540 287, 452 287"/>
-          <path class="app-auth-rail" d="M196 257 C 324 257, 324 287, 452 287"/>
-          <path class="app-auth-rail" d="M196 357 C 324 357, 324 287, 452 287"/>
-          <path class="app-auth-rail" d="M628 287 C 648 287, 648 177, 668 177"/>
-          <path class="app-auth-rail" d="M628 287 C 648 287, 648 327, 668 327"/>
+          <path class="app-auth-rail" d="M196 67 C 216 67, 216 97, 236 97"/>
+          <path class="app-auth-rail" d="M196 167 C 216 167, 216 197, 236 197"/>
+          <path class="app-auth-rail" d="M412 97 C 432 97, 432 132, 452 132"/>
+          <path class="app-auth-rail" d="M412 197 C 432 197, 432 132, 452 132"/>
+          <path class="app-auth-rail" d="M628 132 C 540 132, 540 297, 452 297"/>
+          <path class="app-auth-rail" d="M196 267 C 324 267, 324 297, 452 297"/>
+          <path class="app-auth-rail" d="M196 367 C 324 367, 324 297, 452 297"/>
+          <path class="app-auth-rail" d="M628 297 C 648 297, 648 90, 668 90"/>
+          <path class="app-auth-rail" d="M628 297 C 648 297, 648 299, 668 299"/>
         </g>
         <g class="app-auth-dag-edges">
-          <path class="app-auth-edge" d="M196 57 C 216 57, 216 87, 236 87"/>
-          <path class="app-auth-edge" d="M196 157 C 216 157, 216 187, 236 187"/>
-          <path class="app-auth-edge" d="M412 87 C 432 87, 432 122, 452 122"/>
-          <path class="app-auth-edge" d="M412 187 C 432 187, 432 122, 452 122"/>
-          <path class="app-auth-edge" d="M628 122 C 540 122, 540 287, 452 287"/>
-          <path class="app-auth-edge" d="M196 257 C 324 257, 324 287, 452 287"/>
-          <path class="app-auth-edge" d="M196 357 C 324 357, 324 287, 452 287"/>
-          <path class="app-auth-edge" d="M628 287 C 648 287, 648 177, 668 177"/>
-          <path class="app-auth-edge" d="M628 287 C 648 287, 648 327, 668 327"/>
+          <path class="app-auth-edge" d="M196 67 C 216 67, 216 97, 236 97"/>
+          <path class="app-auth-edge" d="M196 167 C 216 167, 216 197, 236 197"/>
+          <path class="app-auth-edge" d="M412 97 C 432 97, 432 132, 452 132"/>
+          <path class="app-auth-edge" d="M412 197 C 432 197, 432 132, 452 132"/>
+          <path class="app-auth-edge" d="M628 132 C 540 132, 540 297, 452 297"/>
+          <path class="app-auth-edge" d="M196 267 C 324 267, 324 297, 452 297"/>
+          <path class="app-auth-edge" d="M196 367 C 324 367, 324 297, 452 297"/>
+          <path class="app-auth-edge" d="M628 297 C 648 297, 648 90, 668 90"/>
+          <path class="app-auth-edge" d="M628 297 C 648 297, 648 299, 668 299"/>
         </g>
         <g class="app-auth-dag-nodes">
-          <g class="app-auth-node" transform="translate(20 30)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">ledger_entries</text><text class="app-auth-node-meta" x="14" y="41">Postgres · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(20 130)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fx_rates</text><text class="app-auth-node-meta" x="14" y="41">Parquet on S3 · LAKE</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(20 230)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">customers</text><text class="app-auth-node-meta" x="14" y="41">MySQL · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-calc" transform="translate(20 330)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fiscal_month</text><text class="app-auth-node-meta" x="14" y="41">CALCULATOR · period_start</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(236 60)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">clean_ledger</text><text class="app-auth-node-meta" x="14" y="41">tempdb · filter + cast</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(236 160)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">latest_fx</text><text class="app-auth-node-meta" x="14" y="41">tempdb · dedupe by day</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(452 95)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">to_usd</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join × rate</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(452 260)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_by_customer</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join + roll up</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-out" transform="translate(668 150)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_api</text><text class="app-auth-node-meta" x="14" y="41">GET /api/x/finance/revenue</text></g>
-          <g class="app-auth-node app-auth-node-out" transform="translate(668 300)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_dashboard</text><text class="app-auth-node-meta" x="14" y="41">the view your team reads</text></g>
+          <g class="app-auth-node" transform="translate(20 40)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">ledger_entries</text><text class="app-auth-node-meta" x="14" y="41">Postgres · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(20 140)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fx_rates</text><text class="app-auth-node-meta" x="14" y="41">Parquet on S3 · LAKE</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(20 240)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">customers</text><text class="app-auth-node-meta" x="14" y="41">MySQL · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-calc" transform="translate(20 340)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fiscal_month</text><text class="app-auth-node-meta" x="14" y="41">CALCULATOR · period_start</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(236 70)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">clean_ledger</text><text class="app-auth-node-meta" x="14" y="41">tempdb · filter + cast</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(236 170)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">latest_fx</text><text class="app-auth-node-meta" x="14" y="41">tempdb · dedupe by day</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(452 105)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">to_usd</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join × rate</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(452 270)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_by_customer</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join + roll up</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-screen app-auth-screen-api" transform="translate(668 30)">
+            <rect class="app-auth-screen-box" width="240" height="120" rx="10"/>
+            <rect class="app-auth-screen-bar" x="0.5" y="0.5" width="239" height="26" rx="9.5"/>
+            <rect class="app-auth-screen-bar" x="0.5" y="14" width="239" height="13"/>
+            <rect class="app-auth-pill" x="12" y="7" width="30" height="13" rx="4"/>
+            <text class="app-auth-pill-text" x="27" y="16.5" text-anchor="middle">GET</text>
+            <text class="app-auth-screen-path" x="48" y="17">/api/x/finance/revenue</text>
+            <rect class="app-auth-ok" x="182" y="7" width="46" height="13" rx="4"/>
+            <text class="app-auth-ok-text" x="205" y="16.5" text-anchor="middle">200 · 42ms</text>
+            <text class="app-auth-code" x="12" y="46">[&#123; "customer": "acme-freight",</text>
+            <text class="app-auth-code" x="12" y="62">   "month": "2026-08",</text>
+            <text class="app-auth-code" x="12" y="78">   "revenue_usd": <tspan class="app-auth-code-num">128400.50</tspan> &#125;,</text>
+            <text class="app-auth-code" x="12" y="94"> &#123; "customer": "northwind",</text>
+            <text class="app-auth-code app-auth-code-dim" x="12" y="110">   … 41 more rows ]</text>
+          </g>
+          <g class="app-auth-screen app-auth-screen-dash" transform="translate(668 210)">
+            <rect class="app-auth-screen-box" width="240" height="178" rx="10"/>
+            <rect class="app-auth-screen-bar" x="0.5" y="0.5" width="239" height="26" rx="9.5"/>
+            <rect class="app-auth-screen-bar" x="0.5" y="14" width="239" height="13"/>
+            <text class="app-auth-screen-title" x="12" y="17.5">Revenue by customer</text>
+            <text class="app-auth-screen-meta" x="228" y="17.5" text-anchor="end">Aug 2026</text>
+            <text class="app-auth-kpi-label" x="14" y="48">REVENUE, USD</text>
+            <text class="app-auth-kpi" x="14" y="72">$1.28M</text>
+            <text class="app-auth-kpi-delta" x="14" y="88">▲ 12% vs Jul</text>
+            <polyline class="app-auth-spark" points="14,154 30,144 46,148 62,132 78,136 94,118 106,122"/>
+            <text class="app-auth-kpi-label" x="128" y="90">TOP CUSTOMERS</text>
+            <line class="app-auth-axis" x1="124" y1="162.5" x2="244" y2="162.5"/>
+            <rect class="app-auth-bar" x="128" y="132" width="16" height="30" rx="3"/><rect class="app-auth-bar" x="152" y="116" width="16" height="46" rx="3"/><rect class="app-auth-bar" x="176" y="124" width="16" height="38" rx="3"/><rect class="app-auth-bar" x="200" y="100" width="16" height="62" rx="3"/><rect class="app-auth-bar app-auth-bar-hi" x="224" y="76" width="16" height="86" rx="3"/>
+          </g>
         </g>
       </svg>
       <div class="app-auth-stage-copy">

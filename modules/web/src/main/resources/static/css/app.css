@@ -2124,7 +2124,7 @@ button.app-busy::after {
 .app-auth-dag {
   /* Sized by HEIGHT so it shares the stage with the copy; the viewBox keeps the aspect. */
   height: 100%;
-  max-height: 24rem;
+  max-height: 25rem;
   width: auto;
   max-width: 100%;
   min-height: 0;
@@ -2191,9 +2191,118 @@ button.app-busy::after {
   stroke: var(--accent-warning);
 }
 
-.app-auth-node-out .app-auth-node-box {
-  fill: var(--brand-soft);
+/* The two OUTPUT SCREENS — the API answering and the dashboard reading — are small
+   pictures of the thing, not labelled boxes: a request line with its 200, three rows of the
+   JSON it returns; a KPI, a sparkline and a bar chart. Still every colour a token. */
+.app-auth-screen-box {
+  fill: var(--surface-raised);
   stroke: var(--brand);
+  stroke-width: 1;
+}
+
+.app-auth-screen-bar {
+  fill: var(--brand-soft);
+}
+
+.app-auth-pill {
+  fill: var(--brand);
+}
+
+.app-auth-pill-text {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: var(--weight-bold);
+  fill: var(--accent-primary-text);
+}
+
+.app-auth-screen-path,
+.app-auth-screen-title {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: var(--weight-semibold);
+  fill: var(--text-primary);
+}
+
+.app-auth-screen-title {
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+
+.app-auth-screen-meta {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  fill: var(--text-muted);
+}
+
+.app-auth-ok {
+  fill: color-mix(in srgb, var(--accent-success) 18%, var(--surface-raised));
+}
+
+.app-auth-ok-text {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: var(--weight-semibold);
+  fill: var(--accent-success);
+}
+
+.app-auth-code {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--text-secondary);
+  white-space: pre;
+}
+
+.app-auth-code-num {
+  fill: var(--brand);
+  font-weight: var(--weight-semibold);
+}
+
+.app-auth-code-dim {
+  fill: var(--text-muted);
+}
+
+.app-auth-kpi-label {
+  font-family: var(--font-sans);
+  font-size: 7.5px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  fill: var(--text-muted);
+}
+
+.app-auth-kpi {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  fill: var(--text-primary);
+}
+
+.app-auth-kpi-delta {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  fill: var(--accent-success);
+}
+
+.app-auth-spark {
+  fill: none;
+  stroke: var(--brand);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.app-auth-axis {
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+}
+
+.app-auth-bar {
+  fill: color-mix(in srgb, var(--brand) 45%, var(--surface-raised));
+}
+
+.app-auth-bar-hi {
+  fill: var(--brand);
 }
 
 .app-auth-node-name {
@@ -2203,9 +2312,6 @@ button.app-busy::after {
   fill: var(--text-primary);
 }
 
-.app-auth-node-out .app-auth-node-name {
-  fill: var(--brand);
-}
 
 .app-auth-node-meta {
   font-family: var(--font-mono);
