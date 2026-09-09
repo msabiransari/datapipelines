@@ -2,10 +2,56 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/auth :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div class="app-center">
-    <div class="ds-card app-card-auth u-center">
-      <h1 class="ds-headline u-mb-xs">datapipelines.co</h1>
-      <p class="u-secondary u-text-sm u-mb-lg">Sign in to continue</p>
+  <!--/* The sign-in ceremony is the product's own visual language, not a stock card: the
+       editor's dot-grid ground with a live four-engine DAG drawn in the editor's card style
+       (an inline SVG styled entirely by tokens — no canvas, no colour resolution, no script),
+       and the sign-in panel floating beside it like an inspector. The DAG is the demo's real
+       shape (Postgres, Parquet on S3, MySQL, SQLite → tempdb → answer), so the picture is a
+       claim the product keeps. Below 900px the stage is hidden and the panel stands alone. */-->
+  <div class="app-auth-split">
+    <section class="app-auth-stage" aria-hidden="true">
+      <svg class="app-auth-dag" viewBox="0 0 560 420" focusable="false">
+        <g class="app-auth-dag-rails">
+          <path class="app-auth-rail" d="M164 62 C 240 62, 250 190, 318 190"/>
+          <path class="app-auth-rail" d="M164 150 C 240 150, 250 190, 318 190"/>
+          <path class="app-auth-rail" d="M164 238 C 240 238, 250 190, 318 190"/>
+          <path class="app-auth-rail" d="M164 326 C 240 326, 250 190, 318 190"/>
+          <path class="app-auth-rail" d="M470 190 C 486 190, 486 190, 502 190"/>
+        </g>
+        <g class="app-auth-dag-edges">
+          <path class="app-auth-edge" d="M164 62 C 240 62, 250 190, 318 190"/>
+          <path class="app-auth-edge" d="M164 150 C 240 150, 250 190, 318 190"/>
+          <path class="app-auth-edge" d="M164 238 C 240 238, 250 190, 318 190"/>
+          <path class="app-auth-edge" d="M164 326 C 240 326, 250 190, 318 190"/>
+          <path class="app-auth-edge app-auth-edge-out" d="M470 190 C 486 190, 486 190, 502 190"/>
+        </g>
+        <g class="app-auth-dag-nodes">
+          <g class="app-auth-node" transform="translate(28 36)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_taxi</text><text class="app-auth-node-meta" x="14" y="40">Postgres · DQL</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(28 124)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_rideshare</text><text class="app-auth-node-meta" x="14" y="40">Parquet on S3 · LAKE</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(28 212)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_rain</text><text class="app-auth-node-meta" x="14" y="40">MySQL · DQL</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(28 300)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_zones</text><text class="app-auth-node-meta" x="14" y="40">SQLite · DQL</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-join" transform="translate(318 164)"><rect class="app-auth-node-box" width="152" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">taxi_vs_rideshare</text><text class="app-auth-node-meta" x="14" y="40">tempdb · H2</text><circle class="app-auth-node-dot" cx="140" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-caller" transform="translate(502 164)"><rect class="app-auth-node-box" width="52" height="52" rx="10"/><text class="app-auth-node-name" x="26" y="31" text-anchor="middle">→</text></g>
+        </g>
+      </svg>
+      <div class="app-auth-stage-copy">
+        <p class="app-auth-eyebrow">Agent-native data pipelines</p>
+        <h2 class="app-auth-stage-title">Four engines. One pipeline. Released by a human.</h2>
+        <ol class="app-auth-steps">
+          <li><b>Describe.</b> Your agent reads the schema and builds the pipeline over MCP.</li>
+          <li><b>Run.</b> Postgres, a Parquet lake, MySQL and SQLite join in one DAG.</li>
+          <li><b>Release.</b> Drafts stay drafts until you say so. Nothing ships by accident.</li>
+        </ol>
+      </div>
+    </section>
+
+    <div class="app-auth-panel">
+      <div class="ds-card app-card-auth app-auth-card ds-animate-slide-up">
+        <div class="app-auth-card-brand">
+          <span class="app-brand-tile" aria-hidden="true"><svg viewBox="0 0 64 64" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default)"/></svg></span>
+        </div>
+        <h1 class="app-auth-title">Sign in to your workspace</h1>
+        <p class="app-auth-sub">Pipelines, templates and datasources live in a workspace. Sign in to yours.</p>
 
       <th:block th:if="${error}">
         <div th:if="${#strings.equals(error, 'expired')}" class="app-alert app-alert-warning u-mb-md">
@@ -42,29 +88,30 @@
            filter refuses 403. `AuthLayoutRenderTest` pins the count at 1.
            A PARSER comment, not an HTML one: an ordinary <!-- --> is passed through to the
            response, and this one would then be counted by the very grep it describes. */-->
-      <form th:if="${localEnabled}" method="post" th:action="@{/login}" class="u-left" hx-boost="false">
+      <th:block th:each="provider : ${providers}">
+        <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"
+           class="ds-button ds-button-primary u-block u-full u-mb-sm u-center u-no-underline app-auth-provider"
+           hx-boost="false"
+           th:text="'Continue with ' + ${provider.displayName}">Continue with Provider</a>
+      </th:block>
+      <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}"
+           class="u-row u-my-md u-secondary u-text-sm">
+        <span class="u-grow u-divider-top"></span>
+        <span>or with email</span>
+        <span class="u-grow u-divider-top"></span>
+      </div>
+      <form th:if="${localEnabled}" method="post" th:action="@{/login}" class="u-left app-auth-form" hx-boost="false">
         <label for="login-email" class="u-block u-text-sm u-secondary u-mb-xs">Email</label>
         <input id="login-email" type="email" name="email" class="ds-input u-full u-mb-sm"
                required autocomplete="username" />
         <label for="login-password" class="u-block u-text-sm u-secondary u-mb-xs">Password</label>
         <input id="login-password" type="password" name="password" class="ds-input u-full u-mb-md"
                required autocomplete="current-password" />
-        <button type="submit" class="ds-button ds-button-primary u-block u-full">Sign in</button>
+        <button type="submit" class="ds-button ds-button-secondary u-block u-full">Sign in with email</button>
       </form>
 
-      <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}"
-           class="u-row u-my-md u-secondary u-text-sm">
-        <span class="u-grow u-divider-top"></span>
-        <span>or</span>
-        <span class="u-grow u-divider-top"></span>
+        <p class="app-auth-foot">Self-hosted. Your data stays in your databases; only the SQL and its result pass through here.</p>
       </div>
-
-      <th:block th:each="provider : ${providers}">
-        <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"
-           class="ds-button ds-button-secondary u-block u-full u-mb-sm u-center u-no-underline"
-           hx-boost="false"
-           th:text="${provider.displayName}">Provider Name</a>
-      </th:block>
     </div>
   </div>
 </th:block>

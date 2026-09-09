@@ -2081,3 +2081,243 @@ button.app-busy::after {
   min-height: 0;
   width: 100%;
 }
+
+/* ---------------------------------------------------------------------------
+   The sign-in ceremony (2026-09-08) — the product's own visual language, not a
+   stock card. LEFT: the editor's dot-grid ground (the same --grid-dot the canvas
+   draws, pipeline-editor.css) with a four-engine DAG as an inline SVG in the
+   editor's card style; the edges carry a travelling dash so the graph reads as
+   RUNNING. RIGHT: the sign-in panel, floating like an inspector. Everything is a
+   token — the SVG is styled from here, so both themes and every palette apply —
+   and the motion stops under prefers-reduced-motion. Below 900px the stage is
+   gone and the panel stands alone.
+   --------------------------------------------------------------------------- */
+.app-auth-split {
+  width: 100%;
+  /* Capped and centred: on a wide monitor the stage would otherwise stretch into a
+     letterbox and the DAG shrink to a thumbnail; the composition holds at 80rem. */
+  max-width: 80rem;
+  margin-inline: auto;
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(22rem, 26rem);
+  gap: var(--gap-xl);
+  align-items: center;
+}
+
+.app-auth-stage {
+  position: relative;
+  /* Fits the fold: the height follows the viewport (the shell header and the page's
+     own padding taken off), floored so the DAG never crushes and capped so a tall
+     monitor does not stretch it into a poster. */
+  height: clamp(28rem, calc(100vh - 9rem), 40rem);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--surface-default);
+  background-image: radial-gradient(var(--grid-dot) 1.1px, transparent 1.2px);
+  background-size: 22px 22px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.app-auth-dag {
+  /* Sized by HEIGHT so it shares the stage with the copy; the viewBox keeps the aspect. */
+  height: 100%;
+  max-height: 26rem;
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  justify-self: center;
+  align-self: center;
+  padding: var(--gap-lg) var(--gap-lg) 0;
+  box-sizing: border-box;
+}
+
+.app-auth-edge {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* The running pulse: a dashed brand stroke drawn OVER the idle edge and moved along it. */
+.app-auth-dag-edges .app-auth-edge {
+  stroke-dasharray: 6 210;
+  stroke-dashoffset: 0;
+  animation: app-auth-flow 2.4s linear infinite;
+  stroke: var(--brand);
+  opacity: 0.85;
+}
+
+.app-auth-dag-edges .app-auth-edge:nth-child(2) { animation-delay: -0.6s; }
+.app-auth-dag-edges .app-auth-edge:nth-child(3) { animation-delay: -1.2s; }
+.app-auth-dag-edges .app-auth-edge:nth-child(4) { animation-delay: -1.8s; }
+.app-auth-dag-edges .app-auth-edge-out { stroke-dasharray: 6 60; animation-duration: 1.2s; }
+
+@keyframes app-auth-flow {
+  from { stroke-dashoffset: 216; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* The idle rail under each pulse: the same five paths drawn once more, first, in the
+   edge colour — the pulse group above rides on top of them. */
+.app-auth-rail {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.app-auth-node-box {
+  fill: var(--surface-raised);
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+}
+
+.app-auth-node-join .app-auth-node-box {
+  stroke: var(--brand);
+}
+
+.app-auth-node-caller .app-auth-node-box {
+  fill: var(--brand-soft);
+  stroke: var(--brand);
+}
+
+.app-auth-node-name {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  fill: var(--text-primary);
+}
+
+.app-auth-node-caller .app-auth-node-name {
+  font-size: 20px;
+  fill: var(--brand);
+}
+
+.app-auth-node-meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  fill: var(--text-muted);
+}
+
+.app-auth-node-dot {
+  fill: var(--accent-success);
+}
+
+.app-auth-stage-copy {
+  padding: var(--gap-md) var(--gap-xl) var(--gap-lg);
+  max-width: 34rem;
+}
+
+.app-auth-eyebrow {
+  margin: 0 0 var(--gap-xs);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+.app-auth-stage-title {
+  margin: 0 0 var(--gap-md);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.app-auth-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--gap-sm);
+  counter-reset: app-auth-step;
+}
+
+.app-auth-steps li {
+  position: relative;
+  padding-left: calc(var(--icon-md) + var(--gap-sm));
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+  counter-increment: app-auth-step;
+}
+
+.app-auth-steps li::before {
+  content: counter(app-auth-step);
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.app-auth-steps b {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.app-auth-panel {
+  display: flex;
+  justify-content: center;
+}
+
+.app-auth-card {
+  padding: var(--gap-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.app-auth-card-brand {
+  margin-bottom: var(--gap-md);
+}
+
+.app-auth-title {
+  margin: 0 0 var(--gap-xs);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+
+.app-auth-sub {
+  margin: 0 0 var(--gap-lg);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.app-auth-foot {
+  margin: var(--gap-lg) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+@media (max-width: 900px) {
+  .app-auth-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-auth-stage {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-auth-dag-edges .app-auth-edge {
+    animation: none;
+    stroke-dasharray: none;
+    stroke: var(--edge);
+  }
+}

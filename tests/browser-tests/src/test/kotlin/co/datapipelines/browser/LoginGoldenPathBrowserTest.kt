@@ -22,7 +22,8 @@ class LoginGoldenPathBrowserTest : BrowserSuite() {
         startTrace()
         page.navigate("$baseUrl/login")
 
-        page.locator("h1").first().innerText() shouldContain "datapipelines.co"
+        // 2026-09-08 redesign: the h1 is the task ("Sign in to your workspace"); the brand is the tile.
+        page.locator("h1").first().innerText() shouldContain "Sign in to your workspace"
         page.locator("#login-email").isVisible shouldBe true
         page.locator("#login-password").isVisible shouldBe true
         // Local-only deployment: no provider buttons, no divider.

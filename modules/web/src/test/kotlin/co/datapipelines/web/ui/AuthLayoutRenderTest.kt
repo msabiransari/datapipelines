@@ -1,10 +1,12 @@
 package co.datapipelines.web.ui
 
 import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
@@ -130,6 +132,37 @@ class AuthLayoutRenderTest {
         html shouldContain "/vendor/design-system/themes/saas.css"
         html shouldContain "/css/app.css"
         html.contains("data-theme=\"saas\"") shouldBe true
+    }
+
+    @Test
+    fun `the sign-in ceremony is the product's own canvas - a token-styled DAG stage beside the panel, provider first`() {
+        // 2026-09-08 redesign: the editor's dot-grid ground and a four-engine DAG as an inline
+        // SVG (no canvas, no script, no inline style — every colour is a class the stylesheet
+        // resolves through tokens), the panel beside it, the identity provider as the primary
+        // action with the local form under an "or with email" divider.
+        val html =
+            engine.process(
+                "login",
+                webContext().apply {
+                    fillLogin()
+                    setVariable("providers", listOf(mapOf("registrationId" to "google", "displayName" to "Google")))
+                },
+            )
+
+        assertAll(
+            { html shouldContain "class=\"app-auth-split\"" },
+            { html shouldContain "app-auth-stage" },
+            { html shouldContain "class=\"app-auth-dag\"" },
+            { html shouldContain "Parquet on S3" },
+            { html shouldContain "Continue with Google" },
+            { html shouldContain "or with email" },
+            { html shouldNotContain "style=\"" },
+            { html shouldNotContain "<canvas" },
+            // The layout loads htmx and toast.js by src; the ceremony adds no inline script.
+            { html shouldNotContain "<script>" },
+            // Provider first, then the email form — the order the panel reads in.
+            { html.indexOf("Continue with Google") shouldBeLessThan html.indexOf("login-email") },
+        )
     }
 
     private fun WebContext.fillLogin(authenticated: Boolean = false) {
