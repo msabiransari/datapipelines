@@ -602,6 +602,14 @@ object PipelineErrorCodes {
         const val VERSION_NOT_ELIGIBLE = "template.version.not_eligible"
 
         /**
+         * §13.9 / ui-screens §5.1 typed-confirm (102) — the typed-confirm guard on the
+         * irreversible template purge dialogs: the `confirm` form field did not name what
+         * the dialog asked the user to type (the version, or the template name on the
+         * entity purge). Checked BEFORE the lifecycle service runs.
+         */
+        const val VERSION_CONFIRM_MISMATCH = "template.version.confirm_mismatch"
+
+        /**
          * §13.13 / versioning §5.5 — the template-surface mirror of
          * `pipeline.authoring.disabled`.
          */
@@ -720,6 +728,13 @@ object PipelineErrorCodes {
          * hardened posture).
          */
         const val NOT_ELIGIBLE = "pipeline.version.not_eligible"
+
+        /**
+         * §13.13 / ui-screens §5.1 typed-confirm (102) — the typed-confirm guard on the
+         * irreversible purge dialogs: the `confirm` form field did not name the version the
+         * dialog asked the user to type. Checked BEFORE the lifecycle service runs.
+         */
+        const val CONFIRM_MISMATCH = "pipeline.version.confirm_mismatch"
 
         /** §13.13 / versioning §5.3 — pipeline release blocked on a DRAFT template pin. */
         const val RELEASE_TEMPLATE_NOT_RELEASED = "pipeline.release.template_not_released"
