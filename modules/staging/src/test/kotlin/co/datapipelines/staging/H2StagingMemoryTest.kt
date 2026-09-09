@@ -58,6 +58,14 @@ class H2StagingMemoryTest {
      *
      * Counting reads is the right observable because the alternatives are not available — the
      * partial table is rolled back by design, and the row count never reaches the caller.
+     *
+     * **The cursor is deliberately SLOW, and that is a statement about the guard.** The mid-drain
+     * check runs at most once per second (it was 250 ms until three concurrent drains showed what
+     * a forced collection costs at that cadence), so a drain that finishes inside one tick is
+     * checked exactly twice: at its first batch, and at its end. A stage that fast cannot be the
+     * runaway this guard exists to stop, so that is correct behaviour — but it means a test of
+     * "stops MID-drain" has to be a drain that lasts longer than a tick. One millisecond every
+     * fiftieth row over 100 000 rows is ~2 s of drain, which spans two ticks with room to spare.
      */
     @Test
     fun `the budget stops the drain mid-cursor, not after the whole source is read`() {
@@ -67,7 +75,7 @@ class H2StagingMemoryTest {
         val reads = AtomicInteger()
         SourceDb().use { src ->
             val rs = src.query("SELECT x AS id, RPAD('a', 800, 'a') AS payload FROM SYSTEM_RANGE(1, $SOURCE_ROWS)")
-            shouldThrow<StagingMemoryLimitException> { runBlocking { staging.stage(counting(rs, reads), "stg_mid", Dialect.H2) } }
+            shouldThrow<StagingMemoryLimitException> { runBlocking { staging.stage(slowCounting(rs, reads), "stg_mid", Dialect.H2) } }
         }
 
         // Something was read — otherwise "fewer than all" is satisfied by a guard that fired
@@ -94,8 +102,11 @@ class H2StagingMemoryTest {
         staging.close()
     }
 
-    /** Wraps [target] so every `next()` is counted — how far the drain actually got. */
-    private fun counting(
+    /**
+     * Wraps [target] so every `next()` is counted — how far the drain actually got — and costs a
+     * millisecond every [SLOW_EVERY_N_ROWS] rows, so the drain outlives the guard's check interval.
+     */
+    private fun slowCounting(
         target: ResultSet,
         reads: AtomicInteger,
     ): ResultSet =
@@ -103,7 +114,7 @@ class H2StagingMemoryTest {
             ResultSet::class.java.classLoader,
             arrayOf(ResultSet::class.java),
             InvocationHandler { _, method, args ->
-                if (method.name == "next") reads.incrementAndGet()
+                if (method.name == "next" && reads.incrementAndGet() % SLOW_EVERY_N_ROWS == 0) Thread.sleep(1)
                 try {
                     method.invoke(target, *(args ?: emptyArray()))
                 } catch (e: java.lang.reflect.InvocationTargetException) {
@@ -115,6 +126,9 @@ class H2StagingMemoryTest {
     private companion object {
         /** Big enough that a mid-drain stop is unambiguous at the default 1 000-row batch. */
         const val SOURCE_ROWS = 100000
+
+        /** 100 000 / 50 = 2 000 ms of drain — two of the guard's one-second ticks, with room. */
+        const val SLOW_EVERY_N_ROWS = 50
 
         /** Enough for the staging machinery, well under the ~24 MB the trip case allocates. */
         const val HEADROOM_MB = 8L
