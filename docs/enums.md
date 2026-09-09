@@ -230,6 +230,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `SUCCESS` | Node completed without error |
 | `FAILED` | Node threw an exception; pipeline aborted |
 | `ABORTED` | Node never started because a dependency failed |
+| `RUNNING` | The node is executing **right now**. Appears only in the LIVE progress snapshot a `RUNNING` execution's row carries (108 §D, [Metadata DB §8.3](metadata-db.md#83-stale-execution-sweep)); a TERMINAL snapshot never contains it — a node that had started and never reported is `ABORTED` there, which is [DAG Executor §7.2](dag-executor.md#72-noderesult--nodestats)'s row and is unchanged. A node that has not started yet is ABSENT from the live snapshot rather than given a status |
 
 ---
 

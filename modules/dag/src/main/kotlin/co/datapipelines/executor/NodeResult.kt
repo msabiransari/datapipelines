@@ -11,6 +11,18 @@ enum class NodeStatus {
     SUCCESS,
     FAILED,
     ABORTED,
+
+    /**
+     * The node is executing right now (108 §D, enums.md §9).
+     *
+     * It appears **only** in the live progress snapshot a RUNNING execution's row carries — the
+     * one a `GET /api/v1/executions/{id}` reads while the run is still going. A TERMINAL snapshot
+     * never contains it: a node that had started and never reported is `ABORTED` there, which is
+     * §7.2's row and stays exactly as it was. That split is why this is additive rather than a
+     * change of meaning — `NodeStatsCollector.snapshot` (terminal) and `liveSnapshot` (in-flight)
+     * are two functions for two questions, not one function with a flag.
+     */
+    RUNNING,
 }
 
 /**
@@ -213,6 +225,28 @@ data class NodeStats(
                 bytesOut = NodeResult.NOT_MEASURED,
                 errorCode = error.code,
                 errorMessage = error.message,
+            )
+
+        /**
+         * A node that is executing right now (108 §D) — the live snapshot's row.
+         *
+         * @param rowsSoFar rows staged so far when the node is mid-drain, else
+         *   [NodeResult.NOT_MEASURED]. It is an honest partial count, not an estimate: it is what
+         *   the staging drain has actually inserted, reported per batch.
+         */
+        fun running(
+            nodeId: String,
+            startedAt: Instant?,
+            rowsSoFar: Long = NodeResult.NOT_MEASURED,
+        ): NodeStats =
+            NodeStats(
+                nodeId = nodeId,
+                status = NodeStatus.RUNNING,
+                startedAt = startedAt,
+                completedAt = null,
+                durationMs = 0,
+                rowsOut = rowsSoFar,
+                bytesOut = NodeResult.NOT_MEASURED,
             )
 
         /**

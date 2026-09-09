@@ -38,6 +38,13 @@ import co.datapipelines.pipeline.OrgContext
  *   `autoCommit=false` AND `fetchSize > 0`; before 108 the executor set neither, so a 2M-row
  *   source node's rows were all in the JVM before `stage()` saw one of them and no per-batch
  *   budget check could ever have caught it.
+ * @property progressWriteIntervalSeconds `datapipelines.executor.progress-write-interval-seconds`
+ *   (108 §D) — the floor between two THROTTLED progress writes for one execution. Node boundaries
+ *   are not throttled; only the staging drain, which reports per batch.
+ * @property heartbeatSeconds `datapipelines.executor.heartbeat-seconds` (108 §D) — how often the
+ *   owning instance stamps `pipeline_executions.heartbeat_at`. The crash sweep reaps a RUNNING row
+ *   whose stamp is older than three of these, so this is also what sets how fast a dead instance's
+ *   rows are reaped: ~45 s, against the sixty MINUTES the age backstop alone gave.
  * @property cancelGraceSeconds `datapipelines.executor.cancel-grace-seconds` (108) — how long the
  *   executor waits, AFTER cancelling the node's statements, for a driver to actually return.
  *   Past it the node fails on schedule and the abandoned statement is logged once with the
@@ -70,6 +77,8 @@ data class ExecutorConfig(
     val nodeTimeoutMaxSeconds: Int = 900,
     val cancelGraceSeconds: Long = 5,
     val sourceFetchSize: Int = 1000,
+    val progressWriteIntervalSeconds: Long = 5,
+    val heartbeatSeconds: Long = 15,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
     val maxCompositionDepth: Int = 5,
@@ -106,6 +115,8 @@ data class ExecutorConfig(
         // pipeline we know of is a single query, but a deployment that discovers otherwise on a
         // release weekend needs one env var, not a patch.
         require(sourceFetchSize >= 0) { "sourceFetchSize must not be negative, was $sourceFetchSize" }
+        require(progressWriteIntervalSeconds > 0) { "progressWriteIntervalSeconds must be positive" }
+        require(heartbeatSeconds > 0) { "heartbeatSeconds must be positive, was $heartbeatSeconds" }
         require(stagingMaxMemoryMb > 0) { "stagingMaxMemoryMb must be positive" }
         require(cancelPollIntervalSeconds > 0) { "cancelPollIntervalSeconds must be positive" }
         require(maxCompositionDepth >= 1) { "maxCompositionDepth must be >= 1, was $maxCompositionDepth" }

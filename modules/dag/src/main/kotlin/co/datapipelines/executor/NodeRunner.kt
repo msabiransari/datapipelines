@@ -113,7 +113,31 @@ data class NodeExecutionContext(
      * existing construction site (four in `web`, every fixture) is unchanged.
      */
     val phases: NodePhases = NodePhases(),
+    /**
+     * Where a node's mid-flight staged-row count goes (108 §D). Defaulted to a no-op so every
+     * existing construction site and every fixture is unchanged.
+     */
+    val nodeProgress: NodeProgressSink = NodeProgressSink.NONE,
 )
+
+/**
+ * The seam between the staging drain and the execution's progress row (108 §D).
+ *
+ * A one-method interface rather than a lambda field so the no-op has a name and shows up in a
+ * stack trace as itself, and so the executor's implementation — which touches the stats collector
+ * AND the throttled writer — reads as one thing rather than a closure nested in a builder.
+ */
+fun interface NodeProgressSink {
+    /** [rowsStaged] rows of [nodeId] have been staged so far. Must not block. */
+    fun staged(
+        nodeId: String,
+        rowsStaged: Long,
+    )
+
+    companion object {
+        val NONE = NodeProgressSink { _, _ -> }
+    }
+}
 
 /**
  * Runs one node: render → connect → dispatch on `type` → dispatch on `output`
@@ -759,7 +783,9 @@ class NodeRunner(
                         // The SOURCE node's dialect, never H2's (staging §3.2) — mapping a Postgres
                         // or Oracle cursor through H2's table picks the wrong storage type and
                         // loses data before egress re-derivation can see it.
-                        ctx.staging.stage(rs, output.table, dialect).also { ctx.warnings.addAll(it.warnings) }
+                        ctx.staging
+                            .stage(rs, output.table, dialect) { rows -> ctx.nodeProgress.staged(node.id, rows) }
+                            .also { ctx.warnings.addAll(it.warnings) }
                     }
                 // B2 (second half): staging enforces the budget it was CONSTRUCTED with — the
                 // operator global — because `StagingFactory.create(executionId, engine)` has no

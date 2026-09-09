@@ -11,6 +11,7 @@ import co.datapipelines.executor.CancellationRegistry
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionEventRepository
+import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionSlots
@@ -125,6 +126,12 @@ class ExecutionStreamLauncher(
     private val executorConfig: ExecutorConfig,
     private val resultUrls: ResultUrlFactory,
     private val executorMetrics: ExecutorMetrics,
+    /**
+     * The live-progress sink (108 §D). Constructor-injected like [executorMetrics] and for the
+     * same reason: this is a per-run executor, and a progress sink left at the factory default
+     * would make the feature work in the bean-of-record — which nothing runs — and nowhere else.
+     */
+    private val executionProgress: ExecutionProgress,
     private val persistenceDispatcher: CoroutineDispatcher,
     private val streams: ExecutionStreamRegistry,
     private val eventLog: SseEventLog,
@@ -333,6 +340,7 @@ class ExecutionStreamLauncher(
             config = executorConfig,
             resultUrls = resultUrls,
             metrics = executorMetrics,
+            progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
         )
 

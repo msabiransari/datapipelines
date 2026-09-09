@@ -2,6 +2,7 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecuteRequest
+import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
@@ -58,6 +59,7 @@ class RecordingExecutionRunnerTest {
             executorConfig = mockk(),
             resultUrls = mockk(),
             executorMetrics = mockk(),
+            executionProgress = ExecutionProgress.NONE,
             persistenceDispatcher = Dispatchers.Unconfined,
             streams = streams,
             eventLog = mockk(relaxed = true),

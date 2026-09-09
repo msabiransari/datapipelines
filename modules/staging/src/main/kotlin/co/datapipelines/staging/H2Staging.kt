@@ -85,6 +85,7 @@ class H2Staging internal constructor(
         resultSet: ResultSet,
         tableName: String,
         sourceDialect: Dialect,
+        onProgress: (Long) -> Unit,
     ): StageResult {
         // Metadata and type mapping read the SOURCE cursor and touch the staging connection not
         // at all, so they hold no lock either.
@@ -104,7 +105,7 @@ class H2Staging internal constructor(
         // undo both so a P4 retry of this node is not poisoned by its own first attempt.
         val rowsStaged =
             try {
-                drainInto(tableName, columns, mappings, resultSet)
+                drainInto(tableName, columns, mappings, resultSet, onProgress)
             } catch (e: CancellationException) {
                 // A node stopped by its own deadline (108 §A) unwinds through here. The rollback
                 // must still run — a half-written tempdb table read as success is the failure this
@@ -325,11 +326,12 @@ class H2Staging internal constructor(
         columns: List<ColumnSchema>,
         mappings: List<LogicalTypeMapping>,
         rs: ResultSet,
+        onProgress: (Long) -> Unit,
     ): Long {
         val sqlTypes = columns.map { H2EgressMapper.h2SqlType(it) }
         val stmt = mutex.withLock { connection.prepareStatement(insertSql(tableName, columns)) }
         try {
-            return drainBatches(tableName, mappings, sqlTypes, rs, stmt)
+            return drainBatches(tableName, mappings, sqlTypes, rs, stmt, onProgress)
         } finally {
             withContext(NonCancellable) { closeLocked(stmt, tableName) }
         }
@@ -341,6 +343,7 @@ class H2Staging internal constructor(
         sqlTypes: List<Int>,
         rs: ResultSet,
         stmt: PreparedStatement,
+        onProgress: (Long) -> Unit,
     ): Long {
         val batchSize = config.insertBatchSize
         var rowCount = 0L
@@ -360,6 +363,8 @@ class H2Staging internal constructor(
             }
             rowCount += batch.size
             batchIndex++
+            // Outside the lock: the caller's sink is not this class's to trust with the mutex.
+            onProgress(rowCount)
             if (exhausted) break
         }
         // The closing check is unconditional, whatever the throttle decided along the way: §8.2's

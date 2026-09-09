@@ -81,6 +81,11 @@ class PipelineExecutor(
     private val config: ExecutorConfig,
     private val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
     /**
+     * Where LIVE progress goes (108 §D). Defaulted to [ExecutionProgress.NONE], which is exactly
+     * the pre-108 behaviour: node stats written once, at the end.
+     */
+    private val progress: ExecutionProgress = ExecutionProgress.NONE,
+    /**
      * No default (F6). `rest-api` §6.4.7 requires `data_ready.result_url` to be **absolute**, and a
      * relative default silently shipped a wire-invalid payload to every client that did not
      * override it. Making it required turns "forgot to wire the base URL" from a runtime protocol
@@ -173,11 +178,13 @@ class PipelineExecutor(
                 coroutineScope {
                     handle.bind(coroutineContext.job)
                     val poller = launch(dispatcher.context) { pollCancelFlag(run, handle) }
+                    val beat = launch(dispatcher.context) { heartbeat(run) }
                     try {
                         val results = runNodes(plan.dag, ctx, run)
                         succeed(run, results)
                     } finally {
                         poller.cancel()
+                        beat.cancel()
                     }
                 }
             }
@@ -245,6 +252,10 @@ class PipelineExecutor(
         val startedAt = Instant.now()
         run.stats.started(node.id, startedAt)
         emit(NodeStarted(run.executionId, node.id, startedAt))
+        // NOT throttled: a node starting is the event a watcher is waiting for, there are at most
+        // a few dozen per execution, and delaying it by up to the throttle would leave the screen
+        // naming the wrong node — the one thing this feature exists to fix.
+        recordProgress(run)
         return try {
             completeNode(node, ctx, run, startedAt)
         } catch (e: CancellationException) {
@@ -441,6 +452,7 @@ class PipelineExecutor(
         run.stats.completed(result)
         metrics.nodeFinished(run.request.pipelineId, node.id, node.source, Duration.ofMillis(result.durationMs), result.rowsOut)
         emit(NodeCompleted(run.executionId, node.id, NodeStats.of(result)))
+        recordProgress(run)
         return result
     }
 
@@ -789,12 +801,39 @@ class PipelineExecutor(
         staging: Staging?,
     ) {
         cancellationRegistry.deregister(executionId)
+        // The one path every execution takes, which is why the progress sink's per-execution state
+        // is released here rather than on any of the outcome branches.
+        progress.forget(executionId)
         // §15.2: a Redis DELETE and an H2 table sweep are both blocking; neither may run on a
         // caller thread that might be a Netty event loop. `NonCancellable` because cleanup must
         // complete even when we got here by cancellation.
         withContext(dispatcher.context + NonCancellable) {
             cancellationFlags.clear(executionId)
             staging?.close()
+        }
+    }
+
+    /** Writes the execution's live per-node state (108 §D) — node boundaries, unthrottled. */
+    private fun recordProgress(run: ExecutionRun) {
+        progress.record(run.executionId, run.stats.liveSnapshot(run.plan.dag.nodeIds))
+    }
+
+    /**
+     * Stamps `heartbeat_at` every `heartbeat-seconds` for as long as this execution runs (108 §D).
+     *
+     * Its own coroutine rather than a ride-along on [pollCancelFlag], even though the two default
+     * to the same interval, because they are two different facts with two different tuning
+     * pressures: the poll interval is how fast a CANCEL lands, the heartbeat is how fast a DEAD
+     * INSTANCE's rows are reaped. An operator lowering one has no reason to be moving the other,
+     * and coupling them would make the sweep's ~45-second promise depend on an SSE setting.
+     *
+     * Cancelled from the same `finally` as the poller, so it stops the instant the execution ends.
+     */
+    private suspend fun heartbeat(run: ExecutionRun) {
+        val interval = Duration.ofSeconds(config.heartbeatSeconds).toMillis()
+        while (true) {
+            delay(interval)
+            progress.heartbeat(run.executionId)
         }
     }
 
@@ -884,6 +923,14 @@ class PipelineExecutor(
             // exists to join it.
             correlationId = request.correlationId,
             workspaceId = request.workspaceId,
+            // 108 §D: the staging drain's per-batch count lands in the stats collector and, at
+            // most once per `progress-write-interval-seconds`, in the row. The snapshot is built
+            // inside the lambda so a throttled tick that decides not to write does not build it.
+            nodeProgress =
+                NodeProgressSink { nodeId, rows ->
+                    run.stats.progress(nodeId, rows)
+                    progress.recordThrottled(run.executionId) { run.stats.liveSnapshot(run.plan.dag.nodeIds) }
+                },
         )
     }
 
@@ -1013,6 +1060,11 @@ fun pipelineExecutor(
      * fails with `pipeline.node.child_execution_failed` ("not wired in this runtime").
      */
     subPipelineRunner: SubPipelineRunner? = null,
+    /**
+     * Where LIVE progress goes (108 §D). `web` wires the JDBC one; left at [ExecutionProgress.NONE]
+     * the executor writes node stats once, at the end, exactly as it did before 108.
+     */
+    progress: ExecutionProgress = ExecutionProgress.NONE,
 ): PipelineExecutor =
     PipelineExecutor(
         nodeRunner =
@@ -1026,5 +1078,6 @@ fun pipelineExecutor(
         dispatcher = dispatcher,
         config = config,
         metrics = metrics,
+        progress = progress,
         resultUrls = resultUrls,
     )

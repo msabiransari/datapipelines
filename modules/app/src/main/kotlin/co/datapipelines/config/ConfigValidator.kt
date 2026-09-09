@@ -51,7 +51,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 23
+        internal const val CHECK_COUNT = 24
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -84,6 +84,17 @@ class ConfigValidator(
         /** §3.21 — `MM-DD`, shape only; [isCalendarDay] then asks the calendar. */
         private val FISCAL_START_DATE = Regex("\\d{2}-\\d{2}")
 
+        /** configuration.md §3.2's default, so an unset key is judged as what actually runs. */
+        private const val DEFAULT_MAX_CONCURRENT_PER_INSTANCE = 100
+
+        /** configuration.md §3.3's default. */
+        private const val DEFAULT_STAGING_MAX_MEMORY_MB = 1024L
+
+        /** Above this share of the max heap, the per-execution budget is a promise the JVM cannot keep. */
+        private const val STAGING_PRESSURE_RATIO = 0.8
+
+        private const val BYTES_PER_MB = 1024L * 1024L
+
         private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]", "0:0:0:0:0:0:0:1")
 
         /** The §7 rules, against a snapshot. Pure — every branch is unit-tested without Spring. */
@@ -112,6 +123,7 @@ class ConfigValidator(
             checkPromotionServerKeyDeprecated(snapshot, warnings)
             checkLocalAuth(snapshot, violations)
             checkExecutorConcurrencyAlias(snapshot, violations, warnings)
+            checkStagingBudgetPressure(snapshot, warnings)
             checkRedisAuthWarning(snapshot, warnings)
             checkOrgSettings(snapshot, violations)
             return ValidationReport(violations, warnings)
@@ -603,6 +615,48 @@ class ConfigValidator(
         }
 
         /**
+         * §3.3 (108 §C) — the staging budget is PER EXECUTION, so
+         * `max-concurrent-executions-per-instance × staging.h2.max-memory-mb` is what the JVM can
+         * actually be asked for, and the shipped defaults ask for 100 GB.
+         *
+         * A **warning, not a refusal**, and the distinction is the point. The number is a
+         * CEILING each execution may reach, not one it will; a deployment that knows its
+         * pipelines stage tens of megabytes is right to run 100 slots against a 1 GB budget, and
+         * refusing that would break every default installation on the day this shipped. What an
+         * operator cannot do is notice the arithmetic on their own — the two keys live in
+         * different sections of configuration.md and neither mentions the other — so the fix is
+         * to say it once, with all three numbers and the ratio, and let them decide.
+         *
+         * 0.8 × max heap: above that the sum of the budgets exceeds what the JVM could grant even
+         * if it did nothing else, so the `max_memory_mb` guard is a promise the process cannot
+         * keep. Below it there is at least a coherent reading.
+         *
+         * `Runtime.maxMemory()` is the container-aware figure under `UseContainerSupport` (on by
+         * default since 10), so this reads the cgroup limit in production and the `-Xmx` on a
+         * laptop, which are the two cases that exist.
+         */
+        private fun checkStagingBudgetPressure(
+            snapshot: ConfigSnapshot,
+            warnings: MutableList<String>,
+        ) {
+            val slots = snapshot.executorMaxConcurrentPerInstance?.trim()?.toIntOrNull() ?: DEFAULT_MAX_CONCURRENT_PER_INSTANCE
+            val budgetMb = snapshot.stagingMaxMemoryMb?.trim()?.toLongOrNull() ?: DEFAULT_STAGING_MAX_MEMORY_MB
+            if (slots <= 0 || budgetMb <= 0) return
+            val maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB
+            if (maxHeapMb <= 0) return
+            val committedMb = slots.toLong() * budgetMb
+            if (committedMb <= (maxHeapMb * STAGING_PRESSURE_RATIO).toLong()) return
+            warnings +=
+                "datapipelines.executor.max-concurrent-executions-per-instance=$slots × " +
+                "datapipelines.staging.h2.max-memory-mb=$budgetMb = ${committedMb}MB of tempdb budget, " +
+                "against a ${maxHeapMb}MB max heap (ratio ${"%.1f".format(committedMb.toDouble() / maxHeapMb)}×). " +
+                "The staging budget is PER EXECUTION, so concurrent executions can be admitted that together " +
+                "exceed the heap; the per-execution limit would then be enforced by an OOM rather than by " +
+                "pipeline.staging.memory_limit_exceeded. Lower one of the two keys, or raise the heap, if this " +
+                "deployment's pipelines actually stage near their budget (configuration.md §3.3)."
+        }
+
+        /**
          * §7 / §3.2 — the executor concurrency key rename's one-release alias (050/R2).
          *
          * `max-concurrent-executions-global` is deprecated in favour of
@@ -622,6 +676,7 @@ class ConfigValidator(
          * there and the WARN states the value in effect. Anything off the default differs
          * detectably and is refused as specified.
          */
+
         private fun checkExecutorConcurrencyAlias(
             snapshot: ConfigSnapshot,
             violations: MutableList<String>,
@@ -756,6 +811,7 @@ class ConfigValidator(
                 // 050/R2 §7 — the executor concurrency alias pair (raw values; presence is the signal).
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
+                stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
                 // §3.19 promotion (055). The base-url is an ordinary value; both keys are
                 // bearer secrets and are carried as PRESENCE only — the §7 report is logged.
                 promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
@@ -932,6 +988,8 @@ internal data class ConfigSnapshot(
     /** §3.2/§7 — raw values; ALIAS presence is the deprecation signal (050/R2). */
     val executorMaxConcurrentGlobal: String? = null,
     val executorMaxConcurrentPerInstance: String? = null,
+    /** §3.3 — the PER-EXECUTION tempdb budget, read here only for the §C pressure warning. */
+    val stagingMaxMemoryMb: String? = null,
     /** §3.19 (055) — the promotion SENDER's target, if any. */
     val promotionTargetBaseUrl: String? = null,
     /** §3.19 (055) — presence ONLY: the target's pre-shared key is a bearer secret. */
@@ -987,6 +1045,7 @@ internal data class ConfigSnapshot(
             "localLockoutDurationMinutes=$localLockoutDurationMinutes, " +
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
+            "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +
             "orgCurrencyName=$orgCurrencyName, " +
             "orgCurrencySymbol=$orgCurrencySymbol, " +
             "orgFiscalStartDate=$orgFiscalStartDate, " +

@@ -28,6 +28,7 @@ import java.sql.DriverManager
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.Executors
 
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -325,6 +326,169 @@ class PipelineShapesE2eTest {
 
     // ------------------------------------------------------------ helpers
 
+    // ------------------------------------------------- Test: parallel staging + live progress
+
+    /**
+     * 108 §B/§D end to end: three independent source nodes STAGE AT THE SAME TIME, and the
+     * execution's row shows which node is running while it is still running.
+     *
+     * Both claims are here rather than in two tests because they are the same round's two halves
+     * and share one (expensive) execution — and because each is the other's non-vacuity floor: an
+     * execution fast enough to make the overlap trivial is too fast to be caught mid-flight, and
+     * one slow enough to poll is one where serialized staging would be obvious.
+     *
+     * **The overlap assertion is on TIMESTAMPS, not on a green suite.** Before 108 §B,
+     * `H2Staging.stage` held the per-execution mutex across the whole source drain — the network
+     * wait included — so two source nodes staged strictly one after the other and their
+     * `[started_at, completed_at]` intervals were disjoint by construction. The assertion is
+     * pairwise intersection of the three, which is exactly what that shape cannot produce.
+     *
+     * **The progress assertion polls a DIFFERENT surface from the one that writes it.** The
+     * executor writes `node_stats_json`; this reads `GET /api/v1/executions/{id}` while the
+     * stream is still open. A test that asserted on the executor's own in-memory collector would
+     * pass with the persistence missing entirely, which is the whole feature.
+     */
+    @Test
+    fun `three independent source nodes stage concurrently and the row shows progress while running`() {
+        ensureAuthSeeded()
+        seedSourceUsers()
+        registerDatasource(source.jdbcUrl)
+        createParallelStagingTemplates()
+
+        val pipelineId = createParallelStagingPipeline()
+        val correlationId = UUID.randomUUID().toString()
+
+        val runningStats = java.util.concurrent.CopyOnWriteArrayList<JsonNode>()
+        val poller = Executors.newSingleThreadExecutor()
+        val polling =
+            java.util.concurrent.atomic
+                .AtomicBoolean(true)
+        poller.submit {
+            // Poll the row by CORRELATION id — the execution id is minted by the server and the
+            // stream reader owns it; this thread must not race the reader for it.
+            while (polling.get()) {
+                runCatching { pollRunningNodeStats(correlationId) }.getOrNull()?.let(runningStats::add)
+                Thread.sleep(PROGRESS_POLL_MS)
+            }
+        }
+
+        val events =
+            try {
+                consumeExecutionStream(pipelineId, ADMIN_KEY.plaintext, correlationId)
+            } finally {
+                polling.set(false)
+                poller.shutdownNow()
+            }
+
+        val completed = events.single { it.first == "pipeline_completed" }.second
+        val stats = completed["node_stats"].associateBy { it["node_id"].asText() }
+
+        // 1. The three sources overlapped. Pairwise, because "some two overlapped" would pass on
+        //    a run where one node was serialized behind the other two.
+        val windows = PARALLEL_SOURCES.map { id -> windowOf(stats.getValue(id)) }
+        windows.forEachIndexed { i, a ->
+            windows.drop(i + 1).forEach { b ->
+                (a.first <= b.second && b.first <= a.second) shouldBe true
+            }
+        }
+
+        // 2. The row said RUNNING, with a node named, while the execution was still going. The
+        //    poll is time-based, so the assertion is that it saw progress AT ALL — not how much.
+        val sawRunning =
+            runningStats.any { snapshot ->
+                snapshot.any { it["status"].asText() == "RUNNING" && it["node_id"].asText() in PARALLEL_SOURCES }
+            }
+        sawRunning shouldBe true
+    }
+
+    /** The `[started_at, completed_at]` window of one node's stats, in epoch millis. */
+    private fun windowOf(stat: JsonNode): Pair<Long, Long> =
+        java.time.Instant
+            .parse(stat["started_at"].asText())
+            .toEpochMilli() to
+            java.time.Instant
+                .parse(stat["completed_at"].asText())
+                .toEpochMilli()
+
+    /**
+     * Reads the node stats of the RUNNING execution carrying [correlationId], or null when there
+     * is no running row yet (or it carries no stats yet — the window this test exists to close).
+     */
+    private fun pollRunningNodeStats(correlationId: String): JsonNode? {
+        val listed =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/executions")
+                .thenReturn()
+        if (listed.statusCode() != 200) return null
+        val row =
+            mapper
+                .readTree(listed.body().asString())["data"]
+                .firstOrNull { it["correlation_id"]?.asText() == correlationId && it["status"].asText() == "RUNNING" }
+                ?: return null
+        val detail =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/executions/${row["execution_id"].asText()}")
+                .thenReturn()
+        if (detail.statusCode() != 200) return null
+        return mapper.readTree(detail.body().asString())["data"]["node_stats"]?.takeIf { !it.isNull && it.size() > 0 }
+    }
+
+    private fun createParallelStagingTemplates() {
+        // Each source node scans the SAME seeded table with a different cross-join width, so the
+        // three take comparably long and none is trivially instant — an instant node cannot
+        // overlap with anything and would make the assertion vacuous.
+        PARALLEL_SOURCES.forEachIndexed { i, id ->
+            createTemplate(
+                "test/parallel_$id.sql",
+                "POSTGRES",
+                "Parallel source $id",
+                "SELECT g AS n, ${i + 1} AS lane FROM generate_series(1, $PARALLEL_ROWS) g",
+            )
+        }
+        createTemplate(
+            "test/parallel_join.sql",
+            "H2",
+            "Parallel join",
+            PARALLEL_SOURCES.joinToString(" UNION ALL ") { "SELECT lane, COUNT(*) AS c FROM stg_$it GROUP BY lane" },
+        )
+    }
+
+    private fun createParallelStagingPipeline(): String =
+        createPipeline(
+            "test/parallel_staging",
+            "Parallel staging",
+            PARALLEL_SOURCES.map { id ->
+                mapOf(
+                    "id" to id,
+                    "description" to "Source $id",
+                    "type" to "DQL",
+                    "source" to "pg-local",
+                    "template" to mapOf("id" to "test/parallel_$id.sql", "version" to 1),
+                    "output" to mapOf("target" to "tempdb", "table" to "stg_$id"),
+                    "depends_on" to emptyList<String>(),
+                )
+            } +
+                listOf(
+                    mapOf(
+                        "id" to "joined",
+                        "description" to "Join the three",
+                        "type" to "DQL",
+                        "source" to "tempdb",
+                        "template" to mapOf("id" to "test/parallel_join.sql", "version" to 1),
+                        "output" to mapOf("target" to "caller"),
+                        // Data flow only: the join reads all three staged tables. No edge here
+                        // exists to serialise anything — that is the rule 108 §B restated.
+                        "depends_on" to PARALLEL_SOURCES,
+                    ),
+                ),
+        )
+
     private fun ensureAuthSeeded() {
         synchronized(authLock) {
             if (authSeeded) return
@@ -616,6 +780,17 @@ class PipelineShapesE2eTest {
          * genuinely stopped producing, never on a slow container.
          */
         private const val SSE_BUDGET_MINUTES = 2L
+
+        /**
+         * The three independent source nodes of the 108 §B/§D test, and the row count each scans.
+         *
+         * 400 000 rows is chosen so a node takes long enough to be caught mid-flight by a 50 ms
+         * poll and long enough that serialized staging would triple the execution, while staying
+         * well inside [SSE_BUDGET_MINUTES] on a loaded box.
+         */
+        private val PARALLEL_SOURCES = listOf("src_a", "src_b", "src_c")
+        private const val PARALLEL_ROWS = 400_000
+        private const val PROGRESS_POLL_MS = 50L
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val EXECUTOR_USER_ID: String = UUID.randomUUID().toString()

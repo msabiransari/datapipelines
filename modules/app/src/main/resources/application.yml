@@ -221,6 +221,8 @@ datapipelines:
     node-timeout-max-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_MAX_SECONDS:900}
     cancel-grace-seconds: ${DATAPIPELINES_EXECUTOR_CANCEL_GRACE_SECONDS:5}
     source-fetch-size: ${DATAPIPELINES_EXECUTOR_SOURCE_FETCH_SIZE:1000}
+    progress-write-interval-seconds: ${DATAPIPELINES_EXECUTOR_PROGRESS_WRITE_INTERVAL_SECONDS:5}
+    heartbeat-seconds: ${DATAPIPELINES_EXECUTOR_HEARTBEAT_SECONDS:15}
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
