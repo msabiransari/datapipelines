@@ -33,7 +33,7 @@ import java.util.UUID
 class PipelineUiControllerTest {
     private val repository = mockk<PipelineRepository>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val browse = PipelineBrowseModel(pipelineServiceOver(repository), repository)
+    private val browse = co.datapipelines.web.pipelineBrowseModelOver(repository)
     private val controller = PipelineUiController(browse, themeResolver)
 
     private val userId = UUID.randomUUID()

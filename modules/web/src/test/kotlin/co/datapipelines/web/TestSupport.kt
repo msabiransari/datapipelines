@@ -245,3 +245,47 @@ val NO_EXCLUSIVE_DRAFT_TEMPLATES =
             templateId: String,
         ) = Unit
     }
+
+/**
+ * A [co.datapipelines.web.ui.PipelineBrowseModel] over [pipelines], with 106's detail-only
+ * collaborators as STRICT mocks by default.
+ *
+ * Strict is the right double here, and the reason is the inverse of the usual one: these five
+ * are read by [co.datapipelines.web.ui.PipelineBrowseModel.fillDetail] and by nothing else, so
+ * a listing test that touches one has a bug and must go red. A relaxed mock would swallow
+ * exactly that. A test that DOES exercise the detail passes its own real doubles.
+ */
+@Suppress("LongParameterList") // the model's own constructor, mirrored
+fun pipelineBrowseModelOver(
+    pipelines: co.datapipelines.pipeline.PipelineRepository,
+    service: co.datapipelines.pipeline.PipelineService = pipelineServiceOver(pipelines),
+    executions: co.datapipelines.executor.ExecutionRepository = io.mockk.mockk(),
+    endpoints: co.datapipelines.application.endpoints.PublishedEndpointRepository = io.mockk.mockk(),
+    datasources: co.datapipelines.pipeline.DatasourceRegistry = co.datapipelines.pipeline.DatasourceRegistry.EMPTY,
+    actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
+    runStats: co.datapipelines.web.ui.PipelineRunStats = io.mockk.mockk(),
+): co.datapipelines.web.ui.PipelineBrowseModel =
+    co.datapipelines.web.ui
+        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats)
+
+/** The templates twin of [pipelineBrowseModelOver], for the same reason. */
+fun templateBrowseModelOver(
+    templates: co.datapipelines.templates.TemplateRepository,
+    usage: co.datapipelines.templates.TemplateUsageService = io.mockk.mockk(),
+    executions: co.datapipelines.executor.ExecutionRepository = io.mockk.mockk(),
+    actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
+): co.datapipelines.web.ui.TemplateBrowseModel =
+    co.datapipelines.web.ui
+        .TemplateBrowseModel(templates, usage, executions, actors)
+
+/**
+ * An [co.datapipelines.web.ui.ActorNames] that resolves NOBODY.
+ *
+ * The empty map is the production miss case — a user removed after stamping a version — so a
+ * test that does not care who made a version still exercises the fallback the row renders,
+ * rather than a mock that throws. A test that DOES care stubs its own names.
+ */
+fun anonymousActors(): co.datapipelines.web.ui.ActorNames =
+    io.mockk.mockk<co.datapipelines.web.ui.ActorNames>().also {
+        io.mockk.every { it.lookup(any()) } returns emptyMap()
+    }

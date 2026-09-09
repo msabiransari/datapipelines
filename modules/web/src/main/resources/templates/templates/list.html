@@ -10,6 +10,8 @@
        is the width of the FIRST frame and not a shift onto it. -->
   <script th:src="@{/js/splitter.js}"></script>
   <script th:src="@{/js/template-explorer.js}" defer></script>
+  <!-- 106: the detail pane's tabs, its lifecycle verbs and the narrow layout's tree drawer. -->
+  <script th:src="@{/js/explorer-detail.js}" defer></script>
 
   <!-- 058 — the explorer: TREE LEFT, the selected template RIGHT. The 047 accordion put each
        template's versions table under its own row, pushing every other row down; the owner's
@@ -25,8 +27,14 @@
         <p class="app-page-sub">Reusable SQL that pipelines pin by version. A template's folder is the first
           segment of its name.</p>
       </div>
-      <div class="app-page-actions" th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
-        <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()">Create Template</button>
+      <div class="app-page-actions">
+        <!-- 106 §B: below 1100px the tree is a DRAWER, not a column — this is what opens it.
+             The stylesheet decides when it is visible (`display: none` above the breakpoint),
+             so the markup states the affordance once and no script measures the viewport. -->
+        <button type="button" class="ds-button ds-button-secondary tplx-browse"
+                data-explorer-drawer-open aria-expanded="false" aria-controls="template-tree-pane">Browse</button>
+        <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()"
+                th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">Create Template</button>
       </div>
     </div>
 
@@ -37,7 +45,7 @@
     <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound.
          With three controls instead of two that starved the search box to a few pixels, so
          the selects are sized by their content and only the search box flexes. -->
-    <div class="u-row-md u-wrap u-mb-md">
+    <div class="u-row-md u-wrap u-mb-md tplx-search-row">
       <input type="search" id="template-filter-q" name="q" th:value="${q}"
              placeholder="Search templates..."
              th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
@@ -72,6 +80,10 @@
          the RIGHT pane beside it) never move. The RIGHT pane is #template-detail: a leaf's
          selection swaps its innerHTML and nothing else — the whole point of the layout. -->
     <div class="tplx-body">
+      <!-- The drawer's scrim (106 §B). Inert and display:none above 1100px; `hidden` is what
+           the script toggles, so the closed state needs no inline style. -->
+      <div class="tplx-drawer-backdrop" data-explorer-drawer-backdrop hidden></div>
+
       <div class="tplx-tree" id="template-tree-pane" data-explorer-pane>
         <!-- The fragment's own root carries id="template-list-wrapper" in BOTH presentations, so
              the swap target survives every refresh — this div is only a placeholder (§4.6). -->

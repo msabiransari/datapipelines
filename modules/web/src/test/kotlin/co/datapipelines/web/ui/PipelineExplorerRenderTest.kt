@@ -1,13 +1,14 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.executor.ExecutionRecord
+import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineSettings
-import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.StagingEngine
-import co.datapipelines.pipeline.TempdbSettings
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.string.shouldContain
@@ -224,13 +225,171 @@ class PipelineExplorerRenderTest {
         html shouldContain "title=\"$DEEP_PATH\""
         html shouldContain "Open in editor"
         html shouldContain "/pipelines/$LEAF_ID/editor"
-        html shouldContain "tempdb engine"
-        html shouldContain "H2"
+        // 106: the path is the eyebrow and the LEAF is the title.
+        html shouldContain "nyc/mobility/</p>"
+        html shouldContain "revenue_by_borough</h2>"
+        // The staging engine is a CHIP; the one-row "Settings" table is gone.
+        html shouldContain "tempdb · H2"
+        html shouldNotContain "tempdb engine"
         html shouldContain "start_date"
         html shouldContain "DATE"
         html shouldContain "RELEASED"
         html shouldContain "DRAFT"
         html shouldContain "3 nodes"
+    }
+
+    @Test
+    fun `106 - the detail is three regions - header, reading column, acting column`() {
+        val html = render("partials/pipeline-detail") { fillDetail() }
+
+        html shouldContain "class=\"tplx-detail-header\""
+        html shouldContain "class=\"tplx-read\""
+        html shouldContain "class=\"tplx-act\""
+        // The reading column's two cards, and the acting column's ONE tabbed card.
+        html shouldContain ">Overview<"
+        html shouldContain ">Parameters<"
+        html shouldContain "data-explorer-tabs"
+        html shouldContain "data-tab-panel=\"pipeline-tab-versions\""
+        html shouldContain "data-tab-panel=\"pipeline-tab-runs\""
+        html shouldContain "data-tab-panel=\"pipeline-tab-usage\""
+        // Runs and Usage are LAZY — one fragment each, fetched on the tab's first click.
+        html shouldContain "/partials/pipelines/$LEAF_ID/runs"
+        html shouldContain "/partials/pipelines/$LEAF_ID/usage"
+        html shouldContain "hx-trigger=\"click once\""
+        // The overview's key/value strip, with the facts the mock's legend names.
+        html shouldContain ">Datasources<"
+        html shouldContain ">Templates<"
+        html shouldContain ">Created<"
+        html shouldContain ">Last run<"
+        html shouldContain "sample-lake"
+        html shouldContain "demo/top_carrier.sql@1"
+        // No "via" chip: nothing records the surface a CREATE arrived on, so none is invented.
+        html shouldNotContain "via MCP"
+        html shouldNotContain "via UI"
+    }
+
+    @Test
+    fun `106 - the acting column renders version ROWS, never a table`() {
+        val html = render("partials/pipeline-versions") { fillDetail() }
+
+        html shouldContain "class=\"tplx-vrow\""
+        html shouldNotContain "<table"
+        html shouldContain "7 runs"
+        html shouldContain ">current<"
+    }
+
+    @Test
+    fun `106 - the header renders exactly the verbs the lifecycle allows`() {
+        // A draft over a release: Release yes; Delete no (101 purges the ENTITY only while the
+        // only version is a draft); Discard yes (the pointer names a release).
+        val overRelease = render("partials/pipeline-detail") { fillDetail() }
+        overRelease shouldContain "Release v2…"
+        overRelease shouldContain ">Discard<"
+        overRelease shouldNotContain ">Delete<"
+
+        // A never-released pipeline: Delete, and no Discard.
+        val draftOnly =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                setVariable("canDelete", true)
+                setVariable("canDiscardCurrent", false)
+                setVariable("versions", listOf(draftRow()))
+                setVariable("versionCount", 1)
+            }
+        draftOnly shouldContain ">Delete<"
+        draftOnly shouldNotContain ">Discard<"
+        draftOnly shouldContain "Release v2…"
+
+        // Nothing to release: no Release button at all.
+        val released =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                setVariable("releasableVersion", null)
+                setVariable("draftVersion", null)
+                setVariable("versions", listOf(releasedRow()))
+            }
+        released shouldNotContain "Release v"
+    }
+
+    @Test
+    fun `106 - every lifecycle button points at a REST verb 101 shipped, and swaps nothing`() {
+        val html = render("partials/pipeline-detail") { fillDetail() } + render("partials/pipeline-versions") { fillDetail() }
+
+        html shouldContain "data-verb-url=\"/api/v1/pipelines/$LEAF_ID/release\""
+        html shouldContain "data-verb-url=\"/api/v1/pipelines/$LEAF_ID/versions/1/discard\""
+        html shouldContain "data-verb-url=\"/api/v1/pipelines/$LEAF_ID/versions/2\""
+        // The hash precondition rides the button (versioning §4.2) — release what you tested.
+        html shouldContain "data-if-match=\"h2\""
+        // Every one carries a confirm, and none of them is a UI-only route.
+        html shouldContain "data-confirm="
+        html shouldNotContain "/partials/pipelines/$LEAF_ID/release"
+    }
+
+    @Test
+    fun `106 - the detail carries no inline style anywhere`() {
+        val html =
+            render("partials/pipeline-detail") { fillDetail() } +
+                render("partials/pipeline-versions") { fillDetail() } +
+                render("partials/pipeline-usage") { fillUsage() }
+
+        html shouldNotContain "style=\""
+    }
+
+    @Test
+    fun `106 - the usage tab names what a discard would be refused over, and claims no schedules`() {
+        val html = render("partials/pipeline-usage") { fillUsage() }
+
+        html shouldContain "Published endpoints"
+        html shouldContain "/api/x/rideshare"
+        html shouldContain "Pipelines invoking it"
+        html shouldContain "nyc/rollup"
+        html shouldContain "pins v1"
+        // 092 has not landed; a third empty heading would claim schedules were checked.
+        html shouldNotContain "Schedule"
+    }
+
+    @Test
+    fun `106 - the runs tab lists executions, newest first, each linking to its detail`() {
+        val html = render("partials/pipeline-runs") { fillRuns() }
+
+        html shouldContain "class=\"tplx-runrow\""
+        html shouldContain "/executions/$RUN_ID"
+        html shouldContain "data-status=\"SUCCESS\""
+        html shouldContain "MCP"
+        html shouldContain "4 minutes ago"
+    }
+
+    private fun WebContext.fillUsage() {
+        setVariable(
+            "usage",
+            UsageView(
+                endpoints = listOf(UsageView.EndpointUse("/rideshare", enabled = true, description = "Serves it.")),
+                parents = listOf(UsageView.ParentUse(UUID.randomUUID(), "nyc/rollup", 2, "child", 1)),
+            ),
+        )
+    }
+
+    private fun WebContext.fillRuns() {
+        val started = Instant.parse("2026-09-03T09:56:00Z")
+        setVariable(
+            "runs",
+            listOf(
+                ExecutionRecord(
+                    executionId = RUN_ID,
+                    pipelineId = LEAF_ID,
+                    pipelineVersion = 2,
+                    status = ExecutionStatus.SUCCESS,
+                    parametersJson = "{}",
+                    triggeredBy = ACTOR,
+                    triggeredVia = ExecutionTrigger.MCP,
+                    startedAt = started,
+                    durationMs = 3200,
+                    resultRowCount = 6,
+                ),
+            ),
+        )
+        setVariable("runActors", mapOf(ACTOR to "Muhammad"))
+        setVariable("runAgo", mapOf(RUN_ID to RelativeTime.since(started, Instant.parse("2026-09-03T10:00:00Z"))))
     }
 
     @Test
@@ -318,12 +477,21 @@ class PipelineExplorerRenderTest {
         setVariable("scopes", setOf("ADMIN"))
     }
 
+    /**
+     * The 106 detail model: the three regions in one fill, exactly as
+     * [PipelineBrowseModel.fillDetail] leaves it — a draft v2 over a released v1, which is the
+     * state where every header verb has something to decide (Release yes, Delete no because a
+     * release exists, Discard yes because the pointer names one).
+     */
     private fun WebContext.fillDetail() {
         setVariable("pipelineId", LEAF_ID)
         setVariable("pipeline", record(DEEP_PATH))
+        setVariable("folderPath", "nyc/mobility/")
+        setVariable("leafName", "revenue_by_borough")
         setVariable("workingVersion", 2)
         setVariable("draftVersion", 2)
-        setVariable("settings", PipelineSettings(TempdbSettings(StagingEngine.H2)))
+        setVariable("draftHash", "h2")
+        setVariable("stagingEngine", StagingEngine.H2)
         val startDate =
             Parameter(
                 LogicalType.DATE,
@@ -332,14 +500,44 @@ class PipelineExplorerRenderTest {
             )
         setVariable("parameters", mapOf("start_date" to startDate))
         setVariable("nodeCount", 3)
-        setVariable(
-            "versions",
-            listOf(
-                PipelineVersionRecord(LEAF_ID, 2, PipelineVersionStatus.DRAFT, "h2", Instant.parse("2026-09-02T10:00:00Z"), ACTOR),
-                PipelineVersionRecord(LEAF_ID, 1, PipelineVersionStatus.RELEASED, "h1", Instant.parse("2026-09-01T10:00:00Z"), ACTOR),
-            ),
-        )
+        setVariable("datasourceRows", listOf(DatasourceRowView("sample-lake", Dialect.POSTGRES)))
+        setVariable("templatePins", listOf(TemplatePinView("demo/top_carrier.sql", 1)))
+        setVariable("createdBy", "Muhammad")
+        setVariable("lastRun", null)
+        setVariable("lastRunAgo", null)
+        setVariable("lastRunBy", null)
+        setVariable("versions", listOf(draftRow(), releasedRow()))
+        setVariable("versionCount", 2)
+        setVariable("runCount", 7)
+        setVariable("usageCount", 0)
+        setVariable("releasableVersion", 2)
+        setVariable("canDelete", false)
+        setVariable("canDiscardCurrent", true)
     }
+
+    private fun draftRow() =
+        VersionRowView.of(
+            version = 2,
+            status = PipelineVersionStatus.DRAFT,
+            createdAt = Instant.parse("2026-09-02T10:00:00Z"),
+            actor = "Muhammad",
+            now = Instant.parse("2026-09-03T10:00:00Z"),
+            usage = 7,
+            usageUnit = "run",
+            isCurrent = false,
+        )
+
+    private fun releasedRow() =
+        VersionRowView.of(
+            version = 1,
+            status = PipelineVersionStatus.RELEASED,
+            createdAt = Instant.parse("2026-09-01T10:00:00Z"),
+            actor = "Muhammad",
+            now = Instant.parse("2026-09-03T10:00:00Z"),
+            usage = 1,
+            usageUnit = "run",
+            isCurrent = true,
+        )
 
     private fun WebContext.fillPage() {
         fillChrome()
@@ -397,6 +595,7 @@ class PipelineExplorerRenderTest {
     private companion object {
         const val DEEP_PATH = "nyc/mobility/revenue_by_borough"
         val LEAF_ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val RUN_ID: UUID = UUID.fromString("33333333-3333-3333-3333-333333333333")
         val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     }

@@ -1,12 +1,16 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.executor.ExecutionRecord
+import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.Dialect
 import org.springframework.ui.Model
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -36,6 +40,9 @@ import java.util.UUID
  */
 class TemplateBrowseModel(
     private val templates: TemplateRepository,
+    private val usage: TemplateUsageService,
+    private val executions: ExecutionRepository,
+    private val actors: ActorNames,
 ) {
     /**
      * Fills [model] for one **tree level** — [prefix] `null`/empty is the root — and returns
@@ -160,6 +167,138 @@ class TemplateBrowseModel(
         return WRAPPER_VIEW
     }
 
+    // -------------------------------------------------------------------------------------
+    // 106 — the detail pane's three regions, the pipelines explorer's twin
+    // -------------------------------------------------------------------------------------
+
+    /**
+     * Fills [model] for the SELECTED template's detail — header, reading column (Overview +
+     * Used by), acting column (Versions · Source · Runs) — and returns the view name.
+     *
+     * Versions and Source ride the FIRST PAINT because both are already in hand: the working
+     * version's body is one read and the version list is another, and a tab that costs nothing
+     * extra should not cost a round trip. Runs is the one lazy tab, for the same reason as the
+     * pipelines twin.
+     */
+    fun fillDetail(
+        model: Model,
+        workspaceId: UUID,
+        id: String,
+    ): String {
+        val template = templates.findWorking(workspaceId, id)
+        model.addAttribute("templateId", id)
+        model.addAttribute("template", template)
+        if (template == null) return DETAIL_VIEW
+
+        val cut = id.lastIndexOf('/')
+        model.addAttribute("folderPath", if (cut < 0) "" else id.substring(0, cut + 1))
+        model.addAttribute("leafName", if (cut < 0) id else id.substring(cut + 1))
+
+        val draft = templates.findDraftDetail(workspaceId, id)
+        // The CURRENT RELEASE, not the working version: "current" in a version row means the
+        // one a pin without a version would resolve to, which a draft never is.
+        val currentRelease = templates.findLatest(workspaceId, id)?.version
+        val versions = templates.listVersions(workspaceId, id)
+        val names = actors.lookup(versions.map { it.createdBy })
+        val inUse = usage.inUseCounts(workspaceId, id)
+        val now = Instant.now()
+        model.addAttribute("draftVersion", draft?.version)
+        model.addAttribute("draftHash", draft?.bodyHash)
+        model.addAttribute("inUse", inUse)
+        model.addAttribute(
+            "versions",
+            versions.map { v ->
+                VersionRowView.of(
+                    version = v.version,
+                    status = v.status,
+                    createdAt = v.createdAt,
+                    actor = names[v.createdBy] ?: ActorNames.fallback(v.createdBy),
+                    now = now,
+                    usage = inUse[v.version] ?: 0,
+                    usageUnit = "pipeline",
+                    isCurrent = v.version == currentRelease,
+                )
+            },
+        )
+        model.addAttribute("versionCount", versions.size)
+        model.addAttribute("releasableVersion", draft?.version)
+        model.addAttribute("canDelete", versions.size == 1 && draft != null)
+        model.addAttribute("excerpt", excerpt(template.body))
+        model.addAttribute("excerptTruncated", template.body.lineSequence().count() > EXCERPT_LINES)
+        model.addAttribute("interpolations", interpolations(template.body))
+
+        val pins = usage.referencedAnywhere(workspaceId, id)
+        model.addAttribute("usedBy", pins)
+        model.addAttribute("usedByCount", pins.map { it.pipelineId }.distinct().size)
+        model.addAttribute("runCount", pins.map { it.pipelineId }.distinct().size)
+        return DETAIL_VIEW
+    }
+
+    /**
+     * Fills [model] for the templates twin's Runs tab — the recent executions of the pipelines
+     * that pin this template.
+     *
+     * There is no execution → template edge in the database (an execution names a pipeline and
+     * a version, not the templates its nodes rendered), so this is derived: the pins give the
+     * pipelines, the pipelines give their runs, and the merged list is cut to
+     * [PipelineBrowseModel.RUNS_LIMIT]. The fan-out over pipelines is capped at
+     * [USED_BY_FANOUT] — a template pinned by 300 pipelines must not turn one tab into 300
+     * queries, and the tab's promise is "recent runs", not "every run".
+     *
+     * Visibility is the execution-history screen's: an admin sees the workspace's runs,
+     * everyone else their own.
+     */
+    fun fillRuns(
+        model: Model,
+        workspaceId: UUID,
+        id: String,
+        userId: UUID,
+        isAdmin: Boolean,
+    ): String {
+        val pipelineIds =
+            usage
+                .referencedAnywhere(workspaceId, id)
+                .map { it.pipelineId }
+                .distinct()
+                .take(USED_BY_FANOUT)
+        val rows =
+            pipelineIds
+                .flatMap { pipelineId ->
+                    if (isAdmin) {
+                        executions.findAll(workspaceId, pipelineId, limit = PipelineBrowseModel.RUNS_LIMIT)
+                    } else {
+                        executions.findByUser(workspaceId, userId, pipelineId, limit = PipelineBrowseModel.RUNS_LIMIT)
+                    }
+                }.sortedByDescending(ExecutionRecord::startedAt)
+                .take(PipelineBrowseModel.RUNS_LIMIT)
+        model.addAttribute("runs", rows)
+        model.addAttribute("runActors", actors.lookup(rows.map { it.triggeredBy }))
+        val now = Instant.now()
+        model.addAttribute("runAgo", rows.associate { it.executionId to RelativeTime.since(it.startedAt, now) })
+        model.addAttribute("runPipelines", rows.associate { it.executionId to it.pipelineId })
+        return RUNS_VIEW
+    }
+
+    /** The first [EXCERPT_LINES] lines of the current body — the Overview's peek at the source. */
+    private fun excerpt(body: String): String = body.lineSequence().take(EXCERPT_LINES).joinToString("\n")
+
+    /**
+     * The distinct leading identifiers the body interpolates: `start_date` from a
+     * `start_date` interpolation, `row` from a `row.borough` one.
+     *
+     * This is a **derived reading, not a declared contract**: a template declares no parameter
+     * schema anywhere in this system (only a pipeline does), so the honest thing to show is
+     * what the text references, labelled as that. Directives (`<#if …>`) are deliberately not
+     * scanned — a loop variable is not an input, and listing one would invent a parameter.
+     */
+    private fun interpolations(body: String): List<String> =
+        INTERPOLATION
+            .findAll(body)
+            .map { it.groupValues[1] }
+            .distinct()
+            .sorted()
+            .toList()
+
     companion object {
         /** The templates screen's page size — the value the flat list has always used. */
         const val PAGE_SIZE = 25
@@ -176,6 +315,17 @@ class TemplateBrowseModel(
         const val WRAPPER_VIEW = "partials/templates"
         const val LEVEL_VIEW = "partials/template-tree-level"
         const val SEARCH_VIEW = "partials/template-search"
+        const val DETAIL_VIEW = "partials/template-detail"
+        const val RUNS_VIEW = "partials/template-runs"
+
+        /** The Overview's source peek — the mock's "first 12 lines, then open full source". */
+        const val EXCERPT_LINES = 12
+
+        /** How many pinning pipelines the Runs tab will ask for executions (see [fillRuns]). */
+        const val USED_BY_FANOUT = 20
+
+        /** A Freemarker interpolation's leading identifier — the scan [interpolations] runs. */
+        private val INTERPOLATION = Regex("""\$\{\s*([A-Za-z_][A-Za-z0-9_]*)""")
 
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16

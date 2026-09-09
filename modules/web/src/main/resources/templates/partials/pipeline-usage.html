@@ -1,0 +1,39 @@
+<!-- The acting column's USAGE tab (106) — what depends on this pipeline, which is the same
+     thing as "what the server will refuse a discard over".
+
+     The parent half runs the SAME query 101's refusal runs
+     (`PipelineRepository.findLiveParentsPinningVersion`, the evidence behind
+     `pipeline.version.pinned`), asked once per version. So the list a user reads before
+     pressing Discard is the list the server decides on — not a second implementation of the
+     rule that can drift from it.
+
+     SCHEDULES ARE NOT HERE. 092 has not landed; there is no schedule table to query, and a
+     third empty heading would state that schedules were checked when nothing was. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="usage" class="tplx-usage">
+  <p class="ds-empty-description" th:if="${usage.total == 0}">
+    Nothing depends on this pipeline — no published endpoint serves it and no live pipeline pins it.
+  </p>
+
+  <th:block th:if="${!#lists.isEmpty(usage.endpoints)}">
+    <h4 class="tplx-usage-h">Published endpoints</h4>
+    <div class="tplx-vrow" th:each="e : ${usage.endpoints}">
+      <span class="u-mono" th:text="${'/api/x' + e.path}">/api/x/rideshare</span>
+      <span class="ds-badge" th:classappend="${e.enabled} ? 'ds-badge-success' : 'ds-badge-default'"
+            th:text="${e.enabled} ? 'enabled' : 'disabled'">enabled</span>
+      <span class="tplx-vmeta" th:text="${e.description}">Serves the borough report.</span>
+    </div>
+  </th:block>
+
+  <th:block th:if="${!#lists.isEmpty(usage.parents)}">
+    <h4 class="tplx-usage-h">Pipelines invoking it</h4>
+    <div class="tplx-vrow" th:each="p : ${usage.parents}">
+      <a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId} + '/editor'}"
+         th:text="${p.pipelineName}">nyc/rollup</a>
+      <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + p.pipelineVersion}">v2</span>
+      <span class="tplx-vmeta">
+        <span th:text="'node ' + ${p.nodeId}">node child</span>
+        <span> · </span><span th:text="'pins v' + ${p.pinnedVersion}">pins v1</span>
+      </span>
+    </div>
+  </th:block>
+</div>

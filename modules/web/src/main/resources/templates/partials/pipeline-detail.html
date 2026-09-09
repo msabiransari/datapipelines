@@ -1,19 +1,31 @@
-<!-- The RIGHT pane's content: the SELECTED pipeline (067).
+<!-- The RIGHT pane's content: the SELECTED pipeline (067, reshaped by 106 to the owner's
+     approved mock — layout B, "reading | acting").
 
      Swapped (innerHTML) into #pipeline-detail by /partials/pipelines/detail; selection never
      re-renders the tree, by construction: this fragment contains no tree markup, no tree swap
      target and no out-of-band swap — the render guard pins exactly that.
 
-     READ-ONLY (R10). There is no create, rename, move, delete or edit control here. A
-     pipeline's name is its identity (§4.5) and the editor owns every write, so the one action
-     is "Open in editor".
+     THREE REGIONS, server-rendered on selection:
+       1. header  — the folder path as an eyebrow, the leaf as the title, the actions right.
+       2. reading — Overview (chips, description at a 78ch measure, the key/value strip) and
+                    Parameters (a table as wide as its content, with its own scroll).
+       3. acting  — ONE tabbed card: Versions (first paint) · Runs · Usage (each loaded once,
+                    on the tab's first click — a tab nobody opens costs nothing).
 
-     `pipeline` is null when the id no longer names a live pipeline (deleted in another tab, a
-     stale pane): the pane says so quietly rather than rendering a header full of nothing.
+     The pre-106 "Settings" table is gone: one row of one column was a table pretending to be
+     a section, and the staging engine is a chip in Overview now.
 
      The version shown is the WORKING version (versioning §7) — the draft when one exists, else
-     the current released — so opening the editor from here shows what this pane just showed. -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="detail" class="tplx-detail-content">
+     the current released — so opening the editor from here shows what this pane just showed.
+
+     WRITES. This pane is no longer strictly read-only: 101's lifecycle verbs live here, which
+     is where the owner asked for them. Every one of them posts to the REST verb 101 shipped
+     (never to a UI-only route), carries a plain confirm, and swaps nothing — explorer-detail.js
+     re-fetches this fragment when the verb succeeds, so the pane always shows server truth.
+     102's confirm partial had not merged when this was built; when it does, the `data-confirm`
+     strings below are the seam it replaces. Authoring itself is still the editor's. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="detail" class="tplx-detail-content"
+     th:attr="data-detail-url=${pipeline == null} ? null : @{/partials/pipelines/detail(id=${pipeline.id})}">
   <th:block th:if="${pipeline == null}">
     <div class="ds-empty">
       <p class="ds-empty-title">Pipeline not found</p>
@@ -24,25 +36,38 @@
   </th:block>
 
   <th:block th:if="${pipeline != null}">
+    <!-- ============================================================== 1. header -->
     <header class="tplx-detail-header">
-      <!-- The FULL path, and it rides on `title` too — this is the one place the whole screen
-           shows it untruncated. -->
-      <h2 class="tplx-detail-path" th:text="${pipeline.name}" th:title="${pipeline.name}">nyc/mobility/revenue_by_borough</h2>
-      <p class="tplx-detail-meta">
-        <span th:text="${pipeline.displayName}">Revenue by borough</span>
-        <span th:if="${!#strings.isEmpty(pipeline.description)}"
-              class="tplx-detail-description" th:text="${pipeline.description}">What this pipeline answers.</span>
-      </p>
-      <div class="tplx-detail-badges">
-        <!-- D55: `workingVersion` is the draft's number for a never-released pipeline, and null
-             only when its sole draft was discarded — then there is no version to name. -->
-        <span class="ds-badge ds-badge-default" th:if="${workingVersion != null}"
-              th:text="${'v' + workingVersion}">v1</span>
-        <span class="ds-badge ds-badge-default" th:text="${nodeCount + (nodeCount == 1 ? ' node' : ' nodes')}">3 nodes</span>
-        <span th:if="${draftVersion != null}" class="ds-badge ds-badge-warning"
-              th:text="'draft v' + ${draftVersion} + ' pending release'"
-              title="A draft exists; release it from the editor to publish."></span>
+      <div class="tplx-detail-identity">
+        <!-- The path is an EYEBROW: it locates the leaf, it is not the leaf. The FULL name
+             still rides on `title` — this is the one place the whole screen shows it. -->
+        <p class="tplx-detail-path" th:text="${folderPath}" th:title="${pipeline.name}">demo/</p>
+        <h2 class="tplx-detail-title" th:text="${leafName}" th:title="${pipeline.name}">top_rideshare_by_borough</h2>
+      </div>
+      <div class="tplx-detail-actions">
         <span class="htmx-indicator ds-spinner" id="pipeline-detail-spinner" aria-hidden="true"></span>
+
+        <!-- 101 §7: the ENTITY purge, offered only while the only version is a draft — the
+             one state the server accepts it in. A purge takes the row and its executions, so
+             the tree must lose the leaf: this one reloads rather than re-rendering the pane. -->
+        <button th:if="${canDelete}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+                data-verb="DELETE" data-after="reload"
+                th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id}},
+                         data-confirm='Delete ' + ${pipeline.name} + '? Its draft and every execution of it are removed permanently.'">Delete</button>
+
+        <!-- A released pipeline is DISCARDED, not deleted (101 §7): reversible, pointer per
+             D60, and refused while anything live pins the version — the Usage tab shows what. -->
+        <button th:if="${!canDelete and canDiscardCurrent}" type="button"
+                class="ds-button ds-button-ghost ds-button-sm tplx-danger" data-verb="POST"
+                th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${pipeline.currentVersion} + '/discard'},
+                         data-confirm='Discard v' + ${pipeline.currentVersion} + '? It can be restored later.'">Discard</button>
+
+        <button th:if="${releasableVersion != null}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-verb="POST" th:text="'Release v' + ${releasableVersion} + '…'"
+                th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/release'},
+                         data-if-match=${draftHash},
+                         data-confirm='Release v' + ${releasableVersion} + '? A released version is immutable.'">Release v1…</button>
+
         <!-- The editor is a full document load, never a boosted swap: its Alpine root
              (x-data="pipelineEditor()") is initialised by alpine.min.js the moment the
              swapped markup lands, racing the editor scripts that define it — every
@@ -53,73 +78,129 @@
       </div>
     </header>
 
-    <!-- SETTINGS (§5). The staging engine is the one setting worth a pane: it decides where
-         every tempdb node's data lands, and it is the first thing someone reads a pipeline to
-         find out. Absent settings render nothing at all — an empty settings table would be
-         noise, not information. -->
-    <th:block th:if="${settings != null and settings.tempdb != null}">
-      <h3 class="tplx-detail-section">Settings</h3>
-      <table class="ds-table tpl-versions-table">
-        <tbody>
-          <tr>
-            <td>tempdb engine</td>
-            <td th:text="${settings.tempdb.engine}">H2</td>
-          </tr>
-        </tbody>
-      </table>
-    </th:block>
+    <div class="tplx-detail-body">
+      <!-- ========================================================== 2. reading -->
+      <div class="tplx-read">
+        <section class="ds-card">
+          <div class="app-card-h">
+            <h3>Overview</h3>
+            <span class="app-card-note" th:if="${workingVersion != null}"
+                  th:text="'working version v' + ${workingVersion}">working version v1</span>
+          </div>
+          <div class="app-card-b">
+            <div class="app-chips">
+              <span class="ds-badge ds-badge-default app-chip-mono" th:if="${workingVersion != null}"
+                    th:text="${'v' + workingVersion}">v1</span>
+              <span th:if="${draftVersion != null}" class="ds-badge ds-badge-warning"
+                    title="A draft exists; release it to publish.">draft · pending release</span>
+              <span th:if="${draftVersion == null and pipeline.currentVersion != null}"
+                    class="ds-badge ds-badge-success">released</span>
+              <span class="ds-badge ds-badge-default"
+                    th:text="${nodeCount + (nodeCount == 1 ? ' node' : ' nodes')}">3 nodes</span>
+              <span class="ds-badge ds-badge-default app-chip-mono" th:if="${stagingEngine != null}"
+                    th:text="'tempdb · ' + ${stagingEngine}">tempdb · H2</span>
+              <span class="ds-badge ds-badge-default"
+                    th:text="${#lists.size(datasourceRows)} + (${#lists.size(datasourceRows)} == 1 ? ' datasource' : ' datasources')">3 datasources</span>
+            </div>
 
-    <!-- PARAMETERS (§6). The declared parameters ARE the pipeline's calling convention — what
-         an execute call may pass and what every template renders against — so they belong in
-         the pane rather than one click deeper in the editor. -->
-    <h3 class="tplx-detail-section">Parameters</h3>
-    <p class="ds-empty-description" th:if="${#maps.isEmpty(parameters)}">This pipeline declares no parameters.</p>
-    <table class="ds-table tpl-versions-table" th:unless="${#maps.isEmpty(parameters)}">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Required</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr th:each="e : ${parameters}">
-          <td th:text="${e.key}">start_date</td>
-          <td th:text="${e.value.type}">DATE</td>
-          <td th:text="${e.value.required} ? 'yes' : 'no'">no</td>
-          <td th:text="${e.value.default == null} ? '—' : ${e.value.default.asText()}">2024-01-01</td>
-        </tr>
-      </tbody>
-    </table>
+            <p class="tplx-measure" th:if="${!#strings.isEmpty(pipeline.description)}"
+               th:text="${pipeline.description}">What this pipeline answers.</p>
 
-    <!-- VERSIONS, newest first, with their lifecycle badges (versioning §6). A version is
-         immutable, so nothing here is editable in place. -->
-    <h3 class="tplx-detail-section">Versions</h3>
-    <table class="ds-table tpl-versions-table">
-      <thead>
-        <tr>
-          <th class="num">Version</th>
-          <th>Status</th>
-          <th>Created</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr th:each="v : ${versions}">
-          <td class="num" th:text="${'v' + v.version}">v1</td>
-          <td>
-            <span class="ds-badge"
-                  th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : 'ds-badge-warning'"
-                  th:text="${v.status}">RELEASED</span>
-          </td>
-          <td th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
-          <td>
-            <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
-               th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open</a>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+            <dl class="tplx-kv">
+              <dt>Datasources</dt>
+              <dd>
+                <th:block th:if="${#lists.isEmpty(datasourceRows)}">—</th:block>
+                <th:block th:each="d, i : ${datasourceRows}"><a class="u-mono"
+                     th:href="@{'/datasources/' + ${d.name}}" th:text="${d.name}">sample-lake</a><span
+                     class="u-muted" th:text="' (' + ${d.dialect} + ')'"> (LAKE)</span><span
+                     th:if="${!i.last}" class="u-muted"> · </span></th:block>
+              </dd>
+              <dt>Templates</dt>
+              <dd>
+                <th:block th:if="${#lists.isEmpty(templatePins)}">—</th:block>
+                <th:block th:each="t, i : ${templatePins}"><a class="u-mono"
+                     th:href="@{/templates(q=${t.id})}" th:text="${t.label}">demo/x.sql@1</a><span
+                     th:if="${!i.last}" class="u-muted"> · </span></th:block>
+              </dd>
+              <dt>Created</dt>
+              <dd>
+                <span th:text="${#temporals.format(pipeline.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-09 01:22</span>
+                <span class="u-muted"> · by </span><span th:text="${createdBy}">Muhammad</span>
+              </dd>
+              <dt>Last run</dt>
+              <dd>
+                <th:block th:if="${lastRun == null}"><span class="u-muted">never run</span></th:block>
+                <a th:if="${lastRun != null}" th:href="@{'/executions/' + ${lastRun.executionId}}" class="tplx-lastrun">
+                  <span class="app-chip" th:attr="data-status=${lastRun.status.name()}"
+                        th:classappend="${lastRun.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${lastRun.status.name() == 'FAILED'} ? 'app-chip-bad' : (${lastRun.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(lastRun.status.name()))}">Success</span></span>
+                  <span th:text="${lastRun.durationMs != null} ? ${lastRun.durationMs} + ' ms' : '—'">3200 ms</span>
+                  <span class="u-muted"> · </span>
+                  <span th:text="${lastRun.resultRowCount != null} ? ${lastRun.resultRowCount} + ' rows' : '— rows'">6 rows</span>
+                  <span class="u-muted"> · </span>
+                  <span th:text="${lastRunAgo}" th:title="${#temporals.format(lastRun.startedAt, 'yyyy-MM-dd HH:mm')}">4 mins ago</span>
+                </a>
+              </dd>
+            </dl>
+          </div>
+        </section>
+
+        <!-- The declared parameters ARE the pipeline's calling convention — what an execute
+             call may pass and what every template renders against — so they belong in the
+             pane rather than one click deeper in the editor. The table is as wide as its
+             content (never the full column) and takes its own scroll past 22rem. -->
+        <section class="ds-card">
+          <div class="app-card-h">
+            <h3>Parameters</h3>
+            <span class="app-card-note"
+                  th:text="${#maps.size(parameters)} + (${#maps.size(parameters)} == 1 ? ' declared' : ' declared')">2 declared</span>
+          </div>
+          <p class="ds-empty-description app-card-b" th:if="${#maps.isEmpty(parameters)}">This pipeline declares no parameters.</p>
+          <div class="tplx-scroll" th:unless="${#maps.isEmpty(parameters)}">
+            <table class="ds-table tplx-fit-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th></tr>
+              </thead>
+              <tbody>
+                <tr th:each="e : ${parameters}">
+                  <td class="u-mono">
+                    <span th:text="${e.key}">start_date</span>
+                    <span class="ds-badge ds-badge-warning" th:if="${e.value.required}">required</span>
+                  </td>
+                  <td class="u-mono" th:text="${e.value.type}">DATE</td>
+                  <td class="u-mono" th:text="${e.value.default == null} ? '—' : ${e.value.default.asText()}">2024-01-01</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- =========================================================== 3. acting -->
+      <div class="tplx-act">
+        <section class="ds-card tplx-tabcard" data-explorer-tabs>
+          <div class="tplx-tabs" role="tablist" aria-label="Pipeline details">
+            <button type="button" class="tplx-tab is-on" role="tab" aria-selected="true"
+                    data-tab-panel="pipeline-tab-versions">Versions
+              <b th:text="${versionCount}">1</b></button>
+            <button type="button" class="tplx-tab" role="tab" aria-selected="false"
+                    data-tab-panel="pipeline-tab-runs"
+                    th:attr="hx-get=@{'/partials/pipelines/' + ${pipeline.id} + '/runs'}"
+                    hx-target="#pipeline-tab-runs" hx-swap="innerHTML" hx-trigger="click once">Runs
+              <b th:text="${runCount}">7</b></button>
+            <button type="button" class="tplx-tab" role="tab" aria-selected="false"
+                    data-tab-panel="pipeline-tab-usage"
+                    th:attr="hx-get=@{'/partials/pipelines/' + ${pipeline.id} + '/usage'}"
+                    hx-target="#pipeline-tab-usage" hx-swap="innerHTML" hx-trigger="click once">Usage
+              <b th:text="${usageCount}">0</b></button>
+          </div>
+
+          <div class="tplx-tabpanel" id="pipeline-tab-versions" role="tabpanel">
+            <div th:replace="~{partials/pipeline-versions :: versions}"></div>
+          </div>
+          <div class="tplx-tabpanel" id="pipeline-tab-runs" role="tabpanel" hidden></div>
+          <div class="tplx-tabpanel" id="pipeline-tab-usage" role="tabpanel" hidden></div>
+        </section>
+      </div>
+    </div>
   </th:block>
 </div>

@@ -1,49 +1,60 @@
-<!-- A leaf's versions, newest first, with their lifecycle badges
-     (template-hierarchy-design §9.2; versioning §6, V6__version_lifecycle.sql).
+<!-- A leaf's versions, newest first (template-hierarchy-design §9.2; versioning §6), rendered
+     by 106 as the acting column's Versions tab.
 
-     `uq_template_versions_one_draft` permits at most one DRAFT per template, so the status is
-     DERIVED from the draft pointer rather than re-queried per row: the version the pointer
-     names is the DRAFT, every other version is RELEASED.
+     COMPACT ROWS, NOT A TABLE — the pipelines twin's reasoning verbatim: this is the narrow
+     column of a two-column detail, and a five-column table there wraps its headers and hides
+     its last column behind a scroll.
 
-     `inUse[v.version]` is the 040 D6 per-version in-use count — distinct pipelines pinning
-     that version in their working version, from the same used-by service the MCP
-     `templates_used_by` tool and the `template.in_use` delete guard read. A version with no
-     working-version pin renders an em dash, not a zero: "nobody uses this" is the
-     retirement-ready signal, and the dash keeps the zero-pinned rows quiet.
+     The status is the VERSION ROW's own now (101 put DISCARDED on template versions too), not
+     derived from the draft pointer: deriving it was correct while DRAFT/RELEASED were the only
+     two states and became a lie the moment a third existed.
 
-     There is no rename, move or delete affordance here, and no version is editable in place —
-     a version is immutable (templates §5.1) and a name is its identity (§4.5). -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tpl-versions">
-  <table class="ds-table tpl-versions-table">
-    <thead>
-      <tr>
-        <th class="num">Version</th>
-        <th>Status</th>
-        <th class="num">In use</th>
-        <th>Created</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr th:each="v : ${versions}">
-        <td class="num" th:text="${'v' + v.version}">v1</td>
-        <td>
-          <span th:if="${draftVersion != null and draftVersion == v.version}"
-                class="ds-badge ds-badge-warning">DRAFT</span>
-          <span th:unless="${draftVersion != null and draftVersion == v.version}"
-                class="ds-badge ds-badge-success">RELEASED</span>
-        </td>
-        <td class="num">
-          <span th:if="${inUse != null and inUse[v.version] != null}"
-                th:text="${inUse[v.version] + (inUse[v.version] == 1 ? ' pipeline' : ' pipelines')}">2 pipelines</span>
-          <span th:unless="${inUse != null and inUse[v.version] != null}">—</span>
-        </td>
-        <td th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
-        <td>
-          <a class="ds-button ds-button-ghost ds-button-sm"
-             th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open</a>
-        </td>
-      </tr>
-    </tbody>
-  </table>
+     The "in use" number is the 040 D6 per-version count — distinct pipelines pinning that
+     version in their working version, from the same used-by service the MCP `templates_used_by`
+     tool and the `template.in_use` delete guard read. It is worded by the model
+     ([VersionRowView.usageLabel]) so that this partial and the pipelines one cannot disagree
+     about what the number counts. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist">
+  <p class="ds-empty-description" th:if="${#lists.isEmpty(versions)}">This template has no versions.</p>
+
+  <div class="tplx-vrow" th:each="v : ${versions}">
+    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + v.version}">v1</span>
+    <span class="ds-badge"
+          th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : (${v.status.name() == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-default')"
+          th:text="${v.status}">RELEASED</span>
+    <span class="tplx-vmeta">
+      <span th:text="${v.createdAgo}" th:title="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">3 days ago</span>
+      <span> · </span><span th:text="${v.actor}">Muhammad</span>
+      <span> · </span><span th:text="${v.usageLabel}">2 pipelines</span>
+      <span th:if="${v.isCurrent}"> · </span><span th:if="${v.isCurrent}" class="tplx-current">current</span>
+    </span>
+    <span class="tplx-vacts">
+      <a class="ds-button ds-button-ghost ds-button-sm"
+         th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open</a>
+
+      <button th:if="${v.canRelease}" type="button" class="ds-button ds-button-ghost ds-button-sm" data-verb="POST"
+              th:attr="data-verb-url=@{/api/v1/templates/release},
+                       data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;}',
+                       data-if-match=${draftHash},
+                       data-confirm='Release v' + ${v.version} + '? A released version is immutable.'">Release…</button>
+
+      <button th:if="${v.canPurge}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+              data-verb="DELETE"
+              th:attr="data-verb-url=@{/api/v1/templates/version(name=${templateId},version=${v.version})},
+                       data-confirm='Discard draft v' + ${v.version} + '? It is removed permanently.',
+                       data-after=${versionCount == 1} ? 'reload' : null">Discard draft</button>
+
+      <button th:if="${v.canDiscard}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+              data-verb="POST"
+              th:attr="data-verb-url=@{/api/v1/templates/version/discard},
+                       data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;,&quot;version&quot;:' + ${v.version} + '}',
+                       data-confirm='Discard v' + ${v.version} + '? It can be restored later.'">Discard</button>
+
+      <button th:if="${v.canRestore}" type="button" class="ds-button ds-button-ghost ds-button-sm"
+              data-verb="POST"
+              th:attr="data-verb-url=@{/api/v1/templates/version/restore},
+                       data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;,&quot;version&quot;:' + ${v.version} + '}',
+                       data-confirm='Restore v' + ${v.version} + ' to RELEASED?'">Restore</button>
+    </span>
+  </div>
 </div>

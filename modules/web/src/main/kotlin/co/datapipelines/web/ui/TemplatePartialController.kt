@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
@@ -48,7 +49,6 @@ class TemplatePartialController(
     private val browse: TemplateBrowseModel,
     private val validator: TemplateValidator,
     private val authoring: AuthoringGuard,
-    private val usage: co.datapipelines.templates.TemplateUsageService,
 ) {
     @GetMapping("/partials/templates")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -81,47 +81,50 @@ class TemplatePartialController(
     }
 
     /**
-     * The SELECTED template, for the explorer's right pane (058) — the header (full path,
-     * badges, Open-in-editor) and the leaf's versions, newest first, with their RELEASED /
-     * DRAFT lifecycle badges (versioning §6, `V6__version_lifecycle.sql`).
+     * The SELECTED template, for the explorer's right pane (058, reshaped by 106) — the
+     * header (path eyebrow, leaf name, Open in editor and 101's verbs), the READING column
+     * (Overview with the source excerpt, and Used by) and the ACTING column
+     * (Versions · Source · Runs).
      *
      * A selection swaps this fragment into `#template-detail` with `innerHTML` and touches
-     * nothing else: the tree pane's DOM is never re-rendered by a selection, which is the
-     * whole point of the two-pane layout.
+     * nothing else: the tree pane's DOM is never re-rendered by a selection.
      *
-     * The status is derived, not re-queried per row: `uq_template_versions_one_draft` permits
-     * at most one DRAFT per template, so the one version the draft pointer names is the DRAFT
-     * and every other version is RELEASED.
-     *
-     * Each row also carries its **in-use count** — distinct pipelines pinning that version in
-     * their working version (040 D6), from the same used-by service the MCP tool and the
-     * delete guard read. A version with no working-version pin renders "—" (nothing to act
-     * on), not a zero: the count's unit is the pipeline, and "no one uses this" is the
-     * retirement-ready signal an author is looking for.
-     *
-     * A name that no longer names a live template (deleted in another tab, a stale pane)
-     * renders the pane's quiet not-found state — never a header full of nothing, and never
-     * an error page for what is an ordinary read.
+     * The route keeps its historical spelling (`/versions`) — it is what every leaf, every
+     * search row and the explorer script already point at, and renaming it would be a
+     * migration for no reader's benefit.
      *
      * §9.6: the name is a query parameter. It may contain `/`, and an encoded `%2F` in a URL
-     * **path segment** is refused 400 by the container below routing — no handler could reach
-     * past it.
+     * **path segment** is refused 400 by the container below routing — which is why the two
+     * fragments below take `name` as a parameter where the pipelines twin can use `{id}`.
      */
     @GetMapping("/partials/templates/versions")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun versions(
         model: Model,
         @RequestParam name: String,
+    ): String = browse.fillDetail(model, currentPrincipal().requireWorkspace().id, name)
+
+    /**
+     * The acting column's **Runs** tab — recent executions of the pipelines pinning this
+     * template, loaded on the tab's first click.
+     *
+     * Visibility is the execution-history screen's, unchanged: an admin sees the workspace's
+     * runs, everyone else sees their own.
+     */
+    @GetMapping("/partials/templates/runs")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    fun runs(
+        model: Model,
+        @RequestParam name: String,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        model.addAttribute("templateId", name)
-        // D55/§7.1: the working version — a never-released template has no released projection,
-        // and the detail pane must show the draft rather than an empty card.
-        model.addAttribute("template", templates.findWorking(workspaceId, name))
-        model.addAttribute("versions", templates.listVersions(workspaceId, name))
-        model.addAttribute("draftVersion", templates.findDraftDetail(workspaceId, name)?.version)
-        model.addAttribute("inUse", usage.inUseCounts(workspaceId, name))
-        return "partials/template-detail"
+        val principal = currentPrincipal()
+        return browse.fillRuns(
+            model,
+            principal.requireWorkspace().id,
+            name,
+            principal.userId,
+            Scope.satisfies(principal.scopes, Scope.ADMIN),
+        )
     }
 
     /**

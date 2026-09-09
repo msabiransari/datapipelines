@@ -8,7 +8,6 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -41,9 +40,8 @@ class TemplatePartialControllerTest {
     private val templates = mockk<TemplateRepository>()
     private val browse = mockk<TemplateBrowseModel>(relaxed = true)
     private val validator = mockk<TemplateValidator>(relaxed = true)
-    private val usage = mockk<TemplateUsageService>()
     private val controller =
-        TemplatePartialController(templates, browse, validator, AuthoringGuard(true), usage)
+        TemplatePartialController(templates, browse, validator, AuthoringGuard(true))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -116,27 +114,26 @@ class TemplatePartialControllerTest {
     // ------------------------------------------------------------ versions
 
     @Test
-    fun `the versions pane carries template, versions, the draft pointer and in-use counts`() {
-        val template = template("acme/rev").copy(version = 3)
-        val versions =
-            listOf(
-                co.datapipelines.templates.TemplateVersionSummary("acme/rev", 3, java.time.Instant.EPOCH, userId),
-                co.datapipelines.templates.TemplateVersionSummary("acme/rev", 2, java.time.Instant.EPOCH, userId),
-            )
-        // D55/§7.1: the detail pane reads the WORKING version — a never-released template has
-        // no released projection, and the pane must show its draft rather than an empty card.
-        every { templates.findWorking(workspaceId, "acme/rev") } returns template
-        every { templates.listVersions(workspaceId, "acme/rev") } returns versions
-        every { templates.findDraftDetail(workspaceId, "acme/rev") } returns null
-        every { usage.inUseCounts(workspaceId, "acme/rev") } returns mapOf(3 to 4)
+    fun `the detail route is the model's fillDetail over the active workspace, and nothing else`() {
+        // 106 moved the detail's every read into TemplateBrowseModel.fillDetail — one call, all
+        // three regions. What this controller still owns is the workspace it asks about, so
+        // that is what is asserted; the fill's own contents are TemplateBrowseModel's tests.
+        every { browse.fillDetail(model, workspaceId, "acme/rev") } returns "partials/template-detail"
 
-        controller.versions(model, name = "acme/rev")
+        controller.versions(model, name = "acme/rev") shouldBe "partials/template-detail"
 
-        controller.versions(ExtendedModelMap(), "acme/rev") shouldBe "partials/template-detail"
-        model["template"] shouldBe template
-        model["versions"] shouldBe versions
-        model["draftVersion"] shouldBe null
-        model["inUse"] shouldBe mapOf(3 to 4)
+        io.mockk.verify(exactly = 1) { browse.fillDetail(model, workspaceId, "acme/rev") }
+    }
+
+    @Test
+    fun `the runs route passes the caller's identity, so a non-admin sees only their own runs`() {
+        // The execution-history screen's visibility rule, unchanged: a second surface over the
+        // same rows must not be a wider one. The principal here holds AUTHOR, not ADMIN.
+        every { browse.fillRuns(model, workspaceId, "acme/rev", userId, false) } returns "partials/template-runs"
+
+        controller.runs(model, name = "acme/rev") shouldBe "partials/template-runs"
+
+        io.mockk.verify(exactly = 1) { browse.fillRuns(model, workspaceId, "acme/rev", userId, false) }
     }
 
     // ------------------------------------------------------------ create
@@ -256,7 +253,6 @@ class TemplatePartialControllerTest {
                 browse,
                 validator,
                 AuthoringGuard(false),
-                usage,
             )
         every { templates.existsId(workspaceId, "acme/y") } returns false
 

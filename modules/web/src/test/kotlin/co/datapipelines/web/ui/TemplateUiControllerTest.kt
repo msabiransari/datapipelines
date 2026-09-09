@@ -37,7 +37,7 @@ class TemplateUiControllerTest {
     private val repository = mockk<TemplateRepository>()
     private val themeResolver = mockk<ThemeResolver>()
     private val pipelines = mockk<PipelineRepository>()
-    private val browse = TemplateBrowseModel(repository)
+    private val browse = co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, pipelines))
     private val controller = TemplateUiController(browse, themeResolver)
     private val partialController =
         TemplatePartialController(
@@ -45,7 +45,6 @@ class TemplateUiControllerTest {
             browse,
             mockk<TemplateValidator>(),
             mockk<AuthoringGuard>(),
-            TemplateUsageService(repository, pipelines),
         )
 
     private val userId = UUID.randomUUID()
@@ -273,7 +272,10 @@ class TemplateUiControllerTest {
         every { repository.listVersions(workspaceId, name) } returns
             listOf(co.datapipelines.templates.TemplateVersionSummary(name, 1, java.time.Instant.parse("2026-09-01T00:00:00Z"), userId))
         every { repository.findDraftDetail(workspaceId, name) } returns null
+        // 106: "current" in a version row is the CURRENT RELEASE, not the working version.
+        every { repository.findLatest(workspaceId, name) } returns template(name)
         every { pipelines.countWorkingTemplatePinsByPinnedVersion(workspaceId, name) } returns mapOf(1 to 2)
+        every { pipelines.findAnyVersionTemplatePins(workspaceId, name) } returns emptyList()
 
         val model = ExtendedModelMap()
         val viewName = partialController.versions(model, name)
@@ -290,9 +292,6 @@ class TemplateUiControllerTest {
     fun `a name with no live template answers the quiet not-found detail, not an error`() {
         authenticate()
         every { repository.findWorking(workspaceId, "gone.sql") } returns null
-        every { repository.listVersions(workspaceId, "gone.sql") } returns emptyList()
-        every { repository.findDraftDetail(workspaceId, "gone.sql") } returns null
-        every { pipelines.countWorkingTemplatePinsByPinnedVersion(workspaceId, "gone.sql") } returns emptyMap()
 
         val model = ExtendedModelMap()
         val viewName = partialController.versions(model, "gone.sql")

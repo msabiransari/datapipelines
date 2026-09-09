@@ -420,8 +420,8 @@ class ExplorerStressBrowserTest : BrowserSuite() {
                 page.click(leafButton("nyc/lib/mobility/stations"))
             }
             throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-path")
-            page.locator("#template-detail h2.tplx-detail-path").innerText() shouldBe "nyc/lib/mobility/stations"
+            page.waitForSelector("#template-detail h2.tplx-detail-title")
+            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/stations"
             page.locator("#template-detail").innerText() shouldNotContain "trips"
             // The mechanism, pinned: A's held request was ABORTED by hx-sync replace (a failed
             // partial), not merely released-and-ordered behind B's — an ordering-only defense
@@ -436,7 +436,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
                 }
             }
             throttle.releaseAll()
-            page.locator("#template-detail h2.tplx-detail-path").innerText() shouldBe "nyc/lib/mobility/routes"
+            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/routes"
 
             // ---- pipelines: same contract, second explorer. ledger (A) then settlement (B).
             page.navigate("$baseUrl/pipelines")
@@ -452,8 +452,8 @@ class ExplorerStressBrowserTest : BrowserSuite() {
                 page.click(leafButton("trade/settlement"))
             }
             throttle.releaseAll()
-            page.waitForSelector("#pipeline-detail h2.tplx-detail-path")
-            page.locator("#pipeline-detail h2.tplx-detail-path").innerText() shouldBe "trade/settlement"
+            page.waitForSelector("#pipeline-detail h2.tplx-detail-title")
+            page.locator("#pipeline-detail h2.tplx-detail-title").getAttribute("title") shouldBe "trade/settlement"
             page.locator("#pipeline-detail").innerText() shouldNotContain "ledger"
         } finally {
             throttle.releaseAll()
