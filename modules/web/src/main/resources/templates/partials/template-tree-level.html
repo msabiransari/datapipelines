@@ -93,6 +93,7 @@
     <li class="tpl-node" role="none" th:each="t : ${templates}">
       <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false"
               th:attr="hx-get=@{/partials/templates/versions(name=${t.id})},
+                       data-leaf-name=${t.id},
                        data-editor-url=@{/templates/editor(name=${t.id})}"
               hx-target="#template-detail" hx-swap="innerHTML"
               hx-sync="#template-detail:replace"
@@ -114,8 +115,8 @@
         <!-- versioning §7: unreleased edits stay visible in the list (templates §6). The pane
              keeps the badge compact; the version number and the release action live in the
              detail pane, one click away. -->
-        <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
-              th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it from the editor to publish.'">draft</span>
+        <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning tpl-leaf-draft"
+              th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it to publish.'">draft</span>
       </button>
     </li>
   </ul>

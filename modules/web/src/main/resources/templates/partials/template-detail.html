@@ -37,23 +37,29 @@
       <div class="tplx-detail-actions">
         <span class="htmx-indicator ds-spinner" id="template-detail-spinner" aria-hidden="true"></span>
 
+        <!-- 102 §B.1 — the §4.3d template twins in #tx-dialog, ONE destructive per view:
+             Purge template (the {D} shape) / Discard of the resolved release / Purge draft.
+             No Switch: templates are pinned by version; there is no served pointer to switch. -->
         <button th:if="${canDelete}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
-                data-verb="DELETE" data-after="reload"
-                th:attr="data-verb-url=@{/api/v1/templates(name=${templateId})},
-                         data-confirm='Delete ' + ${templateId} + '? Its draft is removed permanently.'">Delete</button>
+                th:attr="hx-get=@{'/partials/templates/lifecycle/purge-entity'(name=${templateId})},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'">Purge template…</button>
 
-        <button th:if="${!canDelete and draftVersion == null}" type="button"
-                class="ds-button ds-button-ghost ds-button-sm tplx-danger" data-verb="POST"
-                th:attr="data-verb-url=@{/api/v1/templates/version/discard},
-                         data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;,&quot;version&quot;:' + ${template.version} + '}',
-                         data-confirm='Discard v' + ${template.version} + '? It can be restored later.'">Discard</button>
+        <button th:if="${!canDelete and canDiscardCurrent}" type="button"
+                class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+                th:attr="hx-get=@{'/partials/templates/lifecycle/discard'(name=${templateId}, version=${currentReleaseVersion})},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Discard v' + ${currentReleaseVersion} + '…'">Discard v1…</button>
+
+        <button th:if="${canPurgeDraftInHeader}" type="button"
+                class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+                th:attr="hx-get=@{'/partials/templates/lifecycle/purge'(name=${templateId}, version=${draftVersion})},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Purge v' + ${draftVersion} + '…'">Purge v2…</button>
 
         <button th:if="${releasableVersion != null}" type="button" class="ds-button ds-button-secondary ds-button-sm"
-                data-verb="POST" th:text="'Release v' + ${releasableVersion} + '…'"
-                th:attr="data-verb-url=@{/api/v1/templates/release},
-                         data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;}',
-                         data-if-match=${draftHash},
-                         data-confirm='Release v' + ${releasableVersion} + '? A released version is immutable.'">Release v1…</button>
+                th:attr="hx-get=@{'/partials/templates/lifecycle/release'(name=${templateId})},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Release v' + ${releasableVersion} + '…'">Release v1…</button>
 
         <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open"
            th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open in editor</a>

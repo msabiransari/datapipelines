@@ -1,0 +1,37 @@
+<!-- The template entity purge dialog (ui-screens §4.3d/§4.6, 102): sole-draft-only, and
+     refused while ANY pipeline pins ANY version of the template — graph rule 3's template
+     arm (`template.in_use`), pre-read from the same any-version scan the delete runs. The
+     typed confirm names the TEMPLATE. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="template-purge-entity">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="tlc-purge-entity-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="tlc-purge-entity-title"
+        th:text="'Purge ' + ${dlg.leafName} + '?'">Purge my_template.sql?</h2>
+
+    <th:block th:if="${dlg.refusal != null}">
+      <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">refused</p>
+    </th:block>
+
+    <th:block th:if="${dlg.refusal == null}">
+      <p class="u-secondary u-text-sm">
+        The template and its draft version are deleted permanently — this cannot be undone.
+      </p>
+
+      <form th:attr="hx-post=@{'/partials/templates/lifecycle/purge-entity'(name=${dlg.id})},
+                       hx-target='#template-detail', hx-swap='innerHTML'">
+        <input type="hidden" name="name" th:value="${dlg.id}">
+        <label class="ds-form-label">
+          Type the template's name — <span class="u-mono" th:text="${dlg.expected}">test/my_template.sql</span> — to confirm
+        </label>
+        <input class="ds-input u-mono" data-confirm-input autocomplete="off" spellcheck="false"
+               th:attr="data-confirm-expect=${dlg.expected}">
+        <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+                disabled hx-disabled-elt="this"
+                th:text="'Purge ' + ${dlg.leafName}">Purge my_template.sql</button>
+      </form>
+    </th:block>
+  </div>
+</div>

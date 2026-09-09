@@ -869,3 +869,83 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
     justify-content: flex-start;
   }
 }
+
+/* ============================================================================
+ * 102 — the version rows' ⋯ overflow menu, and the Switch dialog's radio rows.
+ *
+ * The menu is a native <details> popover (the tree's own idiom — no JS to open); this block
+ * only positions it. Tokens only, and no motion: the menu appears, it does not animate in
+ * (prefers-reduced-motion needs nothing special here BY CONSTRUCTION, the §3.5 rule).
+ * ========================================================================== */
+.tplx-vmenu {
+  position: relative;
+}
+
+.tplx-vmenu[open] > .tplx-vmenu-list {
+  display: flex;
+}
+
+.tplx-vmenu-list {
+  display: none;
+  position: absolute;
+  /* Right-aligned under the ⋯, ABOVE the row when there is no room below it — the acting
+     card scrolls inside itself, and a bottom-row menu must not open out of view. */
+  bottom: calc(100% + var(--gap-xs, 4px));
+  right: 0;
+  z-index: var(--z-popover, 30);
+  flex-direction: column;
+  min-width: 12rem;
+  padding: var(--gap-xs, 4px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md, 0 4px 16px color-mix(in srgb, var(--text-primary) 12%, transparent));
+}
+
+/* The row's first ⋯ (top of the list) opens DOWNWARD — there is nothing above it to cover. */
+.tplx-vrow:first-child .tplx-vmenu-list,
+.tplx-vrow:nth-child(2) .tplx-vmenu-list {
+  bottom: auto;
+  top: calc(100% + var(--gap-xs, 4px));
+}
+
+.tplx-vmenu-item {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: var(--gap-xs, 4px) var(--gap-sm, 8px);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tplx-vmenu-item:hover {
+  background: var(--surface-hover);
+}
+
+/* The Switch dialog's radio rows (§4.3d): one line per version — the radio, the version, the
+   status, the current marker — readable at the acting column's width and inside the modal. */
+.tplx-switchrows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs, 4px);
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.tplx-switchrow {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm, 8px);
+  padding: var(--gap-xs, 4px) var(--gap-sm, 8px);
+  border: 1px solid var(--border-faint, var(--border-subtle));
+  border-radius: var(--radius-base);
+  font-size: var(--text-sm);
+}
+
+.tplx-switchrow-disabled {
+  color: var(--text-muted);
+  background: var(--surface-default);
+}

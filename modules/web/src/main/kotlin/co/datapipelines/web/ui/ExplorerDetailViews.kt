@@ -22,6 +22,12 @@ data class VersionRowView(
     val createdAgo: String,
     val actor: String,
     /**
+     * The write surface chip (V20, 102): "Muhammad · via MCP" — `session` renders nothing.
+     * A DRAFT row shows its LAST WRITE's surface (updated_via); a locked row shows the
+     * surface that created it.
+     */
+    val via: String,
+    /**
      * How much this version is USED, already worded.
      *
      * The two explorers count different things — a pipeline version's uses are its
@@ -40,6 +46,8 @@ data class VersionRowView(
     val canPurge: Boolean,
     /** A DISCARDED version: `POST /{id}/versions/{v}/restore` would bring it back. */
     val canRestore: Boolean,
+    /** A RELEASED version that is not current: the Switch dialog would take it (§3.4). */
+    val canSwitch: Boolean,
 ) {
     companion object {
         // Eight named fields of ONE row. A parameter object here would be this data class
@@ -55,6 +63,7 @@ data class VersionRowView(
             usage: Int,
             usageUnit: String,
             isCurrent: Boolean,
+            via: String = co.datapipelines.pipeline.WriteSurface.SESSION.wire,
         ): VersionRowView =
             VersionRowView(
                 version = version,
@@ -62,12 +71,16 @@ data class VersionRowView(
                 createdAt = createdAt,
                 createdAgo = RelativeTime.since(createdAt, now),
                 actor = actor,
+                via = via,
                 usageLabel = "$usage $usageUnit" + if (usage == 1) "" else "s",
                 isCurrent = isCurrent,
                 canRelease = status == PipelineVersionStatus.DRAFT,
                 canDiscard = status == PipelineVersionStatus.RELEASED,
                 canPurge = status == PipelineVersionStatus.DRAFT,
                 canRestore = status == PipelineVersionStatus.DISCARDED,
+                // Switching to the version that is ALREADY current is a legal no-op (§3.5),
+                // but the row that owns the pointer does not offer the lever to itself.
+                canSwitch = status == PipelineVersionStatus.RELEASED && !isCurrent,
             )
     }
 }

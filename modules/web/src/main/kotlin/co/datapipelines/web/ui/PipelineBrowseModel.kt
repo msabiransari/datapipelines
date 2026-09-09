@@ -58,6 +58,7 @@ class PipelineBrowseModel(
     private val datasources: DatasourceRegistry,
     private val actors: ActorNames,
     private val runStats: PipelineRunStats,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
 ) {
     private val deserializer = PipelineDeserializer()
 
@@ -292,18 +293,37 @@ class PipelineBrowseModel(
                     usage = runs[v.version] ?: 0,
                     usageUnit = "run",
                     isCurrent = record.currentVersion == v.version,
+                    // The chip's fact (V20): a draft row shows its last write's surface.
+                    via = if (v.status == PipelineVersionStatus.DRAFT) v.updatedVia else v.createdVia,
                 )
             },
         )
-        // The HEADER's verbs, from the same rows the tab renders (101 §7): a draft is what
-        // Release acts on; Delete is the ENTITY purge, which 101 allows only while the only
-        // version is a draft; otherwise the destructive verb on offer is Discard.
+        // The HEADER's verbs (101 §7, reshaped by 102 §B.1's one-destructive rule): a draft
+        // is what Release acts on; Purge pipeline is the ENTITY purge, which 101 allows only
+        // while the only version is a draft; otherwise the destructive verb on offer is
+        // Discard of a RELEASED current — a pointer that named a draft (the D60 development
+        // fallback) is NOT a discard target, so it must not offer the button.
         model.addAttribute("releasableVersion", versions.firstOrNull { it.status == PipelineVersionStatus.DRAFT }?.version)
         model.addAttribute("canDelete", versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT)
-        model.addAttribute("canDiscardCurrent", record.currentVersion != null)
+        val currentRow = versions.firstOrNull { it.version == record.currentVersion }
+        model.addAttribute("canDiscardCurrent", record.currentVersion != null && currentRow?.status == PipelineVersionStatus.RELEASED)
+        // Purge draft joins the header only when neither other destructive is there (§4.3d).
+        model.addAttribute(
+            "canPurgeDraftInHeader",
+            versions.any { it.status == PipelineVersionStatus.DRAFT } &&
+                !(versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT) &&
+                !(record.currentVersion != null && currentRow?.status == PipelineVersionStatus.RELEASED),
+        )
+        // Switch needs >= 2 live, posture-eligible versions (§3.4) — the dialog's own rule.
+        model.addAttribute(
+            "canSwitchHeader",
+            versions.count { PipelineVersionStatus.eligibleForPointer(it.status, authoring.developmentPosture) } >= 2,
+        )
         model.addAttribute("versionCount", versions.size)
         model.addAttribute("runCount", runStats.totalRuns(record.id))
         model.addAttribute("usageCount", usage(workspaceId, record).total)
+        // The reading column's Created line chip (V20): the FIRST version's surface.
+        model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
     }
 
     /**

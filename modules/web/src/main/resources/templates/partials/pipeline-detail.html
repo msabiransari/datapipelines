@@ -18,12 +18,12 @@
      The version shown is the WORKING version (versioning §7) — the draft when one exists, else
      the current released — so opening the editor from here shows what this pane just showed.
 
-     WRITES. This pane is no longer strictly read-only: 101's lifecycle verbs live here, which
-     is where the owner asked for them. Every one of them posts to the REST verb 101 shipped
-     (never to a UI-only route), carries a plain confirm, and swaps nothing — explorer-detail.js
-     re-fetches this fragment when the verb succeeds, so the pane always shows server truth.
-     102's confirm partial had not merged when this was built; when it does, the `data-confirm`
-     strings below are the seam it replaces. Authoring itself is still the editor's. -->
+      WRITES. This pane is no longer strictly read-only: 101's lifecycle verbs live here, which
+      is where the owner asked for them. Since 102 each opens its §4.3d dialog partial into
+      #px-dialog; the dialog's POST calls the service 101 wired (never a UI-only verb) and
+      answers Shape A — this fragment re-rendered with a toast and `lifecycle-changed` — or
+      Shape C for every refusal. The pre-102 plain-confirm fetch path is gone. Authoring
+      itself is still the editor's. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="detail" class="tplx-detail-content"
      th:attr="data-detail-url=${pipeline == null} ? null : @{/partials/pipelines/detail(id=${pipeline.id})}">
   <th:block th:if="${pipeline == null}">
@@ -47,26 +47,34 @@
       <div class="tplx-detail-actions">
         <span class="htmx-indicator ds-spinner" id="pipeline-detail-spinner" aria-hidden="true"></span>
 
-        <!-- 101 §7: the ENTITY purge, offered only while the only version is a draft — the
-             one state the server accepts it in. A purge takes the row and its executions, so
-             the tree must lose the leaf: this one reloads rather than re-rendering the pane. -->
+        <!-- 102 §B.1 — the lifecycle verbs as §4.3d dialogs, ONE destructive per view (owner
+             rule): Purge pipeline (the {D} shape) / Discard of a RELEASED current / Purge
+             draft, in that priority, and never two of them. Each opens its partial into
+             #px-dialog; the POST calls the service 101 wired and answers Shape A / Shape C. -->
         <button th:if="${canDelete}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
-                data-verb="DELETE" data-after="reload"
-                th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id}},
-                         data-confirm='Delete ' + ${pipeline.name} + '? Its draft and every execution of it are removed permanently.'">Delete</button>
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipeline.id})},
+                         hx-target='#px-dialog', hx-swap='innerHTML'">Purge pipeline…</button>
 
-        <!-- A released pipeline is DISCARDED, not deleted (101 §7): reversible, pointer per
-             D60, and refused while anything live pins the version — the Usage tab shows what. -->
         <button th:if="${!canDelete and canDiscardCurrent}" type="button"
-                class="ds-button ds-button-ghost ds-button-sm tplx-danger" data-verb="POST"
-                th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${pipeline.currentVersion} + '/discard'},
-                         data-confirm='Discard v' + ${pipeline.currentVersion} + '? It can be restored later.'">Discard</button>
+                class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${pipeline.currentVersion})},
+                         hx-target='#px-dialog', hx-swap='innerHTML'"
+                th:text="'Discard v' + ${pipeline.currentVersion} + '…'">Discard v2…</button>
+
+        <button th:if="${canPurgeDraftInHeader}" type="button"
+                class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${draftVersion})},
+                         hx-target='#px-dialog', hx-swap='innerHTML'"
+                th:text="'Purge v' + ${draftVersion} + '…'">Purge v3…</button>
 
         <button th:if="${releasableVersion != null}" type="button" class="ds-button ds-button-secondary ds-button-sm"
-                data-verb="POST" th:text="'Release v' + ${releasableVersion} + '…'"
-                th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/release'},
-                         data-if-match=${draftHash},
-                         data-confirm='Release v' + ${releasableVersion} + '? A released version is immutable.'">Release v1…</button>
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
+                         hx-target='#px-dialog', hx-swap='innerHTML'"
+                th:text="'Release v' + ${releasableVersion} + '…'">Release v1…</button>
+
+        <button th:if="${canSwitchHeader}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id})},
+                         hx-target='#px-dialog', hx-swap='innerHTML'">Switch…</button>
 
         <!-- The editor is a full document load, never a boosted swap: its Alpine root
              (x-data="pipelineEditor()") is initialised by alpine.min.js the moment the
@@ -126,6 +134,10 @@
               <dd>
                 <span th:text="${#temporals.format(pipeline.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-09 01:22</span>
                 <span class="u-muted"> · by </span><span th:text="${createdBy}">Muhammad</span>
+                <!-- V20's chip: the surface the FIRST version arrived on — 'session' renders
+                     nothing (it is the default person-at-a-browser shape). -->
+                <span th:if="${createdVia != null and createdVia != 'session'}" class="u-muted"
+                      th:text="' · via ' + ${createdVia == 'api_key' ? 'API key' : 'MCP'}"> · via MCP</span>
               </dd>
               <dt>Last run</dt>
               <dd>

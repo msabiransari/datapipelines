@@ -1,0 +1,37 @@
+<!-- The template Release dialog (ui-screens §4.3d/§4.6, 102). Templates have no §5.3 pin
+     gate of their own — a template's imports resolve at save time — so the dialog states the
+     draft facts and the lock; the not_draft branch opens with no button. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="template-release">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="tlc-release-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="tlc-release-title"
+        th:text="'Release v' + ${dlg.version} + '?'">Release v2?</h2>
+
+    <th:block th:if="${dlg.refusal != null}">
+      <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">No draft.</p>
+    </th:block>
+
+    <th:block th:if="${dlg.refusal == null}">
+      <p class="u-secondary u-text-sm">
+        Last written <span th:title="${#temporals.format(dlg.updatedAt, 'yyyy-MM-dd HH:mm')}" th:text="${dlg.updatedAgo}">2 hours ago</span>
+        by <span th:text="${dlg.updatedBy}">Muhammad</span>.
+      </p>
+      <p class="u-secondary u-text-sm u-mb-md">
+        Releasing makes v<span th:text="${dlg.version}">2</span> the version a pin without a number
+        resolves to, and locks it.
+      </p>
+
+      <form th:attr="hx-post=@{'/partials/templates/lifecycle/release'(name=${dlg.id})},
+                       hx-target=${from == 'editor'} ? null : '#template-detail',
+                       hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+        <input type="hidden" name="from" th:value="${from}">
+        <input type="hidden" name="name" th:value="${dlg.id}">
+        <button type="submit" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+                th:text="'Release v' + ${dlg.version}">Release v2</button>
+      </form>
+    </th:block>
+  </div>
+</div>

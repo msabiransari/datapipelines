@@ -1,0 +1,12 @@
+<!-- The Shape A wrapper (ui-screens §4.3d, 102): a lifecycle POST's SUCCESS for the
+     explorer is the re-rendered detail region — 106's own fragment, filled by 106's own
+     model, NEVER a copy — with the toast riding out-of-band and the [data-lifecycle-applied]
+     marker the dialog layer reads to close the open dialog. The detail fragment itself is
+     untouched: the render guard pins that a SELECTION's response carries no OOB swap, and a
+     selection is exactly what this wraps. -->
+<div xmlns:th="http://www.thymeleaf.org">
+  <div th:replace="~{partials/pipeline-detail :: detail}"></div>
+  <div hidden data-lifecycle-applied="1"></div>
+  <div th:if="${lifecycleToastTitle != null}"
+       th:replace="~{partials/toast-oob :: oob('success', ${lifecycleToastTitle}, ${lifecycleToastMessage})}"></div>
+</div>

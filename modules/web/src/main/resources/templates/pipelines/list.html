@@ -11,9 +11,11 @@
        is the width of the FIRST frame and not a shift onto it. -->
   <script th:src="@{/js/splitter.js}"></script>
   <script th:src="@{/js/template-explorer.js}" defer></script>
-  <!-- 106: the detail pane's tabs, its lifecycle verbs and the narrow layout's tree drawer.
-       Shared by both explorers, like the keyboard layer above it. -->
+  <!-- 106: the detail pane's tabs and the narrow layout's tree drawer; 102 moved the
+       lifecycle verbs into dialogs and added the badge refresh. Shared by both explorers. -->
   <script th:src="@{/js/explorer-detail.js}" defer></script>
+  <!-- 102: the lifecycle dialogs' close/focus/typed-confirm layer (§4.3d). -->
+  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
 
   <!-- 067 — the pipelines explorer: TREE LEFT, the selected pipeline RIGHT. Pipeline names
        are paths now, so the flat table could not show the structure the names carry. The
@@ -101,5 +103,10 @@
       </div>
     </div>
   </div>
+
+  <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d). A dialog partial is
+       swapped in whole (a .u-backdrop, on screen the moment it lands); emptying this div is
+       the ONLY close path — no display toggling, so a stale form can never hide here. -->
+  <div id="px-dialog"></div>
 </th:block>
 </html>

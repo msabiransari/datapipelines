@@ -1,0 +1,45 @@
+<!-- The Discard dialog (ui-screens §4.3d, 102) — reversible, but it can move the sticky
+     pointer (D60). The fallback line is §3.4's own rule pre-read from the same versions the
+     service's fallback will scan; the toast after the POST names the SERVICE's outcome.
+     Parents pinning this version (pipeline.version.pinned's evidence) leave no button. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="pipeline-discard">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="plc-discard-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="plc-discard-title"
+        th:text="'Discard v' + ${dlg.version} + '?'">Discard v2?</h2>
+
+    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines)}">
+      <p class="u-secondary u-text-sm">
+        <strong th:text="'v' + ${dlg.version}">v2</strong> cannot be discarded: it is pinned by live pipeline
+        version(s) — remove or repoint them first.
+      </p>
+      <ul class="u-text-sm u-mb-md" data-discard-pinnerPipelines>
+        <li th:each="p : ${dlg.pinnerPipelines}">
+          <span class="u-mono" th:text="${p.pipelineName}">parent/pipeline</span>
+          <span class="u-muted u-text-xs" th:text="'v' + ${p.pipelineVersion} + ' · node ' + ${p.nodeId}">v3 · node extract</span>
+        </li>
+      </ul>
+    </th:block>
+
+    <th:block th:if="${#lists.isEmpty(dlg.pinnerPipelines)}">
+      <p class="u-secondary u-text-sm" th:if="${dlg.isCurrent}">
+        v<span th:text="${dlg.version}">2</span> is current —
+        <span th:text="${dlg.fallback}">v1 becomes current.</span>
+      </p>
+      <p class="u-secondary u-text-sm" th:if="${!dlg.isCurrent}">
+        v<span th:text="${dlg.version}">1</span> is not the current version — the pointer does not move.
+      </p>
+      <p class="u-secondary u-text-sm u-mb-md">Discard is reversible — Restore brings it back.</p>
+
+      <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${dlg.id}, version=${dlg.version})},
+                       hx-target='#pipeline-detail', hx-swap='innerHTML'">
+        <input type="hidden" name="version" th:value="${dlg.version}">
+        <button type="submit" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+                th:text="'Discard v' + ${dlg.version}">Discard v2</button>
+      </form>
+    </th:block>
+  </div>
+</div>

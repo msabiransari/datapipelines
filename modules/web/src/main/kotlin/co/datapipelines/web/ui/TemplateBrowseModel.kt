@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
@@ -198,6 +199,9 @@ class TemplateBrowseModel(
         // The CURRENT RELEASE, not the working version: "current" in a version row means the
         // one a pin without a version would resolve to, which a draft never is.
         val currentRelease = templates.findLatest(workspaceId, id)?.version
+        // The header's Discard names the RESOLVED RELEASE, never the working version — in a
+        // {R,D} shape the working version is the draft and discard refuses drafts.
+        model.addAttribute("currentReleaseVersion", currentRelease)
         val versions = templates.listVersions(workspaceId, id)
         val names = actors.lookup(versions.map { it.createdBy })
         val inUse = usage.inUseCounts(workspaceId, id)
@@ -217,12 +221,21 @@ class TemplateBrowseModel(
                     usage = inUse[v.version] ?: 0,
                     usageUnit = "pipeline",
                     isCurrent = v.version == currentRelease,
+                    // The chip's fact (V20): a draft row shows its last write's surface.
+                    via = if (v.status == PipelineVersionStatus.DRAFT) v.updatedVia else v.createdVia,
                 )
             },
         )
         model.addAttribute("versionCount", versions.size)
         model.addAttribute("releasableVersion", draft?.version)
-        model.addAttribute("canDelete", versions.size == 1 && draft != null)
+        // The header's one destructive (102 §B.1): the entity purge in the {D} shape, else
+        // Discard of the resolved release, else Purge draft — at most one of the three.
+        val canDelete = versions.size == 1 && draft != null
+        val canDiscard = !canDelete && currentRelease != null
+        model.addAttribute("canDelete", canDelete)
+        model.addAttribute("canDiscardCurrent", canDiscard)
+        model.addAttribute("canPurgeDraftInHeader", draft != null && !canDelete && !canDiscard)
+        model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
         model.addAttribute("excerpt", excerpt(template.body))
         model.addAttribute("excerptTruncated", template.body.lineSequence().count() > EXCERPT_LINES)
         model.addAttribute("interpolations", interpolations(template.body))
