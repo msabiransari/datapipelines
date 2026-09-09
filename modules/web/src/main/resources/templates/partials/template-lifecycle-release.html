@@ -28,7 +28,6 @@
                        hx-target=${from == 'editor'} ? null : '#template-detail',
                        hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
         <input type="hidden" name="from" th:value="${from}">
-        <input type="hidden" name="name" th:value="${dlg.id}">
         <button type="submit" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                 th:text="'Release v' + ${dlg.version}">Release v2</button>
       </form>

@@ -36,7 +36,6 @@
 
       <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${dlg.id}, version=${dlg.version})},
                        hx-target='#pipeline-detail', hx-swap='innerHTML'">
-        <input type="hidden" name="version" th:value="${dlg.version}">
         <button type="submit" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
                 th:text="'Discard v' + ${dlg.version}">Discard v2</button>
       </form>

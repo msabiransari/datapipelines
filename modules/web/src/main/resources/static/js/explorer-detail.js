@@ -95,7 +95,9 @@
   }
 
   function onLifecycleChanged(event) {
-    var payload = event.detail && event.detail.value;
+    // htmx's HX-Trigger contract (ze() in the vendored source): a JSON-OBJECT payload fires
+    // as the detail ITSELF; only string payloads arrive wrapped as {value: str}. Accept both.
+    var payload = event.detail && event.detail.value ? event.detail.value : event.detail
     if (!payload) return;
     applyBadge(leafFor(payload), payload);
   }

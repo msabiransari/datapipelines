@@ -41,7 +41,7 @@
         <label class="ds-form-label">
           Type the pipeline's name — <span class="u-mono" th:text="${dlg.expected}">test/my_pipeline</span> — to confirm
         </label>
-        <input class="ds-input u-mono" data-confirm-input autocomplete="off" spellcheck="false"
+        <input class="ds-input u-mono" data-confirm-input name="confirm" autocomplete="off" spellcheck="false"
                th:attr="data-confirm-expect=${dlg.expected}">
         <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
                 disabled hx-disabled-elt="this"

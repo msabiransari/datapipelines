@@ -13,6 +13,9 @@
 
     <th:block th:if="${dlg.refusal != null}">
       <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">refused</p>
+      <ul th:if="${!#lists.isEmpty(dlg.inUsePipelines)}" class="u-text-sm u-mb-md" data-purge-entity-pinnerPipelines>
+        <li th:each="p : ${dlg.inUsePipelines}" class="u-mono" th:text="${p}">parent/pipeline</li>
+      </ul>
     </th:block>
 
     <th:block th:if="${dlg.refusal == null}">
@@ -22,11 +25,10 @@
 
       <form th:attr="hx-post=@{'/partials/templates/lifecycle/purge-entity'(name=${dlg.id})},
                        hx-target='#template-detail', hx-swap='innerHTML'">
-        <input type="hidden" name="name" th:value="${dlg.id}">
         <label class="ds-form-label">
           Type the template's name — <span class="u-mono" th:text="${dlg.expected}">test/my_template.sql</span> — to confirm
         </label>
-        <input class="ds-input u-mono" data-confirm-input autocomplete="off" spellcheck="false"
+        <input class="ds-input u-mono" data-confirm-input name="confirm" autocomplete="off" spellcheck="false"
                th:attr="data-confirm-expect=${dlg.expected}">
         <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
                 disabled hx-disabled-elt="this"

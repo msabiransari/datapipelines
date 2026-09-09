@@ -22,11 +22,10 @@
                      hx-target=${from == 'editor'} ? null : '#pipeline-detail',
                      hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
       <input type="hidden" name="from" th:value="${from}">
-      <input type="hidden" name="version" th:value="${dlg.version}">
       <label class="ds-form-label u-mt-md" th:for="'plc-purge-confirm'">
         Type <span class="u-mono" th:text="${dlg.expected}">v4</span> to confirm
       </label>
-      <input class="ds-input u-mono" id="plc-purge-confirm" data-confirm-input autocomplete="off"
+      <input class="ds-input u-mono" id="plc-purge-confirm" data-confirm-input name="confirm" autocomplete="off"
              spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
       <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
               disabled hx-disabled-elt="this"
