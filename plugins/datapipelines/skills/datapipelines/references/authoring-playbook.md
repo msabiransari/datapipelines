@@ -77,9 +77,13 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
 - **On a lake table, filter on the PARTITION column.** A day-partitioned table
   (`hvfhv_trips`, partitioned on `pickup_date`) prunes only on that column: `WHERE pickup_date
   IN (DATE '2024-01-01', …)` or `BETWEEN` two dates touches those partitions and nothing else.
-  A filter on a sibling timestamp (`pickup_at >= TIMESTAMP …`), a `CAST(pickup_date AS …)`,
-  or any function on the column reads EVERY file and relies on row-group statistics — it
-  looks fast on a quiet box and dies at the timeout on a busy one. Never build a `UNION ALL`
+  A filter on a sibling column INSIDE the files (`pickup_at >= TIMESTAMP …`) reads EVERY file
+  and relies on row-group statistics — it looks fast on a quiet box and dies at the timeout
+  on a busy one. A deterministic expression OF the partition column (`CAST(pickup_date AS
+  VARCHAR)`, `UPPER(...)`) still prunes on DuckDB 1.5.5.1 — it is folded per partition value
+  (measured, `SqlProbeLakeTest`) — but a plain literal or `IN` list is the readable form; a
+  bound `:param` in the predicate is the open question (`sql_probe` reports
+  `partition_prune x/y` — check it). Never build a `UNION ALL`
   of date-range branches to work around it; that is N full walks in one statement. One query,
   the partition column, a list of dates. (Real miss: an 11-branch UNION over `pickup_at`,
   cancelled at 60 s.)
@@ -145,7 +149,7 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
 | Do | Don't |
 |---|---|
 | After each source node runs, check its predicate/join key against the table's indexes (`datasources_get_table_stats`, `sql_probe`'s `plan.scan`) and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
-| Filter a lake table on its partition column, with literals or an `IN` list | Filter on a sibling timestamp, CAST the column, or UNION date-range branches |
+| Filter a lake table on its partition column, with literals or an `IN` list | Filter on a sibling timestamp inside the files, or UNION date-range branches (a CAST of the partition column itself still prunes — measured) |
 | Join the lookup; answer with names | Print `HV0003` / `uber` and call it an answer |
 | Infer table roles from `*_companies`, `*_zone_day`, `*_sample` when no description exists | Ignore a table because nothing described it |
 | Aggregate and filter at the source; ship the answer's grain | Stage raw rows into H2 and aggregate there |
