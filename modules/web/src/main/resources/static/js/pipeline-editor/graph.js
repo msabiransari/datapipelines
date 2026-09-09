@@ -18,6 +18,17 @@
    * state/rule below reads the pair back — the card never names a colour itself. */
   var TYPE_TOKEN = { DQL: "dql", DML: "dml", DDL: "ddl", PIPELINE: "pipeline", CALCULATOR: "calc" };
 
+  /* 105 §B — the arrowhead's size. Cytoscape's triangle scales linearly with
+   * arrow-scale at 4.35 model px per unit (MEASURED live on this stack's editor,
+   * 2026-09-09: renderedBoundingBox deltas of 3.91px at 0.9 and 8.70px at 2.0).
+   * The old 0.9 put the head at 3.9px — under the 8px floor and near-invisible
+   * at a 0.27 fit zoom, which is the owner's "the line just disappears behind
+   * the node without giving any hint". 2.0 clears the floor (8.7px) and keeps
+   * the mock's head-to-card proportion (3.7% of the 236px card). Exported so
+   * the browser test asserts the same number the canvas paints. */
+  var ARROW_SCALE = 2;
+  var ARROW_BASE_PX = 4.35;
+
   function iconForType(type) {
     return TYPE_ICONS[String(type || "").toUpperCase()] || "db";
   }
@@ -275,8 +286,18 @@
           "line-color": tokens.edgeIdle,
           "target-arrow-color": tokens.edgeIdle,
           "target-arrow-shape": "triangle",
-          "arrow-scale": 0.9,
+          "arrow-scale": ARROW_SCALE,
           "curve-style": "unbundled-bezier",
+          // 105: WITHOUT this, cytoscape lerps every (weight, distance) control
+          // pair against the source→target line's SHAPE-INTERSECTION points (the
+          // default, "intersection") — not the ports the pairs are computed from.
+          // The pairs applyEdgeCurves writes are port-relative (edgeRouteFor),
+          // and with a dragged-back target the intersection baseline diverges so
+          // far from the ports that the resolved control points land nowhere near
+          // the requested detour (measured live: requested P2 (768,1663), resolved
+          // (711,1406)). "endpoints" makes the manual source-endpoint/target-endpoint
+          // pair the baseline, so the rendered curve IS the computed one.
+          "edge-distances": "endpoints",
           "source-endpoint": sourcePort,
           "target-endpoint": targetPort,
           width: 2,
@@ -575,6 +596,15 @@
       afterPaint(function () { self.syncCardHeights(); });
     });
 
+    // 105 §B: a dragged node must re-take its curves. The (weight, distance)
+    // control points are relative to the source→target VECTOR, so without this
+    // a drag keeps the old curve re-projected onto the new vector — the
+    // arc-over-the-card in the owner's screenshot. dragfree fires once, when the
+    // user lets go; layoutstop covers the layout-time recompute.
+    this.cy.on("dragfree", "node", function () {
+      self.applyEdgeCurves();
+    });
+
     // Live re-theme (§5.3): no page element calls updateTheme() — a theme swap reaches
     // the page as an htmx OOB replacement of #theme-link (partials/theme-swap.html).
     // Watch head for the link being swapped in, and re-read tokens on the NEW sheet's
@@ -774,41 +804,159 @@
    * max(60, dx/2) — the mock's `C x1+dx y1, x2-dx y2, x2 y2`. Cytoscape 3.34 has no
    * `control-point-positions` (verified against the vendored source), so the
    * (weight, distance) form is computed per edge from post-layout positions.
+   *
+   * 105 §B: this formula is now the FORWARD regime only (dx ≥ EDGE_FORWARD_MIN_DX).
+   * With a NEGATIVE dx it clamps k to 60 and the curve loops over the cards — the
+   * owner's photograph (handbacks/105): the arrowhead slid behind the target card
+   * and the "731 rows" label floated mid-arc. See edgeRouteFor for the regime split.
    */
   function edgeControlPoints(sx, sy, tx, ty) {
-    var dx = tx - sx;
-    var dy = ty - sy;
+    var k = Math.max(60, (tx - sx) / 2);
+    return projectControlPoints(
+      { x: sx, y: sy },
+      { x: tx, y: ty },
+      [
+        { x: sx + k, y: sy },
+        { x: tx - k, y: ty },
+      ],
+    );
+  }
+
+  /**
+   * N control points → the (weights, distances) pair Cytoscape's unbundled-bezier
+   * reads: weight = the point's projection on the source→target vector as a
+   * fraction of its length, distance = the signed perpendicular offset along
+   * CYTOSCAPE's perpendicular — (−Δy, Δx)/|Δ|, per the vendored renderer's
+   * `findMidptPtsEtc`/`findBezierPoints` (verified 105: with the opposite sign the
+   * resolved control points land mirrored, which the symmetric two-point S-curve
+   * hid for four rounds and the asymmetric detour exposed). The inverse, as the
+   * node tests pin it: p = S + w·Δ + d·(−Δy, Δx)/|Δ|. Coincident ports (a
+   * zero-length vector) have no curve.
+   */
+  function projectControlPoints(sp, tp, points) {
+    var dx = tp.x - sp.x;
+    var dy = tp.y - sp.y;
     var len2 = dx * dx + dy * dy;
     if (len2 <= 0) return null;
     var len = Math.sqrt(len2);
-    var k = Math.max(60, dx / 2);
-    var c1x = sx + k;
-    var c1y = sy;
-    var c2x = tx - k;
-    var c2y = ty;
-    return {
-      weights: [
-        ((c1x - sx) * dx + (c1y - sy) * dy) / len2,
-        ((c2x - sx) * dx + (c2y - sy) * dy) / len2,
-      ],
-      distances: [
-        ((c1x - sx) * dy - (c1y - sy) * dx) / len,
-        ((c2x - sx) * dy - (c2y - sy) * dx) / len,
-      ],
-    };
+    var weights = [];
+    var distances = [];
+    for (var i = 0; i < points.length; i++) {
+      var px = points[i].x - sp.x;
+      var py = points[i].y - sp.y;
+      weights.push((px * dx + py * dy) / len2);
+      distances.push((py * dx - px * dy) / len);
+    }
+    return { weights: weights, distances: distances };
   }
 
+  /*
+   * 105 §B — WHICH CURVE AN EDGE GETS, as a pure function of the two card boxes.
+   *
+   * Ports are the card's EDGE centres (the stylesheet's source-endpoint /
+   * target-endpoint): right edge for the source, left edge for the target. The
+   * port-to-port dx decides:
+   *
+   *   dx ≥ EDGE_FORWARD_MIN_DX   the mock's bezier (edgeControlPoints): the curve
+   *                              leaves and enters horizontally, k = max(60, dx/2).
+   *   dx < EDGE_FORWARD_MIN_DX   INCLUDING EVERY NEGATIVE dx: an orthogonal detour
+   *                              BELOW both cards — OUT right of the source port,
+   *                              DOWN past the lower card's bottom edge, across at
+   *                              the detour depth, UP, and IN to the target port
+   *                              from its left. Four control points, so the
+   *                              unbundled-bezier rounds the corners the way the
+   *                              mock's single-arc aesthetic would.
+   *
+   * Why the detour exists: nodes are draggable, and a user can put a dependent
+   * LEFT of its source (the owner did — the screenshot this round answers). On a
+   * backward edge the forward formula loops the line over the cards and the
+   * arrowhead ends up behind one of them; the detour keeps the line in the clear
+   * and lands the arrowhead pointing INTO the left port exactly like a forward
+   * edge. The stub (EDGE_STUB) is also why the regime boundary is 60: below it
+   * the two 60px stubs would cross each other and the mock's S-curve degenerates.
+   *
+   * `depth` is the clearance below the LOWER card's bottom edge; applyEdgeCurves
+   * staggers it per target so parallel backward edges do not overlap exactly.
+   *
+   * Pure — node --test drives every regime (graph-edges.test.mjs).
+   */
+  var EDGE_FORWARD_MIN_DX = 60;
+  var EDGE_STUB = 60;
+  var EDGE_DETOUR_DEPTH = 44;
+  var EDGE_DETOUR_STAGGER = 24;
+
+  function edgeRouteFor(source, target, depth) {
+    var sp = { x: source.x + source.w / 2, y: source.y };
+    var tp = { x: target.x - target.w / 2, y: target.y };
+    var dx = tp.x - sp.x;
+    if (dx >= EDGE_FORWARD_MIN_DX) {
+      var k = Math.max(60, dx / 2);
+      var bezier = [
+        { x: sp.x + k, y: sp.y },
+        { x: tp.x - k, y: tp.y },
+      ];
+      var projected = projectControlPoints(sp, tp, bezier);
+      if (!projected) return null;
+      return { kind: "bezier", points: bezier, weights: projected.weights, distances: projected.distances };
+    }
+    var clear = depth === undefined ? EDGE_DETOUR_DEPTH : depth;
+    var yDetour = Math.max(source.y + source.h / 2, target.y + target.h / 2) + clear;
+    var points = [
+      { x: sp.x + EDGE_STUB, y: sp.y },
+      { x: sp.x + EDGE_STUB, y: yDetour },
+      { x: tp.x - EDGE_STUB, y: yDetour },
+      { x: tp.x - EDGE_STUB, y: tp.y },
+    ];
+    var detour = projectControlPoints(sp, tp, points);
+    if (!detour) return null;
+    return { kind: "detour", points: points, weights: detour.weights, distances: detour.distances };
+  }
+
+  /**
+   * 105 §B — the per-edge routing pass. Every edge's curve is decided from the
+   * LIVE card boxes (the measured cardH, like the minimap reads) through
+   * edgeRouteFor; backward edges into the same target stagger their detour depth
+   * (EDGE_DETOUR_STAGGER per ordinal) so parallel detours do not overlap exactly.
+   *
+   * Runs at layoutstop AND after a user drag (`dragfree`, wired in render): the
+   * (weight, distance) form is RELATIVE to the source→target vector, so a node
+   * moved without a recompute keeps its old curve re-projected onto the new
+   * vector — the arc-over-the-card the owner photographed. Measured (105 §A.3):
+   * an edge laid out at dx=+160, its target then dragged to dx=−400, had its
+   * "enter from the left" control land 85px PAST the target port.
+   */
   PipelineGraph.prototype.applyEdgeCurves = function () {
     if (!this.cy) return;
+    var self = this;
     var w = this.tokens.cardW;
+    var boxOf = function (n) {
+      return { x: n.position().x, y: n.position().y, w: w, h: n.data("cardH") || self.tokens.cardH };
+    };
+    var routed = [];
+    var detoursPerTarget = {};
     this.cy.edges().forEach(function (edge) {
-      var s = edge.source().position();
-      var t = edge.target().position();
-      var cp = edgeControlPoints(s.x + w / 2, s.y, t.x - w / 2, t.y);
-      if (!cp) return;
-      edge.style({
-        "control-point-weights": cp.weights,
-        "control-point-distances": cp.distances,
+      var sBox = boxOf(edge.source());
+      var tBox = boxOf(edge.target());
+      var route = edgeRouteFor(sBox, tBox);
+      if (!route) return;
+      routed.push({ edge: edge, sBox: sBox, tBox: tBox });
+      if (route.kind === "detour") {
+        var tid = edge.target().id();
+        detoursPerTarget[tid] = (detoursPerTarget[tid] || 0) + 1;
+      }
+    });
+    var ordinal = {};
+    routed.forEach(function (r) {
+      var route = edgeRouteFor(r.sBox, r.tBox);
+      if (route && route.kind === "detour" && detoursPerTarget[r.edge.target().id()] > 1) {
+        var tid = r.edge.target().id();
+        ordinal[tid] = (ordinal[tid] || 0) + 1;
+        route = edgeRouteFor(r.sBox, r.tBox, EDGE_DETOUR_DEPTH + ordinal[tid] * EDGE_DETOUR_STAGGER);
+      }
+      if (!route) return;
+      r.edge.style({
+        "control-point-weights": route.weights,
+        "control-point-distances": route.distances,
       });
     });
   };
@@ -1330,6 +1478,14 @@
     truncateLeft: truncateLeft,
     templateLine: templateLine,
     edgeControlPoints: edgeControlPoints,
+    edgeRouteFor: edgeRouteFor,
+    projectControlPoints: projectControlPoints,
+    ARROW_SCALE: ARROW_SCALE,
+    ARROW_BASE_PX: ARROW_BASE_PX,
+    EDGE_FORWARD_MIN_DX: EDGE_FORWARD_MIN_DX,
+    EDGE_STUB: EDGE_STUB,
+    EDGE_DETOUR_DEPTH: EDGE_DETOUR_DEPTH,
+    EDGE_DETOUR_STAGGER: EDGE_DETOUR_STAGGER,
     iconForType: iconForType,
     typeToken: typeToken,
     escapeHtml: escapeHtml,
