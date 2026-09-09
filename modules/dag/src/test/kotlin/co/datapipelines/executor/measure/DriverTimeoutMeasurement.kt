@@ -46,7 +46,15 @@ class DriverTimeoutMeasurement {
                             }
                         }
                     rows += measure("tempdbCreateTableAs (CTAS)") { conn.timed { st -> st.execute("CREATE TABLE m_ctas AS $SLOW_SELECT") } }
-                    conn.createStatement().use { it.execute("CREATE TABLE m_dml (n BIGINT)") }
+                    // POPULATED before the DELETE, and the reason is a row this measurement got
+                    // wrong once: the INSERT above is CANCELLED by its own timeout, so a DELETE
+                    // that followed it against an empty table returned in 1 ms and was reported as
+                    // "the driver did NOT honour the timeout". It had nothing to delete. A row that
+                    // measures an empty table is not a measurement of anything.
+                    conn.createStatement().use {
+                        it.execute("CREATE TABLE m_dml (n BIGINT)")
+                        it.execute("""INSERT INTO m_dml SELECT "X" FROM SYSTEM_RANGE(1, 50000)""")
+                    }
                     rows +=
                         measure("tempdbDml (INSERT … SELECT)") { conn.timed { st -> st.executeUpdate("INSERT INTO m_dml $SLOW_SELECT") } }
                     rows +=
