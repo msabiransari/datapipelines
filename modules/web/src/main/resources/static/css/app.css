@@ -2102,33 +2102,31 @@ button.app-busy::after {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
   gap: var(--gap-xl);
-  align-items: stretch;
+  align-items: center;
 }
 
 .app-auth-stage {
   position: relative;
-  /* The stage fills the height the viewport gives it (shell header and page padding
-     taken off) — the DAG is sized by the room, not by a cap. */
-  height: calc(100vh - 8rem);
-  min-height: 30rem;
+  /* The stage is exactly as tall as its picture: the SVG keeps its viewBox aspect and
+     sizes by width, so the frame hugs the diagram instead of standing as a tall empty
+     panel beside the card (owner, 2026-09-08). On a short window the viewport still
+     caps it and the picture scales down inside. */
+  align-self: center;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
   background-color: var(--surface-default);
   background-image: radial-gradient(var(--grid-dot) 1.1px, transparent 1.2px);
   background-size: 22px 22px;
   overflow: hidden;
-  display: grid;
-  place-items: center;
   padding: var(--gap-lg);
   box-sizing: border-box;
 }
 
 .app-auth-dag {
-  /* The viewBox keeps the aspect; whichever of width and height binds first wins. */
+  display: block;
   width: 100%;
-  height: 100%;
-  max-height: 100%;
-  max-width: 100%;
+  height: auto;
+  max-height: calc(100vh - 10rem);
 }
 
 .app-auth-edge {
