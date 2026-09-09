@@ -93,6 +93,34 @@
  *    everything, which always runs BEFORE the swap, so a skeleton never
  *    coexists with the content it was standing in for.
  *
+ * 103 §A/§B added the FEEDBACK AND ATMOSPHERE layer — measured against
+ * algoschool.app (notes T195), which has zero hx-boost and still reads as the
+ * more native app because a click there is acknowledged immediately and the new
+ * page arrives with motion:
+ *
+ * 10. THE PENDING NAVIGATION. A boosted link click marks the link `is-pending`
+ *     + aria-disabled and its rail group `is-pending-scope` in the SAME frame as
+ *     the press — before any request exists, which is the whole point; §D's bar
+ *     lives at the top of the window, nowhere near the thing that was pressed.
+ *     A status pill ("Loading…", role=status) joins them only after 150ms, the
+ *     same no-flash arm as the skeleton. Cleared on htmx:afterSettle, on every
+ *     htmx error/abort event (afterSettle never fires for those) and on
+ *     `pageshow` (the bfcache restores the DOM with the class still on it and
+ *     fires no htmx event at all). A form's pending rides on its SUBMIT BUTTON,
+ *     because htmx reports the <form> as the requesting element and §D's
+ *     per-element marking therefore never reaches the control that was pressed.
+ *
+ * 11. THE ENTRANCE. The new #app-main fades and slides 4px up over 150ms. The
+ *     class is added on htmx:afterSETTLE — at afterSwap the element is still
+ *     wearing `htmx-swapping htmx-added htmx-settling` and htmx replaces it a
+ *     frame later, which starts the animation and then cancels it 15ms in
+ *     (measured; every class-level assertion stayed green) — and removed on
+ *     `animationend` plus a fallback timer, because under
+ *     prefers-reduced-motion app.css sets `animation: none` and an animation
+ *     that never runs never ends. Which swaps qualify is decided by
+ *     applyBoostSwap and carried on a one-shot: htmx's swap events carry the
+ *     SWAP's eventInfo, not the response's, and have no `boosted` flag.
+ *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
  * every listener on document.body (plus one keydown on document, for the menu),
@@ -268,6 +296,183 @@
   }
 
 
+  /* ------------------------------------------------------------------ 103 §A
+     THE CLICK IS ACKNOWLEDGED.
+
+     085 §D's bar answers "is the server working"; it does not answer "did my
+     click land". Measured against algoschool.app (notes T195): that app has no
+     hx-boost at all — every navigation is a document load — and still reads as
+     the more native of the two, because a click there IMMEDIATELY dims the
+     clicked link, marks it aria-disabled, and raises a "Loading page…" pill
+     after a short delay. Our boosted swap gives the same trip no feedback until
+     the 2px bar appears, and the bar is at the top of the window, nowhere near
+     the thing the reader just pressed.
+
+     This tracker is that feedback, and it is NAVIGATION-scoped rather than
+     request-scoped (the busy tracker above owns the per-request half): one
+     navigation is pending at a time, its link carries `is-pending`, its rail
+     group carries `is-pending-scope`, and a pill appears only if the swap is
+     still not here after 150ms — the same no-flash-on-a-fast-swap arm as the
+     skeleton, for the same reason.
+
+     Written as a factory over injected timers, like createBusyTracker, so
+     `node --test` drives the whole state machine on a fake clock. */
+  var PENDING_DELAY_MS = 150;
+  var PENDING_CLASS = "is-pending";
+  var PENDING_SCOPE_CLASS = "is-pending-scope";
+  var PILL_ID = "app-status-pill";
+  var PILL_ON_CLASS = "is-on";
+
+  function statusPill(doc) {
+    return doc.getElementById(PILL_ID);
+  }
+
+  /* The pill is present-but-`hidden` when off, not merely transparent: an
+     aria-live region announces when its content BECOMES rendered, and a region
+     that is permanently rendered with unchanging text announces nothing at all.
+     `[hidden] { display: none !important }` (app.css) is what makes the
+     attribute outrank the design system's display classes. */
+  function showStatusPill(doc) {
+    var pill = statusPill(doc);
+    if (!pill) return false;
+    pill.removeAttribute("hidden");
+    pill.classList.add(PILL_ON_CLASS);
+    return true;
+  }
+
+  function hideStatusPill(doc) {
+    var pill = statusPill(doc);
+    if (!pill) return false;
+    pill.classList.remove(PILL_ON_CLASS);
+    pill.setAttribute("hidden", "hidden");
+    return true;
+  }
+
+  /* Is this click a BOOSTED navigation, and what is the group it belongs to?
+     Returns the scope element (the rail's <nav>, the breadcrumb, or whatever
+     element carries the hx-boost that will handle the click) or null for
+     anything that is not a boosted same-document navigation — a fragment link,
+     a new-tab link, a download, an element under hx-boost="false".
+
+     Pure over the element's own `closest`, so the state machine is testable
+     without a DOM: `closest("[hx-boost]")` is the SAME lookup htmx performs, so
+     an element it will not boost cannot be pended here. */
+  function boostedNavScope(link) {
+    if (!link || !link.getAttribute) return null;
+    var href = link.getAttribute("href");
+    if (!href || href.charAt(0) === "#") return null;
+    if (link.getAttribute("target")) return null;
+    if (link.getAttribute("download") !== null) return null;
+    if (!link.closest) return null;
+    var boost = link.closest("[hx-boost]");
+    if (!boost || boost.getAttribute("hx-boost") !== "true") return null;
+    return link.closest(".app-nav") || link.closest("#app-crumbs") || boost;
+  }
+
+  /* A form submitted through htmx: the control the reader pressed is the submit
+     button, not the <form> htmx reports as the requesting element, so the busy
+     tracker's per-element marking never reaches it. */
+  function submitControl(form) {
+    if (!form || !form.querySelector) return null;
+    return form.querySelector("button[type='submit'], button:not([type]), input[type='submit']");
+  }
+
+  function createPendingTracker(timers, delayMs) {
+    var delay = typeof delayMs === "number" ? delayMs : PENDING_DELAY_MS;
+    var marked = []; // { el, cls, aria } — only what WE set is ever unset
+    var timer = null;
+
+    function mark(el, cls, withAria) {
+      if (!el || !el.classList) return false;
+      if (el.classList.contains && el.classList.contains(cls)) return false;
+      el.classList.add(cls);
+      var aria = false;
+      if (withAria && el.getAttribute && el.getAttribute("aria-disabled") === null) {
+        el.setAttribute("aria-disabled", "true");
+        aria = true;
+      }
+      marked.push({ el: el, cls: cls, aria: aria });
+      return true;
+    }
+
+    /* The 150ms arm, per NAVIGATION rather than per element: a second pended
+       control inside one navigation (a form's button and its scope) must not
+       restart or duplicate the timer. */
+    function arm(doc) {
+      if (timer !== null) return;
+      timer = timers.setTimeout(function () {
+        timer = null;
+        showStatusPill(doc);
+      }, delay);
+    }
+
+    function begin(doc, elt, scope) {
+      if (!mark(elt, PENDING_CLASS, true)) return false;
+      if (scope && scope !== elt) mark(scope, PENDING_SCOPE_CLASS, false);
+      arm(doc);
+      return true;
+    }
+
+    function clear(doc) {
+      if (timer !== null) {
+        timers.clearTimeout(timer);
+        timer = null;
+      }
+      for (var i = 0; i < marked.length; i++) {
+        var entry = marked[i];
+        entry.el.classList.remove(entry.cls);
+        if (entry.aria) entry.el.removeAttribute("aria-disabled");
+      }
+      marked = [];
+      hideStatusPill(doc);
+      return true;
+    }
+
+    return {
+      begin: begin,
+      clear: clear,
+      pendingCount: function () {
+        return marked.length;
+      },
+      armed: function () {
+        return timer !== null;
+      },
+    };
+  }
+
+  /* ------------------------------------------------------------------ 103 §B
+     THE SWAP ARRIVES WITH MOTION.
+
+     A boosted swap replaces the whole of #app-main between two frames, which is
+     the one thing a document load never does badly: a page load fades in from
+     the browser's own paint, a swap simply teleports. The entrance is a 150ms
+     fade + 4px slide-up on the NEW #app-main — transform and opacity only, so
+     it cannot move a box and cannot cost a layout shift (§B's CLS budget).
+
+     The class comes off on `animationend`, and off ANYWAY after a fallback:
+     under `prefers-reduced-motion: reduce` app.css sets `animation: none`, and
+     an animation that never runs never ends. The fallback is what keeps the
+     class from becoming permanent state on a reduced-motion machine.
+
+     Which swaps get it is decided by applyBoostSwap, not re-derived here:
+     htmx's afterSwap detail is the swap's own eventInfo and carries no
+     `boosted` flag, so the beforeSwap that RETARGETED the response sets a
+     one-shot and afterSwap consumes it. */
+  var ENTER_CLASS = "app-enter";
+  var ENTER_FALLBACK_MS = 250;
+
+  function markEntrance(timers, el) {
+    if (!el || !el.classList) return false;
+    el.classList.add(ENTER_CLASS);
+    var done = function () {
+      el.classList.remove(ENTER_CLASS);
+    };
+    if (el.addEventListener) el.addEventListener("animationend", done, { once: true });
+    timers.setTimeout(done, ENTER_FALLBACK_MS);
+    return true;
+  }
+
+
   /* ------------------------------------------------------------------ 079 §A/§B
      The rail and the top bar are OUTSIDE #app-main, so a boosted swap never
      re-renders them. Everything below is the client-side half of a fact the
@@ -432,8 +637,24 @@
     window.__dpShellInit = true;
     var doc = document;
 
+    /* 103 §B: the boosted swap is decided HERE, so the entrance is armed here
+       too — htmx's afterSwap event carries the swap's own info, not the
+       response's, and cannot be asked whether the request was boosted. */
+    var entranceDue = false;
     doc.body.addEventListener("htmx:beforeSwap", function (evt) {
-      applyBoostSwap(evt.detail, doc.getElementById(MAIN_ID));
+      if (applyBoostSwap(evt.detail, doc.getElementById(MAIN_ID))) entranceDue = true;
+    });
+    /* On afterSETTLE, not afterSwap. Measured (ShellFeelBrowserTest's trace): at
+       afterSwap the swapped element is still mid-ceremony — `htmx-swapping
+       htmx-added htmx-settling` — and htmx's settle step replaces it again a
+       frame later, so the entrance started and was CANCELLED 15ms in
+       (`animationstart@771 … animationcancel@788`). The reader saw a flicker,
+       every assertion about the class still passed, and only the animation
+       events said so. Settle is when the element is final. */
+    doc.body.addEventListener("htmx:afterSettle", function () {
+      if (!entranceDue) return;
+      entranceDue = false;
+      markEntrance(window, doc.getElementById(MAIN_ID));
     });
 
     /* 085 §D — every request shows the bar; the originating button goes busy;
@@ -455,6 +676,45 @@
       if (!evt.detail) return;
       busy.end(doc, evt.detail.elt, evt.detail.target);
     });
+
+    /* 103 §A — the click's own acknowledgement. The pend is on the CLICK, not on
+       htmx:beforeRequest: the whole point is that it lands before any request
+       exists, in the same frame as the press. Clearing is deliberately spread
+       over three kinds of ending, because only their union is total:
+
+         - htmx:afterSettle — the swap arrived and the new screen is on screen
+           (the normal path; afterRequest would clear it one frame too early,
+           while the outgoing screen is still painted);
+         - every htmx error/abort event — afterSettle NEVER fires for a response
+           error, a network error, a timeout or an abort (085 §D's finding), and
+           a dimmed link that stays dimmed is worse than no feedback at all;
+         - pageshow — a back/forward restore from the bfcache re-paints the DOM
+           exactly as it was left, `is-pending` included, with no htmx event of
+           any kind to clear it.
+
+       A form's pending rides on the SUBMIT BUTTON (the control the reader
+       pressed); htmx reports the <form> as the requesting element, so the busy
+       tracker never reaches it. */
+    var pending = createPendingTracker(window, PENDING_DELAY_MS);
+    doc.body.addEventListener("click", function (evt) {
+      var link = evt.target.closest && evt.target.closest("a[href]");
+      if (!link) return;
+      var scope = boostedNavScope(link);
+      if (scope) pending.begin(doc, link, scope);
+    });
+    doc.body.addEventListener("htmx:beforeRequest", function (evt) {
+      var elt = evt.detail && evt.detail.elt;
+      if (!elt || elt.tagName !== "FORM") return;
+      var control = submitControl(elt);
+      if (control) pending.begin(doc, control, elt);
+    });
+    var clearPending = function () {
+      pending.clear(doc);
+    };
+    doc.body.addEventListener("htmx:afterSettle", clearPending);
+    var terminal = ["htmx:responseError", "htmx:sendError", "htmx:timeout", "htmx:swapError", "htmx:sendAbort"];
+    for (var t = 0; t < terminal.length; t++) doc.body.addEventListener(terminal[t], clearPending);
+    window.addEventListener("pageshow", clearPending);
 
     var resync = function () {
       syncNavActive(doc, window.location.pathname);
@@ -537,6 +797,19 @@
     showProgress: showProgress,
     hideProgress: hideProgress,
     createBusyTracker: createBusyTracker,
+    createPendingTracker: createPendingTracker,
+    boostedNavScope: boostedNavScope,
+    submitControl: submitControl,
+    showStatusPill: showStatusPill,
+    hideStatusPill: hideStatusPill,
+    markEntrance: markEntrance,
+    PENDING_DELAY_MS: PENDING_DELAY_MS,
+    PENDING_CLASS: PENDING_CLASS,
+    PENDING_SCOPE_CLASS: PENDING_SCOPE_CLASS,
+    PILL_ID: PILL_ID,
+    PILL_ON_CLASS: PILL_ON_CLASS,
+    ENTER_CLASS: ENTER_CLASS,
+    ENTER_FALLBACK_MS: ENTER_FALLBACK_MS,
     SKELETON_DELAY_MS: SKELETON_DELAY_MS,
     SKELETON_CLASS: SKELETON_CLASS,
     BUSY_CLASS: BUSY_CLASS,

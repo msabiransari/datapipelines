@@ -121,7 +121,15 @@ test("the progress bar shows and hides by class, tolerating its absence", () => 
 
 test("init wires the shell once — repeated loads never stack listeners", () => {
   const added = [];
-  globalThis.window = { location: { pathname: "/pipelines" }, localStorage: { setItem() {} } };
+  const onWindow = [];
+  globalThis.window = {
+    location: { pathname: "/pipelines" },
+    localStorage: { setItem() {} },
+    // 103 §A: init() also listens for `pageshow` on the WINDOW — the bfcache
+    // restores the DOM with `is-pending` still on the link it was left on and
+    // fires no htmx event of any kind, so it is the one ending only this covers.
+    addEventListener: (t) => onWindow.push(t),
+  };
   globalThis.document = {
     readyState: "complete",
     body: { addEventListener: (t) => added.push(t) },
@@ -137,6 +145,7 @@ test("init wires the shell once — repeated loads never stack listeners", () =>
   shell.init();
   const beforeSwapCount = added.filter((t) => t === "htmx:beforeSwap").length;
   assert.equal(beforeSwapCount, 1, "one boost-policy listener across repeated init");
+  assert.deepEqual(onWindow, ["pageshow"], "the bfcache clear is wired exactly once");
   delete globalThis.window;
   delete globalThis.document;
 });
@@ -150,6 +159,7 @@ test("a boosted cross-origin click falls back to plain navigation (selfRequestsO
       assign: (href) => assigned.push(href),
     },
     localStorage: { setItem() {} },
+    addEventListener: () => {},
   };
   globalThis.document = {
     readyState: "complete",
@@ -576,4 +586,218 @@ test("concurrent requests into the same target share one skeleton; different tar
   assert.equal(other.children.length, 1);
   tracker.end(doc, mkBusyEl("BUTTON"), other);
   assert.equal(other.children.length, 0);
+});
+
+// ---------------------------------------------------------------- 103 §A / §B
+//
+// The click's acknowledgement and the entrance, driven on a fake clock. The
+// state machine is what these pin: the 150ms arm exists so a fast swap never
+// flashes the pill, and the clear must be total across three different kinds of
+// ending (settle, htmx error/abort, bfcache restore) — only their union covers
+// every path, and a link left dimmed forever is worse than no feedback at all.
+
+/** An element double with `closest`, `classList.contains` and attributes. */
+function mkFeelEl(tagName, attrs = {}, parents = []) {
+  const classes = new Set();
+  const own = { ...attrs };
+  const el = {
+    tagName,
+    classList: {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      contains: (c) => classes.has(c),
+    },
+    getAttribute: (k) => (k in own ? own[k] : null),
+    setAttribute: (k, v) => { own[k] = v; },
+    removeAttribute: (k) => { delete own[k]; },
+    // The chain the real `closest` walks, described as [selector, element] pairs.
+    closest: (sel) => {
+      if (matches(el, sel)) return el;
+      const hit = parents.find(([s]) => s === sel);
+      return hit ? hit[1] : null;
+    },
+    listeners: {},
+    addEventListener: (type, fn) => { el.listeners[type] = fn; },
+    fire: (type) => el.listeners[type] && el.listeners[type](),
+    has: (c) => classes.has(c),
+    attr: (k) => own[k],
+  };
+  return el;
+}
+
+/** The two selectors boostedNavScope asks the ELEMENT ITSELF about. */
+function matches(el, sel) {
+  if (sel === "a[href]") return el.tagName === "A" && el.getAttribute("href") !== null;
+  if (sel === "[hx-boost]") return el.getAttribute("hx-boost") !== null;
+  return false;
+}
+
+/** A doc double carrying just the status pill. */
+function mkFeelDoc(pill) {
+  return { getElementById: (id) => (id === "app-status-pill" ? pill : null) };
+}
+
+function mkPill() {
+  return mkFeelEl("DIV", { hidden: "hidden" });
+}
+
+test("a boosted nav click pends the link, arms the pill at 150ms, and settles clean", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const pill = mkPill();
+  const doc = mkFeelDoc(pill);
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+
+  const nav = mkFeelEl("NAV", { "hx-boost": "true" });
+  const link = mkFeelEl("A", { href: "/pipelines" }, [[".app-nav", nav], ["[hx-boost]", nav]]);
+
+  assert.equal(shell.boostedNavScope(link), nav);
+  assert.equal(tracker.begin(doc, link, nav), true);
+
+  // The dim lands in the SAME frame as the press — before any request exists.
+  assert.equal(link.has(shell.PENDING_CLASS), true);
+  assert.equal(link.attr("aria-disabled"), "true");
+  assert.equal(nav.has(shell.PENDING_SCOPE_CLASS), true);
+  // …and the pill is only ARMED, never shown yet.
+  assert.equal(tracker.armed(), true);
+  assert.equal(pill.attr("hidden"), "hidden");
+
+  clock.fireNext();
+  assert.equal(pill.attr("hidden"), undefined);
+  assert.equal(pill.has(shell.PILL_ON_CLASS), true);
+
+  tracker.clear(doc);
+  assert.equal(link.has(shell.PENDING_CLASS), false);
+  assert.equal(link.attr("aria-disabled"), undefined);
+  assert.equal(nav.has(shell.PENDING_SCOPE_CLASS), false);
+  assert.equal(pill.has(shell.PILL_ON_CLASS), false);
+  assert.equal(pill.attr("hidden"), "hidden");
+  assert.equal(tracker.pendingCount(), 0);
+});
+
+test("a 40ms swap never flashes the pill — the arm is cancelled, not fired", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const pill = mkPill();
+  const doc = mkFeelDoc(pill);
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+  const nav = mkFeelEl("NAV", { "hx-boost": "true" });
+  const link = mkFeelEl("A", { href: "/templates" }, [[".app-nav", nav], ["[hx-boost]", nav]]);
+
+  tracker.begin(doc, link, nav);
+  assert.equal(clock.pendingCount(), 1);
+  // The swap lands before the arm — the whole point of the 150ms delay.
+  tracker.clear(doc);
+  assert.equal(clock.pendingCount(), 0, "the timer is cancelled, not left to fire into a settled page");
+  assert.equal(pill.attr("hidden"), "hidden");
+  assert.equal(pill.has(shell.PILL_ON_CLASS), false);
+});
+
+test("an htmx error clears the pending state — afterSettle never fires for one", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const pill = mkPill();
+  const doc = mkFeelDoc(pill);
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+  const nav = mkFeelEl("NAV", { "hx-boost": "true" });
+  const link = mkFeelEl("A", { href: "/executions" }, [[".app-nav", nav], ["[hx-boost]", nav]]);
+
+  tracker.begin(doc, link, nav);
+  clock.fireNext(); // the request is slow; the pill is up
+  assert.equal(pill.has(shell.PILL_ON_CLASS), true);
+
+  // htmx:responseError / sendError / timeout / swapError / sendAbort all route
+  // here, because NONE of them is followed by an afterSettle.
+  tracker.clear(doc);
+  assert.equal(link.has(shell.PENDING_CLASS), false);
+  assert.equal(pill.has(shell.PILL_ON_CLASS), false);
+});
+
+test("pending never unsets an aria-disabled it did not set, and never double-marks", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const doc = mkFeelDoc(mkPill());
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+  // A control that was ALREADY aria-disabled (085 §D's busy marking, or a
+  // server-rendered disabled action) must come back exactly as it was.
+  const link = mkFeelEl("A", { href: "/promotion", "aria-disabled": "true" });
+
+  tracker.begin(doc, link, null);
+  assert.equal(tracker.begin(doc, link, null), false, "a second click on a pending link is a no-op");
+  assert.equal(clock.pendingCount(), 1, "one arm per navigation, not one per click");
+  tracker.clear(doc);
+  assert.equal(link.attr("aria-disabled"), "true", "restored to what it was, not stripped");
+});
+
+test("boostedNavScope refuses everything htmx itself would not boost", () => {
+  const shell = loadShell();
+  const nav = mkFeelEl("NAV", { "hx-boost": "true" });
+  const main = mkFeelEl("MAIN", { "hx-boost": "true" });
+  const chain = [[".app-nav", nav], ["[hx-boost]", nav]];
+
+  // In-content links scope to whatever carries the boost (there is no rail group).
+  const inMain = mkFeelEl("A", { href: "/pipelines/abc" }, [["[hx-boost]", main]]);
+  assert.equal(shell.boostedNavScope(inMain), main);
+
+  // A fragment link, a new-tab link and a download are navigations htmx leaves alone.
+  assert.equal(shell.boostedNavScope(mkFeelEl("A", { href: "#top" }, chain)), null);
+  assert.equal(shell.boostedNavScope(mkFeelEl("A", { href: "/x", target: "_blank" }, chain)), null);
+  assert.equal(shell.boostedNavScope(mkFeelEl("A", { href: "/x", download: "" }, chain)), null);
+  assert.equal(shell.boostedNavScope(mkFeelEl("A", {}, chain)), null);
+  // hx-boost="false" on the link itself: `closest("[hx-boost]")` finds the LINK,
+  // exactly as htmx's own lookup does, and the answer is no.
+  assert.equal(shell.boostedNavScope(mkFeelEl("A", { href: "/logout", "hx-boost": "false" }, chain)), null);
+  // Outside any boosting ancestor (the anonymous shell's brand link).
+  assert.equal(shell.boostedNavScope(mkFeelEl("A", { href: "/" }, [])), null);
+});
+
+test("a form's pending rides on its submit button, which htmx never names", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const pill = mkPill();
+  const doc = mkFeelDoc(pill);
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+
+  const button = mkFeelEl("BUTTON", { type: "submit" });
+  const form = mkFeelEl("FORM");
+  form.querySelector = (sel) => (sel.includes("submit") ? button : null);
+
+  assert.equal(shell.submitControl(form), button);
+  tracker.begin(doc, shell.submitControl(form), form);
+  assert.equal(button.has(shell.PENDING_CLASS), true);
+  assert.equal(button.attr("aria-disabled"), "true");
+  assert.equal(form.has(shell.PENDING_SCOPE_CLASS), true);
+  clock.fireNext();
+  assert.equal(pill.has(shell.PILL_ON_CLASS), true);
+  tracker.clear(doc);
+  assert.equal(button.has(shell.PENDING_CLASS), false);
+
+  // A form with no submit control is not a crash and not a pend.
+  const bare = mkFeelEl("FORM");
+  bare.querySelector = () => null;
+  assert.equal(shell.submitControl(bare), null);
+  assert.equal(shell.submitControl(null), null);
+});
+
+test("the entrance class comes off on animationend, and off anyway if none ever runs", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const main = mkFeelEl("MAIN", { id: "app-main" });
+
+  assert.equal(shell.markEntrance(clock, null), false, "no #app-main — nothing to animate");
+  shell.markEntrance(clock, main);
+  assert.equal(main.has(shell.ENTER_CLASS), true);
+  main.fire("animationend");
+  assert.equal(main.has(shell.ENTER_CLASS), false, "the normal path: the animation ended");
+
+  // prefers-reduced-motion sets `animation: none` (app.css), so animationend
+  // NEVER fires — the fallback timer is the only thing that takes the class off,
+  // and without it the class would be permanent state on a reduced-motion machine.
+  const quiet = mkFeelEl("MAIN", { id: "app-main" });
+  quiet.addEventListener = () => {};
+  const quietClock = mkClock(); // its own clock: the first entrance's fallback is still armed
+  shell.markEntrance(quietClock, quiet);
+  assert.equal(quiet.has(shell.ENTER_CLASS), true);
+  quietClock.fireNext();
+  assert.equal(quiet.has(shell.ENTER_CLASS), false);
 });
