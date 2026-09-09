@@ -1,9 +1,6 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.AuthoringGuard
-import co.datapipelines.web.anonymousActors
-import io.mockk.every
-import io.mockk.mockk
 import co.datapipelines.pipeline.ExclusiveDraftTemplates
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
@@ -15,6 +12,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.web.anonymousActors
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -141,11 +139,14 @@ class PipelineLifecycleDialogModelTest {
         every { repository.listVersions(any(), any()) } returns
             listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 3, DISCARDED, "h3", T0, USER))
 
-        model.switch(WS, ID).options.single().eligible shouldBe false
+        model
+            .switch(WS, ID)
+            .options
+            .single()
+            .eligible shouldBe false
     }
 
-    private fun recordOf(current: Int?) =
-        PipelineRecord(ID, "test/probe", "probe", "", USER, current, T0, T0)
+    private fun recordOf(current: Int?) = PipelineRecord(ID, "test/probe", "probe", "", USER, current, T0, T0)
 
     private fun detail(status: PipelineVersionStatus) =
         co.datapipelines.pipeline.PipelineVersionDetail(

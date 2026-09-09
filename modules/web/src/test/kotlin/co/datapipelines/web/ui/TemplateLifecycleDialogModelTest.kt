@@ -6,12 +6,12 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplatePin
-import co.datapipelines.web.anonymousActors
-import io.mockk.every
-import io.mockk.mockk
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersionSummary
+import co.datapipelines.web.anonymousActors
 import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -80,9 +80,10 @@ class TemplateLifecycleDialogModelTest {
         every { templates.findLatest(any(), any()) } returns null
         model.restore(WS, NAME, 1).movesPointer shouldBe true
 
-        val latest = mockk<co.datapipelines.templates.Template> {
-            every { version } returns 3
-        }
+        val latest =
+            mockk<co.datapipelines.templates.Template> {
+                every { version } returns 3
+            }
         every { templates.findLatest(any(), any()) } returns latest
         model.restore(WS, NAME, 2).movesPointer shouldBe false
     }
