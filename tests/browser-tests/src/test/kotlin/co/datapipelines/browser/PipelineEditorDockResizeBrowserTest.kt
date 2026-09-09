@@ -92,14 +92,18 @@ class PipelineEditorDockResizeBrowserTest : BrowserSuite() {
             canvasH: canvas.getBoundingClientRect().height,
             bodyH: document.querySelector('.pe-body').getBoundingClientRect().height,
             cyH: cy ? cy.height() : null,
-            prop: getComputedStyle(document.documentElement).getPropertyValue('--pe-dock-pane-h').trim(),
+            prop: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pe-dock-pane-h')),
+            reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
             valueNow: handle ? Number(handle.getAttribute('aria-valuenow')) : null,
             valueMin: handle ? Number(handle.getAttribute('aria-valuemin')) : null,
             role: handle ? handle.getAttribute('role') : null,
             orientation: handle ? handle.getAttribute('aria-orientation') : null,
             label: handle ? handle.getAttribute('aria-label') : null,
             stored: window.localStorage.getItem('dp.pane.editor-dock'),
-            transition: getComputedStyle(dock).transitionDuration,
+            transitionMs: (() => {
+              const d = getComputedStyle(dock).transitionDuration;
+              return d.endsWith('ms') ? parseFloat(d) : parseFloat(d) * 1000;
+            })(),
             handleVisible: handle ? handle.getBoundingClientRect().height > 0 : false,
           };
         }
@@ -249,7 +253,9 @@ class PipelineEditorDockResizeBrowserTest : BrowserSuite() {
         ready()
         dragHandle(-150.0)
         val dragged = read()
-        dragged["stored"] shouldBe dragged.d("paneH").toInt().toString()
+        // The stored number is the PROPERTY the splitter wrote; `paneH` is the rendered row,
+        // which carries the dock's 1px `border-top` on top of it. Compare like with like.
+        dragged["stored"] shouldBe dragged.d("prop").toInt().toString()
 
         page.navigate(editorUrl)
         page.locator(".pe-card").first().waitFor()
@@ -294,10 +300,27 @@ class PipelineEditorDockResizeBrowserTest : BrowserSuite() {
     @Test
     fun `under prefers-reduced-motion the dock has no transition to lag behind the pointer`() {
         startTrace()
-        page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE))
         ready()
-        withClue("the dock still animates its height under reduced motion") {
-            read()["transition"] shouldBe "0s"
+
+        // Non-vacuity FIRST: with motion allowed the dock really does animate its height (the
+        // 200ms `grid-template-rows` transition the collapse uses). Without this line the
+        // assertion below would pass just as happily on a dock that never had a transition.
+        withClue("the dock has no height transition at all, so the reduced-motion case is vacuous") {
+            read().d("transitionMs") shouldBeGreaterThanOrEqual 150.0
+        }
+
+        page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE))
+        val m = read()
+        withClue("prefers-reduced-motion was not emulated, so the assertion below proves nothing: $m") {
+            m["reducedMotion"] shouldBe true
+        }
+        // NOT `== "0s"`: the vendored design system zeroes motion with
+        // `transition-duration: 0.01ms !important`, which computes to 1e-05s. The contract is
+        // "no perceptible animation", and 0.01ms is how the design system states it — asserting
+        // the literal 0s would have been asserting our own (unwinnable) rule instead of the
+        // effect. Anything at or below a millisecond cannot lag a pointer.
+        withClue("the dock still animates its height under reduced motion: $m") {
+            m.d("transitionMs") shouldBeLessThanOrEqual 1.0
         }
     }
 

@@ -176,7 +176,10 @@
   }
 
   /**
-   * Bind one `.app-splitter` handle.
+   * Bind one splitter handle. The shared contract is the `data-splitter="<pane key>"`
+   * attribute, not a class: `app.css` belongs to another lane this round, so each pane's own
+   * stylesheet paints its own handle (`.pe-dock-splitter`, `.tplx-splitter`) and the marker is
+   * what this module finds them by.
    *
    * `opts`: { handle, pane, axis, invert, prop, storageKey, container, label,
    *           bounds: () => ({min, max}), onChange: (size) => void }
@@ -222,7 +225,9 @@
     }
 
     function commit(size) {
-      applyProp(opts.prop, size);
+      withoutTransition(function () {
+        applyProp(opts.prop, size);
+      });
       writeStored(opts.storageKey, size);
       publish(size);
       if (opts.onChange) opts.onChange(size);
@@ -230,17 +235,51 @@
 
     /** Double-click: forget the size and fall back to the stylesheet's own default. */
     function reset() {
-      applyProp(opts.prop, null);
+      withoutTransition(function () {
+        applyProp(opts.prop, null);
+      });
       writeStored(opts.storageKey, null);
       if (opts.onChange) opts.onChange(current());
       publish(current());
     }
 
-    /* `is-dragging` on the pane's container kills the dock's row transition (§D); the
-       axis class on the root holds the resize cursor and suppresses selection while the
-       captured pointer travels across the page. */
-    function dragging(on) {
+    /**
+     * `is-dragging` kills the container's size transition (§D). It is NOT only for pointer
+     * drags: the dock's `transition: grid-template-rows 0.2s` exists for the COLLAPSE, and it
+     * would otherwise animate a keyboard step and a double-click reset too — a pane that eases
+     * toward a size the user has already chosen, and motion `prefers-reduced-motion` asked not
+     * to have. Every commit therefore suppresses it, a drag for its whole duration and a
+     * discrete change for one frame.
+     */
+    function suppress(on) {
       if (opts.container) opts.container.classList.toggle("is-dragging", !!on);
+    }
+
+    /**
+     * Run `fn` (the property write) with the transition off, and — this is the part that is
+     * easy to get wrong — FLUSH the layout before turning it back on. `requestAnimationFrame`
+     * fires BEFORE the frame's layout and paint, so re-enabling the transition there would
+     * re-enable it in time for the very change being made, and the pane would ease to the new
+     * size after all. Reading `offsetHeight` while the class is still on commits the new size
+     * synchronously; only then is it safe to release.
+     */
+    function withoutTransition(fn) {
+      var midDrag = state.pointerId !== null;
+      if (!midDrag) suppress(true);
+      fn();
+      if (midDrag) return;
+      if (opts.container) void opts.container.offsetHeight;
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(function () {
+          suppress(false);
+        });
+      } else {
+        suppress(false);
+      }
+    }
+
+    /** The resize cursor and the selection lock, while a captured pointer crosses the page. */
+    function cursorLock(on) {
       root().classList.toggle("dp-splitting-" + axis, !!on);
     }
 
@@ -253,7 +292,8 @@
       state.pointerId = ev.pointerId;
       state.x = ev.clientX;
       state.y = ev.clientY;
-      dragging(true);
+      suppress(true);
+      cursorLock(true);
       /* setPointerCapture: the drag survives the pointer leaving the 12px handle, which is
          what every "the divider stops following my mouse" report is. */
       if (handle.setPointerCapture && ev.pointerId !== undefined) handle.setPointerCapture(ev.pointerId);
@@ -289,7 +329,8 @@
         }
       }
       state.pointerId = null;
-      dragging(false);
+      suppress(false);
+      cursorLock(false);
     }
 
     handle.addEventListener("pointerup", endDrag);
@@ -328,12 +369,16 @@
 
   /* ---------------------------------------------------------------- the two panes */
 
-  /** px of one `1rem`-relative viewport unit, read the way the layout reads it. */
+  /** `fraction` of the viewport's width, in px — the JS side of a `vw` ceiling. */
   function vw(fraction) {
     return (window.innerWidth || 0) * fraction;
   }
 
-  /** The dock keeps a readable strip of canvas above it (§B). */
+  /* The four bounds, each also written in the stylesheet that draws the pane:
+     `--pe-dock-min-h` / `--pe-dock-canvas-floor` in pipeline-editor.css, and
+     `.tplx-tree`'s `min-width` / `max-width` in template-tree.css. Two of them are
+     measured back by the browser suites, so a change on one side that is not made on the
+     other goes red rather than quiet. */
   var DOCK_MIN = 120;
   var DOCK_CANVAS_FLOOR = 160;
   var TREE_MIN = 260;
@@ -345,8 +390,19 @@
     var body = document.querySelector(".pe-body");
     var tabs = dock && dock.querySelector(".pe-dock-tabs");
     if (!dock || !handle || !body || !tabs) return null;
-    /* The pane row is what the dock has that its tab strip does not. */
+    /*
+     * The pane row's height, read from the RESOLVED custom property rather than from the
+     * dock's box. `dockH − tabsH` looked right and was wrong by exactly the dock's 1px
+     * `border-top`: every keyboard step then started 1px above where the last one landed and
+     * the drift compounded (measured: a 16px ArrowUp moved the property 232 → 249). The
+     * property is also the only honest answer while the dock is COLLAPSED — the row is 0px
+     * then, but the height the user chose, and that expand must restore, is still this one.
+     * The rendered box is the fallback for a browser that cannot resolve it.
+     */
     var paneHeight = function () {
+      var raw = window.getComputedStyle(root()).getPropertyValue("--pe-dock-pane-h");
+      var px = parseFloat(raw);
+      if (isFinite(px) && px >= 0) return px;
       return Math.max(0, measure(dock, "y") - measure(tabs, "y"));
     };
     return bind({

@@ -98,11 +98,8 @@ html.dp-splitting-x * {
   user-select: none !important;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tplx-splitter::after {
-    transition: none;
-  }
-}
+/* No reduced-motion rule for the grip: motion.css's `*` block already zeroes every
+   transition-duration with `!important` (see the note in pipeline-editor.css). */
 
 /* The tree pane. The width is viewport-based (a SHARE of the full-bleed canvas),
    NOT a percentage of the grid track — an auto track sizes itself from this

@@ -1014,12 +1014,15 @@ html.dp-splitting-y * {
   user-select: none !important;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .pe-dock,
-  .pe-dock-splitter::after {
-    transition: none;
-  }
-}
+/* §D's reduced-motion half needs NO rule here, and a rule here would be a LIE: the vendored
+   design system's motion.css already carries `*, *::before, *::after { transition-duration:
+   0.01ms !important }` inside `@media (prefers-reduced-motion: reduce)`. A `transition: none`
+   of ours could never win against that `!important` — it would read as protection while doing
+   nothing, which is worse than no rule at all. Measured under Playwright's reduced-motion
+   emulation: the dock's `transition-duration` computes to 1e-05s, and
+   `PipelineEditorDockResizeBrowserTest` asserts that. The `is-dragging` switch above is the
+   part that IS ours: it covers the default (motion-allowed) case, where a 200ms row
+   transition would make the pane lag the pointer. */
 
 .pe-dock-collapsed {
   grid-template-rows: var(--pe-dock-tabs-h) 0;
