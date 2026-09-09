@@ -84,7 +84,6 @@ class UiConfig {
     @Bean
     @Suppress("LongParameterList") // one collaborator per §4.3d fact, exactly like the browse models
     fun pipelineLifecycleDialogModel(
-        pipelines: co.datapipelines.pipeline.PipelineService,
         repository: co.datapipelines.pipeline.PipelineRepository,
         templates: co.datapipelines.pipeline.TemplateVersionStatuses,
         exclusiveTemplates: co.datapipelines.pipeline.ExclusiveDraftTemplates,
@@ -92,7 +91,7 @@ class UiConfig {
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
     ): PipelineLifecycleDialogModel =
-        PipelineLifecycleDialogModel(pipelines, repository, templates, exclusiveTemplates, runStats, actorNames, authoring)
+        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring)
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean

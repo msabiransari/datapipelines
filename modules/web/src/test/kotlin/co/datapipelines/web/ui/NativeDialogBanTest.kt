@@ -27,25 +27,35 @@ import kotlin.io.path.relativeTo
 class NativeDialogBanTest {
     @Test
     fun `no template, script or browser test calls a native confirm or alert`() {
-        val offenders = mutableListOf<String>()
-        roots.forEach { root ->
-            Files.walk(root).use { stream ->
-                stream
-                    .filter { file ->
-                        Files.isRegularFile(file) &&
-                            file.fileName.toString().let { it.endsWith(".html") || it.endsWith(".js") || it.endsWith(".kt") }
-                    }.forEach { file ->
-                        // Excluded BY PATH (the prompt's rule): htmx's own attribute on the
-                        // API console, never a native call.
-                        if (file.relativeTo(root).toString() == "api/console.html") return@forEach
-                        val text = Files.readString(file)
-                        if (text.contains("window.confirm(") || text.contains("window.alert(")) {
-                            offenders += file.relativeTo(root).toString()
-                        }
-                    }
+        roots.flatMap { it.offenders() }.shouldBeEmpty()
+    }
+
+    /**
+     * The scan half, extracted so the rule reads in one line: every template, script and
+     * browser-test source under this root, minus the console's PATH exclusion, keeping the
+     * files that carry a native call.
+     */
+    private fun Path.offenders(): List<String> {
+        val sources =
+            Files.walk(this).use { stream ->
+                stream.filter(::isScannable).toList()
             }
-        }
-        offenders.shouldBeEmpty()
+        return sources
+            // Excluded BY PATH (the prompt's rule): htmx's own attribute on the API console,
+            // never a native call.
+            .filter { it.relativeTo(this).toString() != "api/console.html" }
+            .filter(::carriesNativeDialog)
+            .map { it.relativeTo(this).toString() }
+    }
+
+    private fun isScannable(file: Path): Boolean =
+        Files.isRegularFile(file) &&
+            file.fileName.toString().let { it.endsWith(".html") || it.endsWith(".js") || it.endsWith(".kt") }
+
+    /** One file's verdict: a native confirm/alert call anywhere in its text. */
+    private fun carriesNativeDialog(file: Path): Boolean {
+        val text = Files.readString(file)
+        return text.contains("window.confirm(") || text.contains("window.alert(")
     }
 
     @Test

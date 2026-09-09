@@ -6,7 +6,6 @@ import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -27,7 +26,6 @@ import java.util.UUID
  * being pressed, and the screen is never the authority. These models only decide what to SAY.
  */
 class PipelineLifecycleDialogModel(
-    private val pipelines: PipelineService,
     private val repository: PipelineRepository,
     private val templates: TemplateVersionStatuses,
     private val exclusiveTemplates: ExclusiveDraftTemplates,
@@ -141,6 +139,7 @@ class PipelineLifecycleDialogModel(
         val expected: String,
     )
 
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun purge(
         workspaceId: UUID,
         id: UUID,
@@ -179,6 +178,7 @@ class PipelineLifecycleDialogModel(
         val pinnerPipelines: List<PinnerView>,
     )
 
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun discard(
         workspaceId: UUID,
         id: UUID,
@@ -228,6 +228,7 @@ class PipelineLifecycleDialogModel(
         val movesPointer: Boolean,
     )
 
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun restore(
         workspaceId: UUID,
         id: UUID,

@@ -78,7 +78,7 @@ class PipelineAuthoringToolsTest {
         // D55: the lifecycle argument is part of the expectation, so a create that asked the
         // repository for a RELEASED v1 would not match this stub at all — the mock IS the guard.
         every {
-            pipelines.create(any(), capture(row), capture(stored), McpFixtures.USER, CreateLifecycle.DRAFT, WriteSurface.SESSION)
+            pipelines.create(any(), capture(row), capture(stored), McpFixtures.USER, CreateLifecycle.DRAFT, WriteSurface.MCP)
         } returns McpFixtures.pipelineRecord(version = null)
         every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns draftDetail(version = 1)
 
@@ -135,7 +135,7 @@ class PipelineAuthoringToolsTest {
     fun `update writes the DRAFT and answers with its status, hash and pointer`() {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every {
-            drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER, WriteSurface.SESSION)
+            drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
         } returns
             PipelineDraftService.DraftWrite(
                 McpFixtures.pipelineRecord(version = 1),
@@ -167,7 +167,7 @@ class PipelineAuthoringToolsTest {
     fun `a no-op update answers with the RELEASED state and carries no draft pointer`() {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every {
-            drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER, WriteSurface.SESSION)
+            drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
         } returns
             PipelineDraftService.DraftWrite(
                 McpFixtures.pipelineRecord(version = 1),
@@ -222,7 +222,7 @@ class PipelineAuthoringToolsTest {
     fun `update of an unknown pipeline is a catalogued not-found`() {
         val id = UUID.randomUUID()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { drafts.write(any(), id, any<Pipeline>(), any(), any(), McpFixtures.USER, WriteSurface.SESSION) } throws
+        every { drafts.write(any(), id, any<Pipeline>(), any(), any(), McpFixtures.USER, WriteSurface.MCP) } throws
             co.datapipelines.typesystem.DatapipelinesException(
                 PipelineErrorCodes.Execution.NOT_FOUND,
                 "Pipeline '$id' not found.",

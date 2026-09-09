@@ -38,6 +38,7 @@ import javax.sql.DataSource
  * against metadata-db.md §4 line by line.
  */
 @SpringBootTest(classes = [DatapipelinesApplication::class])
+@Suppress("LargeClass") // one class per shipped migration family, asserted schema-line-by-schema-line (§5.10)
 class FlywayMigrationIntegrationTest {
     @Autowired
     private lateinit var dataSource: DataSource
@@ -133,6 +134,7 @@ class FlywayMigrationIntegrationTest {
      * are seeded REAL rows first (a bogus UUID would fail the FK, not the CHECK — the exact
      * confusion the V17 shape guards against by naming the constraint). Rolled back either way.
      */
+    @Suppress("NestedBlockDepth") // the probe is one transaction's shape: seed, insert, classify, roll back
     private fun viaAccepted(
         table: String,
         value: String,

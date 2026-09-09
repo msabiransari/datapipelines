@@ -189,8 +189,7 @@ class PipelineLifecycleDialogController(
         response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
-    ): String {
+    ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val result = pipelines.discardVersion(workspaceId, id, version, principal.userId)
@@ -240,8 +239,7 @@ class PipelineLifecycleDialogController(
         response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
-    ): String {
+    ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val record = pipelines.restoreVersion(workspaceId, id, version)
@@ -282,9 +280,8 @@ class PipelineLifecycleDialogController(
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun purgeEntity(
         @PathVariable id: UUID,
-        @RequestParam(required = false, defaultValue = "false") include_exclusive: Boolean,
+        @RequestParam("include_exclusive", required = false, defaultValue = "false") includeExclusive: Boolean,
         @RequestParam confirm: String?,
-        @RequestParam(required = false) from: String?,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -298,7 +295,7 @@ class PipelineLifecycleDialogController(
                     details = mapOf("pipeline_id" to id.toString()),
                 )
         requireTypedConfirm(confirm, record.name)
-        val result = pipelines.purgeEntity(workspaceId, id, includeExclusiveDraftTemplates = include_exclusive)
+        val result = pipelines.purgeEntity(workspaceId, id, includeExclusiveDraftTemplates = includeExclusive)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.AUDIT_ENTITY_PURGED,

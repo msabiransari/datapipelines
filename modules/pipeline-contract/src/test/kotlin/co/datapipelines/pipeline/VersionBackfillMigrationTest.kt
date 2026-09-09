@@ -62,11 +62,8 @@ class VersionBackfillMigrationTest {
         // V19 discard stamps, so a schema stopped at V6 can no longer serve them. The
         // backfill under test is still V6's — these later migrations run AFTER the pre-V6
         // rows exist, exactly as a live deployment would have received them.
-        ShippedMigrations.migrations(dir).filter { it.first in 7..18 }.forEach { pair ->
+        ShippedMigrations.migrations(dir).filter { it.first > 6 }.forEach { pair ->
             jdbc.jdbcTemplate.execute(pair.second.readText())
-        }
-        ShippedMigrations.paths().filter { it.contains("V19__") }.forEach {
-            jdbc.jdbcTemplate.execute(Fixtures.repoFile(it).readText())
         }
 
         repository = PipelineRepository(jdbc)

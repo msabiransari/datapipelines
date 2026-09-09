@@ -102,11 +102,6 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         ps shouldBe 200
     }
 
-    private fun pipelineId(name: String): String =
-        send("GET", "/api/v1/pipelines?prefix=${name.substringBeforeLast('/')}/")
-            .second!!
-            .let { Regex("\"id\"\\s*:\\s*\"([0-9a-f-]+)\"").find(it)!!.groupValues[1] }
-
     private fun createDraftTemplate(id: String) {
         val (status) =
             send(

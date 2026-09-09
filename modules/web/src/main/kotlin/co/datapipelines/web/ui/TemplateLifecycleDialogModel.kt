@@ -90,6 +90,7 @@ class TemplateLifecycleDialogModel(
         val refusal: Refusal?,
     )
 
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun purge(
         workspaceId: UUID,
         id: String,
@@ -139,6 +140,7 @@ class TemplateLifecycleDialogModel(
         val pinnerPipelines: List<String>,
     )
 
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun discard(
         workspaceId: UUID,
         id: String,
@@ -186,6 +188,7 @@ class TemplateLifecycleDialogModel(
         val movesPointer: Boolean,
     )
 
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun restore(
         workspaceId: UUID,
         id: String,
