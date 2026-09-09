@@ -72,7 +72,7 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
     @Test
     fun `the admin users table is a fragment now, and looks like the table it replaced`() {
         startTrace()
-        val user = loginReadyAdmin()
+        loginReadyAdmin()
 
         page.navigate("$baseUrl/admin/users")
         page.waitForSelector("#user-table-body tr[id^=user-row-]")
@@ -80,8 +80,11 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
         // §B: the PAGE painted these rows. Before 097 the tbody arrived with three skeleton
         // rows and an inline script fetched the real ones, so this markup was never in the
         // page's own response.
+        //
+        // The assertion is about the ROWS, not about this test's own user: the suite shares one
+        // database, the listing is paged at 20, and which users land on page 1 is nobody's
+        // business here.
         page.locator("#user-table-body tr[id^=user-row-]").count() shouldBeGreaterThanOrEqual 1
-        page.locator("#user-table-body").innerText() shouldContain user.email
 
         // §C: the action buttons carry the semantic classes, and NOTHING in the table carries
         // an inline style attribute — the thing the widened InlineWidthAuditTest bans in the
@@ -113,18 +116,21 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
         )
         page.fill("#userSearch", "")
 
-        // The search box swaps the SAME fragment the page rendered: this user's row survives
-        // the round trip byte-identically (the parity §A asserts for datasources, here by
-        // construction — one fragment, two entry points).
-        val row = page.locator("#user-table-body tr:has-text('${user.email}')")
-        val before = row.innerHTML()
+        // The search box swaps the SAME fragment the page rendered: a row the PAGE painted
+        // survives the round trip byte-identically (the parity §A asserts for datasources,
+        // here by construction — one fragment, two entry points). The row is whichever one
+        // page 1 happens to show, looked up by its own email.
+        val first = page.locator("#user-table-body tr[id^=user-row-]").first()
+        val rowId = first.getAttribute("id")
+        val email = first.locator("td").nth(2).innerText()
+        val before = first.innerHTML()
         page.waitForResponse({ it.url().contains("/partials/admin/users") }, {
-            page.fill("#userSearch", user.email)
+            page.fill("#userSearch", email)
             // The box is hx-triggered on `keyup changed`, which `fill` does not fire.
             page.locator("#userSearch").press("End")
         })
-        page.waitForSelector("#user-table-body tr[id^=user-row-]")
-        page.locator("#user-table-body tr:has-text('${user.email}')").innerHTML() shouldBe before
+        page.locator("#user-table-body tr[id='$rowId']").waitFor()
+        page.locator("#user-table-body tr[id='$rowId']").innerHTML() shouldBe before
     }
 
     @Test
