@@ -17,6 +17,7 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 | `pipeline.validation.duplicate_name` (on update) | Your draft renames onto a taken name | Pick a different `name`; this fails at write time now, not at release |
 | `pipeline.execution.datasource_unreachable` | Source DB down/bad credentials | `datasources_test` to confirm |
 | `pipeline.node.query_execution_failed` | A node's SQL failed | Read `node_stats` + `executions_get` for the node error, re-render its template with the failed parameters |
+| `pipeline.node.query_timeout` | A node's query outlived its JDBC timeout (`timeout_seconds` in the detail) and was cancelled | The SQL is not wrong, it is too slow for the budget: prune on the partition column, push the filter down, stage less, split the node — see the authoring playbook. Raising the datasource's `query_timeout_seconds` is the last resort, not the first |
 | `pipeline.node.sql_parameter_missing` | The rendered SQL references a `:name` no pipeline parameter declares | Name a declared parameter — or interpolate structure instead |
 | `template.validation.parameter_interpolated` | A declared parameter appears inside `${}` | Write `:name` for it — bound values are never parsed as SQL |
 | `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
