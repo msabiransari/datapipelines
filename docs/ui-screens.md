@@ -497,7 +497,7 @@ same services 101 wired, never the REST controllers over HTTP and never a second
 | Purge entity | `…/lifecycle/purge-entity` | only in the `{D}` shape (else the `last_release` branch, no button); the exclusive draft templates the service offers, with a checkbox "also purge these `<k>` templates (they are pinned by nothing else)"; typed confirm is the entity's NAME | `{D}` |
 | Switch | `…/lifecycle/switch` | the live versions as radio rows (RELEASED always; DRAFT under development posture), the current one marked, discarded ones disabled with "restore first"; "endpoints published on this pipeline serve v`<n>` after this." Not authoring-gated (§3.1: the receiver's rollback lever) | ≥ 2 live eligible versions |
 
-The templates twin is addressed by NAME in query/body ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative--measured)):
+The templates twin is addressed by NAME in query/body ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)):
 `GET /partials/templates/lifecycle/{verb}?name=&version=`. It has every dialog above except
 Switch — templates are pinned by version; there is no served pointer to switch. The pipeline
 purge-draft POST rides the **versioned** purge (`DELETE /api/v1/pipelines/{id}/versions/{v}`
