@@ -110,6 +110,44 @@ class ExecutionsPartialRenderTest {
         html shouldContain record.pipelineId.toString().substring(0, 8) + "..."
     }
 
+    /**
+     * §5 (097 §B): `/executions` renders the shell AND the initial fragment. It used to
+     * render a spinner behind `hx-trigger="load"`, so the screen's first paint was an empty
+     * frame waiting on a round trip the browser had not made yet — the one list screen still
+     * on that idiom. Rendering the page's own `content` fragment (no layout) is enough to see
+     * it: the table is THERE, and the loading placeholder is gone.
+     */
+    @Test
+    fun `the page's first paint carries the table itself, not a loading placeholder`() {
+        val record = executionRecord()
+        val html =
+            engine.process(
+                "executions/list",
+                setOf("content"),
+                webContext().apply {
+                    setVariable("pipelines", emptyList<Any>())
+                    setVariable("statuses", ExecutionStatus.entries)
+                    setVariable("selectedPipelineId", "")
+                    setVariable("selectedStatus", "FAILED")
+                    setVariable("selectedStartedAfter", "2026-09-01")
+                    setVariable("selectedStartedBefore", "")
+                    setVariable("executions", listOf(record))
+                    setVariable("pipelineNames", emptyMap<UUID, PipelineName>())
+                    setVariable("offset", 0)
+                    setVariable("pageSize", 20)
+                    setVariable("nextOffset", null)
+                    setVariable("hasMore", false)
+                },
+            )
+
+        html shouldContain "<table class=\"ds-table\""
+        html shouldNotContain "Loading executions"
+        html shouldNotContain "hx-trigger=\"load\""
+        // The bar re-renders in the state the rows were fetched with (a shared filtered link).
+        html shouldContain "value=\"2026-09-01\""
+        html shouldContain "selected=\"selected\""
+    }
+
     private fun executionRecord() =
         ExecutionRecord(
             executionId = UUID.randomUUID(),

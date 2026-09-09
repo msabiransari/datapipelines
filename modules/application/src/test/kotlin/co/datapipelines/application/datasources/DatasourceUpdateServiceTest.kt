@@ -94,7 +94,7 @@ class DatasourceUpdateServiceTest {
 
         private fun record(call: String) {
             calls += call
-            if (refuseAt != null && call.startsWith(refuseAt)) throw IllegalStateException("refused at $call")
+            if (refuseAt != null && call.startsWith(refuseAt)) error("refused at $call")
         }
     }
 

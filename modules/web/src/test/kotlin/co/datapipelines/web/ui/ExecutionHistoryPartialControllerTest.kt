@@ -39,7 +39,8 @@ class ExecutionHistoryPartialControllerTest {
         mockk<co.datapipelines.pipeline.PipelineRepository>().also {
             every { it.releasedAtFor(any(), any()) } returns emptyMap()
         }
-    private val controller = ExecutionHistoryPartialController(executions, pipelineNames, pipelines)
+    private val controller =
+        ExecutionHistoryPartialController(ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

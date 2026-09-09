@@ -61,6 +61,17 @@ class UiConfig {
     fun datasourceBrowseModel(datasources: co.datapipelines.datasources.DatasourceRegistry): DatasourceBrowseModel =
         DatasourceBrowseModel(datasources)
 
+    /**
+     * 097 §B: the execution-history screen's one model, shared by the page and the partial —
+     * which is what let `/executions` render its first fragment instead of a spinner.
+     */
+    @Bean
+    fun executionHistoryBrowseModel(
+        executions: co.datapipelines.executor.ExecutionRepository,
+        pipelineNames: PipelineNames,
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+    ): ExecutionHistoryBrowseModel = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     fun pipelineBrowseModel(

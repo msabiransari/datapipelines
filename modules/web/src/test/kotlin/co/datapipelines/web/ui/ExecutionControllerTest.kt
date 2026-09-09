@@ -59,8 +59,9 @@ class ExecutionControllerTest {
     private val cancellation = mockk<ExecutionCancellationService>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
 
-    private val pageController = ExecutionHistoryController(pipelines)
-    private val partialController = ExecutionHistoryPartialController(executions, pipelineNames, pipelines)
+    private val browse = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
+    private val pageController = ExecutionHistoryController(pipelines, browse)
+    private val partialController = ExecutionHistoryPartialController(browse)
     private val detailController = ExecutionDetailController(executions, pipelines, resultStore, resultUrls)
     private val detailPartialController = ExecutionDetailPartialController(executions, resultStore, cursor, cancellation)
 
@@ -118,8 +119,10 @@ class ExecutionControllerTest {
     fun `history page returns pipelines and statuses`() {
         authenticate(owner, setOf(Scope.READ))
         every { pipelines.findAll(any()) } returns listOf(pipelineRecord())
+        // §5 (097 §B): the page paints the first fragment too, so it reads the rows as well.
+        every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
         val model = ExtendedModelMap()
-        val viewName = pageController.list(model)
+        val viewName = pageController.list(model, null, null, null, null, 0)
 
         viewName shouldBe "executions/list"
         @Suppress("UNCHECKED_CAST")

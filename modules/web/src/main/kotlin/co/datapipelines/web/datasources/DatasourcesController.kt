@@ -148,7 +148,8 @@ class DatasourcesController(
         // the payload shape (§3.1) and the §3.2 envelope.
         val saved =
             updates.update(name, existing, principal, globalRequested, DatasourcePayloadBinder.workspaceNameOf(body)) {
-                DatasourcePayloadBinder.bind(body, requirePassword = false, pathName = name)
+                DatasourcePayloadBinder
+                    .bind(body, requirePassword = false, pathName = name)
                     .copy(isReadonly = readonlyRequested ?: existing.isReadonly)
             }
         return ApiResponse.of(saved.toResponse())

@@ -33,7 +33,12 @@ class DatasourceUiControllerTest {
             mockk(relaxed = true),
             co.datapipelines.auth.WorkspacesProperties(),
         )
-    private val controller = DatasourceUiController(DatasourceBrowseModel(registry), co.datapipelines.auth.WorkspacesProperties(), themeResolver)
+    private val controller =
+        DatasourceUiController(
+            DatasourceBrowseModel(registry),
+            co.datapipelines.auth.WorkspacesProperties(),
+            themeResolver,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -80,7 +85,8 @@ class DatasourceUiControllerTest {
             DatasourceBrowseModel(registry),
             registry,
             rules,
-            co.datapipelines.application.datasources.DatasourceUpdateService(registry, rules),
+            co.datapipelines.application.datasources
+                .DatasourceUpdateService(registry, rules),
             co.datapipelines.datasources.DatasourceReferences.NONE,
         )
 
