@@ -310,8 +310,7 @@ class PipelineExecutor(
         try {
             return withTimeout(seconds.seconds) { body.await() }
         } catch (e: TimeoutCancellationException) {
-            if (cancelledByAncestor()) throw bodyOutcomeOr(body, e)
-            throw nodeDeadlineExpired(node, ctx, run, seconds, startedAt, body)
+            throw deadlineOutcome(node, ctx, run, seconds, startedAt, body, e)
         } catch (e: CancellationException) {
             throw bodyOutcomeOr(body, e)
         } finally {
@@ -326,6 +325,35 @@ class PipelineExecutor(
             scope.cancel()
         }
     }
+
+    /**
+     * A `TimeoutCancellationException` arrived — decide whose deadline it was, and return what to
+     * raise.
+     *
+     * kotlinx hands a cancellation cause that is already a `CancellationException` to children
+     * **unwrapped**, so the execution's own deadline, or an ancestor's, reaches this handler as
+     * the very type the node would raise for its own. Scope liveness is the discriminator; the
+     * exception's type carries no information at all here (see [cancelledByAncestor], and the
+     * coroutine entry in MISTAKES).
+     *
+     * Returns rather than throws so the caller has exactly one `throw` per branch — a function
+     * that raises three different things three different ways is hard to follow, and detekt is
+     * right to say so.
+     */
+    private suspend fun deadlineOutcome(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+        seconds: Long,
+        startedAt: Instant,
+        body: Deferred<NodeResult>,
+        cause: TimeoutCancellationException,
+    ): Throwable =
+        if (cancelledByAncestor()) {
+            bodyOutcomeOr(body, cause)
+        } else {
+            nodeDeadlineExpired(node, ctx, run, seconds, startedAt, body)
+        }
 
     /**
      * What the node ITSELF ended with, when our `await` was cancelled from outside (108 §A).
