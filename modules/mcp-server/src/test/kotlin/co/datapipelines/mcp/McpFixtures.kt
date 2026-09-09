@@ -81,6 +81,19 @@ object McpFixtures {
             drafts = drafts,
             releases = releases,
             authoring = authoring,
+            // 101: the entity purge's port — empty offer in these fixtures (no template pins).
+            draftTemplates =
+                object : co.datapipelines.pipeline.ExclusiveDraftTemplates {
+                    override fun exclusiveIds(
+                        workspaceId: java.util.UUID,
+                        pipelineId: java.util.UUID,
+                    ) = emptyList<String>()
+
+                    override fun purge(
+                        workspaceId: java.util.UUID,
+                        templateId: String,
+                    ) = Unit
+                },
         )
 
     fun request(
@@ -108,7 +121,6 @@ object McpFixtures {
             description = description,
             ownerId = owner,
             currentVersion = version,
-            isDeleted = false,
             createdAt = Instant.parse("2026-08-01T00:00:00Z"),
             updatedAt = Instant.parse("2026-08-02T00:00:00Z"),
         )

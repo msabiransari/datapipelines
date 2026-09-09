@@ -7,7 +7,7 @@ import java.util.UUID
  * One row of the `pipelines` table (metadata-db §4.4) — the pipeline's **server-owned**
  * metadata.
  *
- * This is where the protected fields live: [id], [ownerId], [currentVersion], [isDeleted],
+ * This is where the protected fields live: [id], [ownerId], [currentVersion],
  * [createdAt], [updatedAt]. None of them appears on [Pipeline], the authorable body, so no
  * inbound payload can set them — the absent-field discipline, not an `@JsonIgnoreProperties`
  * filter that Jackson deserialization advisories are known to bypass.
@@ -15,6 +15,12 @@ import java.util.UUID
  * The body itself is not here: it lives in `pipeline_versions.body_json`, one immutable row
  * per version ([PipelineRepository.findVersionBody]). A surface that needs the §3.1 shape
  * composes a record with a body; nothing denormalizes one into the other.
+ *
+ * There is **no entity status field, deliberately** (versioning §3.2, since V19): a
+ * pipeline is ACTIVE while any version is DRAFT or RELEASED and DISCARDED when every
+ * version is — a derivation over rows this record does not carry. Readers that need it
+ * ask the repository ([PipelineRepository.hasLiveVersion]); a stored flag is exactly the
+ * drift the derivation exists to prevent.
  */
 data class PipelineRecord(
     val id: UUID,
@@ -23,18 +29,16 @@ data class PipelineRecord(
     val description: String,
     val ownerId: UUID,
     /**
-     * The latest RELEASED version, or **null when nothing has been released yet** (D55, since
-     * V18): creation lands version 1 as a DRAFT, so a pipeline an agent just authored has a
-     * version 1 and no release pointer at all. It still does not move while a draft exists
-     * (versioning §3.4) — a released pipeline with an open draft reads `current_version = 1`
-     * and a draft at 2.
+     * The **sticky pointer** (D60, since 101): the version every pointer-following
+     * dependent runs. NULL when nothing has been released (D55, V18) or when the release
+     * it named was discarded with no eligible survivor (§3.4). It moves only on the events
+     * §3.4 lists — it is no longer a derived "latest released" fact.
      *
-     * Every read that means "what would a release serve" (promotion candidates, published
-     * endpoints, the promotion inventory) uses THIS; every read that means "what is the
-     * pipeline right now" uses [PipelineService.workingVersion] instead.
+     * Every read that means "what would a dependent run" (published endpoints, promotion,
+     * schedules) uses THIS; every read that means "what is the pipeline right now" uses
+     * [PipelineService.workingVersion] instead.
      */
     val currentVersion: Int?,
-    val isDeleted: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
 )

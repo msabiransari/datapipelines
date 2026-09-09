@@ -235,7 +235,6 @@ class TemplateHtmxRenderAuditTest {
                     description = "A test pipeline",
                     ownerId = UUID.randomUUID(),
                     currentVersion = 1,
-                    isDeleted = false,
                     createdAt = Instant.parse("2026-08-01T00:00:00Z"),
                     updatedAt = Instant.parse("2026-08-10T00:00:00Z"),
                 ),

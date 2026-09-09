@@ -208,12 +208,13 @@ class TemplateTreeQueryIntegrationTest {
     }
 
     @Test
-    fun `a soft-deleted template leaves the tree, and its folder with it`() {
+    fun `a discarded template leaves the tree, and its folder with it`() {
         repository.createReleased(workspaceId, draft("gone/only_one"), actor)
         repository.listChildFolders(workspaceId).map { it.segment } shouldContainExactly
             listOf("a_b", "acme", "axb", "f1", "f2", "f3", "gone")
 
-        repository.softDelete(workspaceId, "gone/only_one")
+        // 101: the derived entity status — discard the only release through the real verb.
+        checkNotNull(repository.discardVersion(workspaceId, "gone/only_one", 1, actor, draftEligible = true))
 
         repository.listChildFolders(workspaceId).map { it.segment } shouldContainExactly
             listOf("a_b", "acme", "axb", "f1", "f2", "f3")

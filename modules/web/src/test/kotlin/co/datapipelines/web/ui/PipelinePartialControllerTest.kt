@@ -74,7 +74,6 @@ class PipelinePartialControllerTest {
         description = description,
         ownerId = userId,
         currentVersion = 1,
-        isDeleted = false,
         createdAt = Instant.EPOCH,
         updatedAt = Instant.EPOCH,
     )

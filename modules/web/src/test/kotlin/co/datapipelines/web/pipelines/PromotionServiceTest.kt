@@ -295,7 +295,7 @@ class PromotionServiceTest {
         hash: String = "hash-${record.name}",
     ) {
         every { pipelines.findByName(workspaceId, record.name) } returns record
-        every { pipelines.findByNameIncludingDeleted(workspaceId, record.name) } returns record
+        every { pipelines.findByNameAnyStatus(workspaceId, record.name) } returns record
         every { pipelines.findCurrentVersionDetail(workspaceId, record.id) } returns detail(record, hash)
         every { pipelines.findVersionDetail(workspaceId, record.id, atVersion) } returns
             detail(record, hash).copy(version = atVersion)
@@ -313,7 +313,6 @@ class PromotionServiceTest {
         description = "",
         ownerId = UUID.randomUUID(),
         currentVersion = version,
-        isDeleted = false,
         createdAt = EPOCH,
         updatedAt = EPOCH,
     )

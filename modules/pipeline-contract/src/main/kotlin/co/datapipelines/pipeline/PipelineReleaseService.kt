@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.DatapipelinesException
+import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 /**
@@ -21,11 +22,11 @@ import java.util.UUID
  *    error here.
  *
  * The hash precondition (§4.2) rides the flip statement itself: `you release what you
- * tested`. Discard mirrors it (§5.4): delete a never-executed draft, flip an executed one
- * to DISCARDED — the `pipeline_executions` composite FK decides which, transparently to
- * the caller.
+ * tested`. The draft verb is PURGE (§5.4, 101): the row is hard-deleted together with its
+ * executions — the FK never forces a tombstone — and the sole-draft case takes the entity
+ * row with it.
  */
-class PipelineReleaseService(
+open class PipelineReleaseService(
     private val pipelines: PipelineRepository,
     private val templates: TemplateVersionStatuses,
     private val validator: PipelineValidator,
@@ -47,7 +48,7 @@ class PipelineReleaseService(
      *   `pipeline.release.template_not_released`, `pipeline.version.conflict` (stale hash).
      */
     @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued code
-    fun release(
+    open fun release(
         workspaceId: UUID,
         pipelineId: UUID,
         expectedHash: String,
@@ -110,35 +111,53 @@ class PipelineReleaseService(
         return Released(released.record, released.version, bodyJson)
     }
 
-    /** What a discard did (§5.4) — both are a success to the caller. */
-    sealed interface Discarded {
-        /** A never-executed draft: the row is gone and the version number returns to the pool. */
-        data object Deleted : Discarded
+    /** What a draft purge did (§5.4, 101) — the row (and its executions) are gone either way. */
+    sealed interface Purged {
+        /** How many execution rows went with the draft (§5.4) — the audit detail. */
+        val executionsDeleted: Int
 
-        /** An executed draft: history keeps the number, the row flipped to DISCARDED. */
-        data class Flipped(
-            val version: PipelineVersionDetail,
-        ) : Discarded
+        /** The draft went; other versions remain, so the entity stays. */
+        data class Version(
+            override val executionsDeleted: Int,
+            val record: PipelineRecord,
+        ) : Purged
+
+        /** The draft was the ONLY version: the entity row went with it (§3.2). */
+        data class Entity(
+            override val executionsDeleted: Int,
+        ) : Purged
     }
 
     /**
-     * Discards the pipeline's DRAFT at [expectedHash] — hard-delete when never executed,
-     * DISCARDED-flip when the executions FK blocks the delete.
+     * Purges the pipeline's DRAFT at [expectedHash] (versioning §5.4, 101): the row is
+     * hard-deleted **together with its executions** — the pre-101 flip-to-DISCARDED branch
+     * is withdrawn; development runs of a thing that never shipped are not history. When
+     * the draft was the sole version the entity row goes too, and when the draft had
+     * become `current_version` (the development fallback) the pointer recomputes.
      *
-     * @throws DatapipelinesException `pipeline.authoring.disabled` (§5.5),
-     *   `pipeline.version.not_draft` or `pipeline.version.conflict`.
+     * @throws DatapipelinesException `pipeline.authoring.disabled` (§5.5) or
+     *   `pipeline.version.conflict` (stale hash / the draft vanished).
      */
-    fun discard(
+    @Transactional("metadataTransactionManager")
+    open fun purge(
         workspaceId: UUID,
         pipelineId: UUID,
         expectedHash: String,
-    ): Discarded {
-        // §5.5: discard is an authoring action — a promotion receiver refuses it.
+    ): Purged {
+        // §5.5: purging authored content is authoring — a receiver's sole writer is promotion.
         authoring.requirePipelineAuthoring()
 
-        return when (val outcome = pipelines.discardDraft(workspaceId, pipelineId, expectedHash)) {
-            DiscardOutcome.Deleted -> Discarded.Deleted
-            is DiscardOutcome.FlippedToDiscarded -> Discarded.Flipped(outcome.detail)
+        return when (
+            val outcome =
+                pipelines.purgeDraft(
+                    workspaceId,
+                    pipelineId,
+                    expectedHash,
+                    draftEligible = authoring.developmentPosture,
+                )
+        ) {
+            is PurgeOutcome.VersionPurged -> Purged.Version(outcome.executionsDeleted, outcome.record)
+            is PurgeOutcome.EntityPurged -> Purged.Entity(outcome.executionsDeleted)
             null -> throw conflictAfterGuardFailure(workspaceId, pipelineId)
         }
     }

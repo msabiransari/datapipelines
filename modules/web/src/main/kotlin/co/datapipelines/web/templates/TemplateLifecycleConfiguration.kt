@@ -1,6 +1,7 @@
 package co.datapipelines.web.templates
 
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
@@ -29,5 +30,6 @@ class TemplateLifecycleConfiguration {
         templates: TemplateRepository,
         validator: TemplateValidator,
         authoring: AuthoringGuard,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring)
+        pipelines: PipelineRepository,
+    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, pipelines)
 }

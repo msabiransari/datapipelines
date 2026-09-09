@@ -228,4 +228,20 @@ fun pipelineServiceOver(
         drafts = co.datapipelines.pipeline.PipelineDraftService(pipelines, authoring),
         releases = co.datapipelines.pipeline.PipelineReleaseService(pipelines, templateVersions, validator, authoring),
         authoring = authoring,
+        // 101: the entity purge's port — empty offer (this helper's callers pin no templates).
+        draftTemplates = NO_EXCLUSIVE_DRAFT_TEMPLATES,
     )
+
+/** The 101 entity-purge port with an always-empty offer — the fixture default. */
+val NO_EXCLUSIVE_DRAFT_TEMPLATES =
+    object : co.datapipelines.pipeline.ExclusiveDraftTemplates {
+        override fun exclusiveIds(
+            workspaceId: java.util.UUID,
+            pipelineId: java.util.UUID,
+        ) = emptyList<String>()
+
+        override fun purge(
+            workspaceId: java.util.UUID,
+            templateId: String,
+        ) = Unit
+    }

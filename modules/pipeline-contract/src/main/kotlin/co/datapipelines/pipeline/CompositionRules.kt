@@ -97,13 +97,31 @@ internal object CompositionRules {
             )
         }
         val resolved = resolve(ref, pipelines, workspaceId, index, into) ?: return
-        if (resolved.deleted) {
+        if (resolved.entityDiscarded) {
             into.add(
                 Validation.PIPELINE_REFERENCE_DELETED,
                 "nodes[$index].pipeline",
-                "Pipeline '${ref.name.truncateForError()}' is deleted; existing pinned references still resolve, " +
-                    "but a deleted pipeline cannot be referenced by a new save.",
+                "Pipeline '${ref.name.truncateForError()}' is discarded (every version discarded); existing pinned " +
+                    "references still resolve, but a discarded pipeline cannot be referenced by a new save.",
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
+            )
+        }
+        // D58 (101): composition references reviewed content only. A DRAFT child can be purged
+        // out from under its parent, and a DISCARDED child is retired — an exact-version pin
+        // must never name either.
+        if (resolved.versionStatus != PipelineVersionStatus.RELEASED) {
+            into.add(
+                Validation.PIPELINE_REFERENCE_NOT_RELEASED,
+                "nodes[$index].pipeline.version",
+                "PIPELINE node '${node.id.truncateForError()}' pins '${ref.name.truncateForError()}' version " +
+                    "${ref.version}, which is ${resolved.versionStatus.name}; a child pipeline pin must name a " +
+                    "RELEASED version.",
+                mapOf(
+                    "node" to node.id.truncateForError(),
+                    "pipeline" to ref.name.truncateForError(),
+                    "pipeline_version" to ref.version,
+                    "status" to resolved.versionStatus.name,
+                ),
             )
         }
         checkParameters(pipeline, index, node, resolved.pipeline, org, into)

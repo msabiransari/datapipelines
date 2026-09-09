@@ -53,8 +53,8 @@ class PromotionInventoryServiceTest {
             name = "acme",
             displayName = "Acme",
             isPersonal = false,
-            createdBy = null,
             isDeleted = false,
+createdBy = null,
             createdAt = Instant.EPOCH,
         )
 
@@ -66,7 +66,6 @@ class PromotionInventoryServiceTest {
             description = "",
             ownerId = UUID.randomUUID(),
             currentVersion = 3,
-            isDeleted = false,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
         )

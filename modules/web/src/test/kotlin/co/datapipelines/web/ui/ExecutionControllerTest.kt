@@ -110,7 +110,6 @@ class ExecutionControllerTest {
             description = "desc",
             ownerId = owner,
             currentVersion = 3,
-            isDeleted = false,
             createdAt = Instant.now(),
             updatedAt = Instant.now(),
         )

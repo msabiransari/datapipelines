@@ -1,6 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.ExclusiveDraftTemplates
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
@@ -52,6 +53,36 @@ class PipelineLifecycleConfiguration {
         authoring: AuthoringGuard,
     ): PipelineReleaseService = PipelineReleaseService(pipelines, templates, validator, authoring)
 
+    /**
+     * The entity purge's exclusive-draft-templates offer (versioning §3.5, 101), as the port
+     * `pipeline-contract` declares — the same module-arrow arrangement as
+     * [templateVersionStatuses] above.
+     */
+    @Bean
+    fun exclusiveDraftTemplates(templates: TemplateRepository): ExclusiveDraftTemplates =
+        object : ExclusiveDraftTemplates {
+            override fun exclusiveIds(
+                workspaceId: java.util.UUID,
+                pipelineId: java.util.UUID,
+            ) = templates.exclusiveDraftTemplateIds(workspaceId, pipelineId)
+
+            override fun purge(
+                workspaceId: java.util.UUID,
+                templateId: String,
+            ) {
+                // The offered set was verified draft-only and exclusively pinned at offer
+                // time, and the sole pinner (the purged pipeline) is already gone; the
+                // entity delete cascades its one version row.
+                if (!templates.deleteTemplateRow(workspaceId, templateId)) {
+                    throw co.datapipelines.typesystem.DatapipelinesException(
+                        code = co.datapipelines.pipeline.PipelineErrorCodes.Template.NOT_FOUND,
+                        message = "Template '$templateId' no longer exists; the exclusive-template purge raced.",
+                        details = mapOf("template_id" to templateId),
+                    )
+                }
+            }
+        }
+
     @Bean
     fun pipelineService(
         pipelines: PipelineRepository,
@@ -59,5 +90,6 @@ class PipelineLifecycleConfiguration {
         drafts: PipelineDraftService,
         releases: PipelineReleaseService,
         authoring: AuthoringGuard,
-    ): PipelineService = PipelineService(pipelines, validator, drafts, releases, authoring)
+        draftTemplates: ExclusiveDraftTemplates,
+    ): PipelineService = PipelineService(pipelines, validator, drafts, releases, authoring, draftTemplates)
 }

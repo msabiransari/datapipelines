@@ -311,8 +311,8 @@ class CompositionRulesTest {
         val resolver =
             PipelineResolver { _, name, version ->
                 when (name to version) {
-                    CHILD to 1, CHILD to CHILD_VERSION -> ResolvedPipeline(intermediate, deleted = false)
-                    GRANDCHILD to 1 -> ResolvedPipeline(grandchild, deleted = false)
+                    CHILD to 1, CHILD to CHILD_VERSION -> ResolvedPipeline(intermediate, entityDiscarded = false)
+                    GRANDCHILD to 1 -> ResolvedPipeline(grandchild, entityDiscarded = false)
                     else -> null
                 }
             }
@@ -334,8 +334,8 @@ class CompositionRulesTest {
         val resolver =
             PipelineResolver { _, name, version ->
                 when (name to version) {
-                    CHILD to 1, CHILD to CHILD_VERSION -> ResolvedPipeline(intermediate, deleted = false)
-                    GRANDCHILD to 1 -> ResolvedPipeline(grandchild, deleted = false)
+                    CHILD to 1, CHILD to CHILD_VERSION -> ResolvedPipeline(intermediate, entityDiscarded = false)
+                    GRANDCHILD to 1 -> ResolvedPipeline(grandchild, entityDiscarded = false)
                     else -> null
                 }
             }

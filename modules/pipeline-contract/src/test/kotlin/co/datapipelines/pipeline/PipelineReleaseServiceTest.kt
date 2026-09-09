@@ -30,8 +30,8 @@ class PipelineReleaseServiceTest {
     private val service = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true))
 
     @Test
-    fun `release and discard refuse when authoring is disabled`() {
-        // versioning §5.5: release and discard are authoring actions — a receiver refuses.
+    fun `release and purge refuse when authoring is disabled`() {
+        // versioning §5.5: release and the draft purge are authoring actions — a receiver refuses.
         val receiver = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(false))
 
         val release =
@@ -40,17 +40,29 @@ class PipelineReleaseServiceTest {
             }
         release.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
 
-        val discard =
+        val purge =
             shouldThrow<DatapipelinesException> {
-                receiver.discard(UUID.randomUUID(), UUID.randomUUID(), "hash")
+                receiver.purge(UUID.randomUUID(), UUID.randomUUID(), "hash")
             }
-        discard.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+        purge.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
         io.mockk.verify { pipelines wasNot Called }
     }
 
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
+
+    private fun pipelineRecord() =
+        co.datapipelines.pipeline.PipelineRecord(
+            id = pipelineId,
+            name = "test/monthly_revenue",
+            displayName = "M",
+            description = "d",
+            ownerId = userId,
+            currentVersion = null,
+            createdAt = Instant.EPOCH,
+            updatedAt = Instant.EPOCH,
+        )
 
     /** A deserializable body pinning one template at v2 — what release re-validates. */
     private val draftBody =
@@ -130,7 +142,6 @@ class PipelineReleaseServiceTest {
                     description = "d",
                     ownerId = userId,
                     currentVersion = 2,
-                    isDeleted = false,
                     createdAt = Instant.EPOCH,
                     updatedAt = Instant.EPOCH,
                 ),
@@ -159,25 +170,25 @@ class PipelineReleaseServiceTest {
     }
 
     @Test
-    fun `discard deletes, flips, or refuses - never clobbers`() {
+    fun `purge deletes the version or the entity, or refuses - never clobbers`() {
+        // 101: the draft verb is PURGE — the row (and its executions) are gone either way;
+        // the flip-to-DISCARDED branch is withdrawn.
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
-        every { pipelines.discardDraft(workspaceId, pipelineId, "draft-hash") } returns
-            co.datapipelines.pipeline.DiscardOutcome.Deleted
-        val discarded = service.discard(workspaceId, pipelineId, "draft-hash")
-        discarded shouldBe PipelineReleaseService.Discarded.Deleted
+        every { pipelines.purgeDraft(workspaceId, pipelineId, "draft-hash", true) } returns
+            co.datapipelines.pipeline.PurgeOutcome.VersionPurged(3, pipelineRecord())
+        val purged = service.purge(workspaceId, pipelineId, "draft-hash")
+        (purged as PipelineReleaseService.Purged.Version).executionsDeleted shouldBe 3
 
-        val discardedDetail = draftDetail().copy(status = PipelineVersionStatus.DISCARDED)
-        val flippedOutcome = DiscardOutcome.FlippedToDiscarded(discardedDetail)
-        every { pipelines.discardDraft(workspaceId, pipelineId, "draft-hash") } returns flippedOutcome
-        val flipped = service.discard(workspaceId, pipelineId, "draft-hash")
-        val flippedDetail = (flipped as PipelineReleaseService.Discarded.Flipped).version
-        flippedDetail.status shouldBe PipelineVersionStatus.DISCARDED
+        every { pipelines.purgeDraft(workspaceId, pipelineId, "draft-hash", true) } returns
+            co.datapipelines.pipeline.PurgeOutcome.EntityPurged(1)
+        (service.purge(workspaceId, pipelineId, "draft-hash") as PipelineReleaseService.Purged.Entity)
+            .executionsDeleted shouldBe 1
 
         // The repository's guard failed (0 rows) and no draft exists: not_draft, and the
         // conflict path never fires.
-        every { pipelines.discardDraft(workspaceId, pipelineId, "draft-hash") } returns null
+        every { pipelines.purgeDraft(workspaceId, pipelineId, "draft-hash", true) } returns null
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns null
-        shouldThrow<DatapipelinesException> { service.discard(workspaceId, pipelineId, "draft-hash") }
+        shouldThrow<DatapipelinesException> { service.purge(workspaceId, pipelineId, "draft-hash") }
             .code shouldBe PipelineErrorCodes.Versioning.NOT_DRAFT
     }
 }

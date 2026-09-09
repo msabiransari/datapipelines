@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
@@ -80,6 +81,21 @@ class PipelineServiceIntegrationTest {
                     authoring,
                 ),
             authoring = authoring,
+            // 101: the entity purge's exclusive-draft-templates port. This suite's fixtures
+            // pin no templates, so the offer is always empty — the exclusive computation's own
+            // coverage lives where templates exist (web/integration).
+            draftTemplates =
+                object : ExclusiveDraftTemplates {
+                    override fun exclusiveIds(
+                        workspaceId: java.util.UUID,
+                        pipelineId: java.util.UUID,
+                    ) = emptyList<String>()
+
+                    override fun purge(
+                        workspaceId: java.util.UUID,
+                        templateId: String,
+                    ) = Unit
+                },
         )
     }
 
@@ -154,24 +170,23 @@ class PipelineServiceIntegrationTest {
             withDraft.currentVersion shouldBe 1
         }
 
-        service.discard(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
-        withClue("discarding the draft falls back to the release") {
+        service.purge(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
+        withClue("purging the draft falls back to the release") {
             service.workingVersion(WORKSPACE_ID, checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))) shouldBe 1
         }
     }
 
     @Test
-    fun `a pipeline whose only draft was discarded has no working version at all`() {
-        // The one "nothing to run" state, and the only way to reach it: creation always writes v1,
-        // so a version-less pipeline needs a discard of the sole draft of a never-released one.
+    fun `a pipeline whose only draft was purged is gone entirely`() {
+        // 101: the sole-draft purge IS the entity purge (§3.2) — there is no version-less
+        // entity any more, D57; the "nothing to run" state is the DISCARDED entity instead.
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
 
-        service.discard(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash)
+        service.purge(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash)
 
-        val record = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
-        withClue("no draft, no release — the surfaces answer their version-not-found refusal") {
-            service.workingVersion(WORKSPACE_ID, record).shouldBeNull()
-            record.currentVersion.shouldBeNull()
+        service.findRecord(WORKSPACE_ID, created.record.id).shouldBeNull()
+        withClue("the entity row went with its only draft — D57's entity purge") {
+            countRows("pipelines") shouldBe 0
         }
         repository.listVersions(WORKSPACE_ID, created.record.id).shouldBeEmptyList()
     }
@@ -375,9 +390,9 @@ class PipelineServiceIntegrationTest {
                 owner,
             )
 
-        val outcome = service.discard(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
+        val outcome = service.purge(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
 
-        outcome shouldBe PipelineReleaseService.Discarded.Deleted
+        outcome.shouldBeInstanceOf<PipelineReleaseService.Purged.Version>()
         service.findDraft(WORKSPACE_ID, created.record.id).shouldBeNull()
         withClue("the version number returns to the pool — the draft row is gone, not flipped") {
             repository.listVersions(WORKSPACE_ID, created.record.id).map { it.version } shouldContainExactly listOf(1)
@@ -464,16 +479,18 @@ class PipelineServiceIntegrationTest {
     }
 
     @Test
-    fun `delete soft-deletes and the row stops resolving`() {
+    fun `purgeEntity removes an only-draft pipeline and reports its exclusive draft templates`() {
+        // 101: DELETE /{id} is the entity purge — the only-draft case; the row GOES.
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
 
-        service.delete(WORKSPACE_ID, created.record.id) shouldBe true
+        val result = service.purgeEntity(WORKSPACE_ID, created.record.id)
 
         service.findRecord(WORKSPACE_ID, created.record.id).shouldBeNull()
-        withClue("§14 — the row stays, so the name stays taken; a second delete finds nothing live") {
-            service.delete(WORKSPACE_ID, created.record.id) shouldBe false
-            countRows("pipelines") shouldBe 1
+        withClue("the entity row went, with its only draft (D57)") {
+            countRows("pipelines") shouldBe 0
+            countRows("pipeline_versions") shouldBe 0
         }
+        result.executionsDeleted shouldBe 0
     }
 
     // ---------------------------------------------------------------------------- D6: execute

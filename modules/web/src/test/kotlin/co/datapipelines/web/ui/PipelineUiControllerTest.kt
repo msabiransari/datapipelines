@@ -48,7 +48,6 @@ class PipelineUiControllerTest {
             description = "A test pipeline",
             ownerId = userId,
             currentVersion = 1,
-            isDeleted = false,
             createdAt = java.time.Instant.parse("2026-08-01T00:00:00Z"),
             updatedAt = java.time.Instant.parse("2026-08-10T00:00:00Z"),
         )
@@ -130,9 +129,9 @@ class PipelineUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         val now = java.time.Instant.now()
-        val byDisplayName = PipelineRecord(UUID.randomUUID(), "nyc/p1", "Alpha Bravo", "desc one", userId, 1, false, now, now)
-        val byDescription = PipelineRecord(UUID.randomUUID(), "nyc/p2", "Charlie Delta", "contains BRAVO", userId, 1, false, now, now)
-        val neither = PipelineRecord(UUID.randomUUID(), "nyc/p3", "Echo", "nothing", userId, 1, false, now, now)
+        val byDisplayName = PipelineRecord(UUID.randomUUID(), "nyc/p1", "Alpha Bravo", "desc one", userId, 1, now, now)
+        val byDescription = PipelineRecord(UUID.randomUUID(), "nyc/p2", "Charlie Delta", "contains BRAVO", userId, 1, now, now)
+        val neither = PipelineRecord(UUID.randomUUID(), "nyc/p3", "Echo", "nothing", userId, 1, now, now)
         every { repository.findAll(workspaceId) } returns listOf(byDisplayName, byDescription, neither)
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 

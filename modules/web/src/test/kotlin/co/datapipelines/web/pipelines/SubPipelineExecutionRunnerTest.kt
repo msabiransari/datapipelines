@@ -132,13 +132,12 @@ class SubPipelineExecutionRunnerTest {
             description = "",
             ownerId = parentUserId,
             currentVersion = 4,
-            isDeleted = false,
             createdAt = Instant.now(),
             updatedAt = Instant.now(),
         )
 
     private fun stubRegistry(body: String = childBody) {
-        every { pipelines.findByNameIncludingDeleted(any(), "test/monthly_revenue") } returns childRecord()
+        every { pipelines.findByNameAnyStatus(any(), "test/monthly_revenue") } returns childRecord()
         every { pipelines.findVersionBody(any(), childRecordId, 4) } returns body
     }
 
@@ -480,7 +479,7 @@ class SubPipelineExecutionRunnerTest {
     @Test
     fun `a pinned reference that vanished from the registry fails as a child failure, not an NPE`() =
         runTest {
-            every { pipelines.findByNameIncludingDeleted(any(), "test/monthly_revenue") } returns null
+            every { pipelines.findByNameAnyStatus(any(), "test/monthly_revenue") } returns null
 
             val thrown =
                 shouldThrow<DatapipelinesException> {

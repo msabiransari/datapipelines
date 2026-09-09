@@ -18,9 +18,10 @@ fun interface PipelineResolver {
      * The pinned version's parsed body, or null when the name or the pinned version is unknown
      * in [workspaceId].
      *
-     * A soft-deleted pipeline still **resolves** — soft-delete does not affect existing pinned
-     * references (D7) — and comes back with [ResolvedPipeline.deleted] set, so save-time
-     * validation can block the NEW reference with `pipeline_reference_deleted`.
+     * A pipeline whose entity is DISCARDED (every version discarded — the derived status that
+     * replaced soft delete in 101) still **resolves** — discarding does not affect existing
+     * pinned references (D7) — and comes back with [ResolvedPipeline.entityDiscarded] set, so
+     * save-time validation can block the NEW reference with `pipeline_reference_deleted`.
      */
     fun resolve(
         workspaceId: UUID,
@@ -29,10 +30,22 @@ fun interface PipelineResolver {
     ): ResolvedPipeline?
 }
 
-/** The outcome of a successful [PipelineResolver.resolve]. */
+/**
+ * The outcome of a successful [PipelineResolver.resolve].
+ *
+ * [versionStatus] is the PINNED VERSION's lifecycle status (101/D58): composition references
+ * reviewed content only, so a pin on anything but a RELEASED child version is refused at
+ * save time — a DRAFT child can be purged out from under its parent, which an exact-version
+ * pin must never allow.
+ */
 data class ResolvedPipeline(
     /** The pinned version's parsed body. */
     val pipeline: Pipeline,
-    /** True when the pipeline is soft-deleted: resolves for existing references, blocked for new ones (D7). */
-    val deleted: Boolean,
+    /**
+     * True when the referenced entity is DISCARDED (every version discarded): resolves for
+     * existing references, blocked for new ones (D7).
+     */
+    val entityDiscarded: Boolean,
+    /** The pinned version's own status — D58's save-time check reads it. */
+    val versionStatus: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
 )

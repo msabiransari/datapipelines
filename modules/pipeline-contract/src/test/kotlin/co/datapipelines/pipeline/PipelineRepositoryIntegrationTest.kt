@@ -96,7 +96,6 @@ class PipelineRepositoryIntegrationTest {
 
         record.currentVersion shouldBe 1
         record.name shouldBe "test/monthly_revenue"
-        record.isDeleted shouldBe false
         // Server-generated, not asserted from a hand-built object (metadata-db §6.1).
         record.createdAt shouldNotBe null
         repository.findVersionBody(WORKSPACE_ID, record.id, 1) shouldNotBe null
@@ -143,19 +142,20 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
-    fun `appendReleasedVersion onto a never-released pipeline allocates version 1`() {
-        // The COALESCE in the import path's `current_version + 1`: with a NULL pointer the
-        // arithmetic would produce NULL and the import would silently write nothing.
+    fun `appendReleasedVersion onto a never-released pipeline allocates past the draft and sets the pointer`() {
+        // D60/D55: allocation is max(version) + 1 — never pointer arithmetic (the NULL
+        // pointer of a never-released pipeline once made `current_version + 1` compute NULL,
+        // the defect the old COALESCE fixed) — and the FIRST import onto a current-less
+        // entity sets the pointer.
         val body = Fixtures.pipeline()
         val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner, CreateLifecycle.DRAFT)
-        // Discard the draft first: v1 is taken by it, and this asserts the pointer arithmetic,
-        // not the one-draft rule.
-        repository.discardDraft(WORKSPACE_ID, record.id, checkNotNull(repository.findDraftDetail(WORKSPACE_ID, record.id)).bodyHash)
 
         val appended = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, body, serializer.write(body), owner))
 
-        appended.currentVersion shouldBe 1
-        repository.listVersions(WORKSPACE_ID, record.id).map { it.version } shouldContainExactly listOf(1)
+        withClue("allocation read the MAX (the draft's 1), not the NULL pointer") {
+            appended.currentVersion shouldBe 2
+        }
+        repository.listVersions(WORKSPACE_ID, record.id).map { it.version } shouldContainExactly listOf(2, 1)
     }
 
     @Test
@@ -182,9 +182,16 @@ class PipelineRepositoryIntegrationTest {
 
         val updated = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, v2, serializer.write(v2), owner))
 
-        updated.currentVersion shouldBe 2
-        updated.displayName shouldBe "Monthly Revenue v2"
+        withClue("D60: a subsequent import never moves the existing pointer — the human switches") {
+            updated.currentVersion shouldBe 1
+            // …and index metadata rides the pointer, not the number: the row still describes v1.
+            updated.displayName shouldBe "Monthly Revenue"
+        }
         repository.listVersions(WORKSPACE_ID, record.id).map { it.version } shouldContainExactly listOf(2, 1)
+        withClue("the manual switch is what moves the pointer onto the imported release") {
+            checkNotNull(repository.switchCurrent(WORKSPACE_ID, record.id, 2, draftEligible = true))
+            repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 2
+        }
         repository.listVersions(WORKSPACE_ID, record.id).map { it.status } shouldContainExactly
             listOf(PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED)
         // Version 1's body is untouched — RELEASED rows are never UPDATEd (§3.1).
@@ -277,7 +284,7 @@ class PipelineRepositoryIntegrationTest {
 
         repository.listFolder(WORKSPACE_ID).folders.map { it.path } shouldContainExactly listOf("nyc")
 
-        repository.softDelete(WORKSPACE_ID, record.id) shouldBe true
+        discardOnlyRelease(record)
 
         repository.listFolder(WORKSPACE_ID).folders.shouldBeEmpty()
     }
@@ -322,6 +329,18 @@ class PipelineRepositoryIntegrationTest {
     }
 
     /** Creates one live pipeline per name, at version 1, in [WORKSPACE_ID]. */
+    /**
+     * 101's replacement for the old `softDelete` in these tests: discard the entity's ONLY
+     * release through the real verb (development posture, no pins), which lands the entity
+     * at DISCARDED with a NULL pointer — the derived state every former is_deleted
+     * assertion meant.
+     */
+    private fun discardOnlyRelease(record: PipelineRecord) {
+        checkNotNull(
+            repository.discardVersion(WORKSPACE_ID, record.id, record.name, checkNotNull(record.currentVersion), owner, draftEligible = true),
+        )
+    }
+
     private fun seed(vararg names: String) {
         names.forEach { name ->
             val body = Fixtures.pipeline(name = name)
@@ -345,13 +364,11 @@ class PipelineRepositoryIntegrationTest {
         repository.findById(WORKSPACE_ID, record.id) shouldBe record
         repository.findByName(WORKSPACE_ID, "test/monthly_revenue") shouldBe record
 
-        repository.softDelete(WORKSPACE_ID, record.id) shouldBe true
+        discardOnlyRelease(record)
 
         repository.findById(WORKSPACE_ID, record.id).shouldBeNull()
         repository.findByName(WORKSPACE_ID, "test/monthly_revenue").shouldBeNull()
-        // A second delete finds nothing live to delete.
-        repository.softDelete(WORKSPACE_ID, record.id) shouldBe false
-        // The row survives, so the name stays taken (metadata-db §4.4).
+        // The row survives (DISCARDED, restore-able), so the name stays taken (D59).
         countRows("pipelines") shouldBe 1
     }
 
@@ -364,7 +381,7 @@ class PipelineRepositoryIntegrationTest {
         repository.createReleased(WORKSPACE_ID, NewPipeline.from(a, owner), serializer.write(a), owner)
         repository.createReleased(WORKSPACE_ID, NewPipeline.from(b, other), serializer.write(b), other)
         val deleted = repository.createReleased(WORKSPACE_ID, NewPipeline.from(c, owner), serializer.write(c), owner)
-        repository.softDelete(WORKSPACE_ID, deleted.id)
+        discardOnlyRelease(deleted)
 
         repository.findAll(WORKSPACE_ID).map { it.name } shouldContainExactly listOf("pipeline_b", "pipeline_a")
         repository.findAll(WORKSPACE_ID, owner).map { it.name } shouldContainExactly listOf("pipeline_a")
@@ -467,7 +484,7 @@ class PipelineRepositoryIntegrationTest {
         repository.createReleased(WORKSPACE_ID, NewPipeline.from(reader, owner), serializer.write(reader), owner)
         repository.createReleased(WORKSPACE_ID, NewPipeline.from(writer, owner), serializer.write(writer), owner)
         val goneRecord = repository.createReleased(WORKSPACE_ID, NewPipeline.from(gone, owner), serializer.write(gone), owner)
-        repository.softDelete(WORKSPACE_ID, goneRecord.id)
+        discardOnlyRelease(goneRecord)
 
         repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "pg-prod").map { it.pipelineName } shouldContainExactly
             listOf("reader", "writer")
@@ -524,7 +541,7 @@ class PipelineRepositoryIntegrationTest {
 
         val bodyC = Fixtures.pipeline(name = "c")
         val deleted = repository.createReleased(WORKSPACE_ID, NewPipeline.from(bodyC, owner), serializer.write(bodyC), owner)
-        repository.softDelete(WORKSPACE_ID, deleted.id)
+        discardOnlyRelease(deleted)
         repository.countAll(WORKSPACE_ID) shouldBe 2
     }
 
@@ -556,36 +573,49 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
-    fun `renaming a pipeline onto a taken name raises duplicate_name too`() {
+    fun `an import never renames a pointed entity, and a pointer-moving import onto a taken name raises duplicate_name`() {
         val taken = Fixtures.pipeline(name = "already_taken")
         repository.createReleased(WORKSPACE_ID, NewPipeline.from(taken, owner), serializer.write(taken), owner)
         val mine = Fixtures.pipeline(name = "mine")
         val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(mine, owner), serializer.write(mine), owner)
         val renamed = mine.copy(name = "already_taken")
 
+        // D60: with the pointer set (current = 1), the import inserts the version and leaves
+        // BOTH the name and the pointer alone — the metadata rides the pointer, not the
+        // number, so the would-be rename is not even attempted.
+        val appended = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, renamed, serializer.write(renamed), owner))
+        appended.name shouldBe "mine"
+        appended.currentVersion shouldBe 1
+
+        // The duplicate-name constraint still fires where the name IS written: a never-released
+        // entity (pointer NULL) adopts the imported name — onto a taken name, the constraint is
+        // the authority, and atomicity holds: no orphan version row behind the refusal.
+        val fresh = Fixtures.pipeline(name = "fresh")
+        val freshRecord =
+            repository.create(WORKSPACE_ID, NewPipeline.from(fresh, owner), serializer.write(fresh), owner, CreateLifecycle.DRAFT)
         val thrown =
             shouldThrow<DatapipelinesException> {
-                repository.appendReleasedVersion(WORKSPACE_ID, record.id, renamed, serializer.write(renamed), owner)
+                repository.appendReleasedVersion(
+                    WORKSPACE_ID,
+                    freshRecord.id,
+                    renamed,
+                    serializer.write(renamed),
+                    owner,
+                )
             }
-
         thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
-        // Atomicity, asserted on the writes and not only on the counter: the failed UPDATE must
-        // leave no version row behind. `current_version` alone would still read 1 if the CTE had
-        // inserted an orphan version and only the pipelines UPDATE rolled back.
-        repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 1
-        repository.listVersions(WORKSPACE_ID, record.id).size shouldBe 1
-        countRows("pipeline_versions") shouldBe 2
+        repository.listVersions(WORKSPACE_ID, freshRecord.id).size shouldBe 1
     }
 
     @Test
-    fun `a soft-deleted pipeline's name stays taken - uniqueness is global`() {
+    fun `a discarded pipeline's name stays taken - names are unique forever (D59)`() {
         // V1 declares `name TEXT NOT NULL UNIQUE` — a plain constraint, not a partial index on
         // `is_deleted = FALSE`. §12.1 and metadata-db §4.4 now agree that this is deliberate:
         // execution history references the name, so a deleted pipeline's name is not reusable
         // until the row is hard-deleted.
         val body = Fixtures.pipeline()
         val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
-        repository.softDelete(WORKSPACE_ID, record.id) shouldBe true
+        discardOnlyRelease(record)
 
         val thrown =
             shouldThrow<DatapipelinesException> {
@@ -815,7 +845,7 @@ class PipelineRepositoryIntegrationTest {
         repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner).shouldBeNull()
         repository.writeDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner).shouldBeNull()
         repository.releaseDraft(WORKSPACE_ID, record.id, v1.name, v1.displayName, v1.description, stale, owner).shouldBeNull()
-        repository.discardDraft(WORKSPACE_ID, record.id, stale).shouldBeNull()
+        repository.purgeDraft(WORKSPACE_ID, record.id, stale, draftEligible = true).shouldBeNull()
 
         countRows("pipeline_versions") shouldBe 2
         repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 1
@@ -856,12 +886,14 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
-    fun `discarding a never-executed draft hard-deletes it and returns the number to the pool`() {
+    fun `purging a never-executed draft hard-deletes it and returns the number to the pool`() {
         val (record, v1, v1Detail) = createdPipeline()
         val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
 
-        repository.discardDraft(WORKSPACE_ID, record.id, draft.bodyHash) shouldBe DiscardOutcome.Deleted
+        val outcome = checkNotNull(repository.purgeDraft(WORKSPACE_ID, record.id, draft.bodyHash, draftEligible = true))
 
+        outcome.shouldBeInstanceOf<PurgeOutcome.VersionPurged>()
+        outcome.executionsDeleted shouldBe 0
         countRows("pipeline_versions") shouldBe 1
         // The number returns to the pool: a new (genuinely different) draft re-allocates v2.
         checkNotNull(
@@ -870,21 +902,22 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
-    fun `discarding an executed draft flips it to DISCARDED - the FK blocks the delete`() {
+    fun `purging an executed draft deletes it WITH its executions - the tombstone is withdrawn`() {
+        // 101 (§3.1/§5.4): development runs of a thing that never shipped are not history.
         val (record, v1, v1Detail) = createdPipeline()
         val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
         insertExecution(record.id, draft.version)
 
-        val outcome = repository.discardDraft(WORKSPACE_ID, record.id, draft.bodyHash)
+        val outcome = checkNotNull(repository.purgeDraft(WORKSPACE_ID, record.id, draft.bodyHash, draftEligible = true))
 
-        val flipped = outcome.shouldBeInstanceOf<DiscardOutcome.FlippedToDiscarded>()
-        flipped.detail.status shouldBe PipelineVersionStatus.DISCARDED
-        flipped.detail.version shouldBe 2
-        countRows("pipeline_versions") shouldBe 2
-        // §3.4: the number stays consumed — a new draft allocates v3, never v2 again.
+        outcome.shouldBeInstanceOf<PurgeOutcome.VersionPurged>()
+        outcome.executionsDeleted shouldBe 1
+        countRows("pipeline_versions") shouldBe 1
+        countRows("pipeline_executions") shouldBe 0
+        // The executions went with the row, so the number is free again: a new draft re-allocates v2.
         checkNotNull(
             repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft three"), v1Detail.bodyHash, owner),
-        ).version shouldBe 3
+        ).version shouldBe 2
     }
 
     @Test
@@ -1295,12 +1328,12 @@ class PipelineRepositoryIntegrationTest {
 
         repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "test/t.sql") shouldBe mapOf(1 to 2, 2 to 1)
 
-        // Soft-deleted pipelines drop out of the working scan (and therefore the counts).
+        // Entities whose every version is discarded drop out of the working scan (and the counts).
         val p3Record = checkNotNull(repository.findByName(WORKSPACE_ID, "p3"))
-        repository.softDelete(WORKSPACE_ID, p3Record.id)
+        discardOnlyRelease(p3Record)
         repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "test/t.sql") shouldBe mapOf(1 to 2)
         repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "test/t.sql", 2) shouldBe emptyList()
-        // …and the any-version scan agrees: a soft-deleted pipeline can no longer be edited or
+        // …and the any-version scan agrees: a discarded entity can no longer be edited or
         // executed, so its stored pins are inert and excluded there too (the documented choice).
         repository
             .findAnyVersionTemplatePins(WORKSPACE_ID, "test/t.sql")
@@ -1317,7 +1350,9 @@ class PipelineRepositoryIntegrationTest {
             SELECT p.name
               FROM pipelines p
               JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = p.current_version
-             WHERE p.is_deleted = FALSE AND p.workspace_id = :workspaceId
+             WHERE EXISTS (SELECT 1 FROM pipeline_versions lv
+                            WHERE lv.pipeline_id = p.id AND lv.status IN ('DRAFT','RELEASED'))
+               AND p.workspace_id = :workspaceId
                AND v.body_json @> jsonb_build_object('nodes', jsonb_build_array(
                       jsonb_build_object('template', jsonb_build_object('id', :templateId, 'version', :version))))
             """.trimIndent(),

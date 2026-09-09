@@ -300,7 +300,7 @@ Field rules:
 - `output` — standard §4.7 block, permitted only when the pinned child has a caller node. Zero-caller child ⇒ `output` must be absent; the node is side-effect-only and downstream `depends_on` gives ordering.
 - `depends_on` — unchanged.
 
-Deleting a pipeline (soft delete) does **not** affect existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly.
+A pipeline whose entity is DISCARDED (every version discarded) still resolves existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly. A PIPELINE node may pin only a RELEASED child version (`pipeline_reference_not_released`, 101/D58).
 
 ---
 
@@ -779,7 +779,8 @@ The PIPELINE-node rules (§4.9). Everything here is computed against the pinned 
 | `pipeline.validation.pipeline_not_found` | `pipeline.name` exists in the registry |
 | `pipeline.validation.pipeline_version_not_found` | Pinned `version` exists for that name |
 | `pipeline.validation.pipeline_self_reference` | Node does not reference its containing pipeline |
-| `pipeline.validation.pipeline_reference_deleted` | Referenced pipeline is not soft-deleted (blocks NEW references only — soft-delete never breaks an existing pinned reference, mirroring template deletion) |
+| `pipeline.validation.pipeline_reference_deleted` | Referenced pipeline's entity is DISCARDED — every version discarded, derived since V19 (blocks NEW references only — discarding never breaks an existing pinned reference, mirroring template deletion) |
+| `pipeline.validation.pipeline_reference_not_released` | A PIPELINE node pins a child version that is not RELEASED — composition references reviewed content only (101, versioning §3.5 D58; a DRAFT child can be purged out from under its parent) |
 | `pipeline.validation.pipeline_node_has_source` | PIPELINE node has no `source` |
 | `pipeline.validation.pipeline_node_has_template` | PIPELINE node has no `template` |
 | `pipeline.validation.pipeline_parameter_unmapped` | Every required-without-default child parameter is supplied |
@@ -957,6 +958,10 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.in_use` | 409 | Template delete refused while any pipeline version pins any version of the template (040: the any-version reverse scan; `details.referencing_pipelines` names who blocks, `details.references` carries pipeline/node/pipeline-version/pinned-version rows). Deleting is otherwise soft and existing pins keep resolving — the refusal makes "who still uses this?" unmissable, it does not change delete semantics |
 | `template.version.conflict` | 409 | Content-hash precondition failed on a template draft write/release/discard — another writer changed it after the caller loaded it ([Versioning §4](versioning.md#4-content-hash-body_hash)) |
 | `template.version.not_draft` | 409 | Template release or discard requested but no DRAFT version exists ([Versioning §3](versioning.md#3-version-lifecycle)) |
+| `template.version.not_released` | 409 | Discard targeted a template version that is not RELEASED — a DRAFT is purged, never discarded (101, [Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
+| `template.version.not_discarded` | 409 | Restore targeted a template version that is not DISCARDED (101, [Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
+| `template.version.last_release` | 409 | The purge path refused: a RELEASED template version is never purged, and a template holding any non-draft version is never purged (101, [Versioning §3.5](versioning.md#35-the-lifecycle-table) D57) |
+| `template.version.not_eligible` | 409 | Manual switch targeted a template version that is not live and posture-eligible (101, [Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
 | `template.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — the template mirror of `pipeline.authoring.disabled` ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)); reads, execution and import are unaffected |
 
 ### 13.10 Result retrieval
@@ -1010,6 +1015,11 @@ entry, Versioning is the semantics).
 |---|---|---|
 | `pipeline.version.conflict` | 409 | Content-hash precondition failed on a draft create/write, release, or discard — another writer changed the pipeline after the caller loaded it; `details` carries `current_body_hash`, `current_status`, `updated_by`, `updated_at` (Versioning §4.2) |
 | `pipeline.version.not_draft` | 409 | Pipeline release or discard requested but no DRAFT version exists (Versioning §5.3/§5.4) |
+| `pipeline.version.not_released` | 409 | Discard targeted a version that is not RELEASED — a DRAFT is purged, never discarded; a DISCARDED version is already retired (101, [Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
+| `pipeline.version.not_discarded` | 409 | Restore targeted a version that is not DISCARDED — there is nothing to restore (101, [Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
+| `pipeline.version.pinned` | 409 | Discard or purge refused: a LIVE version of another pipeline exact-pins this version — `details` names the pinning entities (101, [Versioning §3.5](versioning.md#35-the-lifecycle-table) graph rule 1) |
+| `pipeline.version.last_release` | 409 | The purge path refused: a RELEASED version is never purged, and an entity holding any non-draft version is never purged — discard is per version, the entity stays; restore or release something first (101, [Versioning §3.5](versioning.md#35-the-lifecycle-table) D57) |
+| `pipeline.version.not_eligible` | 409 | Manual switch targeted a version that is not a live, posture-eligible version — DISCARDED, missing, or a DRAFT under a hardened posture (101, [Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60) D60) |
 | `pipeline.release.template_not_released` | 409 | Pipeline release blocked: the draft pins template version(s) still in DRAFT — release those templates first (Versioning §5.3 precondition 2) |
 | `pipeline.promotion.not_released` | 409 | Promotion selected a pipeline whose candidate version is not RELEASED — drafts are never promoted (Versioning §10.3 guard 1) |
 | `pipeline.promotion.not_newer` | 409 | Promotion push of a version not greater than the target environment's current version for that pipeline — same-version pushes are a bug, not a no-op (Versioning §10.3 guard 2) |

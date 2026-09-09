@@ -6,11 +6,13 @@ import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRepoFiles
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.BeforeAll
@@ -101,7 +103,7 @@ class RepositoryPipelineResolverTest {
 
         v1 shouldNotBe null
         v1?.pipeline?.description shouldBe ""
-        v1?.deleted shouldBe false
+        v1?.entityDiscarded shouldBe false
         resolvedV2?.pipeline?.description shouldBe "v2"
     }
 
@@ -115,15 +117,21 @@ class RepositoryPipelineResolverTest {
     }
 
     @Test
-    fun `a soft-deleted pipeline still resolves, flagged deleted (D7)`() {
+    fun `a discarded pipeline still resolves, flagged entityDiscarded (D7)`() {
         val record = save(childPipeline("resolver_deleted"))
-        pipelines.softDelete(DEFAULT_WORKSPACE_ID, record.id) shouldBe true
+        // 101: the derived entity status — discard the only release through the real verb.
+        checkNotNull(
+            pipelines.discardVersion(DEFAULT_WORKSPACE_ID, record.id, record.name, checkNotNull(record.currentVersion), userId, draftEligible = true),
+        )
 
         val resolved = repositoryPipelineResolver(pipelines).resolve(DEFAULT_WORKSPACE_ID, "resolver_deleted", 1)
 
         resolved shouldNotBe null
-        resolved?.deleted shouldBe true
+        resolved?.entityDiscarded shouldBe true
         resolved?.pipeline?.name shouldBe "resolver_deleted"
+        withClue("D58: the pinned version reads as DISCARDED, so a NEW pin is refused at save") {
+            resolved?.versionStatus shouldBe PipelineVersionStatus.DISCARDED
+        }
     }
 
     private companion object {

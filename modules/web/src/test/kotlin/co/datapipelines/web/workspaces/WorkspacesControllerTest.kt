@@ -43,8 +43,8 @@ class WorkspacesControllerTest {
             "acme",
             "Acme",
             isPersonal = false,
-            createdBy = null,
             isDeleted = false,
+createdBy = null,
             createdAt = Instant.EPOCH,
         )
 

@@ -85,6 +85,15 @@ class TemplateRepositoryIntegrationTest {
             isLibrary = isLibrary,
         )
 
+    /**
+     * 101's replacement for the old `softDelete` in these tests: discard the template's ONLY
+     * release through the real verb, landing the entity at DISCARDED (every version
+     * discarded, pointer NULL) — the derived state every former is_deleted assertion meant.
+     */
+    private fun discardOnlyRelease(id: String) {
+        checkNotNull(repository.discardVersion(workspaceId, id, 1, actor, draftEligible = true))
+    }
+
     @Test
     fun `create inserts the template and version 1 together, returning what the database stored`() {
         val stored = repository.createReleased(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 1, "l"))), actor)
@@ -153,7 +162,7 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
-    fun `update appends a new immutable version and bumps current_version`() {
+    fun `an import appends a new immutable version and leaves the pointer for the human to switch`() {
         repository.createReleased(workspaceId, draft(body = "SELECT 1"), actor)
 
         val v2 = repository.appendReleasedVersion(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), actor)
@@ -161,6 +170,11 @@ class TemplateRepositoryIntegrationTest {
         v2.shouldNotBeNull()
         v2.version shouldBe 2
         v2.body shouldBe "SELECT 2"
+        withClue("D60: a subsequent import never moves the pointer — the human switches") {
+            repository.findLatest(workspaceId, "test/fetch_orders.sql")?.version shouldBe 1
+        }
+        // …and the switch is what moves it.
+        checkNotNull(repository.switchCurrent(workspaceId, "test/fetch_orders.sql", 2, draftEligible = true))
         repository.findLatest(workspaceId, "test/fetch_orders.sql")?.version shouldBe 2
         // Version 1 is untouched — immutable per version (§5.1).
         repository.findVersion(workspaceId, "test/fetch_orders.sql", 1)?.body shouldBe "SELECT 1"
@@ -205,7 +219,7 @@ class TemplateRepositoryIntegrationTest {
             repository.createDraft(workspaceId, "test/a.sql", draft(id = "test/a.sql", body = "SELECT 2"), a.bodyHash, actor)!!
         repository.createReleased(workspaceId, draft(id = "test/b.sql"), actor)
         repository.createReleased(workspaceId, draft(id = "test/c.sql"), actor)
-        repository.softDelete(workspaceId, "test/c.sql")
+        discardOnlyRelease("test/c.sql")
         checkNotNull(aDraft)
 
         repository.findCurrentVersions(workspaceId, listOf("test/a.sql", "test/b.sql", "test/c.sql", "test/nope.sql")) shouldBe
@@ -214,33 +228,35 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
-    fun `a soft-deleted template disappears from findLatest but its versions still resolve`() {
+    fun `a discarded template disappears from findLatest but its versions still resolve`() {
         repository.createReleased(workspaceId, draft(), actor)
 
-        repository.softDelete(workspaceId, "test/fetch_orders.sql") shouldBe true
+        discardOnlyRelease("test/fetch_orders.sql")
 
         // §5.1: pipelines referencing a deleted template's version continue to work, so the
         // registry lookup must still resolve it, but the current-version projection is gone.
         repository.findLatest(workspaceId, "test/fetch_orders.sql").shouldBeNull()
         repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1).shouldNotBeNull()
         repository.findVersion(workspaceId, "test/fetch_orders.sql", 1).shouldNotBeNull()
-        repository.softDelete(workspaceId, "test/fetch_orders.sql") shouldBe false
+        repository.discardVersion(workspaceId, "test/fetch_orders.sql", 1, actor, draftEligible = true).shouldBeNull()
     }
 
     @Test
-    fun `update on a soft-deleted template writes nothing and adds no version`() {
-        // TPL-TEST-9. §5.1 keeps a deleted template's existing versions resolvable, but a deleted
-        // template must not gain new ones — the UPDATE's `is_deleted = FALSE` predicate is the
-        // only thing enforcing that, and a CTE whose first leg matches no row must not leave the
-        // INSERT leg to run on its own.
+    fun `an import onto a discarded template inserts but never moves the NULL pointer`() {
+        // 101's successor to TPL-TEST-9: a DISCARDED entity's versions stay resolvable, and an
+        // import may land a new release (first-import-sets-pointer when current is NULL), so
+        // the protection is the D60 pointer rule, not an is_deleted wall on the write.
         repository.createReleased(workspaceId, draft(body = "SELECT 1"), actor)
-        repository.softDelete(workspaceId, "test/fetch_orders.sql")
+        discardOnlyRelease("test/fetch_orders.sql")
 
-        repository.appendReleasedVersion(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), actor).shouldBeNull()
+        val imported = repository.appendReleasedVersion(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), actor)
 
-        existsRows("template_versions") shouldBe 1
-        repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 2).shouldBeNull()
+        withClue("D60 exception: the first import onto a current-less entity sets the pointer") {
+            checkNotNull(imported)
+        }
+        existsRows("template_versions") shouldBe 2
         repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1)?.body shouldBe "SELECT 1"
+        repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 2)?.body shouldBe "SELECT 2"
     }
 
     @Test
@@ -256,15 +272,19 @@ class TemplateRepositoryIntegrationTest {
 
         v2.shouldNotBeNull()
         v2.createdBy shouldBe updater
-        withClue("findLatest must agree with the update's own return value") {
-            repository.findLatest(workspaceId, "test/fetch_orders.sql")?.createdBy shouldBe updater
+        withClue("D60: the import left the pointer on v1, whose author is the actor") {
+            repository.findLatest(workspaceId, "test/fetch_orders.sql")?.createdBy shouldBe actor
         }
-        withClue("and with listVersions, which reads the same column") {
+        withClue("and listVersions, which reads the same column, credits each version its own") {
             repository.listVersions(workspaceId, "test/fetch_orders.sql").single { it.version == 2 }.createdBy shouldBe updater
             repository.listVersions(workspaceId, "test/fetch_orders.sql").single { it.version == 1 }.createdBy shouldBe actor
         }
         withClue("version 1 still belongs to its own author") {
             repository.findVersion(workspaceId, "test/fetch_orders.sql", 1)?.createdBy shouldBe actor
+        }
+        withClue("after the human switches, findLatest credits the updater") {
+            checkNotNull(repository.switchCurrent(workspaceId, "test/fetch_orders.sql", 2, draftEligible = true))
+            repository.findLatest(workspaceId, "test/fetch_orders.sql")?.createdBy shouldBe updater
         }
     }
 
@@ -274,12 +294,18 @@ class TemplateRepositoryIntegrationTest {
         repository.createReleased(workspaceId, draft(id = "test/a.sql"), actor)
         repository.appendReleasedVersion(workspaceId, "test/a.sql", draft(id = "test/a.sql", body = "SELECT 2"), actor)
         repository.createReleased(workspaceId, draft(id = "test/gone.sql"), actor)
-        repository.softDelete(workspaceId, "test/gone.sql")
+        discardOnlyRelease("test/gone.sql")
 
         val page = repository.list(workspaceId)
 
         page.map { it.id } shouldContainExactly listOf("test/a.sql", "test/b.sql")
-        withClue("the current version, not every version") { page.single { it.id == "test/a.sql" }.version shouldBe 2 }
+        withClue("D60: the listed version is the pointer's (the import did not move it)") {
+            page.single { it.id == "test/a.sql" }.version shouldBe 1
+        }
+        checkNotNull(repository.switchCurrent(workspaceId, "test/a.sql", 2, draftEligible = true))
+        withClue("after the switch, the current version, not every version") {
+            repository.list(workspaceId).single { it.id == "test/a.sql" }.version shouldBe 2
+        }
     }
 
     @Test
@@ -368,7 +394,7 @@ class TemplateRepositoryIntegrationTest {
             actor,
         )
         repository.createReleased(workspaceId, draft(id = "test/gone.sql"), actor)
-        repository.softDelete(workspaceId, "test/gone.sql")
+        discardOnlyRelease("test/gone.sql")
 
         repository.count(workspaceId) shouldBe 3
         repository.count(workspaceId, dialect = Dialect.MYSQL) shouldBe 1
@@ -592,7 +618,7 @@ class TemplateRepositoryIntegrationTest {
         repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 9"), "stale", actor).shouldBeNull()
         repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 9"), "stale", actor).shouldBeNull()
         repository.releaseDraft(workspaceId, "test/fetch_orders.sql", "stale", actor).shouldBeNull()
-        repository.discardDraft(workspaceId, "test/fetch_orders.sql", "stale") shouldBe false
+        repository.purgeDraft(workspaceId, "test/fetch_orders.sql", "stale", draftEligible = true) shouldBe false
 
         jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 2
         checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).version shouldBe 2
@@ -638,7 +664,7 @@ class TemplateRepositoryIntegrationTest {
                 ),
             )
 
-        repository.discardDraft(workspaceId, "test/fetch_orders.sql", draftDetail.bodyHash) shouldBe true
+        repository.purgeDraft(workspaceId, "test/fetch_orders.sql", draftDetail.bodyHash, draftEligible = true) shouldBe true
 
         jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
         checkNotNull(
