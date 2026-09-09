@@ -80,9 +80,11 @@ internal object PipelineToolPayloads {
             put("description", record.description)
             put("owner_id", record.ownerId.toString())
             put("version", version?.version ?: record.currentVersion)
-            // D55: `current_version` is the latest RELEASED version and is **null** until a
-            // human releases — an agent reading it as "the version I can point an endpoint at"
-            // gets an honest absence rather than the number of a draft nobody reviewed.
+            // D55/D60: `current_version` is the sticky pointer — **null** until a human
+            // releases, and moved only by the events D60 lists (a discard of the version it
+            // names falls back to the highest eligible live version or null; an import never
+            // moves it). An agent reading it as "the version a dependent would run" gets an
+            // honest absence rather than the number of a draft nobody reviewed.
             put("current_version", record.currentVersion)
             // No RELEASED fallback: since D55 a create lands DRAFT, and defaulting the status
             // of a row we did not read to "RELEASED" is precisely the assumption D55 removed.

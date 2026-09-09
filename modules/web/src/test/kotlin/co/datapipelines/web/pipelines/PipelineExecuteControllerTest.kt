@@ -36,7 +36,7 @@ class PipelineExecuteControllerTest {
     private val pipelineId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
     private val record =
-        PipelineRecord(pipelineId, "p", "P", "d", userId, 5, false, Instant.EPOCH, Instant.EPOCH)
+        PipelineRecord(pipelineId, "p", "P", "d", userId, 5, Instant.EPOCH, Instant.EPOCH)
 
     private val bodyJson =
         """{"schema_version":1,"name":"p","display_name":"P","description":"d","parameters":{},""" +

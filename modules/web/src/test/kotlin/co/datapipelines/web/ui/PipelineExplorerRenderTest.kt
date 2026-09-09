@@ -366,7 +366,6 @@ class PipelineExplorerRenderTest {
             description = "Fixture.",
             ownerId = ACTOR,
             currentVersion = 2,
-            isDeleted = false,
             createdAt = Instant.parse("2026-09-01T10:00:00Z"),
             updatedAt = Instant.parse("2026-09-02T10:00:00Z"),
         )

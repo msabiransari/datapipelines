@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
@@ -91,12 +92,17 @@ import java.util.UUID
  * `TransactionRollbackIntegrationTest` guards both — it asserts every bean with a
  * `@Transactional` method is a proxy AND that no such target declares a `final` public method.
  */
+@Suppress(
+    "TooManyFunctions", // the aggregate's one-stop use-case surface (S5/R6); the 101 verbs grew it
+    "ThrowsCount", // each refusal is a distinct catalogued code the caller distinguishes — the boundary's shape
+)
 open class PipelineService(
     private val pipelines: PipelineRepository,
     private val validator: PipelineValidator,
     private val drafts: PipelineDraftService,
     private val releases: PipelineReleaseService,
     private val authoring: AuthoringGuard,
+    private val draftTemplates: ExclusiveDraftTemplates,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
@@ -478,38 +484,384 @@ open class PipelineService(
     ): PipelineReleaseService.Released = releases.release(workspaceId, pipelineId, expectedHash, actor)
 
     /**
-     * §5.11 — discard the draft: hard-delete when never executed, DISCARDED-flip when the
-     * `pipeline_executions` FK blocks the delete.
+     * §5.11 — purge the draft: the row and its executions are deleted (no tombstone since
+     * 101), and the sole-draft case takes the entity row with it.
      *
-     * **Deliberately NOT transactional**, and this is the case the round's "where any of them
-     * is more than one statement" question actually turns on. It IS two statements — but they
-     * are ALTERNATIVES, not a composition: the DELETE's foreign-key violation is the control
-     * flow that selects the flip ([PipelineRepository.discardDraft] documents the swallow).
-     * Wrapping them would be actively wrong on PostgreSQL, where an error aborts the whole
-     * transaction and the following UPDATE fails with `current transaction is aborted` — the
-     * discard would need a SAVEPOINT to survive the atomicity it does not need. Each statement
-     * is atomic on its own and a failed DELETE leaves nothing behind, so there is no partial
-     * state for a transaction to protect.
+     * Transactional because the repository purge is deliberately multi-statement
+     * (executions → version → maybe entity → maybe pointer); without the transaction a
+     * failure between them would leave a purged version's executions orphaned.
      */
-    open fun discard(
+    @Transactional("metadataTransactionManager")
+    open fun purge(
         workspaceId: UUID,
         pipelineId: UUID,
         expectedHash: String,
-    ): PipelineReleaseService.Discarded = releases.discard(workspaceId, pipelineId, expectedHash)
+    ): PipelineReleaseService.Purged = releases.purge(workspaceId, pipelineId, expectedHash)
 
     /**
-     * §5.6 — soft delete. The row stays, so the name stays taken (execution history references
-     * it). Returns false when nothing was live to delete; the surface maps that to its 404.
+     * §3.1 (101) — discard RELEASED version [version]: the row flips to DISCARDED, and the
+     * pointer recomputes only when THIS version was the pointer (D60), falling back to the
+     * highest eligible live version or NULL.
      *
-     * One statement, so no transaction — the guard is the authoring capability, checked first.
+     * Preconditions, evaluated in order: the entity exists (404); the target version exists
+     * (404) and is RELEASED (`pipeline.version.not_released` otherwise — a draft is purged,
+     * never discarded); no LIVE parent version exact-pins it (`pipeline.version.pinned`,
+     * naming the pinners — the guard also rides the statement itself, so a pin that lands
+     * between check and flip still refuses). An authoring write (§5.5).
+     *
+     * @throws co.datapipelines.typesystem.DatapipelinesException the codes above.
      */
-    open fun delete(
+    open fun discardVersion(
         workspaceId: UUID,
         pipelineId: UUID,
-    ): Boolean {
-        // versioning §5.5: deleting authored content is authoring — a receiver's sole writer
-        // is promotion.
+        version: Int,
+        actor: UUID,
+    ): DiscardResult {
         authoring.requirePipelineAuthoring()
-        return pipelines.softDelete(workspaceId, pipelineId)
+        // AnyStatus: the entity may already be all-DISCARDED (every version discarded) — the
+        // refusal is the TARGET's status (not_released), never a 404 that hides the version.
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val detail =
+            pipelines.findVersionDetail(workspaceId, pipelineId, version)
+                ?: throw versionNotFound(pipelineId, version)
+        if (detail.status == PipelineVersionStatus.DRAFT) throw notReleased(pipelineId, version, detail.status)
+        if (detail.status == PipelineVersionStatus.DISCARDED) throw notReleased(pipelineId, version, detail.status)
+        refuseIfPinned(workspaceId, record, version)
+
+        val flipped =
+            pipelines.discardVersion(
+                workspaceId = workspaceId,
+                pipelineId = pipelineId,
+                pipelineName = record.name,
+                version = version,
+                actor = actor,
+                draftEligible = authoring.developmentPosture,
+            ) ?: throw pinnedOrConcurrent(workspaceId, record, version)
+        return DiscardResult(recordBefore = record, recordAfter = flipped.first, version = flipped.second)
     }
+
+    /**
+     * §3.1 (101) — restore DISCARDED version [version] to RELEASED. Its original
+     * `released_at`/`released_by` return untouched (§8's derivation depends on one release
+     * stamp per version); the pointer moves only above-current-or-NULL (D60). No pin can
+     * exist on a DISCARDED version (the `pinned` guard blocked its discard), so restore is
+     * always safe. An authoring write (§5.5).
+     */
+    open fun restoreVersion(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+    ): PipelineRecord {
+        authoring.requirePipelineAuthoring()
+        // AnyStatus: restoring the first version of a DISCARDED entity is the one way back
+        // (§3.5's `{X,X}` rows) — a live-only read would 404 the restore.
+        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val detail =
+            pipelines.findVersionDetail(workspaceId, pipelineId, version)
+                ?: throw versionNotFound(pipelineId, version)
+        if (detail.status != PipelineVersionStatus.DISCARDED) throw notDiscarded(pipelineId, version, detail.status)
+
+        return pipelines.restoreVersion(
+            workspaceId,
+            pipelineId,
+            version,
+            draftEligible = authoring.developmentPosture,
+        ) ?: throw versionNotFound(pipelineId, version)
+    }
+
+    /**
+     * §3.1 (101) — purge DRAFT version [version] (drafts only): the row and its executions
+     * are deleted; the sole-draft case takes the entity with it. The hash-free admin verb —
+     * it names an explicit version, so there is no two-writer protocol to honour.
+     *
+     * Preconditions: entity + target exist (404); target is DRAFT (a RELEASED target is
+     * `pipeline.version.last_release` — a release is never purged; a DISCARDED target is
+     * history, same code). An authoring write (§5.5).
+     */
+    @Transactional("metadataTransactionManager")
+    open fun purgeVersion(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+    ): PipelineReleaseService.Purged {
+        authoring.requirePipelineAuthoring()
+        // AnyStatus: purging a DISCARDED entity's version is last_release (history is never
+        // purged), not a 404 hiding it.
+        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val detail =
+            pipelines.findVersionDetail(workspaceId, pipelineId, version)
+                ?: throw versionNotFound(pipelineId, version)
+        if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(pipelineId, version, detail.status)
+        // Graph rule 1: a draft PIPELINE version cannot be pinned by a saved parent (D58
+        // refuses the pin at save), so there is no pin guard here — the invariant is
+        // enforced upstream, and this comment is what makes that a decision rather than a gap.
+        return when (
+            val outcome =
+                pipelines.purgeDraft(
+                    workspaceId,
+                    pipelineId,
+                    expectedHash = null,
+                    draftEligible = authoring.developmentPosture,
+                )
+        ) {
+            is PurgeOutcome.VersionPurged -> PipelineReleaseService.Purged.Version(outcome.executionsDeleted, outcome.record)
+            is PurgeOutcome.EntityPurged -> PipelineReleaseService.Purged.Entity(outcome.executionsDeleted)
+            null -> throw versionNotFound(pipelineId, version)
+        }
+    }
+
+    /** What a discard produced: the pointer before/after and the flipped version's detail. */
+    data class DiscardResult(
+        val recordBefore: PipelineRecord,
+        val recordAfter: PipelineRecord,
+        val version: PipelineVersionDetail,
+    )
+
+    /** What an entity purge produced (§3.2) — and the exclusive draft templates it offered. */
+    data class EntityPurgeResult(
+        val executionsDeleted: Int,
+        /** Draft-only templates pinned by this draft body and by no OTHER live pipeline version. */
+        val exclusiveDraftTemplates: List<String>,
+        /** Whether [exclusiveDraftTemplates] were purged with the entity (the `include` flag). */
+        val exclusiveTemplatesPurged: Boolean,
+    )
+
+    /**
+     * §3.2 (101) — the entity purge: allowed only when the entity's ONLY version is a DRAFT
+     * and nothing pins it. The entity row goes, with the draft and its executions. A
+     * non-draft version present ⇒ `pipeline.version.last_release`; an inbound exact pin ⇒
+     * `pipeline.version.pinned`.
+     *
+     * [includeExclusiveDraftTemplates] computes the set of DRAFT-ONLY templates the draft
+     * body pins that no OTHER live pipeline version pins, and (when true) purges them with
+     * the entity. Either way the response carries the set (§3.5) — the UI (102) shows the
+     * offer even when the caller did not take it.
+     *
+     * Transactional: the guard reads, the template purge and the entity delete must not
+     * strand half a cleanup.
+     */
+    @Transactional("metadataTransactionManager")
+    open fun purgeEntity(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        includeExclusiveDraftTemplates: Boolean = false,
+    ): EntityPurgeResult {
+        authoring.requirePipelineAuthoring()
+        // AnyStatus: a DISCARDED entity is addressable — its refusal is last_release (the
+        // version shape), never a 404 that would hide the restore path (§3.5's `{X,X}` rows).
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+
+        val versions = pipelines.listVersions(workspaceId, pipelineId)
+        when {
+            versions.size != 1 -> throw lastReleaseEntity(pipelineId, versions)
+            versions[0].status != PipelineVersionStatus.DRAFT -> throw lastReleaseEntity(pipelineId, versions)
+        }
+
+        // Graph rule 3: no inbound edges of any kind. A never-released pipeline cannot be
+        // published (the pointer is NULL) and cannot be pinned by a saved parent (D58), but
+        // the check is stated, not assumed — a template-style pin edge would refuse here.
+        refuseIfPinned(workspaceId, record, versions[0].version)
+
+        val exclusive = exclusiveDraftTemplates(workspaceId, record)
+        val purged =
+            pipelines.purgeDraft(
+                workspaceId,
+                pipelineId,
+                expectedHash = null,
+                draftEligible = authoring.developmentPosture,
+            ) ?: throw pipelineNotFound(pipelineId)
+        if (purged !is PurgeOutcome.EntityPurged) {
+            // Versions appeared between the guard read and the purge — the transaction's
+            // own guard made the purge refuse everything but the single draft; re-read.
+            throw lastReleaseEntity(pipelineId, pipelines.listVersions(workspaceId, pipelineId))
+        }
+
+        var purgedTemplates = false
+        if (includeExclusiveDraftTemplates && exclusive.isNotEmpty()) {
+            exclusive.forEach { templateId -> draftTemplates.purge(workspaceId, templateId) }
+            purgedTemplates = true
+        }
+        return EntityPurgeResult(purged.executionsDeleted, exclusive, purgedTemplates)
+    }
+
+    /**
+     * §3.4 (101) — the manual switch: `current = [version]`, which must be a LIVE,
+     * posture-eligible version. NOT an authoring verb: this is the promotion receiver's
+     * rollout/rollback lever, so no `requirePipelineAuthoring` here — D60 named the human
+     * the mover, and the receiver's human is included.
+     */
+    open fun switchCurrent(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+    ): PipelineRecord {
+        // AnyStatus: a DISCARDED entity's versions are addressable — their switch answer is
+        // not_eligible (the status check below), not a 404.
+        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val detail =
+            pipelines.findVersionDetail(workspaceId, pipelineId, version)
+                ?: throw versionNotFound(pipelineId, version)
+        if (!PipelineVersionStatus.eligibleForPointer(detail.status, authoring.developmentPosture)) {
+            throw notEligible(pipelineId, version, detail.status)
+        }
+        return pipelines.switchCurrent(
+            workspaceId,
+            pipelineId,
+            version,
+            draftEligible = authoring.developmentPosture,
+        ) ?: throw notEligible(pipelineId, version, detail.status)
+    }
+
+    /** The draft-only templates exclusively pinned by [record]'s draft body (§3.5, 101). */
+    private fun exclusiveDraftTemplates(
+        workspaceId: UUID,
+        record: PipelineRecord,
+    ): List<String> = draftTemplates.exclusiveIds(workspaceId, record.id)
+
+    /** Graph rule 1's service-side arm: names the pinning entities in `details`. */
+    private fun refuseIfPinned(
+        workspaceId: UUID,
+        record: PipelineRecord,
+        version: Int,
+    ) {
+        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
+        if (pinners.isNotEmpty()) {
+            throw pinned(workspaceId, record, version, pinners)
+        }
+    }
+
+    @Suppress("UnusedParameter") // workspaceId rides for a future per-workspace pin report
+    private fun pinned(
+        workspaceId: UUID,
+        record: PipelineRecord,
+        version: Int,
+        pinners: List<TemplatePin>,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Versioning.PINNED,
+            message =
+                "Version $version of '${record.name.truncateForError()}' is pinned by ${pinners.size} " +
+                    "live pipeline version(s); discard or repoint them first.",
+            details =
+                mapOf(
+                    "pipeline_id" to record.id.toString(),
+                    "version" to version,
+                    "pinned_by" to
+                        pinners.map { mapOf("pipeline" to it.pipelineName, "version" to it.pipelineVersion, "node" to it.nodeId) },
+                ),
+        )
+
+    /**
+     * The discard statement returned zero rows after the service-side guard passed: a pin
+     * landed in between, or a concurrent discard won.
+     */
+    private fun pinnedOrConcurrent(
+        workspaceId: UUID,
+        record: PipelineRecord,
+        version: Int,
+    ): DatapipelinesException {
+        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
+        if (pinners.isNotEmpty()) return pinned(workspaceId, record, version, pinners)
+        val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
+        return when (current.status) {
+            PipelineVersionStatus.RELEASED -> {
+                DatapipelinesException(
+                    code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
+                    message = "Pipeline was modified by someone else after you loaded it.",
+                    details = mapOf("current_status" to current.status.name),
+                )
+            }
+
+            else -> {
+                notReleased(record.id, version, current.status)
+            }
+        }
+    }
+
+    private fun lastRelease(
+        pipelineId: UUID,
+        version: Int,
+        status: PipelineVersionStatus,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Versioning.LAST_RELEASE,
+            message =
+                "Version $version of pipeline '$pipelineId' is ${status.name} and is never purged — " +
+                    "discard is per version, the entity stays; restore or release something first.",
+            details = mapOf("pipeline_id" to pipelineId.toString(), "version" to version, "status" to status.name),
+        )
+
+    private fun lastReleaseEntity(
+        pipelineId: UUID,
+        versions: List<PipelineVersionRecord>,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Versioning.LAST_RELEASE,
+            message =
+                "Pipeline '$pipelineId' cannot be purged: an entity purge requires the only version " +
+                    "to be a DRAFT (this one has ${versions.size} version(s)).",
+            details =
+                mapOf(
+                    "pipeline_id" to pipelineId.toString(),
+                    "versions" to versions.map { mapOf("version" to it.version, "status" to it.status.name) },
+                ),
+        )
+
+    private fun notReleased(
+        pipelineId: UUID,
+        version: Int,
+        status: PipelineVersionStatus,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Versioning.NOT_RELEASED,
+            message =
+                "Version $version of pipeline '$pipelineId' is ${status.name}; discard targets a RELEASED " +
+                    "version — a draft is purged, not discarded.",
+            details = mapOf("pipeline_id" to pipelineId.toString(), "version" to version, "status" to status.name),
+        )
+
+    private fun notDiscarded(
+        pipelineId: UUID,
+        version: Int,
+        status: PipelineVersionStatus,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Versioning.NOT_DISCARDED,
+            message = "Version $version of pipeline '$pipelineId' is ${status.name}; restore targets a DISCARDED version.",
+            details = mapOf("pipeline_id" to pipelineId.toString(), "version" to version, "status" to status.name),
+        )
+
+    private fun notEligible(
+        pipelineId: UUID,
+        version: Int,
+        status: PipelineVersionStatus,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Versioning.NOT_ELIGIBLE,
+            message =
+                "Version $version of pipeline '$pipelineId' is ${status.name} and cannot be switched to — " +
+                    "the pointer names a live version eligible for this deployment's posture.",
+            details = mapOf("pipeline_id" to pipelineId.toString(), "version" to version, "status" to status.name),
+        )
+
+    private fun pipelineNotFound(pipelineId: UUID): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Execution.NOT_FOUND,
+            message = "Pipeline '$pipelineId' does not exist.",
+            details = mapOf("pipeline_id" to pipelineId.toString()),
+        )
+
+    private fun versionNotFound(
+        pipelineId: UUID,
+        version: Int,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Execution.NOT_FOUND,
+            message = "Pipeline '$pipelineId' has no version $version.",
+            details =
+                mapOf(
+                    "pipeline_id" to pipelineId.toString(),
+                    "pipeline_version" to version,
+                ),
+        )
 }

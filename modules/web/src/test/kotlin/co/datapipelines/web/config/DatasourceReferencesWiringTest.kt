@@ -117,8 +117,8 @@ class DatasourceReferencesWiringTest {
             name,
             name,
             isPersonal = false,
-            createdBy = UUID.randomUUID(),
             isDeleted = false,
+            createdBy = UUID.randomUUID(),
             createdAt = Instant.EPOCH,
         )
 }

@@ -12,8 +12,11 @@ import java.util.UUID
  * object `{engine, dialect, is_library, imports, body}` projected through JSONB and hashed
  * by the database with the one expression V6's backfill used. `display_name` /
  * `description` are NOT in the canonical body: they live on the index row `templates`
- * only and are not part of the versioned artifact (versioning §3.5 has no template-side
+ * only and are not part of the versioned artifact (versioning §3.7 has no template-side
  * draft metadata to stage — the asymmetry is documented in v1.3).
+ *
+ * [discardedAt]/[discardedBy] are the discard stamps (§3.1, V19): both NULL unless the
+ * status is DISCARDED; restore clears them and never touches `released_at`/`released_by`.
  */
 data class TemplateVersionDetail(
     val templateId: String,
@@ -24,6 +27,8 @@ data class TemplateVersionDetail(
     val createdBy: UUID,
     val releasedAt: Instant? = null,
     val releasedBy: UUID? = null,
+    val discardedAt: Instant? = null,
+    val discardedBy: UUID? = null,
     val updatedBy: UUID? = null,
     val updatedAt: Instant? = null,
 )

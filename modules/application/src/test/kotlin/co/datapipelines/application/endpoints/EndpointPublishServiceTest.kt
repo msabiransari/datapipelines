@@ -103,7 +103,6 @@ class EndpointPublishServiceTest {
                 description = "",
                 ownerId = ACTOR,
                 currentVersion = null,
-                isDeleted = false,
                 createdAt = Instant.EPOCH,
                 updatedAt = Instant.EPOCH,
             )
@@ -224,7 +223,6 @@ class EndpointPublishServiceTest {
                 description = "",
                 ownerId = ACTOR,
                 currentVersion = 1,
-                isDeleted = false,
                 createdAt = Instant.EPOCH,
                 updatedAt = Instant.EPOCH,
             )

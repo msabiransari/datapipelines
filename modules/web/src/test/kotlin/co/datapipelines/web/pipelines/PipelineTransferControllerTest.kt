@@ -45,7 +45,7 @@ class PipelineTransferControllerTest {
     private val pipelineId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
     private val record =
-        PipelineRecord(pipelineId, "monthly_revenue", "Monthly Revenue", "d", userId, 3, false, Instant.EPOCH, Instant.EPOCH)
+        PipelineRecord(pipelineId, "monthly_revenue", "Monthly Revenue", "d", userId, 3, Instant.EPOCH, Instant.EPOCH)
 
     private val body =
         """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue","description":"d",""" +

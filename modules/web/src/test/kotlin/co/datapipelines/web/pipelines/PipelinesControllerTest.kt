@@ -16,6 +16,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
@@ -51,6 +52,18 @@ class PipelinesControllerTest {
     // 056: the controller takes the SERVICE, built here over the very same mocks this suite
     // already stubbed — so every `every { repository… }` / `every { drafts… }` below still fires
     // unchanged and not one assertion in this file moved.
+    private val audit =
+        object : co.datapipelines.auth.AuditEventSink {
+            override fun log(
+                event: String,
+                userId: java.util.UUID?,
+                keyId: String?,
+                sourceIp: String?,
+                userAgent: String?,
+                details: Map<String, Any?>,
+            ) = Unit
+        }
+
     private val controller =
         PipelinesController(
             pipelines =
@@ -60,7 +73,9 @@ class PipelinesControllerTest {
                     drafts = drafts,
                     releases = releases,
                     authoring = AuthoringGuard(true),
+                    draftTemplates = co.datapipelines.web.NO_EXCLUSIVE_DRAFT_TEMPLATES,
                 ),
+            audit = audit,
         )
 
     private val userId = UUID.randomUUID()
@@ -74,7 +89,6 @@ class PipelinesControllerTest {
             description = "desc",
             ownerId = userId,
             currentVersion = 1,
-            isDeleted = false,
             createdAt = Instant.parse("2026-08-01T00:00:00Z"),
             updatedAt = Instant.parse("2026-08-01T00:00:00Z"),
         )
@@ -318,7 +332,7 @@ class PipelinesControllerTest {
         authenticate()
         shouldThrow<ApiException> { controller.discard(pipelineId, null) }.details["reason"] shouldBe "precondition_missing"
 
-        every { releases.discard(any(), pipelineId, "hash-v2") } returns PipelineReleaseService.Discarded.Deleted
+        every { releases.purge(any(), pipelineId, "hash-v2") } returns PipelineReleaseService.Purged.Version(0, record)
 
         controller.discard(pipelineId, "hash-v2")
     }
@@ -397,13 +411,24 @@ class PipelinesControllerTest {
     }
 
     @Test
-    fun `delete is 204 on success and 404 when nothing was live`() {
+    fun `delete - the entity purge - succeeds and answers the exclusive-template offer`() {
         authenticate()
-        every { repository.softDelete(any(), pipelineId) } returns true
-        controller.delete(pipelineId)
+        every { repository.findByIdAnyStatus(any(), pipelineId) } returns record
+        every { repository.listVersions(any(), pipelineId) } returns
+            listOf(
+                PipelineVersionRecord(pipelineId, 1, PipelineVersionStatus.DRAFT, "h", Instant.EPOCH, userId),
+            )
+        every { repository.findVersionDetail(any(), pipelineId, 1) } returns
+            PipelineVersionDetail(pipelineId, 1, PipelineVersionStatus.DRAFT, "h", Instant.EPOCH, userId)
+        every { repository.findLiveParentsPinningVersion(any(), record.name, 1) } returns emptyList()
+        every { repository.purgeDraft(any(), pipelineId, null, true) } returns
+            co.datapipelines.pipeline.PurgeOutcome
+                .EntityPurged(0)
 
-        every { repository.softDelete(any(), pipelineId) } returns false
-        shouldThrow<ApiException> { controller.delete(pipelineId) }.code shouldBe "pipeline.execution.not_found"
+        val response = controller.delete(pipelineId)
+
+        response.data["purged"] shouldBe true
+        response.data["exclusive_draft_templates"] shouldBe emptyList<String>()
     }
 
     @Test
@@ -420,7 +445,9 @@ class PipelinesControllerTest {
                         drafts = drafts,
                         releases = releases,
                         authoring = AuthoringGuard(false),
+                        draftTemplates = co.datapipelines.web.NO_EXCLUSIVE_DRAFT_TEMPLATES,
                     ),
+                audit = audit,
             )
 
         val body =

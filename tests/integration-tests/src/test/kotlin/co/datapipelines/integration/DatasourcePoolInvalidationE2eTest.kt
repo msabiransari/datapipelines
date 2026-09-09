@@ -139,8 +139,12 @@ class DatasourcePoolInvalidationE2eTest {
             awaitRunningSleepStatement()
 
             // The in-use guard is real: the pipeline has to go first, which is exactly the
-            // sequence an operator retiring a datasource follows.
-            deleteOn(portB, "/api/v1/pipelines/$pipelineId")
+            // sequence an operator retiring a datasource follows. 101: retiring the pipeline
+            // is a session-only lifecycle verb (discard the release — the entity goes
+            // DISCARDED — its inert pins stop blocking), outside this key-driven harness — so
+            // the metadata DB is flipped to the same derived state directly; the DATASOURCE
+            // delete below remains the real REST surface under test.
+            retirePipelineMetadata(pipelineId)
             deleteOn(portB, "/api/v1/datasources/$SLOW_DS")
 
             // THE ASSERTION: the execution that was mid-statement finishes, with its rows.
@@ -249,7 +253,21 @@ class DatasourcePoolInvalidationE2eTest {
         return E2eSse.parseEvents(response.body(), mapper)
     }
 
-    /** The metadata Postgres, addressed WITHOUT Testcontainers' driver query parameters (§5.6). */
+    /** 101: the derived retired state (every version DISCARDED, pointer NULL), via SQL. */
+    private fun retirePipelineMetadata(pipelineId: String) {
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use {
+                it.execute(
+                    """
+                    UPDATE pipeline_versions SET status = 'DISCARDED', discarded_at = NOW()
+                     WHERE pipeline_id = '$pipelineId'
+                    """.trimIndent(),
+                )
+                it.execute("UPDATE pipelines SET current_version = NULL WHERE id = '$pipelineId'")
+            }
+        }
+    }
+
     private fun metadataJdbcUrl(): String = postgres.jdbcUrl.substringBefore('?')
 
     /** A DELETE on one instance, asserting the documented 204. */

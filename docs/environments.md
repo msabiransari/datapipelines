@@ -74,10 +74,15 @@ DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true
 That is supported and expected. The default is `false` because the common hardened deployment is a **receiver** — content is built in a lower environment and promoted up (§7).
 
 **What authoring off means for versions.** Every draft-creating write — create, update, release,
-discard, for pipelines and templates — is refused with `pipeline.authoring.disabled` /
-`template.authoring.disabled` where authoring is off ([versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)),
+the draft purge, discard, restore and the entity purge, for pipelines and templates — is refused
+with `pipeline.authoring.disabled` / `template.authoring.disabled` where authoring is off
+([versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)),
 so **a hardened receiver cannot hold a DRAFT at all**: everything on it arrived RELEASED through
-promotion. That is what makes the execute default safe to state in one sentence everywhere — running
+promotion. **Eligibility follows the posture** (101, D60): the sticky `current_version` may name
+a DRAFT only under `development`; under hardened only RELEASED is eligible — stated as a rule,
+not assumed. The one lifecycle verb a hardened deployment DOES take is the **manual switch**
+(`POST /pipelines/{id}/current`): pointing a receiver at the release it just imported, or back
+at the one before it, is the operator's rollout/rollback lever ([versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)). That is what makes the execute default safe to state in one sentence everywhere — running
 a pipeline with no version given runs the *working* version (versioning §7.2, D56), which on a
 development deployment may be a draft and on a hardened one is a release by construction, not by
 convention.

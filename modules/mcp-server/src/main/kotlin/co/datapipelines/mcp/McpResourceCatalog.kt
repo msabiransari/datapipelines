@@ -160,14 +160,16 @@ class McpResourceCatalog(
                 descriptor(
                     uri = McpResourceUri.pipeline(it.id),
                     name = it.name,
-                    // D55: `current_version` is null until a human releases, so the catalogue
-                    // names the released version when there is one and says so when there is
-                    // not — never "version null". The resource itself serves the WORKING
+                    // D55/D60: `current_version` is the sticky pointer — null until a human
+                    // releases (or after the release it named was discarded with no eligible
+                    // survivor), and under development posture it may name the draft the
+                    // discard fallback caught. The catalogue names what the pointer says and
+                    // never calls a draft a release. The resource itself serves the WORKING
                     // version (McpResourceReader), which is what the second sentence tells a
                     // reader who is deciding whether to fetch it.
                     description =
-                        it.currentVersion?.let { v -> "${it.displayName} — pipeline body, released version $v." }
-                            ?: "${it.displayName} — pipeline body, not released yet (the draft is served).",
+                        it.currentVersion?.let { v -> "${it.displayName} — pipeline body, current version $v." }
+                            ?: "${it.displayName} — pipeline body, no current version (the draft is served).",
                     mimeType = MIME_JSON,
                 )
             }

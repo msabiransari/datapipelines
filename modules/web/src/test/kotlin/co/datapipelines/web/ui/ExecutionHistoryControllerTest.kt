@@ -66,7 +66,6 @@ class ExecutionHistoryControllerTest {
             description = "",
             ownerId = UUID.randomUUID(),
             currentVersion = 1,
-            isDeleted = false,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
         )

@@ -152,14 +152,17 @@ internal class PipelineTreeQueries(
         /**
          * The live-in-this-workspace predicate of ONE tree level, shared by all three queries.
          *
-         * Soft-deleted rows are out, the same rule the flat listing follows: a deleted pipeline
-         * is not browsable, and a folder derived from one would be a folder with nothing in it.
+         * A DISCARDED entity is out (the §3.2 derivation — 101 replaced the `is_deleted`
+         * column), the same rule the flat listing follows: a discarded pipeline is not
+         * browsable, and a folder derived from one would be a folder with nothing in it.
          * `namePattern` is CAST in the SQL for the reason every optional bind in this module is
          * — a bare parameter gives Postgres no type to infer and the statement will not prepare.
          */
         val TREE_WHERE =
             """
-            WHERE is_deleted = FALSE
+            WHERE EXISTS (SELECT 1 FROM pipeline_versions lv
+                           WHERE lv.pipeline_id = pipelines.id
+                             AND lv.status IN ('DRAFT','RELEASED'))
               AND workspace_id = :workspaceId
               AND name LIKE CAST(:namePattern AS TEXT) ESCAPE '\'
             """.trimIndent()

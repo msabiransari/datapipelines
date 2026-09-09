@@ -285,7 +285,7 @@ class PromotionService(
             parsed.nodes.filter { it.type == NodeType.PIPELINE }.forEach { node ->
                 val child = node.pipeline ?: return@forEach
                 val childRecord =
-                    pipelines.findByNameIncludingDeleted(workspaceId, child.name)
+                    pipelines.findByNameAnyStatus(workspaceId, child.name)
                         ?: throw ApiErrors.pipelineNotFound(child.name)
                 addPipeline(childRecord.id, child.name, child.version)
             }

@@ -204,11 +204,13 @@ class WorkspacesReadonlyE2eTest {
             "INSERT INTO child_t (n) VALUES (1)",
         )
 
-        // The child (saved clean against a writable datasource) carries the DML write shape.
+        // The child (saved clean against a writable datasource) carries the DML write shape,
+        // RELEASED, because 101/D58 lets a PIPELINE node pin only a RELEASED child.
         createPipeline(
             "test/ro_child_pipeline",
             listOf(dmlNode("child_insert", CHILD_DS, RO_CHILD_INSERT_TEMPLATE)),
         )
+        releaseLastPipeline()
         // The parent runs it through a PIPELINE node.
         val parentId =
             createPipeline(
@@ -307,6 +309,8 @@ class WorkspacesReadonlyE2eTest {
             .`when`()
             .post("/api/v1/pipelines")
 
+    private var lastPipeline: Pair<String, String> = Pair("", "")
+
     private fun createPipeline(
         name: String,
         nodes: List<Map<String, Any?>>,
@@ -317,27 +321,56 @@ class WorkspacesReadonlyE2eTest {
                 "Pipeline '$name' creation failed (status=${response.statusCode()}): ${response.body().asString()}",
             )
         }
-        return response.jsonPath().getString("data.id")
+        lastPipeline = response.jsonPath().getString("data.id") to response.jsonPath().getString("data.body_hash")
+        return lastPipeline.first
+    }
+
+    /** 101/D58: a PIPELINE node pins only a RELEASED child (templates lock first). */
+    private fun releaseLastPipeline() {
+        val (id, hash) = lastPipeline
+        io.restassured.RestAssured
+            .given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .header("If-Match", hash)
+            .`when`()
+            .post("/api/v1/pipelines/$id/release")
+            .then()
+            .statusCode(200)
     }
 
     private fun createTemplate(
         id: String,
         body: String,
     ) {
-        given()
+        val response =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .body(
+                    """
+                    {"id": "$id", "dialect": "H2", "display_name": "Readonly E2E $id",
+                     "description": "Readonly E2E template", "imports": [],
+                     "body": ${mapper.writeValueAsString(body)}}
+                    """.trimIndent(),
+                ).`when`()
+                .post("/api/v1/templates")
+                .then()
+                .statusCode(201)
+                .extract()
+        // 101/D58: templates lock first — the child's release needs this pin released.
+        io.restassured.RestAssured
+            .given()
             .port(port)
-            .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body(
-                """
-                {"id": "$id", "dialect": "H2", "display_name": "Readonly E2E $id",
-                 "description": "Readonly E2E template", "imports": [],
-                 "body": ${mapper.writeValueAsString(body)}}
-                """.trimIndent(),
-            ).`when`()
-            .post("/api/v1/templates")
+            .header("If-Match", response.jsonPath().getString("data.body_hash"))
+            .contentType(io.restassured.http.ContentType.JSON)
+            .body("""{"name": "$id"}""")
+            .`when`()
+            .post("/api/v1/templates/release")
             .then()
-            .statusCode(201)
+            .statusCode(200)
     }
 
     /** Registers the datasource if absent — the flag itself arrives only via [flipReadonly]. */

@@ -57,6 +57,16 @@ class TypedTemplatesMigrationTest {
         insertPreV8ReleasedTemplate("test/pre_v8_report.sql", "SELECT 42 AS answer")
         // V8, applied once, exactly as Flyway would.
         jdbc.jdbcTemplate.execute(v8())
+        // 101: the repository's detail reads select the V19 discard stamps, so a schema stopped
+        // at V8 can no longer serve them — the later migrations run AFTER the pre-V8 rows exist,
+        // exactly as a live deployment would have received them. The migration under test is
+        // still V8's.
+        ShippedMigrations.migrations(dir).filter { it.first in 9..18 }.forEach { pair ->
+            jdbc.jdbcTemplate.execute(pair.second.readText())
+        }
+        ShippedMigrations.paths().filter { it.contains("V19__") }.forEach {
+            jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(it).readText())
+        }
     }
 
     @Test

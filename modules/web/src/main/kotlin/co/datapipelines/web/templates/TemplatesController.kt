@@ -14,6 +14,7 @@ import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
@@ -23,6 +24,7 @@ import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.IfMatchHeader
+import co.datapipelines.web.pipelines.LifecycleVerbs
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.http.HttpStatus
@@ -77,7 +79,7 @@ class TemplatesController(
     private val drafts: TemplateDraftService,
     private val releases: TemplateReleaseService,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
-    private val usage: co.datapipelines.templates.TemplateUsageService,
+    private val audit: co.datapipelines.auth.AuditEventSink,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
@@ -259,8 +261,10 @@ class TemplatesController(
     }
 
     /**
-     * §8.10 — discard the template draft (always a hard delete: nothing references a
-     * template version by FK). Hash-guarded. The name is the body's `name` field (§9.6).
+     * §8.10 (101) — purge the template draft (always a hard delete: nothing references a
+     * template version by FK; the sole-draft case takes the entity with it). Hash-guarded.
+     * The route keeps its historical spelling for the editor; the verb underneath is the
+     * purge (versioning §5.4). Session-only, audited. The name is the body's `name` (§9.6).
      */
     @PostMapping("/draft/discard")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -269,18 +273,142 @@ class TemplatesController(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestBody body: String,
     ) {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        releases.discard(workspaceId, nameOf(body), IfMatchHeader.required(ifMatch))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val name = nameOf(body)
+        releases.purge(workspaceId, name, IfMatchHeader.required(ifMatch))
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
+            principal,
+            workspaceId,
+            mapOf("template_id" to name, "scope" to "draft"),
+        )
     }
 
     /**
-     * §8.6 — soft delete, refused with `409 template.in_use` while any pipeline version pins
-     * any version of the template (040 D4). The refusal is retirement protection, not a
-     * semantic necessity — pipelines referencing a deleted template's versions keep resolving
-     * (templates §5.1) — so it exists to make "who still uses this?" a refusal the author
-     * cannot miss instead of a fact they never learn. `details` carries the full reverse-scan
-     * rows (pipeline, node, carrying pipeline version, pinned version) plus the distinct
-     * pipeline names, so the author can go and change exactly the pins that block.
+     * §8 (101) — discard RELEASED version v: flip to DISCARDED (reversible via restore),
+     * pointer per D60; `template.in_use` while a live pipeline version pins it. The name and
+     * version are body fields (§9.6: the name never travels in a path segment). Session-only,
+     * audited.
+     */
+    @PostMapping("/version/discard")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun discardVersion(
+        @RequestBody body: String,
+    ): ApiResponse<Map<String, Any?>> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val request = versionVerbRequestOf(body)
+        val detail = releases.discardVersion(workspaceId, request.name, request.version, principal.userId)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_DISCARDED,
+            principal,
+            workspaceId,
+            mapOf("template_id" to request.name, "version" to request.version),
+        )
+        return ApiResponse.of(versionDetailJson(detail))
+    }
+
+    /** §8 (101) — restore DISCARDED version v to RELEASED; pointer moves only above-current-or-NULL. */
+    @PostMapping("/version/restore")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun restoreVersion(
+        @RequestBody body: String,
+    ): ApiResponse<Map<String, Any?>> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val request = versionVerbRequestOf(body)
+        val detail = releases.restoreVersion(workspaceId, request.name, request.version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RESTORED,
+            principal,
+            workspaceId,
+            mapOf("template_id" to request.name, "version" to request.version),
+        )
+        return ApiResponse.of(versionDetailJson(detail))
+    }
+
+    /** §8 (101) — purge DRAFT version v (drafts only; the sole-draft case takes the entity). Irreversible. */
+    @DeleteMapping("/version")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun purgeVersion(
+        @RequestParam name: String,
+        @RequestParam version: Int,
+    ) {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        releases.purgeVersion(workspaceId, name, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
+            principal,
+            workspaceId,
+            mapOf("template_id" to name, "version" to version, "scope" to "version"),
+        )
+    }
+
+    /** §8 (101) — the manual switch: `current = version`, live and posture-eligible. The receiver's lever. */
+    @PostMapping("/current")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun switchCurrent(
+        @RequestBody body: String,
+    ): ApiResponse<Map<String, Any?>> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val request = versionVerbRequestOf(body)
+        val current = releases.switchCurrent(workspaceId, request.name, request.version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_CURRENT_SWITCHED,
+            principal,
+            workspaceId,
+            mapOf("template_id" to request.name, "to" to current),
+        )
+        return ApiResponse.of(mapOf("name" to request.name, "current_version" to current))
+    }
+
+    /** A 101 version-verb body: `name` + `version` (§9.6), read through the house body reader. */
+    private fun versionVerbRequestOf(body: String): VersionVerbRequest {
+        val tree = objectOf(body)
+        val name = tree.get("name")?.asText("")
+        val version = tree.get("version")?.takeIf { it.isInt }?.asInt()
+        if (name.isNullOrBlank() || version == null || version < 1) {
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "The version verb requires the template 'name' and a numeric 'version' in the body (§9.6).",
+                mapOf(ApiErrors.REASON to "name_and_version_required"),
+            )
+        }
+        return VersionVerbRequest(name, version)
+    }
+
+    private data class VersionVerbRequest(
+        val name: String,
+        val version: Int,
+    )
+
+    private fun versionDetailJson(detail: TemplateVersionDetail): Map<String, Any?> =
+        mapOf(
+            "name" to detail.templateId,
+            "version" to detail.version,
+            "status" to detail.status.name,
+            "body_hash" to detail.bodyHash,
+            "released_at" to (detail.releasedAt?.toString() ?: ""),
+            "discarded_at" to (detail.discardedAt?.toString() ?: ""),
+        )
+
+    /**
+     * §8.6 (101) — the entity purge, replacing the V1 soft delete (retired in V19): allowed
+     * only when the template's ONLY version is a DRAFT, and refused with `409 template.in_use`
+     * while any pipeline version pins any version of it (040 D4's reverse scan — the refusal
+     * is retirement protection: pipelines referencing a discarded template's versions keep
+     * resolving, so it exists to make "who still uses this?" a refusal the author cannot
+     * miss). A template holding a non-draft version is refused
+     * `template.version.last_release`. Session-only, audited.
      */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -288,31 +416,15 @@ class TemplatesController(
     fun delete(
         @RequestParam name: String,
     ) {
-        // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
-        authoring.requireTemplateAuthoring()
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val references = usage.referencedAnywhere(workspaceId, name)
-        if (references.isNotEmpty()) {
-            throw ApiException(
-                PipelineErrorCodes.Template.IN_USE,
-                "Template '$name' is referenced by ${references.map { it.pipelineId }.distinct().size} pipeline(s)." +
-                    " Remove or re-pin the referencing nodes before deleting it.",
-                mapOf(
-                    "template_id" to name,
-                    "referencing_pipelines" to references.map { it.pipelineName }.distinct(),
-                    "references" to
-                        references.map {
-                            mapOf(
-                                "pipeline" to it.pipelineName,
-                                "node_id" to it.nodeId,
-                                "pipeline_version" to it.pipelineVersion,
-                                "pinned_version" to it.pinnedVersion,
-                            )
-                        },
-                ),
-            )
-        }
-        if (!templates.softDelete(workspaceId, name)) throw ApiErrors.templateNotFound(name)
+        val principal = LifecycleVerbs.requireSession()
+        releases.purgeEntity(principal.requireWorkspace().id, name)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_ENTITY_PURGED,
+            principal,
+            principal.requireWorkspace().id,
+            mapOf("template_id" to name),
+        )
     }
 
     /**

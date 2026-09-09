@@ -193,12 +193,21 @@ object PipelineErrorCodes {
         /** §12.9 — the pinned `pipeline.version` exists for that name. */
         const val PIPELINE_VERSION_NOT_FOUND = "pipeline.validation.pipeline_version_not_found"
 
+        /**
+         * §12.9 (101, D58) — a PIPELINE node pinned a child pipeline version that is not
+         * RELEASED. Composition references reviewed content only: a DRAFT child can be
+         * purged out from under its parent, which an exact-version pin must never allow.
+         * A DISCARDED child version is refused by the same rule.
+         */
+        const val PIPELINE_REFERENCE_NOT_RELEASED = "pipeline.validation.pipeline_reference_not_released"
+
         /** §12.9 — a PIPELINE node must not reference its containing pipeline. */
         const val PIPELINE_SELF_REFERENCE = "pipeline.validation.pipeline_self_reference"
 
         /**
-         * §12.9 — the referenced pipeline is soft-deleted (D7: blocks NEW references at save
-         * time only; existing pinned references keep resolving).
+         * §12.9 — the referenced pipeline's entity is DISCARDED (every version discarded;
+         * derived since V19 — the old `is_deleted` read). Blocks NEW references at save
+         * time only; existing pinned references keep resolving (D7).
          */
         const val PIPELINE_REFERENCE_DELETED = "pipeline.validation.pipeline_reference_deleted"
 
@@ -560,6 +569,28 @@ object PipelineErrorCodes {
         const val VERSION_NOT_DRAFT = "template.version.not_draft"
 
         /**
+         * §13.9 / versioning §3.1 (101) — discard targeted a version that is not RELEASED
+         * (a DRAFT is purged, never discarded; a DISCARDED version is already retired).
+         */
+        const val VERSION_NOT_RELEASED = "template.version.not_released"
+
+        /** §13.9 / versioning §3.1 (101) — restore targeted a version that is not DISCARDED. */
+        const val VERSION_NOT_DISCARDED = "template.version.not_discarded"
+
+        /**
+         * §13.9 / versioning §3.5 (101, D57) — the purge path refused: a RELEASED version
+         * is never purged, and an entity holding any non-draft version is never purged.
+         * Discard is per version, the entity stays; restore or release something first.
+         */
+        const val VERSION_LAST_RELEASE = "template.version.last_release"
+
+        /**
+         * §13.9 / versioning §3.4 (101, D60) — manual switch targeted a version that is not
+         * a live, posture-eligible version (DISCARDED, or a DRAFT under a hardened posture).
+         */
+        const val VERSION_NOT_ELIGIBLE = "template.version.not_eligible"
+
+        /**
          * §13.13 / versioning §5.5 — the template-surface mirror of
          * `pipeline.authoring.disabled`.
          */
@@ -648,6 +679,36 @@ object PipelineErrorCodes {
 
         /** §13.13 / versioning §3 — release or discard requested but no DRAFT version exists. */
         const val NOT_DRAFT = "pipeline.version.not_draft"
+
+        /**
+         * §13.13 / versioning §3.1 (101) — discard targeted a version that is not RELEASED
+         * (a DRAFT is purged, never discarded; a DISCARDED version is already retired).
+         */
+        const val NOT_RELEASED = "pipeline.version.not_released"
+
+        /** §13.13 / versioning §3.1 (101) — restore targeted a version that is not DISCARDED. */
+        const val NOT_DISCARDED = "pipeline.version.not_discarded"
+
+        /**
+         * §13.13 / versioning §3.5 (101, graph rule 1) — discard or purge refused: a LIVE
+         * (non-discarded) version of another pipeline exact-pins this version. `details`
+         * names the pinning entities.
+         */
+        const val PINNED = "pipeline.version.pinned"
+
+        /**
+         * §13.13 / versioning §3.5 (101, D57) — the purge path refused: a RELEASED version
+         * is never purged, and an entity holding any non-draft version is never purged.
+         * Discard is per version, the entity stays; restore or release something first.
+         */
+        const val LAST_RELEASE = "pipeline.version.last_release"
+
+        /**
+         * §13.13 / versioning §3.4 (101, D60) — manual switch targeted a version that is
+         * not a live, posture-eligible version (DISCARDED, missing, or a DRAFT under a
+         * hardened posture).
+         */
+        const val NOT_ELIGIBLE = "pipeline.version.not_eligible"
 
         /** §13.13 / versioning §5.3 — pipeline release blocked on a DRAFT template pin. */
         const val RELEASE_TEMPLATE_NOT_RELEASED = "pipeline.release.template_not_released"

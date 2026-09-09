@@ -34,6 +34,8 @@ data class TemplateVersionSummary(
     val version: Int,
     val createdAt: java.time.Instant,
     val createdBy: UUID,
+    /** The lifecycle status — 101's version verbs made the version list a lifecycle surface. */
+    val status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
 )
 
 /**
@@ -88,7 +90,7 @@ data class TemplateVersionSummary(
  * request pipeline). **No default anywhere**: a missed caller is a compile error, never a
  * silent resolution in some default world.
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LargeClass")
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
@@ -100,7 +102,7 @@ class TemplateRepository(
         jdbc
             .query(
                 "$SELECT_JOINED WHERE t.name = :name AND t.workspace_id = :workspaceId" +
-                    " AND t.is_deleted = FALSE AND v.version = t.current_version",
+                    " AND $TEMPLATE_LIVE_T AND v.version = t.current_version",
                 mapOf("name" to id, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
@@ -179,8 +181,9 @@ class TemplateRepository(
      * a search for `100%_off` searches for that literal string instead of turning into a wildcard
      * that scans everything.
      *
-     * The `t.is_deleted = FALSE` predicate matches `idx_templates_active` (metadata-db §4.8), the
-     * partial index that exists for exactly this listing.
+     * The `$TEMPLATE_LIVE_T` predicate is the derived entity status (versioning §3.2, 101) —
+     * a DISCARDED template (every version discarded) leaves the listing exactly as the old
+     * soft-delete predicate removed deleted rows.
      */
     fun list(
         workspaceId: UUID,
@@ -401,7 +404,7 @@ class TemplateRepository(
                 """
                 SELECT t.name, t.current_version
                   FROM templates t
-                 WHERE t.workspace_id = :workspaceId AND t.is_deleted = FALSE AND t.name IN (:names)
+                 WHERE t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T AND t.name IN (:names)
                    -- D55/V18: NULL means never released. A never-released template has no
                    -- latest-RELEASED version to report, and reporting 0 (getInt's answer for
                    -- NULL) would name a version that cannot exist.
@@ -419,7 +422,7 @@ class TemplateRepository(
     ): List<TemplateVersionSummary> =
         jdbc.query(
             """
-            SELECT t.name AS template_id, v.version, v.created_at, v.created_by
+            SELECT t.name AS template_id, v.version, v.status, v.created_at, v.created_by
               FROM template_versions v
               JOIN templates t ON t.id = v.template_id
              WHERE t.name = :name AND t.workspace_id = :workspaceId
@@ -430,6 +433,7 @@ class TemplateRepository(
             TemplateVersionSummary(
                 id = rs.getString("template_id"),
                 version = rs.getInt("version"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 createdBy = rs.getObject("created_by", UUID::class.java),
             )
@@ -640,7 +644,7 @@ class TemplateRepository(
             .query(
                 """
                 SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                  WHERE t.name = :name AND v.status = 'DRAFT'
                 """.trimIndent(),
@@ -724,25 +728,170 @@ class TemplateRepository(
             ).singleOrNull()
 
     /**
-     * Discard (versioning §5.4) — a hard delete: nothing references a `template_versions`
-     * row by FK, so §3.4's executed-draft DISCARDED branch cannot fire for templates and
-     * the version number always returns to the pool. False when no DRAFT matched
-     * [expectedHash].
+     * Purge the draft (versioning §5.4, 101): the version row is hard-deleted — nothing
+     * references a `template_versions` row by FK, so there are no executions to take with
+     * it. When the draft was the sole version the ENTITY row goes too (D57's twin: an
+     * entity holds >= 1 version or does not exist); when the draft had become
+     * `current_version` (the development fallback) the pointer recomputes.
+     *
+     * [expectedHash] is the §4.2 precondition; null targets the draft without a hash (the
+     * 101 admin verb). Returns null when no DRAFT matched; the caller re-reads.
      */
-    fun discardDraft(
+    fun purgeDraft(
         workspaceId: UUID,
         id: String,
-        expectedHash: String,
+        expectedHash: String?,
+        draftEligible: Boolean,
+    ): Boolean {
+        val hashGuard = if (expectedHash == null) "" else " AND v.body_hash = :expectedHash"
+        val params =
+            mutableMapOf<String, Any?>(
+                "name" to id,
+                "workspaceId" to workspaceId,
+                "draftEligible" to draftEligible,
+            )
+        if (expectedHash != null) params["expectedHash"] = expectedHash
+
+        val purged =
+            jdbc
+                .query(
+                    "DELETE FROM template_versions v" +
+                        " USING templates t" +
+                        " WHERE t.name = :name AND t.workspace_id = :workspaceId" +
+                        " AND v.template_id = t.id AND v.status = 'DRAFT'$hashGuard" +
+                        " RETURNING v.version",
+                    params,
+                ) { rs, _ -> rs.getInt("version") }
+                .singleOrNull() ?: return false
+
+        val remaining =
+            checkNotNull(
+                jdbc.queryForObject(
+                    """
+                    SELECT COUNT(*) FROM template_versions v JOIN templates t ON t.id = v.template_id
+                     WHERE t.name = :name AND t.workspace_id = :workspaceId
+                    """.trimIndent(),
+                    mapOf("name" to id, "workspaceId" to workspaceId),
+                    Int::class.java,
+                ),
+            )
+        if (remaining == 0) {
+            // Sole version ⇒ entity purge (D57's twin): versions cascade on the entity delete.
+            jdbc.update(
+                "DELETE FROM templates WHERE name = :name AND workspace_id = :workspaceId",
+                mapOf("name" to id, "workspaceId" to workspaceId),
+            )
+            return true
+        }
+        jdbc.update(T_POINTER_FALLBACK_SQL, params + ("version" to purged) + ("name" to id))
+        return true
+    }
+
+    /**
+     * Discard a RELEASED template version (§3.1, 101): status flips to DISCARDED with the
+     * stamps, pointer recomputes only when this version WAS the pointer. Graph rule 1's
+     * guard rides the statement: a LIVE pipeline version pinning `name@version` (the same
+     * lateral [PipelineRepository.findLiveVersionsPinningTemplateVersion] runs — kept in
+     * step by the model test's pin invariant) refuses the flip by returning zero rows.
+     * Returns null when the target was not RELEASED or is pinned.
+     */
+    fun discardVersion(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+        actor: UUID,
+        draftEligible: Boolean,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                T_DISCARD_VERSION_SQL,
+                mapOf(
+                    "name" to id,
+                    "workspaceId" to workspaceId,
+                    "version" to version,
+                    "actor" to actor,
+                    "draftEligible" to draftEligible,
+                ),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Restore a DISCARDED template version (§3.1, 101) — stamps back to RELEASED, discard
+     * stamps cleared, `released_at`/`released_by` untouched; pointer moves only
+     * above-current-or-NULL. No live predicate: restoring the first version of a DISCARDED
+     * template is the one way back. Returns null when the target was not DISCARDED.
+     */
+    fun restoreVersion(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                T_RESTORE_VERSION_SQL,
+                mapOf("name" to id, "workspaceId" to workspaceId, "version" to version),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Manual switch (§3.4, 101): `current = version`, which must be LIVE and
+     * posture-eligible — eligibility rides the statement's EXISTS. Returns the new current
+     * version, or null when not eligible.
+     */
+    fun switchCurrent(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+        draftEligible: Boolean,
+    ): Int? =
+        jdbc
+            .query(
+                T_SWITCH_CURRENT_SQL,
+                mapOf("name" to id, "workspaceId" to workspaceId, "version" to version, "draftEligible" to draftEligible),
+            ) { rs, _ -> rs.getInt("current_version") }
+            .singleOrNull()
+
+    /**
+     * The entity purge's offer (versioning §3.5, 101): the DRAFT-ONLY templates whose only
+     * pinner among LIVE pipeline versions is [pipelineId] — this pipeline's private
+     * work-in-progress, orphaned by its purge. Name-addressed by the pipeline's id.
+     */
+    fun exclusiveDraftTemplateIds(
+        workspaceId: UUID,
+        pipelineId: java.util.UUID,
+    ): List<String> =
+        jdbc
+            .query(
+                EXCLUSIVE_DRAFT_TEMPLATES_SQL,
+                mapOf("workspaceId" to workspaceId, "pipelineId" to pipelineId),
+            ) { rs, _ -> rs.getString("name") }
+
+    /** Deletes the template entity row; versions cascade (V1's `ON DELETE CASCADE`). True when the row went. */
+    fun deleteTemplateRow(
+        workspaceId: UUID,
+        id: String,
     ): Boolean =
         jdbc.update(
-            """
-            DELETE FROM template_versions v
-             USING templates t
-             WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
-               AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
-            """.trimIndent(),
-            mapOf("name" to id, "workspaceId" to workspaceId, "expectedHash" to expectedHash),
+            "DELETE FROM templates WHERE name = :name AND workspace_id = :workspaceId",
+            mapOf("name" to id, "workspaceId" to workspaceId),
         ) > 0
+
+    /** True when the template entity is LIVE (ACTIVE) — the §3.2 derivation read directly. */
+    fun hasLiveVersion(
+        workspaceId: UUID,
+        id: String,
+    ): Boolean =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM template_versions lv JOIN templates t ON t.id = lv.template_id
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
+                   AND lv.status IN ('DRAFT','RELEASED')
+            )
+            """.trimIndent(),
+            mapOf("name" to id, "workspaceId" to workspaceId),
+            Boolean::class.java,
+        ) == true
 
     /**
      * Appends the next version directly as RELEASED and bumps `current_version` — the
@@ -825,16 +974,6 @@ class TemplateRepository(
             ).singleOrNull()
 
     /** Soft-deletes the template (§9). Returns false when nothing live was there to delete in [workspaceId]. */
-    fun softDelete(
-        workspaceId: UUID,
-        id: String,
-    ): Boolean =
-        jdbc.update(
-            "UPDATE templates SET is_deleted = TRUE, updated_at = NOW()" +
-                " WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE",
-            mapOf("name" to id, "workspaceId" to workspaceId),
-        ) > 0
-
     private fun params(
         workspaceId: UUID,
         id: String,
@@ -940,7 +1079,7 @@ class TemplateRepository(
          */
         private val LIST_WHERE =
             """
-            WHERE t.is_deleted = FALSE
+            WHERE $TEMPLATE_LIVE_T
               AND t.workspace_id = :workspaceId
               AND v.version = COALESCE(
                     t.current_version,
@@ -971,7 +1110,7 @@ class TemplateRepository(
          */
         private val TREE_WHERE =
             """
-            WHERE t.is_deleted = FALSE
+            WHERE $TEMPLATE_LIVE_T
               AND t.workspace_id = :workspaceId
               AND v.version = COALESCE(
                     t.current_version,
@@ -1013,13 +1152,29 @@ class TemplateRepository(
         /** The version-detail column list, `t.name AS template_id` for the human id. */
         private const val DETAIL_COLS_PLAIN =
             "template_id, version, status, body_hash, created_at, created_by," +
-                " released_at, released_by, updated_by, updated_at"
+                " released_at, released_by, discarded_at, discarded_by, updated_by, updated_at"
 
+        // Workspace-scoped only, deliberately WITHOUT an entity-live filter (101): a
+        // DISCARDED template entity's version details are exactly what restore and §9.2's
+        // import classification must read.
         private const val DETAIL_WHERE =
             "SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by," +
-                " v.released_at, v.released_by, v.updated_by, v.updated_at" +
+                " v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at" +
                 " FROM template_versions v JOIN templates t ON t.id = v.template_id" +
-                " WHERE t.workspace_id = :workspaceId AND t.is_deleted = FALSE"
+                " WHERE t.workspace_id = :workspaceId"
+
+        /**
+         * The derived entity status (versioning §3.2, since V19 retired `is_deleted`): a
+         * template is LIVE while it holds >= 1 DRAFT or RELEASED version. `t`-aliased probe.
+         */
+        private const val TEMPLATE_LIVE_T =
+            "EXISTS (SELECT 1 FROM template_versions lv" +
+                " WHERE lv.template_id = t.id AND lv.status IN ('DRAFT','RELEASED'))"
+
+        /** [TEMPLATE_LIVE_T] for unaliased `UPDATE templates` contexts. */
+        private const val TEMPLATE_LIVE =
+            "EXISTS (SELECT 1 FROM template_versions lv" +
+                " WHERE lv.template_id = templates.id AND lv.status IN ('DRAFT','RELEASED'))"
 
         /**
          * §3.2 as ruled by D55 — the authoring create: version 1 lands DRAFT,
@@ -1105,7 +1260,7 @@ class TemplateRepository(
                        :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary,
                        CAST(:importsJson AS jsonb), :body, 'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
-                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.version = t.current_version AND v.status = 'RELEASED'
                    AND $TEMPLATE_HASH_EXPR <> v.body_hash
                    AND NOT EXISTS (SELECT 1 FROM template_versions d
@@ -1113,10 +1268,10 @@ class TemplateRepository(
                 RETURNING $DETAIL_COLS_PLAIN
             ), noop AS (
                 SELECT v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                   JOIN guard ON TRUE
-                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.version = t.current_version AND v.status = 'RELEASED'
                    AND $TEMPLATE_HASH_EXPR = v.body_hash
                    -- A draft that raced in owns the working state: identical content is then
@@ -1126,18 +1281,18 @@ class TemplateRepository(
             ), meta AS (
                 UPDATE templates
                    SET display_name = :displayName, description = :description, updated_at = NOW()
-                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                 WHERE name = :name AND workspace_id = :workspaceId AND $TEMPLATE_LIVE
                    AND (EXISTS (SELECT 1 FROM draft) OR EXISTS (SELECT 1 FROM noop))
                 RETURNING 1
             )
             SELECT t.name AS template_id, draft.version, draft.status, draft.body_hash,
-                   draft.created_at, draft.created_by, draft.released_at, draft.released_by,
+                   draft.created_at, draft.created_by, draft.released_at, draft.released_by, draft.discarded_at, draft.discarded_by,
                    draft.updated_by, draft.updated_at
               FROM draft, guard, meta
               JOIN templates t ON t.name = :name
             UNION ALL
             SELECT t.name AS template_id, noop.version, noop.status, noop.body_hash,
-                   noop.created_at, noop.created_by, noop.released_at, noop.released_by,
+                   noop.created_at, noop.created_by, noop.released_at, noop.released_by, noop.discarded_at, noop.discarded_by,
                    noop.updated_by, noop.updated_at
               FROM noop, meta
               JOIN templates t ON t.name = :name
@@ -1154,19 +1309,19 @@ class TemplateRepository(
                        body_hash = $TEMPLATE_HASH_EXPR,
                        updated_by = :actor, updated_at = NOW()
                   FROM templates t
-                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                          v.released_at, v.released_by, v.updated_by, v.updated_at
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
             ), meta AS (
                 UPDATE templates
                    SET display_name = :displayName, description = :description, updated_at = NOW()
-                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                 WHERE name = :name AND workspace_id = :workspaceId AND $TEMPLATE_LIVE
                    AND EXISTS (SELECT 1 FROM written)
                 RETURNING 1
             )
             SELECT t.name AS template_id, w.version, w.status, w.body_hash, w.created_at, w.created_by,
-                   w.released_at, w.released_by, w.updated_by, w.updated_at
+                   w.released_at, w.released_by, w.discarded_at, w.discarded_by, w.updated_by, w.updated_at
               FROM written w
               JOIN templates t ON t.id = w.template_id, meta
             """.trimIndent()
@@ -1178,43 +1333,55 @@ class TemplateRepository(
                 UPDATE template_versions v
                    SET status = 'RELEASED', released_at = NOW(), released_by = :actor
                   FROM templates t
-                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                          v.released_at, v.released_by, v.updated_by, v.updated_at
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
             ), bumped AS (
                 UPDATE templates
                    SET current_version = (SELECT version FROM locked), updated_at = NOW()
-                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                 WHERE name = :name AND workspace_id = :workspaceId AND $TEMPLATE_LIVE
                    AND EXISTS (SELECT 1 FROM locked)
                 RETURNING id
             )
             SELECT t.name AS template_id, l.version, l.status, l.body_hash, l.created_at, l.created_by,
-                   l.released_at, l.released_by, l.updated_by, l.updated_at
+                   l.released_at, l.released_by, l.discarded_at, l.discarded_by, l.updated_by, l.updated_at
               FROM locked l
               JOIN templates t ON t.id = l.template_id, bumped b
             """.trimIndent()
 
-        /** The version-less import path: next version appended directly as RELEASED. */
+        /**
+         * versioning §9.2 + D60 (101) — the version-less import: allocation is
+         * `max(version) + 1` (this rewrite also closes the latent V18 defect where
+         * `current_version + 1` computed NULL on a never-released template — the pipeline
+         * twin had the COALESCE, this side did not), and the pointer moves ONLY when the
+         * entity has no current at all. Index metadata rides that move, and nothing else.
+         */
         private val APPEND_RELEASED_SQL =
             """
-            WITH bumped AS (
-                UPDATE templates
-                   SET current_version = current_version + 1,
-                       display_name = :displayName,
-                       description = :description,
-                       updated_at = NOW()
-                  WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
-                RETURNING id, name, display_name, description, current_version
+            WITH alloc AS (
+                SELECT COALESCE(MAX(v.version), 0) + 1 AS next
+                  FROM template_versions v JOIN templates t ON t.id = v.template_id
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
                      status, body_hash, created_by, released_by, released_at)
-                SELECT id, current_version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                SELECT t.id, alloc.next, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
                        'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
-                  FROM bumped
+                  FROM templates t, alloc
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
                 RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
+            ), bumped AS (
+                UPDATE templates
+                   SET current_version = COALESCE(current_version, (SELECT version FROM new_version)),
+                       display_name = CASE WHEN current_version IS NULL THEN :displayName ELSE display_name END,
+                       description = CASE WHEN current_version IS NULL THEN :description ELSE description END,
+                       updated_at = NOW()
+                  WHERE name = :name AND workspace_id = :workspaceId
+                    AND EXISTS (SELECT 1 FROM new_version)
+                RETURNING id, name, display_name, description, current_version
             )
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
@@ -1247,7 +1414,12 @@ class TemplateRepository(
               JOIN new_version v ON v.template_id = t.id
             """.trimIndent()
 
-        /** versioning §9.2 — exact-version insert onto an existing template; metadata rides only when it is the new latest. */
+        /**
+         * versioning §9.2 + D60 (101) — exact-version insert onto an existing template.
+         * The pointer moves ONLY when it is NULL (first import onto a current-less entity);
+         * index metadata rides that same move. No live predicate: the import classification
+         * must reach DISCARDED entities too (§9.2's present-DISCARDED row).
+         */
         private val INSERT_RELEASED_VERSION_SQL =
             """
             WITH ins AS (
@@ -1257,25 +1429,155 @@ class TemplateRepository(
                 SELECT t.id, :version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
                        'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
                   FROM templates t
-                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
                    AND NOT EXISTS (SELECT 1 FROM template_versions v
                                     WHERE v.template_id = t.id AND v.version = :version)
                 RETURNING template_id, version, status, body_hash, created_at, created_by,
-                          released_at, released_by, updated_by, updated_at
+                          released_at, released_by, discarded_at, discarded_by, updated_by, updated_at
             ), bumped AS (
                 UPDATE templates
-                   SET current_version = GREATEST(current_version, :version),
-                       display_name = CASE WHEN :version > current_version THEN :displayName ELSE display_name END,
-                       description = CASE WHEN :version > current_version THEN :description ELSE description END,
+                   SET current_version = COALESCE(current_version, :version),
+                       display_name = CASE WHEN current_version IS NULL THEN :displayName ELSE display_name END,
+                       description = CASE WHEN current_version IS NULL THEN :description ELSE description END,
                        updated_at = NOW()
-                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                 WHERE name = :name AND workspace_id = :workspaceId
                    AND EXISTS (SELECT 1 FROM ins)
                 RETURNING 1
             )
             SELECT t.name AS template_id, i.version, i.status, i.body_hash, i.created_at, i.created_by,
-                   i.released_at, i.released_by, i.updated_by, i.updated_at
+                   i.released_at, i.released_by, i.discarded_at, i.discarded_by, i.updated_by, i.updated_at
               FROM ins i
               JOIN templates t ON t.id = i.template_id, bumped
+            """.trimIndent()
+
+        /** §3.4 (101) — the template pointer fallback; the twin of the pipeline statement. */
+        private val T_POINTER_FALLBACK_SQL =
+            """
+            UPDATE templates
+               SET current_version = (
+                       SELECT MAX(lv.version) FROM template_versions lv JOIN templates t ON t.id = lv.template_id
+                        WHERE t.name = :name AND t.workspace_id = :workspaceId
+                          AND (lv.status = 'RELEASED' OR (:draftEligible AND lv.status = 'DRAFT'))
+                   ),
+                   updated_at = NOW()
+             WHERE name = :name AND workspace_id = :workspaceId
+               AND current_version = :version
+            """.trimIndent()
+
+        /**
+         * §3.1 (101) — discard a RELEASED template version: flip + stamps + pointer
+         * recompute in one statement, with graph rule 1's pin guard riding the flip (the
+         * same lateral [PipelineRepository.findLiveVersionsPinningTemplateVersion] runs —
+         * one expression in two files, tied together by the model test's pin invariant).
+         */
+        private val T_DISCARD_VERSION_SQL =
+            """
+            WITH flipped AS (
+                UPDATE template_versions v
+                   SET status = 'DISCARDED', discarded_at = NOW(), discarded_by = :actor
+                  FROM templates t
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
+                   AND v.template_id = t.id AND v.version = :version AND v.status = 'RELEASED'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM pipelines pp
+                       JOIN pipeline_versions pv ON pv.pipeline_id = pp.id
+                       CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
+                        WHERE pp.workspace_id = :workspaceId
+                          AND pv.status IN ('DRAFT','RELEASED')
+                          AND pnode->'template'->>'id' = :name
+                          AND (pnode->'template'->>'version')::int = :version
+                   )
+                RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+            ), bumped AS (
+                UPDATE templates t
+                   SET current_version = CASE
+                           WHEN t.current_version = :version THEN (
+                               -- EXCLUDE the version being discarded: same-statement CTEs
+                               -- cannot see flipped's write (the pipeline twin's comment).
+                               SELECT MAX(lv.version) FROM template_versions lv
+                                WHERE lv.template_id = t.id AND lv.version <> :version
+                                  AND (lv.status = 'RELEASED' OR (:draftEligible AND lv.status = 'DRAFT'))
+                           )
+                           ELSE t.current_version
+                       END,
+                       updated_at = NOW()
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
+                   AND EXISTS (SELECT 1 FROM flipped)
+                RETURNING 1
+            )
+            SELECT t.name AS template_id, f.version, f.status, f.body_hash, f.created_at, f.created_by,
+                   f.released_at, f.released_by, f.discarded_at, f.discarded_by, f.updated_by, f.updated_at
+              FROM flipped f
+              JOIN templates t ON t.id = f.template_id, bumped
+            """.trimIndent()
+
+        /** §3.1 (101) — restore a DISCARDED template version; `GREATEST(COALESCE(cur,0), v)` is D60's restore rule. */
+        private val T_RESTORE_VERSION_SQL =
+            """
+            WITH restored AS (
+                UPDATE template_versions v
+                   SET status = 'RELEASED', discarded_at = NULL, discarded_by = NULL
+                  FROM templates t
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
+                   AND v.template_id = t.id AND v.version = :version AND v.status = 'DISCARDED'
+                RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+            ), bumped AS (
+                UPDATE templates
+                   SET current_version = GREATEST(COALESCE(current_version, 0), (SELECT version FROM restored)),
+                       updated_at = NOW()
+                 WHERE name = :name AND workspace_id = :workspaceId
+                   AND EXISTS (SELECT 1 FROM restored)
+                RETURNING 1
+            )
+            SELECT t.name AS template_id, r.version, r.status, r.body_hash, r.created_at, r.created_by,
+                   r.released_at, r.released_by, r.discarded_at, r.discarded_by, r.updated_by, r.updated_at
+              FROM restored r
+              JOIN templates t ON t.id = r.template_id, bumped
+            """.trimIndent()
+
+        /** §3.4 (101) — the template manual switch; eligibility rides the EXISTS. */
+        private val T_SWITCH_CURRENT_SQL =
+            """
+            UPDATE templates t
+               SET current_version = :version, updated_at = NOW()
+             WHERE t.name = :name AND t.workspace_id = :workspaceId
+               AND EXISTS (
+                   SELECT 1 FROM template_versions v
+                    WHERE v.template_id = t.id AND v.version = :version
+                      AND (v.status = 'RELEASED' OR (:draftEligible AND v.status = 'DRAFT'))
+               )
+            RETURNING t.current_version
+            """.trimIndent()
+
+        /**
+         * §3.5 (101) — the entity purge's offer: DRAFT-ONLY templates whose only pinner
+         * among LIVE pipeline versions is the pipeline being purged. The pin probes walk the
+         * nodes laterally and match the template pin exactly — a text LIKE over the body
+         * would false-positive on a name that merely appears in prose.
+         */
+        private val EXCLUSIVE_DRAFT_TEMPLATES_SQL =
+            """
+            SELECT t.name
+              FROM templates t
+             WHERE t.workspace_id = :workspaceId
+               AND EXISTS (SELECT 1 FROM template_versions v WHERE v.template_id = t.id AND v.status = 'DRAFT')
+               AND NOT EXISTS (SELECT 1 FROM template_versions v WHERE v.template_id = t.id AND v.status <> 'DRAFT')
+               AND EXISTS (
+                   SELECT 1 FROM pipeline_versions pv
+                   CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
+                    WHERE pv.pipeline_id = :pipelineId AND pv.status IN ('DRAFT','RELEASED')
+                      AND pnode->'template'->>'id' = t.name
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM pipeline_versions pv JOIN pipelines pp ON pp.id = pv.pipeline_id
+                   CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
+                    WHERE pv.pipeline_id <> :pipelineId AND pv.status IN ('DRAFT','RELEASED')
+                      AND pp.workspace_id = :workspaceId
+                      AND pnode->'template'->>'id' = t.name
+               )
+             ORDER BY t.name
             """.trimIndent()
 
         private val MAPPER =
@@ -1309,6 +1611,8 @@ class TemplateRepository(
                     createdBy = rs.getObject("created_by", UUID::class.java),
                     releasedAt = rs.getObject("released_at", OffsetDateTime::class.java)?.toInstant(),
                     releasedBy = rs.getObject("released_by", UUID::class.java),
+                    discardedAt = rs.getObject("discarded_at", OffsetDateTime::class.java)?.toInstant(),
+                    discardedBy = rs.getObject("discarded_by", UUID::class.java),
                     updatedBy = rs.getObject("updated_by", UUID::class.java),
                     updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
                 )

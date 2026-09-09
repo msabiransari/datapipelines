@@ -151,21 +151,17 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .body("error.code", Matchers.equalTo("datasource.in_use"))
                 .body("error.details.referencing_pipelines", Matchers.hasItem("test/globex_report"))
         } finally {
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, bobKey)
-                .`when`()
-                .delete("/api/v1/pipelines/$pipelineId")
-                .then()
-                .statusCode(204)
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, bobKey)
-                .`when`()
-                .queryParam("name", "test/globex_tpl")
-                .delete("/api/v1/templates")
-                .then()
-                .statusCode(204)
+            // 101: the entity purges are session-only, so cleanup goes through the metadata
+            // DB directly (this suite drives keys, and the delete-under-test is the DATASOURCE's).
+            java.sql.DriverManager
+                .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
+                .use { c ->
+                    c.createStatement().use {
+                        it.execute("DELETE FROM pipeline_executions WHERE pipeline_id = '$pipelineId'")
+                        it.execute("DELETE FROM pipelines WHERE id = '$pipelineId'")
+                        it.execute("DELETE FROM templates WHERE name = 'test/globex_tpl'")
+                    }
+                }
         }
     }
 

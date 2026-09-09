@@ -227,7 +227,7 @@ class SubPipelineExecutionRunner(
         ref: PipelineNodeRef,
         workspaceId: UUID,
     ): Pair<PipelineRecord, Pipeline> {
-        val record = pipelines.findByNameIncludingDeleted(workspaceId, ref.name)
+        val record = pipelines.findByNameAnyStatus(workspaceId, ref.name)
         val body = record?.let { pipelines.findVersionBody(workspaceId, it.id, ref.version) }
         if (record == null || body == null) {
             throw childFailure(

@@ -44,6 +44,16 @@ class AuthoringGuard(
         if (!enabled) throw templateRefusal()
     }
 
+    /**
+     * Is this the DEVELOPMENT posture? (versioning §3.4, 101.) The capability flag IS the
+     * posture: `authoring-enabled=true` is the deployment where drafts live, and under it
+     * — only under it — a DRAFT version is ELIGIBLE for the sticky pointer (D60). Readers
+     * that must not refuse (eligibility is not a permission) read this instead of calling
+     * a require* method.
+     */
+    val developmentPosture: Boolean
+        get() = enabled
+
     private fun pipelineRefusal(): DatapipelinesException =
         refusal(
             code = PipelineErrorCodes.Versioning.AUTHORING_DISABLED,

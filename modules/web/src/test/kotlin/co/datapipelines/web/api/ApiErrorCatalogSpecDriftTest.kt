@@ -128,19 +128,30 @@ class ApiErrorCatalogSpecDriftTest {
          * 138 → 139 with 091 (`auth.api_key.expiry_invalid`, §13.7) and 139 → 140 with 094
          * (`template.validation.new_root_requires_confirmation`, §13.9 — its pipeline twin is a
          * §12 code counted by [SECTION_12_CODE_COUNT]). Re-derived from the document's own parse.
+         *
+         * 140 → 149 with 101 (the version lifecycle): §13.13 gains the five pipeline rows
+         * (`pipeline.version.not_released` / `not_discarded` / `pinned` / `last_release` /
+         * `not_eligible`, all 409 like the family default) and §13.9 the four template twins
+         * (`template.version.not_released` / `not_discarded` / `last_release` / `not_eligible`),
+         * landed in the SAME commit as their constants and catalog rows. Re-derived from the
+         * document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 140
+        const val SECTION_13_ROW_COUNT = 149
 
         /**
          * §12's distinct validation codes.
          *
          * 48 → 58 with 072: §12.10's ten CALCULATOR-node rules, landed in the SAME commit as
-         * their constants. Re-derived from the document's own parse.
+         * their constants.
          *
          * 58 → 59 with 094: `pipeline.validation.new_root_requires_confirmation` — the MCP
          * surface's refusal of a name that mints a new top-level folder without confirmation.
          * A 400 like every other §12 code; landed in the SAME commit as its constant.
+         *
+         * 59 → 60 with 101: `pipeline.validation.pipeline_reference_not_released` — a PIPELINE
+         * node pinning a child version that is not RELEASED (D58). Landed in the SAME commit
+         * as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 59
+        const val SECTION_12_CODE_COUNT = 60
     }
 }

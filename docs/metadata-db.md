@@ -196,19 +196,19 @@ CREATE TABLE pipelines (
     display_name    TEXT        NOT NULL,
     description     TEXT        NOT NULL DEFAULT '',
     owner_id        UUID        NOT NULL REFERENCES users(id),
-    current_version INTEGER     NOT NULL DEFAULT 0,
-    is_deleted      BOOLEAN     NOT NULL DEFAULT FALSE,
+    current_version INTEGER     NULL,               -- V18: nullable, no default — the sticky pointer (D60, 101)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_pipelines_workspace_name UNIQUE (workspace_id, name)
 );
 
-CREATE INDEX idx_pipelines_owner ON pipelines(owner_id) WHERE is_deleted = FALSE;
+CREATE INDEX idx_pipelines_owner ON pipelines(owner_id);   -- V19: plain (the is_deleted partial is gone)
 ```
 
 **Notes:**
-- `name` is unique **per workspace** (V4, workspaces design D2 — pre-launch break, owner-ratified 2026-08-16); the constraint's implicit index (`uq_pipelines_workspace_name`) serves name lookup within a workspace — no separate index is created. The mechanism is exactly the one the global rule used: a plain UNIQUE constraint, **not** a partial index, so uniqueness **includes soft-deleted rows** — a deleted pipeline's name is not reusable *within its workspace* until the row is hard-deleted. This is deliberate (execution history references the name) and is why the constraint is not a partial index. V4 backfills every existing row to the `default` workspace ([§4.11](#411-workspaces)).
-- `current_version` is `0` only between the two statements of `create()` in a transaction that has not yet committed; every committed pipeline has `current_version >= 1` ([§6.1](#61-example-pipeline-repository)).
+- `name` is unique **per workspace** (V4, workspaces design D2 — pre-launch break, owner-ratified 2026-08-16); the constraint's implicit index (`uq_pipelines_workspace_name`) serves name lookup within a workspace — no separate index is created. A plain UNIQUE constraint, deliberately not a partial index: since 101/D59 names are unique FOREVER — a discarded pipeline keeps its name (restore must always work) and no second entity may take it.
+- **`current_version` is the sticky pointer** (V18 made it nullable; 101/D60 made it event-driven): the version every pointer-following dependent runs. NULL until the first release (D55) and after a discard of the version it named with no eligible survivor; it moves only on release / discard-of-current / restore-above-current / manual switch / purge-of-current-draft, and an import moves it only when the entity has no current at all. It is NOT "the latest released" as a derived fact.
+- **There is no entity status column** (V19 retired `is_deleted`): a pipeline is ACTIVE while any version is DRAFT or RELEASED and DISCARDED when every version is — a derivation over `pipeline_versions`, read as an `EXISTS` probe; no reader may resurrect a stored flag.
 - `updated_at` is set by the application in every UPDATE (§2).
 
 ### 4.5 `pipeline_versions`
@@ -223,18 +223,31 @@ CREATE TABLE pipeline_versions (
     status          TEXT        NOT NULL DEFAULT 'RELEASED'
                         CONSTRAINT chk_pipeline_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
     body_hash       TEXT        NOT NULL,            -- SHA-256 (hex) of body_json's canonical projection, DB-computed
-    released_at     TIMESTAMPTZ NULL,                -- DB-generated (NOW()) at release — never application-supplied
+    released_at     TIMESTAMPTZ NULL,                -- DB-generated (NOW()) at release — never application-supplied; UNTOUCHED by discard/restore (V19)
     released_by     UUID        REFERENCES users(id),
+    discarded_at    TIMESTAMPTZ NULL,                -- V19 (101): set at discard, cleared at restore; CHECK requires it when status = 'DISCARDED'
+    discarded_by    UUID        REFERENCES users(id),
     updated_by      UUID        REFERENCES users(id),-- last DRAFT writer — powers the 409 conflict details
-    updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only; not restamped at release/discard
+    updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only; not restamped at release/discard/restore
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
-    PRIMARY KEY (pipeline_id, version)
+    PRIMARY KEY (pipeline_id, version),
+    CONSTRAINT chk_pipeline_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    )
 );
 
 CREATE UNIQUE INDEX uq_pipeline_versions_one_draft
     ON pipeline_versions (pipeline_id) WHERE status = 'DRAFT';
 ```
+
+**Purge and executions (101):** a purged DRAFT's executions are deleted by the service in
+the SAME transaction (the `fk_executions_pipeline_version` constraint stays `NO ACTION` —
+the delete is explicit, auditable and tested: "a purge leaves zero orphan execution rows").
+Redis result keys are not deleted; they expire on their own TTL, and an expired key is not
+a reference. The pre-101 executed-draft tombstone flip is withdrawn — drafts never reach
+DISCARDED.
 
 **Notes:**
 - `body_json` is the complete pipeline JSON as defined by [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema) — `schema_version`, `name`, `display_name`, `description`, `parameters`, `settings`, `nodes`. It already carries the `_json` suffix, so it is **not** renamed by the D4 sweep.
@@ -338,28 +351,27 @@ CREATE TABLE templates (
     name            TEXT        NOT NULL,          -- the human id: 'acme/finance/fetch_orders.sql'
     display_name    TEXT        NOT NULL,
     description     TEXT        NOT NULL DEFAULT '',
-    current_version INTEGER     NOT NULL DEFAULT 0,
-    is_deleted      BOOLEAN     NOT NULL DEFAULT FALSE,
+    current_version INTEGER     NULL,               -- V18: nullable, no default — the sticky pointer (D60, 101)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     CONSTRAINT uq_templates_workspace_name UNIQUE (workspace_id, name)
 );
 
-CREATE INDEX idx_templates_active ON templates(name) WHERE is_deleted = FALSE;
+CREATE INDEX idx_templates_active ON templates(name);   -- V19: plain (the is_deleted partial is gone)
 ```
 
 **Notes:**
 - **Surrogate key (V4).** `id` was the TEXT human id (`'fetch_orders.sql'`) and the primary key until V4; per-workspace name uniqueness (workspaces design D2) required a surrogate, so `id` is now a generated UUID PK and the human id lives in `name`. Everything that referenced the TEXT id keeps working on `name`: pipeline-JSON `template: {id, version}` refs, `imports_json` `{id, version, alias}` entries, REST path params, and MCP tool arguments all mean `name`, resolved within the active workspace. Stored payloads are immutable and were **not** rewritten — nothing anywhere stores the surrogate except `template_versions.template_id` and the `templates` PK itself.
-- `name` is unique per workspace via `uq_templates_workspace_name` — a plain UNIQUE constraint like the pipelines rule ([§4.4](#44-pipelines)), so a soft-deleted template's name stays taken within its workspace until the row is hard-deleted (the row stays, and saved references to its versions keep resolving, [Templates §5](templates.md#5-template-versioning)).
-- `idx_templates_active` indexed `templates(id)` before V4; the column rename carried it onto `name`, which is exactly the listing path it exists for (search/order by `name`, `is_deleted = FALSE`).
+- `name` is unique per workspace via `uq_templates_workspace_name` — a plain UNIQUE constraint like the pipelines rule ([§4.4](#44-pipelines)). Since 101/D59 names are unique FOREVER: a discarded template keeps its name (restore must always work), and saved references to its versions keep resolving ([Templates §5](templates.md#5-template-versioning)).
+- `idx_templates_active` indexed `templates(id)` before V4; the column rename carried it onto `name`, which is exactly the listing path it exists for. V19 rebuilt it plain — the `WHERE is_deleted = FALSE` partial went with the retired column, and the derived ACTIVE probe answers through the `(template_id) …` PK.
 - **`name` carries a FOLDER, and `V12__folder_required.sql` is the gate (077).** The [§4.1 grammar](template-hierarchy-design.md#41-grammar) requires 2–10 `/`-separated segments; the column stays TEXT and the UNIQUE constraint is unchanged, because a folder is a name prefix and never a schema dimension. V12 carries **no DDL** — only a `DO`-block pre-check that ABORTS the migration and names every offending `templates.name`, active and soft-deleted alike (`lookupVersion` resolves soft-deleted rows for pinned refs, so their names are in scope). It has to be a deploy-time abort rather than a save-time refusal because a template name is re-validated at RENDER (`RegistryTemplateLoader.parseKey`, and the import-prologue synthesis), so a stored flat name would break execution of already-released pipelines with no in-place repair — [Template Hierarchy §4.6](template-hierarchy-design.md#46-legacy-names-the-grammar-is-not-purely-a-widening-normative). This re-issues V7's gate rather than editing it: an applied migration's text is frozen by its Flyway checksum.
 - **The gate does NOT look at `pipelines`, deliberately.** `pipelines.name` takes the same grammar, but it is validated at SAVE only — nothing on the execute path re-checks it and pipelines are UUID-addressed — so a pre-077 flat pipeline keeps listing, opening and executing, and its next save is refused with `pipeline.validation.name_invalid`. Aborting a deployment over a row that still works would be a false alarm ([Template Hierarchy §14.2](template-hierarchy-design.md)).
 - **No `params_schema` column** (D3). Templates declare no parameters; the render context is the calling pipeline's `parameters` map with defaults applied — see [Templates §3](templates.md#3-template-entity).
 - **`is_library` lives on `template_versions`, not here** (§4.9). Import validation resolves it at an exact `{id, version}` ([Templates §6](templates.md#6-library-templates)), so a table-level copy would be a second source of truth that a new version could silently contradict. Listing "all libraries" joins to the current version.
 - `description` is `NOT NULL DEFAULT ''` here (unlike `datasources.description`, §4.10) because [Templates §3](templates.md#3-template-entity) makes it the discoverability field agents search on. The asymmetry with datasources is deliberate, not drift.
-- `current_version` is `NOT NULL` — it is `0` only inside the uncommitted create transaction; every committed template has `>= 1`.
-- `updated_at` is set by the application in every UPDATE (§2) — chiefly the `current_version` bump when a new version is stored.
+- **`current_version` is the sticky pointer** (V18 nullable; 101/D60 event-driven — the twin of §4.4's rule: NULL until the first release, moved only by the events versioning §3.4 lists). **There is no entity status column** (V19 retired `is_deleted`): the ACTIVE/DISCARDED derivation reads `template_versions`.
+- `updated_at` is set by the application in every UPDATE (§2) — chiefly a pointer move or an index-metadata write.
 
 ### 4.9 `template_versions`
 
@@ -377,14 +389,20 @@ CREATE TABLE template_versions (
     status          TEXT        NOT NULL DEFAULT 'RELEASED'
                         CONSTRAINT chk_template_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
     body_hash       TEXT        NOT NULL,            -- SHA-256 (hex) of the canonical {engine,dialect,is_library,imports,body} object
-    released_at     TIMESTAMPTZ NULL,                -- DB-generated at release
+    released_at     TIMESTAMPTZ NULL,                -- DB-generated at release; UNTOUCHED by discard/restore (V19)
     released_by     UUID        REFERENCES users(id),
+    discarded_at    TIMESTAMPTZ NULL,                -- V19 (101): set at discard, cleared at restore
+    discarded_by    UUID        REFERENCES users(id),
     updated_by      UUID        REFERENCES users(id),
     updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     PRIMARY KEY (template_id, version),
-    CONSTRAINT chk_dialect CHECK (dialect IN ('POSTGRES', 'ORACLE', 'MSSQL', 'MYSQL', 'H2', 'DUCKDB', 'SQLITE'))
+    CONSTRAINT chk_dialect CHECK (dialect IN ('POSTGRES', 'ORACLE', 'MSSQL', 'MYSQL', 'H2', 'DUCKDB', 'SQLITE')),
+    CONSTRAINT chk_template_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    )
 );
 
 CREATE INDEX idx_template_versions_dialect ON template_versions(dialect);
@@ -954,4 +972,6 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-09-05 | v1.9 | V12 migration (077) | §4.8 `templates`: `name` requires a **folder** ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and migration **V12** carries the deploy gate for stored names — a `DO`-block pre-check that aborts naming every flat offender, active and soft-deleted, and **no DDL at all**. No table, column, index, constraint or classification changes, which is why every other section of this document is untouched. The gate deliberately ignores `pipelines`: that name is validated at save only, so a legacy flat pipeline still runs and an abort over it would be a false alarm ([Template Hierarchy §14.2](template-hierarchy-design.md)). |
 | 2026-09-07 | v1.10 | V13 + V14 migrations (087) | §4.10 `datasources`: `password_encrypted` → **`credential_encrypted`, now NULLABLE**, plus **`credential_kind TEXT NOT NULL DEFAULT 'password'`** and a nullable `username` (V13, [Datasources §3.4](datasources.md#34-credential-kinds)). Three CHECKs: the kind is one of the enums.md §5A set, `kind = 'none'` ⟺ no ciphertext (which is what makes `password_set` derivable rather than a stored flag), and `username` is present exactly when the kind allows it. The backfill is TRUE rather than a guess — every pre-087 row went through a save path that required a username and a password. The credential blob stays kind-agnostic under the V10 versioned envelope, so rotation is untouched. **V14** widens `chk_datasource_dialect` to admit `'LAKE'` (dropped and recreated — Postgres has no ALTER for a CHECK expression); no data changes, since no existing row can hold a value that did not exist. |
 | 2026-09-07 | v1.11 | V15 migration (089 §A) | New **§4.15 `lake_tables`** — the dp-lake catalog: which Parquet/Iceberg tables a LAKE-dialect datasource serves (the 2026-09-07 lake-datasource design record §2). `datasource_id` is TEXT referencing `datasources(name)` — the datasource PK IS its name; there is no surrogate id to point at. `namespace` is 087's segment list as a Postgres `TEXT[]`; `format` is CHECKed (`parquet` \| `iceberg`) because a third value would generate bad view SQL later; the named `uq_lake_tables_datasource_namespace_name` lets the service map a re-registration to the catalogued `datasource.lake_table_duplicate`, and its index doubles as the list-by-datasource access path, so §5 gains no separate FK index. §3 ERD, §5 index table and §5A's classification updated: the table is **environment-local** — it points at an environment-local datasource row and at bucket locations whose credentials never leave the deployment. |
+| 2026-09-08 | v1.13 | V18 migration (099, backfilled entry) | `pipelines.current_version` / `templates.current_version` drop `DEFAULT 0` and `NOT NULL` and become nullable, and any `0` sentinel rows are nulled — creation lands version 1 as a DRAFT (D55), so a fresh entity has a version and no pointer at all. §4.4/§4.8 sketches and notes updated (this entry was missing from the Appendix when 099 landed — the sketches still said `NOT NULL DEFAULT 0`; caught while amending them for V19). |
+| 2026-09-08 | v1.14 | V19 migration (101) | **Discard stamps** on both version tables: `discarded_at TIMESTAMPTZ NULL` / `discarded_by UUID NULL REFERENCES users(id)` plus `chk_*_discard_stamps` — both NULL unless the row is DISCARDED, and a DISCARDED row must carry `discarded_at` (pre-101 executed-draft tombstones backfill `COALESCE(updated_at, NOW())`; `discarded_by` stays NULL — the actor is unknown history). **`is_deleted` retired** from `pipelines` and `templates`: soft-deleted rows migrate to "every version DISCARDED, pointer NULL" (counted by a `RAISE NOTICE` — expected zero outside tests), `idx_pipelines_owner` / `idx_templates_active` are rebuilt plain, and the columns drop — entity status is the §3.2 derivation (`EXISTS` a live version), never stored. §4.4/§4.5/§4.8/§4.9 sketches and notes amended in place; the purge-deletes-executions choice is documented at §4.5. |
 | 2026-09-08 | v1.12 | V16 migration (089 §F) | **V16 widens `template_versions.chk_dialect` to admit `'LAKE'`** — dropped and recreated, the V14 shape, since Postgres has no ALTER for a CHECK expression; additive in effect, no data changes (no existing row can hold a value the CHECK has refused since V1). The dialect itself joined the datasource CHECK in V14; this is its template twin, found by the MinIO suite going red on the first `dialect: LAKE` template insert — the 088 showcase content (`nyc/lake/rideshare_zone_day.sql`) declares exactly one. The §4.9 sketch keeps the V1 constraint, the same convention §4.10 follows for V14 — this row is the record of the widening. |

@@ -258,10 +258,33 @@ class PromotionTwoDeploymentE2eTest {
         assertEquals(0, applied["templates"])
 
         assertAll(
-            { assertEquals(childVersionBefore + 1, uatPipelineVersion(CHILD)) },
-            { assertEquals(devPipelineHash(CHILD), uatPipelineHash(CHILD)) },
+            // 101/D60: the import LANDS the new version but never moves an existing pointer —
+            // the receiver's human switches. So the landed version moves…
+            { assertEquals(childVersionBefore + 1, uatLandedVersion(CHILD)) },
+            // …the pointer does not…
+            { assertEquals(childVersionBefore, uatPipelineVersion(CHILD), "D60: import never moves the pointer") },
+            // …the landed row IS the pushed content (same hash as dev's release)…
+            { assertEquals(devPipelineHash(CHILD), uatLandedHash(CHILD)) },
             { assertEquals(parentVersionBefore, uatPipelineVersion(PARENT), "the untouched pipeline did not move") },
         )
+
+        // The operator's switch — the promotion receiver's verb, D60 — which is what moves
+        // the pointer onto the imported release. (REST switch is session-only and this
+        // harness drives server keys; the metadata row is the same fact.)
+        uatJdbc.execute("UPDATE pipelines SET current_version = ${childVersionBefore + 1} WHERE name = '$CHILD'")
+    }
+
+    /** The MAX landed version row — what an import writes regardless of the pointer (D60). */
+    private fun uatLandedVersion(name: String): Int =
+        uatJdbc
+            .scalar(
+                "SELECT MAX(version) FROM pipeline_versions WHERE pipeline_id = (SELECT id FROM pipelines WHERE name = '$name')",
+            ).toInt()
+
+    private fun uatLandedHash(name: String): String {
+        val version = uatLandedVersion(name)
+        val pipelineId = uatJdbc.scalar("SELECT id FROM pipelines WHERE name = '$name'")
+        return uatJdbc.scalar("SELECT body_hash FROM pipeline_versions WHERE pipeline_id = '$pipelineId' AND version = $version")
     }
 
     // ------------------------------------------------------------------ 5. §10.5 (gate 5)
@@ -648,7 +671,7 @@ class PromotionTwoDeploymentE2eTest {
         // The id comes from dev's own row, not from a listing: the paged listing's wire shape
         // is not what this test is about, and a fixture that depends on it breaks for reasons
         // that say nothing about promotion.
-        val id = devJdbc.scalar("SELECT id::text FROM pipelines WHERE name = '$name' AND is_deleted = FALSE")
+        val id = devJdbc.scalar("SELECT id::text FROM pipelines WHERE name = '$name'")
 
         val full =
             given()
@@ -771,7 +794,7 @@ class PromotionTwoDeploymentE2eTest {
     private fun pipelineVersion(
         jdbc: Jdbc,
         name: String,
-    ): Int = jdbc.scalar("SELECT current_version FROM pipelines WHERE name = '$name' AND is_deleted = FALSE").toInt()
+    ): Int = jdbc.scalar("SELECT current_version FROM pipelines WHERE name = '$name'").toInt()
 
     private fun pipelineHash(
         jdbc: Jdbc,
@@ -785,7 +808,7 @@ class PromotionTwoDeploymentE2eTest {
     private fun templateVersion(
         jdbc: Jdbc,
         id: String,
-    ): Int = jdbc.scalar("SELECT current_version FROM templates WHERE name = '$id' AND is_deleted = FALSE").toInt()
+    ): Int = jdbc.scalar("SELECT current_version FROM templates WHERE name = '$id'").toInt()
 
     private fun templateHash(
         jdbc: Jdbc,

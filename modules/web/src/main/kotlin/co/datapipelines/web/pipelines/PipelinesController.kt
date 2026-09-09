@@ -1,7 +1,10 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.PipelineRecord
+import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
@@ -58,6 +61,7 @@ import java.util.UUID
 @RequestMapping("/api/v1/pipelines")
 class PipelinesController(
     private val pipelines: PipelineService,
+    private val audit: AuditEventSink,
 ) {
     /**
      * §5.1 — create; the server assigns id, version 1 (**DRAFT**, D55), owner and timestamps.
@@ -169,8 +173,10 @@ class PipelinesController(
     }
 
     /**
-     * §5.11 — discard the draft: hard-delete when never executed, DISCARDED-flip when the
-     * executions FK blocks the delete (both transparent to the caller). Hash-guarded.
+     * §5.11 (101) — purge the draft: the row **and its executions** are deleted; no tombstone.
+     * Hash-guarded; the sole-draft case takes the entity with it. The route keeps its
+     * historical spelling (`draft/discard`) for the editor's button — the verb underneath is
+     * the purge (versioning §5.4).
      */
     @PostMapping("/{id}/draft/discard")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -179,20 +185,182 @@ class PipelinesController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
     ) {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        pipelines.discard(workspaceId, id, IfMatchHeader.required(ifMatch))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val purged = pipelines.purge(workspaceId, id, IfMatchHeader.required(ifMatch))
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_VERSION_PURGED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "executions_deleted" to purged.executionsDeleted,
+                "scope" to if (purged is PipelineReleaseService.Purged.Entity) "entity" else "version",
+            ),
+        )
     }
 
-    /** §5.6 — soft delete. Historical executions remain queryable. */
-    @DeleteMapping("/{id}")
+    /**
+     * §7 (101) — discard RELEASED version v: flip to DISCARDED (reversible via restore),
+     * pointer per D60. Session-only, audited.
+     */
+    @PostMapping("/{id}/versions/{version}/discard")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun discardVersion(
+        @PathVariable id: UUID,
+        @PathVariable version: Int,
+    ): ApiResponse<JsonNode> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val result = pipelines.discardVersion(workspaceId, id, version, principal.userId)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_VERSION_DISCARDED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "version" to version,
+                "current_version_before" to result.recordBefore.currentVersion,
+                "current_version_after" to result.recordAfter.currentVersion,
+            ),
+        )
+        return ApiResponse.of(PipelineResponses.full(result.recordAfter, bodyFor(workspaceId, id, result.recordAfter), result.version))
+    }
+
+    /** §7 (101) — restore DISCARDED version v to RELEASED; pointer moves only above-current-or-NULL. */
+    @PostMapping("/{id}/versions/{version}/restore")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun restoreVersion(
+        @PathVariable id: UUID,
+        @PathVariable version: Int,
+    ): ApiResponse<JsonNode> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val record = pipelines.restoreVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_VERSION_RESTORED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "version" to version,
+                "current_version_after" to record.currentVersion,
+            ),
+        )
+        return ApiResponse.of(PipelineResponses.full(record, bodyFor(workspaceId, id, record)))
+    }
+
+    /**
+     * §7 (101) — purge DRAFT version v (drafts only): the row and its executions go; the
+     * sole-draft case takes the entity. Irreversible; session-only, audited.
+     */
+    @DeleteMapping("/{id}/versions/{version}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun purgeVersion(
+        @PathVariable id: UUID,
+        @PathVariable version: Int,
+    ) {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val purged = pipelines.purgeVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_VERSION_PURGED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "version" to version,
+                "executions_deleted" to purged.executionsDeleted,
+                "scope" to if (purged is PipelineReleaseService.Purged.Entity) "entity" else "version",
+            ),
+        )
+    }
+
+    /**
+     * §7 (101) — the entity purge (replaces the V1 soft delete, retired in V19): allowed only
+     * when the only version is a DRAFT. `include_exclusive_draft_templates=true` purges the
+     * draft-only templates this pipeline exclusively pins; the response carries the offered
+     * set either way, so 102's dialog can show it. Session-only, audited.
+     */
+    @DeleteMapping("/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun delete(
         @PathVariable id: UUID,
-    ) {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        if (!pipelines.delete(workspaceId, id)) throw ApiErrors.pipelineNotFound(id.toString())
+        @RequestParam("include_exclusive_draft_templates", required = false, defaultValue = "false")
+        includeExclusiveDraftTemplates: Boolean = false,
+    ): ApiResponse<Map<String, Any?>> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val result = pipelines.purgeEntity(workspaceId, id, includeExclusiveDraftTemplates)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_ENTITY_PURGED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "executions_deleted" to result.executionsDeleted,
+                "exclusive_draft_templates" to result.exclusiveDraftTemplates,
+                "exclusive_templates_purged" to result.exclusiveTemplatesPurged,
+            ),
+        )
+        return ApiResponse.of(
+            mapOf(
+                "id" to id.toString(),
+                "purged" to true,
+                "exclusive_draft_templates" to result.exclusiveDraftTemplates,
+                "exclusive_draft_templates_purged" to result.exclusiveTemplatesPurged,
+            ),
+        )
     }
+
+    /**
+     * §7 (101) — the manual switch: `current = {version}`, which must be live and
+     * posture-eligible. The promotion receiver's rollout/rollback lever; session-only,
+     * audited.
+     */
+    @PostMapping("/{id}/current")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun switchCurrent(
+        @PathVariable id: UUID,
+        @RequestBody body: JsonNode,
+    ): ApiResponse<JsonNode> {
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        if (!body.has("version") || !body["version"].canConvertToInt()) {
+            throw ApiErrors.pipelineNotFound(id.toString())
+        }
+        val target = body["version"].asInt()
+        val before = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val record = pipelines.switchCurrent(workspaceId, id, target)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_CURRENT_SWITCHED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "from" to before.currentVersion,
+                "to" to record.currentVersion,
+            ),
+        )
+        return ApiResponse.of(PipelineResponses.full(record, bodyFor(workspaceId, id, record)))
+    }
+
+    /** The pointer-named version's body for a full response; an empty object when the pointer is NULL. */
+    private fun bodyFor(
+        workspaceId: UUID,
+        id: UUID,
+        record: PipelineRecord,
+    ): String =
+        record.currentVersion
+            ?.let { pipelines.findVersionBody(workspaceId, id, it) }
+            ?: "{}"
 
     /**
      * §5.7 — the listing, with the `owner` / `datasource` / `q` filters.

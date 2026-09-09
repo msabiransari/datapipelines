@@ -305,28 +305,95 @@ UI-driven in practice — agents never release (versioning D4); no MCP tool exis
 
 Response: `200 OK` with the released version's full shape (`status: "RELEASED"`).
 
-### 5.11 Discard pipeline draft
+### 5.11 Purge pipeline draft
 
 ```
 POST /pipelines/{id}/draft/discard
 If-Match: <the draft's body_hash>
 ```
 
-Discards the draft: a never-executed draft is hard-deleted and its version number returns
-to the pool; an executed draft flips to `DISCARDED` (the executions FK blocks the delete)
-and the number stays consumed. Both outcomes are transparent to the caller.
+**Purges** the draft (101: the route keeps its historical spelling for the editor's
+button): the row is hard-deleted **together with its executions** — development runs of a
+thing that never shipped are not history — and when it was the sole version the entity row
+goes too. The number returns to the pool (nothing surviving outranks it). **Session-only**
+(an API key is refused `403 auth.session.required`); audited as `pipeline.version.purged`.
 
 Response: `204 No Content`. Errors as §5.10 (`not_draft` / `version.conflict`).
 
-### 5.6 Delete pipeline
+### 5.12 Discard pipeline version
 
 ```
-DELETE /pipelines/{id}
+POST /pipelines/{id}/versions/{v}/discard
 ```
 
-Soft delete. Subsequent reads return `404`. Subsequent executions return `pipeline.execution.not_found`. The pipeline's historical executions remain queryable.
+Discards RELEASED version v (101): the row flips to `DISCARDED` — reversible via §5.13,
+its executions and promotion history stay — and the sticky pointer recomputes only when v
+WAS the pointer (D60: highest eligible live version, else NULL; a DRAFT is eligible only
+under development posture). Refusals: `409 pipeline.version.not_released` (a draft is
+purged, never discarded; an already-discarded version needs restore), `409
+pipeline.version.pinned` (a live parent version exact-pins v), `404
+pipeline.execution.not_found` (unknown version), `403 pipeline.authoring.disabled`
+(hardened). **Session-only**; audited as `pipeline.version.discarded` (pointer
+before/after in `details`).
+
+Response: `200 OK` with the pipeline's full shape at the new pointer.
+
+### 5.13 Restore pipeline version
+
+```
+POST /pipelines/{id}/versions/{v}/restore
+```
+
+Returns DISCARDED version v to RELEASED (101): the original `released_at`/`released_by`
+return untouched, the discard stamps clear, and the pointer moves only when v > current or
+current is NULL. `409 pipeline.version.not_discarded` otherwise. **Session-only**; audited
+as `pipeline.version.restored`.
+
+Response: `200 OK` with the pipeline's full shape.
+
+### 5.14 Purge pipeline version
+
+```
+DELETE /pipelines/{id}/versions/{v}
+```
+
+**Purge, drafts only** (101): the version row and its executions are deleted,
+irreversibly; the sole-draft case takes the entity with it. A RELEASED target is `409
+pipeline.version.last_release` — a release is never purged; discard is per version and
+reversible. **Session-only**; audited as `pipeline.version.purged`.
 
 Response: `204 No Content`.
+
+### 5.15 Switch pipeline current version
+
+```
+POST /pipelines/{id}/current
+{"version": 3}
+```
+
+The **manual switch** (101, D60): `current = version`, which must be a live,
+posture-eligible version (`409 pipeline.version.not_eligible` for a DISCARDED target or a
+DRAFT under a hardened posture). NOT authoring-gated — this is the promotion receiver's
+rollout/rollback lever — but still **session-only**; audited as
+`pipeline.current_switched` (from/to in `details`).
+
+Response: `200 OK` with the pipeline's full shape at the new pointer.
+
+### 5.6 Delete pipeline (the entity purge)
+
+```
+DELETE /pipelines/{id}?include_exclusive_draft_templates=false
+```
+
+**The entity purge** (101 — replaces the V1 soft delete, retired in V19): allowed only
+when the pipeline's ONLY version is a DRAFT (`409 pipeline.version.last_release`
+otherwise); the entity row, the draft and its executions go, irreversibly.
+`include_exclusive_draft_templates=true` also purges the draft-only templates this
+pipeline exclusively pins; the response carries the offered set either way, so the UI can
+show the cleanup. **Session-only**; audited as `pipeline.purged`.
+
+Response: `200 OK` with `{"purged": true, "exclusive_draft_templates": [...],
+"exclusive_draft_templates_purged": bool}`.
 
 ### 5.7 List pipelines
 
@@ -891,7 +958,7 @@ Locks the template draft (§5.10's mirror; templates lock BEFORE pipelines — v
 `template.version.conflict`, or the template validator's §13.9 codes re-run on the draft
 content. Response: `200 OK` with the released version.
 
-### 8.10 Discard template draft
+### 8.10 Purge template draft
 
 ```
 POST /templates/draft/discard
@@ -902,8 +969,28 @@ If-Match: <the draft's body_hash>
 }
 ```
 
-Always a hard delete (nothing references a template version by FK — versioning §6), so the
-version number always returns to the pool. Response: `204 No Content`.
+**Purges** the draft (101 — historical route spelling): always a hard delete (nothing
+references a template version by FK — versioning §6), and the sole-draft case takes the
+template entity with it. **Session-only**; audited as `template.version.purged`.
+Response: `204 No Content`.
+
+### 8.11 Discard / restore / purge a template version, and the manual switch (101)
+
+```
+POST /templates/version/discard          {"name": "...", "version": 2}
+POST /templates/version/restore          {"name": "...", "version": 2}
+DELETE /templates/version?name=...&version=2
+POST /templates/current                  {"name": "...", "version": 2}
+```
+
+The pipeline twins by name (§5.12–§5.15; §9.6: the name never travels in a path segment):
+discard flips a RELEASED version to DISCARDED (`409 template.version.not_released`;
+`409 template.in_use` while a live pipeline version pins it), restore brings it back
+(`template.version.not_discarded`), purge is drafts-only
+(`template.version.last_release`), and `current` is the manual switch
+(`template.version.not_eligible`). The template's sticky pointer follows the same D60
+rules. All **session-only**, audited as the `template.version.*` / `template.current_switched`
+events. Responses mirror §5.12–§5.15 at template shape.
 
 ### 8.5 List templates
 
@@ -919,13 +1006,17 @@ GET /templates?prefix={folder}&dialect={dialect}&type={sql|html}&offset=0&limit=
 
 The third shape: answers when `name` is absent and `prefix` is PRESENT — browse ONE level of the template tree (067; same contract as `templates_list {prefix}`, [MCP §6.2.6](mcp-server.md)). Present-but-empty (`?prefix=`) is the ROOT. The `data` payload becomes `{prefix, folders, templates, total, has_more}`: `folders` lists the prefix's direct sub-folders as `{path, segment, template_count}` (subtree counts), `templates` its direct leaves as the same rows as the flat list, `total`/`has_more` page the leaves via `offset`/`limit`. `dialect`/`type` narrow both halves, so a folder whose whole subtree is filtered out is absent rather than empty; `q` is ignored while `prefix` is present (browse and search are different presentations). An unknown or illegal prefix answers an EMPTY level with `200` — never a `400`, never a query error.
 
-### 8.6 Delete template
+### 8.6 Delete template (the entity purge, 101)
 
 ```
 DELETE /templates?name={path}
 ```
 
-Soft delete. Existing pipelines referencing any version continue to work (we never hard-delete template versions). New pipelines cannot reference the deleted template.
+**The entity purge** (replaces the V1 soft delete, retired in V19): allowed only when the
+template's ONLY version is a DRAFT (`409 template.version.last_release` otherwise) and no
+live pipeline version pins any version of it (`409 template.in_use`, naming the pinners).
+Existing pipelines referencing any version continue to work (we never hard-delete template
+versions); **session-only**, audited as `template.purged`.
 
 ### 8.7 Validate template (render against sample context)
 
@@ -1767,4 +1858,5 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 | 2026-09-05 | v2.4 | 077 mandatory folders | §5.1: a pipeline `name` needs a **folder** — 2–10 segments, not 1–10 ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)). `POST /api/v1/pipelines` and `POST /api/v1/templates` answer `400` with the existing codes (`pipeline.validation.name_invalid`, `template.validation.id_invalid`) for a flat name, and `details.reason` now separates `folder_required` from `grammar`. **A narrowing, not an addition** — the one kind of change §11 forbids after the freeze — taken pre-release on the owner ruling of 2026-09-05: with no rename (Template Hierarchy §4.5), a root-level name created after the tag is permanent, and the root would accrete scratch with no way to tidy it. No route changes. |
 | 2026-09-07 | v2.5 | 087 connector seams | §9.1 gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) — `{kind, username?, secret?}`; the legacy top-level `username`/`password` pair still works and means `kind: password`, and a body carrying both is `400 datasource.validation.properties_invalid`. §9.3's response gains `credential: {kind, username?}` and derives `password_set` from the kind (`false` for `none`); top-level `username` is now nullable. §9.4: `credential.kind` is part of the body — moving to `none` clears the stored credential. §9.7's `/tables` and `/tables/{table}/columns` accept `?namespace=` (repeated or dotted) beside `?schema=`, and every table row gains a `namespace` array beside `schema`; `/schemas` gains `entries: [{namespace, label}]` beside the legacy `schemas`. All additive. |
 | 2026-09-08 | v2.6 | 089 dp-lake registry (recorded with the §G corrections) | New **§9.8 Lake tables (the dp-lake catalog)** — `POST /datasources/{name}/tables`, `DELETE …/tables/{namespace}/{table}`, `POST …/tables/import` (inline `tables[]`, or a `manifest_url` fetched server-side and restricted to the datasource's own bucket/endpoint — the SSRF boundary), and `GET …/lake-tables` (`read`). The writes are `author`, with a GLOBAL datasource's registry admin-only as a workspaces D8 rule; every write evicts the pool and publishes the §5.7 invalidation. Two corrections landed with this row: the Iceberg `location` is the table's current metadata FILE, not its root (the measured rule, datasources.md §8C.7), and §9.7's introspection listing is registry-backed for LAKE as shipped (datasources.md §8C.3) — §9.8's "a later phase" sentence was written before 089 §C landed. All additive. |
+| 2026-09-08 | v2.8 | 101 version lifecycle | §5.11 is the draft **purge** (row + executions deleted; sole-draft ⇒ the entity goes); new §5.12–§5.15 — `POST /pipelines/{id}/versions/{v}/discard|restore`, `DELETE /pipelines/{id}/versions/{v}` (drafts only), `POST /pipelines/{id}/current` (the manual switch) — and §5.6 becomes the **entity purge** (`include_exclusive_draft_templates`, response carrying the offered set). All session-only (`403 auth.session.required` for keys) and audited (enums.md §15's lifecycle table). §8.10/§8.11/§8.6 mirror for templates by name. The sticky `current_version` (D60) moves only on release / discard-of-current / restore-above-current / switch / purge-of-current-draft; imports never move an existing pointer ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)). |
 | 2026-09-08 | v2.7 | 094 pool settings and retirement | §9.3's response gains **`pool`** (additive): every tunable HikariCP key's effective value, unit and source (`configured` / `dialect_default` / `application_default` / `hikari_default`) — what the pool RUNS with, beside the `properties.hikari` map of what the row STORES. §9.1/§9.4: out-of-range pool values are now REFUSED (`400 datasource.validation.properties_invalid`) instead of being silently rewritten by HikariCP ([Datasources §5](datasources.md#5-connection-pool-configuration)). §9.4/§9.5: an update or delete RETIRES the pool rather than closing it — new leases miss it at once, statements already running finish on the connection they hold, and a per-instance reaper closes it when drained or at the configured ceiling. All additive; no request shape changed. |

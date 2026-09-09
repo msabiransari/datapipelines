@@ -28,10 +28,13 @@ including on creation. A save whose body is identical to the released one is a
 no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"`
 with no draft pointer; that is success, not an error. Your updates are NOT published until
 a human releases the draft from the UI — **leave the draft for a human to release** (by
-design, D4; there is no release tool and that absence is deliberate). Pipeline nodes pin
-template versions immutably; updating a template does not change existing pipelines until
-you update the node reference. Drafts are executable — running your own draft is the
-expected test loop.
+design, D4; there is no release tool and that absence is deliberate). Version RETIREMENT is
+human too (101): a human may **discard** a released version (reversible — restore brings it
+back), **purge** a draft (irreversible — the row and its executions go), or **switch** the
+pointer a pipeline's dependents run; there are no tools for those either, by the same rule.
+Pipeline nodes pin template versions immutably; updating a template does not change existing
+pipelines until you update the node reference. Drafts are executable — running your own draft
+is the expected test loop.
 
 **In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are
 never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the

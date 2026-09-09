@@ -190,7 +190,7 @@ class ReadOnlyPipelineRuleTest {
 
     private fun resolver(vararg children: Pair<String, Pipeline>): PipelineResolver {
         val byName = children.toMap()
-        return PipelineResolver { _, name, _ -> byName[name]?.let { ResolvedPipeline(it, deleted = false) } }
+        return PipelineResolver { _, name, _ -> byName[name]?.let { ResolvedPipeline(it, entityDiscarded = false) } }
     }
 
     private fun pipeline(vararg nodes: Node) =

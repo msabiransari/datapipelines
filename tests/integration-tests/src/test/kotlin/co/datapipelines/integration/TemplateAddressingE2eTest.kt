@@ -220,7 +220,14 @@ class TemplateAddressingE2eTest {
             .body("data", equalTo("SELECT 42 AS v, 'v2' AS rev"))
     }
 
-    /** delete — DELETE /api/v1/templates?name=<path>; afterwards the read 404s. */
+    /**
+     * delete — DELETE /api/v1/templates?name=<path>; a KEY gets the 101 session gate.
+     *
+     * 101: the entity purge is session-only, so the key-driven leg proves the NEW gate
+     * (auth.session.required) and that nothing was purged behind it. The 204 path needs a
+     * browser session and is the UI round's (102); the route's name-addressability was
+     * proven pre-101 and is unchanged by this round.
+     */
     private fun deleteTemplate(name: String) {
         given()
             .port(port)
@@ -229,7 +236,8 @@ class TemplateAddressingE2eTest {
             .`when`()
             .delete("/api/v1/templates")
             .then()
-            .statusCode(204)
+            .statusCode(403)
+            .body("error.code", equalTo("auth.session.required"))
 
         given()
             .port(port)
@@ -238,8 +246,7 @@ class TemplateAddressingE2eTest {
             .`when`()
             .get("/api/v1/templates")
             .then()
-            .statusCode(404)
-            .body("error.code", equalTo("template.not_found"))
+            .statusCode(200)
     }
 
     @Test

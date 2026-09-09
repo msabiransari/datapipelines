@@ -148,7 +148,7 @@ class SampleDataExamplesContentTest {
                         PipelineResolver { _, name, version ->
                             seeded[name]
                                 ?.takeIf { version == SEED_VERSION }
-                                ?.let { ResolvedPipeline(it, deleted = false) }
+                                ?.let { ResolvedPipeline(it, entityDiscarded = false) }
                         },
                     maxCompositionDepth = MAX_COMPOSITION_DEPTH,
                 )

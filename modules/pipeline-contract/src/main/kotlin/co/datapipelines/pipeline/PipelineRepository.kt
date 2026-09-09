@@ -1,7 +1,6 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.DatapipelinesException
-import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -11,15 +10,18 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
 
-/** What a draft discard did (versioning §5.4) — both are a success to the caller. */
-sealed interface DiscardOutcome {
-    /** A never-executed draft: the row is gone and the version number returns to the pool. */
-    data object Deleted : DiscardOutcome
+/** What a draft purge did (versioning §3.1/§5.4, 101) — the row is always gone. */
+sealed interface PurgeOutcome {
+    /** The draft went; other versions remain, so the entity stays. */
+    data class VersionPurged(
+        val executionsDeleted: Int,
+        val record: PipelineRecord,
+    ) : PurgeOutcome
 
-    /** An executed draft: the FK blocks the delete, so the row flipped to DISCARDED. */
-    data class FlippedToDiscarded(
-        val detail: PipelineVersionDetail,
-    ) : DiscardOutcome
+    /** The draft was the ONLY version: the entity row went with it (§3.2's entity purge). */
+    data class EntityPurged(
+        val executionsDeleted: Int,
+    ) : PurgeOutcome
 }
 
 /**
@@ -67,32 +69,35 @@ data class DatasourceRef(
  * schema creation belongs to `app`'s Flyway alone (rule 2) — nothing here creates or alters
  * a table.
  *
- * ## The version lifecycle (versioning §3.1, since V6)
+ * ## The version lifecycle (versioning §3, since V6; rewritten 101)
  *
  * The immutability discipline of metadata-db §4.5, amended: **RELEASED and DISCARDED rows
  * are never UPDATEd; DRAFT rows may be; only the DB predicate `status = 'DRAFT'` permits
- * mutation.** One bounded, checkable exception replaces "append-only forever":
+ * mutation.** One bounded, checkable exception replaces "append-only forever" — and 101
+ * adds the second bounded one: **discard/restore flip a RELEASED↔DISCARDED row's status
+ * and discard stamps, nothing else** (§3.1).
  *
- *  - [create] lands version 1 directly as RELEASED (§3.2: creation is not modification —
- *    an agent's first create is executable the moment it exists).
+ *  - [create] lands version 1 as DRAFT (D55) or RELEASED (import/seeder paths only).
  *  - [createDraft] copies the current released version to a DRAFT (copy-on-write, §5.1) —
  *    the partial unique index `uq_pipeline_versions_one_draft` makes two simultaneous
  *    first-writers race-safe: the loser violates the index and surfaces as
  *    `pipeline.version.conflict` carrying the winner's hash.
  *  - [writeDraft] overwrites the DRAFT in place (§5.2). There is no third write branch.
- *  - [releaseDraft] flips the DRAFT to RELEASED and moves `pipelines.current_version`
- *    (§5.3) — the only writer of that column besides create/import. `current_version`
- *    keeps its meaning, **the latest RELEASED version**; it does not move while a draft
- *    exists (§3.4), so every existing reader (execute-default, editor load, MCP get, the
- *    datasource joins) keeps its semantics.
- *  - [discardDraft] deletes a never-executed draft, or flips an executed one to DISCARDED
- *    (§5.4) — the `pipeline_executions` composite FK is what decides which.
+ *  - [releaseDraft] flips the DRAFT to RELEASED and sets `pipelines.current_version`
+ *    (§5.3) — release(v) ⇒ current = v, the first of D60's four pointer events.
+ *  - [discardVersion] flips a RELEASED version to DISCARDED and recomputes the pointer
+ *    only when that version WAS the pointer (§3.4); [restoreVersion] flips it back and
+ *    moves the pointer only above-current-or-NULL; [switchCurrent] is the manual switch.
+ *  - [purgeDraft] deletes a DRAFT row **together with its executions** (§5.4) — the
+ *    pre-101 flip-to-DISCARDED branch is withdrawn; when it was the sole version the
+ *    entity row goes too.
+ *  - [purgeEntity] deletes an only-draft entity and its row (§3.2).
  *
  * Every mutation carries its caller's content-hash precondition in the statement's own
- * `WHERE` clause (§4.2): zero rows affected ⇒ stale base ⇒ the caller maps the 409. Each
- * mutating method is a single statement (data-modifying CTE where two tables move
- * together), atomic without an enclosing transaction — `@Transactional` belongs on the
- * service layer (metadata-db §6.3), and a repository that quietly depends on a caller
+ * `WHERE` clause where one applies (§4.2): zero rows affected ⇒ stale base ⇒ the caller
+ * maps the 409. Single-statement writes stay single (data-modifying CTE where two tables
+ * move together), atomic without an enclosing transaction — `@Transactional` belongs on
+ * the service layer (metadata-db §6.3), and a repository that quietly depends on a caller
  * remembering to open one is a repository with a corruption path.
  *
  * ## `body_hash` — one expression everywhere
@@ -124,7 +129,7 @@ data class DatasourceRef(
  * paths, and both import modes — and splitting it would scatter one table's invariants
  * across files (the `DatasourceRepository` precedent for the same shape).
  */
-@Suppress("TooManyFunctions") // see the KDoc above
+@Suppress("TooManyFunctions", "LargeClass") // see the KDoc above
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
@@ -143,7 +148,23 @@ class PipelineRepository(
     ): PipelineRecord? =
         jdbc
             .query(
-                "$SELECT_COLUMNS WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE",
+                "$SELECT_COLUMNS WHERE id = :id AND workspace_id = :workspaceId AND $ENTITY_LIVE",
+                mapOf("id" to id, "workspaceId" to workspaceId),
+                MAPPER,
+            ).singleOrNull()
+
+    /**
+     * As [findById], but **including DISCARDED entities** — restore is the one way back for
+     * an entity whose every version was discarded, so its pre-reads must not filter on the
+     * derived live status (§3.5's `{X,X}` rows).
+     */
+    fun findByIdAnyStatus(
+        workspaceId: UUID,
+        id: UUID,
+    ): PipelineRecord? =
+        jdbc
+            .query(
+                "$SELECT_COLUMNS WHERE id = :id AND workspace_id = :workspaceId",
                 mapOf("id" to id, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
@@ -155,21 +176,23 @@ class PipelineRepository(
     ): PipelineRecord? =
         jdbc
             .query(
-                "$SELECT_COLUMNS WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE",
+                "$SELECT_COLUMNS WHERE name = :name AND workspace_id = :workspaceId AND $ENTITY_LIVE",
                 mapOf("name" to name, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
 
     /**
-     * As [findByName], but **including soft-deleted rows** — the read composition needs.
+     * As [findByName], but **including DISCARDED entities** — the read composition needs
+     * (versioning §3.2, since 101 replaced soft delete with the derived entity status).
      *
-     * Soft-delete does not affect existing pinned references (design
+     * Discarding does not affect existing pinned references (design
      * 2026-08-13-pipeline-node-type D7, mirroring templates): a saved PIPELINE node keeps
-     * resolving its pinned child after the child is deleted. The save-time resolver reads the
-     * row's `isDeleted` flag to block only NEW references, and the runtime runner reads the
-     * pinned body either way. Callers that list or look up live pipelines use [findByName].
+     * resolving its pinned child after the child's entity is discarded. The save-time
+     * resolver reads the entity's derived status ([hasLiveVersion]) to block only NEW
+     * references, and the runtime runner reads the pinned body either way. Callers that
+     * list or look up live pipelines use [findByName].
      */
-    fun findByNameIncludingDeleted(
+    fun findByNameAnyStatus(
         workspaceId: UUID,
         name: String,
     ): PipelineRecord? =
@@ -196,7 +219,7 @@ class PipelineRepository(
             params["offset"] = offset
         }
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE is_deleted = FALSE AND workspace_id = :workspaceId$ownerFilter" +
+            "$SELECT_COLUMNS WHERE $ENTITY_LIVE AND workspace_id = :workspaceId$ownerFilter" +
                 " ORDER BY created_at DESC$limitClause",
             params,
             MAPPER,
@@ -226,7 +249,7 @@ class PipelineRepository(
             SELECT p.*
               FROM pipelines p
               JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = p.current_version
-             WHERE p.is_deleted = FALSE AND p.workspace_id = :workspaceId$ownerFilter
+             WHERE $ENTITY_LIVE_P AND p.workspace_id = :workspaceId$ownerFilter
                AND (v.body_json @> jsonb_build_object('nodes', jsonb_build_array(jsonb_build_object('source', :datasourceName)))
                     OR v.body_json @> jsonb_build_object('nodes', jsonb_build_array(jsonb_build_object('output', jsonb_build_object('datasource', :datasourceName)))))
              ORDER BY p.created_at DESC
@@ -290,7 +313,7 @@ class PipelineRepository(
     fun countAll(workspaceId: UUID): Int =
         checkNotNull(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM pipelines WHERE is_deleted = FALSE AND workspace_id = :workspaceId",
+                "SELECT COUNT(*) FROM pipelines WHERE $ENTITY_LIVE AND workspace_id = :workspaceId",
                 mapOf("workspaceId" to workspaceId),
                 Int::class.java,
             ),
@@ -730,46 +753,248 @@ class PipelineRepository(
         }
 
     /**
-     * Discard (versioning §5.4): delete a never-executed draft, or — when the
-     * `pipeline_executions` composite FK blocks the delete — flip it to DISCARDED. Both
-     * outcomes are transparent to the caller. Null when no DRAFT matched [expectedHash].
+     * Purge the draft (versioning §5.4, 101): the version row is hard-deleted **together
+     * with its executions** — development runs of a thing that never shipped are not
+     * history, and the executions FK must never force a tombstone. When the draft was the
+     * sole version the entity row goes too (§3.2's entity purge); when the draft had become
+     * `current_version` (the development fallback of §3.4) the pointer recomputes.
+     *
+     * [expectedHash] is the §4.2 precondition; null targets the draft by number without a
+     * hash (the 101 admin verb, which names an explicit version and needs no two-writer
+     * protocol). Returns null when no DRAFT matched — the caller re-reads and classifies.
+     *
+     * Multi-statement by necessity (executions, version, maybe entity, maybe pointer) —
+     * the SERVICE wraps this in one transaction; each statement is guarded so a lost race
+     * leaves everything untouched.
      */
-    fun discardDraft(
+    fun purgeDraft(
         workspaceId: UUID,
         pipelineId: UUID,
-        expectedHash: String,
-    ): DiscardOutcome? {
+        expectedHash: String?,
+        draftEligible: Boolean,
+    ): PurgeOutcome? {
+        val hashGuard = if (expectedHash == null) "" else " AND v.body_hash = :expectedHash"
         val params =
-            mapOf(
+            mutableMapOf<String, Any?>(
                 "pipelineId" to pipelineId,
                 "workspaceId" to workspaceId,
-                "expectedHash" to expectedHash,
+                "draftEligible" to draftEligible,
             )
-        val deleted =
-            try {
-                jdbc.update(DELETE_DRAFT_SQL, params) > 0
-            } catch (
-                @Suppress("SwallowedException") e: DataIntegrityViolationException,
-            ) {
-                // Swallowed DELIBERATELY: the violation IS the answer — the draft was
-                // executed, the FK blocks the delete, and §5.4's second branch takes over
-                // (the StagingFactory precedent: the catch is control flow, not loss).
-                false
-            }
-        if (deleted) return DiscardOutcome.Deleted
-        return jdbc
-            .query(FLIP_DRAFT_SQL, params, DETAIL_MAPPER)
-            .singleOrNull()
-            ?.let(DiscardOutcome::FlippedToDiscarded)
+        if (expectedHash != null) params["expectedHash"] = expectedHash
+
+        // The draft's executions go WITH it (§5.4) — BEFORE the version row: the composite
+        // FK references the version, so deleting the row first would violate it. Redis
+        // result keys are not deleted; they expire on their own TTL, and an expired key is
+        // not a reference.
+        // jdbc.update, not queryForObject: a DELETE without RETURNING yields an update count,
+        // not a result set — and the count IS the audit detail.
+        val executionsDeleted =
+            jdbc.update(
+                "DELETE FROM pipeline_executions WHERE pipeline_id = :pipelineId AND pipeline_version IN" +
+                    " (SELECT v.version FROM pipeline_versions v" +
+                    "  WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT'$hashGuard)",
+                params,
+            )
+
+        val purged =
+            jdbc
+                .query(
+                    // The target must be a DRAFT of this workspace's pipeline; RETURNING names it.
+                    "DELETE FROM pipeline_versions v" +
+                        " USING pipelines p" +
+                        " WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT'$hashGuard" +
+                        " AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId" +
+                        " RETURNING v.version",
+                    params,
+                ) { rs, _ -> rs.getInt("version") }
+                .singleOrNull() ?: return null
+
+        val remaining =
+            checkNotNull(
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM pipeline_versions WHERE pipeline_id = :pipelineId",
+                    mapOf("pipelineId" to pipelineId),
+                    Int::class.java,
+                ),
+            )
+        if (remaining == 0) {
+            // Sole version ⇒ entity purge (§3.2): the entity row goes, versions cascade.
+            jdbc.update(
+                "DELETE FROM pipelines WHERE id = :id AND workspace_id = :workspaceId",
+                mapOf("id" to pipelineId, "workspaceId" to workspaceId),
+            )
+            return PurgeOutcome.EntityPurged(executionsDeleted)
+        }
+
+        // Pointer fallback (§3.4): only moves if the purged draft WAS the pointer.
+        jdbc.update(
+            POINTER_FALLBACK_SQL,
+            params + ("version" to purged),
+        )
+        val record = findById(workspaceId, pipelineId) ?: return PurgeOutcome.EntityPurged(executionsDeleted)
+        return PurgeOutcome.VersionPurged(executionsDeleted, record)
     }
 
     /**
-     * Appends the next version directly as RELEASED and bumps `current_version`, with the
-     * index row adopting the body's metadata — the version-LESS import path (§9.2: "when
-     * absent, today's allocate-next-local behavior applies") and the seeder. Not the PUT
-     * path: HTTP and MCP writes go through [createDraft]/[writeDraft].
+     * Discard a RELEASED version (§3.1): status flips to DISCARDED with the discard stamps,
+     * and the pointer recomputes ONLY when this version was the pointer (D60). The pin
+     * guard rides the statement (graph rule 1): a LIVE parent version pinning
+     * `pipeline.name@version` refuses the flip by returning zero rows — no read-then-act
+     * window. Returns null when the target was not RELEASED (or is pinned); the caller
+     * re-reads and classifies. On success returns the bumped record beside the flipped
+     * version's detail ([DISCARD_MAPPER]).
+     */
+    fun discardVersion(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        pipelineName: String,
+        version: Int,
+        actor: UUID,
+        draftEligible: Boolean,
+    ): Pair<PipelineRecord, PipelineVersionDetail>? =
+        jdbc
+            .query(
+                DISCARD_VERSION_SQL,
+                mapOf(
+                    "pipelineId" to pipelineId,
+                    "workspaceId" to workspaceId,
+                    "pipelineName" to pipelineName,
+                    "version" to version,
+                    "actor" to actor,
+                    "draftEligible" to draftEligible,
+                ),
+                DISCARD_MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Restore a DISCARDED version (§3.1): status returns to RELEASED, the discard stamps
+     * clear, and `released_at`/`released_by` are UNTOUCHED — a restored version keeps the
+     * stamps of its one true release, which §8's draft-run derivation depends on. The
+     * pointer moves only above-current-or-NULL (D60) — `GREATEST(COALESCE(cur, 0), x)` is
+     * exactly that rule. Returns null when the target was not DISCARDED.
      *
-     * Returns null when no live pipeline has this id in [workspaceId]; the caller decides
+     * Deliberately NO entity-live predicate: restoring the first version of a DISCARDED
+     * entity is the one way back (§3.5's `{X,X}` rows).
+     */
+    fun restoreVersion(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+        draftEligible: Boolean,
+    ): PipelineRecord? =
+        jdbc
+            .query(
+                RESTORE_VERSION_SQL,
+                mapOf(
+                    "pipelineId" to pipelineId,
+                    "workspaceId" to workspaceId,
+                    "version" to version,
+                    "draftEligible" to draftEligible,
+                ),
+                MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Manual switch (§3.4, D60): `current = v` where v must be a LIVE, posture-eligible
+     * version — the eligibility rides the statement's own EXISTS. Returns null when v is
+     * not eligible (or absent); the caller re-reads to tell `not_eligible` from 404.
+     */
+    fun switchCurrent(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+        draftEligible: Boolean,
+    ): PipelineRecord? =
+        jdbc
+            .query(
+                SWITCH_CURRENT_SQL,
+                mapOf(
+                    "pipelineId" to pipelineId,
+                    "workspaceId" to workspaceId,
+                    "version" to version,
+                    "draftEligible" to draftEligible,
+                ),
+                MAPPER,
+            ).singleOrNull()
+
+    /**
+     * The entity purge (§3.2): deletes the pipeline row; `pipeline_versions` cascade
+     * (V1's `ON DELETE CASCADE`), so the caller must have already deleted the executions
+     * of every version this entity holds (an only-draft entity has exactly one version's
+     * worth — [purgeDraft] does both). True when the row went.
+     */
+    fun deletePipelineRow(
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ): Boolean =
+        jdbc.update(
+            "DELETE FROM pipelines WHERE id = :id AND workspace_id = :workspaceId",
+            mapOf("id" to pipelineId, "workspaceId" to workspaceId),
+        ) > 0
+
+    /**
+     * LIVE parent versions pinning `pipelineName@version` — graph rule 1's evidence (the
+     * `pipeline.version.pinned` refusal names them). A parent version is LIVE when its own
+     * status is DRAFT or RELEASED; a DISCARDED parent version's pin is inert and does not
+     * block (it can be restored later, and restoring does not move the pin).
+     */
+    fun findLiveParentsPinningVersion(
+        workspaceId: UUID,
+        pipelineName: String,
+        version: Int,
+    ): List<TemplatePin> =
+        jdbc.query(
+            LIVE_PARENT_PINS_SQL,
+            mapOf("workspaceId" to workspaceId, "pipelineName" to pipelineName, "version" to version),
+            PIN_MAPPER,
+        )
+
+    /**
+     * LIVE pipeline versions pinning `templateId@version` — the template-side twin of graph
+     * rule 1, the evidence behind `template.in_use` when a template VERSION is discarded or
+     * purged. Lives here (not in `templates`) because the pins are rows of `pipeline_versions`.
+     */
+    fun findLiveVersionsPinningTemplateVersion(
+        workspaceId: UUID,
+        templateId: String,
+        version: Int,
+    ): List<TemplatePin> =
+        jdbc.query(
+            LIVE_TEMPLATE_VERSION_PINS_SQL,
+            mapOf("workspaceId" to workspaceId, "templateId" to templateId, "version" to version),
+            PIN_MAPPER,
+        )
+
+    /**
+     * **Is the entity LIVE (ACTIVE)?** — the §3.2 derivation, read directly. The
+     * composition resolver's flag ([findByNameAnyStatus] + this) and any listing that
+     * needs the status ask this; there is no stored column to read instead (V19).
+     */
+    @Suppress("UnusedParameter") // signature symmetry with the other reads; the id alone decides
+    fun hasLiveVersion(
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ): Boolean =
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM pipeline_versions lv" +
+                " WHERE lv.pipeline_id = :id AND lv.status IN ('DRAFT','RELEASED'))",
+            mapOf("id" to pipelineId),
+            Boolean::class.java,
+        ) == true
+
+    /**
+     * Appends the next version directly as RELEASED — the version-LESS import path (§9.2)
+     * and the seeder. Not the PUT path: HTTP and MCP writes go through
+     * [createDraft]/[writeDraft].
+     *
+     * **The pointer rule on import (D60, 101):** the pointer moves only when the entity has
+     * NO current at all (a never-released entity, or one whose every release was
+     * discarded); otherwise the human switches. Allocation is `max(version) + 1`, never
+     * `current_version + 1` — the pointer can be NULL or stale. Index metadata
+     * (name/display_name/description) adopts the imported body's values exactly when the
+     * import moved the pointer (§3.7's row-indexes-the-current-release rule).
+     *
+     * Returns null when no pipeline has this id in [workspaceId]; the caller decides
      * whether that is a 404.
      */
     fun appendReleasedVersion(
@@ -876,24 +1101,6 @@ class PipelineRepository(
                 DETAIL_MAPPER,
             ).singleOrNull()
 
-    /**
-     * Soft-deletes the pipeline (§14: "Soft delete"). Returns false when nothing was live to
-     * delete in [workspaceId].
-     *
-     * The row stays, so its name stays taken — metadata-db §4.4 makes that explicit and
-     * deliberate: execution history references the name, so reusing it would re-point old
-     * records at a different pipeline.
-     */
-    fun softDelete(
-        workspaceId: UUID,
-        id: UUID,
-    ): Boolean =
-        jdbc.update(
-            "UPDATE pipelines SET is_deleted = TRUE, updated_at = NOW()" +
-                " WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE",
-            mapOf("id" to id, "workspaceId" to workspaceId),
-        ) > 0
-
     // ---------------------------------------------------------------------------------------------
     // Constraint translation
     // ---------------------------------------------------------------------------------------------
@@ -973,7 +1180,8 @@ class PipelineRepository(
             .query(
                 """
                 SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                       v.released_at, v.released_by, v.discarded_at, v.discarded_by,
+                       v.updated_by, v.updated_at
                   FROM pipeline_versions v
                  WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT'
                 """.trimIndent(),
@@ -984,12 +1192,9 @@ class PipelineRepository(
     private companion object {
         /**
          * The per-workspace name constraint behind `UNIQUE (workspace_id, name)` (metadata-db
-         * §4.4, V4).
-         *
-         * Note it is a plain UNIQUE constraint, **not** a partial index on `is_deleted = FALSE`:
-         * a soft-deleted pipeline's name stays taken within its workspace until the row is
-         * hard-deleted, which §4.4 states is deliberate because execution history references
-         * the name.
+         * §4.4, V4). Since D59 names are unique FOREVER: a discarded pipeline keeps its name
+         * (restore must always work) and no second entity may take it — which is exactly what
+         * this plain UNIQUE constraint already provided; the 101 round added nothing here.
          */
         const val NAME_CONSTRAINT = "uq_pipelines_workspace_name"
 
@@ -999,8 +1204,22 @@ class PipelineRepository(
         /** The version-table PK — a concurrent draft-create computing the same next number. */
         const val DRAFT_PK = "pipeline_versions_pkey"
 
+        /**
+         * The derived entity status (versioning §3.2, since V19 retired `is_deleted`): a
+         * pipeline is LIVE — ACTIVE — while it holds ≥ 1 DRAFT or RELEASED version.
+         * Unaliased form (contexts that say `FROM pipelines` bare).
+         */
+        const val ENTITY_LIVE =
+            "EXISTS (SELECT 1 FROM pipeline_versions lv" +
+                " WHERE lv.pipeline_id = pipelines.id AND lv.status IN ('DRAFT','RELEASED'))"
+
+        /** [ENTITY_LIVE] for contexts that alias the table `p`. */
+        const val ENTITY_LIVE_P =
+            "EXISTS (SELECT 1 FROM pipeline_versions lv" +
+                " WHERE lv.pipeline_id = p.id AND lv.status IN ('DRAFT','RELEASED'))"
+
         const val COLUMNS =
-            "id, name, display_name, description, owner_id, current_version, is_deleted, created_at, updated_at"
+            "id, name, display_name, description, owner_id, current_version, created_at, updated_at"
 
         const val SELECT_COLUMNS = "SELECT $COLUMNS FROM pipelines"
 
@@ -1018,15 +1237,18 @@ class PipelineRepository(
          */
         const val DETAIL_COLS_PLAIN =
             "pipeline_id, version, status, body_hash, created_at, created_by," +
-                " released_at, released_by, updated_by, updated_at"
+                " released_at, released_by, discarded_at, discarded_by, updated_by, updated_at"
 
         /** The `v.`-qualified detail list for SELECT/UPDATE-RETURNING contexts. */
         val DETAIL_COLUMNS =
             DETAIL_COLS_PLAIN.split(", ").joinToString(", ") { "v.$it" }
 
+        // Workspace-scoped only, deliberately WITHOUT an entity-live filter (101): a
+        // DISCARDED entity's version details are exactly what restore and §9.2's import
+        // classification must read; every LIVE-only reader filters in its own predicate.
         val DETAIL_WHERE =
             "SELECT $DETAIL_COLUMNS FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id" +
-                " WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE"
+                " WHERE p.workspace_id = :workspaceId"
 
         /**
          * versioning §5.1 — the DRAFT-first create (D55, 099): version 1 lands DRAFT and
@@ -1053,7 +1275,7 @@ class PipelineRepository(
                 RETURNING pipeline_id
             )
             SELECT p.id, p.name, p.display_name, p.description, p.owner_id,
-                   p.current_version, p.is_deleted, p.created_at, p.updated_at
+                   p.current_version, p.created_at, p.updated_at
               FROM new_pipeline p
               JOIN new_version v ON v.pipeline_id = p.id
             """.trimIndent()
@@ -1076,7 +1298,7 @@ class PipelineRepository(
                 RETURNING pipeline_id
             )
             SELECT p.id, p.name, p.display_name, p.description, p.owner_id,
-                   p.current_version, p.is_deleted, p.created_at, p.updated_at
+                   p.current_version, p.created_at, p.updated_at
               FROM new_pipeline p
               JOIN new_version v ON v.pipeline_id = p.id
             """.trimIndent()
@@ -1103,7 +1325,7 @@ class PipelineRepository(
                   FROM pipeline_versions v
                   JOIN pipelines p ON p.id = v.pipeline_id
                  WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
-                   AND p.is_deleted = FALSE AND v.version = p.current_version
+                   AND $ENTITY_LIVE_P AND v.version = p.current_version
                    AND v.status = 'RELEASED' AND v.body_hash = :expectedHash
             ), draft AS (
                 INSERT INTO pipeline_versions
@@ -1115,19 +1337,20 @@ class PipelineRepository(
                   FROM pipeline_versions v
                   JOIN pipelines p ON p.id = v.pipeline_id
                  WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
-                   AND p.is_deleted = FALSE AND v.version = p.current_version AND v.status = 'RELEASED'
+                   AND $ENTITY_LIVE_P AND v.version = p.current_version AND v.status = 'RELEASED'
                    AND $BODY_HASH_EXPR <> v.body_hash
                    AND NOT EXISTS (SELECT 1 FROM pipeline_versions d
                                    WHERE d.pipeline_id = :pipelineId AND d.status = 'DRAFT')
                 RETURNING $DETAIL_COLS_PLAIN
             ), noop AS (
                 SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                       v.released_at, v.released_by, v.discarded_at, v.discarded_by,
+                       v.updated_by, v.updated_at
                   FROM pipeline_versions v
                   JOIN pipelines p ON p.id = v.pipeline_id
                   JOIN guard ON TRUE
                  WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
-                   AND p.is_deleted = FALSE AND v.version = p.current_version AND v.status = 'RELEASED'
+                   AND $ENTITY_LIVE_P AND v.version = p.current_version AND v.status = 'RELEASED'
                    AND $BODY_HASH_EXPR = v.body_hash
                    -- A draft that raced in owns the pipeline's working state: the caller's
                    -- "identical to released" write is then a stale base (409), not a no-op —
@@ -1149,11 +1372,14 @@ class PipelineRepository(
                    updated_by = :actor, updated_at = NOW()
               FROM pipelines p
              WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
-               AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+               AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
             RETURNING $DETAIL_COLUMNS
             """.trimIndent()
 
-        /** versioning §5.3 — release: flip, pointer bump, metadata ride, one statement. */
+        /** versioning §5.3 — release: flip, pointer set (release(v) ⇒ current = v, D60's
+         * first event), metadata ride, one statement. The bumped arm needs no live
+         * predicate: `locked` already proved this workspace holds the pipeline's DRAFT, and
+         * an entity with a draft is live by derivation. */
         val RELEASE_DRAFT_SQL =
             """
             WITH locked AS (
@@ -1161,40 +1387,20 @@ class PipelineRepository(
                    SET status = 'RELEASED', released_at = NOW(), released_by = :actor
                   FROM pipelines p
                  WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
-                   AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+                   AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId
                 RETURNING $DETAIL_COLUMNS
             ), bumped AS (
                 UPDATE pipelines
                    SET current_version = (SELECT version FROM locked),
                        name = :name, display_name = :displayName, description = :description,
                        updated_at = NOW()
-                 WHERE id = :pipelineId AND workspace_id = :workspaceId AND is_deleted = FALSE
-                   AND EXISTS (SELECT 1 FROM locked)
+                  WHERE id = :pipelineId AND workspace_id = :workspaceId
+                    AND EXISTS (SELECT 1 FROM locked)
                 RETURNING $COLUMNS
             )
             SELECT ${COLUMNS.split(", ").joinToString(", ") { "b.$it AS b_$it" }},
                    ${DETAIL_COLS_PLAIN.split(", ").joinToString(", ") { "l.$it AS l_$it" }}
               FROM bumped b, locked l
-            """.trimIndent()
-
-        /** versioning §5.4 — delete a never-executed draft; the number returns to the pool. */
-        val DELETE_DRAFT_SQL =
-            """
-            DELETE FROM pipeline_versions v
-             USING pipelines p
-             WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
-               AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND p.is_deleted = FALSE
-            """.trimIndent()
-
-        /** versioning §5.4/§3.4 — the FK blocks the delete of an executed draft; flip instead. */
-        val FLIP_DRAFT_SQL =
-            """
-            UPDATE pipeline_versions v
-               SET status = 'DISCARDED'
-              FROM pipelines p
-             WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
-               AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND p.is_deleted = FALSE
-            RETURNING $DETAIL_COLUMNS
             """.trimIndent()
 
         /**
@@ -1218,7 +1424,7 @@ class PipelineRepository(
                          WHERE d.pipeline_id = p.id AND d.status = 'DRAFT' LIMIT 1),
                        p.current_version)
              CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
                AND node->'template' @> jsonb_build_object('id', :templateId, 'version', :pinnedVersion)
              ORDER BY p.name, node->>'id'
             """.trimIndent()
@@ -1232,7 +1438,7 @@ class PipelineRepository(
               FROM pipelines p
               JOIN pipeline_versions v ON v.pipeline_id = p.id
              CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
                AND node->'template'->>'id' = :templateId
              ORDER BY p.name, v.version DESC, node->>'id'
             """.trimIndent()
@@ -1250,7 +1456,7 @@ class PipelineRepository(
                          WHERE d.pipeline_id = p.id AND d.status = 'DRAFT' LIMIT 1),
                        p.current_version)
              CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
                AND node->'template'->>'id' = :templateId
              GROUP BY 1
             """.trimIndent()
@@ -1276,7 +1482,7 @@ class PipelineRepository(
               FROM pipelines p
               JOIN pipeline_versions v ON v.pipeline_id = p.id
              CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
                AND (node->>'source' = :datasourceName
                     OR node->'output'->>'datasource' = :datasourceName)
              ORDER BY p.name, v.version DESC, node->>'id'
@@ -1305,30 +1511,44 @@ class PipelineRepository(
                 )
             }
 
-        /** The version-less import path: next version appended directly as RELEASED. */
+        /**
+         * versioning §9.2 + D60 (101) — the version-less import: allocation is
+         * `max(version) + 1` (the pointer can be NULL or stale, never an allocator), and the
+         * pointer moves ONLY when the entity has no current at all — the first import onto a
+         * current-less entity sets it, every subsequent import leaves it for the human to
+         * switch. Index metadata adopts the imported body exactly when the pointer moved
+         * (the §3.7 row-indexes-the-current-release rule; a SET expression sees the OLD row,
+         * so `current_version IS NULL` is evaluated before the COALESCE sets it).
+         */
         val APPEND_RELEASED_SQL =
             """
-            WITH bumped AS (
-                UPDATE pipelines
-                   SET current_version = COALESCE(current_version, 0) + 1,
-                       name = :name,
-                       display_name = :displayName,
-                       description = :description,
-                       updated_at = NOW()
-                  WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE
-                RETURNING $COLUMNS
+            WITH alloc AS (
+                SELECT COALESCE(MAX(v.version), 0) + 1 AS next
+                  FROM pipeline_versions v
+                 WHERE v.pipeline_id = :id
             ), new_version AS (
                 INSERT INTO pipeline_versions
                     (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at)
-                SELECT id, current_version, CAST(:bodyJson AS jsonb), $BODY_HASH_EXPR,
+                SELECT p.id, alloc.next, CAST(:bodyJson AS jsonb), $BODY_HASH_EXPR,
                        'RELEASED', :actor, :actor, NOW()
-                  FROM bumped
-                RETURNING pipeline_id
+                  FROM pipelines p, alloc
+                 WHERE p.id = :id AND p.workspace_id = :workspaceId
+                RETURNING pipeline_id, version
+            ), bumped AS (
+                UPDATE pipelines
+                   SET current_version = COALESCE(current_version, (SELECT version FROM new_version)),
+                       name = CASE WHEN current_version IS NULL THEN :name ELSE name END,
+                       display_name = CASE WHEN current_version IS NULL THEN :displayName ELSE display_name END,
+                       description = CASE WHEN current_version IS NULL THEN :description ELSE description END,
+                       updated_at = NOW()
+                  WHERE id = :id AND workspace_id = :workspaceId
+                    AND EXISTS (SELECT 1 FROM new_version)
+                RETURNING $COLUMNS
             )
-            SELECT p.id, p.name, p.display_name, p.description, p.owner_id,
-                   p.current_version, p.is_deleted, p.created_at, p.updated_at
-              FROM bumped p
-              JOIN new_version v ON v.pipeline_id = p.id
+            SELECT b.id, b.name, b.display_name, b.description, b.owner_id,
+                   b.current_version, b.created_at, b.updated_at
+              FROM bumped b
+              JOIN new_version v ON v.pipeline_id = b.id
             """.trimIndent()
 
         /** versioning §9.2 — new pipeline at the source's exact version number. */
@@ -1347,12 +1567,20 @@ class PipelineRepository(
                 RETURNING pipeline_id
             )
             SELECT p.id, p.name, p.display_name, p.description, p.owner_id,
-                   p.current_version, p.is_deleted, p.created_at, p.updated_at
+                   p.current_version, p.created_at, p.updated_at
               FROM new_pipeline p
               JOIN new_version v ON v.pipeline_id = p.id
             """.trimIndent()
 
-        /** versioning §9.2 — exact-version insert onto an existing pipeline; index metadata rides only when it is the new latest. */
+        /**
+         * versioning §9.2 + D60 (101) — exact-version insert onto an existing pipeline.
+         * The pointer moves ONLY when it is NULL (first import onto a current-less entity);
+         * index metadata rides that same move, so the entity's displayed metadata still
+         * describes whatever its pointer actually names. The `NOT EXISTS` guard suppresses
+         * the insert when the number is taken — the caller re-reads and classifies per
+         * §9.2's table (including the DISCARDED-present row, which is why the statement
+         * carries no live predicate).
+         */
         val INSERT_RELEASED_VERSION_SQL =
             """
             WITH ins AS (
@@ -1361,24 +1589,184 @@ class PipelineRepository(
                 SELECT p.id, :version, CAST(:bodyJson AS jsonb), :bodyHash, 'RELEASED', :actor, :actor,
                        COALESCE(:releasedAt, NOW())
                   FROM pipelines p
-                 WHERE p.id = :pipelineId AND p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+                 WHERE p.id = :pipelineId AND p.workspace_id = :workspaceId
                    AND NOT EXISTS (SELECT 1 FROM pipeline_versions v
-                                    WHERE v.pipeline_id = p.id AND v.version = :version)
+                                   WHERE v.pipeline_id = p.id AND v.version = :version)
                 RETURNING $DETAIL_COLS_PLAIN
             ), bumped AS (
                 UPDATE pipelines
-                   SET current_version = GREATEST(COALESCE(current_version, 0), :version),
-                       name = CASE WHEN :version > COALESCE(current_version, 0) THEN :name ELSE name END,
-                       display_name =
-                           CASE WHEN :version > COALESCE(current_version, 0) THEN :displayName ELSE display_name END,
-                       description =
-                           CASE WHEN :version > COALESCE(current_version, 0) THEN :description ELSE description END,
+                   SET current_version = COALESCE(current_version, :version),
+                       name = CASE WHEN current_version IS NULL THEN :name ELSE name END,
+                       display_name = CASE WHEN current_version IS NULL THEN :displayName ELSE display_name END,
+                       description = CASE WHEN current_version IS NULL THEN :description ELSE description END,
                        updated_at = NOW()
-                 WHERE id = :pipelineId AND workspace_id = :workspaceId AND is_deleted = FALSE
-                   AND EXISTS (SELECT 1 FROM ins)
+                  WHERE id = :pipelineId AND workspace_id = :workspaceId
+                    AND EXISTS (SELECT 1 FROM ins)
                 RETURNING 1
             )
             SELECT $DETAIL_COLS_PLAIN FROM ins, bumped
+            """.trimIndent()
+
+        /**
+         * versioning §3.4 (101) — the pointer recompute that fires when a discard or a
+         * draft purge removed the version the pointer named: highest eligible live version,
+         * else NULL (MAX over an empty set IS null — the "else NULL" is free). Eligibility
+         * rides [draftEligible]: RELEASED always, DRAFT only under development posture.
+         * The `current_version = :version` guard is the "x = current" arm of D60's rule —
+         * a pointer that named something else does not move.
+         */
+        val POINTER_FALLBACK_SQL =
+            """
+            UPDATE pipelines
+               SET current_version = (
+                       SELECT MAX(lv.version) FROM pipeline_versions lv
+                        WHERE lv.pipeline_id = :pipelineId
+                          AND (lv.status = 'RELEASED' OR (:draftEligible AND lv.status = 'DRAFT'))
+                   ),
+                   updated_at = NOW()
+             WHERE id = :pipelineId AND workspace_id = :workspaceId
+               AND current_version = :version
+            """.trimIndent()
+
+        /**
+         * versioning §3.1/§3.4 (101) — discard a RELEASED version: status flip + discard
+         * stamps + the pointer recompute in ONE statement. The graph-rule-1 pin guard rides
+         * the flip (`NOT EXISTS` over LIVE parent versions pinning this exact version), so
+         * there is no read-then-act window between the guard and the flip. Zero rows ⇒ the
+         * target was not RELEASED, or it is pinned — the service re-reads and classifies.
+         */
+        val DISCARD_VERSION_SQL =
+            """
+            WITH flipped AS (
+                UPDATE pipeline_versions v
+                   SET status = 'DISCARDED', discarded_at = NOW(), discarded_by = :actor
+                  FROM pipelines p
+                 WHERE v.pipeline_id = :pipelineId AND v.version = :version AND v.status = 'RELEASED'
+                   AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId
+                   AND NOT EXISTS (
+                       SELECT 1 FROM pipelines pp
+                       JOIN pipeline_versions pv ON pv.pipeline_id = pp.id
+                       CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
+                        WHERE pp.workspace_id = :workspaceId
+                          AND pv.status IN ('DRAFT','RELEASED')
+                          AND pv.pipeline_id <> :pipelineId
+                          AND pnode->'pipeline'->>'name' = :pipelineName
+                          AND (pnode->'pipeline'->>'version')::int = :version
+                   )
+                RETURNING $DETAIL_COLUMNS
+            ), bumped AS (
+                UPDATE pipelines p
+                   SET current_version = CASE
+                           WHEN p.current_version = :version THEN (
+                               -- EXCLUDE the version being discarded: data-modifying CTEs
+                               -- cannot see each other's writes, so `flipped`'s change is
+                               -- invisible here and the un-excluded MAX would name the row
+                               -- we just retired.
+                               SELECT MAX(lv.version) FROM pipeline_versions lv
+                                WHERE lv.pipeline_id = p.id AND lv.version <> :version
+                                  AND (lv.status = 'RELEASED' OR (:draftEligible AND lv.status = 'DRAFT'))
+                           )
+                           ELSE p.current_version
+                       END,
+                       updated_at = NOW()
+                 WHERE p.id = :pipelineId AND p.workspace_id = :workspaceId
+                   AND EXISTS (SELECT 1 FROM flipped)
+                RETURNING $COLUMNS
+            )
+            SELECT ${COLUMNS.split(", ").joinToString(", ") { "b.$it AS b_$it" }},
+                   ${DETAIL_COLS_PLAIN.split(", ").joinToString(", ") { "f.$it AS f_$it" }}
+              FROM bumped b, flipped f
+            """.trimIndent()
+
+        /**
+         * versioning §3.1 (101) — restore a DISCARDED version: status back to RELEASED,
+         * discard stamps cleared, `released_at`/`released_by` UNTOUCHED (§8's derivation
+         * depends on one release stamp per version, forever). The pointer moves only
+         * above-current-or-NULL — `GREATEST(COALESCE(current_version, 0), :version)` is
+         * exactly D60's restore rule, evaluated on the OLD row by the same-statement SET.
+         * No live predicate: restoring the first version of a DISCARDED entity is the one
+         * way back.
+         */
+        val RESTORE_VERSION_SQL =
+            """
+            WITH restored AS (
+                UPDATE pipeline_versions v
+                   SET status = 'RELEASED', discarded_at = NULL, discarded_by = NULL
+                  FROM pipelines p
+                 WHERE v.pipeline_id = :pipelineId AND v.version = :version AND v.status = 'DISCARDED'
+                   AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId
+                RETURNING v.version
+            ), bumped AS (
+                UPDATE pipelines
+                   SET current_version = GREATEST(COALESCE(current_version, 0), (SELECT version FROM restored)),
+                       updated_at = NOW()
+                  WHERE id = :pipelineId AND workspace_id = :workspaceId
+                    AND EXISTS (SELECT 1 FROM restored)
+                RETURNING $COLUMNS
+            )
+            SELECT b.id, b.name, b.display_name, b.description, b.owner_id,
+                   b.current_version, b.created_at, b.updated_at
+              FROM bumped b
+            """.trimIndent()
+
+        /**
+         * versioning §3.4 (101) — the manual switch: `current = v`, v LIVE and
+         * posture-eligible, eligibility riding the statement's EXISTS. Zero rows ⇒ not
+         * eligible (or absent) — the service re-reads to tell `not_eligible` from a 404.
+         */
+        val SWITCH_CURRENT_SQL =
+            """
+            UPDATE pipelines p
+               SET current_version = :version, updated_at = NOW()
+             WHERE p.id = :pipelineId AND p.workspace_id = :workspaceId
+               AND EXISTS (
+                   SELECT 1 FROM pipeline_versions v
+                    WHERE v.pipeline_id = p.id AND v.version = :version
+                      AND (v.status = 'RELEASED' OR (:draftEligible AND v.status = 'DRAFT'))
+               )
+            RETURNING p.id, p.name, p.display_name, p.description, p.owner_id,
+                      p.current_version, p.created_at, p.updated_at
+            """.trimIndent()
+
+        /**
+         * Graph rule 1's evidence scan (101) — LIVE parent versions pinning
+         * `pipelineName@version`. A pin is inert when its carrying version is DISCARDED, so
+         * the scan filters `pv.status IN ('DRAFT','RELEASED')`; the parent entity itself is
+         * found through the join (a discarded entity cannot hold live versions by
+         * derivation, so no extra predicate is needed).
+         */
+        val LIVE_PARENT_PINS_SQL =
+            """
+            SELECT pp.id AS pipeline_id, pp.name AS pipeline_name, pv.version AS pipeline_version,
+                   pv.status AS version_status, pnode->>'id' AS node_id, :version AS pinned_version
+              FROM pipelines pp
+              JOIN pipeline_versions pv ON pv.pipeline_id = pp.id
+             CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
+             WHERE pp.workspace_id = :workspaceId
+               AND pv.pipeline_id <> (SELECT id FROM pipelines WHERE name = :pipelineName AND workspace_id = :workspaceId)
+               AND pv.status IN ('DRAFT','RELEASED')
+               AND pnode->'pipeline'->>'name' = :pipelineName
+               AND (pnode->'pipeline'->>'version')::int = :version
+             ORDER BY pp.name, pnode->>'id'
+            """.trimIndent()
+
+        /**
+         * The template twin of [LIVE_PARENT_PINS_SQL] (101) — LIVE pipeline versions pinning
+         * `templateId@version`; the evidence behind `template.in_use` when a template
+         * version is discarded or purged.
+         */
+        val LIVE_TEMPLATE_VERSION_PINS_SQL =
+            """
+            SELECT pp.id AS pipeline_id, pp.name AS pipeline_name, pv.version AS pipeline_version,
+                   pv.status AS version_status, pnode->>'id' AS node_id, :version AS pinned_version
+              FROM pipelines pp
+              JOIN pipeline_versions pv ON pv.pipeline_id = pp.id
+             CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
+             WHERE pp.workspace_id = :workspaceId
+               AND pv.status IN ('DRAFT','RELEASED')
+               AND pnode->'template'->>'id' = :templateId
+               AND (pnode->'template'->>'version')::int = :version
+             ORDER BY pp.name, pnode->>'id'
             """.trimIndent()
 
         val MAPPER =
@@ -1392,7 +1780,6 @@ class PipelineRepository(
                     // NULL since V18 = nothing released yet (D55); a sentinel Int would make
                     // every reader responsible for knowing which number means "no release".
                     currentVersion = rs.getInt("current_version").takeUnless { rs.wasNull() },
-                    isDeleted = rs.getBoolean("is_deleted"),
                     // TIMESTAMPTZ → OffsetDateTime is exact regardless of the JVM zone;
                     // getTimestamp() without a Calendar reads it in the default zone
                     // (metadata-db §6.1 "timestamp reads").
@@ -1412,9 +1799,44 @@ class PipelineRepository(
                     createdBy = rs.getObject("created_by", UUID::class.java),
                     releasedAt = rs.getObject("released_at", OffsetDateTime::class.java)?.toInstant(),
                     releasedBy = rs.getObject("released_by", UUID::class.java),
+                    discardedAt = rs.getObject("discarded_at", OffsetDateTime::class.java)?.toInstant(),
+                    discardedBy = rs.getObject("discarded_by", UUID::class.java),
                     updatedBy = rs.getObject("updated_by", UUID::class.java),
                     updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
                 )
+            }
+
+        /**
+         * [DISCARD_VERSION_SQL]'s joined projection: the bumped record (b_) beside the
+         * flipped version (f_) — the pair [discardVersion] returns so the caller sees both
+         * the pointer move and the flip in one read.
+         */
+        val DISCARD_MAPPER =
+            RowMapper { rs: ResultSet, _: Int ->
+                PipelineRecord(
+                    id = rs.getObject("b_id", UUID::class.java),
+                    name = rs.getString("b_name"),
+                    displayName = rs.getString("b_display_name"),
+                    description = rs.getString("b_description"),
+                    ownerId = rs.getObject("b_owner_id", UUID::class.java),
+                    currentVersion = rs.getInt("b_current_version").takeUnless { rs.wasNull() },
+                    createdAt = rs.getObject("b_created_at", OffsetDateTime::class.java).toInstant(),
+                    updatedAt = rs.getObject("b_updated_at", OffsetDateTime::class.java).toInstant(),
+                ) to
+                    PipelineVersionDetail(
+                        pipelineId = rs.getObject("f_pipeline_id", UUID::class.java),
+                        version = rs.getInt("f_version"),
+                        status = PipelineVersionStatus.fromWire(rs.getString("f_status")),
+                        bodyHash = rs.getString("f_body_hash"),
+                        createdAt = rs.getObject("f_created_at", OffsetDateTime::class.java).toInstant(),
+                        createdBy = rs.getObject("f_created_by", UUID::class.java),
+                        releasedAt = rs.getObject("f_released_at", OffsetDateTime::class.java)?.toInstant(),
+                        releasedBy = rs.getObject("f_released_by", UUID::class.java),
+                        discardedAt = rs.getObject("f_discarded_at", OffsetDateTime::class.java)?.toInstant(),
+                        discardedBy = rs.getObject("f_discarded_by", UUID::class.java),
+                        updatedBy = rs.getObject("f_updated_by", UUID::class.java),
+                        updatedAt = rs.getObject("f_updated_at", OffsetDateTime::class.java)?.toInstant(),
+                    )
             }
 
         /** [RELEASE_DRAFT_SQL]'s joined projection: the bumped record (b_) beside the released version (l_). */
@@ -1429,7 +1851,6 @@ class PipelineRepository(
                             description = rs.getString("b_description"),
                             ownerId = rs.getObject("b_owner_id", UUID::class.java),
                             currentVersion = rs.getInt("b_current_version").takeUnless { rs.wasNull() },
-                            isDeleted = rs.getBoolean("b_is_deleted"),
                             createdAt = rs.getObject("b_created_at", OffsetDateTime::class.java).toInstant(),
                             updatedAt = rs.getObject("b_updated_at", OffsetDateTime::class.java).toInstant(),
                         ),
@@ -1443,6 +1864,8 @@ class PipelineRepository(
                             createdBy = rs.getObject("l_created_by", UUID::class.java),
                             releasedAt = rs.getObject("l_released_at", OffsetDateTime::class.java)?.toInstant(),
                             releasedBy = rs.getObject("l_released_by", UUID::class.java),
+                            discardedAt = rs.getObject("l_discarded_at", OffsetDateTime::class.java)?.toInstant(),
+                            discardedBy = rs.getObject("l_discarded_by", UUID::class.java),
                             updatedBy = rs.getObject("l_updated_by", UUID::class.java),
                             updatedAt = rs.getObject("l_updated_at", OffsetDateTime::class.java)?.toInstant(),
                         ),

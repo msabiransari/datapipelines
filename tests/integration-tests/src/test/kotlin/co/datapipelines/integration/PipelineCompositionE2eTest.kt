@@ -56,6 +56,7 @@ import java.util.concurrent.TimeUnit
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one composition story in one suite; the 101 release helpers grew it past the threshold
 class PipelineCompositionE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -76,7 +77,7 @@ class PipelineCompositionE2eTest {
         )
 
         // Pipeline A (child): one DQL caller node over the H2 datasource.
-        createPipeline(
+        createReleasedPipeline(
             "test/comp_leaf",
             "Composition Leaf",
             listOf(
@@ -138,13 +139,13 @@ class PipelineCompositionE2eTest {
     @Order(2)
     fun `grandchild depth-3 chain succeeds with per-generation lineage`() {
         // comp_mid → comp_leaf (depth 2), comp_root → comp_mid (depth 3).
-        createPipeline(
+        createReleasedPipeline(
             "test/comp_mid",
             "Composition Mid",
             listOf(pipelineNode("run_leaf", "test/comp_leaf", 1)),
         )
         val rootId =
-            createPipeline(
+            createReleasedPipeline(
                 "test/comp_root",
                 "Composition Root",
                 listOf(pipelineNode("run_mid", "test/comp_mid", 1)),
@@ -322,8 +323,8 @@ class PipelineCompositionE2eTest {
     fun `a depth-6 chain is refused at save with composition_too_deep`() {
         // comp_root is depth 3; comp_d4 → depth 4, comp_d5 → depth 5 (the configured max),
         // comp_d6 → depth 6 must fail validation at save (§12.9, static reference-tree walk).
-        createPipeline("test/comp_d4", "Composition Depth 4", listOf(pipelineNode("run_root", "test/comp_root", 1)))
-        createPipeline("test/comp_d5", "Composition Depth 5", listOf(pipelineNode("run_d4", "test/comp_d4", 1)))
+        createReleasedPipeline("test/comp_d4", "Composition Depth 4", listOf(pipelineNode("run_root", "test/comp_root", 1)))
+        createReleasedPipeline("test/comp_d5", "Composition Depth 5", listOf(pipelineNode("run_d4", "test/comp_d4", 1)))
 
         postPipeline("test/comp_d6", "Composition Depth 6", listOf(pipelineNode("run_d5", "test/comp_d5", 1)))
             .then()
@@ -348,7 +349,7 @@ class PipelineCompositionE2eTest {
             "Composition Quarter Rows",
             "SELECT id, label FROM comp_quarters WHERE quarter = :run_fiscal_quarter ORDER BY id",
         )
-        return createPipeline(
+        return createReleasedPipeline(
             "test/comp_quarter_child",
             "Composition Quarter Child",
             listOf(
@@ -557,7 +558,7 @@ class PipelineCompositionE2eTest {
      */
     private fun createSlowFamily(suffix: String): String {
         createTemplate("test/comp_$suffix.sql", "H2", "Composition ${suffix.replaceFirstChar { it.uppercase() }}", SLOW_H2_SQL)
-        createPipeline(
+        createReleasedPipeline(
             "test/comp_${suffix}_leaf",
             "Composition $suffix Leaf",
             listOf(
@@ -728,20 +729,35 @@ class PipelineCompositionE2eTest {
         displayName: String,
         body: String,
     ) {
+        val response =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .body(
+                    """
+                    {"id": "$id", "dialect": "$dialect", "display_name": "$displayName",
+                     "description": "Composition E2E template", "imports": [],
+                     "body": ${mapper.writeValueAsString(body)}}
+                    """.trimIndent(),
+                ).`when`()
+                .post("/api/v1/templates")
+                .then()
+                .statusCode(201)
+                .extract()
+        // 101/D58 chain: templates lock first — a child pipeline cannot release while its
+        // pin is a draft, so every composed fixture releases its template right after create.
+        val hash = response.jsonPath().getString("data.body_hash")
         given()
             .port(port)
-            .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body(
-                """
-                {"id": "$id", "dialect": "$dialect", "display_name": "$displayName",
-                 "description": "Composition E2E template", "imports": [],
-                 "body": ${mapper.writeValueAsString(body)}}
-                """.trimIndent(),
-            ).`when`()
-            .post("/api/v1/templates")
+            .header("If-Match", hash)
+            .contentType(ContentType.JSON)
+            .body("""{"name": "$id"}""")
+            .`when`()
+            .post("/api/v1/templates/release")
             .then()
-            .statusCode(201)
+            .statusCode(200)
     }
 
     private fun createPipeline(
@@ -756,6 +772,35 @@ class PipelineCompositionE2eTest {
             )
         }
         return response.jsonPath().getString("data.id")
+    }
+
+    /**
+     * 101/D58: a PIPELINE node may pin only a RELEASED child, so every child a parent
+     * composes is created AND released here (the pre-101 flow relied on the child's v1
+     * DRAFT being pinnable — D58 withdrew exactly that).
+     */
+    private fun createReleasedPipeline(
+        name: String,
+        displayName: String,
+        nodes: List<Map<String, Any?>>,
+    ): String {
+        val response = postPipeline(name, displayName, nodes)
+        if (response.statusCode() != 201) {
+            throw AssertionError(
+                "Pipeline '$name' creation failed (status=${response.statusCode()}): ${response.body().asString()}",
+            )
+        }
+        val id = response.jsonPath().getString("data.id")
+        val hash = response.jsonPath().getString("data.body_hash")
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .header("If-Match", hash)
+            .`when`()
+            .post("/api/v1/pipelines/$id/release")
+            .then()
+            .statusCode(200)
+        return id
     }
 
     private fun postPipeline(

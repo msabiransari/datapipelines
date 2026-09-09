@@ -186,10 +186,16 @@ catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # as the defining list, so codes defined there join the catalog.
 catalog |= {c for c in re.findall(CODE_RE, texts.get("docs/datasources.md", ""))
             if c.startswith("datasource.validation.")}
-# audit events (enums §15) are events, not error codes — extract only from §15
+# audit events (enums §15) are events, not error codes — extract only from §15.
+# `pipeline` and `template` joined the event extraction in 101: the version-lifecycle
+# audit events (`pipeline.version.discarded`, `template.purged`, …) live in §15's
+# version-lifecycle sub-table exactly like the auth.*/datasource.*/mcp.* events — the
+# endpoint/074 and mcp/052 precedent. They remain distinguishable from error codes
+# because extraction is §15-only: a `pipeline.version.*` NAME still has to be defined
+# in §15 before any doc may cite it, and §13 catalog codes are unaffected.
 enums_txt = texts.get("docs/enums.md", "")
 sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
-events = set(re.findall(r"(?:auth|datasource|mcp|endpoint)\.[a-z_]+(?:\.[a-z_]+)*",
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
