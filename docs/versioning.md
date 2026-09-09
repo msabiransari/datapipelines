@@ -776,7 +776,7 @@ well, and it is what "we always run the LAST version" means:
 | `pipelines_execute` (MCP) | working version |
 | `datapipelines://pipelines/{id}` (MCP resource, no `/versions/{n}`) | working version |
 | `pipelines_get`, `GET /pipelines/{id}`, the editor | working version (§7.1, unchanged) |
-| A published endpoint (`GET /api/x/…`) | **released only** — a draft is never served (§5.1 of published-endpoints); unchanged |
+| A published endpoint (`GET /api/x/…`) | **whatever the pointer names** — in development that may be a draft (D63, §3.4 "A draft pointer"); outside development no draft exists, so released only by construction |
 | Promotion candidates and the promotion push | **released only** (D6); unchanged |
 
 One place resolves it: `PipelineService.workingVersion(workspaceId, record)`. It was three

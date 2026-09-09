@@ -113,6 +113,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED to HttpStatus.BAD_GATEWAY,
+            // §13.4 — the node's statement outlived its JDBC query timeout: 504 like its sibling
+            // `pipeline.execution.timeout`, not the 502 a wrong query earns.
+            PipelineErrorCodes.Node.QUERY_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
             // §13.4 — 500 like the pipeline.node family default, wired explicitly so the code
             // owns a row rather than being absorbed by the default (the 025 A2 convention).
             PipelineErrorCodes.Node.SQL_PARAMETER_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,

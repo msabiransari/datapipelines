@@ -359,6 +359,17 @@ object PipelineErrorCodes {
         const val DATASOURCE_READONLY = "pipeline.node.datasource_readonly"
         const val DATASOURCE_CONNECTION_FAILED = "pipeline.node.datasource_connection_failed"
         const val QUERY_EXECUTION_FAILED = "pipeline.node.query_execution_failed"
+
+        /**
+         * §13.4 — the node's statement outlived its JDBC query timeout (the datasource's
+         * `query_timeout_seconds`, else `node-query-timeout-seconds`) and the driver cancelled
+         * it. HTTP 504, the sibling of [Execution.TIMEOUT]. Distinct from
+         * [QUERY_EXECUTION_FAILED] on purpose: "your query is too slow for the budget" and "your
+         * SQL is wrong" call for different fixes, and the driver text that used to be the only
+         * clue (`INTERRUPT Error: Interrupted!`, `canceling statement due to user request`,
+         * `Statement was canceled`) names none of ours.
+         */
+        const val QUERY_TIMEOUT = "pipeline.node.query_timeout"
         const val STAGING_FAILED = "pipeline.node.staging_failed"
         const val WRITEBACK_FAILED = "pipeline.node.writeback_failed"
         const val WRITEBACK_TARGET_MISSING = "pipeline.node.writeback_target_missing"
@@ -791,7 +802,10 @@ object PipelineErrorCodes {
          */
         const val PIPELINE_NOT_READONLY = "endpoint.pipeline_not_readonly"
 
-        /** §5.1 — the published pipeline has no RELEASED version to serve; a draft is never served. */
+        /**
+         * §5.1 — the published pipeline has no servable version: nothing the pointer names is
+         * eligible (RELEASED always; a DRAFT only under development posture — D63).
+         */
         const val PIPELINE_NOT_RELEASED = "endpoint.pipeline_not_released"
 
         /**

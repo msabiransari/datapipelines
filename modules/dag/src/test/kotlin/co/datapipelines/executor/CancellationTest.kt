@@ -13,6 +13,7 @@ import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -20,6 +21,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
+import java.sql.SQLException
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
@@ -91,6 +93,68 @@ class CancellationTest {
         }
 
     /**
+     * T202: the handle is the one place holding both the statement's timeout and the clock
+     * around the driver call, so it — not a per-driver message table — decides "this driver
+     * error is the query timeout's consequence". Three branches: elapsed past the budget with no
+     * abort in flight converts; a fast failure is a real query failure and passes through; an
+     * abort in flight is left for `withStatement`, which converts it to an abort with no code.
+     */
+    @Test
+    fun `a driver error after the statement's own timeout elapsed is the query timeout`() =
+        runBlocking<Unit> {
+            val handle = InMemoryCancellationRegistry().register(UUID.randomUUID())
+            val statement = TimedStatement(queryTimeoutSeconds = 1)
+
+            val timeout =
+                shouldThrow<NodeQueryTimeoutException> {
+                    handle.withStatement("n", statement) {
+                        handle.whileExecuting("n", statement) {
+                            Thread.sleep(TIMEOUT_OVERSHOOT_MS)
+                            throw SQLException("INTERRUPT Error: Interrupted!", null, 0)
+                        }
+                    }
+                }
+            timeout.code shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
+            timeout.timeoutSeconds shouldBe 1
+            (timeout.elapsedMs >= TIMEOUT_OVERSHOOT_MS).shouldBeTrue()
+            timeout.cause.shouldBeInstanceOf<SQLException>()
+        }
+
+    @Test
+    fun `a driver error inside the budget is a real query failure and passes through`() =
+        runBlocking<Unit> {
+            val handle = InMemoryCancellationRegistry().register(UUID.randomUUID())
+            val statement = TimedStatement(queryTimeoutSeconds = 60)
+
+            shouldThrow<SQLException> {
+                handle.withStatement("n", statement) {
+                    handle.whileExecuting("n", statement) { throw SQLException("syntax error", "42000", 0) }
+                }
+            }.sqlState shouldBe "42000"
+        }
+
+    @Test
+    fun `a driver error after an abort in flight stays an abort, never a query timeout`() =
+        runBlocking<Unit> {
+            val registry = InMemoryCancellationRegistry()
+            val executionId = UUID.randomUUID()
+            val handle = registry.register(executionId)
+            val statement = TimedStatement(queryTimeoutSeconds = 1)
+
+            shouldThrow<ExecutionAbortedException> {
+                handle.withStatement("n", statement) {
+                    handle.whileExecuting("n", statement) {
+                        Thread.sleep(TIMEOUT_OVERSHOOT_MS)
+                        // The cancel lands while the driver is "blocked": elapsed is past the
+                        // budget AND the run is aborted — the abort must win.
+                        registry.cancel(executionId, AbortReason.CANCELLED)
+                        throw SQLException("Statement was canceled", "57014", 57014)
+                    }
+                }
+            }.reason shouldBe AbortReason.CANCELLED
+        }
+
+    /**
      * 086 A1, the first half: the **cancel latch** refuses to enter the driver at all.
      *
      * This is the O7 flake, reproduced deterministically and in milliseconds. The cancel lands in
@@ -103,6 +167,7 @@ class CancellationTest {
      * The driver call is `error(...)`: the guard is only a guard if entering the driver is fatal,
      * not merely slower. Delete the latch and this goes red with an `IllegalStateException`.
      */
+
     @Test
     fun `the cancel latch refuses the driver call for a statement registered before the cancel`() =
         runBlocking<Unit> {
@@ -614,6 +679,9 @@ class CancellationTest {
 
         /** [DriverLikeStatement]'s dropped-cancel window: parse-and-plan before a command exists. */
         const val PROLOGUE_MS = 300L
+
+        /** Past a 1 s `queryTimeout` by a clear margin — the T202 branch keys on elapsed time. */
+        const val TIMEOUT_OVERSHOOT_MS = 1_100L
 
         /** Twenty times [REISSUE_BUDGET_MS] — a dropped cancel cannot pass for a landed one. */
         const val RUNAWAY_MS = 20_000L

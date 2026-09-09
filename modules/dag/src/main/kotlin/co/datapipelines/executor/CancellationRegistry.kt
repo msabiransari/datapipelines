@@ -251,7 +251,24 @@ class InMemoryCancellationRegistry : CancellationRegistry {
             driverCall: () -> T,
         ): T {
             latch(nodeId, stmt)
-            return driverCall()
+            // Read before the call: a driver that failed may have closed the statement, and
+            // `getQueryTimeout` on a closed statement throws on most of them.
+            val timeoutSeconds = stmt.queryTimeout
+            val startedAt = System.nanoTime()
+            try {
+                return driverCall()
+            } catch (e: SQLException) {
+                // T202: the statement's own budget has elapsed, so the driver error is the query
+                // timeout's consequence — H2 and Postgres say `57014`, DuckDB `INTERRUPT Error`,
+                // MySQL a `SQLTimeoutException`, MSSQL `HYT00`; classifying by elapsed time is the
+                // one test every driver passes. An abort in flight is not relabelled: `withStatement`
+                // converts that one, and a cancelled run must carry no error code (§8.3).
+                val elapsedMs = (System.nanoTime() - startedAt) / NANOS_PER_MILLI
+                if (timeoutSeconds > 0 && elapsedMs >= timeoutSeconds * MILLIS_PER_SECOND && reason.get() == null) {
+                    throw NodeQueryTimeoutException(timeoutSeconds, elapsedMs, e)
+                }
+                throw e
+            }
         }
 
         /**
@@ -368,6 +385,9 @@ class InMemoryCancellationRegistry : CancellationRegistry {
 
             /** 80 × 25 ms = 2 s of re-issuing; past that, `queryTimeout` owns the problem. */
             const val REISSUE_ATTEMPTS = 80
+
+            const val NANOS_PER_MILLI = 1_000_000L
+            const val MILLIS_PER_SECOND = 1_000L
         }
     }
 }

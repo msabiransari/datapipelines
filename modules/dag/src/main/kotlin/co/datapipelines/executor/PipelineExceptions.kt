@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import kotlinx.coroutines.CancellationException
+import java.sql.SQLException
 
 /**
  * The executor's exception hierarchy (dag-executor.md §8.1).
@@ -84,6 +85,25 @@ class PipelineTimeoutException(
         code = PipelineErrorCodes.Execution.TIMEOUT,
         message = "Pipeline timed out after ${elapsedMs}ms",
         details = mapOf("timed_out_node_id" to timedOutNodeId, "elapsed_ms" to elapsedMs),
+    )
+
+/**
+ * A node's statement outlived its JDBC query timeout and the driver cancelled it (§8.2, T202).
+ *
+ * Raised by the cancellation handle, the one place that holds both the statement (and so the
+ * timeout it was armed with) and the clock around the driver call: a driver error that arrives
+ * after the statement's own budget has elapsed is the timeout's *consequence*, however the
+ * driver spells it. Carries the catalog code, so [ErrorCodeMapper] passes it through unchanged.
+ */
+class NodeQueryTimeoutException(
+    val timeoutSeconds: Int,
+    val elapsedMs: Long,
+    cause: SQLException,
+) : PipelineException(
+        code = PipelineErrorCodes.Node.QUERY_TIMEOUT,
+        message = "Query exceeded its timeout of ${timeoutSeconds}s and was cancelled after ${elapsedMs}ms",
+        details = mapOf("timeout_seconds" to timeoutSeconds, "elapsed_ms" to elapsedMs, "sql_state" to cause.sqlState),
+        cause = cause,
     )
 
 /** No execution slot was free (§5.3) — per-user or the instance-wide ceiling (050/R2). */

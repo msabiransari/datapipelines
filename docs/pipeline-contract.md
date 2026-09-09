@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.12 (revised — see Change Log)
+**Status:** v1.13 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-06
@@ -849,6 +849,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.datasource_readonly` | 500 | Datasource resolved at write-time but its **live** registry entry is readonly at run-time: a write-shaped use (a `DML`/`DDL` node `source`, or any node's `output.target: "datasource"`) of a datasource flagged `is_readonly` after this pipeline version was saved — the workspaces D10 flip window. The executor re-checks the live registry entry (past the metadata cache) at node execution time, so the flip fails HERE instead of shipping the write; a PIPELINE node's child nodes pass the same backstop in their own execution |
 | `pipeline.node.datasource_connection_failed` | 502 | Could not acquire connection to datasource |
 | `pipeline.node.query_execution_failed` | 502 | SQL executed but failed (syntax, permission, etc.) |
+| `pipeline.node.query_timeout` | 504 | The node's statement outlived its JDBC query timeout (the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds`) and the driver cancelled it. The detail carries `timeout_seconds` and `elapsed_ms`. Sibling of `pipeline.execution.timeout`; distinct from `query_execution_failed` because "too slow for the budget" and "wrong SQL" want different fixes |
 | `pipeline.node.staging_failed` | 500 | Could not stage ResultSet into tempdb |
 | `pipeline.node.writeback_failed` | 500 | Could not write ResultSet to external datasource (output.target: "datasource") |
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
@@ -1047,7 +1048,7 @@ response whose `details.errors[]` names every defect at once.
 | `endpoint.path_conflict` | 409 | The pattern could match the same URL as an already-published one (`/a/{x}` against `/a/b`); `details.conflicting_path` names the other. Ambiguity is refused, never resolved by precedence — at request time at most one pattern may match |
 | `endpoint.path_variable_unknown` | 400 | A `{variable}` in the path names no declared parameter of the pipeline's released version |
 | `endpoint.pipeline_not_readonly` | 409 | The pipeline is not side-effect-free: a `DML`/`DDL` node, or a DQL node writing back to a datasource, transitively through `PIPELINE` children; `details.node_id` names the offender. Raised at publish. The SAME code is returned as `503` at serve time ([REST API §19.4](rest-api.md#194-the-response)) when a later release breaks the rule under a live endpoint — the endpoint is not run |
-| `endpoint.pipeline_not_released` | 503 | The published pipeline has no RELEASED version to serve; a draft is never served |
+| `endpoint.pipeline_not_released` | 503 | The published pipeline has no servable version: nothing its pointer names is eligible — RELEASED always, a DRAFT only under development posture ([Versioning D63](versioning.md#2-decision-log)) |
 | `endpoint.not_found` | 404 | No endpoint matches the request path. Deliberately identical for an unknown path and a disabled one — distinguishing them would let an unauthenticated caller enumerate the registry |
 | `endpoint.method_not_allowed` | 405 | Any method but `GET` under `/api/x`; the response carries `Allow: GET` |
 | `endpoint.not_acceptable` | 406 | An `Accept` this surface cannot satisfy (v1 serves `application/json`) |
@@ -1299,6 +1300,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.13 | T202 node query timeout | §13.4 gains `pipeline.node.query_timeout` (504): a statement cancelled by its own JDBC query timeout reports the timeout, not `query_execution_failed` + driver text. |
 | 2026-09-08 | v1.12 | 099 draft-first (D55/D56) | §14's operation table: `POST /pipelines` lands v1 **DRAFT** with a null pointer, `GET /pipelines/{id}` is the working version, `POST …/execute` defaults to the working version, and `GET …/export` refuses a never-released pipeline with `pipeline.promotion.not_released`. No new error code and no §13 row: every refusal reuses a catalogued one. |
 | 2026-09-06 | v1.12 | 078 composition mapping | The parent→child mapping half of the calculator input ruling (v1.11): a PIPELINE node's `parameters` may now map onto a child CALCULATOR `context_key` as well as a declared parameter (supplied → the child's node is skipped, §4.10's rule composed), and a `"${ref}"` value resolves against all three parent Context tiers — a declared parameter, a parent calculator `context_key` (typed by its kind's output), an org/platform key (org STRING, platform canonical) — type-checked against the target with the unchanged codes, messages naming the tiers; an ANY-output key on either side skips the check (typed only by the run, A6's convention). **No auto-passthrough:** identically spelled parent/child calculator keys are not implicitly mapped — only explicit entries cross. The read surfaces list calculator keys under `parameters` as `{"type", "required": false, "derived": true}` (`"ANY"` for ANY-output kinds), derived on read, never stored. Additive per §15.2. |
 | 2026-09-06 | v1.11 | 078 calculator input ruling | A calculator `context_key` is an implicit **optional execute input** (owner ruling 2026-09-05): supplied in the execute request's `parameters` object → the node is skipped and the supplied value (coerced against the kind's output type; an ANY-output key takes any JSON scalar, refusal = `pipeline.execution.invalid_parameter_type`, §13.3) is what downstream nodes bind, marked `provided_by: "caller"` on the node's stats; unsupplied (JSON `null` included) → the node runs and computes it. §7.2's tier 4 widened accordingly (org < platform < parameters < execute-time inputs — now including calculator keys < calculator outputs). The parent→child mapping half of the ruling — a parent maps a calculator key into a child execution explicitly — ships as its own row with the composition change. Additive per §15.2. |

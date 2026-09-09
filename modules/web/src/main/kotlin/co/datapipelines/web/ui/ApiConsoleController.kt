@@ -79,7 +79,7 @@ class ApiConsoleController(
         // [PipelineNames] was written for (T114). `EndpointsController` still does the
         // per-row read; this page has no excuse to copy it.
         val names = pipelineNames.lookup(workspaceId, endpoints.map { it.pipelineId }.toSet())
-        val released = pipelineNames.releasedVersions(workspaceId, endpoints.map { it.pipelineId }.toSet())
+        val served = pipelineNames.servedVersions(workspaceId, endpoints.map { it.pipelineId }.toSet())
 
         // "Bound keys" is the EXACT-NODE count, which is what the REST surface reports and
         // what a reader can act on ("this path has bindings"). It is deliberately NOT the
@@ -98,7 +98,8 @@ class ApiConsoleController(
                     segments = endpoint.parsed.segments.map { segment -> segment is EndpointPath.Segment.Variable },
                     pipelineDisplayName = name?.displayName ?: name?.name ?: DELETED_PIPELINE,
                     pipelinePath = name?.name,
-                    releasedVersion = released[endpoint.pipelineId],
+                    servedVersion = served[endpoint.pipelineId]?.version,
+                    servedDraft = served[endpoint.pipelineId]?.draft ?: false,
                     timeoutSeconds = endpoint.timeoutSeconds,
                     boundKeys = boundByPath[endpoint.pathPattern]?.size ?: 0,
                     enabled = endpoint.isEnabled,
@@ -186,7 +187,8 @@ class ApiConsoleController(
         val segments: List<Boolean>,
         val pipelineDisplayName: String,
         val pipelinePath: String?,
-        val releasedVersion: Int?,
+        val servedVersion: Int?,
+        val servedDraft: Boolean,
         val timeoutSeconds: Int,
         val boundKeys: Int,
         val enabled: Boolean,

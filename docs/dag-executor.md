@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.7 (revised — see Change Log)
+**Status:** v1.8 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-09-03
@@ -951,6 +951,7 @@ Construction rules (these are the shapes §5.2 actually throws):
 |---|---|
 | `SQLException` during connection acquire | `pipeline.node.datasource_connection_failed` |
 | `SQLException` during query execution | `pipeline.node.query_execution_failed` |
+| `SQLException` arriving after the statement's own JDBC query timeout elapsed (the driver cancelled it) | `pipeline.node.query_timeout` — raised by the cancellation handle, which alone holds the statement's timeout and the clock around the driver call; classified by elapsed time because every driver spells the cancel differently (H2/Postgres `57014`, DuckDB `INTERRUPT Error`, MySQL `SQLTimeoutException`, MSSQL `HYT00`). An abort in flight is never relabelled — §8.3, a cancelled run carries no code |
 | Freemarker render error | `pipeline.node.template_render_failed` |
 | Template not found at runtime | `pipeline.node.template_not_found` |
 | Datasource not found at runtime | `pipeline.node.datasource_not_found` |
@@ -1423,6 +1424,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.8 | T202 node query timeout | §8.2 gains the `pipeline.node.query_timeout` row: `CancellationHandle.whileExecuting` converts a driver error that arrives after the statement's own timeout into `NodeQueryTimeoutException`. |
 | 2026-09-07 | v1.7 | 086 cancel race | §8.3.2: the **registration window** named as a defect the executor owns, not a driver caveat — between `withStatement` registering a statement and the runner entering `executeQuery` the driver holds no command, and a `cancel()` landing there is dropped, so the query runs its full length under an already-cancelled coroutine. Two mechanisms close it, both documented: the **cancel latch** (`whileExecuting`, added to `CancellationHandle` in §8.3.1 and wrapping every one of the seven blocking driver calls — it reads the handle's `abortReason` AND the coroutine's liveness, the second being what carries the guard onto a composed child whose own handle a family cancel never touches) and **cancel re-issue** (`cancelStatements()` re-issues `Statement.cancel()` at 25 ms for up to 2 s while a statement stays registered, covering the driver's own parse-and-plan prologue, which no check of ours can see). `node-query-timeout-seconds` is unchanged as the backstop past that window. New MEASURED table: `Statement.cancel()` in flight is honoured by all five bundled dialects (H2, Postgres, MySQL, SQLite, DuckDB) — so the old "some drivers, some statement kinds" caveat describes none of them — and a cancel issued before registration is dropped by all five, so the window is universal rather than an H2 quirk. |
 | 2026-09-02 | v1.4 | 051 auth/config sweep | §8.3 gains the descendant sentence (T20): an in-flight child stopped by an ancestor’s cancellation or expired deadline ends ABORTED — carrying the family’s abort reason (a DELETE’s `cancelled` survives onto every descendant’s row; an ancestor timeout also records `cancelled`, since no catalogued reason exists for it) — never FAILED, which would misattribute the stop to the child’s own pipeline. Scope liveness, not exception shape, tells “my deadline” from “an ancestor’s” |
 | 2026-08-05 | v1.0 | initial draft | Initial DAG executor spec: ~150-line `Dag<T>`, parallel execution via coroutines, fail-fast, SSE integration, idempotency |

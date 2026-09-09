@@ -13,6 +13,14 @@ data class PipelineName(
     val displayName: String?,
 )
 
+/** What a published endpoint serves right now: the pointer's number, and whether it is a draft (D63). */
+data class ServedVersion(
+    val version: Int,
+    val draft: Boolean,
+)
+
+private const val DRAFT_STATUS = "DRAFT"
+
 /**
  * T114: the execution lists render the pipeline's DISPLAY name, but [ExecutionRecord]
  * carries only `pipelineId` — and `dag`/`pipeline-contract` are outside this change's
@@ -46,36 +54,37 @@ class PipelineNames(
     }
 
     /**
-     * 079 §C: the RELEASED version of each pipeline, for the published-endpoints table.
+     * The version each published endpoint SERVES, keyed by pipeline id — the pointer
+     * (`pipelines.current_version`) and its status.
      *
-     * A published endpoint pins a pipeline, never a version — the latest RELEASED version is
-     * resolved per request (`EndpointPublishService`). So `pipelines.current_version` is the
-     * wrong number to show: it is the newest version of any status, and rendering a DRAFT
-     * number next to a live endpoint would state that the endpoint serves something it does
-     * not. This asks for the highest version whose status is RELEASED, which is exactly what
-     * a call to that endpoint will run.
+     * A published endpoint pins a pipeline, never a version, and the serve path resolves the
+     * pointer per request (`PublishedEndpointServeService`): a RELEASED version always, a DRAFT
+     * only under development posture (Versioning D63). The pointer is sticky and event-driven
+     * (D60), so it is exactly what a call to that endpoint will run — and when it names a draft
+     * the console must SAY draft, not report "no release" about an endpoint that is answering.
      *
-     * A pipeline with no released version yields no entry, and the template renders "—" —
-     * an endpoint can outlive the release it was published against (the pipeline's only
-     * release can be discarded), and that is worth seeing rather than papering over.
+     * A pipeline whose pointer is NULL (nothing eligible: never released, or every release
+     * discarded) yields no entry, and the template renders that — an endpoint can outlive the
+     * release it was published against, and that is worth seeing rather than papering over.
      *
      * ONE batch query, same rule as [lookup]: the table has as many rows as the workspace has
      * endpoints, and a query per row is how a list page becomes slow without anyone noticing.
      */
-    fun releasedVersions(
+    fun servedVersions(
         workspaceId: UUID,
         pipelineIds: Collection<UUID>,
-    ): Map<UUID, Int> {
+    ): Map<UUID, ServedVersion> {
         if (pipelineIds.isEmpty()) return emptyMap()
         return jdbc
             .query(
-                "SELECT v.pipeline_id, MAX(v.version) AS released" +
-                    " FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id" +
-                    " WHERE p.workspace_id = :workspaceId AND v.pipeline_id IN (:ids)" +
-                    " AND v.status = 'RELEASED' GROUP BY v.pipeline_id",
+                "SELECT p.id, p.current_version, v.status" +
+                    " FROM pipelines p JOIN pipeline_versions v" +
+                    " ON v.pipeline_id = p.id AND v.version = p.current_version" +
+                    " WHERE p.workspace_id = :workspaceId AND p.id IN (:ids)",
                 mapOf("workspaceId" to workspaceId, "ids" to pipelineIds.toSet()),
             ) { rs, _ ->
-                rs.getObject("pipeline_id", UUID::class.java) to rs.getInt("released")
+                rs.getObject("id", UUID::class.java) to
+                    ServedVersion(rs.getInt("current_version"), rs.getString("status") == DRAFT_STATUS)
             }.toMap()
     }
 }

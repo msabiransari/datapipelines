@@ -146,11 +146,13 @@
           <td>
             <span class="app-name" th:text="${e.pipelineDisplayName}">Mobility briefing</span>
             <span class="app-path" th:if="${e.pipelinePath != null}" th:text="${e.pipelinePath}">nyc/mobility/briefing</span>
-            <!-- The RELEASED version, not `pipelines.current_version`: an endpoint pins a
-                 pipeline and serves its latest release, so a draft number here would be a
-                 statement about something no call will ever run. No release at all is a
-                 dash, and worth seeing. -->
-            <span class="app-path" th:text="${e.releasedVersion != null} ? 'v' + ${e.releasedVersion} : 'no released version'">v3</span>
+            <!-- What the endpoint SERVES: the pointer (`current_version`) and its status. In
+                 development the pointer may name a draft (Versioning D63), and the row says
+                 so — reporting "no release" about an endpoint that is answering would be a
+                 lie. A NULL pointer (never released, or every release discarded) is worth
+                 seeing, not papering over. -->
+            <span class="app-path"
+                  th:text="${e.servedVersion != null} ? ('v' + ${e.servedVersion} + (${e.servedDraft} ? ' · draft' : '')) : 'nothing to serve'">v3</span>
           </td>
           <td class="num" th:text="${e.timeoutSeconds} + ' s'">30 s</td>
           <td>

@@ -576,6 +576,13 @@ class RecordingStatement : Statement by NoopStatement() {
     }
 }
 
+/** A statement armed with a `queryTimeout`, for the T202 conversion in `whileExecuting`. */
+class TimedStatement(
+    private val queryTimeoutSeconds: Int,
+) : Statement by NoopStatement() {
+    override fun getQueryTimeout(): Int = queryTimeoutSeconds
+}
+
 /**
  * A [java.sql.Statement] that drops a `cancel()` the way every measured driver does (086 A2).
  *
@@ -589,6 +596,7 @@ class RecordingStatement : Statement by NoopStatement() {
  * [blockingExecute] is the driver call: it spends [prologueMs] *registering* — the parse-and-plan
  * window in which a cancel is dropped — and only then becomes cancellable.
  */
+
 class DriverLikeStatement : Statement by NoopStatement() {
     /** Every `cancel()` the executor issued, dropped or not — the re-issue assertion surface. */
     val cancels = AtomicInteger()

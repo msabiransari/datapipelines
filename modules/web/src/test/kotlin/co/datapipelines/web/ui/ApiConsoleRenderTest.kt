@@ -116,11 +116,12 @@ class ApiConsoleRenderTest {
         url: String = "/api/x/nyc/mobility/briefing",
         displayName: String = "Mobility briefing",
         path: String? = "nyc/mobility/briefing",
-        released: Int? = 3,
+        served: Int? = 3,
+        draft: Boolean = false,
         timeout: Int = 30,
         bound: Int = 2,
         enabled: Boolean = true,
-    ) = ApiConsoleController.EndpointRow(url, listOf(false), displayName, path, released, timeout, bound, enabled)
+    ) = ApiConsoleController.EndpointRow(url, listOf(false), displayName, path, served, draft, timeout, bound, enabled)
 
     @Test
     fun `the three cards render, and the tool count is the catalog's size`() {
@@ -161,17 +162,26 @@ class ApiConsoleRenderTest {
     }
 
     @Test
+    fun `an endpoint whose pointer names a draft says draft, not v-number alone`() {
+        // D63: in development the endpoint serves the draft the pointer names; the console
+        // must not read as if a release were live.
+        val html = render { setVariable("endpoints", listOf(endpoint(served = 4, draft = true))) }
+
+        html shouldContain "v4 · draft"
+    }
+
+    @Test
     fun `an endpoint whose pipeline has no release says so, and an unbound one is flagged`() {
         val html =
             render {
-                setVariable("endpoints", listOf(endpoint(released = null, bound = 0, enabled = false)))
+                setVariable("endpoints", listOf(endpoint(served = null, bound = 0, enabled = false)))
             }
 
         // Three separate truths, none of them papered over: an endpoint can outlive the
         // release it was published against, "no bindings" is not "nobody can call it" (a
         // workspace-pinned user key with `execute` still may), and a disabled endpoint is
         // still listed.
-        html shouldContain "no released version"
+        html shouldContain "nothing to serve"
         html shouldContain ">none<"
         html shouldContain "Disabled"
     }

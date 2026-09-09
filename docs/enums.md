@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.5 (living document — updated as enums evolve)
+**Status:** v1.9 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -435,7 +435,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.staging.*`, `result.storage_unavailable` |
 | `502 Bad Gateway` | Upstream failure | `pipeline.node.datasource_connection_failed`, `pipeline.node.query_execution_failed` |
 | `503 Service Unavailable` | Service not ready | Readiness check failure |
-| `504 Gateway Timeout` | Execution timeout | `pipeline.execution.timeout` |
+| `504 Gateway Timeout` | Execution timeout | `pipeline.execution.timeout`, `pipeline.node.query_timeout` |
 
 ---
 
@@ -502,6 +502,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.9 | T202 node query timeout | §17's 504 row gains `pipeline.node.query_timeout`. |
 | 2026-09-08 | v1.8 | 091 keys | §8A `ApiKeyKind` gains **`server`** — the promotion peer's credential as a stored key (auth.md §7.7, V15). Three kinds now, and the note that a scopeless kind is refused everywhere off its own family, `/mcp` and the UI pages included. |
 | 2026-09-02 | v1.7 | 046 typed templates | New §6A `TemplateType` (`sql` \| `html`, template-hierarchy-design §5) beside `TemplateEngine` — a template's kind, chosen at create and immutable across versions; the cross-reference table gains its row. |
 | 2026-08-05 | v1.0 | initial draft | Initial enums reference: 18 enum categories cataloged, cross-reference table, validation discipline |

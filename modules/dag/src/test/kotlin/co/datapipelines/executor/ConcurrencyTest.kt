@@ -282,9 +282,14 @@ class ConcurrencyTest {
 
                 val elapsed =
                     kotlin.system.measureTimeMillis {
-                        shouldThrow<PipelineExecutionFailed> {
-                            h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
-                        }.errorCode shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED
+                        val failed =
+                            shouldThrow<PipelineExecutionFailed> {
+                                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                            }
+                        // T202: a statement the driver cancelled on OUR timeout reports the
+                        // timeout and the budget it blew, not `query_execution_failed` + H2's text.
+                        failed.errorCode shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
+                        failed.errorDetails["timeout_seconds"] shouldBe 1
                     }
 
                 (elapsed < QUERY_TIMEOUT_BUDGET_MS).shouldBeTrue()
@@ -306,7 +311,7 @@ class ConcurrencyTest {
                     kotlin.system.measureTimeMillis {
                         shouldThrow<PipelineExecutionFailed> {
                             h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
-                        }.errorCode shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED
+                        }.errorCode shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
                     }
 
                 (elapsed < QUERY_TIMEOUT_BUDGET_MS).shouldBeTrue()

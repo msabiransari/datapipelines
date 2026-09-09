@@ -339,14 +339,14 @@ class PublishedEndpointServeService(
     private fun notReleased(endpoint: PublishedEndpoint): Outcome {
         log.warn(
             "event=endpoint.pipeline_not_released path={} pipeline_id={} " +
-                "message=\"endpoint is live but its pipeline has no released version\"",
+                "message=\"endpoint is live but its pipeline has no servable version\"",
             endpoint.pathPattern,
             endpoint.pipelineId,
         )
         return Outcome.Refused(
             HTTP_SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED,
-            "This endpoint's pipeline has no released version to serve.",
+            "This endpoint's pipeline has no servable version.",
         )
     }
 
