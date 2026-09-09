@@ -5,42 +5,58 @@
   <!--/* The sign-in ceremony is the product's own visual language, not a stock card: the
        editor's dot-grid ground with a live four-engine DAG drawn in the editor's card style
        (an inline SVG styled entirely by tokens — no canvas, no colour resolution, no script),
-       and the sign-in panel floating beside it like an inspector. The DAG is the demo's real
-       shape (Postgres, Parquet on S3, MySQL, SQLite → tempdb → answer), so the picture is a
-       claim the product keeps. Below 900px the stage is hidden and the panel stands alone. */-->
+       and the sign-in panel floating beside it like an inspector. The DAG is a FICTIONAL finance
+       flow, four hops deep, so a business reader sees the story — sources cleaned, converted,
+       joined, rolled up, then served to an API their customers call and the dashboard their
+       team watches. It is an illustration, not a screenshot; the two ends are what the product
+       does today (published endpoints) and what any BI tool does over them. Geometry is
+       computed (box 176×54, ports at mid-height), not hand-drawn. Below 900px the stage is
+       hidden and the panel stands alone. */-->
   <div class="app-auth-split">
     <section class="app-auth-stage" aria-hidden="true">
-      <svg class="app-auth-dag" viewBox="0 0 560 420" focusable="false">
+      <svg class="app-auth-dag" viewBox="0 0 864 414" focusable="false">
         <g class="app-auth-dag-rails">
-          <path class="app-auth-rail" d="M164 62 C 240 62, 250 190, 318 190"/>
-          <path class="app-auth-rail" d="M164 150 C 240 150, 250 190, 318 190"/>
-          <path class="app-auth-rail" d="M164 238 C 240 238, 250 190, 318 190"/>
-          <path class="app-auth-rail" d="M164 326 C 240 326, 250 190, 318 190"/>
-          <path class="app-auth-rail" d="M470 190 C 486 190, 486 190, 502 190"/>
+          <path class="app-auth-rail" d="M196 57 C 216 57, 216 87, 236 87"/>
+          <path class="app-auth-rail" d="M196 157 C 216 157, 216 187, 236 187"/>
+          <path class="app-auth-rail" d="M412 87 C 432 87, 432 122, 452 122"/>
+          <path class="app-auth-rail" d="M412 187 C 432 187, 432 122, 452 122"/>
+          <path class="app-auth-rail" d="M628 122 C 540 122, 540 287, 452 287"/>
+          <path class="app-auth-rail" d="M196 257 C 324 257, 324 287, 452 287"/>
+          <path class="app-auth-rail" d="M196 357 C 324 357, 324 287, 452 287"/>
+          <path class="app-auth-rail" d="M628 287 C 648 287, 648 177, 668 177"/>
+          <path class="app-auth-rail" d="M628 287 C 648 287, 648 327, 668 327"/>
         </g>
         <g class="app-auth-dag-edges">
-          <path class="app-auth-edge" d="M164 62 C 240 62, 250 190, 318 190"/>
-          <path class="app-auth-edge" d="M164 150 C 240 150, 250 190, 318 190"/>
-          <path class="app-auth-edge" d="M164 238 C 240 238, 250 190, 318 190"/>
-          <path class="app-auth-edge" d="M164 326 C 240 326, 250 190, 318 190"/>
-          <path class="app-auth-edge app-auth-edge-out" d="M470 190 C 486 190, 486 190, 502 190"/>
+          <path class="app-auth-edge" d="M196 57 C 216 57, 216 87, 236 87"/>
+          <path class="app-auth-edge" d="M196 157 C 216 157, 216 187, 236 187"/>
+          <path class="app-auth-edge" d="M412 87 C 432 87, 432 122, 452 122"/>
+          <path class="app-auth-edge" d="M412 187 C 432 187, 432 122, 452 122"/>
+          <path class="app-auth-edge" d="M628 122 C 540 122, 540 287, 452 287"/>
+          <path class="app-auth-edge" d="M196 257 C 324 257, 324 287, 452 287"/>
+          <path class="app-auth-edge" d="M196 357 C 324 357, 324 287, 452 287"/>
+          <path class="app-auth-edge" d="M628 287 C 648 287, 648 177, 668 177"/>
+          <path class="app-auth-edge" d="M628 287 C 648 287, 648 327, 668 327"/>
         </g>
         <g class="app-auth-dag-nodes">
-          <g class="app-auth-node" transform="translate(28 36)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_taxi</text><text class="app-auth-node-meta" x="14" y="40">Postgres · DQL</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(28 124)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_rideshare</text><text class="app-auth-node-meta" x="14" y="40">Parquet on S3 · LAKE</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(28 212)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_rain</text><text class="app-auth-node-meta" x="14" y="40">MySQL · DQL</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(28 300)"><rect class="app-auth-node-box" width="136" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">stage_zones</text><text class="app-auth-node-meta" x="14" y="40">SQLite · DQL</text><circle class="app-auth-node-dot" cx="124" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-join" transform="translate(318 164)"><rect class="app-auth-node-box" width="152" height="52" rx="10"/><text class="app-auth-node-name" x="14" y="22">taxi_vs_rideshare</text><text class="app-auth-node-meta" x="14" y="40">tempdb · H2</text><circle class="app-auth-node-dot" cx="140" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-caller" transform="translate(502 164)"><rect class="app-auth-node-box" width="52" height="52" rx="10"/><text class="app-auth-node-name" x="26" y="31" text-anchor="middle">→</text></g>
+          <g class="app-auth-node" transform="translate(20 30)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">ledger_entries</text><text class="app-auth-node-meta" x="14" y="41">Postgres · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(20 130)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fx_rates</text><text class="app-auth-node-meta" x="14" y="41">Parquet on S3 · LAKE</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node" transform="translate(20 230)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">customers</text><text class="app-auth-node-meta" x="14" y="41">MySQL · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-calc" transform="translate(20 330)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fiscal_month</text><text class="app-auth-node-meta" x="14" y="41">CALCULATOR · period_start</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(236 60)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">clean_ledger</text><text class="app-auth-node-meta" x="14" y="41">tempdb · filter + cast</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(236 160)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">latest_fx</text><text class="app-auth-node-meta" x="14" y="41">tempdb · dedupe by day</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(452 95)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">to_usd</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join × rate</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-step" transform="translate(452 260)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_by_customer</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join + roll up</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
+          <g class="app-auth-node app-auth-node-out" transform="translate(668 150)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_api</text><text class="app-auth-node-meta" x="14" y="41">GET /api/x/finance/revenue</text></g>
+          <g class="app-auth-node app-auth-node-out" transform="translate(668 300)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_dashboard</text><text class="app-auth-node-meta" x="14" y="41">the view your team reads</text></g>
         </g>
       </svg>
       <div class="app-auth-stage-copy">
         <p class="app-auth-eyebrow">Agent-native data pipelines</p>
-        <h2 class="app-auth-stage-title">Four engines. One pipeline. Released by a human.</h2>
+        <h2 class="app-auth-stage-title">From ledgers to the API, every hop in the open.</h2>
         <ol class="app-auth-steps">
-          <li><b>Describe.</b> Your agent reads the schema and builds the pipeline over MCP.</li>
-          <li><b>Run.</b> Postgres, a Parquet lake, MySQL and SQLite join in one DAG.</li>
-          <li><b>Release.</b> Drafts stay drafts until you say so. Nothing ships by accident.</li>
+          <li><b>Describe.</b> Your agent reads your schemas and builds the pipeline over MCP.</li>
+          <li><b>Run.</b> Clean, convert, join and roll up across your engines — each hop a node you can read.</li>
+          <li><b>Serve.</b> A human releases it; then it answers an API your customers call, or feeds the dashboard your team watches.</li>
         </ol>
       </div>
     </section>

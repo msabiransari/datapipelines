@@ -154,6 +154,9 @@ class AuthLayoutRenderTest {
             { html shouldContain "app-auth-stage" },
             { html shouldContain "class=\"app-auth-dag\"" },
             { html shouldContain "Parquet on S3" },
+            // The story ends where the data goes: an API a customer calls and a dashboard a team reads.
+            { html shouldContain "revenue_api" },
+            { html shouldContain "revenue_dashboard" },
             { html shouldContain "Continue with Google" },
             { html shouldContain "or with email" },
             { html shouldNotContain "style=\"" },
