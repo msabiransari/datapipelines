@@ -6,9 +6,10 @@
     SQL into them. Thymeleaf escapes `th:text` by construction, which is the half of this
     that was a correctness risk rather than a tidiness one.
   -->
-  <div class="ds-card te-render-card" th:classappend="${renderError} != null ? 'te-render-card-error' : ''">
-    <p th:if="${renderError} != null" class="te-render-error" th:text="${renderError}">Render failed</p>
-    <pre th:if="${renderError} == null and ${renderOutput}.isEmpty()" class="te-render-empty">(empty output)</pre>
-    <pre th:if="${renderError} == null and !${renderOutput}.isEmpty()" class="te-render-out" th:text="${renderOutput}">SELECT 1</pre>
+  <div class="ds-card te-render-card" th:classappend="${renderError != null} ? 'te-render-card-error' : ''">
+    <p th:if="${renderError != null}" class="te-render-error" th:text="${renderError}">Render failed</p>
+    <pre th:if="${renderError == null and #strings.isEmpty(renderOutput)}" class="te-render-empty">(empty output)</pre>
+    <pre th:if="${renderError == null and !#strings.isEmpty(renderOutput)}" class="te-render-out"
+         th:text="${renderOutput}">SELECT 1</pre>
   </div>
 </th:block>

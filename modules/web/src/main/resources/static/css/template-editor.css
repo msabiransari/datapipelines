@@ -197,17 +197,24 @@
 
 /* 097 §C — the preview result's three states. They were Kotlin string constants carrying
    inline styles (padding, margins, the mono face, the danger fill); the markup is
-   `partials/template-render.html` now and the box lives here, beside the pane it renders in. */
-.te-render-card {
+   `partials/template-render.html` now and the box lives here, beside the pane it renders in.
+
+   SCOPED TO THE PANE deliberately: `.app-main pre` (0,1,1) sets a smaller size, a fill and a
+   bottom margin, and it beats a bare class (0,1,0) — an inline style used to beat it by being
+   inline. Measured, not assumed: unscoped, the rendered SQL came back at 12px with a 16px
+   bottom margin where it had been 14px with none. Everything `.app-main pre` supplies and the
+   inline style did NOT override (the inset fill, the padding, the radius, overflow-x) is left
+   alone here, exactly as before. */
+.te-preview-pane .te-render-card {
   padding: var(--gap-md);
 }
 
-.te-render-card-error {
+.te-preview-pane .te-render-card-error {
   border-color: var(--accent-danger);
   background: var(--accent-danger-bg);
 }
 
-.te-render-out {
+.te-preview-pane .te-render-out {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -216,13 +223,13 @@
   color: var(--text-primary);
 }
 
-.te-render-empty {
+.te-preview-pane .te-render-empty {
   margin: 0;
   color: var(--text-secondary);
   font-style: italic;
 }
 
-.te-render-error {
+.te-preview-pane .te-render-error {
   margin: 0;
   color: var(--accent-danger);
   font-size: var(--text-sm);

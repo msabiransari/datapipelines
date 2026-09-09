@@ -269,7 +269,12 @@ class MutatingHandlerScopeFloorTest {
             method: java.lang.reflect.Method?,
         ): String? {
             if (method == null) return null
-            val prefix = controller.findAnnotation<RequestMapping>()?.value?.firstOrNull().orEmpty()
+            val prefix =
+                controller
+                    .findAnnotation<RequestMapping>()
+                    ?.value
+                    ?.firstOrNull()
+                    .orEmpty()
             val own =
                 method.getAnnotation(PostMapping::class.java)?.value?.firstOrNull()
                     ?: method.getAnnotation(PutMapping::class.java)?.value?.firstOrNull()

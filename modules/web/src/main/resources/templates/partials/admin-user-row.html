@@ -15,13 +15,16 @@
   <td><span class="ds-badge" th:classappend="${userRow.statusBadge}" th:text="${userRow.statusLabel}">Active</span></td>
   <td><span class="ds-badge" th:classappend="${userRow.roleBadge}" th:text="${userRow.roleLabel}">User</span></td>
   <td th:text="${userRow.localStatus}">local</td>
-  <td class="u-nowrap">
-    <button th:each="a : ${userRow.actions}" type="button"
-            class="ds-button ds-button-ghost ds-button-sm"
-            th:classappend="${a.colourClass}"
-            th:attr="hx-patch=@{'/partials/admin/users/' + ${userRow.id} + '/' + ${a.action}},
-                     hx-target='#' + ${userRow.rowId}"
-            hx-swap="outerHTML"
-            th:text="${a.label}">Deactivate</button>
-  </td>
+  <!-- The action cell is written TIGHT — no whitespace between the cell's edges and its
+       buttons, and exactly one space between them — because that is the spacing the Kotlin
+       string builder produced, and this migration is not allowed to move a pixel (097 §C).
+       Whitespace inside a tag is free; whitespace between tags is a text node. -->
+  <td class="u-nowrap"><th:block th:each="a,i : ${userRow.actions}"><th:block
+        th:if="${!i.first}">&#32;</th:block><button type="button"
+        class="ds-button ds-button-ghost ds-button-sm"
+        th:classappend="${a.colourClass}"
+        th:attr="hx-patch=@{'/partials/admin/users/' + ${userRow.id} + '/' + ${a.action}},
+                 hx-target='#' + ${userRow.rowId}"
+        hx-swap="outerHTML"
+        th:text="${a.label}">Deactivate</button></th:block></td>
 </tr>
