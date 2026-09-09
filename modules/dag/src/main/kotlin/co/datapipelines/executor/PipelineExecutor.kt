@@ -310,8 +310,10 @@ class PipelineExecutor(
         try {
             return withTimeout(seconds.seconds) { body.await() }
         } catch (e: TimeoutCancellationException) {
-            if (cancelledByAncestor()) throw e
+            if (cancelledByAncestor()) throw bodyOutcomeOr(body, e)
             throw nodeDeadlineExpired(node, ctx, run, seconds, startedAt, body)
+        } catch (e: CancellationException) {
+            throw bodyOutcomeOr(body, e)
         } finally {
             // Every non-timeout exit too: a sibling's failure, a cancel, an ancestor's deadline.
             // The body is done on the success path, so this is a no-op there; on every other it is
@@ -324,6 +326,34 @@ class PipelineExecutor(
             scope.cancel()
         }
     }
+
+    /**
+     * What the node ITSELF ended with, when our `await` was cancelled from outside (108 §A).
+     *
+     * With the body in a detached scope, a cancellation lands on the `await`, not on the body — so
+     * the exception this function is here to recover would otherwise be lost, and with it the F8
+     * guarantee that an aborted node still records what it hit. `CancellationHandle.withStatement`
+     * converts a cancel-induced driver error into an `ExecutionAbortedException` carrying the
+     * original as a **suppressed** exception, and `recordSuppressedFailure` reads exactly that
+     * field; hand it the await's own cancellation instead and the abort snapshot shows a bare
+     * ABORTED with no cause.
+     *
+     * The wait is bounded by `cancel-grace-seconds` and is not a new one: before the body was
+     * detached, structured concurrency waited for the node to unwind with no bound at all. It runs
+     * under `NonCancellable` because our scope is already cancelled and every suspension point on
+     * a cancelled scope is skipped before it starts.
+     *
+     * @return the body's own throwable, or [cancellation] when the body produced none in time.
+     */
+    private suspend fun bodyOutcomeOr(
+        body: Deferred<NodeResult>,
+        cancellation: CancellationException,
+    ): Throwable =
+        withContext(NonCancellable) {
+            withTimeoutOrNull(config.cancelGraceSeconds.seconds) {
+                runCatching { body.await() }.exceptionOrNull()
+            } ?: cancellation
+        }
 
     /**
      * The node's deadline fired: interrupt its statements, wait out the grace, and build the

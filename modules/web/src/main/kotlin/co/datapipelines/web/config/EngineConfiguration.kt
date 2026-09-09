@@ -89,6 +89,7 @@ class EngineConfiguration {
             nodeTimeoutSeconds = executor.nodeTimeoutSeconds,
             nodeTimeoutMaxSeconds = executor.nodeTimeoutMaxSeconds,
             cancelGraceSeconds = executor.cancelGraceSeconds,
+            sourceFetchSize = executor.sourceFetchSize,
             stagingMaxMemoryMb = staging.maxMemoryMb,
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.

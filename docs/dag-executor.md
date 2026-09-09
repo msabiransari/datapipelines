@@ -565,7 +565,7 @@ The same table appears in [Configuration §3.2](configuration.md#32-executor) an
 | Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node, wall clock, all five phases | the executor |
 | Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
 
-`ExecutorConfig`'s `init` refuses a node deadline ABOVE the execution's — it could never be reached. A node deadline BELOW the statement timeout is legal and simply stronger.
+The precedence is documented, not enforced across keys. Every inversion is harmless — a node deadline above the execution's is never reached, one below the statement timeout is stronger — while a cross-key refusal would turn lowering `execution-timeout-seconds` into a startup crash.
 
 **Why a node bound had to exist.** The statement timeout is the DRIVER's, and drivers honour it unevenly. The measurement this round is built on (108 §1) found a Postgres node stopped cleanly at its statement budget while H2 tempdb nodes in the same pipeline ran 168, 191 and 330 seconds past the same budget. Nothing between the statement and the whole execution had a deadline, so a node whose driver did not cooperate had none at all. Now it does, and the node's promise is unconditional: **no node runs past its budget, whatever the driver, whatever the engine, whatever the phase.**
 

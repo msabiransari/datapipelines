@@ -702,9 +702,39 @@ class NodeRunner(
         startedAt: Instant,
         timeout: Int,
         dialect: Dialect,
+    ): NodeResult {
+        val tookOutOfAutocommit = streamSourceRows(conn, dialect)
+        try {
+            return runDatasourceQuery(node, conn, bound, ctx, startedAt, timeout, dialect)
+        } finally {
+            // Restore autocommit's NET effect, on every path including failure (108 §B).
+            //
+            // Author SQL on a DQL node may legitimately be multi-statement, and under autocommit
+            // each of those statements committed as it ran — including the ones that had already
+            // run when a later one failed. Taking the connection out of autocommit for the read
+            // and then only committing on success would silently change that: a failed node's
+            // earlier side effects would roll back. Streaming is a transport decision and must not
+            // become a transaction-semantics decision, so the commit is unconditional.
+            //
+            // `runCatching`: the cursor is fully consumed by the time this runs, so a commit that
+            // refuses has nothing left to protect — and it must never replace the node's own
+            // failure with a bookkeeping one.
+            if (tookOutOfAutocommit) runCatching { conn.commit() }
+        }
+    }
+
+    private suspend fun runDatasourceQuery(
+        node: ExecutableNode,
+        conn: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+        dialect: Dialect,
     ): NodeResult =
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
+            fetchSizeFor(dialect)?.let { statement.fetchSize = it }
             ctx.handle.withStatement(node.id, statement) {
                 val rs =
                     phase(ctx, NodePhase.EXECUTE, node.id) {
@@ -713,6 +743,56 @@ class NodeRunner(
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
             }
+        }
+
+    /**
+     * Puts the source connection in the state its driver needs to hand back rows **incrementally**
+     * (108 §B, finding #1).
+     *
+     * pgjdbc uses a server-side cursor only when the connection is NOT in autocommit AND the
+     * statement carries a `fetchSize > 0`. The executor set neither, so every Postgres source node
+     * materialised its entire result set inside the driver before `stage()` was handed a cursor —
+     * which makes the staging memory budget a statement about a copy that already exists, and
+     * makes `insert-batch-size` a batching of rows that are all in the heap anyway.
+     *
+     * Only Postgres is switched, because only Postgres pays for the switch this way: MySQL streams
+     * on `Integer.MIN_VALUE` regardless of autocommit ([fetchSizeFor]), the embedded engines have
+     * no network hop to stream over, and taking a connection out of autocommit changes visibility
+     * semantics — worth it exactly where it buys streaming, nowhere else. The pool restores
+     * `autoCommit` when the lease is returned (HikariCP resets it on `close()`), and the node's
+     * `connection.use` is what returns it. The caller commits unconditionally on the way out —
+     * see [datasourceQuery] for why that is not optional.
+     *
+     * @return true when this call is what switched autocommit off, so the caller knows to commit.
+     *
+     * This runs on the DQL cursor path only. A DML/DDL node must NOT be taken out of autocommit —
+     * its work would never commit.
+     */
+    private fun streamSourceRows(
+        conn: Connection,
+        dialect: Dialect,
+    ): Boolean {
+        if (config.sourceFetchSize == 0) return false
+        if (dialect != Dialect.POSTGRES || !conn.autoCommit) return false
+        conn.autoCommit = false
+        return true
+    }
+
+    /**
+     * The `fetchSize` for a source cursor on [dialect].
+     *
+     * MySQL is the exception every JDBC codebase carries: Connector/J streams only when the fetch
+     * size is exactly `Integer.MIN_VALUE`, and treats any other value as "buffer everything". A
+     * positive number there would be the opposite of what it says.
+     *
+     * @return null when `source-fetch-size` is 0 — the operator turned streaming off, and the
+     *   statement is left exactly as pre-108 code left it.
+     */
+    private fun fetchSizeFor(dialect: Dialect): Int? =
+        when {
+            config.sourceFetchSize == 0 -> null
+            dialect == Dialect.MYSQL -> Int.MIN_VALUE
+            else -> config.sourceFetchSize
         }
 
     private suspend fun dispatchOutput(

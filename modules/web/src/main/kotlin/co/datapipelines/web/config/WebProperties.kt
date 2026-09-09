@@ -146,6 +146,8 @@ data class ExecutorProperties(
     val nodeTimeoutMaxSeconds: Int = 900,
     /** `cancel-grace-seconds` (108) — how long a cancelled statement is waited on before it is abandoned. */
     val cancelGraceSeconds: Long = 5,
+    /** `source-fetch-size` (108) — the JDBC `fetchSize` on every DQL source cursor; what makes it stream. */
+    val sourceFetchSize: Int = 1000,
 ) {
     /**
      * What the executor runs with: the alias's value while it is set (the one-release bridge),
@@ -169,6 +171,8 @@ data class ExecutorProperties(
         require(nodeTimeoutSeconds > 0) { "datapipelines.executor.node-timeout-seconds must be > 0" }
         require(nodeTimeoutMaxSeconds > 0) { "datapipelines.executor.node-timeout-max-seconds must be > 0" }
         require(cancelGraceSeconds > 0) { "datapipelines.executor.cancel-grace-seconds must be > 0" }
+        // 0 is legal and means "do not stream" — see ExecutorConfig's init for why it exists.
+        require(sourceFetchSize >= 0) { "datapipelines.executor.source-fetch-size must be >= 0" }
     }
 }
 

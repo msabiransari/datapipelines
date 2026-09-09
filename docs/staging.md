@@ -76,7 +76,10 @@ Key points:
 For each node whose `output.target` is `tempdb`, the executor stages the source ResultSet:
 
 ```kotlin
-suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult = mutex.withLock {
+// Since 108 §B the mutex is taken per batch inside the drain, not around the whole method — see
+// §4.3 and §9.2. The mapping below is unchanged and holds no lock at all: it reads the SOURCE
+// cursor's metadata and touches the staging connection not once.
+suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult {
     val metadata = resultSet.metaData
     val indices = 1..metadata.columnCount
 
@@ -100,11 +103,12 @@ suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialec
 
     val h2ColumnDecls = columns.map { c -> "\"${c.name}\" ${H2EgressMapper.toH2Type(c)}" }
 
-    createTable(tableName, h2ColumnDecls)                       // rejects a duplicate table — §4.5
-    val rowsStaged = batchInsert(tableName, columns, mappings, resultSet)
-    checkMemoryBudget()                                          // §8.2
+    mutex.withLock { createTable(tableName, h2ColumnDecls) }    // rejects a duplicate table — §4.5
+    // The drain takes the lock per BATCH, not for its whole length — §4.3, §9.2 (108 §B).
+    val rowsStaged = drainInto(tableName, columns, mappings, resultSet)
+    mutex.withLock { stagedRowTotal += rowsStaged }
 
-    StageResult(tableName, rowsStaged, columns)
+    return StageResult(tableName, rowsStaged, columns)
 }
 ```
 
@@ -216,6 +220,42 @@ Notes:
 - H2 `INTEGER` is 32-bit, `BIGINT` is 64-bit.
 
 ### 4.3 Batch inserts
+
+**The source cursor is drained outside the mutex (108 §B).** The loop below is the shape: read up
+to `insert-batch-size` rows from the source cursor holding no lock, then take the lock for the
+`INSERT` and the throttled budget check. The materialised batch is the cost, and it is bounded by
+`insert-batch-size`; what it buys is that the per-execution staging lock is never held across a
+network wait on the source database.
+
+```kotlin
+private suspend fun drainBatches(...): Long {
+    var rowCount = 0L
+    while (true) {
+        val batch = readBatch(rs, mappings, config.insertBatchSize)   // NO lock held here
+        if (batch.isNotEmpty() || rowCount == 0L) {
+            mutex.withLock {                                          // the connection, serialized
+                insertBatch(tableName, stmt, batch, sqlTypes)
+                checkBudgetIfDue(...)
+            }
+        }
+        rowCount += batch.size
+        if (batch.size < config.insertBatchSize) break
+    }
+    mutex.withLock { checkMemoryBudget() }
+    return rowCount
+}
+```
+
+**The source statement has to stream, or none of this means anything.** A driver that materialises
+the whole result set before handing back a cursor makes `insert-batch-size` a batching of rows that
+are already in the heap, and the memory budget a statement about a copy that already exists. The
+executor therefore sets `fetchSize` on every DQL source statement
+(`datapipelines.executor.source-fetch-size`, default 1000) and takes a **Postgres** source
+connection out of autocommit for the read — pgjdbc uses a server-side cursor only with both. MySQL
+is the driver-forced exception: Connector/J streams only at `Integer.MIN_VALUE`. Before 108 the
+executor set neither, on any dialect.
+
+The pre-108 shape, for reference:
 
 ```kotlin
 private fun batchInsert(
@@ -481,7 +521,7 @@ fun usedHeapKb(): Long {
 ```
 
 - **Why not `SELECT MEMORY_USED()`:** in H2 2.3.232, `MEMORY_USED()` requires **admin rights** (SQLState 90040) — and the staging connection is deliberately a *non-admin* user so author SQL cannot reach the host (§9.5). Empirically, `MEMORY_USED()` and `(totalMemory − freeMemory)` return the **same number** (both ~14271 KB after a 50k-row fill in the same instant): H2's `MEMORY_USED()` is itself "run a GC, then return used heap", not a measure of the database's own allocation. So the in-process reading is the identical quantity with no admin dependency.
-- Polled **once after each staging operation completes** (after `batchInsert` returns for a table, inside the same mutex-held section — `checkMemoryBudget()` in §3.2) and after each `execute(sql)` that writes to staging. Not per batch: per-table granularity is enough to stop a runaway pipeline within one node.
+- Polled **on the first batch of a drain, then at most once per 250 ms, and unconditionally when the drain completes** (108 §B), plus after each `execute(sql)` that writes to staging. Mid-drain polling is new: with the drain reading outside the lock, a per-table-only check meant a runaway node could put its whole result in the heap before anything looked. It is *throttled* rather than per-batch because the reading forces a `System.gc()` — at the default batch size a 2M-row stage is 2 000 batches, so a per-batch check would cost more than the inserts it guards. The first batch is always checked, so a budget already blown when the stage began is refused immediately.
 - Reading is in kilobytes; budget in megabytes. Compare as `usedHeapKb > maxMemoryMb * 1024`.
 - Exceeding the budget fails the current staging operation with `pipeline.staging.memory_limit_exceeded`, carrying the measured value and the budget in the error details.
 - The same reading backs `StagingStats.memoryUsedBytes` (§10).
@@ -527,6 +567,8 @@ Therefore:
 
 - `H2Staging` owns a `kotlinx.coroutines.sync.Mutex` (`kotlinx.coroutines.sync.Mutex`, **not** a `java.util.concurrent.locks.Lock` — the callers are coroutines and must suspend, not block an executor thread).
 - Every method that touches the connection — `stage`, `withQuery`, `execute`, `stats` — acquires the mutex. These methods are `suspend` functions for that reason (§10).
+- **The invariant is about the CONNECTION, not about the network (108 §B).** `stage()` no longer holds the mutex for its whole drain: it reads a batch from the source cursor holding NO lock, takes the lock for the `INSERT`, releases it, and reads the next batch. Every *use* of the staging connection is still inside the lock — the `CREATE TABLE`, every `executeBatch`, the budget check, the rollback, the statement close — so no two callers are ever inside the connection at once. What changed is that the per-execution lock is no longer held across a network wait on someone else's database. Until 108 it was, and two independent source nodes of one pipeline therefore staged strictly one after the other; a tempdb SELECT queued behind a multi-million-row fetch it did not depend on, and pipeline authors were adding artificial `depends_on` edges because they could see the contention. `H2StagingConcurrencyTest` asserts BOTH halves: the two source cursors' read windows must intersect (timestamps, not a green suite), and the connection's peak concurrent-call count must stay 1.
+- One `PreparedStatement` therefore stays open across several lock acquisitions. That is legal and is what makes the drain cheap; the guard that used to read "statement created until closed" now brackets each CALL instead, because the old formulation would have read 2 for a perfectly serialized run.
 - Consumption discipline for cursors is enforced by construction, not convention: `withQuery(sql) { rs -> … }` (§3.3, §10) holds the mutex for the whole lifetime of the cursor, including the caller node's suspending drain to the result store (§6.1). There is no API that returns a live `ResultSet` to be read after the lock is released, so a downstream `stage`/`execute` on the shared connection cannot interleave with an open cursor — the state-corruption case this section warns about is unreachable.
 - Direct SQL access goes through `withConnection(block)` (§10), which acquires this same mutex for the duration of the block: the connection is never handed out unguarded, and the mutex itself is not reachable — or even observable — from outside the implementation. (The v1.2 contract exposed a `connection` property and made callers "responsible for taking the mutex"; that contract was unsatisfiable — the mutex is private, so no caller could ever take it — and is corrected here.) Two rules bind the block: it must not re-enter any staging operation (the lock is not reentrant, so `stage`/`query`/`execute`/`stats`/`withConnection` from inside the block deadlocks), and nothing derived from the connection (statements, cursors) may outlive the block.
 
@@ -652,7 +694,7 @@ These are documented in the authoring guide (future).
 - **Duplicate-table test**: staging the same table name twice in one execution → `pipeline.staging.table_already_exists`, first table's rows intact.
 - **Integration tests** for staging: stage a ResultSet from a mock source, query it back, verify round-trip (type fidelity + row count + value equality).
 - **Streaming tests**: stage 1M rows with limited JVM heap; verify constant transfer memory.
-- **Concurrency test**: two coroutines calling `stage()` on the same instance simultaneously complete correctly and serialize (both tables present, correct row counts, no driver errors) — the test must fail if the mutex is removed.
+- **Concurrency test**: two coroutines calling `stage()` on the same instance simultaneously complete correctly and serialize (both tables present, correct row counts, no driver errors) — the test must fail if the mutex is removed. Since 108 it asserts the other half too: the two source cursors' read windows must OVERLAP in wall-clock time. Both assertions are needed and neither implies the other — a green row count is satisfied by strict serialization, and overlapping reads are satisfied by a removed mutex.
 - **Lifecycle tests**: after `close()`, `connection.isClosed` is true AND a fresh connection to the same `jdbc:h2:mem:exec_{id}` URL finds the **`STAGING_EXEC` user gone** (`SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME)='STAGING_EXEC'` = 0 — case-insensitively, because `DATABASE_TO_LOWER=TRUE` stores the unquoted-created user as `staging_exec`; the bare literal would count 0 while the user was alive, exactly the vacuous shape this test exists to rule out) — this is the regression test for `DB_CLOSE_DELAY=-1` ever returning. It must key on something the §3.4 cleanup does **not** remove: an *empty* fresh database no longer distinguishes "destroyed" from "survived-but-emptied" now that cleanup drops the tables before closing, so the old "sees an empty database" assertion is satisfied even if the DB survived — the user (dropped only when the DB itself dies) is the falsifiable signal. Separately, prove the §3.4 enumerate+`DROP TABLE` belt actually runs: hold a second peer connection open to the same URL so the DB survives `connection.close()`, `close()` the instance, then assert **through the peer** that the staged tables are gone. Also: `close()` on a connection already broken does not throw.
 - **Memory-limit test**: stage past a deliberately small `max_memory_mb`; assert `pipeline.staging.memory_limit_exceeded` and that the measured in-process JVM-heap reading (not an estimate) drove the decision — with the budget anchored to a measured baseline + headroom, since the reading is JVM-heap-wide (§8.2).
 - **Type round-trip tests** for every canonical type:

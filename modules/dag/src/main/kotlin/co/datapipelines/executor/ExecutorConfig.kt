@@ -32,6 +32,12 @@ import co.datapipelines.pipeline.OrgContext
  * @property nodeTimeoutMaxSeconds `datapipelines.executor.node-timeout-max-seconds` (108) — the
  *   ceiling a node's own override may not exceed; save-time validation refuses past it
  *   (`pipeline.validation.node_timeout_invalid`).
+ * @property sourceFetchSize `datapipelines.executor.source-fetch-size` (108) — the JDBC
+ *   `fetchSize` set on every DQL source statement, and the reason the staging memory budget is
+ *   not a fiction. pgjdbc buffers the WHOLE result set in the driver unless the connection is
+ *   `autoCommit=false` AND `fetchSize > 0`; before 108 the executor set neither, so a 2M-row
+ *   source node's rows were all in the JVM before `stage()` saw one of them and no per-batch
+ *   budget check could ever have caught it.
  * @property cancelGraceSeconds `datapipelines.executor.cancel-grace-seconds` (108) — how long the
  *   executor waits, AFTER cancelling the node's statements, for a driver to actually return.
  *   Past it the node fails on schedule and the abandoned statement is logged once with the
@@ -63,6 +69,7 @@ data class ExecutorConfig(
     val nodeTimeoutSeconds: Long = 300,
     val nodeTimeoutMaxSeconds: Int = 900,
     val cancelGraceSeconds: Long = 5,
+    val sourceFetchSize: Int = 1000,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
     val maxCompositionDepth: Int = 5,
@@ -80,26 +87,25 @@ data class ExecutorConfig(
         // so a 0 here silently removes the last per-statement limit in the system.
         require(nodeQueryTimeoutSeconds > 0) { "nodeQueryTimeoutSeconds must be positive, was $nodeQueryTimeoutSeconds" }
         require(executionTimeoutSeconds > 0) { "executionTimeoutSeconds must be positive" }
-        // One half of the §5.3 precedence is enforced, the other is only guidance, and the
-        // difference is which way the mistake hurts. A node deadline ABOVE the execution's own can
-        // never be reached — the execution deadline fires first and reports
-        // `pipeline.execution.timeout` for a node the operator meant to bound individually, so the
-        // setting silently does nothing. A node deadline BELOW the statement timeout is the
-        // opposite: perfectly sensible, and stronger — the executor simply stops the node before
-        // the driver would have, which is the whole point of owning a bound above the driver's.
+        // §5.3's precedence is documented, NOT enforced across keys, and the reason is worth
+        // stating because the first draft of this class did enforce it and had to be reverted.
+        // Every ordering a cross-key `require` would forbid is harmless: a node deadline above the
+        // execution's is simply never reached (the outer bound fires first and says so), and one
+        // below the statement timeout is stronger, not broken — the executor stops the node before
+        // the driver would have, which is the entire point of owning a bound above the driver's.
+        // What a cross-key require DOES reliably do is turn "I lowered execution-timeout-seconds
+        // for this deployment" into a startup crash, and break every caller that constructs a
+        // short-timeout config for a test. A constraint that refuses correct configurations to
+        // prevent harmless ones is not a guard.
         require(nodeTimeoutSeconds > 0) { "nodeTimeoutSeconds must be positive, was $nodeTimeoutSeconds" }
         require(nodeTimeoutMaxSeconds > 0) { "nodeTimeoutMaxSeconds must be positive, was $nodeTimeoutMaxSeconds" }
-        // Deliberately NOT required to sit under executionTimeoutSeconds, and the shipped defaults
-        // are exactly that case (max 900 > execution 600). The ceiling bounds what an AUTHOR may
-        // ask for; the execution deadline bounds what a RUN may take. A node that declares 900
-        // under a 600 s execution is legal and simply never reaches its own deadline — the
-        // execution's fires first and reports `pipeline.execution.timeout`. Requiring the two to
-        // agree would turn a deployment's decision to raise `execution-timeout-seconds` into a
-        // startup crash for every deployment that had not also raised this one.
-        require(nodeTimeoutSeconds <= executionTimeoutSeconds) {
-            "nodeTimeoutSeconds ($nodeTimeoutSeconds) must not exceed executionTimeoutSeconds ($executionTimeoutSeconds)"
-        }
         require(cancelGraceSeconds > 0) { "cancelGraceSeconds must be positive, was $cancelGraceSeconds" }
+        // ZERO IS LEGAL AND MEANS "DO NOT STREAM" — the operator's escape hatch (108 §B). A DQL
+        // node's author SQL may legitimately be multi-statement, and pgjdbc's server-side cursor
+        // path uses the extended query protocol, which does not carry multiple statements. Every
+        // pipeline we know of is a single query, but a deployment that discovers otherwise on a
+        // release weekend needs one env var, not a patch.
+        require(sourceFetchSize >= 0) { "sourceFetchSize must not be negative, was $sourceFetchSize" }
         require(stagingMaxMemoryMb > 0) { "stagingMaxMemoryMb must be positive" }
         require(cancelPollIntervalSeconds > 0) { "cancelPollIntervalSeconds must be positive" }
         require(maxCompositionDepth >= 1) { "maxCompositionDepth must be >= 1, was $maxCompositionDepth" }
