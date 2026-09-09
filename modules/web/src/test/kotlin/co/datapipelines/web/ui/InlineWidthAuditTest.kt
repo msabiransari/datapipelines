@@ -34,6 +34,25 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  * is EMPTY: an entry added to it is a debt with a name, not a quiet exception, and the test
  * below fails if anyone tries to use it without recording why.
  *
+ * ## The one shape that is NOT an inline style, and why it is allowed
+ *
+ * 104's splitter (`static/js/splitter.js`) sizes two panes by writing ONE CSS custom
+ * property — `--pe-dock-pane-h`, `--tplx-tree-w` — onto `document.documentElement` at
+ * runtime. That is deliberately outside this audit and must stay allowed:
+ *
+ *  - it is a SCRIPT setting `element.style`, not a `style="…"` attribute in a template. The
+ *    regex below cannot see it, a CSP's `style-src` does not forbid it (that directive is
+ *    about the attribute and about `<style>`), and the ban's actual subject — a width
+ *    decision taken inside one template and invisible to every other — does not apply: the
+ *    value is a USER's, not an author's;
+ *  - it is a custom property on the ROOT, so the stylesheets keep owning the geometry. Both
+ *    `pipeline-editor.css` and `template-tree.css` declare the shipped default as the
+ *    `var()` fallback, which is what makes "reset to default" mean "remove the property".
+ *
+ * The line the audit still draws, and which no round may cross: no `width`, `height`,
+ * `max-width` or `grid-template-columns` written onto a CONTENT element, by a template or by
+ * a script. One property, on the root, read by a stylesheet.
+ *
  * ## What this audit deliberately does NOT reach, and who should
  *
  * **HTML built in Kotlin.** Five controllers emit markup as strings, and some of it still

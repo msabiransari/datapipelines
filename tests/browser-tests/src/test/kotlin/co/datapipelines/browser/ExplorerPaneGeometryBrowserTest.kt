@@ -1,5 +1,7 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Mouse
+import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThan
@@ -7,6 +9,8 @@ import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * 090 §A/§B — the explorers' two panes, measured on the shapes the owner actually uses.
@@ -150,7 +154,14 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
             })(),
             labelWidth: lb ? lb.width : null,
             labelRight: lb ? lb.right : null,
-            labelClipped: label ? label.scrollWidth > label.clientWidth + 1 : null
+            labelClipped: label ? label.scrollWidth > label.clientWidth + 1 : null,
+            // 104 §C — the divider handle that replaced the pane's native `resize` corner.
+            handleRole: (() => { const h = document.querySelector('[data-splitter="explorer-tree"]');
+                                 return h ? h.getAttribute('role') : null; })(),
+            handleNow: (() => { const h = document.querySelector('[data-splitter="explorer-tree"]');
+                                return h ? Number(h.getAttribute('aria-valuenow')) : null; })(),
+            nativeResize: getComputedStyle(t).resize,
+            stored: window.localStorage.getItem('dp.pane.explorer-tree')
           };
         }
         """.trimIndent()
@@ -163,6 +174,27 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
             requestAnimationFrame(() => { window.__ff = eval('(' + probe + ')')(); });
           }, {once: true}); }
         """.trimIndent()
+
+    @Suppress("UNCHECKED_CAST")
+    private fun probe(): Map<String, Any?> = page.evaluate(geometryProbe) as Map<String, Any?>
+
+    private fun Map<String, Any?>.d(k: String) = (this[k] as Number).toDouble()
+
+    /** The round's before/after evidence, beside the dock's (104 handback). */
+    private fun shotDir(): Path = Paths.get("build", "reports", "104-screenshots").also { it.toFile().mkdirs() }
+
+    private fun shot(name: String) = page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("104-$name.png")))
+
+    /** A real pointer drag on the divider handle: down, move in steps, up. */
+    private fun dragTreeBy(dx: Double) {
+        val box = page.locator("[data-splitter='explorer-tree']").boundingBox()
+        val y = box.y + 200
+        page.mouse().move(box.x + box.width / 2, y)
+        page.mouse().down()
+        page.mouse().move(box.x + box.width / 2 + dx, y, Mouse.MoveOptions().setSteps(12))
+        page.mouse().up()
+        page.waitForTimeout(150.0)
+    }
 
     @Suppress("UNCHECKED_CAST")
     private fun assertPanes(
@@ -201,6 +233,10 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
             (labelWidth ?: 0.0) shouldBeGreaterThanOrEqual MIN_LABEL_WIDTH
         }
         withClue(label, "the first row's label is truncated inside the pane: $m") { m["labelClipped"] shouldBe false }
+        // 104 §C: the handle is the resizer now, and the native corner one is gone. Asserted on
+        // the DEFAULT path so a revert of either half is caught by the suite that already runs.
+        withClue(label, "no divider handle on the explorer: $m") { m["handleRole"] shouldBe "separator" }
+        withClue(label, "the native resize corner came back: $m") { m["nativeResize"] shouldBe "none" }
     }
 
     private fun withClue(
@@ -312,6 +348,138 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
                 }
             }
         }
+    }
+
+    /**
+     * 104 §C — the tree pane's width is the USER's.
+     *
+     * Three rounds were spent guessing it in the stylesheet (`clamp(260px, 30vw, 480px)` left
+     * the tree 14% of the owner's 3491px window; 26vw uncapped gave it 908px for a column of
+     * short names), and all three were spent because the pane's only resizer was the browser's
+     * native `resize: horizontal` handle — at the pane's BOTTOM-RIGHT corner, where nobody
+     * looks for a divider. This is the handle ON the divider, measured: drag it 200px and the
+     * tree is 200px wider AND the detail's left edge moved with it (a tree that grew while the
+     * detail stayed put would be an overlap, not a resize); reload and the width survives;
+     * double-click and the stylesheet's own default comes back.
+     */
+    @Test
+    fun `the divider handle resizes the tree, the width survives a reload, and a double-click resets it`() {
+        startTrace()
+        ready()
+        seedBothTrees()
+        page.setViewportSize(1920, 900)
+        page.navigate("$baseUrl/templates")
+        page.waitForSelector(".tplx-tree")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+        openFirstFolder()
+
+        val before = probe()
+        assertPanes("templates at 1920 before the drag", before)
+        shot("tree-default")
+
+        dragTreeBy(200.0)
+        val dragged = probe()
+        shot("tree-dragged")
+        withClue("the drag", "the tree is not 200px wider: $before -> $dragged") {
+            (dragged.d("treeWidth") - before.d("treeWidth")) shouldBeGreaterThanOrEqual 198.0
+            (dragged.d("treeWidth") - before.d("treeWidth")) shouldBeLessThanOrEqual 202.0
+        }
+        withClue("the drag", "the detail pane did not move with the divider: $before -> $dragged") {
+            (dragged.d("detailLeft") - before.d("detailLeft")) shouldBeGreaterThanOrEqual 198.0
+            (dragged.d("detailLeft") - before.d("detailLeft")) shouldBeLessThanOrEqual 202.0
+        }
+        withClue("the drag", "the panes crowd after the resize: $dragged") {
+            dragged.d("gap") shouldBeGreaterThanOrEqual dragged.d("gapToken")
+        }
+        withClue("the drag", "aria-valuenow does not describe the pane: $dragged") {
+            (dragged.d("handleNow") - dragged.d("treeWidth")) shouldBeLessThanOrEqual 2.0
+            (dragged.d("treeWidth") - dragged.d("handleNow")) shouldBeLessThanOrEqual 2.0
+        }
+        dragged["stored"] shouldBe dragged.d("treeWidth").toInt().toString()
+
+        page.reload()
+        page.waitForSelector(".tplx-tree")
+        val reloaded = probe()
+        withClue("the reload", "the remembered width did not survive: $dragged -> $reloaded") {
+            (reloaded.d("treeWidth") - dragged.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+            (dragged.d("treeWidth") - reloaded.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+        }
+
+        page.locator("[data-splitter='explorer-tree']").dblclick()
+        page.waitForTimeout(150.0)
+        val reset = probe()
+        withClue("the reset", "double-click did not restore the stylesheet default: $reset") {
+            (reset.d("treeWidth") - before.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+            (before.d("treeWidth") - reset.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+        }
+        reset["stored"] shouldBe null
+        assertPanes("templates at 1920 after the reset", reset)
+    }
+
+    /**
+     * 104 §C — ONE key for both explorers (`dp.pane.explorer-tree`), so a user who widens the
+     * tree in Templates finds it wide in Pipelines. The panes are the same component; two keys
+     * would make them two components that merely look alike.
+     */
+    @Test
+    fun `the width the user set in one explorer is the width the other opens at`() {
+        startTrace()
+        ready()
+        seedBothTrees()
+        page.setViewportSize(1920, 900)
+        page.navigate("$baseUrl/templates")
+        page.waitForSelector(".tplx-tree")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+        openFirstFolder()
+
+        dragTreeBy(200.0)
+        val templates = probe()
+
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector(".tplx-tree")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+        val pipelines = probe()
+
+        withClue("the shared key", "the width did not follow the user to the other explorer: $pipelines") {
+            (pipelines.d("treeWidth") - templates.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+            (templates.d("treeWidth") - pipelines.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+        }
+    }
+
+    /**
+     * 104 §C — a remembered width is the width of the FIRST frame, not a shift onto it.
+     *
+     * This is the whole reason `splitter.js` is a parser-blocking script ABOVE the markup
+     * instead of a deferred one: a size applied after the pane paints moves the detail pane,
+     * and moving a painted element is precisely what CLS scores. (The 090 stylesheet defect
+     * scored 0.0000 because it INSERTED the panes wrong rather than moving them — this one
+     * would really shift, so the budget is the right instrument here.)
+     */
+    @Test
+    fun `a full load with a remembered width paints at that width inside the layout-shift budget`() {
+        startTrace()
+        ready()
+        seedBothTrees()
+        page.setViewportSize(1920, 900)
+        page.addInitScript(
+            """
+            window.localStorage.setItem('dp.pane.explorer-tree', '600');
+            window.__cls = 0;
+            new PerformanceObserver((l) => { for (const e of l.getEntries())
+              if (!e.hadRecentInput) window.__cls += e.value; }).observe({type: 'layout-shift', buffered: true});
+            """.trimIndent(),
+        )
+        page.navigate("$baseUrl/templates")
+        page.waitForSelector(".tplx-tree")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+
+        val m = probe()
+        withClue("the remembered width", "the pane did not open at the remembered 600px: $m") {
+            (m["treeWidth"] as Number).toDouble() shouldBeGreaterThanOrEqual 599.0
+            (m["treeWidth"] as Number).toDouble() shouldBeLessThanOrEqual 601.0
+        }
+        val cls = (page.evaluate("() => window.__cls") as Number).toDouble()
+        withClue("first paint at a remembered width", "cumulative layout shift $cls") { cls shouldBeLessThan CLS_BUDGET }
     }
 
     /**

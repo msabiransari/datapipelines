@@ -592,6 +592,10 @@
       }
     }
 
+    // 104 §B: from here on, every pan/zoom that is not one of this class's own view calls
+    // means the user moved the view — and a stage resize must then leave it where they put it.
+    self.watchViewGestures();
+
     // 082 §A: the stage's width decides the card box (the container query), so a
     // resize that crosses its threshold has to reach the Cytoscape side too.
     // ResizeObserver watches the STAGE, which is the box the query measures — a
@@ -601,7 +605,9 @@
       var stage = container && container.closest ? container.closest(".pe-stage") : null;
       if (stage) {
         self._stageWatch = new ResizeObserver(function () {
-          self.refreshCardMetrics();
+          /* 104 §B: the card box is only half of it — Cytoscape's own viewport moved too,
+             and a dock drag never fires a window resize to tell it. */
+          self.handleStageResize();
         });
         self._stageWatch.observe(stage);
       }
@@ -864,25 +870,80 @@
     return Math.min(FIT_MAX_ZOOM, availW / contentW, availH / contentH);
   }
 
+  /**
+   * 104 §B — is the view still THE FIT, or has the user moved it since?
+   *
+   * A resize must re-fit a graph that is showing the fit and must NOT touch one the user has
+   * panned or zoomed to a corner. Nothing in Cytoscape distinguishes the two: `pan`/`zoom`
+   * fire identically for a user drag and for `fitToView`'s own `cy.zoom()` + `cy.center()`,
+   * so a listener that simply cleared the flag would clear it the moment fit set it. The
+   * discriminator is a programmatic BRACKET around this class's own view calls — the same
+   * shape as "discriminate on scope liveness, not on the exception you were handed".
+   */
+  PipelineGraph.prototype.watchViewGestures = function () {
+    var self = this;
+    if (!self.cy || self._viewWatch) return;
+    self._viewWatch = true;
+    self.cy.on("pan zoom", function () {
+      if (!self._inProgrammaticView) self._fitted = false;
+    });
+  };
+
+  PipelineGraph.prototype._programmaticView = function (fn) {
+    this._inProgrammaticView = true;
+    try {
+      fn();
+    } finally {
+      this._inProgrammaticView = false;
+    }
+  };
+
   PipelineGraph.prototype.fitToView = function () {
-    if (!this.cy) return;
-    var bb = this.cy.elements().boundingBox();
-    this.cy.zoom(fitZoomFor(this.cy.width(), this.cy.height(), bb.w, bb.h, FIT_PADDING));
-    this.cy.center();
+    if (isGone(this)) return;
+    var self = this;
+    self._programmaticView(function () {
+      var bb = self.cy.elements().boundingBox();
+      self.cy.zoom(fitZoomFor(self.cy.width(), self.cy.height(), bb.w, bb.h, FIT_PADDING));
+      self.cy.center();
+    });
+    self._fitted = true;
   };
 
   PipelineGraph.prototype.resetView = function () {
-    if (!this.cy) return;
-    this.cy.zoom(1);
-    this.cy.center();
+    if (isGone(this)) return;
+    var self = this;
+    self._programmaticView(function () {
+      self.cy.zoom(1);
+      self.cy.center();
+    });
+    /* Reset is a VIEW the user chose, not the fit: a later resize leaves it alone. */
+    self._fitted = false;
   };
 
   PipelineGraph.prototype.zoomBy = function (factor) {
-    if (!this.cy) return;
-    this.cy.zoom({
-      level: this.cy.zoom() * factor,
-      renderedPosition: { x: this.cy.width() / 2, y: this.cy.height() / 2 },
+    if (isGone(this)) return;
+    var self = this;
+    self._programmaticView(function () {
+      self.cy.zoom({
+        level: self.cy.zoom() * factor,
+        renderedPosition: { x: self.cy.width() / 2, y: self.cy.height() / 2 },
+      });
     });
+    self._fitted = false;
+  };
+
+  /**
+   * 104 §B — the stage's box changed (the dock was dragged, the rail collapsed, the window
+   * resized). Cytoscape re-reads its container only on a WINDOW resize, so a dock drag would
+   * otherwise leave `cy` painting into a viewport that no longer exists: the bottom cards
+   * vanish under the dock and `cy.height()` still reports the old number. This is the ONE
+   * entry point for that, and the stage ResizeObserver below is its only caller.
+   */
+  PipelineGraph.prototype.handleStageResize = function () {
+    if (isGone(this)) return;
+    this.cy.resize();
+    this.refreshCardMetrics();
+    if (this._fitted) this.fitToView();
   };
 
   /* ------------------------------------------------------------- the minimap */
