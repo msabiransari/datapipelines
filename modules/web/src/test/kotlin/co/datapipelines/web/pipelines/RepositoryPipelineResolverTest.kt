@@ -10,6 +10,7 @@ import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRepoFiles
 import io.kotest.assertions.withClue
@@ -89,6 +90,7 @@ class RepositoryPipelineResolverTest {
             PipelineSerializer().write(pipeline),
             userId,
             co.datapipelines.pipeline.CreateLifecycle.RELEASED,
+            WriteSurface.SESSION,
         )
 
     @Test

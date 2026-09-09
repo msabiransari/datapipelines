@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.WriteSurface
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
 
@@ -171,6 +172,9 @@ class PipelinesCreateTool(
                 workspaceId,
                 PipelineToolPayloads.bodyJson(args),
                 ctx.principal.userId,
+                // The MCP surface stamp (V20): MCP is API-key-authenticated, so only the tool
+                // knows the write arrived over MCP — the auth method alone cannot tell.
+                WriteSurface.MCP,
             )
         // D55: version 1 landed DRAFT, so the create response carries the draft pointer too —
         // the same shape an update returns, so an agent's next write reads one place for the hash.
@@ -242,6 +246,7 @@ class PipelinesUpdateTool(
                 bodyJson = PipelineToolPayloads.bodyJson(args),
                 expectedHash = args.requiredString("expected_hash"),
                 actor = ctx.principal.userId,
+                via = WriteSurface.MCP,
             )
         // A no-op update (versioning §5.1) reports status RELEASED and carries NO draft
         // pointer — the body already equals the released one, nothing was opened. That branch

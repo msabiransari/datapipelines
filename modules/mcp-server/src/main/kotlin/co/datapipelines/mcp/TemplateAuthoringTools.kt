@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateImport
@@ -138,6 +139,8 @@ class TemplatesCreateTool(
             validator.validateOrThrow(draft, workspaceId),
             ctx.principal.userId,
             CreateLifecycle.DRAFT,
+            // The MCP surface stamp (V20) — the tool is the only caller that knows.
+            WriteSurface.MCP,
         )
     }
 

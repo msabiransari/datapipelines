@@ -364,7 +364,8 @@ class PipelineRepository(
     ): List<PipelineVersionRecord> =
         jdbc.query(
             """
-            SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by, v.released_at
+            SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by, v.released_at,
+                   v.created_via, v.updated_via
               FROM pipeline_versions v
               JOIN pipelines p ON p.id = v.pipeline_id
              WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
@@ -380,6 +381,8 @@ class PipelineRepository(
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 createdBy = rs.getObject("created_by", UUID::class.java),
                 releasedAt = rs.getObject("released_at", OffsetDateTime::class.java)?.toInstant(),
+                createdVia = rs.getString("created_via"),
+                updatedVia = rs.getString("updated_via"),
             )
         }
 
@@ -613,6 +616,7 @@ class PipelineRepository(
         bodyJson: String,
         createdBy: UUID,
         lifecycle: CreateLifecycle,
+        via: WriteSurface,
     ): PipelineRecord =
         mappingDuplicateName(pipeline.name) {
             jdbc
@@ -627,6 +631,9 @@ class PipelineRepository(
                         "workspaceId" to workspaceId,
                         "bodyJson" to bodyJson,
                         "createdBy" to createdBy,
+                        // Referenced by the DRAFT arm only; the RELEASED arm leaves the columns
+                        // at their default (versioning §3.7 — imports are not a keyed surface).
+                        "via" to via.wire,
                     ),
                     MAPPER,
                 ).single()
@@ -659,6 +666,7 @@ class PipelineRepository(
         bodyJson: String,
         expectedHash: String,
         actor: UUID,
+        via: WriteSurface,
     ): PipelineVersionDetail? =
         mappingDraftRace(pipelineId) {
             jdbc
@@ -670,6 +678,7 @@ class PipelineRepository(
                         "bodyJson" to bodyJson,
                         "expectedHash" to expectedHash,
                         "actor" to actor,
+                        "via" to via.wire,
                     ),
                     DETAIL_MAPPER,
                 ).singleOrNull()
@@ -695,6 +704,7 @@ class PipelineRepository(
         bodyJson: String,
         expectedHash: String,
         actor: UUID,
+        via: WriteSurface,
     ): PipelineVersionDetail? =
         jdbc
             .query(
@@ -705,6 +715,7 @@ class PipelineRepository(
                     "bodyJson" to bodyJson,
                     "expectedHash" to expectedHash,
                     "actor" to actor,
+                    "via" to via.wire,
                 ),
                 DETAIL_MAPPER,
             ).singleOrNull()
@@ -1181,7 +1192,7 @@ class PipelineRepository(
                 """
                 SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
                        v.released_at, v.released_by, v.discarded_at, v.discarded_by,
-                       v.updated_by, v.updated_at
+                       v.updated_by, v.updated_at, v.created_via, v.updated_via
                   FROM pipeline_versions v
                  WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT'
                 """.trimIndent(),
@@ -1237,7 +1248,8 @@ class PipelineRepository(
          */
         const val DETAIL_COLS_PLAIN =
             "pipeline_id, version, status, body_hash, created_at, created_by," +
-                " released_at, released_by, discarded_at, discarded_by, updated_by, updated_at"
+                " released_at, released_by, discarded_at, discarded_by, updated_by, updated_at," +
+                " created_via, updated_via"
 
         /** The `v.`-qualified detail list for SELECT/UPDATE-RETURNING contexts. */
         val DETAIL_COLUMNS =
@@ -1256,10 +1268,12 @@ class PipelineRepository(
          *
          * `updated_by`/`updated_at` are stamped exactly as a draft WRITE stamps them (V6: they
          * are the last draft writer, and they power the 409's `details`), and `released_at` /
-         * `released_by` stay NULL — a draft has not been released by anyone.
+         * `released_by` stay NULL — a draft has not been released by anyone. The `*_via`
+         * columns (V20) name the entry surface the create arrived on.
          *
          * [INSERT_PIPELINE_SQL] is the other half of the pair and is NOT dead: promotion and
-         * seed imports land RELEASED through it (§9.2, "the not-an-agent path").
+         * seed imports land RELEASED through it (§9.2, "the not-an-agent path") and keep the
+         * columns' database default.
          */
         val INSERT_PIPELINE_DRAFT_SQL =
             """
@@ -1269,8 +1283,10 @@ class PipelineRepository(
                 RETURNING $COLUMNS
             ), new_version AS (
                 INSERT INTO pipeline_versions
-                    (pipeline_id, version, body_json, body_hash, status, created_by, updated_by, updated_at)
-                SELECT id, 1, CAST(:bodyJson AS jsonb), $BODY_HASH_EXPR, 'DRAFT', :createdBy, :createdBy, NOW()
+                    (pipeline_id, version, body_json, body_hash, status, created_by, updated_by, updated_at,
+                     created_via, updated_via)
+                SELECT id, 1, CAST(:bodyJson AS jsonb), $BODY_HASH_EXPR, 'DRAFT', :createdBy, :createdBy, NOW(),
+                       :via, :via
                   FROM new_pipeline
                 RETURNING pipeline_id
             )
@@ -1329,11 +1345,12 @@ class PipelineRepository(
                    AND v.status = 'RELEASED' AND v.body_hash = :expectedHash
             ), draft AS (
                 INSERT INTO pipeline_versions
-                    (pipeline_id, version, body_json, body_hash, status, created_by, updated_by, updated_at)
+                    (pipeline_id, version, body_json, body_hash, status, created_by, updated_by, updated_at,
+                     created_via, updated_via)
                 SELECT v.pipeline_id,
                        (SELECT COALESCE(MAX(d2.version), 0) + 1 FROM pipeline_versions d2 WHERE d2.pipeline_id = v.pipeline_id),
                        CAST(:bodyJson AS jsonb), $BODY_HASH_EXPR,
-                       'DRAFT', :actor, :actor, NOW()
+                       'DRAFT', :actor, :actor, NOW(), :via, :via
                   FROM pipeline_versions v
                   JOIN pipelines p ON p.id = v.pipeline_id
                  WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
@@ -1345,7 +1362,7 @@ class PipelineRepository(
             ), noop AS (
                 SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
                        v.released_at, v.released_by, v.discarded_at, v.discarded_by,
-                       v.updated_by, v.updated_at
+                       v.updated_by, v.updated_at, v.created_via, v.updated_via
                   FROM pipeline_versions v
                   JOIN pipelines p ON p.id = v.pipeline_id
                   JOIN guard ON TRUE
@@ -1363,13 +1380,15 @@ class PipelineRepository(
             SELECT $DETAIL_COLS_PLAIN FROM noop
             """.trimIndent()
 
-        /** versioning §5.2 — in-place draft write. */
+        /** versioning §5.2 — in-place draft write. `updated_via` (V20) moves with the write:
+         * the row's last-writer facts are one unit, and splitting them would let the surface
+         * drift from the person. */
         val WRITE_DRAFT_SQL =
             """
             UPDATE pipeline_versions v
                SET body_json = CAST(:bodyJson AS jsonb),
                    body_hash = $BODY_HASH_EXPR,
-                   updated_by = :actor, updated_at = NOW()
+                   updated_by = :actor, updated_at = NOW(), updated_via = :via
               FROM pipelines p
              WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
                AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
@@ -1803,6 +1822,8 @@ class PipelineRepository(
                     discardedBy = rs.getObject("discarded_by", UUID::class.java),
                     updatedBy = rs.getObject("updated_by", UUID::class.java),
                     updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
+                    createdVia = rs.getString("created_via"),
+                    updatedVia = rs.getString("updated_via"),
                 )
             }
 
@@ -1836,6 +1857,8 @@ class PipelineRepository(
                         discardedBy = rs.getObject("f_discarded_by", UUID::class.java),
                         updatedBy = rs.getObject("f_updated_by", UUID::class.java),
                         updatedAt = rs.getObject("f_updated_at", OffsetDateTime::class.java)?.toInstant(),
+                        createdVia = rs.getString("f_created_via"),
+                        updatedVia = rs.getString("f_updated_via"),
                     )
             }
 
@@ -1868,6 +1891,10 @@ class PipelineRepository(
                             discardedBy = rs.getObject("l_discarded_by", UUID::class.java),
                             updatedBy = rs.getObject("l_updated_by", UUID::class.java),
                             updatedAt = rs.getObject("l_updated_at", OffsetDateTime::class.java)?.toInstant(),
+                            // Release stamps nothing new (D4): the released row keeps the
+                            // draft's surface stamps, which is the assertion, not an omission.
+                            createdVia = rs.getString("l_created_via"),
+                            updatedVia = rs.getString("l_updated_via"),
                         ),
                 )
             }

@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -36,6 +37,10 @@ data class TemplateVersionSummary(
     val createdBy: UUID,
     /** The lifecycle status — 101's version verbs made the version list a lifecycle surface. */
     val status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    /** Which surface created the row (V20, 102) — `'session' | 'api_key' | 'mcp'`. */
+    val createdVia: String = co.datapipelines.pipeline.WriteSurface.SESSION.wire,
+    /** Which surface made the last draft write (V20, 102) — what a DRAFT row should show. */
+    val updatedVia: String = co.datapipelines.pipeline.WriteSurface.SESSION.wire,
 )
 
 /**
@@ -422,7 +427,8 @@ class TemplateRepository(
     ): List<TemplateVersionSummary> =
         jdbc.query(
             """
-            SELECT t.name AS template_id, v.version, v.status, v.created_at, v.created_by
+            SELECT t.name AS template_id, v.version, v.status, v.created_at, v.created_by,
+                   v.created_via, v.updated_via
               FROM template_versions v
               JOIN templates t ON t.id = v.template_id
              WHERE t.name = :name AND t.workspace_id = :workspaceId
@@ -436,6 +442,8 @@ class TemplateRepository(
                 status = PipelineVersionStatus.fromWire(rs.getString("status")),
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 createdBy = rs.getObject("created_by", UUID::class.java),
+                createdVia = rs.getString("created_via"),
+                updatedVia = rs.getString("updated_via"),
             )
         }
 
@@ -458,6 +466,7 @@ class TemplateRepository(
         draft: TemplateDraft,
         createdBy: UUID,
         lifecycle: CreateLifecycle,
+        via: WriteSurface,
     ): Template {
         val id = draft.id ?: generateId()
         // §5.3 (046): creation is where a null payload type becomes the explicit `sql` default,
@@ -467,7 +476,9 @@ class TemplateRepository(
             jdbc
                 .query(
                     if (lifecycle == CreateLifecycle.DRAFT) INSERT_DRAFT_SQL else INSERT_SQL,
-                    params(workspaceId, id, resolved, createdBy),
+                    params(workspaceId, id, resolved, createdBy) +
+                        // Referenced by the DRAFT arm only; the RELEASED arm keeps the default.
+                        mapOf("via" to via.wire),
                     MAPPER,
                 ).single()
         }
@@ -644,7 +655,8 @@ class TemplateRepository(
             .query(
                 """
                 SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
+                       v.created_via, v.updated_via
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                  WHERE t.name = :name AND v.status = 'DRAFT'
                 """.trimIndent(),
@@ -680,12 +692,13 @@ class TemplateRepository(
         draft: TemplateDraft,
         expectedHash: String,
         actor: UUID,
+        via: WriteSurface,
     ): TemplateVersionDetail? =
         mappingDraftRace(id) {
             jdbc
                 .query(
                     CREATE_DRAFT_SQL,
-                    params(workspaceId, id, draft, actor) + mapOf("expectedHash" to expectedHash),
+                    params(workspaceId, id, draft, actor) + mapOf("expectedHash" to expectedHash, "via" to via.wire),
                     DETAIL_MAPPER,
                 ).singleOrNull()
         }
@@ -701,11 +714,12 @@ class TemplateRepository(
         draft: TemplateDraft,
         expectedHash: String,
         actor: UUID,
+        via: WriteSurface,
     ): TemplateVersionDetail? =
         jdbc
             .query(
                 WRITE_DRAFT_SQL,
-                params(workspaceId, id, draft, actor) + mapOf("expectedHash" to expectedHash),
+                params(workspaceId, id, draft, actor) + mapOf("expectedHash" to expectedHash, "via" to via.wire),
                 DETAIL_MAPPER,
             ).singleOrNull()
 
@@ -1152,14 +1166,16 @@ class TemplateRepository(
         /** The version-detail column list, `t.name AS template_id` for the human id. */
         private const val DETAIL_COLS_PLAIN =
             "template_id, version, status, body_hash, created_at, created_by," +
-                " released_at, released_by, discarded_at, discarded_by, updated_by, updated_at"
+                " released_at, released_by, discarded_at, discarded_by, updated_by, updated_at," +
+                " created_via, updated_via"
 
         // Workspace-scoped only, deliberately WITHOUT an entity-live filter (101): a
         // DISCARDED template entity's version details are exactly what restore and §9.2's
         // import classification must read.
         private const val DETAIL_WHERE =
             "SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by," +
-                " v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at" +
+                " v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at," +
+                " v.created_via, v.updated_via" +
                 " FROM template_versions v JOIN templates t ON t.id = v.template_id" +
                 " WHERE t.workspace_id = :workspaceId"
 
@@ -1193,9 +1209,9 @@ class TemplateRepository(
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
-                     status, body_hash, created_by, updated_by, updated_at)
+                     status, body_hash, created_by, updated_by, updated_at, created_via, updated_via)
                 SELECT id, 1, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
-                       'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
+                       'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW(), :via, :via
                   FROM new_template
                 RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
@@ -1254,11 +1270,11 @@ class TemplateRepository(
             ), draft AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
-                     status, body_hash, created_by, updated_by, updated_at)
+                     status, body_hash, created_by, updated_by, updated_at, created_via, updated_via)
                 SELECT v.template_id,
                        (SELECT COALESCE(MAX(d2.version), 0) + 1 FROM template_versions d2 WHERE d2.template_id = v.template_id),
                        :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary,
-                       CAST(:importsJson AS jsonb), :body, 'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
+                       CAST(:importsJson AS jsonb), :body, 'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW(), :via, :via
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.version = t.current_version AND v.status = 'RELEASED'
@@ -1268,7 +1284,8 @@ class TemplateRepository(
                 RETURNING $DETAIL_COLS_PLAIN
             ), noop AS (
                 SELECT v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
+                       v.created_via, v.updated_via
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                   JOIN guard ON TRUE
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
@@ -1287,13 +1304,13 @@ class TemplateRepository(
             )
             SELECT t.name AS template_id, draft.version, draft.status, draft.body_hash,
                    draft.created_at, draft.created_by, draft.released_at, draft.released_by, draft.discarded_at, draft.discarded_by,
-                   draft.updated_by, draft.updated_at
+                   draft.updated_by, draft.updated_at, draft.created_via, draft.updated_via
               FROM draft, guard, meta
               JOIN templates t ON t.name = :name
             UNION ALL
             SELECT t.name AS template_id, noop.version, noop.status, noop.body_hash,
                    noop.created_at, noop.created_by, noop.released_at, noop.released_by, noop.discarded_at, noop.discarded_by,
-                   noop.updated_by, noop.updated_at
+                   noop.updated_by, noop.updated_at, noop.created_via, noop.updated_via
               FROM noop, meta
               JOIN templates t ON t.name = :name
             """.trimIndent()
@@ -1307,12 +1324,13 @@ class TemplateRepository(
                        is_library = :isLibrary,
                        imports_json = CAST(:importsJson AS jsonb), body = :body,
                        body_hash = $TEMPLATE_HASH_EXPR,
-                       updated_by = :actor, updated_at = NOW()
+                       updated_by = :actor, updated_at = NOW(), updated_via = :via
                   FROM templates t
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
+                          v.created_via, v.updated_via
             ), meta AS (
                 UPDATE templates
                    SET display_name = :displayName, description = :description, updated_at = NOW()
@@ -1321,7 +1339,8 @@ class TemplateRepository(
                 RETURNING 1
             )
             SELECT t.name AS template_id, w.version, w.status, w.body_hash, w.created_at, w.created_by,
-                   w.released_at, w.released_by, w.discarded_at, w.discarded_by, w.updated_by, w.updated_at
+                   w.released_at, w.released_by, w.discarded_at, w.discarded_by, w.updated_by, w.updated_at,
+                   w.created_via, w.updated_via
               FROM written w
               JOIN templates t ON t.id = w.template_id, meta
             """.trimIndent()
@@ -1336,7 +1355,8 @@ class TemplateRepository(
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
+                          v.created_via, v.updated_via
             ), bumped AS (
                 UPDATE templates
                    SET current_version = (SELECT version FROM locked), updated_at = NOW()
@@ -1345,7 +1365,8 @@ class TemplateRepository(
                 RETURNING id
             )
             SELECT t.name AS template_id, l.version, l.status, l.body_hash, l.created_at, l.created_by,
-                   l.released_at, l.released_by, l.discarded_at, l.discarded_by, l.updated_by, l.updated_at
+                   l.released_at, l.released_by, l.discarded_at, l.discarded_by, l.updated_by, l.updated_at,
+                   l.created_via, l.updated_via
               FROM locked l
               JOIN templates t ON t.id = l.template_id, bumped b
             """.trimIndent()
@@ -1433,7 +1454,8 @@ class TemplateRepository(
                    AND NOT EXISTS (SELECT 1 FROM template_versions v
                                     WHERE v.template_id = t.id AND v.version = :version)
                 RETURNING template_id, version, status, body_hash, created_at, created_by,
-                          released_at, released_by, discarded_at, discarded_by, updated_by, updated_at
+                          released_at, released_by, discarded_at, discarded_by, updated_by, updated_at,
+                          created_via, updated_via
             ), bumped AS (
                 UPDATE templates
                    SET current_version = COALESCE(current_version, :version),
@@ -1445,7 +1467,8 @@ class TemplateRepository(
                 RETURNING 1
             )
             SELECT t.name AS template_id, i.version, i.status, i.body_hash, i.created_at, i.created_by,
-                   i.released_at, i.released_by, i.discarded_at, i.discarded_by, i.updated_by, i.updated_at
+                   i.released_at, i.released_by, i.discarded_at, i.discarded_by, i.updated_by, i.updated_at,
+                   i.created_via, i.updated_via
               FROM ins i
               JOIN templates t ON t.id = i.template_id, bumped
             """.trimIndent()
@@ -1488,7 +1511,8 @@ class TemplateRepository(
                           AND (pnode->'template'->>'version')::int = :version
                    )
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
+                          v.created_via, v.updated_via
             ), bumped AS (
                 UPDATE templates t
                    SET current_version = CASE
@@ -1507,7 +1531,8 @@ class TemplateRepository(
                 RETURNING 1
             )
             SELECT t.name AS template_id, f.version, f.status, f.body_hash, f.created_at, f.created_by,
-                   f.released_at, f.released_by, f.discarded_at, f.discarded_by, f.updated_by, f.updated_at
+                   f.released_at, f.released_by, f.discarded_at, f.discarded_by, f.updated_by, f.updated_at,
+                   f.created_via, f.updated_via
               FROM flipped f
               JOIN templates t ON t.id = f.template_id, bumped
             """.trimIndent()
@@ -1522,7 +1547,8 @@ class TemplateRepository(
                  WHERE t.name = :name AND t.workspace_id = :workspaceId
                    AND v.template_id = t.id AND v.version = :version AND v.status = 'DISCARDED'
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at
+                          v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
+                          v.created_via, v.updated_via
             ), bumped AS (
                 UPDATE templates
                    SET current_version = GREATEST(COALESCE(current_version, 0), (SELECT version FROM restored)),
@@ -1532,7 +1558,8 @@ class TemplateRepository(
                 RETURNING 1
             )
             SELECT t.name AS template_id, r.version, r.status, r.body_hash, r.created_at, r.created_by,
-                   r.released_at, r.released_by, r.discarded_at, r.discarded_by, r.updated_by, r.updated_at
+                   r.released_at, r.released_by, r.discarded_at, r.discarded_by, r.updated_by, r.updated_at,
+                   r.created_via, r.updated_via
               FROM restored r
               JOIN templates t ON t.id = r.template_id, bumped
             """.trimIndent()
@@ -1615,6 +1642,8 @@ class TemplateRepository(
                     discardedBy = rs.getObject("discarded_by", UUID::class.java),
                     updatedBy = rs.getObject("updated_by", UUID::class.java),
                     updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
+                    createdVia = rs.getString("created_via"),
+                    updatedVia = rs.getString("updated_via"),
                 )
             }
 

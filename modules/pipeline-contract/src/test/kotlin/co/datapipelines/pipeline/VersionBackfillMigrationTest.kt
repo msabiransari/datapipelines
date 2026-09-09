@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.WriteSurface
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -109,6 +110,7 @@ class VersionBackfillMigrationTest {
                 serializer.write(Fixtures.pipeline(name = "test/precondition_legacy")),
                 detail.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
         draft.shouldBeInstanceOf<PipelineVersionDetail>()
         draft.version shouldBe 2
@@ -124,7 +126,7 @@ class VersionBackfillMigrationTest {
         val draftBody = serializer.write(body)
         val draft =
             checkNotNull(
-                repository.createDraft(WORKSPACE_ID, record.id, draftBody, detail.bodyHash, owner),
+                repository.createDraft(WORKSPACE_ID, record.id, draftBody, detail.bodyHash, owner, WriteSurface.SESSION),
             )
         val released =
             checkNotNull(
@@ -141,7 +143,7 @@ class VersionBackfillMigrationTest {
         val record = checkNotNull(repository.findByName(WORKSPACE_ID, "test/third_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
         val body = serializer.write(Fixtures.pipeline(name = "test/third_legacy"))
-        repository.createDraft(WORKSPACE_ID, record.id, body, detail.bodyHash, owner)
+        repository.createDraft(WORKSPACE_ID, record.id, body, detail.bodyHash, owner, WriteSurface.SESSION)
 
         val thrown =
             shouldThrow<org.springframework.dao.DuplicateKeyException> {

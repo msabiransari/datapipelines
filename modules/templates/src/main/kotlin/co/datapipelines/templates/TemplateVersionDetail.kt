@@ -31,4 +31,8 @@ data class TemplateVersionDetail(
     val discardedBy: UUID? = null,
     val updatedBy: UUID? = null,
     val updatedAt: Instant? = null,
+    /** Which surface created the row (V20, 102) — the person is [createdBy], always. */
+    val createdVia: String = co.datapipelines.pipeline.WriteSurface.SESSION.wire,
+    /** Which surface made the last draft write (V20, 102). */
+    val updatedVia: String = co.datapipelines.pipeline.WriteSurface.SESSION.wire,
 )

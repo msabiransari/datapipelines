@@ -85,7 +85,119 @@ class FlywayMigrationIntegrationTest {
                 "18|draft first create|true",
                 // 101 — the version lifecycle: discard stamps + the is_deleted retirement.
                 "19|version lifecycle|true",
+                // 102 — the write-surface stamps on both version tables (owner ruling
+                // 2026-09-09): created_via / updated_via, CHECK'd, defaulting 'session'.
+                "20|version write surface|true",
             )
+    }
+
+    @Test
+    fun `V20 stamps the write surface on both version tables, checked and defaulted`() {
+        // The ruling's schema half, read from the SHIPPED database: the columns exist on BOTH
+        // tables, carry the default (existing rows "backfill" by it), and the CHECK admits
+        // exactly the three surfaces — an INSERT proves it, not the constraint's text (the
+        // V17 rule: a CHECK that parses but does not bind is invisible to a text assertion).
+        val columns =
+            query(
+                """
+                SELECT table_name || '|' || column_name || '|' || is_nullable || '|' || column_default
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND column_name IN ('created_via', 'updated_via')
+                   AND table_name IN ('pipeline_versions', 'template_versions')
+                  ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "pipeline_versions|created_via|NO|'session'::text",
+                "pipeline_versions|updated_via|NO|'session'::text",
+                "template_versions|created_via|NO|'session'::text",
+                "template_versions|updated_via|NO|'session'::text",
+            )
+
+        // The CHECK: the three surfaces land, a fourth is refused — on BOTH tables.
+        assertAll(
+            { viaAccepted("pipeline_versions", "mcp") shouldBe true },
+            { viaAccepted("pipeline_versions", "api_key") shouldBe true },
+            { viaAccepted("pipeline_versions", "cli") shouldBe false },
+            { viaAccepted("template_versions", "mcp") shouldBe true },
+            { viaAccepted("template_versions", "session") shouldBe true },
+            { viaAccepted("template_versions", "agent") shouldBe false },
+        )
+    }
+
+    /**
+     * V20's insert-probe: does the via CHECK admit [value] on [table]? The probe's FK targets
+     * are seeded REAL rows first (a bogus UUID would fail the FK, not the CHECK — the exact
+     * confusion the V17 shape guards against by naming the constraint). Rolled back either way.
+     */
+    private fun viaAccepted(
+        table: String,
+        value: String,
+    ): Boolean {
+        val probeUser = UUID.randomUUID()
+        val pipelineId = UUID.randomUUID()
+        dataSource.connection.use { conn ->
+            conn.autoCommit = false
+            try {
+                conn.createStatement().use { statement ->
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active)" +
+                            " VALUES ('$probeUser', 'v20-probe@datapipelines.test', 'V20 probe', 'test', 'v20-probe', TRUE)",
+                    )
+                    statement.execute(
+                        "INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version)" +
+                            " VALUES ('$pipelineId', 'v20/probe', 'V20 probe', '', '$probeUser'," +
+                            " (SELECT id FROM workspaces LIMIT 1), NULL)",
+                    )
+                    statement.execute(
+                        "INSERT INTO templates (id, name, display_name, description, current_version, workspace_id, created_by)" +
+                            " VALUES ('${UUID.randomUUID()}', 'v20-probe-tpl', 'V20 probe', '', NULL," +
+                            " (SELECT id FROM workspaces LIMIT 1), '$probeUser')",
+                    )
+                }
+                when (table) {
+                    "pipeline_versions" -> {
+                        conn
+                            .prepareStatement(
+                                "INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, created_by, created_via)" +
+                                    " VALUES ('$pipelineId', 99, '{}', 'probe-hash', '$probeUser', ?)",
+                            ).use {
+                                it.setString(1, value)
+                                it.executeUpdate()
+                            }
+                    }
+
+                    else -> {
+                        conn
+                            .prepareStatement(
+                                // template_versions is keyed by the templates SURROGATE (V4); the
+                                // probe seeds the parent row in the same transaction.
+                                "INSERT INTO template_versions" +
+                                    " (template_id, version, body, body_hash, engine, dialect, created_by, created_via)" +
+                                    " VALUES ((SELECT id FROM templates WHERE name = 'v20-probe-tpl'), 99, 'x'," +
+                                    " 'probe-hash', 'freemarker', 'POSTGRES', '$probeUser', ?)",
+                            ).use {
+                                it.setString(1, value)
+                                it.executeUpdate()
+                            }
+                    }
+                }
+                return true
+            } catch (e: SQLException) {
+                // Only the CHECK's own refusal is the assertion — anything else (an FK, a
+                // syntax slip) is an unexpected failure and must not read as "refused".
+                check(e.message.orEmpty().contains("chk_") || e.message.orEmpty().contains("via")) {
+                    "unexpected SQL failure: ${e.message}"
+                }
+                return false
+            } finally {
+                conn.rollback()
+                conn.autoCommit = true
+            }
+        }
     }
 
     @Test
@@ -383,10 +495,14 @@ class FlywayMigrationIntegrationTest {
                 // 101 (V19): discard stamps — both NULL unless DISCARDED, a stamp when it is.
                 "chk_pipeline_versions_discard_stamps",
                 "chk_pipeline_versions_status",
+                // 102 (V20): the write-surface stamps — 'session' | 'api_key' | 'mcp', both
+                // columns, the ruling's CHECK so a key id can never drift back in as a value.
+                "chk_pipeline_versions_via",
                 "chk_status",
                 "chk_template_type",
                 "chk_template_versions_discard_stamps",
                 "chk_template_versions_status",
+                "chk_template_versions_via",
                 "chk_triggered_via",
                 "chk_type_dialect",
                 "chk_workspace_member_role",

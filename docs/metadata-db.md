@@ -229,12 +229,17 @@ CREATE TABLE pipeline_versions (
     discarded_by    UUID        REFERENCES users(id),
     updated_by      UUID        REFERENCES users(id),-- last DRAFT writer — powers the 409 conflict details
     updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only; not restamped at release/discard/restore
+    created_via     TEXT        NOT NULL DEFAULT 'session',  -- V20 (102): which surface wrote the row — the *_by fields name the person, always
+    updated_via     TEXT        NOT NULL DEFAULT 'session',  -- V20: moves with each draft write; release stamps nothing new
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     PRIMARY KEY (pipeline_id, version),
     CONSTRAINT chk_pipeline_versions_discard_stamps CHECK (
         (status = 'DISCARDED' AND discarded_at IS NOT NULL)
         OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_pipeline_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
     )
 );
 
@@ -256,6 +261,7 @@ DISCARDED.
 - **`body_hash` is computed by the database** — `encode(sha256(convert_to(body_json::text, 'UTF8')), 'hex')` — in V6's backfill and in every repository write, one expression everywhere: a JSONB column does not preserve the writer's key order, so the application's serialized string would be a drifting canonical anchor. The hash is the precondition token of every mutation (versioning §4.2) and the cross-server content identity (§11.2).
 - **`released_at` is database-generated** (`NOW()` in the release statement). [Versioning §8](versioning.md#8-executing-drafts) derives the draft-run label by comparing it against the application-supplied `pipeline_executions.started_at`; requiring both clocks to be right would double the failure window, so at most one side spans a clock.
 - `updated_at` belongs to the DRAFT write path; a release or discard does not restamp it (versioning §11) — the row's modification clock is the last draft write, and §2's every-UPDATE rule is a `pipelines`-table rule.
+- **The `*_via` columns name the SURFACE, never the credential (V20, owner ruling 2026-09-09).** `created_via` / `updated_via` are stamped at the entry point — the REST controllers map the principal's auth method, the MCP tools pass `'mcp'` (MCP is API-key-authenticated, so only the tool knows), and import/seed paths keep the `'session'` default. A key's writes remain its OWNER's in `created_by`/`updated_by`: no key id is stored on any row, and the CHECK's value set is what keeps a future key-id column from drifting back in as a value.
 - There is **no terminal-node column and no derived result-node column**. Under D1 the result node is the node whose `output` resolves to `caller` (at most one per pipeline, zero legal); it is a property of the stored JSON, read at execution time. Nothing about it is denormalized here — a denormalized copy would be a second source of truth for a value validation already guarantees.
 - `PRIMARY KEY (pipeline_id, version)` is also the target of the composite foreign key on `pipeline_executions` ([§4.6](#46-pipeline_executions)); it must not be reordered or dropped. The same FK is why an **executed** draft cannot be hard-deleted — discard flips it to DISCARDED and the number stays consumed (versioning §3.4).
 
@@ -395,6 +401,8 @@ CREATE TABLE template_versions (
     discarded_by    UUID        REFERENCES users(id),
     updated_by      UUID        REFERENCES users(id),
     updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only
+    created_via     TEXT        NOT NULL DEFAULT 'session',  -- V20 (102): which surface wrote the row
+    updated_via     TEXT        NOT NULL DEFAULT 'session',  -- V20: moves with each draft write
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     PRIMARY KEY (template_id, version),
@@ -402,6 +410,9 @@ CREATE TABLE template_versions (
     CONSTRAINT chk_template_versions_discard_stamps CHECK (
         (status = 'DISCARDED' AND discarded_at IS NOT NULL)
         OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_template_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
     )
 );
 
@@ -975,3 +986,4 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-09-08 | v1.13 | V18 migration (099, backfilled entry) | `pipelines.current_version` / `templates.current_version` drop `DEFAULT 0` and `NOT NULL` and become nullable, and any `0` sentinel rows are nulled — creation lands version 1 as a DRAFT (D55), so a fresh entity has a version and no pointer at all. §4.4/§4.8 sketches and notes updated (this entry was missing from the Appendix when 099 landed — the sketches still said `NOT NULL DEFAULT 0`; caught while amending them for V19). |
 | 2026-09-08 | v1.14 | V19 migration (101) | **Discard stamps** on both version tables: `discarded_at TIMESTAMPTZ NULL` / `discarded_by UUID NULL REFERENCES users(id)` plus `chk_*_discard_stamps` — both NULL unless the row is DISCARDED, and a DISCARDED row must carry `discarded_at` (pre-101 executed-draft tombstones backfill `COALESCE(updated_at, NOW())`; `discarded_by` stays NULL — the actor is unknown history). **`is_deleted` retired** from `pipelines` and `templates`: soft-deleted rows migrate to "every version DISCARDED, pointer NULL" (counted by a `RAISE NOTICE` — expected zero outside tests), `idx_pipelines_owner` / `idx_templates_active` are rebuilt plain, and the columns drop — entity status is the §3.2 derivation (`EXISTS` a live version), never stored. §4.4/§4.5/§4.8/§4.9 sketches and notes amended in place; the purge-deletes-executions choice is documented at §4.5. |
 | 2026-09-08 | v1.12 | V16 migration (089 §F) | **V16 widens `template_versions.chk_dialect` to admit `'LAKE'`** — dropped and recreated, the V14 shape, since Postgres has no ALTER for a CHECK expression; additive in effect, no data changes (no existing row can hold a value the CHECK has refused since V1). The dialect itself joined the datasource CHECK in V14; this is its template twin, found by the MinIO suite going red on the first `dialect: LAKE` template insert — the 088 showcase content (`nyc/lake/rideshare_zone_day.sql`) declares exactly one. The §4.9 sketch keeps the V1 constraint, the same convention §4.10 follows for V14 — this row is the record of the widening. |
+| 2026-09-09 | v1.15 | V20 migration (102) | **Write-surface stamps** on both version tables: `created_via` / `updated_via TEXT NOT NULL DEFAULT 'session'` with `chk_*_via` admitting `'session' \| 'api_key' \| 'mcp'` — the surface a write arrived on, stamped at the entry point (REST maps the auth method, MCP tools pass `'mcp'`, imports keep the default), while `*_by` keep naming the person; a release stamps nothing new (D4). §4.5/§4.9 sketches and notes amended in place. |

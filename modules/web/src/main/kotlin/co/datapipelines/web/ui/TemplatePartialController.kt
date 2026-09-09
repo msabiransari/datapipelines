@@ -7,6 +7,7 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
@@ -174,7 +175,7 @@ class TemplatePartialController(
                 )
             validator.validateOrThrow(draft, workspaceId)
             // D55: the editor's create lands version 1 DRAFT — the same rule the API follows.
-            templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT)
+            templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, WriteSurface.SESSION)
             // Shape A (§5.1): the success node lands in #template-create-result — its arrival
             // is what closes the modal — and the refreshed list rides along out-of-band. No
             // HX-Redirect: a navigation would discard the toast.

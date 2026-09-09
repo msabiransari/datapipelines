@@ -23,6 +23,7 @@ import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
 import co.datapipelines.web.pipelines.LifecycleVerbs
 import com.fasterxml.jackson.databind.JsonNode
@@ -96,7 +97,7 @@ class TemplatesController(
         val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
         // D55: authoring lands version 1 DRAFT (`status: "DRAFT"` in the response); a human
         // releases it. The RELEASED create belongs to the import path alone.
-        return ApiResponse.of(templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT))
+        return ApiResponse.of(templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, principal.writeSurface()))
     }
 
     /**
@@ -236,7 +237,7 @@ class TemplatesController(
                 "PUT /api/v1/templates requires the template 'id' in the body (§9.6: the name never travels in the path).",
                 mapOf(ApiErrors.REASON to "id_missing"),
             )
-        val written = drafts.write(workspaceId, id, draft, IfMatchHeader.required(ifMatch), principal.userId)
+        val written = drafts.write(workspaceId, id, draft, IfMatchHeader.required(ifMatch), principal.userId, principal.writeSurface())
         val stored =
             templates.findVersion(workspaceId, id, written.version) ?: throw ApiErrors.templateNotFound(id)
         return ApiResponse.of(withDraftPointer(stored, written))

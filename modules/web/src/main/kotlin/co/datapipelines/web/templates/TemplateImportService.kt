@@ -3,6 +3,7 @@ package co.datapipelines.web.templates
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
@@ -128,7 +129,7 @@ class TemplateImportService(
         } else {
             // Not authoring (D55) — see PipelineImportService: promotion and the seeders land
             // released content through this path.
-            templates.create(workspaceId, draft, actorId, CreateLifecycle.RELEASED)
+            templates.create(workspaceId, draft, actorId, CreateLifecycle.RELEASED, WriteSurface.SESSION)
         }
     }
 

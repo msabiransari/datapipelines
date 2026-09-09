@@ -48,7 +48,9 @@ enum class PipelineVersionStatus {
  * (§8's draft-run derivation depends on that). [discardedAt]/[discardedBy] are the discard
  * stamps (§3.1, V19): both NULL unless the status is DISCARDED. [updatedBy] /
  * [updatedAt] carry the last DRAFT write, powering the 409 conflict details; they are
- * whatever the last draft write left on the row, including after release.
+ * whatever the last draft write left on the row, including after release. [createdVia] /
+ * [updatedVia] are the write-surface stamps (V20, 102): which door the write arrived on,
+ * while the `_by` fields keep naming the person.
  */
 data class PipelineVersionDetail(
     val pipelineId: UUID,
@@ -63,4 +65,6 @@ data class PipelineVersionDetail(
     val discardedBy: UUID? = null,
     val updatedBy: UUID? = null,
     val updatedAt: Instant? = null,
+    val createdVia: String = WriteSurface.SESSION.wire,
+    val updatedVia: String = WriteSurface.SESSION.wire,
 )

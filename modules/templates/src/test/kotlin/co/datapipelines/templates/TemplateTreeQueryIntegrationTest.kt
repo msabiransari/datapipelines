@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -259,4 +260,4 @@ private fun TemplateRepository.createReleased(
     workspaceId: java.util.UUID,
     draft: TemplateDraft,
     createdBy: java.util.UUID,
-): Template = create(workspaceId, draft, createdBy, co.datapipelines.pipeline.CreateLifecycle.RELEASED)
+): Template = create(workspaceId, draft, createdBy, co.datapipelines.pipeline.CreateLifecycle.RELEASED, WriteSurface.SESSION)
