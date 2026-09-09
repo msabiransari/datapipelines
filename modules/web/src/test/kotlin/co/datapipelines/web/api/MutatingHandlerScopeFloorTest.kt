@@ -106,6 +106,42 @@ class MutatingHandlerScopeFloorTest {
         (UNAUTHENTICATED_BY_DESIGN.keys - unannotated) shouldBe emptySet()
     }
 
+    /**
+     * 097 §E — the FOURTH URL space. `ui-screens.md §2.1` declares three (UI pages,
+     * `/partials`, `/api/v1`) and, until 097, described nothing about mutations that live on
+     * a PAGE route: seven POSTs with a redirect and an `?ok=`/`?error=` banner, which is a
+     * second error idiom beside §5.1's toasts. The ruling was "document, don't move" — a
+     * page-route mutation is allowed when its success changes the SHELL (the workspace
+     * switch re-mints the session cookie; promotion changes what the whole screen shows) or
+     * when it must work without JS — so this arm is what keeps the list closed.
+     *
+     * Everything else mutates at `/partials` (a fragment and a toast) or `/api/v1` (an
+     * envelope). A new page-route mutation fails here until someone writes down why it is
+     * one of the two allowed kinds.
+     */
+    @Test
+    fun `every mutating handler outside partials and api is an allowlisted page-route mutation`() {
+        val offenders =
+            discoveredMutatingHandlers()
+                .filter { it.path != null && !it.path.startsWith("/partials") && !it.path.startsWith("/api") }
+                .filterNot { it.where in PAGE_ROUTE_MUTATIONS }
+                .map { "${it.where} (${it.path}): a mutating handler on a PAGE route — see ui-screens.md §2.1" }
+        offenders shouldBe emptyList()
+    }
+
+    /** Non-vacuity, and rot control: every entry must still be a page-route mutation. */
+    @Test
+    fun `every page-route mutation entry is a discovered handler outside partials and api`() {
+        val found =
+            discoveredMutatingHandlers()
+                .filter { it.path != null && !it.path.startsWith("/partials") && !it.path.startsWith("/api") }
+                .map { it.where }
+                .toSet()
+        (PAGE_ROUTE_MUTATIONS.keys - found) shouldBe emptySet()
+        // The rule is worth nothing if the path resolution quietly returns null for everything.
+        found shouldHaveAtLeastSize 5
+    }
+
     /** The scan sees the module's controllers — an empty scan would prove nothing. */
     @Test
     fun `the scan finds the module's controllers`() {
@@ -117,6 +153,8 @@ class MutatingHandlerScopeFloorTest {
     private data class DiscoveredHandler(
         val where: String,
         val operation: ScopeMatrix.RestOperation?,
+        /** The handler's full path — class-level prefix plus the mapping's own — or null. */
+        val path: String?,
     )
 
     private fun discoveredMutatingHandlers(): List<DiscoveredHandler> =
@@ -128,6 +166,7 @@ class MutatingHandlerScopeFloorTest {
                     DiscoveredHandler(
                         where = "${controller.simpleName}#${fn.name}",
                         operation = fn.findAnnotation<RequiredScope>()?.value ?: classOperation,
+                        path = pathOf(controller, fn.javaMethod),
                     )
                 }
         }
@@ -223,6 +262,55 @@ class MutatingHandlerScopeFloorTest {
         }
 
         private val MUTATING_VERBS = setOf("POST", "PUT", "PATCH", "DELETE")
+
+        /** Class-level `@RequestMapping` prefix + the handler's own mapping path. */
+        fun pathOf(
+            controller: KClass<*>,
+            method: java.lang.reflect.Method?,
+        ): String? {
+            if (method == null) return null
+            val prefix = controller.findAnnotation<RequestMapping>()?.value?.firstOrNull().orEmpty()
+            val own =
+                method.getAnnotation(PostMapping::class.java)?.value?.firstOrNull()
+                    ?: method.getAnnotation(PutMapping::class.java)?.value?.firstOrNull()
+                    ?: method.getAnnotation(PatchMapping::class.java)?.value?.firstOrNull()
+                    ?: method.getAnnotation(DeleteMapping::class.java)?.value?.firstOrNull()
+                    ?: method.getAnnotation(RequestMapping::class.java)?.value?.firstOrNull()
+                    ?: ""
+            val full = prefix + own
+            return full.ifEmpty { null }
+        }
+
+        /**
+         * The page-route mutations (ui-screens.md §2.1, "Page-route mutation (PRG)"), each
+         * with the reason it is not a `/partials` mutation. The two admissible reasons are the
+         * §2.1 row's: the success changes the SHELL, or the action must survive without JS.
+         */
+        val PAGE_ROUTE_MUTATIONS: Map<String, String> =
+            mapOf(
+                "WorkspacesUiController#switch" to
+                    "SHELL: it re-mints the session cookie and re-renders every workspace-scoped surface. " +
+                    "A fragment swap cannot change the identity the rest of the page was rendered under, " +
+                    "so this one MUST stay a full-page POST",
+                "WorkspacesUiController#create" to
+                    "SHELL: a new workspace joins the switcher in the header, which is outside any fragment " +
+                    "this screen swaps; the redirect re-renders it",
+                "WorkspacesUiController#join" to
+                    "SHELL: joining changes the caller's own membership set — the switcher again",
+                "WorkspacesUiController#addMember" to
+                    "NO-JS: workspace administration is the recovery surface an operator reaches when the " +
+                    "app is misbehaving, and it is a plain form POST end to end",
+                "WorkspacesUiController#removeMember" to
+                    "NO-JS: the sibling of addMember, same form, same banner",
+                "WorkspacesUiController#delete" to
+                    "SHELL: deleting the ACTIVE workspace changes what the switcher and the rail can show",
+                "PromotionUiController#promote" to
+                    "SHELL: a promotion changes the deployment the whole screen describes, and the operator " +
+                    "is told the outcome by the ?ok=/?error= banner the redirect carries",
+                "LocalLoginController#login" to
+                    "NO-JS, and pre-credential: the sign-in POST mints the session it is authenticated by. " +
+                    "It is also on UNAUTHENTICATED_BY_DESIGN above, which is where its permitAll is justified",
+            )
     }
 
     private fun allControllers(): List<KClass<*>> =
