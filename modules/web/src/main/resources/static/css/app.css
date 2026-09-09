@@ -1734,6 +1734,15 @@ button.app-busy::after {
 .u-primary { color: var(--text-primary); }
 .u-danger { color: var(--accent-danger); }
 .u-success { color: var(--accent-success); }
+.u-warning { color: var(--accent-warning); }
+
+/* 097 §C — the admin-users row actions carried their colour as an inline `style` written in
+   Kotlin. As classes they need the hover state spelled out: `.ds-button-ghost:hover` (0,2,0)
+   would otherwise repaint them `--text-primary`, which the inline style used to win against
+   by being inline. Same colour, same states, no attribute. */
+.ds-button-ghost.u-danger:hover { color: var(--accent-danger); }
+.ds-button-ghost.u-success:hover { color: var(--accent-success); }
+.ds-button-ghost.u-warning:hover { color: var(--accent-warning); }
 
 /* layout */
 .u-row { display: flex; align-items: center; gap: var(--gap-sm); }
@@ -1951,6 +1960,23 @@ button.app-busy::after {
    not clear the cell padding a full-bleed skeleton row needs. Declared at table
    scope rather than with `!important`. */
 .ds-table td.u-p0 { padding: 0; }
+
+/* Same reason, the other direction: the admin-users empty row is a roomier cell than a data
+   row, which it used to say with an inline padding (097 §C). */
+.ds-table td.u-p-md { padding: var(--gap-md); }
+
+/* 097 §C — the inline refusal a modal renders in place of a toast (the 022 review F9 rule:
+   form-level feedback belongs in the form). It was three Kotlin string builders carrying
+   inline styles, and two of them had drifted to different hand-picked widths (480px and
+   520px) — the 076 failure exactly. One box, one width, from the stylesheet. */
+.app-inline-refusal {
+  border: 1px solid var(--accent-danger);
+  border-radius: var(--radius-base);
+  padding: var(--gap-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  max-width: 30rem;
+}
 
 /* The login/forced-password notice boxes. One base, three role fills — the fill
    is the whole signal, so the roles never share a border or an icon. The

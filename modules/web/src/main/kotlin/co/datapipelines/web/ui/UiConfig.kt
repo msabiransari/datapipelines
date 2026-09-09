@@ -66,6 +66,30 @@ class UiConfig {
     fun pipelineRunStats(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): PipelineRunStats =
         PipelineRunStats(jdbc)
 
+    /**
+     * 097 §A: the datasources screen's one model, shared by the page and the partial
+     * controllers — the projection this screen had been building twice (see
+     * [DatasourceBrowseModel]).
+     */
+    @Bean
+    fun datasourceBrowseModel(datasources: co.datapipelines.datasources.DatasourceRegistry): DatasourceBrowseModel =
+        DatasourceBrowseModel(datasources)
+
+    /**
+     * 097 §B: the execution-history screen's one model, shared by the page and the partial —
+     * which is what let `/executions` render its first fragment instead of a spinner.
+     */
+    @Bean
+    fun executionHistoryBrowseModel(
+        executions: co.datapipelines.executor.ExecutionRepository,
+        pipelineNames: PipelineNames,
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+    ): ExecutionHistoryBrowseModel = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
+
+    /** 097 §C: the admin user table's row model, shared by the page and the partial. */
+    @Bean
+    fun adminUsersBrowseModel(users: co.datapipelines.auth.UserService): AdminUsersBrowseModel = AdminUsersBrowseModel(users)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources

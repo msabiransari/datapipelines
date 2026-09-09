@@ -13,32 +13,38 @@ import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
+import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
-import java.time.Instant
 import java.util.UUID
 
+/**
+ * The admin user-management screen's htmx partials (ui-screens.md §4.12).
+ *
+ * Every response that carries a row renders `partials/admin-users-rows`' fragments from the
+ * one [AdminUsersBrowseModel] the page also renders through (097 §C). This controller built
+ * its own `<tr>`s as Kotlin strings until then — the pattern 091 deleted for the API-key
+ * table.
+ */
 @Controller
 class AdminUsersPartialController(
     private val userService: UserService,
     private val localPasswordService: LocalPasswordService,
+    private val browse: AdminUsersBrowseModel,
 ) {
     @GetMapping("/partials/admin/users")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun search(
+        model: Model,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false, defaultValue = "0") offset: Int,
-        @RequestParam(required = false, defaultValue = "20") limit: Int,
-    ): ResponseEntity<String> {
+        @RequestParam(required = false, defaultValue = "${AdminUsersBrowseModel.DEFAULT_LIMIT}") limit: Int,
+    ): String {
         requireAdmin()
-        val clampedOffset = offset.coerceAtLeast(0)
-        val clampedLimit = limit.coerceIn(MIN_LIMIT, MAX_LIMIT)
-        val results = userService.search(q.orEmpty(), clampedOffset, clampedLimit)
-        val html = buildUserTable(results)
-        return ResponseEntity.ok(html)
+        return browse.fillList(model, q, offset, limit)
     }
 
     /**
@@ -49,9 +55,10 @@ class AdminUsersPartialController(
     @PostMapping("/partials/admin/users")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun createLocalUser(
+        model: Model,
         @RequestParam email: String,
         @RequestParam(required = false, defaultValue = "") displayName: String,
-    ): ResponseEntity<String> {
+    ): Any {
         requireSessionAdmin("create-local-user")
         if (email.isBlank() || !email.contains('@')) {
             return refusedToast(HttpStatus.BAD_REQUEST, "User not created", "A valid email address is required")
@@ -64,15 +71,15 @@ class AdminUsersPartialController(
             is LocalPasswordService.CreateResult.Success -> {
                 // Shape A: the row prepends, the one-time password stays in its PERSISTENT
                 // inline notice (§5.1's hard rule), and the toast only POINTS at it.
-                ResponseEntity.ok(
-                    buildUserRow(result.user) +
-                        oneTimeNotice(result.oneTimePassword, result.user.email) +
-                        ToastHtml.oob(
-                            "success",
-                            "Local user created",
-                            ToastHtml.esc(result.user.email) +
-                                " — the one-time password is shown once on this screen; pass it to the user out-of-band.",
-                        ),
+                saved(
+                    model,
+                    result.user,
+                    oneTimePassword = result.oneTimePassword,
+                    variant = "success",
+                    title = "Local user created",
+                    message =
+                        result.user.email +
+                            " — the one-time password is shown once on this screen; pass it to the user out-of-band.",
                 )
             }
         }
@@ -81,9 +88,10 @@ class AdminUsersPartialController(
     @PatchMapping("/partials/admin/users/{userId}/{action}")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun toggle(
+        model: Model,
         @PathVariable userId: UUID,
         @PathVariable action: String,
-    ): ResponseEntity<String> {
+    ): Any {
         requireAdmin()
         val actor = currentPrincipal().userId
 
@@ -91,7 +99,7 @@ class AdminUsersPartialController(
         // password notice) — handled outside the row-swap when below.
         if (action == "reset-password") {
             requireSessionAdmin(action)
-            return resetPassword(userId, actor)
+            return resetPassword(model, userId, actor)
         }
         // The credential-minting subset of the row-swap actions. `unlock` clears a lockout
         // and `disable-local` removes the local credential — both change who can hold an
@@ -127,14 +135,33 @@ class AdminUsersPartialController(
                 return refusedToast(HttpStatus.BAD_REQUEST, "Action refused", "Unknown action: $action")
             }
         }
-        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build()
+        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
         // Shape A: the row keeps its #user-row outerHTML swap; the toast names the
         // action and the user it happened to.
         val (title, outcome) = actionOutcome(action)
-        return ResponseEntity.ok(
-            buildUserRow(updated) +
-                ToastHtml.oob("success", title, "${ToastHtml.esc(updated.email)} $outcome"),
-        )
+        return saved(model, updated, oneTimePassword = null, variant = "success", title = title, message = "${updated.email} $outcome")
+    }
+
+    /**
+     * A row action's response: the refreshed row, the one-time password notice when the action
+     * minted one, and the toast — composed by `partials/admin-user-saved`, which renders the
+     * PAGE's row fragment rather than a second copy of it.
+     */
+    @Suppress("LongParameterList") // one parameter per model attribute the response template reads
+    private fun saved(
+        model: Model,
+        user: co.datapipelines.auth.User,
+        oneTimePassword: String?,
+        variant: String,
+        title: String,
+        message: String,
+    ): String {
+        browse.fillRow(model, user)
+        model.addAttribute("oneTimePassword", oneTimePassword)
+        model.addAttribute("toastVariant", variant)
+        model.addAttribute("toastTitle", title)
+        model.addAttribute("toastMessage", message)
+        return "partials/admin-user-saved"
     }
 
     /** The toast copy for a completed row action — what happened, in the user's words. */
@@ -151,108 +178,21 @@ class AdminUsersPartialController(
 
     /** Admin reset: the refreshed row plus the one-time password shown exactly once. */
     private fun resetPassword(
+        model: Model,
         userId: UUID,
         actor: UUID,
-    ): ResponseEntity<String> {
-        val oneTime = localPasswordService.resetPassword(userId, actor) ?: return ResponseEntity.notFound().build()
-        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build()
-        return ResponseEntity.ok(
-            buildUserRow(updated) +
-                oneTimeNotice(oneTime, updated.email) +
-                ToastHtml.oob(
-                    "info",
-                    "Password reset",
-                    "The one-time password is shown once on this screen — pass it to the user out-of-band.",
-                ),
+    ): Any {
+        val oneTime = localPasswordService.resetPassword(userId, actor) ?: return ResponseEntity.notFound().build<String>()
+        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        return saved(
+            model,
+            updated,
+            oneTimePassword = oneTime,
+            variant = "info",
+            title = "Password reset",
+            message = "The one-time password is shown once on this screen — pass it to the user out-of-band.",
         )
     }
-
-    private fun buildUserTable(users: List<co.datapipelines.auth.User>): String {
-        if (users.isEmpty()) {
-            return EMPTY_ROW_HTML
-        }
-        return users.joinToString("\n") { buildUserRow(it) }
-    }
-
-    private fun buildUserRow(user: co.datapipelines.auth.User): String {
-        val activeStatus = if (user.isActive) "Active" else "Inactive"
-        val role = if (user.isAdmin) "Admin" else "User"
-        // Status and role render as design-system badges (029): a restriction/state gets the
-        // semantic variant — success/danger for active, primary/default for the role.
-        val activeBadge = if (user.isActive) "ds-badge-success" else "ds-badge-danger"
-        val roleBadge = if (user.isAdmin) "ds-badge-primary" else "ds-badge-default"
-        val userIdShort = user.id.toString().take(USER_ID_PREFIX_LEN)
-        val locked = user.lockedUntil?.isAfter(Instant.now()) == true
-        val localStatus =
-            when {
-                user.hasLocalPassword && locked -> "local · locked"
-                user.hasLocalPassword -> "local"
-                else -> "—"
-            }
-
-        return """<tr id="user-row-${user.id}">
-          <td title="${user.id}">$userIdShort...</td>
-          <td>${esc(user.displayName)}</td>
-          <td>${esc(user.email)}</td>
-          <td><span class="ds-badge $activeBadge">$activeStatus</span></td>
-          <td><span class="ds-badge $roleBadge">$role</span></td>
-          <td>$localStatus</td>
-          <td style="white-space:nowrap">${toggleButton(user)} ${roleButton(user)}${localButtons(user, locked)}</td>
-        </tr>"""
-    }
-
-    private fun actionButton(
-        user: co.datapipelines.auth.User,
-        action: String,
-        label: String,
-        color: String,
-    ): String =
-        """<button class="ds-button ds-button-ghost ds-button-sm" """ +
-            """hx-patch="/partials/admin/users/${user.id}/$action" """ +
-            """hx-target="#user-row-${user.id}" hx-swap="outerHTML" """ +
-            """style="color:$color">$label</button>"""
-
-    private fun toggleButton(user: co.datapipelines.auth.User): String =
-        if (user.isActive) {
-            actionButton(user, "deactivate", "Deactivate", COLOR_DANGER)
-        } else {
-            actionButton(user, "activate", "Activate", COLOR_SUCCESS)
-        }
-
-    private fun roleButton(user: co.datapipelines.auth.User): String =
-        if (user.isAdmin) {
-            actionButton(user, "demote", "Demote", COLOR_WARNING)
-        } else {
-            actionButton(user, "promote", "Promote", COLOR_WARNING)
-        }
-
-    /**
-     * Local-account operations (auth.md §5A.1): reset is also the unlock path;
-     * disable makes the account OIDC-only again; unlock clears the lockout only.
-     */
-    private fun localButtons(
-        user: co.datapipelines.auth.User,
-        locked: Boolean,
-    ): String =
-        buildString {
-            if (user.hasLocalPassword) {
-                append(" " + actionButton(user, "reset-password", "Reset PW", COLOR_WARNING))
-                append(" " + actionButton(user, "disable-local", "Disable local", COLOR_DANGER))
-            }
-            if (locked) {
-                append(" " + actionButton(user, "unlock", "Unlock", COLOR_SUCCESS))
-            }
-        }
-
-    /** The one-time credential, shown to the admin ONCE via out-of-band swap — never stored retrievably. */
-    private fun oneTimeNotice(
-        oneTimePassword: String,
-        email: String,
-    ): String =
-        """<div id="admin-notice" hx-swap-oob="true" style="background:var(--accent-warning-bg);color:var(--accent-warning);""" +
-            """padding:var(--gap-sm);border-radius:var(--radius-base);margin-bottom:var(--gap-md);font-size:var(--text-sm)">""" +
-            "One-time password for ${esc(email)}: <strong style=\"font-family:var(--font-mono)\">${esc(oneTimePassword)}</strong>" +
-            " — shown ONCE; pass it to the user out-of-band. They must set a new password at first login (auth.md §5A.4).</div>"
 
     /**
      * Shape C (§5.1): the refusal keeps its real 4xx and its body is the toast — the
@@ -270,12 +210,6 @@ class AdminUsersPartialController(
             .header("HX-Retarget", "#toast")
             .header("HX-Reswap", "beforeend")
             .body(ToastHtml.oob("danger", title, ToastHtml.esc(message)))
-
-    private fun esc(text: String?): String =
-        (text ?: "")
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
 
     private fun requireAdmin() {
         val principal = currentPrincipal()
@@ -331,15 +265,5 @@ class AdminUsersPartialController(
          * companion test asserts the FULL session-only set to keep the two in step.
          */
         val CREDENTIAL_ACTIONS = setOf("disable-local", "unlock")
-        const val MIN_LIMIT = 1
-        const val MAX_LIMIT = 100
-        const val USER_ID_PREFIX_LEN = 8
-        const val COLOR_SUCCESS = "var(--accent-success)"
-        const val COLOR_DANGER = "var(--accent-danger)"
-        const val COLOR_WARNING = "var(--accent-warning)"
-        const val EMPTY_ROW_HTML =
-            """<tr><td colspan="7" style="padding:var(--gap-md);""" +
-                """text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">""" +
-                "No users found</td></tr>"
     }
 }

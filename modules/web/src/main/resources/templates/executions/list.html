@@ -16,23 +16,25 @@
         <label class="ds-field-label" for="pipeline_id">Pipeline</label>
         <select id="pipeline_id" name="pipeline_id" class="ds-select app-filter-select">
           <option value="">All pipelines</option>
-          <option th:each="p : ${pipelines}" th:value="${p.id}" th:text="${p.displayName}">Pipeline</option>
+          <option th:each="p : ${pipelines}" th:value="${p.id}" th:text="${p.displayName}"
+                  th:selected="${selectedPipelineId == p.id.toString()}">Pipeline</option>
         </select>
       </div>
       <div class="ds-field">
         <label class="ds-field-label" for="status">Status</label>
         <select id="status" name="status" class="ds-select">
           <option value="">All statuses</option>
-          <option th:each="s : ${statuses}" th:value="${s.name()}" th:text="${s.name()}">Status</option>
+          <option th:each="s : ${statuses}" th:value="${s.name()}" th:text="${s.name()}"
+                  th:selected="${selectedStatus == s.name()}">Status</option>
         </select>
       </div>
       <div class="ds-field">
         <label class="ds-field-label" for="started_after">After</label>
-        <input type="date" id="started_after" name="started_after" class="ds-input app-filter-date">
+        <input type="date" id="started_after" name="started_after" class="ds-input app-filter-date" th:value="${selectedStartedAfter}">
       </div>
       <div class="ds-field">
         <label class="ds-field-label" for="started_before">Before</label>
-        <input type="date" id="started_before" name="started_before" class="ds-input app-filter-date">
+        <input type="date" id="started_before" name="started_before" class="ds-input app-filter-date" th:value="${selectedStartedBefore}">
       </div>
       <div class="ds-field">
         <button type="submit" class="ds-button ds-button-primary">Filter</button>
@@ -40,11 +42,15 @@
     </form>
   </div>
 
-  <div id="execution-table" hx-get="/partials/executions" hx-trigger="load" hx-swap="innerHTML">
-    <div class="u-center u-p-lg u-muted">
-      <div class="ds-spinner u-mb-md"></div>
-      <div class="u-text-sm">Loading executions…</div>
-    </div>
+  <!--
+    §5 (097 §B): the page renders the shell AND the initial fragment — the same
+    `partials/executions :: table` every later filter change swaps in, from the same
+    ExecutionHistoryBrowseModel. This used to be a spinner plus a load-triggered fetch, which
+    made the screen's first paint an empty frame waiting on a second round trip. Nothing here
+    may re-introduce a load trigger — ExecutionsPartialRenderTest asserts its absence.
+  -->
+  <div id="execution-table">
+    <th:block th:replace="~{partials/executions :: table}"></th:block>
   </div>
 </th:block>
 </html>

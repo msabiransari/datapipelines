@@ -24,6 +24,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
 
 /**
@@ -199,10 +200,10 @@ class TemplatePartialControllerTest {
                 displayName = null,
                 description = null,
                 body = "b",
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "Unknown template type"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "Unknown template type"
     }
 
     @Test
@@ -218,10 +219,10 @@ class TemplatePartialControllerTest {
                 displayName = null,
                 description = null,
                 body = "SELECT 1",
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "already exists"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "already exists"
     }
 
     @Test
@@ -239,10 +240,14 @@ class TemplatePartialControllerTest {
                 displayName = null,
                 description = null,
                 body = "SELECT 1",
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "&lt;forbidden&gt;"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        // 097 §C: the escaping moved from a hand-written `.replace("<", "&lt;")` in the
+        // controller to `th:text` in the fragment, so this asserts the RENDERED refusal —
+        // the thing the browser receives — rather than the string the controller built.
+        refusalMessage(response) shouldContain "<forbidden>"
+        renderRefusal(response) shouldContain "&lt;forbidden&gt;"
     }
 
     @Test
@@ -265,8 +270,43 @@ class TemplatePartialControllerTest {
                 displayName = null,
                 description = null,
                 body = "SELECT 1",
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
+        response.status shouldBe HttpStatus.BAD_REQUEST
+    }
+
+    /**
+     * 097 §C: an inline refusal is `partials/inline-refusal` and a status now, not a Kotlin
+     * string, so the assertions read the MESSAGE the fragment will escape and render.
+     */
+    private fun refusalMessage(result: ModelAndView): String = result.model["message"] as String
+
+    /** The refusal as the browser receives it — the fragment, rendered. */
+    private fun renderRefusal(result: ModelAndView): String {
+        val engine =
+            org.thymeleaf.spring6.SpringTemplateEngine().apply {
+                setTemplateResolver(
+                    org.thymeleaf.templateresolver.ClassLoaderTemplateResolver().apply {
+                        prefix = "templates/"
+                        suffix = ".html"
+                        characterEncoding = "UTF-8"
+                    },
+                )
+            }
+        val context =
+            org.thymeleaf.context.WebContext(
+                org.thymeleaf.web.servlet.JakartaServletWebApplication
+                    .buildApplication(
+                        org.springframework.mock.web
+                            .MockServletContext(),
+                    ).buildExchange(
+                        org.springframework.mock.web
+                            .MockHttpServletRequest(),
+                        org.springframework.mock.web
+                            .MockHttpServletResponse(),
+                    ),
+            )
+        result.model.forEach { (k, v) -> context.setVariable(k, v) }
+        return engine.process(result.viewName!!, context)
     }
 }

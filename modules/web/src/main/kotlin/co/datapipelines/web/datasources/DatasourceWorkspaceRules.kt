@@ -1,5 +1,6 @@
 package co.datapipelines.web.datasources
 
+import co.datapipelines.application.datasources.DatasourceUpdateRules
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
@@ -28,9 +29,9 @@ import java.util.UUID
 class DatasourceWorkspaceRules(
     private val workspaceService: WorkspaceService,
     private val workspacesProperties: WorkspacesProperties,
-) {
+) : DatasourceUpdateRules {
     /** The D8 member gate: when off, every non-admin write on this surface is refused. */
-    fun requireMemberDatasourcesGate(principal: AuthenticatedPrincipal) {
+    override fun requireMemberDatasourcesGate(principal: AuthenticatedPrincipal) {
         if (!principal.isAdmin && !workspacesProperties.memberDatasourcesEnabled) {
             throw workspaceForbidden(
                 "member datasource management is disabled on this server (member-datasources-enabled=false)",
@@ -48,7 +49,7 @@ class DatasourceWorkspaceRules(
      * was therefore unreachable on every path and was deleted in the 022b round rather
      * than kept as decorative defense (022 review, below-cap).
      */
-    fun requireGlobalMutationAllowed(
+    override fun requireGlobalMutationAllowed(
         principal: AuthenticatedPrincipal,
         existing: Datasource,
         name: String,
@@ -59,7 +60,7 @@ class DatasourceWorkspaceRules(
     }
 
     /** The `global` flag write (either direction) is admin-only (D8) — a member must not send it at all. */
-    fun requireGlobalFlagWriteAllowed(
+    override fun requireGlobalFlagWriteAllowed(
         principal: AuthenticatedPrincipal,
         globalRequested: Boolean?,
     ) {
@@ -94,7 +95,7 @@ class DatasourceWorkspaceRules(
      * The update binding: absent flags keep the stored binding; `global:false` re-binds
      * (named workspace, else ACTIVE); `workspace` re-binds to an accessible one.
      */
-    fun resolveUpdateBinding(
+    override fun resolveUpdateBinding(
         principal: AuthenticatedPrincipal,
         existing: Datasource,
         global: Boolean?,

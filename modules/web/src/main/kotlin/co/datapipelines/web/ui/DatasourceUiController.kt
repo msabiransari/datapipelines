@@ -5,8 +5,6 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.datasources.CredentialKind
-import co.datapipelines.datasources.Datasource
-import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.datasources.DatasourcePoolForm
 import jakarta.servlet.http.HttpServletRequest
@@ -26,7 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam
  */
 @Controller
 class DatasourceUiController(
-    private val datasources: DatasourceRegistry,
+    private val browse: DatasourceBrowseModel,
     private val workspacesProperties: WorkspacesProperties,
     private val themeResolver: ThemeResolver,
 ) {
@@ -45,14 +43,12 @@ class DatasourceUiController(
         // the ones no shipped dialect can use are refused at save with the dialect named, which
         // is a better answer than a silently short list that hides the contract.
         model.addAttribute("credentialKinds", CredentialKind.entries.map { it.wire })
-        model.addAttribute("selectedDialect", dialect ?: "")
         // 094 §A: the register modal's collapsed "Connection pool" section, prefilled for the
         // dialect its select shows FIRST — the same list, same order, so the initial render and
         // the fragment the select re-fetches on change cannot start out disagreeing.
         model.addAttribute("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
         // Nothing is registered yet, so the mirrored readonly flag is the form's own default.
         model.addAttribute("poolReadonly", false)
-        model.addAttribute("scopes", scopes())
         model.addAttribute("isAdmin", isAdmin())
         model.addAttribute("memberDatasourcesEnabled", workspacesProperties.memberDatasourcesEnabled)
         model.addAttribute("canRegister", isAdmin() || workspacesProperties.memberDatasourcesEnabled)
@@ -61,49 +57,15 @@ class DatasourceUiController(
             "bindingHint",
             principal()?.workspace?.name?.let { name -> "Bound to your active workspace: $name" } ?: "",
         )
-        val page = maxOf(0, offset ?: 0)
-        val size = PAGE_SIZE
-        val dialectFilter =
-            dialect?.trim()?.takeIf { it.isNotEmpty() }?.let { d ->
-                Dialect.entries.firstOrNull { it.wire.equals(d, ignoreCase = true) }
-            }
-        val all = filter(visible(dialectFilter), q?.trim()?.takeIf { it.isNotEmpty() })
-        val items = all.drop(page).take(size)
-        model.addAttribute("datasources", items)
-        model.addAttribute("q", q ?: "")
-        model.addAttribute("offset", page)
-        model.addAttribute("hasMore", all.size > page + size)
-        model.addAttribute("total", all.size)
+        // §5: the page renders the shell AND the initial fragment, both through the one
+        // model the partial controller also renders through — so a reload and a typed search
+        // cannot answer the same question differently (097 §A).
+        browse.fillList(model, principal(), q, dialect, offset)
         return "datasources/list"
-    }
-
-    /** §5.3: the workspace-scoped visible set; empty when no active workspace resolved. */
-    internal fun visible(dialectFilter: Dialect?): List<Datasource> {
-        val workspaceId = principal()?.workspace?.id ?: return emptyList()
-        return datasources.listVisible(dialectFilter, workspaceId)
-    }
-
-    private fun filter(
-        list: List<Datasource>,
-        query: String?,
-    ): List<Datasource> {
-        if (query == null) return list
-        val lower = query.lowercase()
-        return list.filter { d ->
-            d.name.lowercase().contains(lower) ||
-                d.displayName.lowercase().contains(lower) ||
-                (d.description?.lowercase()?.contains(lower) == true)
-        }
     }
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 
     private fun isAdmin(): Boolean = principal()?.isAdmin == true
-
-    private fun scopes(): Set<String> = principal()?.scopes?.map { it.name }?.toSet() ?: emptySet()
-
-    private companion object {
-        const val PAGE_SIZE = 25
-    }
 }

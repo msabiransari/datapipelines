@@ -33,7 +33,8 @@ import java.util.UUID
 class AdminUsersControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
     private val authProperties = AuthProperties()
-    private val controller = AdminUsersController(themeResolver, authProperties)
+    private val users = mockk<UserService>()
+    private val controller = AdminUsersController(themeResolver, authProperties, AdminUsersBrowseModel(users))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -56,12 +57,32 @@ class AdminUsersControllerTest {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(adminPrincipal, null, emptyList())
         every { themeResolver.resolve(any()) } returns "saas"
+        every { users.search("", 0, AdminUsersBrowseModel.DEFAULT_LIMIT) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.users(model, mockk(relaxed = true))
 
         viewName shouldBe "admin/users"
         model["activeTheme"] shouldBe "saas"
+    }
+
+    /**
+     * §5 (097 §B): the page renders the shell AND the initial rows. It used to paint three
+     * skeleton rows and fetch the real ones from an inline script — a fourth first-paint
+     * idiom on the one screen nobody was looking at.
+     */
+    @Test
+    fun `the page fills the rows fragment's own model and carries no inline script`() {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(adminPrincipal, null, emptyList())
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { users.search("", 0, AdminUsersBrowseModel.DEFAULT_LIMIT) } returns emptyList()
+
+        val model: ExtendedModelMap = ExtendedModelMap()
+        controller.users(model, mockk(relaxed = true))
+
+        model["userRows"] shouldBe emptyList<Any>()
+        io.mockk.verify(exactly = 1) { users.search("", 0, AdminUsersBrowseModel.DEFAULT_LIMIT) }
     }
 
     @Test
@@ -82,11 +103,16 @@ class AdminUsersControllerTest {
                     setVariable("authenticated", true)
                     setVariable("currentPath", "/admin/users")
                     setVariable("localEnabled", true)
+                    setVariable("userRows", emptyList<AdminUserRow>())
                 },
             )
 
         html shouldContain "<table class=\"ds-table\">"
         html shouldNotContain "border-bottom:1px solid var(--border-default)"
+        // 097 §B: the rows come from the page's own model; nothing fetches them on load.
+        // (The layout's own vendored <script src=…> tags stay — what left is the inline body.)
+        html shouldNotContain "htmx.ajax"
+        html shouldContain "No users found"
     }
 
     private fun engine(): SpringTemplateEngine =
@@ -104,10 +130,12 @@ class AdminUsersControllerTest {
 class AdminUsersPartialControllerTest {
     private val userService = mockk<UserService>()
     private val localPasswordService = mockk<LocalPasswordService>()
-    private val partialController = AdminUsersPartialController(userService, localPasswordService)
+    private val partialController =
+        AdminUsersPartialController(userService, localPasswordService, AdminUsersBrowseModel(userService))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
+    private val model = ExtendedModelMap()
 
     private val adminPrincipal =
         AuthenticatedPrincipal(
@@ -143,16 +171,45 @@ class AdminUsersPartialControllerTest {
             themePreference = null,
         )
 
+    /**
+     * 097 §C: the responses are Thymeleaf fragments now, not Kotlin strings, so the assertions
+     * below render what the browser would actually receive. That is the point of the migration
+     * — the markup under test is the markup the page renders, not an imitation of it.
+     */
+    private fun render(result: Any): String {
+        val view = result as String
+        val engine =
+            SpringTemplateEngine().apply {
+                setTemplateResolver(
+                    ClassLoaderTemplateResolver().apply {
+                        prefix = "templates/"
+                        suffix = ".html"
+                        characterEncoding = "UTF-8"
+                    },
+                )
+            }
+        val context =
+            WebContext(
+                JakartaServletWebApplication
+                    .buildApplication(MockServletContext())
+                    .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+            )
+        model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
+        return engine.process(view, context)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun refusal(result: Any) = result as org.springframework.http.ResponseEntity<String>
+
     @Test
     fun `search returns table rows`() {
         authenticate()
         every { userService.search("test", 0, 20) } returns listOf(sampleUser())
 
-        val response = partialController.search("test", 0, 20)
+        val html = render(partialController.search(model, "test", 0, 20))
 
-        response.statusCode shouldBe HttpStatus.OK
-        response.body shouldContain "Test User"
-        response.body shouldContain "user@example.com"
+        html shouldContain "Test User"
+        html shouldContain "user@example.com"
     }
 
     @Test
@@ -160,13 +217,31 @@ class AdminUsersPartialControllerTest {
         authenticate()
         every { userService.search("test", 0, 20) } returns listOf(sampleUser())
 
-        val response = partialController.search("test", 0, 20)
+        val html = render(partialController.search(model, "test", 0, 20))
 
         // sampleUser is active and a non-admin (029: chips are ds-badge variants now).
-        response.body shouldContain "ds-badge ds-badge-success"
-        response.body shouldContain "ds-badge ds-badge-default"
-        response.body shouldNotContain "padding:var(--gap-xs)"
-        response.body shouldNotContain "background:var(--surface-tertiary)"
+        html shouldContain "ds-badge ds-badge-success"
+        html shouldContain "ds-badge ds-badge-default"
+        html shouldNotContain "padding:var(--gap-xs)"
+        html shouldNotContain "background:var(--surface-tertiary)"
+    }
+
+    /**
+     * 097 §C: the row actions carried `style="color:var(--accent-…)"` — an inline style,
+     * written in Kotlin where no template audit could see it. They carry the semantic utility
+     * class now, and the widened InlineWidthAuditTest is what keeps them from coming back.
+     */
+    @Test
+    fun `the action buttons carry semantic classes, never an inline style`() {
+        authenticate()
+        every { userService.search("test", 0, 20) } returns listOf(sampleUser())
+
+        val html = render(partialController.search(model, "test", 0, 20))
+
+        html shouldNotContain "style="
+        html shouldContain "ds-button-ghost ds-button-sm u-danger"
+        html shouldContain "hx-patch=\"/partials/admin/users/$userId/deactivate\""
+        html shouldContain "hx-target=\"#user-row-$userId\""
     }
 
     @Test
@@ -174,17 +249,13 @@ class AdminUsersPartialControllerTest {
         authenticate()
         every { userService.search("nobody", 0, 20) } returns emptyList()
 
-        val response = partialController.search("nobody", 0, 20)
-
-        response.statusCode shouldBe HttpStatus.OK
-        response.body shouldContain "No users found"
+        render(partialController.search(model, "nobody", 0, 20)) shouldContain "No users found"
     }
 
     @Test
     fun `toggle unknown action returns bad request`() {
         authenticate()
-        val response = partialController.toggle(userId, "unknown_action")
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refusal(partialController.toggle(model, userId, "unknown_action")).statusCode shouldBe HttpStatus.BAD_REQUEST
     }
 
     @Test
@@ -193,12 +264,11 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
             LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
 
-        val response = partialController.createLocalUser("new@example.com", "New")
+        val html = render(partialController.createLocalUser(model, "new@example.com", "New"))
 
-        response.statusCode shouldBe HttpStatus.OK
-        response.body shouldContain "ABCD-EFGH-JKLM"
-        response.body shouldContain "admin-notice"
-        response.body shouldContain "Test User"
+        html shouldContain "ABCD-EFGH-JKLM"
+        html shouldContain "admin-notice"
+        html shouldContain "Test User"
     }
 
     @Test
@@ -207,9 +277,7 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.createLocalUser("taken@example.com", "", adminPrincipal.userId) } returns
             LocalPasswordService.CreateResult.EmailTaken
 
-        val response = partialController.createLocalUser("taken@example.com", "")
-
-        response.statusCode shouldBe HttpStatus.CONFLICT
+        refusal(partialController.createLocalUser(model, "taken@example.com", "")).statusCode shouldBe HttpStatus.CONFLICT
     }
 
     @Test
@@ -218,11 +286,10 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
         every { userService.snapshot(userId) } returns sampleUser()
 
-        val response = partialController.toggle(userId, "reset-password")
+        val html = render(partialController.toggle(model, userId, "reset-password"))
 
-        response.statusCode shouldBe HttpStatus.OK
-        response.body shouldContain "WXYZ-2345-ABCD"
-        response.body shouldContain "admin-notice"
+        html shouldContain "WXYZ-2345-ABCD"
+        html shouldContain "admin-notice"
     }
 
     @Test
@@ -232,15 +299,15 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.unlock(userId, adminPrincipal.userId) } returns true
         every { userService.snapshot(userId) } returns sampleUser()
 
-        partialController.toggle(userId, "disable-local").statusCode shouldBe HttpStatus.OK
-        partialController.toggle(userId, "unlock").statusCode shouldBe HttpStatus.OK
+        render(partialController.toggle(model, userId, "disable-local")) shouldContain "user-row-$userId"
+        render(partialController.toggle(model, userId, "unlock")) shouldContain "user-row-$userId"
     }
 
     @Test
     fun `create refusals now reach the user as a toast`() {
         authenticate()
 
-        val response = partialController.createLocalUser("not-an-email", "")
+        val response = refusal(partialController.createLocalUser(model, "not-an-email", ""))
 
         response.statusCode shouldBe HttpStatus.BAD_REQUEST // the status is unchanged
         response.headers.getFirst("HX-Retarget") shouldBe "#toast" // …and now deliverable
@@ -255,7 +322,7 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.createLocalUser("taken@example.com", "", adminPrincipal.userId) } returns
             LocalPasswordService.CreateResult.EmailTaken
 
-        val response = partialController.createLocalUser("taken@example.com", "")
+        val response = refusal(partialController.createLocalUser(model, "taken@example.com", ""))
 
         response.statusCode shouldBe HttpStatus.CONFLICT
         response.headers.getFirst("HX-Retarget") shouldBe "#toast"
@@ -270,12 +337,12 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
             LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
 
-        val response = partialController.createLocalUser("new@example.com", "New")
+        val html = render(partialController.createLocalUser(model, "new@example.com", "New"))
 
-        response.body shouldContain "id=\"admin-notice\" hx-swap-oob=\"true\"" // unchanged (inline form)
-        response.body shouldContain "ABCD-EFGH-JKLM" // still inline, persistent
-        response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
-        val toastBody = response.body!!.substringAfter("beforeend:#toast")
+        html shouldContain "id=\"admin-notice\" hx-swap-oob=\"true\"" // unchanged (inline form)
+        html shouldContain "ABCD-EFGH-JKLM" // still inline, persistent
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        val toastBody = html.substringAfter("beforeend:#toast")
         toastBody shouldNotContain "ABCD-EFGH-JKLM" // never in the toast
     }
 
@@ -285,13 +352,12 @@ class AdminUsersPartialControllerTest {
         every { userService.deactivate(userId, adminPrincipal.userId) } returns true
         every { userService.snapshot(userId) } returns sampleUser()
 
-        val response = partialController.toggle(userId, "deactivate")
+        val html = render(partialController.toggle(model, userId, "deactivate"))
 
-        response.statusCode shouldBe HttpStatus.OK
-        response.body shouldContain "id=\"user-row-$userId\""
-        response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
-        response.body shouldContain "User deactivated"
-        response.body shouldContain "user@example.com"
+        html shouldContain "id=\"user-row-$userId\""
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldContain "User deactivated"
+        html shouldContain "user@example.com"
     }
 
     @Test
@@ -300,10 +366,10 @@ class AdminUsersPartialControllerTest {
         every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
         every { userService.snapshot(userId) } returns sampleUser()
 
-        val response = partialController.toggle(userId, "reset-password")
+        val html = render(partialController.toggle(model, userId, "reset-password"))
 
-        response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
-        val toastBody = response.body!!.substringAfter("beforeend:#toast")
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        val toastBody = html.substringAfter("beforeend:#toast")
         toastBody shouldNotContain "WXYZ-2345-ABCD" // the secret stays in the inline notice only
     }
 }

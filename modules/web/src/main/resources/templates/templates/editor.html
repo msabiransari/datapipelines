@@ -9,12 +9,20 @@
        plain (D5). preview.js wraps the pass this page's renderPreview calls. -->
   <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
   <script th:src="@{/js/template-editor/preview.js}"></script>
+  <!-- 097 §D: the page's behaviour is a FILE — the draft lifecycle, the context rail and the
+       preview call. It was a ~135-line inline script body, which put it outside the CSRF
+       audit's static/js sweep, outside `node --test`, and outside review as JS. csrf.js is
+       the one reader of the double-submit cookie. -->
+  <script th:src="@{/js/csrf.js}"></script>
+  <script th:src="@{/js/template-editor/lifecycle.js}"></script>
 
   <!-- 041 layout: the page is a two-row grid — this header, then a row that fills
        the viewport below the nav. Inside that row: context rail LEFT (the
        --app-detail-width token), SQL source RIGHT taking the remainder, preview
        output below the editor sharing its width (template-editor.css). -->
-  <div class="te-page">
+  <!-- The template under edit, as DATA: lifecycle.js reads it here instead of the server
+       inlining a value into a script body (which is what made the script un-extractable). -->
+  <div class="te-page" th:attr="data-template-id=${template?.id ?: ''}">
   <div class="u-row u-between">
     <div>
       <h1 class="ds-headline u-m0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
@@ -123,118 +131,20 @@
   </div>
   </div>
 
-  <script th:inline="javascript">
-    let selectedTab = 'kv';
-
-    /* versioning §5.3/§5.4: the draft lifecycle actions — hash-guarded through the same
-       REST endpoints and the same CSRF double-submit pair every cookie-authenticated
-       state-changing fetch on this server uses. */
-    function tplLifecycle(action) {
-      var btn = document.getElementById(action === 'release' ? 'tpl-release-draft' : 'tpl-discard-draft');
-      var id = btn.getAttribute('data-id');
-      var hash = btn.getAttribute('data-hash');
-      if (action === 'discard' && !window.confirm('Discard this draft? Its version number returns to the pool.')) return;
-      btn.disabled = true;
-      var csrf = (document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/) || [])[1];
-      /* §9.6: the name never travels in a URL path segment (a `%2F` is refused 400 below
-         routing) — release/discard carry it in the JSON body instead. */
-      var url = action === 'release'
-        ? '/api/v1/templates/release'
-        : '/api/v1/templates/draft/discard';
-      fetch(url, {
-        method: 'POST',
-        headers: { 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf) : '', 'If-Match': hash, 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ name: id })
-      }).then(function (response) {
-        if (response.ok) { window.location.reload(); return null; }
-        return response.json().catch(function () { return {}; }).then(function (err) {
-          throw new Error((err && err.error && err.error.message) || ('HTTP ' + response.status));
-        });
-      }).catch(function (err) {
-        btn.disabled = false;
-        window.alert((action === 'release' ? 'Release' : 'Discard') + ' refused: ' + err.message);
-      });
-    }
-
-    function switchTab(tab) {
-      selectedTab = tab;
-      document.getElementById('context-kv').style.display = tab === 'kv' ? 'block' : 'none';
-      document.getElementById('context-json').style.display = tab === 'json' ? 'block' : 'none';
-      document.getElementById('tab-kv-btn').style.borderBottom = tab === 'kv' ? '2px solid var(--accent-primary)' : '2px solid transparent';
-      document.getElementById('tab-kv-btn').style.fontWeight = tab === 'kv' ? 'var(--weight-semibold)' : 'var(--weight-normal)';
-      document.getElementById('tab-json-btn').style.borderBottom = tab === 'json' ? '2px solid var(--accent-primary)' : '2px solid transparent';
-      document.getElementById('tab-json-btn').style.fontWeight = tab === 'json' ? 'var(--weight-semibold)' : 'var(--weight-normal)';
-    }
-
-    function addContextRow() {
-      var row = document.createElement('div');
-      row.className = 'context-row';
-      row.innerHTML = '<input type="text" placeholder="key">' +
-        '<input type="text" placeholder="value">' +
-        '<button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>';
-      document.getElementById('context-rows').appendChild(row);
-    }
-
-    function removeContextRow(btn) {
-      btn.closest('.context-row').remove();
-    }
-
-    function buildContextJson() {
-      if (selectedTab === 'json') {
-        return document.getElementById('contextJsonTextarea').value;
-      }
-      var obj = {};
-      var rows = document.querySelectorAll('#context-rows .context-row');
-      rows.forEach(function(row) {
-        var inputs = row.querySelectorAll('input');
-        var key = inputs[0].value.trim();
-        var val = inputs[1].value.trim();
-        if (key) {
-          obj[key] = val.match(/^[0-9]+(?:\.[0-9]+)?$/) ? Number(val) : val;
-        }
-      });
-      return JSON.stringify(obj);
-    }
-
-    function renderPreview() {
-      var btn = document.getElementById('previewBtn');
-      var spinner = document.getElementById('previewSpinner');
-      btn.disabled = true;
-      spinner.style.display = 'inline';
-      var pane = document.getElementById('previewPane');
-
-      var templateId = [[${template?.id ?: ""}]];
-      var version = document.getElementById('versionSelect')?.value || '1';
-      /* Whichever body is on screen: the editable textarea on the working version, the
-         read-only <pre> on a selected one. The server renders the STORED version either
-         way — this only keeps the request honest about what the author is looking at. */
-      var body = document.getElementById('templateBody')?.value
-        || document.getElementById('versionBody')?.textContent
-        || '';
-      var context = buildContextJson();
-
-      var params = new URLSearchParams();
-      params.append('body', body);
-      params.append('context', context);
-
-      fetch('/partials/templates/render?name=' + encodeURIComponent(templateId) + '&version=' + encodeURIComponent(version), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'DP-CSRF-Token': document.querySelector('[hx-headers]')?.getAttribute('hx-headers') ? JSON.parse(document.querySelector('[hx-headers]').getAttribute('hx-headers'))['DP-CSRF-Token'] : ''
-        },
-        body: params
-      }).then(function(r) { return r.text(); })
-        .then(function(html) {
-          pane.innerHTML = html;
-          /* 041 D4 — rendered SQL gets the shared tokenizer's treatment; the
-             pass is a no-op on shapes without a <pre> (the error card). */
-          if (window.TplPreviewHighlight) window.TplPreviewHighlight.highlightPreview(pane);
-        })
-        .catch(function(e) { pane.innerHTML = '<div class="ds-card app-error-card u-p-md"><p class="u-danger u-text-sm">' + e.message + '</p></div>'; })
-        .finally(function() { btn.disabled = false; spinner.style.display = 'none'; });
-    }
-  </script>
+  <!-- The discard confirmation, in the page (§5.1): the house backdrop + `.app-modal`
+       idiom the register and delete dialogs use. It replaces a `window.confirm`, which
+       blocks the page, cannot be styled and cannot be driven by the browser suite. -->
+  <div id="tpl-discard-confirm" class="u-backdrop u-backdrop-hidden">
+    <div class="ds-card app-modal app-modal-sm">
+      <h2 class="ds-title u-m0 u-mb-sm">Discard this draft?</h2>
+      <p class="u-secondary u-text-sm u-mb-md">Its version number returns to the pool. The released version is untouched.</p>
+      <div class="u-row u-between">
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
+                onclick="TplLifecycle.closeConfirm()">Keep the draft</button>
+        <button type="button" class="ds-button ds-button-primary ds-button-sm" id="tpl-discard-confirm-btn"
+                onclick="TplLifecycle.confirmDiscard()">Discard draft</button>
+      </div>
+    </div>
+  </div>
 </th:block>
 </html>

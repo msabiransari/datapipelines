@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -12,7 +13,6 @@ import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.datasources.DatasourcePoolForm
 import co.datapipelines.web.datasources.DatasourceWorkspaceRules
 import org.springframework.http.HttpStatus
-import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.servlet.ModelAndView
 
 /**
  * The datasources screen's htmx partials (ui-screens.md §4.5/§5): the workspace-scoped
@@ -30,8 +31,14 @@ import org.springframework.web.bind.annotation.RequestParam
  */
 @Controller
 class DatasourcePartialController(
+    private val browse: DatasourceBrowseModel,
     private val datasources: DatasourceRegistry,
     private val rules: DatasourceWorkspaceRules,
+    /**
+     * The gates-binding-save sequence of an update, shared with `PUT /api/v1/datasources/{name}`
+     * (097 §A) — this surface supplies the FORM's input shape, and nothing else.
+     */
+    private val updates: DatasourceUpdateService,
     /**
      * The SAME any-version reverse scan the REST delete's `409 datasource.in_use` reports
      * (061/T79). The delete dialog asks it FIRST and renders its rows, so "where is this used"
@@ -48,39 +55,8 @@ class DatasourcePartialController(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) offset: Int?,
     ): String {
-        listModel(model, q, dialect, offset)
-        return "partials/datasources"
-    }
-
-    /** The list fragment's model — the register success path refreshes the same list OOB. */
-    private fun listModel(
-        model: Model,
-        q: String?,
-        dialect: String?,
-        offset: Int?,
-    ) {
-        val page = maxOf(0, offset ?: 0)
-        val size = PAGE_SIZE
-        val dialectFilter =
-            dialect?.trim()?.takeIf { it.isNotEmpty() }?.let { d ->
-                Dialect.entries.firstOrNull { it.wire.equals(d, ignoreCase = true) }
-            }
-        val workspaceId = principal()?.workspace?.id
-        val visible =
-            if (workspaceId == null) {
-                emptyList()
-            } else {
-                datasources.listVisible(dialectFilter, workspaceId)
-            }
-        val all = filter(visible, q?.trim()?.takeIf { it.isNotEmpty() })
-        val items = all.drop(page).take(size)
-        model.addAttribute("datasources", items)
-        model.addAttribute("q", q ?: "")
-        model.addAttribute("selectedDialect", dialect ?: "")
-        model.addAttribute("offset", page)
-        model.addAttribute("hasMore", all.size > page + size)
-        model.addAttribute("total", all.size)
-        model.addAttribute("scopes", scopes())
+        browse.fillList(model, principal(), q, dialect, offset)
+        return DatasourceBrowseModel.LIST_VIEW
     }
 
     /**
@@ -183,7 +159,7 @@ class DatasourcePartialController(
             // No HX-Redirect: a full-page navigation would discard the toast. The success
             // node lands in #register-result (its arrival closes the modal, 022/F9); the
             // refreshed list and the toast ride along out-of-band (Shape A, §5.1).
-            listModel(model, null, null, null)
+            browse.fillList(model, principal(), null, null, null)
             model.addAttribute("registeredName", datasource.name)
             model.addAttribute("oob", true)
             "partials/datasource-registered"
@@ -278,8 +254,6 @@ class DatasourcePartialController(
             val kind =
                 CredentialKind.fromWireOrNull(credentialKind.trim().lowercase())
                     ?: return refused("Unknown credential kind '$credentialKind'.")
-            rules.requireGlobalMutationAllowed(principal, existing, name)
-            rules.requireMemberDatasourcesGate(principal)
             // An unchecked HTML checkbox posts NOTHING, which is indistinguishable from "the
             // field was not on the form at all" — so an admin could never un-global a datasource
             // through a bare checkbox. `globalPresent` is the companion hidden field the admin
@@ -287,11 +261,12 @@ class DatasourcePartialController(
             // deliberate write, absent ⇒ keep the stored binding. A member forging it is refused
             // by the same admin-only rule REST applies.
             val globalRequested = if (globalPresent) global else null
-            rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
-            // The dialect is immutable on this surface: changing it would repoint a live
-            // datasource at a different driver under the same name, and every pipeline that
-            // references it by name would silently follow. REST does not allow it either.
-            val updated =
+            // The gates fire in [DatasourceUpdateService], in the order REST runs them; this
+            // surface's job is the form's shape. The dialect is NOT part of it: changing it
+            // would repoint a live datasource at a different driver under the same name, and
+            // every pipeline that references it by name would silently follow. REST does not
+            // allow it either.
+            updates.update(name, existing, principal, globalRequested, null) {
                 existing.copy(
                     displayName = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: name,
                     description = description?.trim()?.takeIf { it.isNotEmpty() },
@@ -300,14 +275,13 @@ class DatasourcePartialController(
                     credentialKind = kind,
                     secret = password?.takeIf { it.isNotEmpty() },
                     isReadonly = readonly,
-                    workspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, null),
                     properties =
                         existing.properties.copy(
                             hikari = DatasourcePoolForm.toHikari(params, existing.dialect, existing.properties.hikari),
                         ),
                 )
-            datasources.save(updated, principal.userId)
-            listModel(model, null, null, null)
+            }
+            browse.fillList(model, principal(), null, null, null)
             model.addAttribute("savedName", name)
             model.addAttribute("savedVerb", "updated")
             model.addAttribute("oob", true)
@@ -378,7 +352,7 @@ class DatasourcePartialController(
                         "${result.references.size} node(s). Remove or repoint them first.",
                 )
             }
-            listModel(model, null, null, null)
+            browse.fillList(model, principal(), null, null, null)
             model.addAttribute("savedName", name)
             model.addAttribute("savedVerb", "deleted")
             model.addAttribute("oob", true)
@@ -392,65 +366,18 @@ class DatasourcePartialController(
     private fun visible(name: String): Datasource? = principal()?.workspace?.id?.let { datasources.getVisible(name, it) }
 
     /** A dialog body saying the datasource is not there — a 404 inside a modal, not an error page. */
-    private fun notFoundDialog(name: String): ResponseEntity<String> = refused("Datasource '$name' is not visible in the active workspace.")
-
-    /** The refusal the modal renders inline — never an error page for an expected 4xx. */
-    private fun refused(why: String): ResponseEntity<String> =
-        ResponseEntity.badRequest().body(
-            """<div class="ds-surface" style="border:1px solid var(--accent-danger);border-radius:var(--radius-base);""" +
-                """padding:var(--gap-sm);color:var(--text-primary);font-size:var(--text-sm);max-width:480px">""" +
-                why.replace("&", "&amp;").replace("<", "&lt;") +
-                "</div>",
-        )
+    private fun notFoundDialog(name: String): ModelAndView = refused("Datasource '$name' is not visible in the active workspace.")
 
     /**
-     * The screen's search covers EVERY column the table renders (§4.5): name +
-     * readonly, dialect, workspace, URL, username, credential kind, last-test state — plus
-     * description,
-     * which is searchable though only the modal shows it. A search that silently ignores a
-     * visible column reads as "no results" to the user (029). The workspace column
-     * renders the bound workspace's name or the literal `global`, so both match; the
-     * last-test column renders `ok`, `failed` or `never tested`, so all three do — which is
-     * what makes "show me the broken datasources" a search rather than a manual scan
-     * (061/T84).
+     * The refusal the modal renders inline — never an error page for an expected 4xx.
+     *
+     * A fragment and a status, not a hand-built string: the message is escaped by Thymeleaf
+     * (it used to be escaped by hand, and only for `&` and `<`), and the box's border, padding
+     * and width are the stylesheet's (097 §C).
      */
-    private fun filter(
-        list: List<Datasource>,
-        query: String?,
-    ): List<Datasource> {
-        if (query == null) return list
-        val lower = query.lowercase()
-        return list.filter { d ->
-            d.name.lowercase().contains(lower) ||
-                d.displayName.lowercase().contains(lower) ||
-                d.dialect.wire
-                    .lowercase()
-                    .contains(lower) ||
-                d.jdbcUrl.lowercase().contains(lower) ||
-                (d.username?.lowercase()?.contains(lower) == true) ||
-                d.credentialKind.wire
-                    .contains(lower) ||
-                (d.workspaceName ?: "global").lowercase().contains(lower) ||
-                (d.isReadonly && "readonly".contains(lower)) ||
-                lastTestLabel(d).contains(lower) ||
-                (d.description?.lowercase()?.contains(lower) == true)
-        }
-    }
-
-    /** Exactly the words the §8.1B column renders, so the search and the screen agree. */
-    private fun lastTestLabel(datasource: Datasource): String =
-        when (datasource.lastTest?.ok) {
-            null -> "never tested"
-            true -> "ok"
-            false -> "failed"
-        }
+    private fun refused(why: String): ModelAndView =
+        ModelAndView("partials/inline-refusal", mapOf("message" to why), HttpStatus.BAD_REQUEST)
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-
-    private fun scopes(): Set<String> = principal()?.scopes?.map { it.name }?.toSet() ?: emptySet()
-
-    private companion object {
-        const val PAGE_SIZE = 25
-    }
 }

@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseBody
+import org.springframework.web.servlet.ModelAndView
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -97,7 +98,7 @@ class TemplateEditorController(
     fun edit(
         @RequestParam name: String,
         @RequestParam version: Int,
-    ): ResponseEntity<String> {
+    ): Any {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         // A draft already exists ⇒ it IS the edit target and this path writes NOTHING.
@@ -113,7 +114,7 @@ class TemplateEditorController(
         name: String,
         version: Int,
         actor: UUID,
-    ): ResponseEntity<String>? {
+    ): ModelAndView? {
         val selected =
             templates.findVersion(workspaceId, name, version)
                 ?: return refusal("Version v$version of '$name' was not found.")
@@ -207,25 +208,19 @@ class TemplateEditorController(
      * (`responseHandling` defaults), so a 4xx here would drop the message on the floor.
      * Form-level feedback belongs in the form (the 022 review F9 rule).
      */
-    private fun refusal(why: String): ResponseEntity<String> {
+    private fun refusal(why: String): ModelAndView {
         log.info(EDIT_TAG, CorrelationId.current(), why)
-        return ResponseEntity.ok(
-            """<div class="ds-surface" style="border:1px solid var(--accent-danger);border-radius:var(--radius-base);""" +
-                """padding:var(--gap-sm);color:var(--text-primary);font-size:var(--text-sm)">""" +
-                escaped(why) +
-                "</div>",
-        )
+        return ModelAndView("partials/inline-refusal", mapOf("message" to why))
     }
 
     @PostMapping("/partials/templates/render")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
-    @ResponseBody
     fun renderPreview(
         @RequestParam name: String,
         @RequestParam version: Int,
         @RequestParam("body") @Suppress("UNUSED_PARAMETER") body: String,
         @RequestParam("context") contextJson: String,
-    ): String {
+    ): ModelAndView {
         val workspaceId = currentPrincipal().requireWorkspace().id
         if (templates.lookupVersion(workspaceId, name, version) == null && !templates.existsId(workspaceId, name)) {
             return renderError("Template '$name' not found.")
@@ -243,46 +238,26 @@ class TemplateEditorController(
             }
         return try {
             val rendered = templateEngines.engineFor(workspaceId).render(TemplateRef(name, version), context)
-            if (rendered.isBlank()) {
-                RENDER_EMPTY_HTML
-            } else {
-                RENDER_OUTPUT_PREFIX + escaped(rendered) + RENDER_OUTPUT_SUFFIX
-            }
+            // A blank render is a RESULT, not a failure: the fragment says "(empty output)".
+            renderOutput(if (rendered.isBlank()) "" else rendered)
         } catch (e: co.datapipelines.templates.TemplateRenderException) {
             renderError("Render failed: ${e.message}")
         }
     }
 
-    private fun renderError(message: String): String {
-        log.info(TAG, CorrelationId.current(), message)
-        return RENDER_ERROR_PREFIX + escaped(message) + RENDER_ERROR_SUFFIX
-    }
+    /** The preview pane's three states are one fragment; see `partials/template-render.html`. */
+    private fun renderOutput(rendered: String): ModelAndView =
+        ModelAndView("partials/template-render", mapOf("renderOutput" to rendered, "renderError" to null))
 
-    private fun escaped(text: String): String =
-        text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
+    private fun renderError(message: String): ModelAndView {
+        log.info(TAG, CorrelationId.current(), message)
+        return ModelAndView("partials/template-render", mapOf("renderOutput" to "", "renderError" to message))
+    }
 
     private companion object {
         private val log = LoggerFactory.getLogger(TemplateEditorController::class.java)
         private const val TAG = "Template preview failed — correlationId={}, detail={}"
         private const val EDIT_TAG = "Template edit refused — correlationId={}, detail={}"
         private val MAPPER = TemplateJson.objectMapper()
-
-        const val RENDER_EMPTY_HTML =
-            """<div class="ds-card" style="padding:var(--gap-md)">""" +
-                """<pre style="margin:0;color:var(--text-secondary);font-style:italic">(empty output)</pre></div>"""
-        const val RENDER_OUTPUT_PREFIX =
-            """<div class="ds-card" style="padding:var(--gap-md)">""" +
-                """<pre style="margin:0;white-space:pre-wrap;word-break:break-word;""" +
-                """font-family:var(--font-mono);font-size:var(--text-sm);color:var(--text-primary)">"""
-        const val RENDER_OUTPUT_SUFFIX = "</pre></div>"
-        const val RENDER_ERROR_PREFIX =
-            """<div class="ds-card" style="padding:var(--gap-md);border-color:var(--accent-danger);""" +
-                """background:var(--accent-danger-bg)">""" +
-                """<p style="margin:0;color:var(--accent-danger);font-size:var(--text-sm)">"""
-        const val RENDER_ERROR_SUFFIX = "</p></div>"
     }
 }

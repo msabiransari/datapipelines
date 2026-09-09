@@ -8,10 +8,11 @@
  * contenteditable, which drags caret handling, scroll sync, IME and paste
  * behaviour with it — its own round with its own risks.
  *
- * The render endpoint returns three shapes (TemplateEditorController):
- *   success  <div class="ds-card"><pre>escaped SQL</pre></div>
- *   empty    <div class="ds-card"><pre>(empty output)</pre></div>
- *   error    <div class="ds-card"><p>message</p></div>
+ * The render endpoint returns three shapes (partials/template-render.html since 097 §C —
+ * they were Kotlin string constants before, and the classes were inline styles):
+ *   success  <div class="ds-card te-render-card"><pre class="te-render-out">SQL</pre></div>
+ *   empty    <div class="ds-card te-render-card"><pre class="te-render-empty">(empty output)</pre></div>
+ *   error    <div class="ds-card te-render-card te-render-card-error"><p class="te-render-error">…</p></div>
  * Only <pre> blocks are touched: the error shape has none, and the empty
  * output tokenizes to plain text (no keywords), so it renders unchanged.
  *

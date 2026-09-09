@@ -2,6 +2,7 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourcePayloadBinder
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
@@ -62,6 +63,7 @@ class DatasourcesController(
     private val datasources: DatasourceRegistry,
     private val rules: DatasourceWorkspaceRules,
     private val registrations: DatasourceCreateService,
+    private val updates: DatasourceUpdateService,
 ) {
     /**
      * §9.1 — register. A name already taken is `409 datasource.validation.duplicate_name`
@@ -141,17 +143,16 @@ class DatasourcesController(
         val existing = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
         val globalRequested = DatasourcePayloadBinder.booleanFlag(body, "global")
         val readonlyRequested = DatasourcePayloadBinder.booleanFlag(body, "readonly")
-        rules.requireGlobalMutationAllowed(principal, existing, name)
-        rules.requireMemberDatasourcesGate(principal)
-        rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
-
-        val datasource =
-            DatasourcePayloadBinder.bind(body, requirePassword = false, pathName = name).copy(
-                isReadonly = readonlyRequested ?: existing.isReadonly,
-                workspaceId =
-                    rules.resolveUpdateBinding(principal, existing, globalRequested, DatasourcePayloadBinder.workspaceNameOf(body)),
-            )
-        return ApiResponse.of(datasources.save(datasource, principal.userId).toResponse())
+        // The gates, the binding and the save are [DatasourceUpdateService]'s — the same
+        // sequence the §4.5 edit dialog runs, in one place since 097 §A. What is left here is
+        // the payload shape (§3.1) and the §3.2 envelope.
+        val saved =
+            updates.update(name, existing, principal, globalRequested, DatasourcePayloadBinder.workspaceNameOf(body)) {
+                DatasourcePayloadBinder
+                    .bind(body, requirePassword = false, pathName = name)
+                    .copy(isReadonly = readonlyRequested ?: existing.isReadonly)
+            }
+        return ApiResponse.of(saved.toResponse())
     }
 
     /**

@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
@@ -72,6 +73,11 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     ExecutionsProperties::class,
     DatasourcesProperties::class,
 )
+// One bean per collaborator is what a no-stereotype codebase looks like (015 /
+// module-structure §8.4): every wiring decision is visible in one file, and the count grows
+// with the domain rather than with any complexity here. The 21st is 097's
+// `datasourceUpdateService`.
+@Suppress("TooManyFunctions")
 class DomainConfiguration {
     @Bean
     fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
@@ -100,6 +106,18 @@ class DomainConfiguration {
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
     ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding)
+
+    /**
+     * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the
+     * §4.5 edit dialog (097 §A). The rules component is passed whole here — unlike create's
+     * single binding rule, an update runs FOUR of them in a fixed order, and that order is the
+     * service's, so the port it implements is the four methods (see [DatasourceUpdateRules]).
+     */
+    @Bean
+    fun datasourceUpdateService(
+        datasources: DatasourceRegistry,
+        rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
+    ): DatasourceUpdateService = DatasourceUpdateService(datasources, rules)
 
     @Bean
     fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)

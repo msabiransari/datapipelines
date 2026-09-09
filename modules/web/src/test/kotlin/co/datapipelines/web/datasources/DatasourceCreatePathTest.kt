@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
@@ -55,7 +56,12 @@ class DatasourceCreatePathTest {
 
     private fun controller(memberGate: Boolean = true): DatasourcesController {
         val rules = DatasourceWorkspaceRules(workspaceService, WorkspacesProperties(memberDatasourcesEnabled = memberGate))
-        return DatasourcesController(registry, rules, DatasourceCreateService(registry, rules::resolveCreateBinding))
+        return DatasourcesController(
+            registry,
+            rules,
+            DatasourceCreateService(registry, rules::resolveCreateBinding),
+            DatasourceUpdateService(registry, rules),
+        )
     }
 
     private fun principal(admin: Boolean) =

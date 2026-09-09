@@ -1,0 +1,15 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="render">
+  <!--
+    097 §C — the template editor's preview result, in Thymeleaf. The three states were three
+    pairs of Kotlin string constants (RENDER_EMPTY_HTML, RENDER_OUTPUT_PREFIX/SUFFIX,
+    RENDER_ERROR_PREFIX/SUFFIX), each carrying inline styles and hand-escaping the rendered
+    SQL into them. Thymeleaf escapes `th:text` by construction, which is the half of this
+    that was a correctness risk rather than a tidiness one.
+  -->
+  <div class="ds-card te-render-card" th:classappend="${renderError != null} ? 'te-render-card-error' : ''">
+    <p th:if="${renderError != null}" class="te-render-error" th:text="${renderError}">Render failed</p>
+    <pre th:if="${renderError == null and #strings.isEmpty(renderOutput)}" class="te-render-empty">(empty output)</pre>
+    <pre th:if="${renderError == null and !#strings.isEmpty(renderOutput)}" class="te-render-out"
+         th:text="${renderOutput}">SELECT 1</pre>
+  </div>
+</th:block>

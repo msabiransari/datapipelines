@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping
 class AdminUsersController(
     private val themeResolver: ThemeResolver,
     private val authProperties: AuthProperties,
+    private val browse: AdminUsersBrowseModel,
 ) {
     /**
      * 096 §C (review finding F3): the admin gate was a hand-written
@@ -36,6 +37,11 @@ class AdminUsersController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         // The create-local-user form renders only when the method exists (§5A.1).
         model.addAttribute("localEnabled", authProperties.local.enabled)
+        // §5 (097 §B): the page renders the shell AND the initial rows, through the same
+        // model the partial renders through. The screen used to paint three skeleton rows and
+        // fetch the real ones from an inline <script> — a fourth first-paint idiom, and the
+        // second inline script in the tree.
+        browse.fillList(model, q = null, offset = 0, limit = AdminUsersBrowseModel.DEFAULT_LIMIT)
         return "admin/users"
     }
 }

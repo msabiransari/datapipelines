@@ -1,0 +1,19 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="content">
+  <!--
+    097 §C — the response to a row action: the refreshed row (Shape A), the one-time password
+    notice when the action minted one, and the toast, both out-of-band. The row is the fragment
+    the page renders, not a second copy of the markup.
+
+    The notice is the house `.app-alert` box — the same declarations the inline style it
+    replaces used to carry — and it stays PERSISTENT inline: §5.1's hard rule is that a toast, which
+    auto-dismisses after 6s, may POINT at a one-time secret and nothing more.
+  -->
+  <th:block th:replace="~{partials/admin-user-row :: row}"></th:block>
+  <div th:if="${oneTimePassword != null}" id="admin-notice" hx-swap-oob="true"
+       class="app-alert app-alert-warning u-mb-md">
+    One-time password for <span th:text="${userRow.email}">ada@example.com</span>:
+    <strong class="u-mono" th:text="${oneTimePassword}">hunter2</strong>
+    — shown ONCE; pass it to the user out-of-band. They must set a new password at first login (auth.md §5A.4).
+  </div>
+  <div th:replace="~{partials/toast-oob :: oob(${toastVariant}, ${toastTitle}, ${toastMessage})}"></div>
+</th:block>

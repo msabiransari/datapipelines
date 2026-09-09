@@ -23,12 +23,23 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
 
 class DatasourceUiControllerTest {
     private val registry = mockk<DatasourceRegistry>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = DatasourceUiController(registry, co.datapipelines.auth.WorkspacesProperties(), themeResolver)
+    private val rules =
+        co.datapipelines.web.datasources.DatasourceWorkspaceRules(
+            mockk(relaxed = true),
+            co.datapipelines.auth.WorkspacesProperties(),
+        )
+    private val controller =
+        DatasourceUiController(
+            DatasourceBrowseModel(registry),
+            co.datapipelines.auth.WorkspacesProperties(),
+            themeResolver,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -72,11 +83,11 @@ class DatasourceUiControllerTest {
 
     private fun partialController() =
         DatasourcePartialController(
+            DatasourceBrowseModel(registry),
             registry,
-            co.datapipelines.web.datasources.DatasourceWorkspaceRules(
-                mockk(relaxed = true),
-                co.datapipelines.auth.WorkspacesProperties(),
-            ),
+            rules,
+            co.datapipelines.application.datasources
+                .DatasourceUpdateService(registry, rules),
             co.datapipelines.datasources.DatasourceReferences.NONE,
         )
 
@@ -298,13 +309,13 @@ class DatasourceUiControllerTest {
                 false,
                 false,
                 emptyMap(),
-            ) as ResponseEntity<*>
+            ) as ModelAndView
 
-        result.statusCode shouldBe HttpStatus.BAD_REQUEST
-        result.headers["HX-Retarget"] shouldBe null // the modal owns this error (022/F9)
-        val body = result.body as String
-        body shouldContain "already exists"
-        body shouldNotContain "hx-swap-oob"
+        result.status shouldBe HttpStatus.BAD_REQUEST
+        // The modal owns this error (022/F9): the response IS the inline refusal fragment,
+        // never a toast — no retarget to say, and no OOB toast to render.
+        result.viewName shouldBe "partials/inline-refusal"
+        (result.model["message"] as String) shouldContain "already exists"
     }
 
     @Test
