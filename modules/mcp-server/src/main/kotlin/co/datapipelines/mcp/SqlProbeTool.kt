@@ -41,10 +41,12 @@ internal val PROBE_TYPE_ENUM_JSON: String =
  *   keyword comes from a fixed set; the parameter NAME travels, the never-trusted value text
  *   does not).
  * - A timeout ([SqlProbeTimeoutException]) and a driver refusal ([SqlProbeExecutionException])
- *   are RUN failures — `isError` envelopes carrying the catalogued
- *   `pipeline.node.query_execution_failed`, the same surface `datasources_preview_rows`'s
- *   [runningQuery] boundary uses for bad SQL. The timeout's details carry `wall_ms` and the
- *   pre-captured plan; the driver message stays bounded one level down (B1).
+ *   are RUN failures — `isError` envelopes carrying the catalogued codes: the timeout is
+ *   `pipeline.node.query_timeout` (T202 — "too slow for the budget" is not "wrong SQL"), the
+ *   driver refusal `pipeline.node.query_execution_failed`, the same surface
+ *   `datasources_preview_rows`'s [runningQuery] boundary uses for bad SQL. The timeout's
+ *   details carry `wall_ms` and the pre-captured plan; the driver message stays bounded one
+ *   level down (B1).
  */
 class SqlProbeTool(
     private val datasources: DatasourceRegistry,
@@ -170,8 +172,10 @@ class SqlProbeTool(
         } catch (e: SqlProbeParameterException) {
             throw McpArguments.invalidParams("${e.message} Parameter: '${e.parameter}'.")
         } catch (e: SqlProbeTimeoutException) {
+            // T202 (landed after this lane branched): a statement that outlived its timeout
+            // reports the timeout code, not query_execution_failed — same rule as a node.
             throw DatapipelinesException(
-                code = PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
+                code = PipelineErrorCodes.Node.QUERY_TIMEOUT,
                 message =
                     "The probe exceeded its timeout against datasource '$name'; the EXPLAIN plan " +
                         "captured before the run is attached.",

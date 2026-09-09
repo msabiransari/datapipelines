@@ -135,7 +135,7 @@ class SqlProbeToolTest {
         val thrown = shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }
 
         assertAll(
-            { thrown.code shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED },
+            { thrown.code shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT },
             { thrown.details["wall_ms"] shouldBe 10_000L },
             { thrown.details["reason"] shouldBe "timeout" },
             { (thrown.details["plan"] as Map<*, *>)["scan"] shouldBe "seq" },
