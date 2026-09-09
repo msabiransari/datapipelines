@@ -41,6 +41,37 @@ class ExplainPlanParserTest {
     }
 
     @Test
+    fun `postgres - an aggregate-rooted plan still names the scan node beneath it`() {
+        // The T200 shape (2026-09-09): the root is the aggregate; the index signal is deeper.
+        val rows =
+            listOf(
+                listOf("Finalize GroupAggregate  (cost=91614.90..91666.21 rows=193 width=42)"),
+                listOf("  Group Key: pu_location_id"),
+                listOf("  ->  Sort  (cost=90614.87..90615.36 rows=193 width=42)"),
+                listOf("        ->  Parallel Index Scan using idx_trips_pickup_date on trips  (cost=0.43..89941.95 rows=88425 width=8)"),
+                listOf("              Index Cond: ((pickup_date >= '2024-01-01'::date) AND (pickup_date <= '2024-12-31'::date))"),
+            )
+
+        val summary = ExplainPlanParser.summarize(Dialect.POSTGRES, listOf("QUERY PLAN"), rows)
+
+        summary.scan shouldBe "index:idx_trips_pickup_date"
+        summary.estimatedRows shouldBe "193"
+    }
+
+    @Test
+    fun `postgres - a seq scan under an aggregate root still answers seq`() {
+        val rows =
+            listOf(
+                listOf("HashAggregate  (cost=100.00..101.00 rows=10 width=8)"),
+                listOf("  ->  Parallel Seq Scan on trips  (cost=0.00..90.00 rows=500 width=8)"),
+            )
+
+        val summary = ExplainPlanParser.summarize(Dialect.POSTGRES, listOf("QUERY PLAN"), rows)
+
+        summary.scan shouldBe "seq"
+    }
+
+    @Test
     fun `postgres - an unrecognized root degrades to the first-line fallback, never a failure`() {
         val rows = listOf(listOf("Custom Scan (GpuPreAgg)  (cost=1.00..2.00 rows=5 width=8)"))
 

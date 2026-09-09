@@ -52,21 +52,25 @@ internal object ExplainPlanParser {
     }
 
     /**
-     * Postgres: the first `QUERY PLAN` line is the root node — `Seq Scan on t (cost=...
-     * rows=N ...)` or `Index [Only] Scan using <name> on t ...`. The row estimate is the root's
-     * `rows=N`.
+     * Postgres: the scan signal lives at the DEEPEST node, not the root — an aggregate-rooted
+     * plan (`Finalize GroupAggregate ... -> Parallel Index Scan using idx_x ...`) still answers
+     * `index:idx_x`. Any `Seq Scan on` line anywhere in the plan answers `seq` — a full scan of
+     * one table in a multi-node plan is exactly the timeout this field exists to warn about.
+     * The row estimate is the root's `rows=N` (the output cardinality).
      */
     private fun postgres(rows: List<List<String?>>): ExplainPlanSummary {
-        val root =
-            rows
-                .firstOrNull()
-                ?.firstOrNull()
-                .orEmpty()
-                .trim()
+        val lines = rows.mapNotNull { it.firstOrNull()?.trim()?.removePrefix("->")?.trim() }
+        val root = lines.firstOrNull().orEmpty()
         val scan =
             when {
-                root.startsWith("Seq Scan") -> "seq"
-                else -> PG_INDEX.find(root)?.let { "index:${it.groupValues[1]}" } ?: root.take(SCAN_FALLBACK_CHARS)
+                lines.any { PG_SEQ.containsMatchIn(it) } -> {
+                    "seq"
+                }
+
+                else -> {
+                    lines.firstNotNullOfOrNull { PG_INDEX.find(it) }?.let { "index:${it.groupValues[1]}" }
+                        ?: root.take(SCAN_FALLBACK_CHARS)
+                }
             }
         return ExplainPlanSummary(scan, PG_ROWS.find(root)?.groupValues?.get(1), raw = "", null, null)
     }
@@ -167,7 +171,8 @@ internal object ExplainPlanParser {
 
     private const val SCAN_FALLBACK_CHARS = 40
 
-    private val PG_INDEX = Regex("""^Index (?:Only )?Scan using (\S+)""")
+    private val PG_SEQ = Regex("""^(?:Parallel )?Seq Scan\b""")
+    private val PG_INDEX = Regex("""^(?:Parallel\s+)?(?:Index (?:Only )?Scan|Bitmap Index Scan) using (\S+)""")
     private val PG_ROWS = Regex("""rows=(\d+)""")
     private val H2_ACCESS_COMMENT = Regex("""/\*\s*([^*]+?)\s*\*/""")
     private val BOX_CHARS = Regex("""[│┌┐└┘┬┴─]""")
