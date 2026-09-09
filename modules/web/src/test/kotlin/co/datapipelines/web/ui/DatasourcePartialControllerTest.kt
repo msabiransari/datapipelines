@@ -47,7 +47,7 @@ class DatasourcePartialControllerTest {
 
     /** The delete dialog's usage question. Default: nothing references anything (§6.2). */
     private var references = co.datapipelines.datasources.DatasourceReferences.NONE
-    private val controller = DatasourcePartialController(datasources, rules) { name -> references.referencesTo(name) }
+    private val controller = DatasourcePartialController(DatasourceBrowseModel(datasources), datasources, rules) { name -> references.referencesTo(name) }
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

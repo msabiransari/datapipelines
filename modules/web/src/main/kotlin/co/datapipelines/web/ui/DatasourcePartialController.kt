@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestParam
  */
 @Controller
 class DatasourcePartialController(
+    private val browse: DatasourceBrowseModel,
     private val datasources: DatasourceRegistry,
     private val rules: DatasourceWorkspaceRules,
     /**
@@ -48,39 +49,8 @@ class DatasourcePartialController(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) offset: Int?,
     ): String {
-        listModel(model, q, dialect, offset)
-        return "partials/datasources"
-    }
-
-    /** The list fragment's model — the register success path refreshes the same list OOB. */
-    private fun listModel(
-        model: Model,
-        q: String?,
-        dialect: String?,
-        offset: Int?,
-    ) {
-        val page = maxOf(0, offset ?: 0)
-        val size = PAGE_SIZE
-        val dialectFilter =
-            dialect?.trim()?.takeIf { it.isNotEmpty() }?.let { d ->
-                Dialect.entries.firstOrNull { it.wire.equals(d, ignoreCase = true) }
-            }
-        val workspaceId = principal()?.workspace?.id
-        val visible =
-            if (workspaceId == null) {
-                emptyList()
-            } else {
-                datasources.listVisible(dialectFilter, workspaceId)
-            }
-        val all = filter(visible, q?.trim()?.takeIf { it.isNotEmpty() })
-        val items = all.drop(page).take(size)
-        model.addAttribute("datasources", items)
-        model.addAttribute("q", q ?: "")
-        model.addAttribute("selectedDialect", dialect ?: "")
-        model.addAttribute("offset", page)
-        model.addAttribute("hasMore", all.size > page + size)
-        model.addAttribute("total", all.size)
-        model.addAttribute("scopes", scopes())
+        browse.fillList(model, principal(), q, dialect, offset)
+        return DatasourceBrowseModel.LIST_VIEW
     }
 
     /**
@@ -183,7 +153,7 @@ class DatasourcePartialController(
             // No HX-Redirect: a full-page navigation would discard the toast. The success
             // node lands in #register-result (its arrival closes the modal, 022/F9); the
             // refreshed list and the toast ride along out-of-band (Shape A, §5.1).
-            listModel(model, null, null, null)
+            browse.fillList(model, principal(), null, null, null)
             model.addAttribute("registeredName", datasource.name)
             model.addAttribute("oob", true)
             "partials/datasource-registered"
@@ -307,7 +277,7 @@ class DatasourcePartialController(
                         ),
                 )
             datasources.save(updated, principal.userId)
-            listModel(model, null, null, null)
+            browse.fillList(model, principal(), null, null, null)
             model.addAttribute("savedName", name)
             model.addAttribute("savedVerb", "updated")
             model.addAttribute("oob", true)
@@ -378,7 +348,7 @@ class DatasourcePartialController(
                         "${result.references.size} node(s). Remove or repoint them first.",
                 )
             }
-            listModel(model, null, null, null)
+            browse.fillList(model, principal(), null, null, null)
             model.addAttribute("savedName", name)
             model.addAttribute("savedVerb", "deleted")
             model.addAttribute("oob", true)
@@ -403,54 +373,6 @@ class DatasourcePartialController(
                 "</div>",
         )
 
-    /**
-     * The screen's search covers EVERY column the table renders (§4.5): name +
-     * readonly, dialect, workspace, URL, username, credential kind, last-test state — plus
-     * description,
-     * which is searchable though only the modal shows it. A search that silently ignores a
-     * visible column reads as "no results" to the user (029). The workspace column
-     * renders the bound workspace's name or the literal `global`, so both match; the
-     * last-test column renders `ok`, `failed` or `never tested`, so all three do — which is
-     * what makes "show me the broken datasources" a search rather than a manual scan
-     * (061/T84).
-     */
-    private fun filter(
-        list: List<Datasource>,
-        query: String?,
-    ): List<Datasource> {
-        if (query == null) return list
-        val lower = query.lowercase()
-        return list.filter { d ->
-            d.name.lowercase().contains(lower) ||
-                d.displayName.lowercase().contains(lower) ||
-                d.dialect.wire
-                    .lowercase()
-                    .contains(lower) ||
-                d.jdbcUrl.lowercase().contains(lower) ||
-                (d.username?.lowercase()?.contains(lower) == true) ||
-                d.credentialKind.wire
-                    .contains(lower) ||
-                (d.workspaceName ?: "global").lowercase().contains(lower) ||
-                (d.isReadonly && "readonly".contains(lower)) ||
-                lastTestLabel(d).contains(lower) ||
-                (d.description?.lowercase()?.contains(lower) == true)
-        }
-    }
-
-    /** Exactly the words the §8.1B column renders, so the search and the screen agree. */
-    private fun lastTestLabel(datasource: Datasource): String =
-        when (datasource.lastTest?.ok) {
-            null -> "never tested"
-            true -> "ok"
-            false -> "failed"
-        }
-
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-
-    private fun scopes(): Set<String> = principal()?.scopes?.map { it.name }?.toSet() ?: emptySet()
-
-    private companion object {
-        const val PAGE_SIZE = 25
-    }
 }

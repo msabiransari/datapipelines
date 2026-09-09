@@ -52,6 +52,15 @@ class UiConfig {
         templates: TemplateRepository,
     ): NavCounts = NavCounts(pipelines, templates)
 
+    /**
+     * 097 §A: the datasources screen's one model, shared by the page and the partial
+     * controllers — the projection this screen had been building twice (see
+     * [DatasourceBrowseModel]).
+     */
+    @Bean
+    fun datasourceBrowseModel(datasources: co.datapipelines.datasources.DatasourceRegistry): DatasourceBrowseModel =
+        DatasourceBrowseModel(datasources)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     fun pipelineBrowseModel(
