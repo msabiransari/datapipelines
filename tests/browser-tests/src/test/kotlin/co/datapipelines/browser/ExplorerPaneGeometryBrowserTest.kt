@@ -9,6 +9,8 @@ import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * 090 §A/§B — the explorers' two panes, measured on the shapes the owner actually uses.
@@ -179,13 +181,9 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     private fun Map<String, Any?>.d(k: String) = (this[k] as Number).toDouble()
 
     /** The round's before/after evidence, beside the dock's (104 handback). */
-    private fun shot(name: String) =
-        page.screenshot(
-            Page.ScreenshotOptions().setPath(
-                java.nio.file.Paths.get("build", "reports", "104-screenshots").also { it.toFile().mkdirs() }
-                    .resolve("104-$name.png"),
-            ),
-        )
+    private fun shotDir(): Path = Paths.get("build", "reports", "104-screenshots").also { it.toFile().mkdirs() }
+
+    private fun shot(name: String) = page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("104-$name.png")))
 
     /** A real pointer drag on the divider handle: down, move in steps, up. */
     private fun dragTreeBy(dx: Double) {
