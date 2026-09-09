@@ -62,7 +62,7 @@ class LocalAdminSeedE2eTest {
                 .extract()
                 .asString()
         html shouldContain "name=\"password\""
-        html shouldNotContain ">or<"
+        html shouldNotContain "or with email"
         html shouldNotContain "/oauth2/authorization/"
     }
 

@@ -51,12 +51,14 @@ class LocalLoginE2eTest {
         html shouldContain "name=\"email\""
         html shouldContain "name=\"password\""
         html shouldContain "/oauth2/authorization/google"
-        // Form before divider before buttons — the owner-ratified layout, not tabs.
-        val formAt = html.indexOf("name=\"password\"")
-        val dividerAt = html.indexOf(">or<")
+        // Provider before divider before form — the 2026-09-08 sign-in redesign the owner
+        // approved (the identity provider is the primary action; the local form sits under
+        // "or with email"); still one panel, never tabs.
         val buttonAt = html.indexOf("/oauth2/authorization/google")
-        (dividerAt > formAt) shouldBe true
-        (buttonAt > dividerAt) shouldBe true
+        val dividerAt = html.indexOf("or with email")
+        val formAt = html.indexOf("name=\"password\"")
+        (dividerAt > buttonAt) shouldBe true
+        (formAt > dividerAt) shouldBe true
     }
 
     @Test

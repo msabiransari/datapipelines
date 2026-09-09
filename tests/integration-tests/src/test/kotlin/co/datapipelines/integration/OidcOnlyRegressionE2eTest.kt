@@ -56,7 +56,7 @@ class OidcOnlyRegressionE2eTest {
         // logout form predates this round; it is not the local login form.)
         html shouldNotContain "name=\"password\""
         html shouldNotContain "id=\"login-email\""
-        html shouldNotContain ">or<"
+        html shouldNotContain "or with email"
         html shouldContain "/oauth2/authorization/google"
         html shouldContain "/oauth2/authorization/microsoft"
 
