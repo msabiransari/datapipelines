@@ -27,6 +27,11 @@
   <!-- 080 §B: the dock's four-tab state machine and the Events tab's log, both pure
        (no DOM) so node --test owns their transition tables; init.js keeps the DOM
        effects. The 065 inspector overlay is gone — Details is a tab now. -->
+  <!-- 104 §A: the shared pane splitter. PARSER-BLOCKING and above the markup on purpose —
+       it restores the remembered `--pe-dock-pane-h` onto <html> BEFORE the dock paints, which
+       is the only way to size a pane without a layout shift now that no inline script is
+       allowed on the page (090's stylesheet lesson, one layer up). -->
+  <script th:src="@{/js/splitter.js}"></script>
   <script th:src="@{/js/pipeline-editor/dock.js}"></script>
   <script th:src="@{/js/pipeline-editor/events.js}"></script>
   <script th:src="@{/js/pipeline-editor/init.js}"></script>
@@ -202,6 +207,12 @@
          events.js; both pure so node --test owns the transition tables. -->
     <section class="pe-dock" x-bind:class="dock.state === 'collapsed' ? 'pe-dock-collapsed' : ''"
              aria-label="Node details, execution results, errors and events">
+      <!-- 104 §B — the height handle, on the dock's top edge. The owner could min/max the
+           dock but not size it; this is the drag. `role="separator"` with the value pair is
+           set here rather than only in JS so the control is correct in the DOM the moment it
+           exists; splitter.js keeps aria-valuenow moving. -->
+      <div class="pe-dock-splitter" data-splitter="editor-dock" role="separator"
+           aria-orientation="horizontal" tabindex="0" aria-label="Resize results panel"></div>
       <div class="pe-dock-tabs" role="tablist" aria-label="Editor dock">
         <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-details"
                 aria-controls="pe-pane-details"

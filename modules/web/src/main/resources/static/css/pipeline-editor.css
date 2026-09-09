@@ -26,9 +26,17 @@
   --pe-card-fs-kind: 11px;
   --pe-card-fs-fact: 12px;
   --pe-card-fs-sm: 11.5px;
-  /* The dock: the mock's 38px tab strip over a 232px pane. */
+  /* The dock: the mock's 38px tab strip over a 232px pane. 104 §B: the pane height is
+     the USER's now — splitter.js writes --pe-dock-pane-h onto the ROOT (an inline custom
+     property, which outranks this declaration), remembers it under `dp.pane.editor-dock`,
+     and restores it before first paint. This value is therefore the DEFAULT, and
+     double-clicking the handle removes the root's property to come back to it. */
   --pe-dock-tabs-h: 38px;
   --pe-dock-pane-h: 232px;
+  /* The strip of canvas the dock may never eat into (104 §B's ceiling) and the dock's own
+     floor, declared here so the stylesheet and splitter.js name the same two numbers. */
+  --pe-dock-min-h: 120px;
+  --pe-dock-canvas-floor: 160px;
   /* SQL highlight accents (032) — token references only; hex lives in the fallback slot. */
   --pe-sql-keyword: var(--type-dql, #0369a1);
   --pe-sql-string: var(--accent-warning, #a16207);
@@ -938,6 +946,79 @@
   background: var(--surface-default, #fff);
   border-top: 1px solid var(--border-subtle, #b2b7bf);
   transition: grid-template-rows 0.2s;
+  /* 104 §B: the containing block for the resize handle that overlays the top border. The
+     handle is ABSOLUTE on purpose — a third child in flow would open a third grid row. */
+  position: relative;
+}
+
+/* ---- The resize handle (104 §B) ----
+ * The owner's report: "it has a fixed height. You can min/max it but cannot change the
+ * height." A 9px strip straddling the dock's top border, with a centred grip that only
+ * colours on hover/focus/drag — visible where the boundary is, silent until wanted. It is
+ * NOT the native `resize` corner the tree pane used to carry: that handle sits at the
+ * bottom-right of the pane, which is where nobody looks for a divider (§C).
+ *
+ * `touch-action: none` is what makes the pointer events reach us on a touch screen instead
+ * of being consumed as a scroll gesture. */
+.pe-dock-splitter {
+  position: absolute;
+  user-select: none;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 9px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.pe-dock-splitter::after {
+  content: "";
+  width: 44px;
+  height: 3px;
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  transition: background var(--pe-transition);
+}
+
+.pe-dock-splitter:hover::after,
+.pe-dock-splitter:focus-visible::after,
+.pe-dock.is-dragging .pe-dock-splitter::after {
+  background: var(--brand, #2563eb);
+}
+
+/* A collapsed dock has no height to give: the handle would drag a pane nobody can see. */
+.pe-dock-collapsed .pe-dock-splitter {
+  display: none;
+}
+
+/* §D — the row transition must NOT run during a drag: a dock that eases toward the pointer
+   lags it by 200ms and reads as a broken handle. It is switched off for the duration and
+   back on at pointerup, which is also the only motion `prefers-reduced-motion` users would
+   have seen here. */
+.pe-dock.is-dragging {
+  transition: none;
+}
+
+/* The whole document takes the resize cursor while a drag is in flight — the pointer is
+   captured by the handle and travels over the canvas, and a canvas that shows a grab cursor
+   mid-resize is the same lie as a lagging pane. */
+html.dp-splitting-y,
+html.dp-splitting-y * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-dock,
+  .pe-dock-splitter::after {
+    transition: none;
+  }
 }
 
 .pe-dock-collapsed {

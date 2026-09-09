@@ -6,6 +6,10 @@
        collapses, Enter opens the editor. Shared with the templates explorer (058): one tree
        presentation, one keyboard contract, one file. The tree's expansion itself stays
        htmx + <details>; this script owns selection, focus and the aria state. -->
+  <!-- 104 §A: the shared pane splitter, PARSER-BLOCKING and above the markup — it puts the
+       remembered `--tplx-tree-w` on <html> before the tree pane paints, so a remembered width
+       is the width of the FIRST frame and not a shift onto it. -->
+  <script th:src="@{/js/splitter.js}"></script>
   <script th:src="@{/js/template-explorer.js}" defer></script>
 
   <!-- 067 — the pipelines explorer: TREE LEFT, the selected pipeline RIGHT. Pipeline names
@@ -61,6 +65,14 @@
              so the swap target survives every refresh — this div is only a placeholder. -->
         <div th:replace="~{partials/pipelines :: fragment}"></div>
       </div>
+
+      <!-- 104 §C — the divider handle. It overlays `.tplx-detail`'s left border (the pane
+           boundary) and replaces the pane's native `resize` corner, which sat at the bottom
+           right where nobody found it: three rounds of "the tree is too narrow / too wide"
+           were spent editing the stylesheet instead. Both explorers share one key, so the
+           width follows the user between them. -->
+      <div class="tplx-splitter" data-splitter="explorer-tree" role="separator"
+           aria-orientation="vertical" tabindex="0" aria-label="Resize navigation tree"></div>
 
       <div class="tplx-detail">
         <!-- Nothing selected: a quiet empty state, not a blank panel. Replaced (innerHTML) the

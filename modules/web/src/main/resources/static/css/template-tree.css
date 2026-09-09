@@ -46,6 +46,62 @@
   grid-template-columns: minmax(260px, auto) minmax(0, 1fr);
   gap: var(--gap-lg);
   min-height: 0;
+  /* 104 §C: the containing block for the divider handle, which is absolute so that it can
+     sit ON the boundary without being a third grid column. */
+  position: relative;
+  /* ONE length for the tree's width and the handle's x. `--tplx-tree-w` is what splitter.js
+     writes on the root when the user has sized the pane; unset, the fallback IS the shipped
+     default, so "reset" is "remove the property" and there is nothing to keep in sync. */
+  --tplx-tree-size: var(--tplx-tree-w, clamp(260px, 22vw, 40rem));
+}
+
+/* ---- The divider handle (104 §C) ----
+ * `.tplx-detail`'s left border is the visual line; this overlays it. 12px of hit area
+ * centred on a 1px border — the native `resize: horizontal` corner it replaces sat at the
+ * pane's BOTTOM-RIGHT, which is why three rounds of "the tree is too narrow / too wide"
+ * were fixed by editing this stylesheet instead of by the user dragging it. */
+.tplx-splitter {
+  position: absolute;
+  user-select: none;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tplx-tree-size) + var(--gap-lg) - 6px);
+  width: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.tplx-splitter::after {
+  content: "";
+  width: 3px;
+  height: 40px;
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  transition: background var(--duration-fast, 150ms) ease;
+}
+
+.tplx-splitter:hover::after,
+.tplx-splitter:focus-visible::after,
+.tplx-body.is-dragging .tplx-splitter::after {
+  background: var(--brand);
+}
+
+html.dp-splitting-x,
+html.dp-splitting-x * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tplx-splitter::after {
+    transition: none;
+  }
 }
 
 /* The tree pane. The width is viewport-based (a SHARE of the full-bleed canvas),
@@ -64,12 +120,14 @@
    40rem ceiling: 1440 → 317, 1920 → 422, 2560 → 563, 3491 → 640; the resizer
    still runs from the floor to 40vw. */
 .tplx-tree {
-  width: clamp(260px, 22vw, 40rem);
+  /* 104 §C: the width is the USER's now. `--tplx-tree-size` resolves to the remembered
+     width when there is one and to the clamp above otherwise — the native `resize`
+     handle is gone, replaced by `.tplx-splitter` on the divider where the eye expects it. */
+  width: var(--tplx-tree-size, clamp(260px, 22vw, 40rem));
   min-width: 260px;
-  max-width: 60vw;
+  max-width: 40vw;
   min-height: 0;
   overflow: auto;
-  resize: horizontal;
 
   /* 085 §A — the guide geometry's three lengths, derived once so every level agrees.
      --tpl-indent: one level's step right (~the mock's 18px; tokens only). --tpl-row-h:
