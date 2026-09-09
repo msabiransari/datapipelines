@@ -39,6 +39,7 @@ class LakeConfiguration {
                     name = row.name,
                     format = row.format.wire,
                     location = row.location,
+                    partitionColumn = row.partitionColumn,
                 )
             }
         }

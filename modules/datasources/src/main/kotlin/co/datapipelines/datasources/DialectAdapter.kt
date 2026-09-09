@@ -168,6 +168,35 @@ interface DialectAdapter {
     }
 
     /**
+     * §7C catalog statistics: this dialect's recipe for reading table statistics from the
+     * engine's OWN catalog (never a scan of the table), or null when the engine has no catalog
+     * stats to read — a valid answer the reader reports as `stats_source: "none"`. The concrete
+     * queries live in `TableStatsPlans`.
+     *
+     * LAKE deliberately declares none: a lake table's statistics come from Parquet footers and
+     * the registry's partition column, not from catalog SQL — [SchemaIntrospector.tableStats]
+     * branches on the dialect first (the `lakeColumns` precedent) and never consults this.
+     */
+    val tableStatsPlan: TableStatsPlan?
+        get() = null
+
+    /**
+     * §7D SQL probe: the EXPLAIN wrapper for a gated SELECT — the statement that produces this
+     * dialect's execution plan for [sql] — or null when the engine has no cheap, side-effect-free
+     * plan read. The probe treats null as "no plan", never as an error.
+     *
+     * Oracle and MSSQL declare nothing on purpose: `EXPLAIN PLAN FOR` WRITES to a plan table, and
+     * `SET SHOWPLAN_*` is session state — neither is a cheap read-only wrapper, so the documented
+     * answer there is no plan. The dialects that do declare one emit a non-executing EXPLAIN
+     * (`EXPLAIN QUERY PLAN` on SQLite): the plan must survive a query that goes on to time out,
+     * which an executing variant (DuckDB's `EXPLAIN ANALYZE`) cannot guarantee — it would die
+     * with the query it was meant to explain. (Verified 2026-09-09 against duckdb_jdbc 1.5.5.1:
+     * plain `EXPLAIN` already carries the static pruning marker `Scanning Files: x/y`, so the
+     * executing variant buys nothing the probe needs.)
+     */
+    fun explainSelectSql(sql: String): String? = null
+
+    /**
      * The [CredentialKind]s this dialect's **pinned driver** can actually authenticate with
      * (datasources.md §3.4/§4.2). Fail-closed: a kind outside this set is refused at save with
      * `datasource.validation.properties_invalid` rather than stored and silently ignored at
