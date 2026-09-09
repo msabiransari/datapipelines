@@ -39,7 +39,12 @@ class UiConfig {
 
     /** 047: the templates screen's one model, shared by the page and the partial controllers. */
     @Bean
-    fun templateBrowseModel(templates: TemplateRepository): TemplateBrowseModel = TemplateBrowseModel(templates)
+    fun templateBrowseModel(
+        templates: TemplateRepository,
+        usage: co.datapipelines.templates.TemplateUsageService,
+        executions: co.datapipelines.executor.ExecutionRepository,
+        actorNames: ActorNames,
+    ): TemplateBrowseModel = TemplateBrowseModel(templates, usage, executions, actorNames)
 
     /** 089 §A: the LAKE datasource detail's read-only tree model — stateless, one shared instance. */
     @Bean
@@ -52,10 +57,27 @@ class UiConfig {
         templates: TemplateRepository,
     ): NavCounts = NavCounts(pipelines, templates)
 
+    /** 106: the version/execution actor lookup both explorer details render. */
+    @Bean
+    fun actorNames(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): ActorNames = ActorNames(jdbc)
+
+    /** 106: per-version run counts for the acting column's Versions tab. */
+    @Bean
+    fun pipelineRunStats(
+        jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate,
+    ): PipelineRunStats = PipelineRunStats(jdbc)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
+    @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources
     fun pipelineBrowseModel(
         pipelines: co.datapipelines.pipeline.PipelineService,
         repository: co.datapipelines.pipeline.PipelineRepository,
-    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository)
+        executions: co.datapipelines.executor.ExecutionRepository,
+        endpoints: co.datapipelines.application.endpoints.PublishedEndpointRepository,
+        datasources: co.datapipelines.pipeline.DatasourceRegistry,
+        actorNames: ActorNames,
+        runStats: PipelineRunStats,
+    ): PipelineBrowseModel =
+        PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats)
 }

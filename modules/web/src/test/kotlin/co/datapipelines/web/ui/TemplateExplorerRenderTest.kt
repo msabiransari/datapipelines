@@ -133,10 +133,55 @@ class TemplateExplorerRenderTest {
         html shouldContain "title=\"$DEEP_PATH\""
         html shouldContain "Open in editor"
         html shouldContain "/templates/editor?name=$DEEP_PATH"
-        html shouldContain "<span class=\"ds-badge ds-badge-default\">sql</span>"
-        html shouldContain "<span class=\"ds-badge ds-badge-default\">POSTGRES</span>"
+        html shouldContain ">sql</span>"
+        html shouldContain ">POSTGRES</span>"
         html shouldContain "RELEASED"
         html shouldContain "DRAFT"
+    }
+
+    @Test
+    fun `106 - the templates detail is the pipelines detail's twin - same three regions`() {
+        val html = render("partials/template-detail") { fillDetail() }
+
+        html shouldContain "class=\"tplx-detail-header\""
+        html shouldContain "class=\"tplx-read\""
+        html shouldContain "class=\"tplx-act\""
+        html shouldContain ">Overview<"
+        html shouldContain ">Used by<"
+        html shouldContain "data-tab-panel=\"template-tab-versions\""
+        html shouldContain "data-tab-panel=\"template-tab-source\""
+        html shouldContain "data-tab-panel=\"template-tab-runs\""
+        // Versions AND Source are in the first paint (both are already read); only Runs is lazy.
+        html shouldContain "/partials/templates/runs?name="
+        html shouldContain "hx-trigger=\"click once\""
+        // The path is the eyebrow, the leaf is the title.
+        html shouldContain "acme/finance/reports/</p>"
+        html shouldContain "monthly_revenue.sql</h2>"
+        // The excerpt, and the jump to the full body — never a second copy of the source.
+        html shouldContain "class=\"tplx-excerpt\""
+        html shouldContain "data-tab-jump=\"template-tab-source\""
+        // A template declares no parameter schema; the card says what the body REFERENCES.
+        html shouldContain ">References<"
+        html shouldContain "start_date"
+        html shouldNotContain "style=\""
+    }
+
+    @Test
+    fun `106 - the templates header renders 101's verbs, pointing at the REST routes`() {
+        val html = render("partials/template-detail") { fillDetail() }
+
+        html shouldContain "Release v2…"
+        html shouldContain "data-verb-url=\"/api/v1/templates/release\""
+        html shouldContain "data-if-match=\"h2\""
+        // A template with a draft has nothing to discard yet; Delete needs the sole-draft state.
+        html shouldNotContain ">Delete<"
+
+        val draftOnly =
+            render("partials/template-detail") {
+                fillDetail()
+                setVariable("canDelete", true)
+            }
+        draftOnly shouldContain ">Delete<"
     }
 
     @Test
@@ -220,18 +265,49 @@ class TemplateExplorerRenderTest {
         setVariable("scopes", setOf("ADMIN"))
     }
 
+    /** The 106 template detail: header + reading column + acting column, in one fill. */
     private fun WebContext.fillDetail() {
         setVariable("templateId", DEEP_PATH)
         setVariable("template", template(DEEP_PATH))
+        setVariable("folderPath", "acme/finance/reports/")
+        setVariable("leafName", "monthly_revenue.sql")
+        setVariable("draftVersion", 2)
+        setVariable("draftHash", "h2")
+        setVariable("releasableVersion", 2)
+        setVariable("canDelete", false)
+        setVariable("inUse", mapOf(2 to 1, 1 to 2))
+        setVariable("versionCount", 2)
+        setVariable("runCount", 0)
+        setVariable("usedBy", emptyList<Any>())
+        setVariable("usedByCount", 0)
+        setVariable("excerpt", "SELECT 1")
+        setVariable("excerptTruncated", true)
+        setVariable("interpolations", listOf("start_date"))
         setVariable(
             "versions",
             listOf(
-                TemplateVersionSummary(DEEP_PATH, 2, Instant.parse("2026-09-02T10:00:00Z"), ACTOR),
-                TemplateVersionSummary(DEEP_PATH, 1, Instant.parse("2026-09-01T10:00:00Z"), ACTOR),
+                VersionRowView.of(
+                    version = 2,
+                    status = PipelineVersionStatus.DRAFT,
+                    createdAt = Instant.parse("2026-09-02T10:00:00Z"),
+                    actor = "Muhammad",
+                    now = Instant.parse("2026-09-03T10:00:00Z"),
+                    usage = 1,
+                    usageUnit = "pipeline",
+                    isCurrent = false,
+                ),
+                VersionRowView.of(
+                    version = 1,
+                    status = PipelineVersionStatus.RELEASED,
+                    createdAt = Instant.parse("2026-09-01T10:00:00Z"),
+                    actor = "Muhammad",
+                    now = Instant.parse("2026-09-03T10:00:00Z"),
+                    usage = 2,
+                    usageUnit = "pipeline",
+                    isCurrent = true,
+                ),
             ),
         )
-        setVariable("draftVersion", 2)
-        setVariable("inUse", mapOf(2 to 1, 1 to 2))
     }
 
     private fun WebContext.fillPage() {

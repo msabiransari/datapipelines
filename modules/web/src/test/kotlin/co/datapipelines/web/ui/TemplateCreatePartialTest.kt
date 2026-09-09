@@ -51,10 +51,9 @@ class TemplateCreatePartialTest {
     private val controller =
         TemplatePartialController(
             repository,
-            TemplateBrowseModel(repository),
+            co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, pipelines)),
             validator,
             authoring,
-            TemplateUsageService(repository, pipelines),
         )
 
     private val userId = UUID.randomUUID()
@@ -182,21 +181,19 @@ class TemplateCreatePartialTest {
     }
 
     @Test
-    fun `the versions fragment derives DRAFT from the one draft pointer`() {
+    fun `a name with no live template fills the not-found state and asks no further questions`() {
         authenticate()
-        every { repository.listVersions(any(), "acme/x") } returns emptyList()
+        // 106: the detail fill short-circuits on a null working read, exactly as the pipelines
+        // twin does — every other read would be a query about a row that is not there. The
+        // repository is a STRICT mock, so an extra query fails this test rather than passing
+        // it quietly.
         every { repository.findWorking(any(), "acme/x") } returns null
-        every { repository.findDraftDetail(any(), "acme/x") } returns null
-        every { pipelines.countWorkingTemplatePinsByPinnedVersion(any(), "acme/x") } returns emptyMap()
 
         val model = ExtendedModelMap()
         controller.versions(model, "acme/x") shouldBe "partials/template-detail"
 
         model["templateId"] shouldBe "acme/x"
-        model["draftVersion"] shouldBe null
-        model["versions"].shouldNotBeNull()
-        // 040 D6: the same service's in-use counts ride the model — the empty map renders
-        // every row's em dash, never a missing-variable error.
-        model["inUse"] shouldBe emptyMap<Int, Int>()
+        model["template"] shouldBe null
+        model["versions"] shouldBe null
     }
 }

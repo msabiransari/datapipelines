@@ -1,0 +1,22 @@
+<!-- WHO PINS THIS TEMPLATE (106) — every pin of any version, from any stored pipeline version.
+     `TemplateUsageService.referencedAnywhere`, which is the SAME evidence the `template.in_use`
+     delete guard answers with (D4), so the card a user reads is the list a refusal would name.
+
+     One row per PIN, not per pipeline: two nodes of one pipeline pinning two versions is two
+     facts, and collapsing them would hide which node to go and change. The card's count in the
+     header is the distinct-pipeline number, which is the one people quote. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="usedBy" class="tplx-usage">
+  <p class="ds-empty-description" th:if="${#lists.isEmpty(usedBy)}">
+    No pipeline pins this template — nothing breaks if it changes.
+  </p>
+
+  <div class="tplx-vrow" th:each="p : ${usedBy}">
+    <a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId} + '/editor'}"
+       th:text="${p.pipelineName}">nyc/mobility/revenue</a>
+    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'pins v' + p.pinnedVersion}">pins v1</span>
+    <span class="tplx-vmeta">
+      <span th:text="'node ' + ${p.nodeId}">node trips</span>
+      <span> · </span><span th:text="'in v' + ${p.pipelineVersion} + ' (' + ${p.versionStatus} + ')'">in v2 (RELEASED)</span>
+    </span>
+  </div>
+</div>

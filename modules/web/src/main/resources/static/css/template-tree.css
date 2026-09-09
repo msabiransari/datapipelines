@@ -455,52 +455,388 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 }
 
 /* ------------------------------------------------- the detail pane's content */
+/* 106 — the detail is a READING column and an ACTING column (owner's approved mock,
+ * layout B, 2026-09-08). Three regions stacked: header, then the two columns.
+ *
+ * The breakpoints are defined ONCE, here, and both explorers honour them:
+ *
+ *   >= 1440px   tree | detail; the detail is reading 1.35fr | acting 1fr
+ *   1100-1439   tree | detail; the detail's columns STACK (reading, then acting)
+ *   <  1100     the tree is a DRAWER over the detail; the detail is the full width
+ *   <   640     chips wrap, the key/value strip is one column, the tabs drop their counts
+ *
+ * The base (no media query) is the STACKED shape, so a viewport nobody measured degrades to
+ * the layout that cannot overflow rather than to the one that can. The tree's own width
+ * inside its pane is 104's (`--tplx-tree-size`, its handle and its clamp) and is not touched
+ * here — 106 decides only whether the pane is a column or an overlay. */
 
 .tplx-detail-header {
   display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-md);
   padding-bottom: var(--gap-md);
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--gap-md);
 }
 
+.tplx-detail-identity {
+  min-width: 0;
+}
+
+/* The folder path is an EYEBROW now: it locates the leaf, it is not the leaf. Before 106 it
+   was the h2 at --text-xl, so every pipeline in a deep folder read as its folder. */
 .tplx-detail-path {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: var(--text-xl);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tplx-detail-title {
+  margin: 0;
+  font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
 
-.tplx-detail-meta {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.tplx-detail-description {
-  margin-left: var(--gap-sm);
-}
-
-.tplx-detail-badges {
+.tplx-detail-actions {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.tplx-detail-open {
-  margin-left: auto;
+/* A destructive verb is named by COLOUR only after its label already says what it does
+   (WCAG 1.4.1): "Discard" and "Delete" are the words; this is the second signal, not the
+   only one. */
+.tplx-danger {
+  color: var(--accent-danger);
 }
 
-/* The versions table lives in the detail pane now (058); the inline-expansion indent it
-   carried as a leaf's drop-down does not apply — it is the pane's only table. */
-.tpl-versions {
-  padding: 0;
+.tplx-detail-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gap-lg);
+  align-items: start;
+  min-height: 0;
 }
 
-.tpl-versions-table {
+.tplx-read {
+  display: grid;
+  gap: var(--gap-md);
+  min-width: 0;
+}
+
+.tplx-act {
+  min-width: 0;
+}
+
+/* A reading measure. 78ch is the mock's, and it is why the description is in the WIDE column:
+   a paragraph that runs the full width of a 3491px window is not read, it is skipped. */
+.tplx-measure {
+  margin: 0 0 var(--gap-md);
+  max-width: 78ch;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.tplx-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--gap-xs) var(--gap-lg);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.tplx-kv dt {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.tplx-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tplx-lastrun {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+  color: inherit;
+  text-decoration: none;
+}
+
+.tplx-lastrun:hover {
+  text-decoration: underline;
+}
+
+/* Growing lists get a ceiling and their own scroll (owner, 2026-09-08) — the parameters table
+   must not push the acting column off the screen. */
+.tplx-scroll {
+  max-height: 22rem;
+  overflow: auto;
+}
+
+/* "A table exactly as wide as its content, never the full row" (the mock's legend). A
+   three-column parameter table stretched to a 1900px column is four fields and a desert. */
+.tplx-fit-table {
+  width: auto;
+  min-width: 0;
+}
+
+/* ---- the acting column's tabbed card ---- */
+
+.tplx-tabcard {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.tplx-tabs {
+  display: flex;
+  gap: var(--gap-lg);
+  padding: 0 var(--gap-md);
+  border-bottom: 1px solid var(--border-faint, var(--border-subtle));
+  overflow-x: auto;
+}
+
+.tplx-tab {
+  padding: var(--gap-sm) 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tplx-tab.is-on {
+  color: var(--text-primary);
+  border-bottom-color: var(--brand);
+}
+
+.tplx-tab b {
+  margin-left: var(--gap-xs);
+  padding: 0 var(--gap-xs);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
   font-size: var(--text-xs);
+}
+
+.tplx-tabpanel {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--gap-sm) var(--gap-md);
+}
+
+/* ---- compact version / run / usage ROWS (never a table in this column) ---- */
+
+.tplx-vrow,
+.tplx-runrow {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: var(--gap-sm);
+  align-items: center;
+  padding: var(--gap-sm) 0;
+  border-bottom: 1px solid var(--border-faint, var(--border-subtle));
+  font-size: var(--text-sm);
+  color: inherit;
+  text-decoration: none;
+}
+
+.tplx-vrow:last-child,
+.tplx-runrow:last-child {
+  border-bottom: 0;
+}
+
+.tplx-runrow:hover {
+  background: var(--surface-hover);
+}
+
+.tplx-vmeta {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.tplx-current {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.tplx-vacts {
+  display: flex;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tplx-usage-h {
+  margin: var(--gap-md) 0 var(--gap-xs);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.tplx-usage-h:first-child {
+  margin-top: 0;
+}
+
+/* The templates twin's source excerpt — the first lines of the current body, with the full
+   text one tab away. It is a READ, so it is a <pre>, never a control. */
+.tplx-excerpt {
+  margin: 0;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base, 6px);
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-x: auto;
+}
+
+/* ---- the drawer's trigger and backdrop (inert above 1100px) ---- */
+
+.tplx-browse {
+  display: none;
+}
+
+.tplx-drawer-backdrop {
+  display: none;
+}
+
+/* ================================================== >= 1440: reading | acting */
+@media (min-width: 1440px) {
+  .tplx-detail-body {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  }
+
+  /* The acting card gets the pane's height and scrolls INSIDE itself, so a 40-version list
+     never pushes the reading column's description off the screen. */
+  .tplx-act {
+    position: sticky;
+    top: 0;
+    max-height: calc(100dvh - var(--header-height) - 240px);
+    display: grid;
+    min-height: 0;
+  }
+}
+
+/* ============================ 1100-1439: the detail's columns stack, one ceiling */
+@media (min-width: 1100px) and (max-width: 1439.98px) {
+  .tplx-tabpanel {
+    max-height: 28rem;
+  }
+}
+
+/* ====================================== < 1100: the tree is a drawer, not a column */
+@media (max-width: 1099.98px) {
+  .tplx-body {
+    display: block;
+    position: relative;
+  }
+
+  /* 104's handle has no boundary to sit on once the panes are not side by side. */
+  .tplx-splitter {
+    display: none;
+  }
+
+  .tplx-detail {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .tplx-tree {
+    position: fixed;
+    z-index: var(--z-modal, 600);
+    top: var(--header-height);
+    bottom: 0;
+    left: 0;
+    width: min(var(--tplx-tree-size), 92vw);
+    max-width: 92vw;
+    padding: var(--gap-md);
+    background: var(--surface-default);
+    border-right: 1px solid var(--border-default);
+    transform: translateX(-102%);
+    transition: transform var(--duration-fast, 150ms) ease;
+  }
+
+  .tplx-body.is-drawer-open .tplx-tree {
+    transform: translateX(0);
+  }
+
+  .tplx-drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal-backdrop, 500);
+    background: color-mix(in srgb, var(--text-primary) 55%, transparent);
+  }
+
+  .tplx-drawer-backdrop[hidden] {
+    display: none;
+  }
+
+  .tplx-browse {
+    display: inline-flex;
+  }
+
+  /* The header's actions wrap UNDER the title rather than squeezing it to nothing. */
+  .tplx-detail-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tplx-detail-actions {
+    justify-content: flex-start;
+  }
+
+  /* Tables scroll inside their card; the PAGE never scrolls sideways (the AppShell rule). */
+  .tplx-scroll,
+  .tplx-tabpanel {
+    overflow-x: auto;
+  }
+}
+
+/* =========================================== < 640: chips wrap, one column, no counts */
+@media (max-width: 639.98px) {
+  .tplx-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 0;
+  }
+
+  .tplx-kv dt {
+    margin-top: var(--gap-sm);
+  }
+
+  .tplx-tab b {
+    display: none;
+  }
+
+  .tplx-vrow,
+  .tplx-runrow {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .tplx-vacts {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }

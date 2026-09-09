@@ -1,0 +1,58 @@
+<!-- The acting column's VERSIONS tab (106) — every version of the selected pipeline, newest
+     first, with the verbs 101 would actually accept on it.
+
+     COMPACT ROWS, NOT A TABLE. The pane is the narrow column of a two-column detail; a
+     six-column table there wraps its headers and hides its last column behind a scroll (the
+     failure the /api-console screenshot found on 2026-09-08). A row states the same six facts
+     in a grid that can reflow: version · status · (created · who · runs) · actions.
+
+     Every button posts to the REST verb 101 shipped and swaps nothing — explorer-detail.js
+     re-fetches the whole detail when one succeeds, so a pointer move (D60) or a purged sole
+     draft is reflected by re-reading the server, never by patching the DOM from a guess.
+     The flags come from the model ([VersionRowView]): the template renders what the server
+     would accept, and never derives a lifecycle rule of its own. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist">
+  <p class="ds-empty-description" th:if="${#lists.isEmpty(versions)}">This pipeline has no versions.</p>
+
+  <div class="tplx-vrow" th:each="v : ${versions}">
+    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + v.version}">v1</span>
+    <span class="ds-badge"
+          th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : (${v.status.name() == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-default')"
+          th:text="${v.status}">RELEASED</span>
+    <span class="tplx-vmeta">
+      <span th:text="${v.createdAgo}" th:title="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">3 days ago</span>
+      <span> · </span><span th:text="${v.actor}">Muhammad</span>
+      <span> · </span><span th:text="${v.usageLabel}">7 runs</span>
+      <!-- D60: the sticky pointer, which is NOT "the latest released" — saying so in the row
+           is the only place a reader can see the difference. -->
+      <span th:if="${v.isCurrent}"> · </span><span th:if="${v.isCurrent}" class="tplx-current">current</span>
+    </span>
+    <span class="tplx-vacts">
+      <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+         th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open</a>
+
+      <button th:if="${v.canRelease}" type="button" class="ds-button ds-button-ghost ds-button-sm" data-verb="POST"
+              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/release'},
+                       data-if-match=${draftHash},
+                       data-confirm='Release v' + ${v.version} + '? A released version is immutable.'">Release…</button>
+
+      <!-- A DRAFT is PURGED, not discarded (101 §5.4): the row and its executions go, and a
+           sole draft takes the pipeline with it — which is why this one reloads. -->
+      <button th:if="${v.canPurge}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+              data-verb="DELETE"
+              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${v.version}},
+                       data-confirm='Discard draft v' + ${v.version} + '? The draft and its executions are removed permanently.',
+                       data-after=${versionCount == 1} ? 'reload' : null">Discard draft</button>
+
+      <button th:if="${v.canDiscard}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+              data-verb="POST"
+              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${v.version} + '/discard'},
+                       data-confirm='Discard v' + ${v.version} + '? It can be restored later.'">Discard</button>
+
+      <button th:if="${v.canRestore}" type="button" class="ds-button ds-button-ghost ds-button-sm"
+              data-verb="POST"
+              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${v.version} + '/restore'},
+                       data-confirm='Restore v' + ${v.version} + ' to RELEASED?'">Restore</button>
+    </span>
+  </div>
+</div>

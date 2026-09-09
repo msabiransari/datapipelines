@@ -36,7 +36,7 @@ import java.util.UUID
 class PipelinePartialControllerTest {
     private val repository = mockk<PipelineRepository>()
     private val service = co.datapipelines.web.pipelineServiceOver(repository)
-    private val controller = PipelinePartialController(service, PipelineBrowseModel(service, repository))
+    private val controller = PipelinePartialController(co.datapipelines.web.pipelineBrowseModelOver(repository, service))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -242,7 +242,7 @@ class PipelinePartialControllerTest {
     }
 
     @Test
-    fun `the detail pane carries the working version, its parameters and every version`() {
+    fun `106 - the detail fill supplies all three regions in ONE call`() {
         val id = UUID.randomUUID()
         val body =
             """
@@ -258,15 +258,81 @@ class PipelinePartialControllerTest {
         every { repository.findVersionBody(workspaceId, id, 1) } returns body
         every { repository.listVersions(workspaceId, id) } returns
             listOf(PipelineVersionRecord(id, 1, PipelineVersionStatus.RELEASED, "h", Instant.EPOCH, userId))
+        every { repository.findLiveParentsPinningVersion(workspaceId, "nyc/mobility/revenue_by_borough", 1) } returns emptyList()
 
-        controller.detail(model, id) shouldBe "partials/pipeline-detail"
+        val executions = mockk<co.datapipelines.executor.ExecutionRepository>()
+        every { executions.findAll(workspaceId, id, null, null, null, 1, 0) } returns emptyList()
+        val endpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository>()
+        every { endpoints.findByPipeline(id) } returns emptyList()
+        val runStats = mockk<PipelineRunStats>()
+        every { runStats.runsByVersion(id) } returns mapOf(1 to 7)
+        every { runStats.totalRuns(id) } returns 7
+        // The REGISTRY decides what is a datasource; `pg` resolves, so it is rendered with its
+        // dialect. A name it cannot resolve is left out rather than linked to nothing.
+        val registry =
+            co.datapipelines.pipeline.DatasourceRegistry { name ->
+                if (name == "pg") co.datapipelines.pipeline.DatasourceFacts(co.datapipelines.typesystem.Dialect.POSTGRES) else null
+            }
+        val detailController =
+            PipelinePartialController(
+                co.datapipelines.web.pipelineBrowseModelOver(
+                    repository,
+                    service,
+                    executions = executions,
+                    endpoints = endpoints,
+                    datasources = registry,
+                    runStats = runStats,
+                ),
+            )
 
+        detailController.detail(model, id) shouldBe "partials/pipeline-detail"
+
+        // ---- header
         (model["pipeline"] as PipelineRecord).name shouldBe "nyc/mobility/revenue_by_borough"
+        model["folderPath"] shouldBe "nyc/mobility/"
+        model["leafName"] shouldBe "revenue_by_borough"
+        // No draft: nothing to release, and Delete is refused because a release exists.
+        model["releasableVersion"] shouldBe null
+        model["canDelete"] shouldBe false
+        model["canDiscardCurrent"] shouldBe true
+
+        // ---- reading column
         model["workingVersion"] shouldBe 1
         model["draftVersion"] shouldBe null
         model["nodeCount"] shouldBe 1
+        model["stagingEngine"] shouldBe co.datapipelines.pipeline.StagingEngine.H2
         (model["parameters"] as Map<*, *>).keys shouldBe setOf("start_date")
-        (model["versions"] as List<*>).size shouldBe 1
+        (model["datasourceRows"] as List<*>) shouldBe
+            listOf(DatasourceRowView("pg", co.datapipelines.typesystem.Dialect.POSTGRES))
+        (model["templatePins"] as List<*>) shouldBe listOf(TemplatePinView("test/t.sql", 1))
+        model["lastRun"] shouldBe null
+
+        // ---- acting column
+        val versions = model["versions"] as List<*>
+        versions.size shouldBe 1
+        val row = versions.single() as VersionRowView
+        row.usageLabel shouldBe "7 runs"
+        row.isCurrent shouldBe true
+        row.canDiscard shouldBe true
+        row.canRelease shouldBe false
+        model["runCount"] shouldBe 7
+        model["usageCount"] shouldBe 0
+    }
+
+    @Test
+    fun `106 - a runs fragment over a NON-admin principal asks only for that user's runs`() {
+        // The execution-history screen's rule, restated at the second surface over the same
+        // rows: the principal in this spec holds AUTHOR, so `findByUser` is the read, and a
+        // strict mock means calling `findAll` instead would fail rather than pass quietly.
+        val id = UUID.randomUUID()
+        val executions = mockk<co.datapipelines.executor.ExecutionRepository>()
+        every { executions.findByUser(workspaceId, userId, id, null, null, null, 20, 0) } returns emptyList()
+        val runsController =
+            PipelinePartialController(co.datapipelines.web.pipelineBrowseModelOver(repository, service, executions = executions))
+
+        runsController.runs(model, id) shouldBe "partials/pipeline-runs"
+
+        verify(exactly = 1) { executions.findByUser(workspaceId, userId, id, null, null, null, 20, 0) }
     }
 
     @Test

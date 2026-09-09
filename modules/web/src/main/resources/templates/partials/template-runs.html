@@ -1,0 +1,30 @@
+<!-- The templates twin's RUNS tab (106) — the recent executions of the pipelines that pin this
+     template.
+
+     DERIVED, and the derivation is worth stating: an execution row names a pipeline and a
+     version, never the templates its nodes rendered, so there is no execution → template edge
+     to query. The pins give the pipelines and the pipelines give their runs
+     ([TemplateBrowseModel.fillRuns], which caps the fan-out and says why).
+
+     So this answers "has anything that uses this template run lately", which is the question
+     someone about to change a template is asking — and it does NOT claim that each run
+     rendered this template's body, because a pipeline version pinning v1 does not re-render
+     when v2 lands. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="runs" class="tplx-runs">
+  <p class="ds-empty-description" th:if="${#lists.isEmpty(runs)}">
+    No executions of the pipelines that pin this template.
+  </p>
+
+  <a class="tplx-runrow" th:each="r : ${runs}" th:href="@{'/executions/' + ${r.executionId}}">
+    <span class="app-chip" th:attr="data-status=${r.status.name()}"
+          th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
+    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + r.pipelineVersion}">v1</span>
+    <span class="tplx-vmeta">
+      <span th:text="${r.durationMs != null} ? ${r.durationMs} + ' ms' : '—'">3200 ms</span>
+      <span> · </span><span th:text="${r.triggeredVia.name()}">MCP</span>
+      <span> · </span><span th:text="${runActors[r.triggeredBy]} ?: 'unknown'">Muhammad</span>
+      <span> · </span><span th:text="${runAgo[r.executionId]}"
+                            th:title="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">4 mins ago</span>
+    </span>
+  </a>
+</div>

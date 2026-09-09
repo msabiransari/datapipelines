@@ -185,7 +185,13 @@ class TemplateTreeRenderTest {
         html shouldContain "ds-badge ds-badge-warning"
         html shouldContain "ds-badge ds-badge-success"
         html shouldContain "/templates/editor?name=$DEEP_PATH"
-        listOf("Rename", "Delete", "hx-delete", "hx-put").forEach { html shouldNotContain it }
+        // 106: the version row now carries 101's verbs, so "no destructive action" narrowed to
+        // "no rename, no move, and nothing that writes a version in place" — a version is
+        // immutable (§5.1) and a name is identity (§4.5). Discard and Restore are lifecycle,
+        // not edits, and each points at the REST verb 101 shipped.
+        listOf("Rename", "Move", "hx-put").forEach { html shouldNotContain it }
+        html shouldContain "data-verb-url=\"/api/v1/templates/version/discard\""
+        html shouldContain "data-verb-url=\"/api/v1/templates/release\""
     }
 
     @Test
@@ -197,9 +203,10 @@ class TemplateTreeRenderTest {
 
         html shouldContain "1 pipeline"
         html shouldContain "2 pipelines"
-        html shouldContain "In use"
-        // The singular/plural fork is honest: exactly one occurrence of the singular row.
-        html.windowed("1 pipeline".length).count { it == "1 pipeline" } shouldBe 1
+        // 106 dropped the table's "In use" column header — the row states its own unit now,
+        // because the acting column is too narrow for a five-column table.
+        html shouldNotContain "In use"
+        html shouldNotContain "<table"
     }
 
     // ------------------------------------------------------------- create form
@@ -357,17 +364,42 @@ class TemplateTreeRenderTest {
         setVariable("scopes", setOf("ADMIN"))
     }
 
+    /**
+     * The 106 version rows: DRAFT v2 over RELEASED v1, with the per-version in-use counts
+     * already WORDED by the model ([VersionRowView.usageLabel]) — v2 by one pipeline, v1 by
+     * two, so both sides of the singular/plural fork are exercised.
+     */
     private fun WebContext.fillVersions() {
         setVariable("templateId", DEEP_PATH)
+        setVariable("draftVersion", 2)
+        setVariable("draftHash", "h2")
+        setVariable("versionCount", 2)
+        setVariable("inUse", mapOf(2 to 1, 1 to 2))
         setVariable(
             "versions",
             listOf(
-                TemplateVersionSummary(DEEP_PATH, 2, Instant.parse("2026-09-02T10:00:00Z"), ACTOR),
-                TemplateVersionSummary(DEEP_PATH, 1, Instant.parse("2026-09-01T10:00:00Z"), ACTOR),
+                VersionRowView.of(
+                    version = 2,
+                    status = PipelineVersionStatus.DRAFT,
+                    createdAt = Instant.parse("2026-09-02T10:00:00Z"),
+                    actor = "Muhammad",
+                    now = Instant.parse("2026-09-03T10:00:00Z"),
+                    usage = 1,
+                    usageUnit = "pipeline",
+                    isCurrent = false,
+                ),
+                VersionRowView.of(
+                    version = 1,
+                    status = PipelineVersionStatus.RELEASED,
+                    createdAt = Instant.parse("2026-09-01T10:00:00Z"),
+                    actor = "Muhammad",
+                    now = Instant.parse("2026-09-03T10:00:00Z"),
+                    usage = 2,
+                    usageUnit = "pipeline",
+                    isCurrent = true,
+                ),
             ),
         )
-        setVariable("draftVersion", 2)
-        setVariable("inUse", mapOf(2 to 1, 1 to 2))
     }
 
     private fun WebContext.fillPage() {

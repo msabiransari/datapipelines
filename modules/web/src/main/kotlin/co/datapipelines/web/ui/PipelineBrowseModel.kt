@@ -1,12 +1,23 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.pipeline.DatasourceRegistry
+import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.NodeSource
+import co.datapipelines.pipeline.Pipeline
+import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineFolder
 import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.PipelineVersionRecord
+import co.datapipelines.pipeline.PipelineVersionStatus
 import org.springframework.ui.Model
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -42,7 +53,14 @@ import java.util.UUID
 class PipelineBrowseModel(
     private val pipelines: PipelineService,
     private val repository: PipelineRepository,
+    private val executions: ExecutionRepository,
+    private val endpoints: PublishedEndpointRepository,
+    private val datasources: DatasourceRegistry,
+    private val actors: ActorNames,
+    private val runStats: PipelineRunStats,
 ) {
+    private val deserializer = PipelineDeserializer()
+
     /**
      * Fills [model] for one **tree level** — [prefix] `null`/empty is the root — and returns
      * the view name to render.
@@ -172,6 +190,224 @@ class PipelineBrowseModel(
         return WRAPPER_VIEW
     }
 
+    // -------------------------------------------------------------------------------------
+    // 106 — the detail pane's three regions, in ONE call
+    // -------------------------------------------------------------------------------------
+
+    /**
+     * Fills [model] for the SELECTED pipeline's detail — header, reading column, acting
+     * column — and returns the view name.
+     *
+     * **One call, every region.** The header's verbs, the overview's key/value strip and the
+     * Versions tab's rows are three views of the same lifecycle state; computing them in three
+     * places is how a button appears for a version the server would refuse. Runs and Usage are
+     * the two exceptions and they are deliberate: each is a tab the user may never open, so
+     * each is its own cheap fragment ([fillRuns], [fillUsage]) rather than work every selection
+     * pays for.
+     *
+     * A `pipeline` of null (deleted in another tab, a stale pane) fills nothing else: the
+     * partial renders its quiet not-found state.
+     */
+    fun fillDetail(
+        model: Model,
+        workspaceId: UUID,
+        id: UUID,
+    ): String {
+        val record = pipelines.findRecord(workspaceId, id)
+        model.addAttribute("pipelineId", id)
+        model.addAttribute("pipeline", record)
+        if (record == null) return DETAIL_VIEW
+
+        // The WORKING body (versioning §7): the draft when one exists, else the current
+        // release — the same rule the editor's load follows, so opening the editor from here
+        // shows what this pane just showed. A body that fails to parse renders as no chips and
+        // no parameters rather than as an error page: the pane reads someone else's authored
+        // content and the editor is where a malformed body is repaired.
+        val working = pipelines.findWorking(workspaceId, id)
+        val body = working?.bodyJson?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
+        val versions = pipelines.listVersions(workspaceId, id)
+
+        model.addAttribute("draftHash", working?.draft?.bodyHash)
+        fillIdentity(model, record)
+        fillOverview(model, workspaceId, record, body, working?.version?.version ?: record.currentVersion, working?.draft?.version)
+        fillActing(model, workspaceId, record, versions)
+        return DETAIL_VIEW
+    }
+
+    /** The header: the folder path as an eyebrow, the leaf as the title. */
+    private fun fillIdentity(
+        model: Model,
+        record: PipelineRecord,
+    ) {
+        val cut = record.name.lastIndexOf('/')
+        model.addAttribute("folderPath", if (cut < 0) "" else record.name.substring(0, cut + 1))
+        model.addAttribute("leafName", if (cut < 0) record.name else record.name.substring(cut + 1))
+    }
+
+    private fun fillOverview(
+        model: Model,
+        workspaceId: UUID,
+        record: PipelineRecord,
+        body: Pipeline?,
+        workingVersion: Int?,
+        draftVersion: Int?,
+    ) {
+        model.addAttribute("workingVersion", workingVersion)
+        model.addAttribute("draftVersion", draftVersion)
+        model.addAttribute("parameters", body?.parameters ?: emptyMap<String, Any>())
+        model.addAttribute("nodeCount", body?.nodes?.size ?: 0)
+        // The "Settings" table is gone (106): the staging engine is a chip, because one row of
+        // one column was a table pretending to be a section.
+        model.addAttribute("stagingEngine", body?.settings?.tempdb?.engine)
+        model.addAttribute("datasourceRows", datasourceRows(body))
+        model.addAttribute("templatePins", templatePins(body))
+        model.addAttribute("createdBy", actorName(record.ownerId))
+        // "via UI / MCP / API" is NOT rendered: nothing audits pipeline CREATE with the surface
+        // it arrived on (there is no `pipeline.created` event and `pipelines` carries no
+        // `triggered_via`), and the 106 prompt says to omit the chip rather than infer one.
+        val last = lastRun(workspaceId, record.id)
+        model.addAttribute("lastRun", last)
+        model.addAttribute("lastRunAgo", last?.let { RelativeTime.since(it.startedAt, Instant.now()) })
+        model.addAttribute("lastRunBy", last?.let { actorName(it.triggeredBy) })
+    }
+
+    private fun fillActing(
+        model: Model,
+        workspaceId: UUID,
+        record: PipelineRecord,
+        versions: List<PipelineVersionRecord>,
+    ) {
+        val now = Instant.now()
+        val runs = runStats.runsByVersion(record.id)
+        val names = actors.lookup(versions.map { it.createdBy })
+        model.addAttribute(
+            "versions",
+            versions.map { v ->
+                VersionRowView.of(
+                    version = v.version,
+                    status = v.status,
+                    createdAt = v.createdAt,
+                    actor = names[v.createdBy] ?: ActorNames.fallback(v.createdBy),
+                    now = now,
+                    usage = runs[v.version] ?: 0,
+                    usageUnit = "run",
+                    isCurrent = record.currentVersion == v.version,
+                )
+            },
+        )
+        // The HEADER's verbs, from the same rows the tab renders (101 §7): a draft is what
+        // Release acts on; Delete is the ENTITY purge, which 101 allows only while the only
+        // version is a draft; otherwise the destructive verb on offer is Discard.
+        model.addAttribute("releasableVersion", versions.firstOrNull { it.status == PipelineVersionStatus.DRAFT }?.version)
+        model.addAttribute("canDelete", versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT)
+        model.addAttribute("canDiscardCurrent", record.currentVersion != null)
+        model.addAttribute("versionCount", versions.size)
+        model.addAttribute("runCount", runStats.totalRuns(record.id))
+        model.addAttribute("usageCount", usage(workspaceId, record).total)
+    }
+
+    /**
+     * Fills [model] for the Runs tab — this pipeline's last [RUNS_LIMIT] executions.
+     *
+     * Visibility follows the execution history screen exactly ([ExecutionHistoryPartialController]):
+     * an admin sees the workspace's runs, everyone else sees their own. A second surface over
+     * the same rows must not be a wider one.
+     */
+    fun fillRuns(
+        model: Model,
+        workspaceId: UUID,
+        pipelineId: UUID,
+        userId: UUID,
+        isAdmin: Boolean,
+    ): String {
+        val rows =
+            if (isAdmin) {
+                executions.findAll(workspaceId, pipelineId, limit = RUNS_LIMIT)
+            } else {
+                executions.findByUser(workspaceId, userId, pipelineId, limit = RUNS_LIMIT)
+            }
+        model.addAttribute("runs", rows)
+        model.addAttribute("runActors", actors.lookup(rows.map { it.triggeredBy }))
+        val now = Instant.now()
+        model.addAttribute("runAgo", rows.associate { it.executionId to RelativeTime.since(it.startedAt, now) })
+        return RUNS_VIEW
+    }
+
+    /** Fills [model] for the Usage tab — 101's discard evidence, read before the refusal. */
+    fun fillUsage(
+        model: Model,
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ): String {
+        val record = pipelines.findRecord(workspaceId, pipelineId)
+        model.addAttribute("usage", record?.let { usage(workspaceId, it) } ?: UsageView(emptyList(), emptyList()))
+        return USAGE_VIEW
+    }
+
+    /**
+     * What the server would refuse a discard over.
+     *
+     * The parent half is [PipelineRepository.findLiveParentsPinningVersion] — the SAME query
+     * `PipelineService.refuseIfPinned` runs — asked once per version this pipeline has, so the
+     * tab's list and the refusal's `pinned_by` detail cannot disagree. The endpoint half is the
+     * published-endpoints registry, which pins a pipeline and not a version (§5.1).
+     */
+    private fun usage(
+        workspaceId: UUID,
+        record: PipelineRecord,
+    ): UsageView {
+        val parents =
+            repository
+                .listVersions(workspaceId, record.id)
+                .flatMap { repository.findLiveParentsPinningVersion(workspaceId, record.name, it.version) }
+                .map { UsageView.ParentUse(it.pipelineId, it.pipelineName, it.pipelineVersion, it.nodeId, it.pinnedVersion) }
+        val served =
+            endpoints
+                .findByPipeline(record.id)
+                .map { UsageView.EndpointUse(it.pathPattern, it.isEnabled, it.description) }
+        return UsageView(endpoints = served, parents = parents)
+    }
+
+    private fun lastRun(
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ) = executions.findAll(workspaceId, pipelineId, limit = 1).firstOrNull()
+
+    private fun actorName(actor: UUID): String = actors.lookup(listOf(actor))[actor] ?: ActorNames.fallback(actor)
+
+    /**
+     * The datasources the working body touches, with the dialect each speaks.
+     *
+     * The REGISTRY decides what is a datasource: `tempdb` is the reserved literal and never a
+     * registered name (§4.8), and a name the registry cannot resolve in this environment is
+     * left out rather than rendered as a link to nothing (§11.2 — a body is portable, a
+     * registry is per-environment).
+     */
+    private fun datasourceRows(body: Pipeline?): List<DatasourceRowView> {
+        if (body == null) return emptyList()
+        val names =
+            body.nodes.flatMap { node ->
+                listOfNotNull(
+                    (NodeSource.from(node.source) as? NodeSource.Datasource)?.name,
+                    (node.output as? NodeOutput.Datasource)?.datasource,
+                )
+            }
+        return names
+            .distinct()
+            .sorted()
+            .mapNotNull { name -> datasources.describe(name)?.let { DatasourceRowView(name, it.dialect) } }
+    }
+
+    /** The template versions the working body pins — `id@version`, deduplicated, in body order. */
+    private fun templatePins(body: Pipeline?): List<TemplatePinView> =
+        body
+            ?.nodes
+            ?.map { it.template }
+            ?.filter { it.id.isNotEmpty() }
+            ?.map { TemplatePinView(it.id, it.version) }
+            ?.distinct()
+            .orEmpty()
+
     companion object {
         /** The pipelines screen's page size — the value the flat list has always used. */
         const val PAGE_SIZE = 25
@@ -185,6 +421,12 @@ class PipelineBrowseModel(
         const val WRAPPER_VIEW = "partials/pipelines"
         const val LEVEL_VIEW = "partials/pipeline-tree-level"
         const val SEARCH_VIEW = "partials/pipeline-search"
+        const val DETAIL_VIEW = "partials/pipeline-detail"
+        const val RUNS_VIEW = "partials/pipeline-runs"
+        const val USAGE_VIEW = "partials/pipeline-usage"
+
+        /** The Runs tab's ceiling (106) — "the last 20", never the whole history. */
+        const val RUNS_LIMIT = 20
 
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16
