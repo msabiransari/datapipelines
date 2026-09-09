@@ -25,10 +25,10 @@ import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
 
 /**
@@ -173,7 +173,9 @@ class DatasourceUpdatePathTest {
      * neither writes.
      */
     private fun refusedInline(result: Any) {
-        (result as ResponseEntity<*>).statusCode.value() shouldBe 400
+        val refusal = result as ModelAndView
+        refusal.viewName shouldBe "partials/inline-refusal"
+        refusal.status?.value() shouldBe 400
     }
 
     @Test

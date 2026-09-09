@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.servlet.ModelAndView
 
 @Controller
 class UserSettingsController(
@@ -133,13 +134,13 @@ class UserSettingsController(
         @RequestParam currentPassword: String,
         @RequestParam newPassword: String,
         @RequestParam confirmPassword: String,
-    ): ResponseEntity<String> {
+    ): Any {
         val principal = requirePrincipal()
         if (principal.authMethod != AuthMethod.OIDC) {
             throw SessionRequiredException("change-own-password")
         }
         if (newPassword != confirmPassword) {
-            return ResponseEntity.badRequest().body(errorSpan("The new passwords do not match"))
+            return errorSpan("The new passwords do not match")
         }
         // Read the gate's key BEFORE the change: a successful change clears it, and the
         // response shape depends on whether this screen was reached through the forced-change
@@ -173,26 +174,35 @@ class UserSettingsController(
             }
 
             is LocalPasswordService.ChangeResult.WrongCurrentPassword -> {
-                ResponseEntity.badRequest().body(errorSpan("The current password is incorrect"))
+                errorSpan("The current password is incorrect")
             }
 
             is LocalPasswordService.ChangeResult.PolicyViolation -> {
-                ResponseEntity.badRequest().body(errorSpan(result.reason))
+                errorSpan(result.reason)
             }
 
             is LocalPasswordService.ChangeResult.NoLocalAccount -> {
-                ResponseEntity.badRequest().body(errorSpan("This account has no local password"))
+                errorSpan("This account has no local password")
             }
 
             is LocalPasswordService.ChangeResult.AccountLocked -> {
-                ResponseEntity.status(HttpStatus.FORBIDDEN).body(
-                    errorSpan("Too many failed attempts — this account is temporarily locked. Try again later."),
+                errorSpan(
+                    "Too many failed attempts — this account is temporarily locked. Try again later.",
+                    HttpStatus.FORBIDDEN,
                 )
             }
         }
     }
 
-    private fun errorSpan(message: String): String = """<span style="color:var(--accent-danger);font-size:var(--text-sm)">$message</span>"""
+    /**
+     * The inline field error the password form swaps in — `partials/field-error`, not a
+     * hand-built span with an inline style (097 §C). The status stays: the form's own
+     * `hx-target` swaps the body regardless, and the code is what the audit log reads.
+     */
+    private fun errorSpan(
+        message: String,
+        status: HttpStatus = HttpStatus.BAD_REQUEST,
+    ): ModelAndView = ModelAndView("partials/field-error", mapOf("message" to message), status)
 
     companion object {
         /**

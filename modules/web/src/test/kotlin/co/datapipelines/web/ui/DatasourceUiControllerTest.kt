@@ -23,6 +23,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
 
 class DatasourceUiControllerTest {
@@ -308,13 +309,13 @@ class DatasourceUiControllerTest {
                 false,
                 false,
                 emptyMap(),
-            ) as ResponseEntity<*>
+            ) as ModelAndView
 
-        result.statusCode shouldBe HttpStatus.BAD_REQUEST
-        result.headers["HX-Retarget"] shouldBe null // the modal owns this error (022/F9)
-        val body = result.body as String
-        body shouldContain "already exists"
-        body shouldNotContain "hx-swap-oob"
+        result.status shouldBe HttpStatus.BAD_REQUEST
+        // The modal owns this error (022/F9): the response IS the inline refusal fragment,
+        // never a toast — no retarget to say, and no OOB toast to render.
+        result.viewName shouldBe "partials/inline-refusal"
+        (result.model["message"] as String) shouldContain "already exists"
     }
 
     @Test

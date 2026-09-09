@@ -31,6 +31,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.servlet.ModelAndView
 import java.time.Instant
 import java.util.UUID
 
@@ -244,10 +245,10 @@ class DatasourcePartialControllerTest {
                 global = false,
                 readonly = false,
                 params = emptyMap(),
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "Unknown dialect"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "Unknown dialect"
     }
 
     @Test
@@ -269,10 +270,10 @@ class DatasourcePartialControllerTest {
                 global = false,
                 readonly = false,
                 params = emptyMap(),
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "already exists"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "already exists"
     }
 
     @Test
@@ -294,10 +295,10 @@ class DatasourcePartialControllerTest {
                 global = false,
                 readonly = false,
                 params = emptyMap(),
-            ) as org.springframework.http.ResponseEntity<*>
+            ) as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "Members cannot register datasources"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "Members cannot register datasources"
     }
 
     // ------------------------------------------------------------ 094 §A: the pool section
@@ -346,9 +347,9 @@ class DatasourcePartialControllerTest {
     fun `an edit form for an invisible datasource is a refusal, never an error page`() {
         every { datasources.getVisible("other", workspaceId) } returns null
 
-        val response = controller.editForm(model, "other") as ResponseEntity<*>
+        val response = controller.editForm(model, "other") as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
+        response.status shouldBe HttpStatus.BAD_REQUEST
     }
 
     @Test
@@ -516,9 +517,15 @@ class DatasourcePartialControllerTest {
                 references = listOf(DatasourceReference("sales_daily", 3, "RELEASED", "extract")),
             )
 
-        val response = controller.delete(model, "pg1") as ResponseEntity<*>
+        val response = controller.delete(model, "pg1") as ModelAndView
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        (response.body as String) shouldContain "still used by"
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "still used by"
     }
+
+    /**
+     * 097 §C: an inline refusal is `partials/inline-refusal` and a status now, not a Kotlin
+     * string, so the assertions read the MESSAGE the fragment will escape and render.
+     */
+    private fun refusalMessage(result: ModelAndView): String = result.model["message"] as String
 }

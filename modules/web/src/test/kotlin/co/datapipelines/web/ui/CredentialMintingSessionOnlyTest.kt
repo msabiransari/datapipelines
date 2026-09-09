@@ -56,7 +56,9 @@ class CredentialMintingSessionOnlyTest {
     private val userRepository = mockk<UserRepository>()
     private val themeResolver = mockk<ThemeResolver>()
 
-    private val partials = AdminUsersPartialController(userService, localPasswordService)
+    private val partials =
+        AdminUsersPartialController(userService, localPasswordService, AdminUsersBrowseModel(userService))
+    private val model = org.springframework.ui.ExtendedModelMap()
     private val settings =
         UserSettingsController(userRepository, themeResolver, UiProperties(theme = "forest"), localPasswordService)
 
@@ -106,7 +108,7 @@ class CredentialMintingSessionOnlyTest {
 
         val thrown =
             shouldThrow<SessionRequiredException> {
-                partials.createLocalUser("attacker@evil.example", "svc")
+                partials.createLocalUser(model, "attacker@evil.example", "svc")
             }
         thrown.code shouldBe "auth.session.required"
 
@@ -119,7 +121,7 @@ class CredentialMintingSessionOnlyTest {
     fun `an admin-scoped API key cannot reset another user's password`() {
         authenticateAs(AuthMethod.API_KEY)
 
-        shouldThrow<SessionRequiredException> { partials.toggle(targetId, "reset-password") }
+        shouldThrow<SessionRequiredException> { partials.toggle(model, targetId, "reset-password") }
 
         verify(exactly = 0) { localPasswordService.resetPassword(any(), any()) }
     }
@@ -128,8 +130,8 @@ class CredentialMintingSessionOnlyTest {
     fun `an admin-scoped API key cannot disable local access or unlock an account`() {
         authenticateAs(AuthMethod.API_KEY)
 
-        shouldThrow<SessionRequiredException> { partials.toggle(targetId, "disable-local") }
-        shouldThrow<SessionRequiredException> { partials.toggle(targetId, "unlock") }
+        shouldThrow<SessionRequiredException> { partials.toggle(model, targetId, "disable-local") }
+        shouldThrow<SessionRequiredException> { partials.toggle(model, targetId, "unlock") }
 
         verify(exactly = 0) { localPasswordService.disableLocalAccess(any(), any()) }
         verify(exactly = 0) { localPasswordService.unlock(any(), any()) }
@@ -161,10 +163,10 @@ class CredentialMintingSessionOnlyTest {
         every { userService.snapshot(targetId) } returns sampleUser()
 
         shouldNotThrowAny {
-            partials.createLocalUser("new@example.com", "New User")
-            partials.toggle(targetId, "reset-password")
-            partials.toggle(targetId, "disable-local")
-            partials.toggle(targetId, "unlock")
+            partials.createLocalUser(model, "new@example.com", "New User")
+            partials.toggle(model, targetId, "reset-password")
+            partials.toggle(model, targetId, "disable-local")
+            partials.toggle(model, targetId, "unlock")
         }
     }
 
@@ -177,10 +179,10 @@ class CredentialMintingSessionOnlyTest {
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
 
-        settings
-            .changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
-            .statusCode
-            .value() shouldBe 200
+        val response =
+            settings.changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
+                as org.springframework.http.ResponseEntity<*>
+        response.statusCode.value() shouldBe 200
     }
 
     // ---- the deliberate boundary ----------------------------------------------------
@@ -196,10 +198,10 @@ class CredentialMintingSessionOnlyTest {
         // wants these session-only too, that is a scope-matrix decision to argue in §7.6 —
         // this test exists so the boundary is confronted rather than silently crossed.
         shouldNotThrowAny {
-            partials.toggle(targetId, "activate")
-            partials.toggle(targetId, "deactivate")
-            partials.toggle(targetId, "promote")
-            partials.toggle(targetId, "demote")
+            partials.toggle(model, targetId, "activate")
+            partials.toggle(model, targetId, "deactivate")
+            partials.toggle(model, targetId, "promote")
+            partials.toggle(model, targetId, "demote")
         }
     }
 
@@ -215,7 +217,7 @@ class CredentialMintingSessionOnlyTest {
         // Scope remains the first gate; the session check is an ADDITIONAL requirement on
         // top of admin, never a replacement for it.
         shouldThrow<org.springframework.security.access.AccessDeniedException> {
-            partials.createLocalUser("new@example.com", "New User")
+            partials.createLocalUser(model, "new@example.com", "New User")
         }
     }
 }

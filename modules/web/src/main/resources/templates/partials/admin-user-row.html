@@ -1,0 +1,27 @@
+<tr xmlns:th="http://www.thymeleaf.org" th:fragment="row" th:id="${userRow.rowId}">
+  <!--
+    097 §C — ONE user row, in Thymeleaf. It used to be built as a string in
+    AdminUsersPartialController (the `tr`, the ds-badge classes, the hx-patch
+    attributes and an inline colour style attribute), which is the pattern 091 deleted for the API-key table: markup built
+    in Kotlin is invisible to every template audit and escapes by hand.
+
+    Every rendering decision — which badge, which buttons, what the Local column says — is
+    AdminUsersBrowseModel's (AdminUserRow); this file only renders. The page's first paint,
+    the search's swap and every row action render THIS fragment, so they cannot drift.
+  -->
+  <td th:title="${userRow.id}" th:text="${userRow.idShort} + '...'">1a2b3c4d...</td>
+  <td th:text="${userRow.displayName}">Ada Lovelace</td>
+  <td th:text="${userRow.email}">ada@example.com</td>
+  <td><span class="ds-badge" th:classappend="${userRow.statusBadge}" th:text="${userRow.statusLabel}">Active</span></td>
+  <td><span class="ds-badge" th:classappend="${userRow.roleBadge}" th:text="${userRow.roleLabel}">User</span></td>
+  <td th:text="${userRow.localStatus}">local</td>
+  <td class="u-nowrap">
+    <button th:each="a : ${userRow.actions}" type="button"
+            class="ds-button ds-button-ghost ds-button-sm"
+            th:classappend="${a.colourClass}"
+            th:attr="hx-patch=@{'/partials/admin/users/' + ${userRow.id} + '/' + ${a.action}},
+                     hx-target='#' + ${userRow.rowId}"
+            hx-swap="outerHTML"
+            th:text="${a.label}">Deactivate</button>
+  </td>
+</tr>

@@ -46,27 +46,13 @@
         <th class="num">Actions</th>
       </tr>
     </thead>
+    <!-- §5 (097 §B): the shell AND the initial fragment, from AdminUsersBrowseModel — the
+         same rows the search box swaps in. This used to be three skeleton rows plus an inline
+         script that fetched them, which made the screen's first paint a second round trip. -->
     <tbody id="user-table-body">
-      <!-- The load placeholder is what the dashboard skeletons made the house idiom
-           (025 B2): real shimmer rows, not a "Loading..." caption. Replaced whole by the
-           htmx.ajax load below. -->
-      <tr><td colspan="7" class="u-p0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
-      <tr><td colspan="7" class="u-p0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
-      <tr><td colspan="7" class="u-p0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
+      <th:block th:replace="~{partials/admin-users-rows :: rows}"></th:block>
     </tbody>
   </table>
 
-  <script>
-    // 076 §B: run immediately when this fragment arrives in a boosted swap
-    // (DOMContentLoaded has long fired); arm the listener only on a cold parse.
-    var loadUsers = function() {
-      htmx.ajax('GET', '/partials/admin/users?offset=0&limit=20', {target: '#user-table-body', swap: 'innerHTML'});
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', loadUsers);
-    } else {
-      loadUsers();
-    }
-  </script>
 </th:block>
 </html>

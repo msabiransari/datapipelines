@@ -72,6 +72,10 @@ class UiConfig {
         pipelines: co.datapipelines.pipeline.PipelineRepository,
     ): ExecutionHistoryBrowseModel = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
 
+    /** 097 §C: the admin user table's row model, shared by the page and the partial. */
+    @Bean
+    fun adminUsersBrowseModel(users: co.datapipelines.auth.UserService): AdminUsersBrowseModel = AdminUsersBrowseModel(users)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     fun pipelineBrowseModel(

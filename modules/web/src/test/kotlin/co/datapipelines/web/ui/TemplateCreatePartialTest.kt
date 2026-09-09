@@ -31,6 +31,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.servlet.ModelAndView
 import java.time.Instant
 import java.util.UUID
 
@@ -149,13 +150,13 @@ class TemplateCreatePartialTest {
 
         val response = controller.create(ExtendedModelMap(), "Acme/Finance", "sql", "POSTGRES", null, "d", "SELECT 1")
 
-        val entity = response as ResponseEntity<*>
-        entity.statusCode shouldBe HttpStatus.BAD_REQUEST
-        entity.body.toString() shouldContain "Invalid template id."
+        val entity = response as ModelAndView
+        entity.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(entity) shouldContain "Invalid template id."
         // §9.5: the server's refusal is the one that counts, and it says what the rule is —
         // including, since 077, that a folder is not optional.
-        entity.body.toString() shouldContain "2 to 10 lower-case segments"
-        entity.body.toString() shouldContain "A folder is required"
+        refusalMessage(entity) shouldContain "2 to 10 lower-case segments"
+        refusalMessage(entity) shouldContain "A folder is required"
     }
 
     @Test
@@ -165,8 +166,8 @@ class TemplateCreatePartialTest {
 
         val response = controller.create(ExtendedModelMap(), "acme/finance/monthly_revenue", "sql", "POSTGRES", null, "d", "SELECT 1")
 
-        (response as ResponseEntity<*>).statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "already exists"
+        (response as ModelAndView).status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "already exists"
         verify(exactly = 0) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) }
     }
 
@@ -176,8 +177,8 @@ class TemplateCreatePartialTest {
 
         val response = controller.create(ExtendedModelMap(), "acme/x", "pdf", null, null, "d", "x")
 
-        (response as ResponseEntity<*>).statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body.toString() shouldContain "Unknown template type"
+        (response as ModelAndView).status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "Unknown template type"
         verify(exactly = 0) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) }
     }
 
@@ -199,4 +200,10 @@ class TemplateCreatePartialTest {
         // every row's em dash, never a missing-variable error.
         model["inUse"] shouldBe emptyMap<Int, Int>()
     }
+
+    /**
+     * 097 §C: an inline refusal is `partials/inline-refusal` and a status now, not a Kotlin
+     * string, so the assertions read the MESSAGE the fragment will escape and render.
+     */
+    private fun refusalMessage(result: ModelAndView): String = result.model["message"] as String
 }

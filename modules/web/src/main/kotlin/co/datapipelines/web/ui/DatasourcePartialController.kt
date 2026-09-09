@@ -13,7 +13,6 @@ import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.datasources.DatasourcePoolForm
 import co.datapipelines.web.datasources.DatasourceWorkspaceRules
 import org.springframework.http.HttpStatus
-import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -21,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.servlet.ModelAndView
 
 /**
  * The datasources screen's htmx partials (ui-screens.md §4.5/§5): the workspace-scoped
@@ -366,16 +366,17 @@ class DatasourcePartialController(
     private fun visible(name: String): Datasource? = principal()?.workspace?.id?.let { datasources.getVisible(name, it) }
 
     /** A dialog body saying the datasource is not there — a 404 inside a modal, not an error page. */
-    private fun notFoundDialog(name: String): ResponseEntity<String> = refused("Datasource '$name' is not visible in the active workspace.")
+    private fun notFoundDialog(name: String): ModelAndView = refused("Datasource '$name' is not visible in the active workspace.")
 
-    /** The refusal the modal renders inline — never an error page for an expected 4xx. */
-    private fun refused(why: String): ResponseEntity<String> =
-        ResponseEntity.badRequest().body(
-            """<div class="ds-surface" style="border:1px solid var(--accent-danger);border-radius:var(--radius-base);""" +
-                """padding:var(--gap-sm);color:var(--text-primary);font-size:var(--text-sm);max-width:480px">""" +
-                why.replace("&", "&amp;").replace("<", "&lt;") +
-                "</div>",
-        )
+    /**
+     * The refusal the modal renders inline — never an error page for an expected 4xx.
+     *
+     * A fragment and a status, not a hand-built string: the message is escaped by Thymeleaf
+     * (it used to be escaped by hand, and only for `&` and `<`), and the box's border, padding
+     * and width are the stylesheet's (097 §C).
+     */
+    private fun refused(why: String): ModelAndView =
+        ModelAndView("partials/inline-refusal", mapOf("message" to why), HttpStatus.BAD_REQUEST)
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

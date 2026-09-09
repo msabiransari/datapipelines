@@ -119,9 +119,13 @@ class TemplateEditorControllerTest {
             )
         every { engine.render(any(), mapOf("x" to 42)) } returns "SELECT 42"
 
-        val html = controller.renderPreview("test/my_template.sql", 1, "SELECT \${x}", """{"x":42}""")
+        val preview = controller.renderPreview("test/my_template.sql", 1, "SELECT \${x}", """{"x":42}""")
 
-        html shouldContain "SELECT 42"
+        // 097 §C: the preview is a fragment and a model now, not a Kotlin-built card. The
+        // rendered SQL is DATA on that model, which is what makes it escaped by construction.
+        preview.viewName shouldBe "partials/template-render"
+        (preview.model["renderOutput"] as String) shouldContain "SELECT 42"
+        preview.model["renderError"] shouldBe null
     }
 
     @Test
@@ -130,9 +134,9 @@ class TemplateEditorControllerTest {
         every { templates.lookupVersion(any(), "nope.sql", 1) } returns null
         every { templates.existsId(any(), "nope.sql") } returns false
 
-        val html = controller.renderPreview("nope.sql", 1, "body", """{}""")
+        val preview = controller.renderPreview("nope.sql", 1, "body", """{}""")
 
-        html shouldContain "not found"
+        (preview.model["renderError"] as String) shouldContain "not found"
     }
 
     @Test
@@ -152,9 +156,9 @@ class TemplateEditorControllerTest {
         every { engine.render(any(), any<Map<String, Any?>>()) } throws
             TemplateRenderException("Undefined variable: x", TemplateRef("test/my_template.sql", 1))
 
-        val html = controller.renderPreview("test/my_template.sql", 1, "SELECT \${x}", """{}""")
+        val preview = controller.renderPreview("test/my_template.sql", 1, "SELECT \${x}", """{}""")
 
-        html shouldContain "Render failed"
+        (preview.model["renderError"] as String) shouldContain "Render failed"
     }
 
     // ------------------------------------------------------------------ R5 (054)
@@ -277,7 +281,7 @@ class TemplateEditorControllerTest {
         val expectedHash = slot<String>()
         every { drafts.write(any(), "test/my_template.sql", capture(written), capture(expectedHash), userId) } returns draftDetail(3)
 
-        val response = controller.edit("test/my_template.sql", 1)
+        val response = redirect(controller.edit("test/my_template.sql", 1))
 
         response.statusCode.value() shouldBe 200
         response.headers.getFirst("HX-Redirect") shouldBe "/templates/editor?name=test%2Fmy_template.sql"
@@ -293,7 +297,7 @@ class TemplateEditorControllerTest {
         authenticate()
         every { templates.findDraftDetail(any(), "test/my_template.sql") } returns draftDetail(3)
 
-        val response = controller.edit("test/my_template.sql", 1)
+        val response = redirect(controller.edit("test/my_template.sql", 1))
 
         response.headers.getFirst("HX-Redirect") shouldBe "/templates/editor?name=test%2Fmy_template.sql"
         // The invariant: the UI never asks for a second draft, and never overwrites the
@@ -307,11 +311,12 @@ class TemplateEditorControllerTest {
         every { templates.findDraftDetail(any(), "test/my_template.sql") } returns null
         every { templates.findVersion(any(), "test/my_template.sql", 9) } returns null
 
-        val response = controller.edit("test/my_template.sql", 9)
+        // The refusal renders in place — a 200 carrying the reason, because htmx does not
+        // swap 4xx bodies. It is the shared inline-refusal fragment since 097 §C.
+        val refusal = controller.edit("test/my_template.sql", 9) as org.springframework.web.servlet.ModelAndView
 
-        response.statusCode.value() shouldBe 200
-        response.headers.getFirst("HX-Redirect") shouldBe null
-        response.body!! shouldContain "was not found"
+        refusal.viewName shouldBe "partials/inline-refusal"
+        (refusal.model["message"] as String) shouldContain "was not found"
         verify(exactly = 0) { drafts.write(any(), any(), any(), any(), any()) }
     }
 
@@ -320,8 +325,12 @@ class TemplateEditorControllerTest {
         authenticate()
         every { templates.findDraftDetail(any(), "acme/finance/rev.sql") } returns draftDetail(2)
 
-        val response = controller.edit("acme/finance/rev.sql", 1)
+        val response = redirect(controller.edit("acme/finance/rev.sql", 1))
 
         response.headers.getFirst("HX-Redirect") shouldBe "/templates/editor?name=acme%2Ffinance%2Frev.sql"
     }
+
+    /** The success half of `edit`: an HX-Redirect entity, not a fragment. */
+    @Suppress("UNCHECKED_CAST")
+    private fun redirect(result: Any) = result as org.springframework.http.ResponseEntity<String>
 }

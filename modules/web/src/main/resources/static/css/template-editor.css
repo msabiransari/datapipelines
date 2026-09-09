@@ -194,3 +194,36 @@
 .te-preview-pane .pe-sql-tok-punct {
   color: var(--te-sql-punct);
 }
+
+/* 097 §C — the preview result's three states. They were Kotlin string constants carrying
+   inline styles (padding, margins, the mono face, the danger fill); the markup is
+   `partials/template-render.html` now and the box lives here, beside the pane it renders in. */
+.te-render-card {
+  padding: var(--gap-md);
+}
+
+.te-render-card-error {
+  border-color: var(--accent-danger);
+  background: var(--accent-danger-bg);
+}
+
+.te-render-out {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.te-render-empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.te-render-error {
+  margin: 0;
+  color: var(--accent-danger);
+  font-size: var(--text-sm);
+}

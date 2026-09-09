@@ -13,6 +13,7 @@ import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -20,6 +21,7 @@ import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.servlet.ModelAndView
 
 /**
  * The templates screen's htmx fragments (template-hierarchy-design §9.2, ui-screens.md §4.6).
@@ -196,19 +198,8 @@ class TemplatePartialController(
      * never a toast: form-level feedback belongs in the form (the 022 review F9 rule the
      * datasource register modal established).
      */
-    private fun refused(why: String): ResponseEntity<String> =
-        ResponseEntity.badRequest().body(
-            """<div class="ds-surface" style="border:1px solid var(--accent-danger);border-radius:var(--radius-base);""" +
-                """padding:var(--gap-sm);color:var(--text-primary);font-size:var(--text-sm);max-width:520px">""" +
-                escaped(why) +
-                "</div>",
-        )
-
-    private fun escaped(text: String): String =
-        text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
+    private fun refused(why: String): ModelAndView =
+        ModelAndView("partials/inline-refusal", mapOf("message" to why), HttpStatus.BAD_REQUEST)
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

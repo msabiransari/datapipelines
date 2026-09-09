@@ -193,12 +193,13 @@ class UserSettingsControllerTest {
         every { localPasswordService.changeOwn(userId, "wrong-current-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.WrongCurrentPassword
 
-        val response = controller.changeOwnPassword("wrong-current-1", "new-password-1", "new-password-1")
+        val refusal = fieldError(controller.changeOwnPassword("wrong-current-1", "new-password-1", "new-password-1"))
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.headers["HX-Retarget"] shouldBe null // field-level validation is never a toast
-        response.body shouldContain "current password is incorrect"
-        response.body!! shouldNotContain "hx-swap-oob"
+        refusal.status shouldBe HttpStatus.BAD_REQUEST
+        // Field-level validation is never a toast: the response IS the inline field error
+        // fragment (097 §C — it used to be a hand-built span with an inline style).
+        refusal.viewName shouldBe "partials/field-error"
+        (refusal.model["message"] as String) shouldContain "current password is incorrect"
     }
 
     @Test
@@ -208,7 +209,7 @@ class UserSettingsControllerTest {
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
 
-        val response = controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
+        val response = entity(controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1"))
 
         response.statusCode shouldBe HttpStatus.OK
         response.headers.containsKey("HX-Redirect") shouldBe false
@@ -225,7 +226,7 @@ class UserSettingsControllerTest {
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
 
-        val response = controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
+        val response = entity(controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1"))
 
         response.statusCode shouldBe HttpStatus.OK
         response.headers.getFirst("HX-Redirect") shouldBe "/dashboard"
@@ -241,6 +242,15 @@ class UserSettingsControllerTest {
         setVariable("authenticated", true)
         setVariable("currentPath", "/settings")
     }
+
+    /**
+     * 097 §C: an inline field error is a Thymeleaf fragment and a status now, not a Kotlin
+     * string, so the assertions read the MESSAGE rather than a span's markup.
+     */
+    private fun fieldError(result: Any) = result as org.springframework.web.servlet.ModelAndView
+
+    @Suppress("UNCHECKED_CAST")
+    private fun entity(result: Any) = result as org.springframework.http.ResponseEntity<String>
 
     private fun engine(): SpringTemplateEngine =
         SpringTemplateEngine().apply {
@@ -264,10 +274,10 @@ class UserSettingsControllerTest {
     fun `change password with mismatched confirmation never reaches the service`() {
         authenticate()
 
-        val response = controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-2")
+        val refusal = fieldError(controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-2"))
 
-        response.statusCode shouldBe HttpStatus.BAD_REQUEST
-        response.body shouldContain "do not match"
+        refusal.status shouldBe HttpStatus.BAD_REQUEST
+        (refusal.model["message"] as String) shouldContain "do not match"
     }
 
     @Test
@@ -276,20 +286,19 @@ class UserSettingsControllerTest {
         stubUser(mustChange = false)
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
-        controller
-            .changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
+        entity(controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1"))
             .statusCode shouldBe HttpStatus.OK
 
         every { localPasswordService.changeOwn(userId, "wrong-current-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.WrongCurrentPassword
-        val wrong = controller.changeOwnPassword("wrong-current-1", "new-password-1", "new-password-1")
-        wrong.statusCode shouldBe HttpStatus.BAD_REQUEST
-        wrong.body shouldContain "current password is incorrect"
+        val wrong = fieldError(controller.changeOwnPassword("wrong-current-1", "new-password-1", "new-password-1"))
+        wrong.status shouldBe HttpStatus.BAD_REQUEST
+        (wrong.model["message"] as String) shouldContain "current password is incorrect"
 
         every { localPasswordService.changeOwn(userId, "current-password-1", "short") } returns
             LocalPasswordService.ChangeResult.PolicyViolation("Password must be at least 12 characters")
-        val weak = controller.changeOwnPassword("current-password-1", "short", "short")
-        weak.statusCode shouldBe HttpStatus.BAD_REQUEST
-        weak.body shouldContain "at least 12 characters"
+        val weak = fieldError(controller.changeOwnPassword("current-password-1", "short", "short"))
+        weak.status shouldBe HttpStatus.BAD_REQUEST
+        (weak.model["message"] as String) shouldContain "at least 12 characters"
     }
 }
