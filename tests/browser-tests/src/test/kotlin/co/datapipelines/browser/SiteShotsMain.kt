@@ -301,6 +301,7 @@ object SiteShotsMain {
             signIn(page, email, password)
             val shots = Shots(page)
             if (!shots.heroScreen("editor-hero-2400.png")) return@withBrowser
+            shots.settle()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
@@ -317,6 +318,7 @@ object SiteShotsMain {
             signIn(page, email, password)
             val shots = Shots(page)
             if (!shots.heroScreen("editor-hero-1200x630.png")) return@withBrowser
+            shots.settle()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
@@ -1130,10 +1132,12 @@ object SiteShotsMain {
         /**
          * Everything that must be true before the shutter: fonts resolved (a fallback face
          * re-flows every label), animations and carets dead, and every clock blanked.
+         * A toast auto-hides on a timer, so its presence in frame is a function of how
+         * fast the machine ran — the definition of a non-deterministic pixel; it is removed.
+         * Internal rather than private because [heroExtras] takes its poster and OG
+         * screenshots directly (not through [shoot]) and must settle for itself.
          */
-        private fun settle() {
-            // A toast auto-hides on a timer, so its presence in frame is a function of how
-            // fast the machine ran — the definition of a non-deterministic pixel.
+        internal fun settle() {
             page.evaluate("() => document.querySelectorAll('#toast .ds-toast').forEach(t => t.remove())")
             page.addStyleTag(Page.AddStyleTagOptions().setContent(FREEZE_CSS))
             page.evaluate("() => document.fonts.ready")
