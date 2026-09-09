@@ -78,6 +78,18 @@ class SqlProbeLakeTest {
     }
 
     @Test
+    fun `a zoneless DuckDB TIMESTAMP column decodes through the probe`() {
+        // The demo lake's hvfhv_trips.pickup_at is exactly this shape: DuckDB cannot hand a
+        // zoneless TIMESTAMP out as OffsetDateTime ("Can't convert value to OffsetDateTime"),
+        // so the reader falls back to LocalDateTime and the wire shows the canonical UTC form.
+        val (probe, ds) = probeOver(registeredTrips())
+
+        val result = probe.probe(ds, "SELECT picked_at FROM trips WHERE pickup_date = 'd1' LIMIT 2")
+
+        result.rows.rows.first()["picked_at"] shouldBe "2024-06-15T10:30:00.000000Z"
+    }
+
+    @Test
     fun `CAST on the partition column still prunes - the pinned 1_5_5_1 behavior`() {
         val (probe, ds) = probeOver(registeredTrips())
 
@@ -111,7 +123,8 @@ class SqlProbeLakeTest {
         DriverManager.getConnection("jdbc:duckdb:").use { writer ->
             writer.createStatement().use {
                 it.execute(
-                    "COPY (SELECT i AS id, 'd' || (i % 3) AS pickup_date FROM range(1, 100) t(i)) " +
+                    "COPY (SELECT i AS id, 'd' || (i % 3) AS pickup_date, " +
+                        "TIMESTAMP '2024-06-15 10:30:00' AS picked_at FROM range(1, 100) t(i)) " +
                         "TO '${dir.absolutePath}' (FORMAT PARQUET, PARTITION_BY (pickup_date))",
                 )
             }

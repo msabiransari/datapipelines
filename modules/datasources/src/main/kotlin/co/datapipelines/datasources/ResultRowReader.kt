@@ -7,7 +7,9 @@ import co.datapipelines.typesystem.TypeMappers
 import co.datapipelines.typesystem.TypeMappingWarning
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
+import java.sql.SQLException
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.OffsetDateTime
 
@@ -116,7 +118,28 @@ object ResultRowReader {
             }
 
             LogicalType.TIMESTAMP -> {
-                rs.getObject(index, OffsetDateTime::class.java)
+                readTimestamp(rs, index)
+            }
+        }
+
+    /**
+     * DuckDB's zoneless TIMESTAMP cannot hand out an OffsetDateTime ("Can't convert value to
+     * OffsetDateTime" — measured live against the demo lake, 107) while pgjdbc reads its own
+     * zoneless TIMESTAMP as one. Try the zoned read first; the zoneless fallback is a
+     * LocalDateTime, which JsonEncoder normalizes to UTC. A double failure rethrows the
+     * original with the fallback's failure suppressed.
+     */
+    private fun readTimestamp(
+        rs: ResultSet,
+        index: Int,
+    ): Any? =
+        try {
+            rs.getObject(index, OffsetDateTime::class.java)
+        } catch (e: SQLException) {
+            try {
+                rs.getObject(index, LocalDateTime::class.java)
+            } catch (fallbackFailure: SQLException) {
+                throw e.apply { addSuppressed(fallbackFailure) }
             }
         }
 
