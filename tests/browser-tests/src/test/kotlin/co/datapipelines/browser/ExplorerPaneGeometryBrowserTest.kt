@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Mouse
+import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThan
@@ -176,6 +177,15 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     private fun probe(): Map<String, Any?> = page.evaluate(geometryProbe) as Map<String, Any?>
 
     private fun Map<String, Any?>.d(k: String) = (this[k] as Number).toDouble()
+
+    /** The round's before/after evidence, beside the dock's (104 handback). */
+    private fun shot(name: String) =
+        page.screenshot(
+            Page.ScreenshotOptions().setPath(
+                java.nio.file.Paths.get("build", "reports", "104-screenshots").also { it.toFile().mkdirs() }
+                    .resolve("104-$name.png"),
+            ),
+        )
 
     /** A real pointer drag on the divider handle: down, move in steps, up. */
     private fun dragTreeBy(dx: Double) {
@@ -367,9 +377,11 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
 
         val before = probe()
         assertPanes("templates at 1920 before the drag", before)
+        shot("tree-default")
 
         dragTreeBy(200.0)
         val dragged = probe()
+        shot("tree-dragged")
         withClue("the drag", "the tree is not 200px wider: $before -> $dragged") {
             (dragged.d("treeWidth") - before.d("treeWidth")) shouldBeGreaterThanOrEqual 198.0
             (dragged.d("treeWidth") - before.d("treeWidth")) shouldBeLessThanOrEqual 202.0
