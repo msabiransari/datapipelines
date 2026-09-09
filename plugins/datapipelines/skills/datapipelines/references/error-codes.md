@@ -13,6 +13,9 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 | `template.not_found` / `datasource.not_found` | Reference points at nothing | Create the referenced entity or fix the id |
 | `pipeline.version.conflict` | The pipeline changed after you loaded it (stale `expected_hash`) | Re-read with `pipelines_get`, rebase your edit onto the current body/hash, retry — NEVER retry blindly |
 | `pipeline.version.not_draft` | Release/discard hit a pipeline with no draft | Nothing to act on for an agent — the draft was already released or discarded |
+| `pipeline.version.pinned` | A live pipeline version exact-pins the version a human tried to discard/purge | A human-verb refusal — the parent named in `details` must repoint first; no agent tool discards anything |
+| `pipeline.version.last_release` | A purge targeted a released version, or the entity holds non-draft versions | Purges are drafts-only and human-only — point the person at Discard (reversible) instead |
+| `pipeline.version.not_eligible` | A switch targeted a discarded version (or a draft under a hardened posture) | The receiver's rollback lever refused — restore the version first, or pick a live one |
 | `pipeline.authoring.disabled` / `template.authoring.disabled` | This server has authoring turned off — it is a promotion receiver | Do not retry; tell the user this server only receives promoted content. Reads, execution and import still work |
 | `pipeline.validation.duplicate_name` (on update) | Your draft renames onto a taken name | Pick a different `name`; this fails at write time now, not at release |
 | `pipeline.execution.datasource_unreachable` | Source DB down/bad credentials | `datasources_test` to confirm |
