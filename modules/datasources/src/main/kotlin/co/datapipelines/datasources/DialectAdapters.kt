@@ -178,6 +178,12 @@ class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgre
         listOf("TABLE", "VIEW", "PARTITIONED TABLE", "MATERIALIZED VIEW", "FOREIGN TABLE")
 
     override val introspectionSystemSchemas: Set<String> = setOf("pg_catalog", "information_schema")
+
+    /** §7C: `pg_class` / `pg_stats` — the richest catalog statistics of the fleet. */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.POSTGRES
+
+    /** §7D: plain `EXPLAIN` — non-executing, so the plan survives a probe that times out. */
+    override fun explainSelectSql(sql: String): String = "EXPLAIN $sql"
 }
 
 class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
@@ -211,6 +217,9 @@ class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
             "xs\$null",
             "apex_*",
         )
+
+    /** §7C: `all_tables` / `all_indexes` — by construction; no container exists (§5.4.1). */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.ORACLE
 }
 
 class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
@@ -248,6 +257,9 @@ class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
             "db_denydatawriter",
             "guest",
         )
+
+    /** §7C: `sys.partitions` — by construction; the module's MSSQL container is amd64-gated. */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.MSSQL
 }
 
 /**
@@ -271,6 +283,12 @@ class MysqlDialectAdapter : AbstractDialectAdapter(Dialect.MYSQL, "mysql") {
 
     override val introspectionSystemSchemas: Set<String> =
         setOf("information_schema", "mysql", "performance_schema", "sys")
+
+    /** §7C: `information_schema.tables` estimates + `information_schema.statistics` indexes. */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.MYSQL
+
+    /** §7D: plain `EXPLAIN` — the tabular plan (`type`/`key`/`rows` columns). */
+    override fun explainSelectSql(sql: String): String = "EXPLAIN $sql"
 }
 
 /**
@@ -286,6 +304,12 @@ class H2DialectAdapter : AbstractDialectAdapter(Dialect.H2, "h2") {
     override val namespaceShape: NamespaceShape = NamespaceShape.DATABASE_AND_SCHEMA
 
     override val supportedCredentialKinds: Set<CredentialKind> = setOf(CredentialKind.NONE, CredentialKind.PASSWORD)
+
+    /** §7C: H2's `information_schema` carries a maintained row-count estimate. */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.H2
+
+    /** §7D: plain `EXPLAIN` — the rewritten-statement text whose `/* ... */` comments carry the access path. */
+    override fun explainSelectSql(sql: String): String = "EXPLAIN $sql"
 }
 
 /**
@@ -357,6 +381,12 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
     // DuckDB database — so only the qualified name identifies the engine's own.
     override val introspectionSystemSchemas: Set<String> =
         setOf("information_schema", "pg_catalog", "system.main", "temp.main")
+
+    /** §7C: `duckdb_tables()` / `duckdb_constraints()` / `duckdb_indexes()` (see the plan's KDoc). */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.DUCKDB
+
+    /** §7D: plain `EXPLAIN` — the box-drawing plan carries `Scanning Files: x/y` already; see the seam's KDoc. */
+    override fun explainSelectSql(sql: String): String = "EXPLAIN $sql"
 
     override val defaultProperties: Map<String, String> =
         mapOf(
@@ -432,6 +462,12 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
      * unknown-current-schema guard (see [NamespaceShape.isFlat]).
      */
     override val namespaceShape: NamespaceShape = NamespaceShape.FLAT
+
+    /** §7C: `sqlite_stat1` (post-ANALYZE only) + the table-valued index pragmas. */
+    override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.SQLITE
+
+    /** §7D: `EXPLAIN QUERY PLAN` — the only non-bytecode plan SQLite exposes. */
+    override fun explainSelectSql(sql: String): String = "EXPLAIN QUERY PLAN $sql"
 
     override val defaultProperties: Map<String, String> =
         mapOf(
@@ -552,6 +588,15 @@ class LakeDialectAdapter(
     /** DuckDB's engine catalogs, as [DuckdbDialectAdapter] excludes them. */
     override val introspectionSystemSchemas: Set<String> =
         setOf("information_schema", "pg_catalog", "system.main", "temp.main")
+
+    /**
+     * §7D: plain `EXPLAIN`, like the embedded twin. The pruning signal the probe reports
+     * (`Scanning Files: x/y`) is STATIC plan information — verified 2026-09-09 against
+     * duckdb_jdbc 1.5.5.1 — so the executing `EXPLAIN ANALYZE` variant is neither needed nor
+     * safe here: it would run the probe statement once for the plan and again for the rows, and
+     * a statement over the timebox would kill the plan read along with the query.
+     */
+    override fun explainSelectSql(sql: String): String = "EXPLAIN $sql"
 
     /** Same driver, same refusal — see the declaration's KDoc (and the demo's readonly lake). */
     override val driverSupportsConnectionReadOnly: Boolean get() = false

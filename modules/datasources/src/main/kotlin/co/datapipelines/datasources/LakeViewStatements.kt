@@ -141,14 +141,7 @@ object LakeViewStatements {
                 mapOf("table" to qualified(table)),
             )
         }
-        val location = table.location
-        val refused =
-            location.isEmpty() ||
-                (!location.startsWith("s3://") && !location.startsWith("file://")) ||
-                // The mirror of LakeTableValidator.locationOf's total refusal (application
-                // module): a value that would need escaping IS an attack string.
-                location.any { ch -> ch in "'\"\\" || ch <= ' ' || ch == '\u007F' }
-        if (refused) {
+        if (!isSafeLakeLocation(table.location)) {
             throw DatapipelinesException(
                 DatasourceErrorCodes.LAKE_LOCATION_INVALID,
                 "Lake table '${qualified(table)}' has a location that fails the registry's grammar " +
@@ -227,3 +220,14 @@ object LakeViewStatements {
 
     private const val MAX_ECHOED = 32
 }
+
+/**
+ * The location grammar every lake SQL-emission boundary enforces ([LakeViewStatements]' class
+ * KDoc): `s3://` or `file://`, and no character a SQL string literal would need escaping for —
+ * a value that would need escaping IS an attack string. Shared with [TableStatsReader], which
+ * interpolates a registered location into `parquet_metadata(...)` at the same boundary.
+ */
+internal fun isSafeLakeLocation(location: String): Boolean =
+    location.isNotEmpty() &&
+        (location.startsWith("s3://") || location.startsWith("file://")) &&
+        location.none { ch -> ch in "'\"\\" || ch <= ' ' || ch == '\u007F' }

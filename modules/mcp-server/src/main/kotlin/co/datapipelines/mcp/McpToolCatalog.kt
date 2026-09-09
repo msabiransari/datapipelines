@@ -54,13 +54,25 @@ object McpToolCatalog {
             Entry("templates_used_by", mutating = false),
             Entry("templates_create", mutating = true),
             Entry("templates_render", mutating = false),
+            // 107 — the bounded D61/D62 self-service verb: hard-deletes a never-released,
+            // unpinned, author-owned draft template. A write, so the `mcp.tool.write` audit's
+            // business.
+            Entry("templates_purge_draft", mutating = true),
             Entry("datasources_list", mutating = false),
             Entry("datasources_get", mutating = false),
             Entry("datasources_test", mutating = false),
             Entry("datasources_get_schemas", mutating = false),
             Entry("datasources_get_tables", mutating = false),
             Entry("datasources_get_columns", mutating = false),
+            // 107 — the §7C catalog-stats read. `read` floor: estimates about shape, never
+            // customer row data (the preview_rows reasoning does not apply to a COUNT the
+            // engine already stored).
+            Entry("datasources_get_table_stats", mutating = false),
             Entry("datasources_preview_rows", mutating = false),
+            // 107 — the bounded free-SQL probe. Read-only by classification (a write-shaped
+            // statement never reaches a connection), so not a writer — but its `sql` argument is
+            // audited as a SHA-256 + length, never verbatim (the dispatcher's redaction).
+            Entry("sql_probe", mutating = false),
             // 094 ruling 4: there is deliberately no `datasources_create`. Registering a
             // datasource means handing over a live database credential, and a credential passed
             // through a tool call transits the agent's context, its transcript and whatever the
@@ -70,6 +82,9 @@ object McpToolCatalog {
             Entry("executions_list", mutating = false),
             Entry("executions_get", mutating = false),
             Entry("executions_get_result", mutating = false),
+            // 107 — cancellation IS a write (it ends a running execution), and the same-credential
+            // rule makes the `mcp.tool.write` row the trace of WHOSE key stopped it.
+            Entry("executions_cancel", mutating = true),
             // 072 — the calculator catalog. Read, and read in the strongest sense: they return a
             // property of the BUILD, identical for every caller and every workspace.
             Entry("calculators_list", mutating = false),

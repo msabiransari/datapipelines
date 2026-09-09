@@ -200,6 +200,9 @@ class WebsiteFactsGuardTest {
                 launcher = launcher,
                 endpointPublishService = mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
                 lakeTableRegistryService = mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
+                cancellationService = mockk<co.datapipelines.executor.ExecutionCancellationService>(),
+                mcpCallAudit = mockk<co.datapipelines.application.mcp.McpCallAudit>(),
+                auditSink = mockk<co.datapipelines.auth.AuditEventSink>(),
             ).size
     }
 

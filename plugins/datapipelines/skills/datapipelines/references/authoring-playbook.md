@@ -40,6 +40,13 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
 - **Exclude what the question excludes.** A TLC zone table carries `EWR`, `Unknown`, `N/A`
   beside the five boroughs; "each NYC borough" means five rows. Look at the distinct values
   of the grouping column before you group by it.
+- **Read the table's stats and indexes before you write the predicate.**
+  `datasources_get_table_stats` answers the row estimate, the index list and the per-column
+  bounds from the engine's catalog — never a scan, so ask it of a hundred-million-row
+  table too. A filter the indexes do not support on a large table is the timeout you will
+  hit in §3; find it here, and when no index carries your predicate, write the suggested
+  `CREATE INDEX` into your handback — a readonly datasource is the operator's to change,
+  so the suggestion is the deliverable.
 
 ## 3. Shape the DAG — push work down, ship little, then index
 
@@ -76,9 +83,17 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
   of date-range branches to work around it; that is N full walks in one statement. One query,
   the partition column, a list of dates. (Real miss: an 11-branch UNION over `pickup_at`,
   cancelled at 60 s.)
+- **Climb the ladder: probe → render → execute_node → full DAG.** `sql_probe` the exact
+  SELECT against the source first — rows, `wall_ms`, and the EXPLAIN plan (captured before
+  the run, so it survives the timeout it explains); then `templates_render`; then
+  `pipelines_execute_node` on the one node; only then `pipelines_execute` the whole DAG.
+  Each rung is cheaper than the next and isolates a different fault class.
+  **Stop-loss (T199): three identical failures → stop and report.** A schema refusal is not
+  your typo — re-introspect or hand back; a fourth identical call changes nothing.
 - **After a node runs green, analyse it — and say what you found.** Read the node's timing
-  and, where the platform gives you the plan (`sql_probe` when it exists; the node's
-  `node_stats` otherwise), ask one question of every SOURCE node: *is the predicate and join
+  and the plan (`sql_probe` the node's SELECT against the source — `plan.scan`, and on a
+  lake `partitions_scanned`/`partitions_total`; the node's `node_stats` carries the
+  timing), ask one question of every SOURCE node: *is the predicate and join
   key index-supported on that table?* If not — a date range filtered by a second column
   through a single-column index, a join key with no index, a lake read that did not prune —
   write it into your handback as a concrete suggestion: the exact `CREATE INDEX …` (or the
@@ -121,14 +136,15 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
   "the numbers are right". Name the independent check you ran — or that you ran none.
 - **Report the index analysis** (§3): for every source node, one line — supported by
   `<index>` / *not supported — suggest `CREATE INDEX … ON table (cols)`* / *lake: filters on
-  the partition column, N of M partitions*. The operator reads
+  the partition column, `partitions_scanned`/`partitions_total` from `sql_probe`'s plan*.
+  The operator reads
   the handback; that line is how a slow pipeline becomes a fast one without a rewrite.
 
 ## Do / Don't, in one screen
 
 | Do | Don't |
 |---|---|
-| After each source node runs, check its predicate/join key against the table's indexes and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
+| After each source node runs, check its predicate/join key against the table's indexes (`datasources_get_table_stats`, `sql_probe`'s `plan.scan`) and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
 | Filter a lake table on its partition column, with literals or an `IN` list | Filter on a sibling timestamp, CAST the column, or UNION date-range branches |
 | Join the lookup; answer with names | Print `HV0003` / `uber` and call it an answer |
 | Infer table roles from `*_companies`, `*_zone_day`, `*_sample` when no description exists | Ignore a table because nothing described it |

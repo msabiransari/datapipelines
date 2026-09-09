@@ -3,6 +3,8 @@ package co.datapipelines.mcp
 import co.datapipelines.application.ExecutionLaunch
 import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.application.LaunchDecision
+import co.datapipelines.application.mcp.McpCallAudit
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
@@ -21,6 +23,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 import kotlinx.coroutines.runBlocking
+import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /** §6.2.3 — the `parameters` description, kept off the schema line for length. */
@@ -100,6 +103,15 @@ class PipelineExecuteTool(
      * for what an implementation guarantees.
      */
     private val executionRunner: McpExecutionRunner? = null,
+    /**
+     * The launch-time audit row (107). `executions_cancel`'s same-credential rule joins key id x
+     * correlation id against the audit log, and the dispatcher's `mcp.tool.called` row exists
+     * only when a call ENDS — for this blocking tool that is after the execution it started is
+     * already terminal, so an in-flight execution could never be cancelled by its own key
+     * (measured live, 107). This row is emitted BEFORE the blocking run begins; [McpCallAudit]
+     * reads both event names. Null only outside the assembled application.
+     */
+    private val launchAudit: AuditEventSink? = null,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -169,6 +181,7 @@ class PipelineExecuteTool(
 
             is LaunchDecision.Start -> {
                 val started = request.copy(executionId = decision.executionId)
+                auditLaunch(ctx, id, decision.executionId)
                 payload(started, execute(started, workspace))
             }
         }
@@ -247,6 +260,35 @@ class PipelineExecuteTool(
         )
     }
 
+    /**
+     * The `mcp.execution.launched` row — see [launchAudit]. A failure here must not stop the
+     * launch: the dispatcher's end-of-call row remains, and the worst case is the cancel verb
+     * refusing a key it should have accepted.
+     */
+    @Suppress("TooGenericExceptionCaught") // audit emission must never stop a launch
+    private fun auditLaunch(
+        ctx: McpToolContext,
+        pipelineId: UUID,
+        executionId: UUID?,
+    ) {
+        if (launchAudit == null) return
+        try {
+            launchAudit.log(
+                event = McpCallAudit.LAUNCH_EVENT,
+                userId = ctx.principal.userId,
+                keyId = ctx.principal.keyId,
+                details =
+                    buildMap {
+                        put("correlation_id", ctx.correlationId.toString())
+                        put("pipeline_id", pipelineId.toString())
+                        executionId?.let { put("execution_id", it.toString()) }
+                    },
+            )
+        } catch (e: Exception) {
+            log.warn("MCP launch audit emission failed correlation_id={}", ctx.correlationId, e)
+        }
+    }
+
     /** Runs the execution, translating the one cancellation path that is not a [DatapipelinesException]. */
     private fun execute(
         request: ExecuteRequest,
@@ -312,5 +354,9 @@ class PipelineExecuteTool(
             "expires_at" to view.expiresAt,
             "ttl_seconds" to resultConfig.effectiveTtlSeconds(null),
         )
+    }
+
+    private companion object {
+        val log: org.slf4j.Logger = LoggerFactory.getLogger(PipelineExecuteTool::class.java)
     }
 }

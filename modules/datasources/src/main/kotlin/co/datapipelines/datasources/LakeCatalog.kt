@@ -29,6 +29,13 @@ data class LakeRegisteredTable(
     val format: String,
     /** `s3://bucket/prefix[/glob]` (Iceberg: the current metadata FILE, not the table root — datasources.md §8C.7) or a `file://` path. */
     val location: String,
+    /**
+     * The hive-style partition column (metadata-db §4.15), null when unpartitioned. Carried
+     * across the port for §7C: a lake table has no indexes — the partition column IS the access
+     * structure the engine prunes on, and [SchemaIntrospector.tableStats] reports it as the
+     * partition pseudo-index.
+     */
+    val partitionColumn: String? = null,
 )
 
 /**

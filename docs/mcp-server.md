@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.27 (frozen contract — additive-only changes after this point)
+**Status:** v1.28 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-09
 
 ---
 
@@ -151,7 +151,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 30 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 34 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -178,16 +178,20 @@ Tools are named `{domain}_{action}`:
 - `templates_used_by`
 - `templates_create`
 - `templates_render`
+- `templates_purge_draft`
 - `datasources_list`
 - `datasources_get`
 - `datasources_test`
 - `datasources_get_schemas`
 - `datasources_get_tables`
 - `datasources_get_columns`
+- `datasources_get_table_stats`
 - `datasources_preview_rows`
+- `sql_probe`
 - `executions_list`
 - `executions_get`
 - `executions_get_result`
+- `executions_cancel`
 - `calculators_list`
 - `calculators_get`
 - `endpoints_create`
@@ -317,7 +321,7 @@ A pipeline with **no caller node** ([Pipeline Contract §9](pipeline-contract.md
 
 MCP **progress notifications** for in-flight nodes are deliberately not implemented in v1 — the tool returns progress only as the final `node_stats`. Streaming execution events through the MCP transport is a v2 item ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)). The v1 stateless transport delivers **no** server-to-client notifications of any kind (§5.1), so `node_stats` in the tool's final result is the authoritative and only per-node record.
 
-**If the agent abandons the call** (aborts the HTTP request, client crash): a blocking `POST /mcp` gives the servlet no disconnect callback, so the `datapipelines.sse.disconnect-grace-seconds` cancellation that a dropped **REST SSE** stream gets ([REST API §6.8](rest-api.md#68-client-disconnect)) does **not** apply to an abandoned tool call in v1 — the execution runs until it finishes or hits `datapipelines.executor.execution-timeout-seconds`. To stop an in-flight execution deterministically, cancel it out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance — in-flight statements are interrupted and the abandoned tool call returns an `ABORTED` result. There is no resumption path (a reconnecting agent must re-execute) and no MCP cancel *tool* in v1.
+**If the agent abandons the call** (aborts the HTTP request, client crash): a blocking `POST /mcp` gives the servlet no disconnect callback, so the `datapipelines.sse.disconnect-grace-seconds` cancellation that a dropped **REST SSE** stream gets ([REST API §6.8](rest-api.md#68-client-disconnect)) does **not** apply to an abandoned tool call in v1 — the execution runs until it finishes or hits `datapipelines.executor.execution-timeout-seconds`. To stop an in-flight execution deterministically, cancel it: over MCP with `executions_cancel` (§6.2.35) when this key's own MCP calls started it, or out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance — in-flight statements are interrupted and the abandoned tool call returns an `ABORTED` result. There is no resumption path (a reconnecting agent must re-execute).
 
 **With no `version`, this runs the WORKING version** (D56, 099): the draft when one exists, else the latest release — "always run the LAST version". On a development server that may well be a draft (drafts have been executable since 039); on a hardened server `authoring-enabled=false` refuses every draft-creating write, so the working version is a RELEASED version by construction ([versioning §7.2](versioning.md#72-execute-with-no-version-runs-the-working-version-d56-099)). The execution record pins the version that actually ran and the executions screen marks a draft run, so a result is never ambiguous about what produced it. An explicit `version` is exact and never clamped.
 
@@ -867,7 +871,7 @@ An unknown template id is the catalogued `template.not_found`; a known id with n
 
 068 shipped a `datasources_create` tool here and wrote the hazard into its own description: a secret sent through a tool call transits the agent's context, its transcript and whatever logging the client does, so "prefer the UI for a real credential" was an instruction to the model. 094 (owner ruling 4) decided that hazard is not documentable away — the tool's own description is not a control — and removed it. The surface went 31 → 30 tools; this section number is kept so §6.2.23 onward do not shift.
 
-What stays is every datasource tool that needs no credential: `datasources_list`, `datasources_get`, `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` and `datasources_preview_rows`. An agent can therefore still discover a connection, confirm it works, read its shape and preview its rows — everything authoring a pipeline needs — without one ever being handed a password. The same reasoning is why there is no `api_keys_create`: see the §6.2.23 preamble.
+What stays is every datasource tool that needs no credential: `datasources_list`, `datasources_get`, `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_get_table_stats`, `datasources_preview_rows` and `sql_probe`. An agent can therefore still discover a connection, confirm it works, read its shape and statistics, probe a SELECT and preview rows — everything authoring a pipeline needs — without one ever being handed a password. The same reasoning is why there is no `api_keys_create`: see the §6.2.23 preamble.
 
 An agent that needs a datasource it cannot find should **ask the person** to add it in the UI, then read it back with `datasources_list`.
 
@@ -1208,6 +1212,128 @@ Unregister one table. The objects in the bucket are untouched — the table stop
 
 **Response:** `{datasource, table, deleted: true}` with `table` the dotted qualified name.
 
+#### 6.2.32 `templates_purge_draft`
+
+Hard-delete a template that has NEVER been released — the one lifecycle verb an agent gets (101's bounded D61/D62 self-service fraction; humans release, and humans discard releases — D4/D57 are untouched).
+
+```json
+{
+  "name": "templates_purge_draft",
+  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, may reference any version of it (the refusal names the pinning pipelines; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["id"],
+    "additionalProperties": false,
+    "properties": {
+      "id": {"type": "string", "description": "Template id."}
+    }
+  }
+}
+```
+
+Returns: `{"id", "purged": true}`.
+
+Admission is exact: the ONLY version is a DRAFT, created by THIS key's user (templates record a creator user, never a key — "this key created it" degrades to "this key's user"), and NOTHING pins any version of it in ANY pipeline version ever — the delete guard's every-version-ever scan, not the working-version scan `templates_used_by` (§6.2.21) answers. A pinned draft is refused with `template.in_use` and `details.pinned_by` naming the pipelines to change first; a template holding any RELEASED or discarded version is `template.version.last_release`; another user's draft is `auth.scope.insufficient` with `details.reason: "not_creator"`; an unknown id is `template.not_found`. The sole-draft purge takes the entity row with it, and a concurrent edit between the guard reads and the delete is `template.version.conflict` — never a silent delete of someone else's save.
+
+**Scope:** `author`.
+
+**Mutating.** Declared `mutating` in the tool catalog, so every call writes the §14 audit pair (`mcp.tool.called` and `mcp.tool.write`).
+
+#### 6.2.33 `datasources_get_table_stats`
+
+One table's catalog statistics — row estimate, indexes, per-column bounds — always from the engine's OWN catalog, never a scan ([Datasources §7C](datasources.md#7c-catalog-table-statistics)). The fourth introspection tool, one step past the get_columns flow of §6.2.16–18.
+
+```json
+{
+  "name": "datasources_get_table_stats",
+  "description": "One table's catalog statistics: a row estimate, the index list (a lake table's partition column reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds. Every number comes from the engine's own catalog (pg_class, information_schema, parquet footers) — never a scan of the table, so this is safe at any table size. When a dialect holds no catalog stats the stat fields are null and stats_source is \"none\" — probe an explicit count with sql_probe if you need one. Read this before writing a predicate — an unindexed filter on a large table is the timeout you will hit.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name", "table"],
+    "properties": {
+      "name": {"type": "string", "description": "Datasource name."},
+      "table": {"type": "string", "description": "Table name exactly as datasources_get_tables returned it."},
+      "namespace": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "The table's namespace, outermost first, as datasources_get_tables reported it. An unknown namespace matches nothing."
+      }
+    }
+  }
+}
+```
+
+Returns: `{row_estimate?, stats_as_of?, stats_source, indexes: [{name, columns, unique, primary, kind}], columns: [{name, n_distinct?, distinct_is_ratio, null_fraction?, min?, max?}]}` — the stat fields are omitted-when-null per the envelope convention (a missing `row_estimate` means "the catalog does not hold this", not zero), and `stats_source` names the catalog the numbers came from (`pg_class`, `information_schema.tables`, `sys.partitions`, `parquet_metadata`, …) or `"none"` when the dialect holds no catalog stats for the table. A LAKE table's registered partition column reports as the `{kind: "partition"}` pseudo-index — the lake has no indexes; the partition column IS the access structure the engine prunes on. An unknown TABLE answers empty stats with the dialect's `stats_source` label, not an error (the §7A filter philosophy); an unknown datasource is `datasource.not_found`, and a connection failure is `pipeline.execution.datasource_unreachable` — the same translations as §6.2.16–18.
+
+**Scope:** `read` — the engine's own stored ESTIMATES about shape, never customer row data (the §6.2.21 reasoning), which is why it sits below the sibling introspection tools' `author` floor.
+
+#### 6.2.34 `sql_probe`
+
+Run ONE read-only SELECT/WITH against a datasource and get rows, the canonical schema, `wall_ms` of query time, and the EXPLAIN plan captured BEFORE the query ran — the bounded free-SQL probe ([Datasources §7D](datasources.md#7d-the-sql-probe)). A debug probe, not an export.
+
+```json
+{
+  "name": "sql_probe",
+  "description": "Run ONE read-only SELECT or WITH statement against a datasource and return up to `limit` wire-encoded rows, the canonical column schema, wall_ms of query time, and the EXPLAIN plan captured BEFORE the query ran — a bounded debug probe, not an export. The statement is classified before any connection opens: anything but a single SELECT/WITH, or a denylisted verb (INSERT, DROP, ATTACH, EXPLAIN, INTO, ...) anywhere in it, is refused without touching the datasource. Parameters bind as named :name placeholders through the same binder pipeline SQL uses; every referenced name must be supplied in `parameters` with its canonical type. `tempdb` is refused as a datasource — the staging database exists only inside a full execution (use pipelines_execute). On a timeout the error details carry wall_ms and the plan, so the plan that explains the timeout survives it. The sql text never reaches the audit log — only its SHA-256 and length are recorded.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name", "sql"],
+    "additionalProperties": false,
+    "properties": {
+      "name": {"type": "string", "description": "Datasource name. The reserved name tempdb is refused — it exists only inside a full execution (pipelines_execute)."},
+      "sql": {"type": "string", "description": "ONE SELECT or WITH statement. A second statement or a denylisted verb is refused before any connection opens."},
+      "parameters": {
+        "type": "object",
+        "description": "Bind values for the statement's :name placeholders, keyed by name. type is the canonical logical type; value is its wire string (BIGINTEGER/BIGDECIMAL as decimal text, temporal in ISO forms, BINARY as padded base64). A null value binds SQL NULL.",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {"type": "string", "enum": ["BOOLEAN","INTEGER","BIGINTEGER","DECIMAL","BIGDECIMAL","STRING","BINARY","DATE","TIME","TIMESTAMP"]},
+            "value": {"type": ["string", "null"]}
+          }
+        }
+      },
+      "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 500},
+      "timeout_seconds": {"type": "integer", "default": 10, "minimum": 1, "maximum": 30}
+    }
+  }
+}
+```
+
+Returns: `{columns: [{name, type, precision?, scale?, nullable?}], warnings, rows, row_count_returned, truncated, wall_ms, plan?}` — values wire-encoded per the result-cursor rules, exactly like `datasources_preview_rows` (§6.2.19). `plan` carries `{scan?, estimated_rows?, raw, partitions_scanned?, partitions_total?}`; on LAKE the partitions pair is DuckDB's `Scanning Files: x/y` marker, null when no static file filter pruned (never `y/y` — a filter selecting every file is optimized away entirely). `limit` defaults to 50 and clamps to 500; `timeout_seconds` defaults to 10 and clamps to 30.
+
+Refusals split into two families. **Argument faults** (JSON-RPC `-32602`, nothing leased, nothing ran): the statement is not a single SELECT/WITH or carries a denylisted verb (the classifier is a conservative token scan — false positives err toward refusal, and a side-effecting function call it cannot see through is NOT caught; the datasource's own DB-user privileges remain the last line), or a `parameters` entry is missing/mistyped. **Run failures** (the catalogued `pipeline.node.query_execution_failed` `isError` envelope): a timeout, whose `details` carry `reason: "timeout"`, `wall_ms` and the pre-captured plan — the plan that explains the timeout survives it — or a driver refusal, carrying the bounded driver message. `tempdb` is refused as a datasource with `pipeline.node.standalone_execution_refused` (`details.reason: "tempdb_source"`) — the staging database exists only inside a full execution. The `sql` argument is audited as `sql_sha256` + `sql_length`, never verbatim (§14).
+
+**Scope:** `author` — this returns arbitrary customer ROW DATA; the same 037 F reasoning as `datasources_preview_rows`.
+
+#### 6.2.35 `executions_cancel`
+
+Request cancellation of a RUNNING execution — the MCP twin of `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) with one rule REST does not have: the **same-credential rule**.
+
+```json
+{
+  "name": "executions_cancel",
+  "description": "Request cancellation of a RUNNING execution. This key can cancel ONLY an execution its own MCP calls started: the execution must have been triggered via MCP by this key's user, and an audit row must pair this key with the execution's correlation id — an execution started over REST, the UI, a pipeline node, a published endpoint, or another key of the same user is refused, and the refusal names which rule fired. A non-RUNNING execution is refused with its current status. Cancellation is requested, not awaited: the flag reaches the executing instance within about one poll interval (immediately when same-instance); poll executions_get for the terminal ABORTED status. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["execution_id"],
+    "additionalProperties": false,
+    "properties": {
+      "execution_id": {"type": "string", "format": "uuid"}
+    }
+  }
+}
+```
+
+Returns: `{execution_id, status: "cancellation_requested"}`. Cancellation is REQUESTED, not awaited — the flag reaches the executing instance within about one poll interval (immediately when same-instance); poll `executions_get` (§6.2.14) for the terminal `ABORTED`.
+
+The same-credential rule, in order: an execution the caller may not see is the same not-found every read path answers (ownership before anything else); a non-RUNNING execution is `pipeline.execution.not_running` with its current status in `details`; an execution started outside MCP (REST, the UI, a PIPELINE node, a published endpoint) is `auth.scope.insufficient` with `details.reason: "started_outside_mcp"`; and one started by a DIFFERENT credential — another key of the same user included — is the same code with `details.reason: "different_credential"`. The join that proves "this key started it" is an audit row pairing this key id with the execution's correlation id, because `pipeline_executions` records the owner USER, never the key. `pipelines_execute` writes that row (`mcp.execution.launched`) BEFORE the blocking run begins — the dispatcher's end-of-call `mcp.tool.called` row cannot exist while the call is still blocking, and in-flight is exactly when a cancel matters.
+
+**Scope:** `execute` — the REST twin's floor (the same-credential rule is a handler gate, not expressible as a scope).
+
+**Mutating.** Declared `mutating` in the tool catalog — cancellation IS a write (it ends a running execution), and the `mcp.tool.write` row is the trace of WHOSE key stopped it (§14).
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1332,7 +1458,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 30 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 34 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1503,7 +1629,6 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - **Dynamic per-pipeline tools**: register `pipeline_execute_{name}` tools for pipelines flagged as "agent-exposed," so an agent sees them by name rather than discovering them by listing. Flips `tools.listChanged` to `true` (§5.1). v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
 - **Result streaming / progress notifications via MCP**: stream execution events through the MCP transport instead of returning them only in the final tool result — removes the blocking-call experience of §6.2.3. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
 - **Resource subscriptions**: `resources/subscribe` for live updates when pipelines/templates change. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
-- **An MCP cancel tool**: v1 cancellation is `DELETE /api/v1/executions/{id}` over REST, or abandoning the blocking call (§6.2.3).
 - **Datasource CREATE, UPDATE and DELETE tools**: deliberate omission, not an oversight, and since 094 a standing rule rather than a case-by-case judgement — **no credential travels through an agent** ([§6.2.22](#6222-removed--no-datasource-writes-on-this-surface)). Registration briefly existed as `datasources_create` (068) and was removed; editing and deleting an established datasource are operator actions with a blast radius across every pipeline that references it. All three stay UI/REST-only (§4.1).
 - **Sampling**: support server-initiated LLM completions (rare for this product; agents do their own LLM work).
 - **OAuth support**: when multi-tenant SaaS deployment materializes.
@@ -1542,6 +1667,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 |---|---|
 | `mcp.tool.called` | Every tool call, every outcome (success, domain error, invalid params, internal error, scope refusal) |
 | `mcp.tool.write` | Exactly one per call to a tool the catalog declares **mutating**, emitted after the tool returns — on success and on failure alike. A §7.6 scope refusal never invoked the tool, so it writes no write event: the refusal is recorded by `mcp.tool.called` alone |
+| `mcp.execution.launched` | One per `pipelines_execute` launch (107), emitted BEFORE the blocking run begins: key id + correlation id + pipeline/execution id. It exists so §6.2.35's same-credential rule can authorize cancelling an IN-FLIGHT execution — the end-of-call `mcp.tool.called` row only exists once the blocking call returns, which for this tool is after the execution is terminal |
 
 **Fields** (identical for both events): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`.
 
@@ -1549,7 +1675,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 
 **Node runs are covered** (the point of 052): `pipelines_execute_node` runs real DML/DDL with no execution row, no SSE, no idempotency record — §6.2.20's ratification covers "no execution history", not "no trace". The `mcp.tool.write` row naming pipeline, node and version IS the trace that the write happened and by whom.
 
-**Deliberately NOT recorded:** SQL text, row data, parameter values. Those are customer data; the event records THAT a write happened and by whom, never what it contained. Only identifier-shaped arguments are read from the request — the `parameters` map is never touched.
+**Deliberately NOT recorded:** SQL text, row data, parameter values. Those are customer data; the event records THAT a write happened and by whom, never what it contained. Only identifier-shaped arguments are read from the request — the `parameters` map is never touched. The one exception with a rule of its own (107): an argument named `sql` (`sql_probe`, §6.2.34) is recorded as **`sql_sha256` + `sql_length`, never verbatim** — a probe statement is customer-authored text with the same transcript-hazard profile as a credential, and the hash is what an operator needs to pair an audit row with a reported statement without the log ever holding the text.
 
 **Failure discipline:** emission happens after the tool returns and cannot change the tool's result or its error; an audit-sink failure is logged server-side (WARN + correlation id) and swallowed — the customer's call does not fail because bookkeeping did.
 
@@ -1634,6 +1760,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.28 | 107 agent probes | Tool surface 30 → **34**: new §6.2.32 `templates_purge_draft` (the bounded D61/D62 self-service verb — hard-deletes a never-released, unpinned, author-owned draft template, the entity row with it; scope `author`, **mutating**), §6.2.33 `datasources_get_table_stats` (one table's catalog statistics — row estimate, indexes incl. the lake partition pseudo-index, per-column bounds — always from the engine's OWN catalog, never a scan; scope `read`: stored estimates about shape, never row data), §6.2.34 `sql_probe` (ONE classified read-only SELECT/WITH, row-capped at 500 and timeboxed at 30 s, answering rows + canonical schema + the EXPLAIN plan captured BEFORE the query — so the plan survives the timeout it explains; `tempdb` refused with the §6.2.20 code; scope `author`, the 037 F row-data rule) and §6.2.35 `executions_cancel` (cancel a RUNNING execution this key's OWN MCP calls started — the same-credential rule joins key id x correlation id on the audit log — `pipelines_execute` gained a launch-time `mcp.execution.launched` row for exactly this, because the dispatcher's row is written when the call ENDS and this call blocks until the execution is terminal; requested, not awaited; scope `execute`, **mutating**). §6.1 lists the four; §5.1's static-surface count and §8's admission-rule count updated. §6.2.3's abandoned-call paragraph now points at `executions_cancel`; §12's "an MCP cancel tool" future line removed (shipped). §14 records the one audit exception: a `sql` argument is logged as `sql_sha256` + `sql_length`, never verbatim. The four entries' fences are drift-pinned to the shipped schemas like every §6.2 block; the numbering appends 6.2.32–35 because 6.2.23/24 already appear twice (endpoints and calculators) and 6.2.29–31 are the lake tools. |
 | 2026-09-08 | v1.27 | T199 LAKE in the MCP enum | No new tools. §6.2.6 and §6.2.8 `dialect` enums gain **`LAKE`** — the server accepted it since 087/089, the ADVERTISED schema still listed seven values, so clients refused every LAKE template before the server saw it (an agent blamed its own typing and bypassed MCP over REST). The enum is now derived from `Dialect.entries`; `DialectEnumSchemaTest` and the §6.2 drift test pin it. |
 | 2026-09-08 | v1.26 | 099 draft-first (D55/D56) | **Additive: response VALUES and descriptions, no new tool and no new argument.** §6.2.4 `pipelines_create` lands version 1 as a **DRAFT** — the response carries `status: "DRAFT"`, `current_version: null` and the `draft` pointer, and the description tells an agent to run it and then STOP for a human to release (D4 without exception). §6.2.8 `templates_create` mirrors it. §6.2.5 `pipelines_execute` documents its default in the `version` property: with none given it runs the **WORKING** version — the draft when one exists, else the latest release (D56) — never clamped for an explicit one. §6.2.1 `pipelines_list` rows now state the working `version` and a new `status` (`DRAFT`/`RELEASED`), because a listing that reported the released pointer alone would show nothing for every freshly authored pipeline. The `datapipelines://pipelines/{id}` resource (no `/versions/{n}`) serves the working version too, so reading a body and running it cannot disagree. Tool count unchanged at **30**. |
 | 2026-09-04 | v1.19 | 072 calculators | Tool surface 22 → **24**: new §6.2.23 `calculators_list` and §6.2.24 `calculators_get` (both scope `read`, non-mutating), projecting the `CalculatorRegistry` catalog — typed inputs, output type and a worked example per kind, plus the org and platform Context keys a body may reference without declaring anything. `pipelines_create` / `pipelines_update` need no new arguments (a CALCULATOR node is part of the body) but their descriptions now name the type and point at `calculators_list`. `executions_get` needed no change and gained two things anyway: `parameters` is now the fully resolved Context after the run (org keys, platform keys, parameters, calculator outputs — [DAG Executor §7.3](dag-executor.md#73-the-context-snapshot--pipeline_executionsparameters_json)) and each CALCULATOR node's `node_stats` entry carries `context_key`/`context_value`. §5.1's static-surface count and §8's admission rule updated. |

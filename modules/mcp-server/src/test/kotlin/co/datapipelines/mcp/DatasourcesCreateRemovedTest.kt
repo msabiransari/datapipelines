@@ -51,10 +51,11 @@ class DatasourcesCreateRemovedTest {
             { McpToolCatalog.NAMES shouldNotContain TOOL },
             { McpToolCatalog.MUTATING shouldNotContain TOOL },
             { ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys shouldNotContain TOOL },
-            // 31 → 30 (089's three lake_tables_* tools landed first). The site renders NAMES.size,
+            // 31 → 30 (089's three lake_tables_* tools landed first), 30 → 34 (107's four
+            // probe/cancel/purge tools). The site renders NAMES.size,
             // so this is also what the marketing page says.
-            { McpToolCatalog.NAMES.size shouldBe 30 },
-            { ScopeMatrix.MCP_TOOL_MIN_SCOPE.size shouldBe 30 },
+            { McpToolCatalog.NAMES.size shouldBe 34 },
+            { ScopeMatrix.MCP_TOOL_MIN_SCOPE.size shouldBe 34 },
         )
     }
 
@@ -63,7 +64,8 @@ class DatasourcesCreateRemovedTest {
         val datasourceTools = McpToolCatalog.ENTRIES.filter { it.name.startsWith("datasources_") }
 
         assertAll(
-            { datasourceTools.map { it.name }.size shouldBe 7 },
+            // 7 → 8 with 107's `datasources_get_table_stats` (a read; the rule below still holds).
+            { datasourceTools.map { it.name }.size shouldBe 8 },
             // The rule made structural: a mutating datasource tool cannot exist on this surface,
             // because the only datasource mutation there is takes a credential.
             { datasourceTools.none { it.mutating } shouldBe true },
@@ -145,7 +147,7 @@ class DatasourcesCreateRemovedTest {
                 .result() as McpSchema.ListToolsResult
 
         result.tools().map { it.name() } shouldNotContain TOOL
-        result.tools().size shouldBe 30
+        result.tools().size shouldBe 34
     }
 
     private val pipelines = mockk<PipelineRepository>()

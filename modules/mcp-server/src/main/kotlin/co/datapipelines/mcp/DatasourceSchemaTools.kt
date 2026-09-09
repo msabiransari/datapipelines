@@ -164,6 +164,60 @@ class DatasourcesGetColumnsTool(
 }
 
 /**
+ * `datasources_get_table_stats` (datasources.md §7C — 107). Scope: `read`.
+ *
+ * The fourth introspection tool, one step past the get_columns flow: the engine's CATALOG
+ * statistics — row estimate, indexes, per-column histogram bounds — never a scan of the table.
+ * It sits on `read` rather than the sibling tools' `author`: the §7A tools' floor is about
+ * opening live connections to enumerate schema, and the catalog-stats read returns the engine's
+ * own stored ESTIMATES — metadata about shape, like the columns listing — so it shares the
+ * metadata floor. The same §5.3 visibility gate applies before anything is read.
+ */
+class DatasourcesGetTableStatsTool(
+    private val introspector: SchemaIntrospector,
+    private val datasources: DatasourceRegistry,
+) : McpTool {
+    override val definition =
+        McpTools.tool(
+            name = "datasources_get_table_stats",
+            description =
+                "One table's catalog statistics: a row estimate, the index list (a lake table's partition column " +
+                    "reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds. " +
+                    "Every number comes from the engine's own catalog (pg_class, information_schema, parquet " +
+                    "footers) — never a scan of the table, so this is safe at any table size. When a dialect holds " +
+                    "no catalog stats the stat fields are null and stats_source is \"none\" — probe an explicit " +
+                    "count with sql_probe if you need one. Read this before writing a predicate — an unindexed " +
+                    "filter on a large table is the timeout you will hit.",
+            schema =
+                """
+                {
+                  "type": "object",
+                  "required": ["name", "table"],
+                  "properties": {
+                    "name": {"type": "string", "description": "Datasource name."},
+                    "table": {"type": "string", "description": "Table name exactly as datasources_get_tables returned it."},
+                    "namespace": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "The table's namespace, outermost first, as datasources_get_tables reported it. An unknown namespace matches nothing."
+                    }
+                  }
+                }
+                """.trimIndent(),
+        )
+
+    override fun call(
+        args: McpArguments,
+        ctx: McpToolContext,
+    ): Any {
+        val name = args.requiredString("name")
+        val table = args.requiredString("table")
+        val gated = datasources.requireVisible(name, ctx)
+        return introspecting(name) { introspector.tableStats(gated, table, args.namespace()).toWireMap() }
+    }
+}
+
+/**
  * The `namespace` argument of the two filtered introspection tools: an array of segments,
  * outermost first, with the dotted shorthand expanded so an agent may send either
  * `["a1", "sales"]` or `["a1.sales"]`. Null when absent or empty — "no filter", never a filter

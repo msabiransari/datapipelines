@@ -3,10 +3,13 @@ package co.datapipelines.mcp
 import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.mcp.McpCallAudit
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
+import co.datapipelines.datasources.SqlProbe
+import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
@@ -33,7 +36,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 31 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 34 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -46,7 +49,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 31 tools of §6.1, in `tools/list` order. */
+    /** The 34 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -82,6 +85,14 @@ class McpServerAutoConfiguration {
         // 089 §A — the SAME lake-table registry the REST /tables endpoints call, so a
         // registration over MCP crosses the same validation, D8 gate and pool invalidation.
         lakeTableRegistryService: LakeTableRegistryService,
+        // 107 — the SAME cancellation service `DELETE /api/v1/executions/{id}` calls (086's
+        // Redis-flag-first, local-second semantics live there, not here), plus the audit-log
+        // read the same-credential rule joins on. Plain parameters, the 068/074 pattern.
+        cancellationService: ExecutionCancellationService,
+        mcpCallAudit: McpCallAudit,
+        // 107: the launch-time audit row executions_cancel joins on — pipelines_execute blocks
+        // until the execution is terminal, so the dispatcher's end-of-call row comes too late.
+        auditSink: co.datapipelines.auth.AuditEventSink,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -108,6 +119,7 @@ class McpServerAutoConfiguration {
                 launcher = launcher.getIfAvailable(),
                 resultConfig = executorConfig.result,
                 executionRunner = executionRunner.getIfAvailable(),
+                launchAudit = auditSink,
             ),
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner),
             PipelinesCreateTool(pipelineService, pipelines),
@@ -117,16 +129,22 @@ class McpServerAutoConfiguration {
             TemplatesUsedByTool(usage),
             TemplatesCreateTool(templates, authoring, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
+            // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
+            TemplatesPurgeDraftTool(templates, usage, authoring),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
             DatasourcesGetSchemasTool(introspector, datasources),
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
+            DatasourcesGetTableStatsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, sqlRunner),
+            // 107 — the bounded probe, same inline-construction discipline as `sqlRunner`.
+            SqlProbeTool(datasources, SqlProbe(datasources)),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, executorConfig.result),
+            ExecutionsCancelTool(executions, cancellationService, mcpCallAudit),
             // 072: no collaborators at all — the catalog is a compile-time constant, which is
             // exactly why these two need no workspace, no repository and no registry.
             CalculatorsListTool(),
@@ -140,6 +158,16 @@ class McpServerAutoConfiguration {
         tools: List<McpTool>,
         auditLogger: AuditLogger,
     ): McpToolDispatcher = McpToolDispatcher(tools, auditLogger)
+
+    /**
+     * 107 — the audit-log read `executions_cancel`'s same-credential rule joins on
+     * (key id × the call's correlation id; see [McpCallAudit]'s KDoc for why the execution row
+     * alone cannot answer it). Built here for the same reason the dispatcher is: the metadata
+     * `NamedParameterJdbcTemplate` is a bean wherever the engine is assembled.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    fun mcpCallAudit(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): McpCallAudit = McpCallAudit(jdbc)
 
     @Bean
     @ConditionalOnMissingBean

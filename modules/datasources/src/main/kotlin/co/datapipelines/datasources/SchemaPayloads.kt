@@ -91,3 +91,60 @@ data class ColumnInfo(
     val warnings: List<TypeMappingWarning>,
     val remarks: String? = null,
 )
+
+/**
+ * One table's CATALOG statistics — the engine's own stored estimates, never a scan of the
+ * table: no `COUNT(*)`, no `COUNT(DISTINCT)` anywhere on the read path. This is the answer an
+ * agent needs for "how big is this, roughly" and "what is it indexed by" without paying for
+ * the read.
+ *
+ * [rowEstimate] is a STRING under the BIGINTEGER wire convention (type-system §7.3); null when
+ * the catalog has none — a table Postgres has never ANALYZEd carries `reltuples = -1`, reported
+ * as null rather than as a lie. [statsAsOf] is the engine's last analyze time as an ISO instant
+ * where the catalog exposes one (Postgres, Oracle). [statsSource] names the catalog the numbers
+ * came from (`pg_class`, `information_schema.tables`, `parquet_metadata`, ...) — `none` when
+ * the dialect has no catalog stats for this table, which is a valid answer, not an error.
+ */
+data class TableStats(
+    val rowEstimate: String?,
+    val statsAsOf: String?,
+    val statsSource: String,
+    val indexes: List<IndexStats>,
+    val columns: List<ColumnStats>,
+)
+
+/**
+ * One index as the catalog reports it, [columns] in key order. [kind] is `index` for an
+ * ordinary catalog index and `partition` for a lake table's partition column — a lake has no
+ * indexes; the partition column IS the access structure the engine prunes on, so it reports as
+ * the pseudo-index it is.
+ */
+data class IndexStats(
+    val name: String,
+    val columns: List<String>,
+    val unique: Boolean,
+    val primary: Boolean,
+    val kind: String = INDEX_KIND_INDEX,
+) {
+    companion object {
+        const val INDEX_KIND_INDEX = "index"
+        const val INDEX_KIND_PARTITION = "partition"
+    }
+}
+
+/**
+ * One column's catalog statistics. [nDistinct] is a STRING under the BIGINTEGER wire
+ * convention. Postgres stores a NEGATIVE `n_distinct` as a fraction of the table; the reader
+ * normalizes it to an estimate against the row estimate, and [distinctIsRatio] is true only
+ * when that normalization could not run (no row estimate) — the catalog holds a ratio and the
+ * wire reports null rather than a guess. [min]/[max] are the catalog's histogram bounds where
+ * it holds them (Postgres `pg_stats`, Parquet footers), null elsewhere.
+ */
+data class ColumnStats(
+    val name: String,
+    val nDistinct: String?,
+    val distinctIsRatio: Boolean,
+    val nullFraction: Double?,
+    val min: String?,
+    val max: String?,
+)

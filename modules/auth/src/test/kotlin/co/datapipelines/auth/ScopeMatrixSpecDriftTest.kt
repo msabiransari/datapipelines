@@ -53,13 +53,15 @@ class ScopeMatrixSpecDriftTest {
     fun `every MCP tool minimum scope matches auth-md §7-6`() {
         val fromDoc = parseMcpTable(RepoFiles.read(RepoFiles.AUTH_SPEC_PATH))
 
-        // All 30 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
+        // All 34 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
         // data-visibility pair, 20 → 21 with 040's `templates_used_by`, 21 → 22 with 068's
         // `datasources_create`, 22 → 24 with 072's `calculators_list` / `calculators_get`,
         // 24 → 28 with 074's four `endpoints_*` tools, 28 → 31 with 089's three
-        // `lake_tables_*` tools, and 31 → 30 with 094 REMOVING `datasources_create`
-        // (no credential travels through an agent).
-        fromDoc.size shouldBe 30
+        // `lake_tables_*` tools, 31 → 30 with 094 REMOVING `datasources_create`
+        // (no credential travels through an agent), and 30 → 34 with 107's
+        // `datasources_get_table_stats`, `sql_probe`, `executions_cancel` and
+        // `templates_purge_draft`.
+        fromDoc.size shouldBe 34
         ScopeMatrix.MCP_TOOL_MIN_SCOPE shouldContainExactly fromDoc
     }
 

@@ -371,6 +371,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 |---|---|
 | `mcp.tool.called` | Every MCP tool call, success or failure — tool, actor (key id + owner), target, outcome, `elapsed_ms`, correlation id. Emitted by the dispatcher for every outcome including the §7.6 scope refusal ([MCP §14](mcp-server.md#14-audit)) |
 | `mcp.tool.write` | Every call to a tool the MCP catalog declares **mutating** — a write to stored definitions or to customer data, `pipelines_execute_node` node runs included — one event after the tool returns, on success and on failure (the failure carries the error code). The trace that an `author`-scoped key exercised a write path ([MCP §14](mcp-server.md#14-audit)) |
+| `mcp.execution.launched` | One per `pipelines_execute` launch (107), emitted BEFORE the blocking run begins — key id, correlation id, pipeline/execution id. `executions_cancel`'s same-credential rule joins on it, because the dispatcher's end-of-call `mcp.tool.called` row cannot exist while the launching call is still blocking ([MCP §14](mcp-server.md#14-audit)) |
 
 **Version lifecycle audit events** (same `audit_log` table, defined in [Versioning §3](versioning.md#3-version-lifecycle); emitted by the 101 REST verbs, all session-only — an API key cannot produce one):
 

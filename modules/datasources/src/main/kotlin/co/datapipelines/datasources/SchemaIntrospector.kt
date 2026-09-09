@@ -7,8 +7,6 @@ import co.datapipelines.typesystem.IngressTypeMapper
 import java.sql.Connection
 import java.sql.DatabaseMetaData
 import java.sql.ResultSetMetaData
-import java.sql.SQLException
-import java.sql.SQLFeatureNotSupportedException
 
 /**
  * Reads live schema metadata from a registered datasource (datasources.md §7A) via JDBC
@@ -16,7 +14,9 @@ import java.sql.SQLFeatureNotSupportedException
  * canonical types, not driver-specific names. The introspection flow is
  * [schemas] → [tables] → [columns]: nothing bundles columns into a table listing.
  *
- * Read-only by construction: only `metaData` calls, no statements. An unknown datasource is the
+ * Read-only by construction: `metaData` calls, plus statements that are themselves metadata
+ * reads — [lakeColumns]'s zero-row scan and [tableStats]'s catalog queries (§7C, assembled in
+ * [TableStatsReader]; this class is at the house size ceiling). An unknown datasource is the
  * catalogued `datasource.not_found` ([DatasourceErrorCodes.NOT_FOUND]); an unknown table/schema
  * filter matches nothing and returns empty — a filter for something that does not exist means
  * "no results", not an error (the same philosophy as `datasources_list`'s dialect filter).
@@ -43,6 +43,9 @@ class SchemaIntrospector(
     private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
     private val lakeCache: LakeIntrospectionCache = LakeIntrospectionCache.NONE,
 ) {
+    /** The §7C engine — same registry and lake ports as this reader. */
+    private val statsReader = TableStatsReader(registry, lakeTables, lakeCache)
+
     /**
      * §7A — the namespace listing, the entry point of the introspection flow (schemas → tables →
      * columns). Each entry is the ordered path a caller can pass back as a filter plus the label
@@ -313,6 +316,26 @@ class SchemaIntrospector(
         }
     }
 
+    /**
+     * §7C — one table's CATALOG statistics: the engine's own stored estimates and index
+     * definitions, never a scan of the table (no `COUNT(*)`, no `COUNT(DISTINCT)` anywhere on
+     * the path). A dialect with no catalog stats answers `stats_source: "none"` — a valid
+     * result, not an error; an unknown table answers empty stats (the §7A rule). The engine
+     * lives in [TableStatsReader]; this is the two-overload entry point the surfaces call.
+     */
+    fun tableStats(
+        datasourceName: String,
+        table: String,
+        namespaceFilter: List<String>? = null,
+    ): TableStats = statsReader.tableStats(registry.get(datasourceName) ?: throw notFound(datasourceName), table, namespaceFilter)
+
+    /** §7C for an already-gated [datasource] — see [schemas]'s C3 note. */
+    fun tableStats(
+        datasource: Datasource,
+        table: String,
+        namespaceFilter: List<String>? = null,
+    ): TableStats = statsReader.tableStats(datasource, table, namespaceFilter)
+
     /** One [ResultSetMetaData] row set, mapped exactly like [mapColumnRow] maps a `getColumns` row. */
     private fun mapResultSetColumns(
         meta: ResultSetMetaData,
@@ -478,78 +501,6 @@ class SchemaIntrospector(
     /** `getSchemas()`'s owning-catalog column, blank-sentinel-filtered. */
     private fun java.sql.ResultSet.catalogOf(): String? = getString("TABLE_CATALOG").asNonBlankOrNull()
 
-    /**
-     * The connection's current NAMESPACE, in this dialect's own vocabulary: the **catalog** for
-     * catalog-routing drivers (Connector/J keeps the current database there and leaves
-     * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none
-     * — and the JDBC blank sentinel counts as none: `""` means "objects without a
-     * catalog/schema", not a schema named `""`, so the caller reads unfiltered rather than
-     * filtering on a name that matches nothing.
-     *
-     * Every [SQLException] this read can produce is classified HERE, in ONE place — extending
-     * the lease boundary's own [SQLException.isConnectionFailure] classification, never
-     * forking a second one. Three families (R5 F1; the shapes are live-pinned per driver in
-     * `EmbeddedDialectBehaviorTest`):
-     *
-     * 1. **Feature-unsupported** — [SQLFeatureNotSupportedException], or a driver signaling
-     *    the same via plain `SQLException` with SQLState `0A000` — reads as null: a legitimate
-     *    capability statement ("driver reports none").
-     * 2. **Connection loss** — the [SQLException.isConnectionFailure] family, INCLUDING the
-     *    per-driver knowledge the classifier carries (SQLState class 08 + the typed connection
-     *    exceptions + SQLite's null-state result codes + H2's closed-object codes + the
-     *    DuckDB/SQLite closed-connection lifecycle messages) — becomes
-     *    [DatasourceUnreachableException]: the catalogued 502 path, whose recommended
-     *    recovery fails honestly on the same dead connection.
-     * 3. **Anything left** — a NON-connection failure of the current-schema read itself
-     *    (pgjdbc's `getSchema()` executes `select current_schema()` on the server —
-     *    bytecode-verified for 42.7.13 — so a statement cancel 57014 or a permission error
-     *    arrives here) — is [CurrentSchemaUnknownException] with the driver exception
-     *    attached as cause: a catalogued failure whose recovery (pass an explicit schema
-     *    filter, which never consults the current schema) works on the live connection.
-     *    NEVER a raw rethrow to the surface: the surfaces catch only the two module
-     *    exceptions, and a raw driver exception is a 500 / JSON-RPC -32603.
-     */
-    private fun Connection.currentNamespace(
-        adapter: DialectAdapter,
-        datasourceName: String,
-    ): List<String> {
-        val shape = adapter.namespaceShape
-        val innermost = currentInnermost(shape, datasourceName) ?: return emptyList()
-        // The outer segment matters as much as the inner one on a multi-catalog connection: a
-        // current schema of `sales` with no catalog is what merged two ATTACHed catalogs' tables.
-        // `getCatalog()` failing is not fatal here — the one-catalog dialects behave as before.
-        val outer = if (shape.hasOuterCatalog) runCatching { catalog }.getOrNull()?.takeUnless { it.isBlank() } else null
-        return listOfNotNull(outer, innermost)
-    }
-
-    /** The innermost current level, classified — see [currentNamespace]'s three families. */
-    private fun Connection.currentInnermost(
-        shape: NamespaceShape,
-        datasourceName: String,
-    ): String? =
-        try {
-            if (shape.innermostArrivesInCatalog) catalog else schema
-        } catch (_: SQLFeatureNotSupportedException) {
-            // The typed capability statement: the driver reports none. Deliberately
-            // discarded — the exception type itself is the entire signal.
-            null
-        } catch (e: SQLException) {
-            when {
-                e.sqlState == FEATURE_UNSUPPORTED_STATE -> null
-                e.isConnectionFailure() -> ConnectionLease.unreachable(datasourceName, e)
-                else -> throw CurrentSchemaUnknownException(datasourceName, e)
-            }
-        }?.asNonBlankOrNull()
-
-    /**
-     * The ONE blank-sentinel rule at the ResultSet boundary: a value that is null, empty, or
-     * whitespace-only means "absent", never a name — drivers report the JDBC `""` sentinel
-     * ("objects without a catalog/schema") and some report `" "` just as vacuously. Every
-     * site that reads a schema or remark (driver-reported or caller-supplied) routes through
-     * this rule so the boundary cannot spell it differently per site.
-     */
-    private fun String?.asNonBlankOrNull(): String? = this?.takeUnless { it.isBlank() }
-
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(
             code = DatasourceErrorCodes.NOT_FOUND,
@@ -564,9 +515,6 @@ class SchemaIntrospector(
          * catalog routing the schemas walk is every database the server grants).
          */
         const val MAX_LISTING_ROWS = 2000
-
-        /** SQLState "feature not supported" — the untyped sibling of [SQLFeatureNotSupportedException]. */
-        const val FEATURE_UNSUPPORTED_STATE = "0A000"
 
         /** The engine object a registered lake table IS (089 §B's per-table view) — TableInfo.type. */
         const val LAKE_TABLE_TYPE = "VIEW"
