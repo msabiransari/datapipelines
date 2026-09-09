@@ -1057,7 +1057,7 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 
 | Operation | Method & Path | Notes |
 |---|---|---|
-| Create pipeline | `POST /pipelines` | Body: pipeline JSON without `id`, `version`, `created_at`, `updated_at` (server assigns). Version 1 lands **DRAFT** and `current_version` stays null — releasing is a human action ([Versioning §3.2](versioning.md#32-the-one-write-rule-copy-on-write), D55). |
+| Create pipeline | `POST /pipelines` | Body: pipeline JSON without `id`, `version`, `created_at`, `updated_at` (server assigns). Version 1 lands **DRAFT** and `current_version` stays null — releasing is a human action ([Versioning §3.6](versioning.md#36-the-one-write-rule-copy-on-write), D55). |
 | Get pipeline (working version) | `GET /pipelines/{id}` | Returns the working version: the DRAFT when one exists, else the latest release. |
 | Get pipeline (specific version) | `GET /pipelines/{id}/versions/{version}` | |
 | List pipeline versions | `GET /pipelines/{id}/versions` | Returns version metadata. |

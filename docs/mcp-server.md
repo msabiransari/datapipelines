@@ -229,7 +229,7 @@ List pipelines the caller has access to.
 
 Returns: array of pipeline metadata objects. Datasource references are per-node and are read from the body via `pipelines_get` — the listing does not aggregate them.
 
-**`version` is the working version, and `status` names it** (D55/D56, 099): the draft's number when the pipeline has a draft, else the latest released one, with `status` = `DRAFT` or `RELEASED`. Since creation lands a DRAFT, a listing that reported the released pointer alone would show nothing at all for every freshly authored pipeline, and `version: 1` on its own could not tell a reviewed release from a draft nobody has looked at. Both fields are also `null` in the one case where a pipeline has no version at all — its sole draft was discarded ([versioning §3.4](versioning.md#34-version-number-allocation-and-discard)).
+**`version` is the working version, and `status` names it** (D55/D56, 099): the draft's number when the pipeline has a draft, else the latest released one, with `status` = `DRAFT` or `RELEASED`. Since creation lands a DRAFT, a listing that reported the released pointer alone would show nothing at all for every freshly authored pipeline, and `version: 1` on its own could not tell a reviewed release from a draft nobody has looked at. Both fields are also `null` in the one case where a pipeline has no version at all — its sole draft was purged, which deletes the entity with it ([versioning §3.2](versioning.md#32-entity-status-is-derived-names-are-unique-forever)).
 
 **Two presentations, chosen by `prefix`** (067). Pipeline names are folder paths ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference), [Template Hierarchy §14](template-hierarchy-design.md)), so an agent needs to BROWSE as well as search:
 

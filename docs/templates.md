@@ -229,7 +229,7 @@ Release again          → version 2 RELEASED    (current_version = 2)
 Soft-delete            → version 2 marked deleted; pipelines referencing v1/v2 still work
 ```
 
-**Creation lands a DRAFT** ([Versioning §3.2](versioning.md#32-the-one-write-rule-copy-on-write),
+**Creation lands a DRAFT** ([Versioning §3.6](versioning.md#36-the-one-write-rule-copy-on-write),
 ruling D55, 2026-09-08) — `POST /templates`, `templates_create` and the editor's create alike, with
 `status: "DRAFT"` in the response and `templates.current_version` null until a human releases it. A
 DRAFT pipeline may pin a DRAFT template version and render against it while iterating; a pipeline's
