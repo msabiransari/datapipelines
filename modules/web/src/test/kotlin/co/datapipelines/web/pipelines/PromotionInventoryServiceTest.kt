@@ -54,7 +54,7 @@ class PromotionInventoryServiceTest {
             displayName = "Acme",
             isPersonal = false,
             isDeleted = false,
-createdBy = null,
+            createdBy = null,
             createdAt = Instant.EPOCH,
         )
 

@@ -13,18 +13,18 @@ import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
-import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.IfMatchHeader
+import co.datapipelines.web.pipelines.LifecycleVerbs
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.http.HttpStatus
@@ -79,7 +79,6 @@ class TemplatesController(
     private val drafts: TemplateDraftService,
     private val releases: TemplateReleaseService,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
-    private val usage: co.datapipelines.templates.TemplateUsageService,
     private val audit: co.datapipelines.auth.AuditEventSink,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {

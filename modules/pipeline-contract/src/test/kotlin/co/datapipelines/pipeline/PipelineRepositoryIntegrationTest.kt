@@ -328,7 +328,6 @@ class PipelineRepositoryIntegrationTest {
             listOf("nyc/mobility/mine")
     }
 
-    /** Creates one live pipeline per name, at version 1, in [WORKSPACE_ID]. */
     /**
      * 101's replacement for the old `softDelete` in these tests: discard the entity's ONLY
      * release through the real verb (development posture, no pins), which lands the entity
@@ -337,7 +336,14 @@ class PipelineRepositoryIntegrationTest {
      */
     private fun discardOnlyRelease(record: PipelineRecord) {
         checkNotNull(
-            repository.discardVersion(WORKSPACE_ID, record.id, record.name, checkNotNull(record.currentVersion), owner, draftEligible = true),
+            repository.discardVersion(
+                WORKSPACE_ID,
+                record.id,
+                record.name,
+                checkNotNull(record.currentVersion),
+                owner,
+                draftEligible = true,
+            ),
         )
     }
 

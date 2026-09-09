@@ -291,11 +291,12 @@ class PipelinesController(
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun delete(
         @PathVariable id: UUID,
-        @RequestParam(required = false, defaultValue = "false") include_exclusive_draft_templates: Boolean = false,
+        @RequestParam("include_exclusive_draft_templates", required = false, defaultValue = "false")
+        includeExclusiveDraftTemplates: Boolean = false,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        val result = pipelines.purgeEntity(workspaceId, id, include_exclusive_draft_templates)
+        val result = pipelines.purgeEntity(workspaceId, id, includeExclusiveDraftTemplates)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.AUDIT_ENTITY_PURGED,

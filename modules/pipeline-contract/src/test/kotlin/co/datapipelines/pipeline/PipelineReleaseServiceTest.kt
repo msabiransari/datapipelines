@@ -175,12 +175,14 @@ class PipelineReleaseServiceTest {
         // the flip-to-DISCARDED branch is withdrawn.
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.purgeDraft(workspaceId, pipelineId, "draft-hash", true) } returns
-            co.datapipelines.pipeline.PurgeOutcome.VersionPurged(3, pipelineRecord())
+            co.datapipelines.pipeline.PurgeOutcome
+                .VersionPurged(3, pipelineRecord())
         val purged = service.purge(workspaceId, pipelineId, "draft-hash")
         (purged as PipelineReleaseService.Purged.Version).executionsDeleted shouldBe 3
 
         every { pipelines.purgeDraft(workspaceId, pipelineId, "draft-hash", true) } returns
-            co.datapipelines.pipeline.PurgeOutcome.EntityPurged(1)
+            co.datapipelines.pipeline.PurgeOutcome
+                .EntityPurged(1)
         (service.purge(workspaceId, pipelineId, "draft-hash") as PipelineReleaseService.Purged.Entity)
             .executionsDeleted shouldBe 1
 

@@ -48,7 +48,6 @@ class TemplatesControllerTest {
 
     private val drafts = mockk<TemplateDraftService>()
     private val releases = mockk<TemplateReleaseService>()
-    private val usage = mockk<co.datapipelines.templates.TemplateUsageService>()
 
     // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
@@ -67,7 +66,16 @@ class TemplatesControllerTest {
         }
 
     private val controller =
-        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, guard, usage, audit)
+        TemplatesController(
+            repository,
+            validator,
+            engines,
+            TemplateImportService(repository, validator),
+            drafts,
+            releases,
+            guard,
+            audit,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -131,7 +139,6 @@ class TemplatesControllerTest {
                 drafts,
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(false),
-                usage,
                 audit,
             )
         // The authoring refusal for delete comes from the service the controller delegates to.
@@ -446,7 +453,6 @@ class TemplatesControllerTest {
                 TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true)),
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(true),
-                usage,
                 audit,
             )
 

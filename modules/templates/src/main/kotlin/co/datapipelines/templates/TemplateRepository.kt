@@ -90,7 +90,7 @@ data class TemplateVersionSummary(
  * request pipeline). **No default anywhere**: a missed caller is a compile error, never a
  * silent resolution in some default world.
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LargeClass")
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
@@ -753,14 +753,16 @@ class TemplateRepository(
         if (expectedHash != null) params["expectedHash"] = expectedHash
 
         val purged =
-            jdbc.query(
-                "DELETE FROM template_versions v" +
-                    " USING templates t" +
-                    " WHERE t.name = :name AND t.workspace_id = :workspaceId" +
-                    " AND v.template_id = t.id AND v.status = 'DRAFT'$hashGuard" +
-                    " RETURNING v.version",
-                params,
-            ) { rs, _ -> rs.getInt("version") }.singleOrNull() ?: return false
+            jdbc
+                .query(
+                    "DELETE FROM template_versions v" +
+                        " USING templates t" +
+                        " WHERE t.name = :name AND t.workspace_id = :workspaceId" +
+                        " AND v.template_id = t.id AND v.status = 'DRAFT'$hashGuard" +
+                        " RETURNING v.version",
+                    params,
+                ) { rs, _ -> rs.getInt("version") }
+                .singleOrNull() ?: return false
 
         val remaining =
             checkNotNull(

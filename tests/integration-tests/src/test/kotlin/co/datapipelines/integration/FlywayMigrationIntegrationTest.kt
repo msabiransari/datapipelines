@@ -83,6 +83,8 @@ class FlywayMigrationIntegrationTest {
                 // nullable and lose their DEFAULT 0 (NULL = never released). The two UPDATEs are
                 // expected to touch zero rows — no writer ever left the sentinel behind.
                 "18|draft first create|true",
+                // 101 — the version lifecycle: discard stamps + the is_deleted retirement.
+                "19|version lifecycle|true",
             )
     }
 
@@ -378,9 +380,12 @@ class FlywayMigrationIntegrationTest {
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
+                // 101 (V19): discard stamps — both NULL unless DISCARDED, a stamp when it is.
+                "chk_pipeline_versions_discard_stamps",
                 "chk_pipeline_versions_status",
                 "chk_status",
                 "chk_template_type",
+                "chk_template_versions_discard_stamps",
                 "chk_template_versions_status",
                 "chk_triggered_via",
                 "chk_type_dialect",
@@ -757,10 +762,17 @@ class FlywayMigrationIntegrationTest {
             shouldThrow<SQLException> { insertPipeline("shared_name", DEFAULT_WORKSPACE_UUID) }
                 .message shouldContain "uq_pipelines_workspace_name"
 
-            // The soft-delete variant: a deleted row keeps its name taken within its workspace.
+            // 101/D59: names are unique FOREVER — every version DISCARDED (the derived
+            // retired state since V19) keeps the name taken exactly like a live row; there
+            // is no is_deleted column to set any more.
             insertPipeline("retired_name", DEFAULT_WORKSPACE_UUID)
             connection.createStatement().use {
-                it.executeUpdate("UPDATE pipelines SET is_deleted = TRUE WHERE name = 'retired_name'")
+                it.executeUpdate(
+                    """
+                    UPDATE pipeline_versions SET status = 'DISCARDED', discarded_at = NOW()
+                     WHERE pipeline_id = (SELECT id FROM pipelines WHERE name = 'retired_name')
+                    """.trimIndent(),
+                )
             }
             insertPipeline("retired_name", secondWorkspace) // legal in the other workspace
             shouldThrow<SQLException> { insertPipeline("retired_name", DEFAULT_WORKSPACE_UUID) }

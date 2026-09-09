@@ -2,10 +2,10 @@ package co.datapipelines.pipeline
 
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
-import io.kotest.matchers.collections.shouldNotBeEmpty
 import org.junit.jupiter.api.Test
 
 /**
@@ -66,13 +66,22 @@ class VersioningSpecDriftTest {
         /** §3.5.1's ten version-set shapes. */
         val SHAPES =
             listOf(
-                "{D}", "{R}", "{R,D}", "{R,R}", "{R,R,D}",
-                "{R,X}", "{X,D}", "{X,X}", "{X,X,D}", "{R,X,D}",
+                "{D}",
+                "{R}",
+                "{R,D}",
+                "{R,R}",
+                "{R,R,D}",
+                "{R,X}",
+                "{X,D}",
+                "{X,X}",
+                "{X,X,D}",
+                "{R,X,D}",
             )
 
         /** Every code the services can throw, read from the constants by reflection. */
         fun cataloguedCodes(): Set<String> {
             val codes = mutableSetOf<String>()
+
             fun collect(container: Any) {
                 container::class.nestedClasses.forEach { nested -> nested.objectInstance?.let { collect(it) } }
                 container::class.java.declaredFields

@@ -65,7 +65,16 @@ import kotlin.random.Random
  *   [AuthoringGuard]`(false)` — the capability flag IS the posture (§3.4) — and entities
  *   materialize as import-shaped (released-only) states, the only shape a receiver holds.
  */
-@Suppress("LargeClass") // the acceptance gate in one place, the same argument the repository suite makes
+@Suppress(
+    // The acceptance gate in one place (the repository suite's argument). The model's `step`
+    // is §3 restated as one when-per-event — the honest shape for a rules table; splitting it
+    // per event would scatter one state machine across N functions, and the invariant block
+    // is §13's checklist verbatim.
+    "LargeClass",
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    "NestedBlockDepth",
+)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class VersionLifecycleModelTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -130,13 +139,21 @@ class VersionLifecycleModelTest {
     ) {
         val id = materialize(row.versionsBefore, row.pointerBefore)
         val pinTarget =
-            Regex("pins v(\\d+)").find(row.edge)?.groupValues?.get(1)?.toInt()
+            Regex("pins v(\\d+)")
+                .find(row.edge)
+                ?.groupValues
+                ?.get(1)
+                ?.toInt()
                 ?: if (row.outcome.contains("pinned")) {
-                    Regex("\\(v(\\d+)").find(row.event)?.groupValues?.get(1)?.toInt()
+                    Regex("\\(v(\\d+)")
+                        .find(row.event)
+                        ?.groupValues
+                        ?.get(1)
+                        ?.toInt()
                 } else {
                     null
                 }
-        if (pinTarget != null) insertParentPinning(id, nameOf(id), pinTarget)
+        if (pinTarget != null) insertParentPinning(nameOf(id), pinTarget)
 
         val outcome = fireEvent(id, row.event, posture)
         if (row.allowed) {
@@ -162,7 +179,11 @@ class VersionLifecycleModelTest {
             versions.entries.joinToString(" ") { "${it.key}${it.value}" } shouldBe after.substringBefore("cur=").trim()
         }
         val expectedPointer =
-            Regex("cur=(∅|\\d+)").find(after)?.groupValues?.get(1)?.let { if (it == "∅") null else it.toInt() }
+            Regex("cur=(∅|\\d+)")
+                .find(after)
+                ?.groupValues
+                ?.get(1)
+                ?.let { if (it == "∅") null else it.toInt() }
         withClue("After pointer") { pointer shouldBe expectedPointer }
     }
 
@@ -187,7 +208,12 @@ class VersionLifecycleModelTest {
                         buildString {
                             appendLine("version-lifecycle model violation (seed=$seed, posture=$posture)")
                             appendLine("shrunk counterexample:")
-                            shrunk.events.forEachIndexed { i, ev -> appendLine("  $i. $ev ${if (i == shrunk.index) "-> FAILED here" else ""}") }
+                            shrunk.events.forEachIndexed {
+                                i,
+                                ev,
+                                ->
+                                appendLine("  $i. $ev ${if (i == shrunk.index) "-> FAILED here" else ""}")
+                            }
                             append("expected code=${shrunk.expected} actual=${shrunk.actual}; ")
                             append("expected state=${shrunk.expectedState} actual=${shrunk.actualState}; ")
                             appendLine("diagnostics: ${shrunk.diagnostics}")
@@ -200,7 +226,7 @@ class VersionLifecycleModelTest {
         val seconds = (System.nanoTime() - started) / 1_000_000_000.0
         println(
             "VersionLifecycleModelTest: $sequences sequences/posture, $events events total, " +
-                String.format("%.1fs", seconds),
+                String.format(java.util.Locale.ROOT, "%.1fs", seconds),
         )
     }
 
@@ -268,7 +294,10 @@ class VersionLifecycleModelTest {
                 // Executions first: they reference pipelines WITHOUT a cascade (V1's FK is
                 // NO ACTION — the same order the real entity purge deletes in).
                 jdbc.update(
-                    "DELETE FROM pipeline_executions WHERE pipeline_id IN (SELECT id FROM pipelines WHERE name = :n AND workspace_id = :ws)",
+                    """
+                    DELETE FROM pipeline_executions
+                     WHERE pipeline_id IN (SELECT id FROM pipelines WHERE name = :n AND workspace_id = :ws)
+                    """.trimIndent(),
                     mapOf("n" to shrinkName, "ws" to WORKSPACE),
                 )
                 jdbc.update("DELETE FROM pipelines WHERE name = :n AND workspace_id = :ws", mapOf("n" to shrinkName, "ws" to WORKSPACE))
@@ -286,8 +315,14 @@ class VersionLifecycleModelTest {
                         if (outcome.code != expectedCode || actualState != expectedState) {
                             repro =
                                 SeqFailure(
-                                    failure.seed, trial.toList(), index, expectedCode, outcome.code,
-                                    expectedState, actualState, diagnostics(id),
+                                    failure.seed,
+                                    trial.toList(),
+                                    index,
+                                    expectedCode,
+                                    outcome.code,
+                                    expectedState,
+                                    actualState,
+                                    diagnostics(id),
                                 )
                             return@loop
                         }
@@ -350,21 +385,52 @@ class VersionLifecycleModelTest {
         if (model.gone) return Ev.Noop
         val versions = model.versions.keys.toList()
         return when (random.nextInt(10)) {
-            0 -> Ev.Release
-            1 -> Ev.Discard(versions.random(random))
-            2 -> Ev.Restore(versions.random(random))
-            3 -> Ev.Purge(versions.random(random))
-            4 -> Ev.PurgeEntity
-            5 -> Ev.Switch(versions.random(random))
-            6, 7 -> Ev.Import
-            8 ->
+            0 -> {
+                Ev.Release
+            }
+
+            1 -> {
+                Ev.Discard(versions.random(random))
+            }
+
+            2 -> {
+                Ev.Restore(versions.random(random))
+            }
+
+            3 -> {
+                Ev.Purge(versions.random(random))
+            }
+
+            4 -> {
+                Ev.PurgeEntity
+            }
+
+            5 -> {
+                Ev.Switch(versions.random(random))
+            }
+
+            6, 7 -> {
+                Ev.Import
+            }
+
+            8 -> {
                 model.versions
                     .filterValues { it == 'R' }
                     .keys
                     .randomOrNull(random)
                     ?.let { Ev.AddPin(it) }
-                    ?: Ev.Noop // no released version: a pin would name a draft, which D58 refuses at save
-            else -> Ev.AddExecution(model.versions.filterValues { it != 'X' }.keys.randomOrNull(random) ?: versions.first())
+                    ?: Ev.Noop
+            }
+
+            // no released version: a pin would name a draft, which D58 refuses at save
+            else -> {
+                Ev.AddExecution(
+                    model.versions
+                        .filterValues { it != 'X' }
+                        .keys
+                        .randomOrNull(random) ?: versions.first(),
+                )
+            }
         }
     }
 
@@ -380,11 +446,17 @@ class VersionLifecycleModelTest {
                     CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                     WHERE pp.workspace_id = :ws AND pnode->'pipeline'->>'name' IS NOT NULL""",
                 mapOf("ws" to WORKSPACE),
-            ) { rs, _ -> "${rs.getString("parent")}->${rs.getString("pinned_name")}@${rs.getString("pinned_version")}(${rs.getString("pv_status")})" }
+            ) { rs, _ ->
+                "${rs.getString(
+                    "parent",
+                )}->${rs.getString("pinned_name")}@${rs.getString("pinned_version")}(${rs.getString("pv_status")})"
+            }
         return "rowName=$rowName pinScan(v2)=$scan rawPins=$rawPins"
     }
 
-    private data class Outcome(val code: String?)
+    private data class Outcome(
+        val code: String?,
+    )
 
     /** Fires one event at the REAL surface, normalizing the outcome to a code-or-null. */
     private fun applyEvent(
@@ -394,42 +466,53 @@ class VersionLifecycleModelTest {
     ): Outcome =
         try {
             when (ev) {
-                Ev.Noop -> Outcome(null)
+                Ev.Noop -> {
+                    Outcome(null)
+                }
+
                 Ev.Release -> {
                     val draft = repository.findDraftDetail(WORKSPACE, id)
                     service.release(WORKSPACE, id, draft?.bodyHash ?: "irrelevant", actor)
                     Outcome(null)
                 }
+
                 is Ev.Discard -> {
                     service.discardVersion(WORKSPACE, id, ev.version, actor)
                     Outcome(null)
                 }
+
                 is Ev.Restore -> {
                     service.restoreVersion(WORKSPACE, id, ev.version)
                     Outcome(null)
                 }
+
                 is Ev.Purge -> {
                     service.purgeVersion(WORKSPACE, id, ev.version)
                     Outcome(null)
                 }
+
                 Ev.PurgeEntity -> {
                     service.purgeEntity(WORKSPACE, id, includeExclusiveDraftTemplates = false)
                     Outcome(null)
                 }
+
                 is Ev.Switch -> {
                     service.switchCurrent(WORKSPACE, id, ev.version)
                     Outcome(null)
                 }
+
                 Ev.Import -> {
                     val next = (readState(id).first.keys.maxOrNull() ?: 0) + 1
                     val body = pipelineBody(nameOf(id), next)
                     repository.appendReleasedVersion(WORKSPACE, id, deserializer.readOrThrow(body), body, actor)
                     Outcome(null)
                 }
+
                 is Ev.AddPin -> {
-                    insertParentPinning(id, nameOf(id), ev.version)
+                    insertParentPinning(nameOf(id), ev.version)
                     Outcome(null)
                 }
+
                 is Ev.AddExecution -> {
                     insertExecution(id, ev.version)
                     Outcome(null)
@@ -446,7 +529,12 @@ class VersionLifecycleModelTest {
         posture: String,
     ): Outcome {
         val service = if (posture == "dev") dev else hard
-        val version = Regex("v(\\d+)").find(eventCell)?.groupValues?.get(1)?.toInt()
+        val version =
+            Regex("v(\\d+)")
+                .find(eventCell)
+                ?.groupValues
+                ?.get(1)
+                ?.toInt()
         return try {
             when {
                 eventCell.startsWith("release") -> {
@@ -454,33 +542,42 @@ class VersionLifecycleModelTest {
                     service.release(WORKSPACE, id, draft?.bodyHash ?: "irrelevant", actor)
                     Outcome(null)
                 }
+
                 eventCell.startsWith("discard") -> {
                     service.discardVersion(WORKSPACE, id, checkNotNull(version), actor)
                     Outcome(null)
                 }
+
                 eventCell.startsWith("restore") -> {
                     service.restoreVersion(WORKSPACE, id, checkNotNull(version))
                     Outcome(null)
                 }
+
                 eventCell.startsWith("purge(entity)") -> {
                     service.purgeEntity(WORKSPACE, id, includeExclusiveDraftTemplates = false)
                     Outcome(null)
                 }
+
                 eventCell.startsWith("purge") -> {
                     service.purgeVersion(WORKSPACE, id, checkNotNull(version))
                     Outcome(null)
                 }
+
                 eventCell.startsWith("switch") -> {
                     service.switchCurrent(WORKSPACE, id, checkNotNull(version))
                     Outcome(null)
                 }
+
                 eventCell.startsWith("import") -> {
                     val next = (readState(id).first.keys.maxOrNull() ?: 0) + 1
                     val body = pipelineBody(nameOf(id), next)
                     repository.appendReleasedVersion(WORKSPACE, id, deserializer.readOrThrow(body), body, actor)
                     Outcome(null)
                 }
-                else -> throw IllegalStateException("unparsed event cell: $eventCell")
+
+                else -> {
+                    error("unparsed event cell: $eventCell")
+                }
             }
         } catch (e: DatapipelinesException) {
             Outcome(e.code)
@@ -633,7 +730,7 @@ class VersionLifecycleModelTest {
             "DRAFT" -> 'D'
             "RELEASED" -> 'R'
             "DISCARDED" -> 'X'
-            else -> throw IllegalStateException("unknown status $status")
+            else -> error("unknown status $status")
         }
 
     private fun nameOf(id: UUID): String =
@@ -686,7 +783,6 @@ class VersionLifecycleModelTest {
 
     /** A live parent DRAFT version whose body exact-pins `child@version` (graph rule 1's edge). */
     private fun insertParentPinning(
-        childId: UUID,
         childName: String,
         version: Int,
     ) {
@@ -814,6 +910,13 @@ class VersionLifecycleModelTest {
 // -------------------------------------------------------------------------------------------------
 
 /** §3's rules over [VersionLifecycleModelTest.Ev]'s event set. */
+@Suppress(
+    // §3 as one when-per-event — the honest shape for a rules table; the whole file is the
+    // acceptance gate, and splitting the machine per event would scatter one state machine.
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    "NestedBlockDepth",
+)
 internal class RefModel(
     private val developmentPosture: Boolean,
 ) {
@@ -850,11 +953,13 @@ internal class RefModel(
     ): Pair<String?, State> {
         if (state.gone) return null to state
 
-        fun requireAuthoring(): String? =
-            if (developmentPosture) null else PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+        fun requireAuthoring(): String? = if (developmentPosture) null else PipelineErrorCodes.Versioning.AUTHORING_DISABLED
 
         return when (ev) {
-            VersionLifecycleModelTest.Ev.Noop -> null to state
+            VersionLifecycleModelTest.Ev.Noop -> {
+                null to state
+            }
+
             VersionLifecycleModelTest.Ev.Release -> {
                 val refused = requireAuthoring()
                 if (refused != null) {
@@ -870,15 +975,28 @@ internal class RefModel(
                     }
                 }
             }
+
             is VersionLifecycleModelTest.Ev.Discard -> {
                 val refused = requireAuthoring()
                 when {
-                    refused != null -> refused to state
-                    ev.version !in state.versions -> PipelineErrorCodes.Execution.NOT_FOUND to state
-                    state.versions[ev.version] != 'R' -> PipelineErrorCodes.Versioning.NOT_RELEASED to state
+                    refused != null -> {
+                        refused to state
+                    }
+
+                    ev.version !in state.versions -> {
+                        PipelineErrorCodes.Execution.NOT_FOUND to state
+                    }
+
+                    state.versions[ev.version] != 'R' -> {
+                        PipelineErrorCodes.Versioning.NOT_RELEASED to state
+                    }
+
                     // Graph rule 1: a live parent's exact pin refuses the discard (the
                     // service's statement guard and this model rule are the same rule).
-                    ev.version in state.pinned -> PipelineErrorCodes.Versioning.PINNED to state
+                    ev.version in state.pinned -> {
+                        PipelineErrorCodes.Versioning.PINNED to state
+                    }
+
                     else -> {
                         val next = LinkedHashMap(state.versions)
                         next[ev.version] = 'X'
@@ -892,12 +1010,22 @@ internal class RefModel(
                     }
                 }
             }
+
             is VersionLifecycleModelTest.Ev.Restore -> {
                 val refused = requireAuthoring()
                 when {
-                    refused != null -> refused to state
-                    ev.version !in state.versions -> PipelineErrorCodes.Execution.NOT_FOUND to state
-                    state.versions[ev.version] != 'X' -> PipelineErrorCodes.Versioning.NOT_DISCARDED to state
+                    refused != null -> {
+                        refused to state
+                    }
+
+                    ev.version !in state.versions -> {
+                        PipelineErrorCodes.Execution.NOT_FOUND to state
+                    }
+
+                    state.versions[ev.version] != 'X' -> {
+                        PipelineErrorCodes.Versioning.NOT_DISCARDED to state
+                    }
+
                     else -> {
                         val next = LinkedHashMap(state.versions)
                         next[ev.version] = 'R'
@@ -907,12 +1035,22 @@ internal class RefModel(
                     }
                 }
             }
+
             is VersionLifecycleModelTest.Ev.Purge -> {
                 val refused = requireAuthoring()
                 when {
-                    refused != null -> refused to state
-                    ev.version !in state.versions -> PipelineErrorCodes.Execution.NOT_FOUND to state
-                    state.versions[ev.version] != 'D' -> PipelineErrorCodes.Versioning.LAST_RELEASE to state
+                    refused != null -> {
+                        refused to state
+                    }
+
+                    ev.version !in state.versions -> {
+                        PipelineErrorCodes.Execution.NOT_FOUND to state
+                    }
+
+                    state.versions[ev.version] != 'D' -> {
+                        PipelineErrorCodes.Versioning.LAST_RELEASE to state
+                    }
+
                     else -> {
                         val next = LinkedHashMap(state.versions)
                         next.remove(ev.version)
@@ -925,21 +1063,32 @@ internal class RefModel(
                     }
                 }
             }
+
             VersionLifecycleModelTest.Ev.PurgeEntity -> {
                 val refused = requireAuthoring()
                 when {
-                    refused != null -> refused to state
-                    state.versions.size != 1 || state.versions.values.single() != 'D' ->
+                    refused != null -> {
+                        refused to state
+                    }
+
+                    state.versions.size != 1 || state.versions.values.single() != 'D' -> {
                         PipelineErrorCodes.Versioning.LAST_RELEASE to state
-                    else -> null to State(LinkedHashMap(), null, gone = true, state.pinned)
+                    }
+
+                    else -> {
+                        null to State(LinkedHashMap(), null, gone = true, state.pinned)
+                    }
                 }
             }
-            is VersionLifecycleModelTest.Ev.Switch ->
+
+            is VersionLifecycleModelTest.Ev.Switch -> {
                 when {
                     ev.version !in state.versions -> PipelineErrorCodes.Execution.NOT_FOUND to state
                     !eligible(state.versions[ev.version]) -> PipelineErrorCodes.Versioning.NOT_ELIGIBLE to state
                     else -> null to State(LinkedHashMap(state.versions), ev.version, false, state.pinned)
                 }
+            }
+
             VersionLifecycleModelTest.Ev.Import -> {
                 // Version-less import: allocation max+1, pointer set only when NULL (D60).
                 val nextNumber = (state.versions.keys.maxOrNull() ?: 0) + 1
@@ -947,6 +1096,7 @@ internal class RefModel(
                 next[nextNumber] = 'R'
                 null to State(next, state.pointer ?: nextNumber, false, state.pinned)
             }
+
             // Environment events, not lifecycle verbs — the state they touch is asserted by
             // the invariants (pin targets stay live; purge clears executions).
             is VersionLifecycleModelTest.Ev.AddPin -> {
@@ -954,7 +1104,10 @@ internal class RefModel(
                 // its parent goes (nothing in a sequence touches parents).
                 null to State(LinkedHashMap(state.versions), state.pointer, state.gone, state.pinned + ev.version)
             }
-            is VersionLifecycleModelTest.Ev.AddExecution -> null to state
+
+            is VersionLifecycleModelTest.Ev.AddExecution -> {
+                null to state
+            }
         }
     }
 

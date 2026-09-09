@@ -92,6 +92,10 @@ import java.util.UUID
  * `TransactionRollbackIntegrationTest` guards both — it asserts every bean with a
  * `@Transactional` method is a proxy AND that no such target declares a `final` public method.
  */
+@Suppress(
+    "TooManyFunctions", // the aggregate's one-stop use-case surface (S5/R6); the 101 verbs grew it
+    "ThrowsCount", // each refusal is a distinct catalogued code the caller distinguishes — the boundary's shape
+)
 open class PipelineService(
     private val pipelines: PipelineRepository,
     private val validator: PipelineValidator,
@@ -714,11 +718,6 @@ open class PipelineService(
         record: PipelineRecord,
     ): List<String> = draftTemplates.exclusiveIds(workspaceId, record.id)
 
-    private fun reRead(
-        workspaceId: UUID,
-        pipelineId: UUID,
-    ): PipelineRecord = pipelines.findById(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
-
     /** Graph rule 1's service-side arm: names the pinning entities in `details`. */
     private fun refuseIfPinned(
         workspaceId: UUID,
@@ -731,6 +730,7 @@ open class PipelineService(
         }
     }
 
+    @Suppress("UnusedParameter") // workspaceId rides for a future per-workspace pin report
     private fun pinned(
         workspaceId: UUID,
         record: PipelineRecord,
@@ -746,11 +746,15 @@ open class PipelineService(
                 mapOf(
                     "pipeline_id" to record.id.toString(),
                     "version" to version,
-                    "pinned_by" to pinners.map { mapOf("pipeline" to it.pipelineName, "version" to it.pipelineVersion, "node" to it.nodeId) },
+                    "pinned_by" to
+                        pinners.map { mapOf("pipeline" to it.pipelineName, "version" to it.pipelineVersion, "node" to it.nodeId) },
                 ),
         )
 
-    /** The discard statement returned zero rows after the service-side guard passed: a pin landed in between, or a concurrent discard won. */
+    /**
+     * The discard statement returned zero rows after the service-side guard passed: a pin
+     * landed in between, or a concurrent discard won.
+     */
     private fun pinnedOrConcurrent(
         workspaceId: UUID,
         record: PipelineRecord,
@@ -760,12 +764,17 @@ open class PipelineService(
         if (pinners.isNotEmpty()) return pinned(workspaceId, record, version, pinners)
         val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
         return when (current.status) {
-            PipelineVersionStatus.RELEASED -> DatapipelinesException(
-                code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
-                message = "Pipeline was modified by someone else after you loaded it.",
-                details = mapOf("current_status" to current.status.name),
-            )
-            else -> notReleased(record.id, version, current.status)
+            PipelineVersionStatus.RELEASED -> {
+                DatapipelinesException(
+                    code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
+                    message = "Pipeline was modified by someone else after you loaded it.",
+                    details = mapOf("current_status" to current.status.name),
+                )
+            }
+
+            else -> {
+                notReleased(record.id, version, current.status)
+            }
         }
     }
 

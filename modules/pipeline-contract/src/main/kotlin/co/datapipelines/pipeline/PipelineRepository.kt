@@ -129,7 +129,7 @@ data class DatasourceRef(
  * paths, and both import modes — and splitting it would scatter one table's invariants
  * across files (the `DatasourceRepository` precedent for the same shape).
  */
-@Suppress("TooManyFunctions") // see the KDoc above
+@Suppress("TooManyFunctions", "LargeClass") // see the KDoc above
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
@@ -797,15 +797,17 @@ class PipelineRepository(
             )
 
         val purged =
-            jdbc.query(
-                // The target must be a DRAFT of this workspace's pipeline; RETURNING names it.
-                "DELETE FROM pipeline_versions v" +
-                    " USING pipelines p" +
-                    " WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT'$hashGuard" +
-                    " AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId" +
-                    " RETURNING v.version",
-                params,
-            ) { rs, _ -> rs.getInt("version") }.singleOrNull() ?: return null
+            jdbc
+                .query(
+                    // The target must be a DRAFT of this workspace's pipeline; RETURNING names it.
+                    "DELETE FROM pipeline_versions v" +
+                        " USING pipelines p" +
+                        " WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT'$hashGuard" +
+                        " AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId" +
+                        " RETURNING v.version",
+                    params,
+                ) { rs, _ -> rs.getInt("version") }
+                .singleOrNull() ?: return null
 
         val remaining =
             checkNotNull(
@@ -968,6 +970,7 @@ class PipelineRepository(
      * composition resolver's flag ([findByNameAnyStatus] + this) and any listing that
      * needs the status ask this; there is no stored column to read instead (V19).
      */
+    @Suppress("UnusedParameter") // signature symmetry with the other reads; the id alone decides
     fun hasLiveVersion(
         workspaceId: UUID,
         pipelineId: UUID,
@@ -1819,20 +1822,21 @@ class PipelineRepository(
                     currentVersion = rs.getInt("b_current_version").takeUnless { rs.wasNull() },
                     createdAt = rs.getObject("b_created_at", OffsetDateTime::class.java).toInstant(),
                     updatedAt = rs.getObject("b_updated_at", OffsetDateTime::class.java).toInstant(),
-                ) to PipelineVersionDetail(
-                    pipelineId = rs.getObject("f_pipeline_id", UUID::class.java),
-                    version = rs.getInt("f_version"),
-                    status = PipelineVersionStatus.fromWire(rs.getString("f_status")),
-                    bodyHash = rs.getString("f_body_hash"),
-                    createdAt = rs.getObject("f_created_at", OffsetDateTime::class.java).toInstant(),
-                    createdBy = rs.getObject("f_created_by", UUID::class.java),
-                    releasedAt = rs.getObject("f_released_at", OffsetDateTime::class.java)?.toInstant(),
-                    releasedBy = rs.getObject("f_released_by", UUID::class.java),
-                    discardedAt = rs.getObject("f_discarded_at", OffsetDateTime::class.java)?.toInstant(),
-                    discardedBy = rs.getObject("f_discarded_by", UUID::class.java),
-                    updatedBy = rs.getObject("f_updated_by", UUID::class.java),
-                    updatedAt = rs.getObject("f_updated_at", OffsetDateTime::class.java)?.toInstant(),
-                )
+                ) to
+                    PipelineVersionDetail(
+                        pipelineId = rs.getObject("f_pipeline_id", UUID::class.java),
+                        version = rs.getInt("f_version"),
+                        status = PipelineVersionStatus.fromWire(rs.getString("f_status")),
+                        bodyHash = rs.getString("f_body_hash"),
+                        createdAt = rs.getObject("f_created_at", OffsetDateTime::class.java).toInstant(),
+                        createdBy = rs.getObject("f_created_by", UUID::class.java),
+                        releasedAt = rs.getObject("f_released_at", OffsetDateTime::class.java)?.toInstant(),
+                        releasedBy = rs.getObject("f_released_by", UUID::class.java),
+                        discardedAt = rs.getObject("f_discarded_at", OffsetDateTime::class.java)?.toInstant(),
+                        discardedBy = rs.getObject("f_discarded_by", UUID::class.java),
+                        updatedBy = rs.getObject("f_updated_by", UUID::class.java),
+                        updatedAt = rs.getObject("f_updated_at", OffsetDateTime::class.java)?.toInstant(),
+                    )
             }
 
         /** [RELEASE_DRAFT_SQL]'s joined projection: the bumped record (b_) beside the released version (l_). */

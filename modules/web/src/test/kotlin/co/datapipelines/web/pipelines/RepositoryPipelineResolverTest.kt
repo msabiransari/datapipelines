@@ -6,9 +6,9 @@ import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineSettings
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRepoFiles
@@ -121,7 +121,14 @@ class RepositoryPipelineResolverTest {
         val record = save(childPipeline("resolver_deleted"))
         // 101: the derived entity status — discard the only release through the real verb.
         checkNotNull(
-            pipelines.discardVersion(DEFAULT_WORKSPACE_ID, record.id, record.name, checkNotNull(record.currentVersion), userId, draftEligible = true),
+            pipelines.discardVersion(
+                DEFAULT_WORKSPACE_ID,
+                record.id,
+                record.name,
+                checkNotNull(record.currentVersion),
+                userId,
+                draftEligible = true,
+            ),
         )
 
         val resolved = repositoryPipelineResolver(pipelines).resolve(DEFAULT_WORKSPACE_ID, "resolver_deleted", 1)

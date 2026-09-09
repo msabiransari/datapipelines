@@ -1,13 +1,15 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -62,7 +64,10 @@ class PipelineServiceIntegrationTest {
         service = serviceWith(AuthoringGuard(true))
     }
 
-    private fun serviceWith(authoring: AuthoringGuard): PipelineService {
+    private fun serviceWith(
+        authoring: AuthoringGuard,
+        draftTemplates: ExclusiveDraftTemplates = emptyDraftTemplates(),
+    ): PipelineService {
         val validator = Fixtures.validator()
         return PipelineService(
             pipelines = repository,
@@ -81,23 +86,23 @@ class PipelineServiceIntegrationTest {
                     authoring,
                 ),
             authoring = authoring,
-            // 101: the entity purge's exclusive-draft-templates port. This suite's fixtures
-            // pin no templates, so the offer is always empty — the exclusive computation's own
-            // coverage lives where templates exist (web/integration).
-            draftTemplates =
-                object : ExclusiveDraftTemplates {
-                    override fun exclusiveIds(
-                        workspaceId: java.util.UUID,
-                        pipelineId: java.util.UUID,
-                    ) = emptyList<String>()
-
-                    override fun purge(
-                        workspaceId: java.util.UUID,
-                        templateId: String,
-                    ) = Unit
-                },
+            draftTemplates = draftTemplates,
         )
     }
+
+    /** 101: the purge port's default double — an always-empty offer (fixtures pin no templates). */
+    private fun emptyDraftTemplates(): ExclusiveDraftTemplates =
+        object : ExclusiveDraftTemplates {
+            override fun exclusiveIds(
+                workspaceId: java.util.UUID,
+                pipelineId: java.util.UUID,
+            ) = emptyList<String>()
+
+            override fun purge(
+                workspaceId: java.util.UUID,
+                templateId: String,
+            ) = Unit
+        }
 
     // ---------------------------------------------------------------- D1: save validation, once
 
@@ -476,6 +481,131 @@ class PipelineServiceIntegrationTest {
         withClue("badges cover the rows RETURNED, and only those") {
             page.drafts.keys.all { key -> key in page.items.map { it.id } } shouldBe true
         }
+    }
+
+    @Test
+    fun `the read surface - datasource filter, browseLevel, versioned reads - answers in one place`() {
+        // 101: these pre-existing reads lost their in-module coverage share when the verbs
+        // grew the module; this test pins them where they live (the web controllers' tests
+        // exercise them through HTTP, which this module's kover cannot see).
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
+
+        withClue("list by datasource name resolves through the repository's pushed-down filter") {
+            service.list(WORKSPACE_ID, datasourceName = "pg-prod").map { it.name } shouldContainExactly listOf("test/monthly_revenue")
+            service.list(WORKSPACE_ID, datasourceName = "nope").shouldBeEmpty()
+        }
+        withClue("page with q filters in memory with a truthful total") {
+            val page = service.page(WORKSPACE_ID, "monthly", 0, 10)
+            page.total shouldBe 1
+            page.hasMore shouldBe false
+        }
+        withClue("browseLevel answers one level and treats an illegal prefix as empty") {
+            // The root's level shows `test` as a FOLDER; the pipeline is the `test` prefix's leaf.
+            service.browseLevel(WORKSPACE_ID, null).pipelines.shouldBeEmpty()
+            service.browseLevel(WORKSPACE_ID, "test").pipelines.map { it.name } shouldContainExactly listOf("test/monthly_revenue")
+            service.browseLevel(WORKSPACE_ID, "not a legal prefix!!").pipelines.shouldBeEmpty()
+        }
+        val record = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
+        withClue("the versioned reads compose record, body and detail") {
+            service.findVersion(WORKSPACE_ID, record, 1)?.bodyJson shouldNotBe null
+            service.findVersionBody(WORKSPACE_ID, record.id, 1) shouldNotBe null
+            service.findExecutable(WORKSPACE_ID, record, 1)?.pipeline shouldNotBe null
+            service.findDrafts(WORKSPACE_ID, listOf(record.id)) shouldBe emptyMap()
+            service.findCurrentVersion(WORKSPACE_ID, record.id)?.version shouldBe 1
+        }
+    }
+
+    @Test
+    fun `the version verbs answer not_found for unknown versions and last_release for released entities`() {
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
+
+        val unknown = 99
+        val thrownByVerb =
+            mapOf(
+                "discard" to
+                    shouldThrow<DatapipelinesException> {
+                        service.discardVersion(
+                            WORKSPACE_ID,
+                            created.record.id,
+                            unknown,
+                            owner,
+                        )
+                    },
+                "restore" to shouldThrow<DatapipelinesException> { service.restoreVersion(WORKSPACE_ID, created.record.id, unknown) },
+                "purge" to shouldThrow<DatapipelinesException> { service.purgeVersion(WORKSPACE_ID, created.record.id, unknown) },
+                "switch" to shouldThrow<DatapipelinesException> { service.switchCurrent(WORKSPACE_ID, created.record.id, unknown) },
+            )
+        thrownByVerb.forEach { (verb, thrown) ->
+            withClue("$verb(unknown) is the catalogued 404") {
+                thrown.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
+            }
+        }
+
+        withClue("a released version is never purged - last_release (D57)") {
+            shouldThrow<DatapipelinesException> { service.purgeVersion(WORKSPACE_ID, created.record.id, 1) }
+                .code shouldBe PipelineErrorCodes.Versioning.LAST_RELEASE
+        }
+        withClue("the entity purge on a released entity refuses last_release, keeping restore alive") {
+            shouldThrow<DatapipelinesException> { service.purgeEntity(WORKSPACE_ID, created.record.id) }
+                .code shouldBe PipelineErrorCodes.Versioning.LAST_RELEASE
+        }
+    }
+
+    @Test
+    fun `the lifecycle read helpers - any-status lookup, live probe, pin scans, row delete`() {
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
+        val id = created.record.id
+
+        withClue("findByIdAnyStatus reaches live and discarded entities alike") {
+            checkNotNull(repository.findByIdAnyStatus(WORKSPACE_ID, id))
+            checkNotNull(
+                repository.discardVersion(WORKSPACE_ID, id, created.record.name, 1, owner, draftEligible = true),
+            )
+            checkNotNull(repository.findByIdAnyStatus(WORKSPACE_ID, id))
+            repository.findById(WORKSPACE_ID, id).shouldBeNull()
+        }
+        withClue("hasLiveVersion is the §3.2 derivation") {
+            repository.hasLiveVersion(WORKSPACE_ID, id) shouldBe false
+        }
+        withClue("the pin scans answer empty without parents and the row delete is final") {
+            repository.findLiveParentsPinningVersion(WORKSPACE_ID, created.record.name, 1) shouldBe emptyList()
+            repository.findLiveVersionsPinningTemplateVersion(WORKSPACE_ID, "test/fetch_orders.sql", 1) shouldBe emptyList()
+            repository.deletePipelineRow(WORKSPACE_ID, id) shouldBe true
+            repository.deletePipelineRow(WORKSPACE_ID, id) shouldBe false
+        }
+    }
+
+    @Test
+    fun `purgeEntity with include_exclusive_draft_templates purges the offered set`() {
+        val offered = mutableListOf<String>()
+        val serviceWithOffer =
+            serviceWith(
+                AuthoringGuard(true),
+                draftTemplates =
+                    object : ExclusiveDraftTemplates {
+                        override fun exclusiveIds(
+                            workspaceId: java.util.UUID,
+                            pipelineId: java.util.UUID,
+                        ) = listOf("test/only_mine.sql")
+
+                        override fun purge(
+                            workspaceId: java.util.UUID,
+                            templateId: String,
+                        ) {
+                            offered.add(templateId)
+                        }
+                    },
+            )
+
+        val created = serviceWithOffer.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val result = serviceWithOffer.purgeEntity(WORKSPACE_ID, created.record.id, includeExclusiveDraftTemplates = true)
+
+        offered shouldContainExactly listOf("test/only_mine.sql")
+        result.exclusiveDraftTemplates shouldContainExactly listOf("test/only_mine.sql")
+        result.exclusiveTemplatesPurged shouldBe true
     }
 
     @Test

@@ -97,6 +97,23 @@ internal object CompositionRules {
             )
         }
         val resolved = resolve(ref, pipelines, workspaceId, index, into) ?: return
+        checkReferenceLifecycle(index, node, ref, resolved, into)
+        checkParameters(pipeline, index, node, resolved.pipeline, org, into)
+        checkOutput(index, node, resolved.pipeline, into)
+    }
+
+    /**
+     * §12.9's reference lifecycle (D7 + 101's D58): a discarded entity blocks NEW references,
+     * and a pin must name a RELEASED child version — a DRAFT child can be purged out from
+     * under its parent, which an exact-version pin must never allow.
+     */
+    private fun checkReferenceLifecycle(
+        index: Int,
+        node: Node,
+        ref: PipelineNodeRef,
+        resolved: ResolvedPipeline,
+        into: FailureCollector,
+    ) {
         if (resolved.entityDiscarded) {
             into.add(
                 Validation.PIPELINE_REFERENCE_DELETED,
@@ -106,9 +123,6 @@ internal object CompositionRules {
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
             )
         }
-        // D58 (101): composition references reviewed content only. A DRAFT child can be purged
-        // out from under its parent, and a DISCARDED child is retired — an exact-version pin
-        // must never name either.
         if (resolved.versionStatus != PipelineVersionStatus.RELEASED) {
             into.add(
                 Validation.PIPELINE_REFERENCE_NOT_RELEASED,
@@ -124,8 +138,6 @@ internal object CompositionRules {
                 ),
             )
         }
-        checkParameters(pipeline, index, node, resolved.pipeline, org, into)
-        checkOutput(index, node, resolved.pipeline, into)
     }
 
     /**

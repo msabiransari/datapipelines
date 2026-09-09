@@ -12,11 +12,11 @@ import co.datapipelines.pipeline.PipelineFolder
 import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
-import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
@@ -413,7 +413,7 @@ class PipelinesControllerTest {
     @Test
     fun `delete - the entity purge - succeeds and answers the exclusive-template offer`() {
         authenticate()
-        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findByIdAnyStatus(any(), pipelineId) } returns record
         every { repository.listVersions(any(), pipelineId) } returns
             listOf(
                 PipelineVersionRecord(pipelineId, 1, PipelineVersionStatus.DRAFT, "h", Instant.EPOCH, userId),
@@ -422,7 +422,8 @@ class PipelinesControllerTest {
             PipelineVersionDetail(pipelineId, 1, PipelineVersionStatus.DRAFT, "h", Instant.EPOCH, userId)
         every { repository.findLiveParentsPinningVersion(any(), record.name, 1) } returns emptyList()
         every { repository.purgeDraft(any(), pipelineId, null, true) } returns
-            co.datapipelines.pipeline.PurgeOutcome.EntityPurged(0)
+            co.datapipelines.pipeline.PurgeOutcome
+                .EntityPurged(0)
 
         val response = controller.delete(pipelineId)
 

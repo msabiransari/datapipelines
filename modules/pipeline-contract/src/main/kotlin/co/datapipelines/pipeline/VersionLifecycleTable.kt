@@ -15,6 +15,12 @@ package co.datapipelines.pipeline
  * Plain string ops, no markdown dependency — the `ScopeMatrixSpecDriftTest` mechanism.
  */
 object VersionLifecycleTable {
+    /** [parse]'s search offset: skip the newline that ends the §3.5.2 heading line. */
+    private const val SKIP_HEADING_NEWLINE = 1
+
+    /** The table's column count (Shape|Before|Event|Posture|Edge|Outcome|After|Entity). */
+    private const val COLUMN_COUNT = 8
+
     /** One parsed row of §3.5.2. Field names mirror the table's column headers. */
     data class Row(
         val shape: String,
@@ -36,7 +42,11 @@ object VersionLifecycleTable {
 
         /** The Before cell's pointer; `∅` (or absence) means NULL. */
         val pointerBefore: Int? by lazy {
-            Regex("cur=(∅|\\d+)").find(before)?.groupValues?.get(1)?.let { if (it == "∅") null else it.toInt() }
+            Regex("cur=(∅|\\d+)")
+                .find(before)
+                ?.groupValues
+                ?.get(1)
+                ?.let { if (it == "∅") null else it.toInt() }
         }
 
         /** Every error code the Outcome cell cites (template twins included). */
@@ -54,18 +64,22 @@ object VersionLifecycleTable {
      */
     fun parse(docText: String): List<Row> {
         val start =
-            docText.indexOf("#### 3.5.2")
+            docText
+                .indexOf("#### 3.5.2")
                 .let { if (it < 0) return emptyList() else docText.indexOf('\n', it) }
         val rest = docText.substring(start)
         val end =
-            Regex("^#{2,4} ", RegexOption.MULTILINE).find(rest, 1)?.range?.start ?: rest.length
+            Regex("^#{2,4} ", RegexOption.MULTILINE)
+                .find(rest, SKIP_HEADING_NEWLINE)
+                ?.range
+                ?.start ?: rest.length
         return rest
             .substring(0, end)
             .lineSequence()
             .map { it.trim() }
             .filter { it.startsWith("|") }
             .map { it.trim('|').split("|").map(String::trim) }
-            .filter { it.size == 8 }
+            .filter { it.size == COLUMN_COUNT }
             .filterNot { it[0] == "Shape" || it[0].startsWith("---") }
             .map { cells ->
                 Row(
@@ -79,8 +93,7 @@ object VersionLifecycleTable {
                     after = cells[6],
                     entity = cells[7],
                 )
-            }
-            .toList()
+            }.toList()
     }
 
     /** `1R 2X 3D` → {1:'R', 2:'X', 3:'D'}; anything after `cur=` is not a version token. */
