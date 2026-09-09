@@ -118,6 +118,26 @@
        for EVERY request, boosted or partial (ui-screens.md §5.1). -->
   <div id="app-progress" class="app-progress" aria-hidden="true"></div>
 
+  <!-- 103 §A: the status pill. #app-progress says "the server is working" at the
+       top of the window; this says "your click landed" in words, and only after
+       150ms of waiting so a fast swap never flashes it (shell.js owns the arm).
+       It is `hidden` when off rather than merely transparent: an aria-live region
+       announces when its content BECOMES rendered, and a permanently-rendered
+       region with unchanging text announces nothing. One element, class-toggled,
+       no inline style (079 §D). -->
+  <div id="app-status-pill" class="app-status-pill" role="status" aria-live="polite" hidden>
+    <span class="app-status-pill-spinner" aria-hidden="true"></span><span>Loading&hellip;</span>
+  </div>
+
+  <!-- 103 §C: the ground. A fixed, non-interactive backdrop behind the whole
+       shell — the login ceremony's idiom (`.app-auth-stage`) carried into the
+       app: the editor's dot grid at very low contrast plus one soft brand glow
+       at the top-left. It is an ELEMENT rather than a `body` background because
+       it must not scroll with the content and must sit under the shell's own
+       opaque surfaces (the rail, the top bar, the cards), which is a paint
+       order, not a background. Tokens only, both themes, every palette. -->
+  <div class="app-backdrop" aria-hidden="true"></div>
+
   <!-- The notification stack (ui-screens.md §5.1): htmx appends server-rendered
        partials/toast fragments here (hx-swap="beforeend"); toast.js arms each.
        The stack lives OUTSIDE #app-main so it persists across boosted swaps

@@ -1129,8 +1129,13 @@ button.app-busy::after {
    holding. Scoped to .app-main so the marketing site, which never loads this
    file, is untouched either way. */
 .app-main .ds-headline {
-  font-size: var(--text-xl);
+  /* 103 §D: one step up the scale, with the weight/tracking/leading that make
+     Inter read as a title rather than as large body text. The owner ruled Inter
+     and no second face (2026-09-08), so this is the whole instrument. */
+  font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
 }
 
 .app-main .ds-title {
@@ -2477,5 +2482,243 @@ button.app-busy::after {
     animation: none;
     stroke-dasharray: none;
     stroke: var(--edge);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   103 — THE SHELL FEELS NATIVE (ui-screens.md §3.5).
+
+   Measured against algoschool.app (owner, 2026-09-08; notes T195): that app has
+   ZERO hx-boost — every navigation is a full document load — and still reads as
+   the more native of the two. What it has that we did not is a FEEDBACK AND
+   ATMOSPHERE layer: a click-time pending state, a fixed radial-glow ground,
+   entrance motion on arrival, heading weight, and consistent elevation. We were
+   already the more SPA of the two architecturally and gave none of it. Nothing
+   below changes the architecture: no router, no view-transitions dependency, no
+   library — CSS plus the state machine in shell.js.
+   --------------------------------------------------------------------------- */
+
+/* --- §A the click is acknowledged ---------------------------------------- */
+
+/* The pended link: dimmed, non-interactive, and saying so with the cursor. The
+   `aria-disabled` is shell.js's (the attribute, never the property — §D's
+   reasoning: a really-disabled control drops focus mid-flight), and the dim is
+   this rule rather than the design system's `.ds-button[aria-disabled]` rule,
+   which a nav <a> never matches. */
+.is-pending {
+  opacity: 0.55;
+  cursor: progress;
+  pointer-events: none;
+}
+
+/* The group the pended link belongs to (the rail's <nav>, the breadcrumb, or
+   #app-main for an in-content link). A navigation is already under way, so the
+   whole group reads as busy rather than inviting a second click — the cursor is
+   the only signal, because dimming ten siblings to say one of them was clicked
+   is noise, not feedback. */
+.is-pending-scope {
+  cursor: progress;
+}
+
+/* The status pill. Fixed under the top bar on the CONTENT side (it clears the
+   rail, collapsed or not — see the second rule below), and `hidden` when off — see the layout. */
+.app-status-pill {
+  position: fixed;
+  top: calc(var(--header-height) + var(--gap-md));
+  left: calc(var(--app-rail-width, 0px) + var(--gap-lg));
+  z-index: var(--z-fixed);
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--space-1-5) var(--gap-sm);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-default);
+  box-shadow: var(--shadow-md);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  pointer-events: none;
+  animation: ds-fade-in var(--duration-fast) var(--ease-out);
+}
+
+/* `--app-rail-width` is overridden on `.app-shell`, and the pill is a fixed
+   sibling OUTSIDE the shell — so it cannot inherit the collapse and is told
+   about it here, on the same `<html>` class the collapse itself lives on. */
+:root.rail-collapsed .app-status-pill {
+  left: calc(var(--app-rail-collapsed) + var(--gap-lg));
+}
+
+.app-status-pill-spinner {
+  width: var(--gap-sm);
+  height: var(--gap-sm);
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent-primary);
+  animation: ds-spin 700ms linear infinite;
+}
+
+/* --- §B the swap arrives with motion ------------------------------------- */
+
+/* 150ms, fade plus a 4px slide-up. TRANSFORM and OPACITY only: neither is laid
+   out, so the entrance cannot move a box and cannot score a layout shift —
+   ExplorerPaneGeometryBrowserTest's 0.05 CLS budget on boosted navigation is
+   what a margin or height animation here would spend. */
+@keyframes app-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.app-enter {
+  animation: app-enter var(--duration-base) var(--ease-out);
+}
+
+/* --- §C the ground has depth --------------------------------------------- */
+
+/* The backdrop element (layouts/default.html). Fixed, inert, and painted at the
+   base layer: the rail, the top bar and every card are opaque surfaces above
+   it, so it shows exactly where the app has nothing — which is the only place
+   atmosphere belongs. The dot grid is the editor's own `--grid-dot` mixed
+   FURTHER toward the page surface (the canvas's grid is a working surface and
+   is meant to be seen; this one is meant to be felt), and the glow is one soft
+   brand radial at the top left, the login stage's idiom. Both are token
+   expressions, so all nine themes get them by construction. */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-base);
+  pointer-events: none;
+  background-color: var(--surface-page);
+  background-image:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--brand) 10%, transparent), transparent 55%),
+    radial-gradient(color-mix(in srgb, var(--grid-dot) 45%, var(--surface-page)) 1.1px, transparent 1.2px);
+  background-size: 100% 100%, 22px 22px;
+}
+
+/* The shell rides above the backdrop. One positioned ancestor is all it takes;
+   nothing inside needs a z-index of its own (the top bar keeps its own
+   `--z-sticky`, the toast stack and the progress bar are fixed siblings
+   OUTSIDE the shell and keep `--z-fixed`/`--z-toast`). */
+.app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+/* Cards read as raised rather than drawn. `--shadow-sm` is the design system's
+   own smallest elevation; the border stays, because ui-screens.md §2 principle
+   8 is normative — a card boundary is a `border-default`-family line, never a
+   shadow alone. */
+.app-main .ds-card {
+  box-shadow: var(--shadow-sm);
+}
+
+/* The hover lift is for cards that DO something: a card that is itself a link,
+   and a card carrying a primary action. A lift on a static card is noise — it
+   promises an affordance that is not there. */
+.app-main a.ds-card,
+.app-main .ds-card:has(.ds-button-primary) {
+  transition:
+    transform var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out);
+}
+
+.app-main a.ds-card:hover,
+.app-main .ds-card:has(.ds-button-primary):hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* --- §D headings carry weight -------------------------------------------- */
+
+/* Inter, bold, tight — one step up the scale from 076's `--text-xl`. The owner
+   ruled Inter and no second face (2026-09-08), so weight, tracking and leading
+   are the whole instrument. It stays a property of `.ds-headline` inside
+   `.app-main`, so no screen picks its own size and TypeScaleAuditTest's ban on
+   inline font-size keeps holding. */
+/* Card and section titles: the size is 076's (a card title must not compete
+   with the page title), the weight and tracking are this round's. */
+.app-main .ds-title,
+.app-main .app-card-h h2 {
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+
+/* The eyebrow, generalised out of the login ceremony's `.app-auth-eyebrow` (its
+   exemplar, unchanged): a small uppercase brand line naming the section a
+   heading belongs to. 0.08em is a literal because it is a TRACKING value for
+   one size, and the design system's `--tracking-wide` (0.025em) is sized for
+   body text — at `--text-xs` uppercase it does not open the word at all. */
+.app-eyebrow {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+/* --- §E inputs and controls transition ----------------------------------- */
+
+/* The design system already transitions `.ds-button` and `.ds-input` colour,
+   border and shadow (primitives.css) — the brief's premise that "nothing in the
+   app applies it" is true of the `.ds-transition` CLASS and not of the effect.
+   What is genuinely missing is here: the press, the rail, and every control in
+   the app that is a bare <select>/<textarea> rather than a `.ds-input`. */
+.app-main .ds-button {
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+/* The press. 1px is the whole gesture: a button that travels further reads as a
+   toy, and one that does not move at all reads as a picture of a button. */
+.app-main .ds-button:active:not([aria-disabled="true"]):not(:disabled) {
+  transform: translateY(1px);
+}
+
+.app-main select:not(.ds-input),
+.app-main textarea:not(.ds-input) {
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+/* The rail. 100ms, background only: the rows are dense and a slower fade makes
+   a pointer crossing the rail leave a comet trail behind it. */
+.app-nav-link {
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+/* Reduced motion. motion.css's own block already collapses every duration token
+   to 0ms and clamps `*` animations to 0.01ms, which is enough to STOP all of
+   the above — but "0.01ms of app-enter" still computes an animation-name, and
+   the entrance's cleanup hangs off `animationend`. Naming `animation: none`
+   here is what makes the reduced-motion state assertable (ShellFeelBrowserTest
+   reads the computed animation-name) and is why shell.js carries a fallback
+   timer for a class whose animation will never end. */
+@media (prefers-reduced-motion: reduce) {
+  .app-enter,
+  .app-status-pill,
+  .app-status-pill-spinner {
+    animation: none;
+  }
+
+  .app-main a.ds-card:hover,
+  .app-main .ds-card:has(.ds-button-primary):hover,
+  .app-main .ds-button:active {
+    transform: none;
   }
 }
