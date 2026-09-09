@@ -514,7 +514,9 @@ open class PipelineService(
         actor: UUID,
     ): DiscardResult {
         authoring.requirePipelineAuthoring()
-        val record = pipelines.findById(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        // AnyStatus: the entity may already be all-DISCARDED (every version discarded) — the
+        // refusal is the TARGET's status (not_released), never a 404 that hides the version.
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
@@ -547,7 +549,9 @@ open class PipelineService(
         version: Int,
     ): PipelineRecord {
         authoring.requirePipelineAuthoring()
-        pipelines.findById(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        // AnyStatus: restoring the first version of a DISCARDED entity is the one way back
+        // (§3.5's `{X,X}` rows) — a live-only read would 404 the restore.
+        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
@@ -577,7 +581,9 @@ open class PipelineService(
         version: Int,
     ): PipelineReleaseService.Purged {
         authoring.requirePipelineAuthoring()
-        val record = pipelines.findById(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        // AnyStatus: purging a DISCARDED entity's version is last_release (history is never
+        // purged), not a 404 hiding it.
+        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
@@ -637,7 +643,9 @@ open class PipelineService(
         includeExclusiveDraftTemplates: Boolean = false,
     ): EntityPurgeResult {
         authoring.requirePipelineAuthoring()
-        val record = pipelines.findById(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        // AnyStatus: a DISCARDED entity is addressable — its refusal is last_release (the
+        // version shape), never a 404 that would hide the restore path (§3.5's `{X,X}` rows).
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
 
         val versions = pipelines.listVersions(workspaceId, pipelineId)
         when {
@@ -683,7 +691,9 @@ open class PipelineService(
         pipelineId: UUID,
         version: Int,
     ): PipelineRecord {
-        pipelines.findById(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        // AnyStatus: a DISCARDED entity's versions are addressable — their switch answer is
+        // not_eligible (the status check below), not a 404.
+        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)

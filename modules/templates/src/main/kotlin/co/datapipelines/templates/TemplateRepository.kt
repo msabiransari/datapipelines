@@ -1491,8 +1491,10 @@ class TemplateRepository(
                 UPDATE templates t
                    SET current_version = CASE
                            WHEN t.current_version = :version THEN (
+                               -- EXCLUDE the version being discarded: same-statement CTEs
+                               -- cannot see flipped's write (the pipeline twin's comment).
                                SELECT MAX(lv.version) FROM template_versions lv
-                                WHERE lv.template_id = t.id
+                                WHERE lv.template_id = t.id AND lv.version <> :version
                                   AND (lv.status = 'RELEASED' OR (:draftEligible AND lv.status = 'DRAFT'))
                            )
                            ELSE t.current_version

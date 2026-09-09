@@ -153,6 +153,22 @@ class PipelineRepository(
                 MAPPER,
             ).singleOrNull()
 
+    /**
+     * As [findById], but **including DISCARDED entities** — restore is the one way back for
+     * an entity whose every version was discarded, so its pre-reads must not filter on the
+     * derived live status (§3.5's `{X,X}` rows).
+     */
+    fun findByIdAnyStatus(
+        workspaceId: UUID,
+        id: UUID,
+    ): PipelineRecord? =
+        jdbc
+            .query(
+                "$SELECT_COLUMNS WHERE id = :id AND workspace_id = :workspaceId",
+                mapOf("id" to id, "workspaceId" to workspaceId),
+                MAPPER,
+            ).singleOrNull()
+
     /** As [findById], by machine name — the identifier MCP and cross-pipeline references use (§3.2). */
     fun findByName(
         workspaceId: UUID,
@@ -1639,8 +1655,12 @@ class PipelineRepository(
                 UPDATE pipelines p
                    SET current_version = CASE
                            WHEN p.current_version = :version THEN (
+                               -- EXCLUDE the version being discarded: data-modifying CTEs
+                               -- cannot see each other's writes, so `flipped`'s change is
+                               -- invisible here and the un-excluded MAX would name the row
+                               -- we just retired.
                                SELECT MAX(lv.version) FROM pipeline_versions lv
-                                WHERE lv.pipeline_id = p.id
+                                WHERE lv.pipeline_id = p.id AND lv.version <> :version
                                   AND (lv.status = 'RELEASED' OR (:draftEligible AND lv.status = 'DRAFT'))
                            )
                            ELSE p.current_version

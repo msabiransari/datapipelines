@@ -149,9 +149,13 @@ held by surviving rows are never reused; a purged draft's number is re-derived f
 MAX over what survives (§3.1) — safe precisely because purge deletes the executions with
 the row.
 
-**The draft is the highest number.** At most one draft exists (§3.3) and allocation reads
-the MAX, so the draft is always the highest-numbered version of its entity. This is an
-invariant (§3.5's model test asserts it after every event), not an accident.
+**The draft is allocated the highest number — and an import may land above it.** Allocation
+always reads the MAX (§3.3), so a draft is created above every existing version; the one
+event that can place a version above a draft afterwards is an IMPORT onto an entity that
+holds one (§3.5's `{D}` first-import row lands `1D 2R cur=2`): the imported release numbers
+past the draft, and the pointer names it. The true invariants are the allocation rule and
+"at most one draft" — the model test asserts both after every event, and NOT a
+draft-dominance that the table itself overrides.
 
 ### 3.4 `current_version` is sticky and event-driven (D60)
 
@@ -305,7 +309,7 @@ substitute `template.version.last_release` / `not_released` / `not_discarded` /
 | {X,X} | `1X 2X cur=∅` | restore(v1) | dev | — | allowed — current NULL ⇒ pointer set | `1R 2X cur=1` | ACTIVE |
 | {X,X} | `1X 2R cur=2` (after restore(v2)) | restore(v1) | dev | — | allowed — v1 < current ⇒ pointer untouched | `1R 2R cur=2` | ACTIVE |
 | {X,X} | `1X 2X cur=∅` | purge(entity) | dev | — | refused `pipeline.version.last_release` | `1X 2X cur=∅` | DISCARDED |
-| {X,X} | `1X 2X cur=∅` | release / switch | both | — | refused `pipeline.version.not_draft` / `pipeline.version.not_eligible` — nothing live | `1X 2X cur=∅` | DISCARDED |
+| {X,X} | `1X 2X cur=∅` | release / switch | dev | — | refused `pipeline.version.not_draft` / `pipeline.version.not_eligible` — nothing live (hardened: release is the blanket authoring refusal) | `1X 2X cur=∅` | DISCARDED |
 | {X,X} | `1X 2X cur=∅` | import (first — no current) | both | — | allowed — v₃ RELEASED; pointer set; the entity is ACTIVE again | `1X 2X 3R cur=3` | ACTIVE |
 | {X,X,D} | `1X 2X 3D cur=3` | release | dev | — | allowed | `1X 2X 3R cur=3` | ACTIVE |
 | {X,X,D} | `1X 2X 3D cur=3` | purge(v3 = current) | dev | — | allowed — fallback; nothing eligible remains ⇒ NULL | `1X 2X cur=∅` | DISCARDED |
