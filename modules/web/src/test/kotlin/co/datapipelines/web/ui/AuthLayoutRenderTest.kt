@@ -152,6 +152,7 @@ class AuthLayoutRenderTest {
         assertAll(
             { html shouldContain "class=\"app-auth-split\"" },
             { html shouldContain "app-auth-stage" },
+            { html shouldContain "app-auth-story" },
             { html shouldContain "class=\"app-auth-dag\"" },
             { html shouldContain "Parquet on S3" },
             // The story ends where the data goes: an API a customer calls and a dashboard a team reads.
@@ -159,6 +160,10 @@ class AuthLayoutRenderTest {
             { html shouldContain "app-auth-screen-api" },
             { html shouldContain "Revenue by customer" },
             { html shouldContain "app-auth-screen-dash" },
+            // The first act: the person who asks and the agent that builds, outside the box.
+            { html shouldContain "app-auth-person" },
+            { html shouldContain "app-auth-agent" },
+            { html shouldContain "datapipelines · workspace" },
             { html shouldContain "Continue with Google" },
             { html shouldContain "or with email" },
             { html shouldNotContain "style=\"" },

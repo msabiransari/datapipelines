@@ -2094,23 +2094,23 @@ button.app-busy::after {
    --------------------------------------------------------------------------- */
 .app-auth-split {
   width: 100%;
-  /* Capped and centred: on a wide monitor the stage would otherwise stretch into a
-     letterbox and the DAG shrink to a thumbnail; the composition holds at 80rem. */
-  max-width: 80rem;
+  /* Capped and centred, generously: the stage is the picture and gets the width; the
+     story and the sign-in card share the right column. */
+  max-width: 110rem;
   margin-inline: auto;
   min-height: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(22rem, 26rem);
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
   gap: var(--gap-xl);
-  align-items: center;
+  align-items: stretch;
 }
 
 .app-auth-stage {
   position: relative;
-  /* Fits the fold: the height follows the viewport (the shell header and the page's
-     own padding taken off), floored so the DAG never crushes and capped so a tall
-     monitor does not stretch it into a poster. */
-  height: clamp(28rem, calc(100vh - 9rem), 40rem);
+  /* The stage fills the height the viewport gives it (shell header and page padding
+     taken off) — the DAG is sized by the room, not by a cap. */
+  height: calc(100vh - 8rem);
+  min-height: 30rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
   background-color: var(--surface-default);
@@ -2118,20 +2118,17 @@ button.app-busy::after {
   background-size: 22px 22px;
   overflow: hidden;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  place-items: center;
+  padding: var(--gap-lg);
+  box-sizing: border-box;
 }
 
 .app-auth-dag {
-  /* Sized by HEIGHT so it shares the stage with the copy; the viewBox keeps the aspect. */
+  /* The viewBox keeps the aspect; whichever of width and height binds first wins. */
+  width: 100%;
   height: 100%;
-  max-height: 25rem;
-  width: auto;
+  max-height: 100%;
   max-width: 100%;
-  min-height: 0;
-  justify-self: center;
-  align-self: center;
-  padding: var(--gap-lg) var(--gap-lg) 0;
-  box-sizing: border-box;
 }
 
 .app-auth-edge {
@@ -2158,6 +2155,8 @@ button.app-busy::after {
 .app-auth-dag-edges .app-auth-edge:nth-child(7) { animation-delay: -1.5s; }
 .app-auth-dag-edges .app-auth-edge:nth-child(8) { animation-delay: -2.1s; }
 .app-auth-dag-edges .app-auth-edge:nth-child(9) { animation-delay: -1.1s; }
+.app-auth-dag-edges .app-auth-edge:nth-child(10) { animation-delay: -0.5s; }
+.app-auth-dag-edges .app-auth-edge:nth-child(11) { animation-delay: -1.7s; }
 
 @keyframes app-auth-flow {
   from { stroke-dashoffset: 237; }
@@ -2305,6 +2304,49 @@ button.app-busy::after {
   fill: var(--brand);
 }
 
+/* The first act: the PERSON who asks and the AGENT that builds, outside the platform box;
+   the box is the workspace, its edge is where MCP enters. */
+.app-auth-box {
+  fill: color-mix(in srgb, var(--surface-raised) 55%, transparent);
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+
+.app-auth-box-label {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  fill: var(--text-muted);
+}
+
+.app-auth-person-head {
+  fill: var(--brand-soft);
+  stroke: var(--brand);
+  stroke-width: 1.2;
+}
+
+.app-auth-person-body {
+  fill: var(--brand-soft);
+  stroke: var(--brand);
+  stroke-width: 1.2;
+}
+
+.app-auth-chip {
+  fill: var(--brand-soft);
+  stroke: var(--brand);
+  stroke-width: 0.8;
+}
+
+.app-auth-chip-text {
+  font-family: var(--font-sans);
+  font-size: 8px;
+  font-weight: var(--weight-semibold);
+  fill: var(--brand);
+}
+
 .app-auth-node-name {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -2323,9 +2365,9 @@ button.app-busy::after {
   fill: var(--accent-success);
 }
 
-.app-auth-stage-copy {
-  padding: var(--gap-md) var(--gap-xl) var(--gap-lg);
-  max-width: 34rem;
+.app-auth-story {
+  max-width: 26rem;
+  margin-bottom: var(--gap-xl);
 }
 
 .app-auth-eyebrow {
@@ -2388,6 +2430,7 @@ button.app-busy::after {
 
 .app-auth-panel {
   display: flex;
+  flex-direction: column;
   justify-content: center;
 }
 
