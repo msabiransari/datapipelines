@@ -67,6 +67,26 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
   the operator; do not work around it in the pipeline.
 - **One template, bound per node.** If two nodes run the same SQL over different values,
   that is one template with parameters, not two copies. Copies drift.
+- **On a lake table, filter on the PARTITION column.** A day-partitioned table
+  (`hvfhv_trips`, partitioned on `pickup_date`) prunes only on that column: `WHERE pickup_date
+  IN (DATE '2024-01-01', …)` or `BETWEEN` two dates touches those partitions and nothing else.
+  A filter on a sibling timestamp (`pickup_at >= TIMESTAMP …`), a `CAST(pickup_date AS …)`,
+  or any function on the column reads EVERY file and relies on row-group statistics — it
+  looks fast on a quiet box and dies at the timeout on a busy one. Never build a `UNION ALL`
+  of date-range branches to work around it; that is N full walks in one statement. One query,
+  the partition column, a list of dates. (Real miss: an 11-branch UNION over `pickup_at`,
+  cancelled at 60 s.)
+- **After a node runs green, analyse it — and say what you found.** Read the node's timing
+  and, where the platform gives you the plan (`sql_probe` when it exists; the node's
+  `node_stats` otherwise), ask one question of every SOURCE node: *is the predicate and join
+  key index-supported on that table?* If not — a date range filtered by a second column
+  through a single-column index, a join key with no index, a lake read that did not prune —
+  write it into your handback as a concrete suggestion: the exact `CREATE INDEX …` (or the
+  partition column to filter on), the table, why (rows scanned vs rows kept), and what it would
+  save. A readonly datasource is the operator's to change, so the suggestion is the
+  deliverable; a tempdb table is yours — add the `DDL` node. Never leave "it was slow" as the
+  whole story; "it read 780k rows through `idx_trips_pickup_date` to keep 65k — an index on
+  `(pu_location_id, pickup_date)` would read the 65k" is the story.
 
 ## 4. Get the numbers right
 
@@ -99,11 +119,17 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
   pipeline will ever have.
 - **Report what you did not verify.** "Row counts match the previous version" is not
   "the numbers are right". Name the independent check you ran — or that you ran none.
+- **Report the index analysis** (§3): for every source node, one line — supported by
+  `<index>` / *not supported — suggest `CREATE INDEX … ON table (cols)`* / *lake: filters on
+  the partition column, N of M partitions*. The operator reads
+  the handback; that line is how a slow pipeline becomes a fast one without a rewrite.
 
 ## Do / Don't, in one screen
 
 | Do | Don't |
 |---|---|
+| After each source node runs, check its predicate/join key against the table's indexes and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
+| Filter a lake table on its partition column, with literals or an `IN` list | Filter on a sibling timestamp, CAST the column, or UNION date-range branches |
 | Join the lookup; answer with names | Print `HV0003` / `uber` and call it an answer |
 | Infer table roles from `*_companies`, `*_zone_day`, `*_sample` when no description exists | Ignore a table because nothing described it |
 | Aggregate and filter at the source; ship the answer's grain | Stage raw rows into H2 and aggregate there |

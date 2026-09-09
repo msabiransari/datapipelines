@@ -214,7 +214,10 @@ the UI did on 2026-09-02 (T85): the answer was in the event all along.
 nodes** — the judgment between the golden path's steps: read the question's grain first,
 join the lookups and answer with display names, infer table roles from naming when nothing
 is described, aggregate at the source and ship the answer's grain, index a large staged
-table only after loading it, keep `depends_on` to data flow, treat a timeout as work in the
+table only after loading it, filter a lake table on its PARTITION column (never a CAST, a
+sibling timestamp or a UNION of ranges), analyse every source node's predicate against the
+table's indexes after it runs and put the `CREATE INDEX` suggestion in your handback, keep
+`depends_on` to data flow, treat a timeout as work in the
 wrong place, cast what you ship across engines, never compare a sample to a census, validate
 one number independently, and stop at the draft. Each of those is a mistake an agent made
 here.
