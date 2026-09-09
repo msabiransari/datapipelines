@@ -68,16 +68,20 @@ class McpServerWiringTest {
             TemplatesUsedByTool(usage),
             TemplatesCreateTool(templates, authoringGuard, templateValidator),
             TemplatesRenderTool(templates, engines),
+            TemplatesPurgeDraftTool(templates, usage, authoringGuard),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
             DatasourcesGetSchemasTool(introspector, datasources),
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
+            DatasourcesGetTableStatsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, co.datapipelines.datasources.SqlRunner(datasources)),
+            SqlProbeTool(datasources, co.datapipelines.datasources.SqlProbe(datasources)),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),
+            ExecutionsCancelTool(executions, mockk(), mockk()),
             CalculatorsListTool(),
             CalculatorsGetTool(),
             // 074 — the four published-endpoint tools, appended the way the shipped bean does.
@@ -94,13 +98,13 @@ class McpServerWiringTest {
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 30 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 34 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist. (28 → 27 with 094 removing
-     * `datasources_create`.)
+     * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four.)
      */
     @Test
-    fun `the tool surface is exactly the 30 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 34 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
@@ -110,7 +114,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 30 tools and all three prompts registered`() {
+    fun `the server builds with all 34 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

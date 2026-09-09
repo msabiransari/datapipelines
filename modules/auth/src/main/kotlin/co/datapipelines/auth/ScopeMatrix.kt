@@ -144,17 +144,20 @@ object ScopeMatrix {
     }
 
     /**
-     * All 31 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 34 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
      * every other datasource tool and deliberately NOT `read`: they are the first tools that
      * return arbitrary customer ROW DATA — not metadata, not the results of a pipeline someone
-     * deliberately authored — and a read-scoped key should not acquire that reach.
+     * deliberately authored — and a read-scoped key should not acquire that reach. `sql_probe`
+     * (107) is `author` under the same rule — it returns live rows.
      *
      * `templates_used_by` is `read` (040 D7): it returns which pipelines reference which
      * template version — reference structure any workspace reader may already see by reading
-     * the pipelines themselves — never customer row data.
+     * the pipelines themselves — never customer row data. `datasources_get_table_stats` (107)
+     * is `read` on the same reasoning: the engine's own catalog ESTIMATES about shape, never
+     * row data.
      */
     val MCP_TOOL_MIN_SCOPE: Map<String, Scope> =
         mapOf(
@@ -199,6 +202,16 @@ object ScopeMatrix {
             "lake_tables_register" to Scope.AUTHOR,
             "lake_tables_import" to Scope.AUTHOR,
             "lake_tables_unregister" to Scope.AUTHOR,
+            // 107 — the probes. `datasources_get_table_stats` reads the engine's stored
+            // ESTIMATES (metadata, never row data) and sits on `read` with templates_used_by;
+            // `sql_probe` returns live rows and sits on `author` with preview_rows (037 F).
+            "datasources_get_table_stats" to Scope.READ,
+            "sql_probe" to Scope.AUTHOR,
+            // 107 — cancel an execution: the REST twin's floor (CANCEL_EXECUTION is EXECUTE);
+            // the same-credential rule is a handler gate, not expressible as a scope.
+            "executions_cancel" to Scope.EXECUTE,
+            // 107 — purge a never-released, unpinned, author-owned draft template: authoring.
+            "templates_purge_draft" to Scope.AUTHOR,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

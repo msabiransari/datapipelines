@@ -38,10 +38,17 @@ object McpFixtures {
     val WORKSPACE_ID: UUID = UUID.fromString("44444444-4444-4444-4444-444444444444")
     val WORKSPACE: WorkspaceContext = WorkspaceContext(WORKSPACE_ID, "acme")
 
+    /** The default key id principals carry (the dispatcher tests assert it verbatim). */
+    const val KEY_ID: String = "dpk_ABCDEFGHIJKL"
+
+    /** A second key of the SAME user — the same-credential rule's negative case (107). */
+    const val OTHER_KEY_ID: String = "dpk_MNOPQRSTUVWX"
+
     fun principal(
         vararg scopes: Scope,
         userId: UUID = USER,
         method: AuthMethod = AuthMethod.API_KEY,
+        keyId: String = KEY_ID,
     ): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
             userId = userId,
@@ -49,7 +56,7 @@ object McpFixtures {
             displayName = "Agent",
             scopes = scopes.toSet(),
             authMethod = method,
-            keyId = "dpk_ABCDEFGHIJKL",
+            keyId = keyId,
             // Every tool/catalog/reader path resolves the workspace through requireWorkspace().
             workspace = WORKSPACE,
         )
@@ -58,7 +65,8 @@ object McpFixtures {
         vararg scopes: Scope,
         userId: UUID = USER,
         idempotencyKey: String? = null,
-    ): McpToolContext = McpToolContext(principal(*scopes, userId = userId), CORRELATION_ID, idempotencyKey)
+        keyId: String = KEY_ID,
+    ): McpToolContext = McpToolContext(principal(*scopes, userId = userId, keyId = keyId), CORRELATION_ID, idempotencyKey)
 
     /**
      * A REAL [PipelineService] over the suite's own mocked collaborators (056).

@@ -360,6 +360,36 @@ class McpToolDispatcherTest {
         )
     }
 
+    /**
+     * 107 — the `sql` argument never reaches the audit log verbatim. A `sql_probe` call records
+     * `sql_sha256` + `sql_length` instead: the hash pairs a row with a reported statement, and
+     * the text itself — customer-authored, transcript-hazard — stays out of the append-only log.
+     */
+    @Test
+    fun `the sql argument is audited as a sha256 and a length, never verbatim`() {
+        val sink = RecordingAuditSink()
+        val sql = "SELECT * FROM customers WHERE email = 'ceo@acme.test'"
+        val dispatcher = McpToolDispatcher(listOf(SpyTool("sql_probe")), sink)
+
+        dispatcher.call(
+            McpFixtures.request("sql_probe", mapOf("name" to "pg-prod", "sql" to sql)),
+            McpFixtures.ctx(Scope.AUTHOR),
+        )
+
+        val row = sink.calls().single()
+        val expected =
+            java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest(sql.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+        assertAll(
+            { row.details["sql_sha256"] shouldBe expected },
+            { row.details["sql_length"] shouldBe sql.length },
+            { row.details.containsKey("sql") shouldBe false },
+            { row.details.values.none { it.toString().contains("ceo@acme.test") } shouldBe true },
+        )
+    }
+
     /** 052/A — bookkeeping must never change the customer's call: a throwing sink is swallowed, the result stands. */
     @Test
     fun `an audit sink failure is swallowed and the tool result is unchanged`() {

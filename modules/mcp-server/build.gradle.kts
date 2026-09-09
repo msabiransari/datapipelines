@@ -42,6 +42,10 @@ dependencies {
     // without bundling an embedded server; `app`/`web` supply them at runtime (§5.9).
     compileOnly(libs.spring.boot.starter.web)
     compileOnly(libs.spring.boot.starter.oauth2.client)
+    // 107 — `mcpCallAudit` builds the audit-join reader from the metadata
+    // `NamedParameterJdbcTemplate`. Same `compileOnly` discipline as the servlet types above:
+    // compile against it, never bundle it — `app` supplies spring-jdbc at runtime via `dag`.
+    compileOnly(libs.spring.boot.starter.jdbc)
 
     // --- Tests -------------------------------------------------------------------
     testImplementation(libs.spring.boot.starter.web)

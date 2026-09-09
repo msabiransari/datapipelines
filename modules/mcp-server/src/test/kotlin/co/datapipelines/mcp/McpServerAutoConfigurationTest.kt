@@ -132,6 +132,13 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun auditLogger(): AuditLogger = mockk(relaxed = true)
 
+        // 107 — the cancellation service and the audit-join reader `executions_cancel` takes.
+        // Mocking `mcpCallAudit` also keeps the autoconfiguration's @Bean (which needs the
+        // metadata NamedParameterJdbcTemplate) out of this stub context via @ConditionalOnMissingBean.
+        @Bean fun executionCancellationService(): co.datapipelines.executor.ExecutionCancellationService = mockk()
+
+        @Bean fun mcpCallAudit(): co.datapipelines.application.mcp.McpCallAudit = mockk()
+
         @Bean fun authErrorWriter(): AuthErrorWriter = AuthErrorWriter(ObjectMapper())
     }
 }

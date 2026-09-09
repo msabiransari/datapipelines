@@ -238,11 +238,20 @@ class McpToolDispatcher(
      * The rest of the ruling's target discipline (052): the version a version-aware tool
      * was pointed at, and the node id for node runs — identifiers, never values. The
      * `parameters` map is deliberately NOT read: parameter values are customer data.
+     *
+     * 107: an argument named `sql` is recorded as `sql_sha256` + `sql_length`, NEVER verbatim —
+     * a probe statement is customer-authored text with the same transcript-hazard profile as a
+     * credential, and the hash is what an operator needs to pair an audit row with a reported
+     * statement without the log ever holding the text.
      */
     private fun MutableMap<String, Any?>.identifierExtras(request: McpSchema.CallToolRequest) {
         val args = request.arguments() ?: return
         (args["node_id"] as? String)?.takeIf { it.isNotBlank() }?.let { put("node_id", it) }
         (args["version"] as? Number)?.toInt()?.let { put("version", it) }
+        (args["sql"] as? String)?.let {
+            put("sql_sha256", sha256Hex(it))
+            put("sql_length", it.length)
+        }
     }
 
     private companion object {
@@ -250,5 +259,12 @@ class McpToolDispatcher(
         const val WRITE_EVENT = "mcp.tool.write"
         const val NANOS_PER_MILLI = 1_000_000L
         val TARGET_KEYS = listOf("execution_id", "pipeline_id", "id", "name")
+
+        /** Lowercase hex SHA-256 of the UTF-8 text — the audit-safe stand-in for SQL text. */
+        fun sha256Hex(text: String): String =
+            java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest(text.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
     }
 }
