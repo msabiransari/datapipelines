@@ -37,6 +37,7 @@ object McpFixtures {
     val EXECUTION_ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
     val CORRELATION_ID: UUID = UUID.fromString("33333333-3333-3333-3333-333333333333")
     val WORKSPACE_ID: UUID = UUID.fromString("44444444-4444-4444-4444-444444444444")
+
     /**
      * The workspace every fixture principal operates in. Its flags are a WORKSPACE ADMIN's
      * since RBAC round 1: `ScopeMatrix.allowedTool` judges both axes now, and these suites are

@@ -22,6 +22,7 @@ class ApiKeyServiceTest {
     private val userService = mockk<UserService>()
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val cache = AuthCache(AuthProperties())
+
     /**
      * Relaxed, then STUBBED for the two per-request re-reads validation now makes (D-R12).
      * A relaxed mock answers `isActive` with `false`, which would refuse every key in this

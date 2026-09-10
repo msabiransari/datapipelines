@@ -1,9 +1,9 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.LakeTableRegistryService
-import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.datasources.BootstrapDatasourceRegistrar
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository

@@ -84,10 +84,18 @@ class AuthRepositoriesIntegrationTest {
 
         // D-R10: deactivation is reversible and purges nothing.
         workspaces.deactivate(ws.id, alice.id).shouldBeTrue()
-        workspaces.findById(ws.id).shouldNotBeNull().isActive.shouldBeFalse()
+        workspaces
+            .findById(ws.id)
+            .shouldNotBeNull()
+            .isActive
+            .shouldBeFalse()
         workspaces.findAllActive().map { it.name } shouldContainExactlyInAnyOrder listOf("default", "demo")
         workspaces.reactivate(ws.id).shouldBeTrue()
-        workspaces.findById(ws.id).shouldNotBeNull().isActive.shouldBeTrue()
+        workspaces
+            .findById(ws.id)
+            .shouldNotBeNull()
+            .isActive
+            .shouldBeTrue()
 
         // `demo` is seeded by V23 itself (D-R11), so a migrated database always carries it.
         workspaces.findAll().map { it.name } shouldContainExactlyInAnyOrder listOf("default", "demo", "acme")

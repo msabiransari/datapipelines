@@ -50,15 +50,13 @@ class ConfigValidator(
          * `ConfigValidatorCheckCountTest`, which counts the `check*` functions below and
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
+         *
+         * 24 until RBAC round 1, which removed THREE checks with the behaviour they read — the
+         * provisioning-mode value check, the open-join/mode agreement check and the
+         * examples-file/mode cross-key rule — and added one that refuses both removed keys by
+         * name.
          */
-        // 24 until RBAC round 1, which removed THREE checks with the behaviour they read —
-        // the provisioning-mode value check, the open-join/mode agreement check, and the
-        // examples-file/mode cross-key rule — and added one that refuses both removed keys by
-        // name. Pinned by `ConfigValidatorCheckCountTest`, which counts the `check*` functions.
         internal const val CHECK_COUNT = 22
-
-
-        /** How an absent mode reads in a violation: application.yml always supplies the default. */
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -459,6 +457,7 @@ class ConfigValidator(
         // it CREATES `demo`, once in a deployment's life (D-R11), so there is no mode left for
         // the file to be unreachable under. What remains is `checkBootstrapActorConfigured`'s
         // rule that seeding needs an actor.
+
         /**
          * §7 / §3.18 — bootstrap datasource registration needs an actor.
          *

@@ -84,11 +84,14 @@ class WorkspacesController(
         return ApiResponse.of(workspaces.updateDisplayName(principal, name, displayName).toResponse())
     }
 
-    /** §17.5 — soft delete; `409 workspace.in_use` while content remains (each kind counts). Owner or admin. */
-    // D-R10 — an INSTANCE verb, like create/deactivate/reactivate: deleting a workspace is a
-    // super admin's, and the annotation says so rather than leaving the service to be the only
-    // one who knows. Deactivation is what operators actually want; delete stays for the empty
-    // case, and `workspace.in_use` refuses it otherwise.
+    /**
+     * §17.5 — soft delete; `409 workspace.in_use` while content remains (each kind counts).
+     *
+     * An INSTANCE verb since D-R10, like create/deactivate/reactivate: deleting a workspace is
+     * a super admin's, and the annotation says so rather than leaving the service to be the
+     * only one who knows. Deactivation is what operators actually want; delete stays for the
+     * empty case, and `workspace.in_use` refuses it otherwise.
+     */
     @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
@@ -167,7 +170,8 @@ class WorkspacesController(
         @PathVariable name: String,
         @PathVariable userId: UUID,
         @RequestBody body: JsonNode,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.setMemberFlags(currentPrincipal(), name, userId, flagsOf(body)).toResponse())
+    ): ApiResponse<Map<String, Any?>> =
+        ApiResponse.of(workspaces.setMemberFlags(currentPrincipal(), name, userId, flagsOf(body)).toResponse())
 
     /**
      * D-R10 — deactivate a workspace. Super admin. Nothing is purged, ever: it stops being

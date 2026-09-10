@@ -54,9 +54,7 @@ class ScopeInterceptorTest {
      * workspace admin here, which satisfies every capability and leaves the scope check as
      * the only thing that can refuse.
      */
-    private fun adminContext() =
-        WorkspaceContext(UUID.randomUUID(), "acme", MembershipFlags(author = true, promoter = true, admin = true))
-
+    private fun adminContext() = WorkspaceContext(UUID.randomUUID(), "acme", MembershipFlags(author = true, promoter = true, admin = true))
 
     private fun authenticate(vararg scopes: Scope) {
         val principal =

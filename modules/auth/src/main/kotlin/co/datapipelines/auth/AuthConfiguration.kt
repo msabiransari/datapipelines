@@ -28,6 +28,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  */
 @Configuration
 @EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class)
+@Suppress("TooManyFunctions") // the wiring class: one function per bean, which is the point
 class AuthConfiguration {
     @Bean
     fun userRepository(jdbc: NamedParameterJdbcTemplate): UserRepository = UserRepository(jdbc)

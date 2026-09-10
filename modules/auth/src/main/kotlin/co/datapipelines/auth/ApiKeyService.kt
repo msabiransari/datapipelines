@@ -45,7 +45,7 @@ class ApiKeyService(
      * An empty [scopes] falls back to `datapipelines.auth.api-keys.default-scopes`
      * ([Configuration §3.4]) — the operator's default, not a hard-coded `read`.
      */
-    @Suppress("LongParameterList") // the issuance contract; every argument is a distinct decision
+    @Suppress("LongParameterList", "ThrowsCount") // the issuance contract; each refusal has its own catalogued code
     fun issue(
         issuer: AuthenticatedPrincipal,
         ownerId: UUID,

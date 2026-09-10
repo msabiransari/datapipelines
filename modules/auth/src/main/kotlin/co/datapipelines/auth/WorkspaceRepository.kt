@@ -18,6 +18,7 @@ import java.util.UUID
  * design §4): membership revocation takes effect within one TTL, immediately on the
  * instance that performed the mutation. Nothing here caches on its own.
  */
+@Suppress("TooManyFunctions") // the persistence surface of two tables; each read backs one documented rule
 class WorkspaceRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

@@ -1,7 +1,7 @@
 package co.datapipelines.web.datasources
 
-import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.AuditLogger
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceService

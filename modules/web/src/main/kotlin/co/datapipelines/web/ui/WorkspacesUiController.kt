@@ -4,15 +4,14 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Capability
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LoginMethod
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
-import co.datapipelines.auth.Capability
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspaceSessionRequiredException
-import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.auth.sessionCookie
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
@@ -41,7 +40,6 @@ class WorkspacesUiController(
     private val userService: UserService,
     private val jwtService: JwtService,
     private val authProperties: AuthProperties,
-    private val workspacesProperties: WorkspacesProperties,
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/workspaces")

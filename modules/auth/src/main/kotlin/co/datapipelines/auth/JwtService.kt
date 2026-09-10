@@ -65,7 +65,6 @@ class JwtService(
             doFinal(label.toByteArray(Charsets.UTF_8))
         }
 
-
     /**
      * Issues the session JWT (auth.md §6.1). [activeWorkspace], when non-null, is stamped
      * as the `active_workspace` claim (design §5.1) — the workspace *name*, matching what

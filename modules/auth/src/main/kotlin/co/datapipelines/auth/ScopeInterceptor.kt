@@ -87,14 +87,18 @@ class ScopeInterceptor(
                 true
             }
 
-            else ->
+            else -> {
                 when (val decision = ScopeMatrix.allowed(principal, operation, principal.workspace)) {
                     is ScopeMatrix.Decision.Allowed -> {
                         auditSuperAdminAction(request, principal, operation)
                         true
                     }
-                    is ScopeMatrix.Decision.Refused -> deny(request, response, principal, operation, decision)
+
+                    is ScopeMatrix.Decision.Refused -> {
+                        deny(request, response, principal, operation, decision)
+                    }
                 }
+            }
         }
     }
 

@@ -148,14 +148,18 @@ class McpToolDispatcher(
         ctx: McpToolContext,
     ): McpErrorPayload? =
         when (val decision = ScopeMatrix.allowedTool(ctx.principal, toolName, ctx.principal.workspace)) {
-            is ScopeMatrix.Decision.Allowed -> null
-            is ScopeMatrix.Decision.Refused ->
+            is ScopeMatrix.Decision.Allowed -> {
+                null
+            }
+
+            is ScopeMatrix.Decision.Refused -> {
                 McpErrorPayload(
                     code = decision.code,
                     message = decision.message,
                     userMessage = decision.userMessage,
                     details = decision.details + mapOf("tool" to toolName),
                 )
+            }
         }
 
     /**

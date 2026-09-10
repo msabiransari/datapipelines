@@ -317,6 +317,7 @@ class DomainConfiguration {
                     // No workspace on the principal: only a datasource no workspace OWNS can
                     // be reached, because there is no grant to consult (D-R7).
                     null -> registry.getLive(name)?.takeIf { it.ownerWorkspaceId == null }
+
                     else -> registry.getVisibleLive(name, workspaceId)
                 }
             facts?.let { DatasourceFacts(it.dialect, it.isReadonly) }

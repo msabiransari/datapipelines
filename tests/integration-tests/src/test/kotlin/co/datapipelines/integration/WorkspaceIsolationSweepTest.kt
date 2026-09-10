@@ -9,16 +9,8 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.specification.RequestSpecification
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.config.BeanDefinition
-import org.springframework.beans.factory.support.RootBeanDefinition
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider
-import org.springframework.core.type.filter.AnnotationTypeFilter
-import org.springframework.mock.web.MockServletContext
-import org.springframework.stereotype.Controller
-import org.springframework.web.context.support.StaticWebApplicationContext
-import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
 
 /**
  * **The IDOR sweep — the guard the whole RBAC design rests on** (design §3/§8.2, D-R5).
@@ -51,10 +43,17 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  * failure prints the path.
  *
  * ## The route list is REFLECTIVE, on purpose
- * It comes from Spring's own `RequestMappingHandlerMapping` over the scanned controllers —
- * the same technique `PublicRouteWalkerTest` uses — so **a route added tomorrow is swept
- * without anybody remembering to add it here**. A hand-written list would guard the routes
- * somebody thought of, which is never the one that leaks.
+ * It is read off the controllers' own `@*Mapping` annotations, so **a route added tomorrow is
+ * swept without anybody remembering to add it here**. A hand-written list would guard the
+ * routes somebody thought of, which is never the one that leaks.
+ *
+ * The reflection is deliberately PLAIN — `Class.forName` and `Method#getAnnotations`, reading
+ * the annotation types by NAME. Spring's own `RequestMappingHandlerMapping` would be more
+ * faithful, but it is not on this module's test compile classpath: module-structure §4.2 gives
+ * `tests/integration-tests` `:modules:app` alone, and adding the MVC library would have meant
+ * regenerating a STRICT dependency lock (run 004) to buy a nicety. Reading the annotations is
+ * the same information from the same source; what it gives up is Spring's pattern
+ * normalisation, which these routes do not use.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -168,11 +167,14 @@ class WorkspaceIsolationSweepTest {
                 when {
                     // A foreign row was read, run or written. The leak this suite exists for.
                     status in SUCCESS_RANGE -> true
+
                     // "Forbidden" tells the caller the row EXISTS — the oracle D-R5 removes,
                     // and the shape a permission-check "fix" leaves behind.
                     status == HTTP_FORBIDDEN -> true
+
                     // A route with no body cannot legitimately refuse before resolving its id.
                     bodyless && status != HTTP_NOT_FOUND -> true
+
                     else -> false
                 }
             if (leaked) "${route.method} ${route.path} (${route.handler}) -> $status" else null
@@ -218,43 +220,144 @@ class WorkspaceIsolationSweepTest {
         return path.takeUnless { "{" in it }
     }
 
-    private fun isPublic(pattern: String): Boolean =
-        pattern == "/" || PUBLIC_PREFIXES.any { pattern.startsWith(it) }
+    private fun isPublic(pattern: String): Boolean = pattern == "/" || PUBLIC_PREFIXES.any { pattern.startsWith(it) }
 
-    /** `(path patterns, methods, "Class#method")` for every handler Spring registers. */
-    private fun walkMappings(): List<Triple<Set<String>, Set<String>, String>> {
-        val context = StaticWebApplicationContext()
-        context.servletContext = MockServletContext()
-        scanControllers().forEach { type ->
-            // Lazy: the mapping reads the bean TYPE, never an instance, so no controller's
-            // constructor dependencies have to exist for the walk to be exact.
-            context.registerBeanDefinition(type.name, RootBeanDefinition(type).apply { isLazyInit = true })
-        }
-        context.refresh()
-
-        val mapping =
-            RequestMappingHandlerMapping().apply {
-                applicationContext = context
-                afterPropertiesSet()
+    /** `(path patterns, methods, "Class#method")` for every handler, read off its annotations. */
+    private fun walkMappings(): List<Triple<Set<String>, Set<String>, String>> =
+        controllerClasses().flatMap { type ->
+            val classPrefixes = mappingOf(type.annotations)?.first ?: setOf("")
+            type.declaredMethods.mapNotNull { method ->
+                val (methodPaths, methodVerbs) = mappingOf(method.annotations) ?: return@mapNotNull null
+                val patterns =
+                    classPrefixes
+                        .flatMap { prefix -> methodPaths.map { path -> join(prefix, path) } }
+                        .toSet()
+                Triple(patterns, methodVerbs, "${type.simpleName}#${method.name}")
             }
-        return mapping.handlerMethods.map { (info, handler) ->
-            val patterns = info.pathPatternsCondition?.patternValues.orEmpty()
-            val methods = info.methodsCondition.methods.map { it.name }.ifEmpty { listOf("GET") }.toSet()
-            Triple(patterns, methods, "${handler.beanType.simpleName}#${handler.method.name}")
         }
+
+    /**
+     * The paths and HTTP verbs one `@*Mapping` annotation declares, or null when there is none.
+     *
+     * Matched by the annotation's SIMPLE NAME rather than by type, because the types are not on
+     * this module's compile classpath (see the class KDoc). `value` and `path` are aliases in
+     * Spring's own model, so both are read; a mapping that names neither is the empty path,
+     * which is what `@GetMapping` on a class-prefixed handler means.
+     */
+    private fun mappingOf(annotations: Array<Annotation>): Pair<Set<String>, Set<String>>? {
+        annotations.forEach { annotation ->
+            val verbs = VERB_BY_ANNOTATION[annotation.annotationClass.simpleName] ?: return@forEach
+            val paths =
+                (readStrings(annotation, "value") + readStrings(annotation, "path"))
+                    .ifEmpty { listOf("") }
+                    .toSet()
+            val declaredVerbs =
+                verbs.ifEmpty {
+                    // `@RequestMapping(method = [POST])` — the verb is a field, not the name.
+                    readEnumNames(annotation, "method").ifEmpty { ALL_VERBS }
+                }
+            return paths to declaredVerbs
+        }
+        return null
     }
 
-    private fun scanControllers(): List<Class<*>> =
-        ClassPathScanningCandidateComponentProvider(false)
-            .apply { addIncludeFilter(AnnotationTypeFilter(Controller::class.java)) }
-            .findCandidateComponents(BASE_PACKAGE)
-            .map(BeanDefinition::getBeanClassName)
-            .filterNotNull()
-            .map { Class.forName(it) }
+    private fun readStrings(
+        annotation: Annotation,
+        member: String,
+    ): List<String> =
+        runCatching {
+            @Suppress("UNCHECKED_CAST")
+            (
+                annotation.annotationClass.java
+                    .getMethod(member)
+                    .invoke(annotation) as Array<String>
+            ).toList()
+        }.getOrDefault(emptyList())
+
+    private fun readEnumNames(
+        annotation: Annotation,
+        member: String,
+    ): Set<String> =
+        runCatching {
+            (
+                annotation.annotationClass.java
+                    .getMethod(member)
+                    .invoke(annotation) as Array<*>
+            ).mapNotNull { (it as? Enum<*>)?.name }
+                .toSet()
+        }.getOrDefault(emptySet())
+
+    private fun join(
+        prefix: String,
+        path: String,
+    ): String {
+        val joined = (prefix.trimEnd('/') + "/" + path.trimStart('/')).trimEnd('/')
+        return joined.ifEmpty { "/" }
+    }
+
+    /**
+     * The application's controller classes, found by walking the packaged classes under
+     * `co.datapipelines.web` on the runtime classpath. `:modules:app` puts the web jar there,
+     * so this sees exactly what the running application registers.
+     */
+    private fun controllerClasses(): List<Class<*>> {
+        val marker = Class.forName("co.datapipelines.web.api.ApiResponse")
+        val jar =
+            java.io.File(
+                marker.protectionDomain.codeSource.location
+                    .toURI(),
+            )
+        val names =
+            if (jar.isDirectory) {
+                jar
+                    .walkTopDown()
+                    .filter { it.extension == "class" }
+                    .map {
+                        it
+                            .relativeTo(jar)
+                            .path
+                            .removeSuffix(".class")
+                            .replace(java.io.File.separatorChar, '.')
+                    }.toList()
+            } else {
+                java.util.jar.JarFile(jar).use { archive ->
+                    archive
+                        .entries()
+                        .toList()
+                        .map { it.name }
+                        .filter { it.endsWith(".class") }
+                        .map { it.removeSuffix(".class").replace('/', '.') }
+                }
+            }
+        return names
+            .filter { it.startsWith(BASE_PACKAGE) && "$" !in it }
+            .mapNotNull { runCatching { Class.forName(it) }.getOrNull() }
+            .filter { type -> type.annotations.any { it.annotationClass.simpleName in CONTROLLER_ANNOTATIONS } }
             .sortedBy { it.name }
+    }
 
     private companion object {
         const val BASE_PACKAGE = "co.datapipelines.web"
+
+        /**
+         * What marks a class as a request handler. `@RestController` is meta-annotated
+         * `@Controller`, but reflection over the CLASS sees only what is written on it, so
+         * both are named.
+         */
+        val CONTROLLER_ANNOTATIONS = setOf("Controller", "RestController")
+
+        val ALL_VERBS = setOf("GET", "POST", "PUT", "PATCH", "DELETE")
+
+        /** Spring's shorthand mappings, and the verb each one fixes. `RequestMapping` fixes none. */
+        val VERB_BY_ANNOTATION: Map<String, Set<String>> =
+            mapOf(
+                "GetMapping" to setOf("GET"),
+                "PostMapping" to setOf("POST"),
+                "PutMapping" to setOf("PUT"),
+                "PatchMapping" to setOf("PATCH"),
+                "DeleteMapping" to setOf("DELETE"),
+                "RequestMapping" to emptySet(),
+            )
         const val API_KEY_HEADER = "DP-API-Key"
         const val SESSION_COOKIE = "dp_session"
         const val CSRF_COOKIE = "dp_csrf"

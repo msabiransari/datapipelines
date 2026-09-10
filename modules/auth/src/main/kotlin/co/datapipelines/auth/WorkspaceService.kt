@@ -64,6 +64,7 @@ fun interface WorkspaceLiveness {
  * flag reads. Being a super admin does not make a DEACTIVATED workspace selectable; it makes
  * it visible.
  */
+@Suppress("TooManyFunctions") // the workspace surface IS this class: resolution + CRUD + members + deactivation
 class WorkspaceService(
     private val workspaceRepository: WorkspaceRepository,
     private val userRepository: UserRepository,
@@ -152,6 +153,7 @@ class WorkspaceService(
      * re-asserts it because a service must not depend on having been called from a governed
      * route). The creator enters as the workspace ADMIN.
      */
+    @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
     fun create(
         principal: AuthenticatedPrincipal,
         name: String,
@@ -441,10 +443,17 @@ class WorkspaceService(
         if (!workspace.isActive) return null
         val explicit = memberships(principal.userId).firstOrNull { it.workspaceId == workspace.id }
         return when {
-            principal.isSuperAdmin ->
+            principal.isSuperAdmin -> {
                 WorkspaceContext(workspace.id, workspace.name, MembershipFlags.superAdminOver(explicit?.flags))
-            explicit != null -> WorkspaceContext(workspace.id, workspace.name, explicit.flags)
-            else -> null
+            }
+
+            explicit != null -> {
+                WorkspaceContext(workspace.id, workspace.name, explicit.flags)
+            }
+
+            else -> {
+                null
+            }
         }
     }
 
@@ -454,6 +463,7 @@ class WorkspaceService(
      * Throws [WorkspaceNotFoundException] for the unreachable case (D-R5) and
      * [RoleRequiredException] for the viewer.
      */
+    @Suppress("ThrowsCount") // three distinct refusals: unknown workspace, unreachable, wrong role
     fun requireIssuanceCapability(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
@@ -546,8 +556,7 @@ class WorkspaceService(
      * that ticks "admin" alone gets the workspace admin it asked for rather than a constraint
      * violation with no catalogued code.
      */
-    private fun normalize(flags: MembershipFlags): MembershipFlags =
-        if (flags.admin) flags.copy(author = true) else flags
+    private fun normalize(flags: MembershipFlags): MembershipFlags = if (flags.admin) flags.copy(author = true) else flags
 
     private fun requireSuperAdmin(principal: AuthenticatedPrincipal) {
         if (!principal.isSuperAdmin) {

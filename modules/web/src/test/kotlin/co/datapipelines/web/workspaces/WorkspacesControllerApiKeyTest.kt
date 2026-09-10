@@ -77,8 +77,11 @@ class WorkspacesControllerApiKeyTest {
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
 
-    /** The five mutations the finding named, each with its HTTP verb and path. */
-    /** The verbs a workspace admin's key may drive: `ws_admin` on the role axis, `author` on the scope one. */
+    /**
+     * The verbs a workspace admin's key may drive: `ws_admin` on the role axis, `author` on the
+     * scope one. Three of the finding's original five; the other two became instance verbs no
+     * key can reach ([instanceVerbs]).
+     */
     private fun mutations(): List<Triple<String, HandlerMethod, String>> =
         listOf(
             Triple("PUT", handler("update", String::class.java, JsonNode::class.java), "/api/v1/workspaces/acme"),

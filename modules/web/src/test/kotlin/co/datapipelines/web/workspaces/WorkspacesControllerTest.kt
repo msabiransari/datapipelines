@@ -2,6 +2,7 @@ package co.datapipelines.web.workspaces
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
@@ -10,7 +11,6 @@ import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceNameInvalidException
 import co.datapipelines.auth.WorkspaceNotFoundException
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException

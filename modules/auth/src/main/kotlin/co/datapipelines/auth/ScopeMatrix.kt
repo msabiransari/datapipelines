@@ -38,6 +38,7 @@ object ScopeMatrix {
         EXECUTE_PIPELINE(Scope.EXECUTE, Capability.EXECUTE),
         CANCEL_EXECUTION(Scope.EXECUTE, Capability.EXECUTE),
         MUTATE_PIPELINES_TEMPLATES(Scope.AUTHOR, Capability.AUTHOR),
+
         /**
          * "Test a datasource connection" (§7.6). [Capability.WS_ADMIN], not `author`: the
          * design's §1 table puts "register a datasource bound to THIS workspace; test it" on
@@ -471,7 +472,11 @@ object ScopeMatrix {
                 mapOf(
                     "operation" to operationName,
                     "required" to capability.wire,
-                    "held" to context.flags.held().map { it.wire }.sorted(),
+                    "held" to
+                        context.flags
+                            .held()
+                            .map { it.wire }
+                            .sorted(),
                     "workspace" to context.name,
                 ),
         )

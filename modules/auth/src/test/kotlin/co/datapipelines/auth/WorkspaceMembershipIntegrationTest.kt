@@ -94,7 +94,10 @@ class WorkspaceMembershipIntegrationTest {
                     alice.id,
                 )
             }
-        refusal.message.shouldNotBeNull().contains("chk_workspace_member_admin_authors").shouldBeTrue()
+        refusal.message
+            .shouldNotBeNull()
+            .contains("chk_workspace_member_admin_authors")
+            .shouldBeTrue()
     }
 
     @Test
@@ -141,7 +144,11 @@ class WorkspaceMembershipIntegrationTest {
 
         // Everything it owns is still there: the row, its members, its name.
         workspaces.findById(ws.id).shouldNotBeNull()
-        workspaces.findMembersOf(ws.id).map { it.email }.contains(alice.email).shouldBeTrue()
+        workspaces
+            .findMembersOf(ws.id)
+            .map { it.email }
+            .contains(alice.email)
+            .shouldBeTrue()
         workspaces.nameExists("acme").shouldBeTrue()
         // …and it is not selectable while it is off.
         workspaces.findAllActive().map { it.name } shouldContainExactly listOf("default", "demo")

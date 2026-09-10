@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
@@ -13,7 +14,6 @@ import co.datapipelines.auth.WorkspaceInUseException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspacesProperties
 import io.kotest.matchers.shouldBe
