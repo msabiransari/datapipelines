@@ -136,6 +136,26 @@ data class AuthenticatedPrincipal(
         get() = superAdmin || Capability.WS_ADMIN.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER)
 
     /**
+     * "May this principal AUTHOR here" — the same question [isWorkspaceAdmin] answers one rung
+     * up, and it had the same defect for the same reason: the UI asked it as
+     * `Scope.satisfies(scopes, AUTHOR)`, and a SESSION carries no scopes at all since D-R1. Two
+     * screens' entire action columns — every Test/Edit/Delete button on `/datasources`, the
+     * Create Template button — were therefore invisible to every signed-in human, including a
+     * workspace admin, with no refusal to explain it. Found by the browser suite.
+     *
+     * A KEY still answers on the scope axis, which is why the scope is consulted when there is
+     * one: a `read` key must not see an author's affordances just because its owner is an
+     * author in the workspace it is pinned to.
+     */
+    val isAuthor: Boolean
+        get() =
+            superAdmin ||
+                (
+                    Capability.AUTHOR.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER) &&
+                        (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
+                )
+
+    /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)
      * when the principal has none — the "zero memberships" refusal every workspace-scoped
      * operation shares. This is the one place [WorkspaceErrorCodes.MEMBERSHIP_REQUIRED]

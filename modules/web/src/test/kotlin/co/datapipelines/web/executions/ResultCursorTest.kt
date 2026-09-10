@@ -2,6 +2,7 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionRecord
@@ -42,6 +43,7 @@ class ResultCursorTest {
     private fun principal(
         userId: UUID = owner,
         scopes: Set<Scope> = setOf(Scope.READ),
+        workspaceAdmin: Boolean = false,
     ) = AuthenticatedPrincipal(
         userId,
         "a@b.c",
@@ -49,7 +51,13 @@ class ResultCursorTest {
         scopes,
         AuthMethod.API_KEY,
         "dpk_x",
-        workspace = WorkspaceContext(workspaceId, "acme"),
+        workspace =
+            WorkspaceContext(
+                workspaceId,
+                "acme",
+                // RBAC round 1: "an admin reads any execution" is the capability, not a scope.
+                if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+            ),
     )
 
     private fun record(
@@ -79,7 +87,7 @@ class ResultCursorTest {
     @Test
     fun `admin reads any execution`() {
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
-        cursor.readable(executionId, principal(userId = UUID.randomUUID(), scopes = setOf(Scope.ADMIN))).status shouldBe
+        cursor.readable(executionId, principal(userId = UUID.randomUUID(), workspaceAdmin = true)).status shouldBe
             ExecutionStatus.SUCCESS
     }
 

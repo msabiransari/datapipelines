@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionRecord
@@ -41,7 +42,10 @@ class DashboardPartialControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(scopes: Set<Scope>) {
+    private fun authenticate(
+        scopes: Set<Scope>,
+        workspaceAdmin: Boolean = false,
+    ) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(
@@ -50,7 +54,14 @@ class DashboardPartialControllerTest {
                     "A",
                     scopes,
                     AuthMethod.OIDC,
-                    workspace = WorkspaceContext(workspaceId, "acme"),
+                    workspace =
+                        WorkspaceContext(
+                            workspaceId,
+                            "acme",
+                            // RBAC round 1: "an admin sees the workspace's runs" is the CAPABILITY
+                            // now — `Scope.ADMIN` is a scope no principal can hold (D-R1, O-2).
+                            if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                        ),
                 ),
                 null,
                 emptyList(),
@@ -73,7 +84,7 @@ class DashboardPartialControllerTest {
 
     @Test
     fun `an admin reads the workspace-wide batch`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate(emptySet(), workspaceAdmin = true)
         every { pipelines.countAll(workspaceId) } returns 7
         every {
             executions.findAll(workspaceId, null, null, null, null, any(), any())
@@ -103,7 +114,7 @@ class DashboardPartialControllerTest {
 
     @Test
     fun `the stats math - today filter, success rate, empty batch guard`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate(emptySet(), workspaceAdmin = true)
         every { pipelines.countAll(workspaceId) } returns 3
         // Two today (one SUCCESS, one FAILED), one yesterday (SUCCESS) — rate over the sample.
         val batch =
@@ -122,7 +133,7 @@ class DashboardPartialControllerTest {
 
     @Test
     fun `both endpoints return the partial view names`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate(emptySet(), workspaceAdmin = true)
         every { pipelines.countAll(workspaceId) } returns 0
         every { executions.findAll(workspaceId, null, null, null, null, any(), any()) } returns emptyList()
 

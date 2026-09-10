@@ -31,7 +31,9 @@ import java.util.UUID
  */
 class UiLayoutChromeAdviceTest {
     private val themeResolver = mockk<ThemeResolver>()
-    private val advice = UiWorkspaceAdvice(mockk<WorkspaceService>(), themeResolver)
+    private val workspaceService = mockk<WorkspaceService>()
+
+    private val advice = UiWorkspaceAdvice(workspaceService, themeResolver)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -50,6 +52,17 @@ class UiLayoutChromeAdviceTest {
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
 
+    private fun membership(
+        name: String,
+        active: Boolean = true,
+    ) = co.datapipelines.auth.WorkspaceMembership(
+        workspaceId = UUID.randomUUID(),
+        workspaceName = name,
+        flags = co.datapipelines.auth.MembershipFlags.VIEWER,
+        joinedAt = java.time.Instant.EPOCH,
+        workspaceActive = active,
+    )
+
     @Test
     fun `activeTheme resolves through the theme resolver for any request`() {
         every { themeResolver.resolve(any()) } returns "ocean"
@@ -64,6 +77,28 @@ class UiLayoutChromeAdviceTest {
         authenticate()
 
         advice.authenticated() shouldBe true
+    }
+
+    @Test
+    fun `the switcher offers every workspace the caller may enter, and no deactivated one`() {
+        // `listOwn`, not `memberships`: a super admin holds no explicit membership in the
+        // workspaces they administer (D-R8) and creates workspaces themselves (D-R11), so a
+        // switcher built from explicit memberships would offer them nothing — not even the
+        // workspace they just created. A DEACTIVATED workspace is filtered here: /workspaces
+        // still lists it (that screen reactivates it), but it is not a destination.
+        authenticate()
+        every { workspaceService.listOwn(any()) } returns
+            listOf(
+                membership("live"),
+                membership("retired", active = false),
+            )
+
+        advice.workspaceOptions()?.map { it.workspaceName } shouldBe listOf("live")
+    }
+
+    @Test
+    fun `an anonymous screen gets no switcher at all`() {
+        advice.workspaceOptions() shouldBe null
     }
 
     @Test

@@ -121,6 +121,40 @@ abstract class BrowserSuite {
         // the hidden option, and waits for visibility forever. Wait for the visible
         // table cell.
         page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+        enterWorkspace(page, name)
+    }
+
+    /**
+     * [createWorkspaceOn] WITHOUT entering the new workspace — the raw product behaviour, for
+     * the one suite whose subject is the switcher itself.
+     */
+    protected fun createWorkspaceWithoutEntering(name: String) {
+        page.navigate("$baseUrl/workspaces")
+        page.waitForURL("**/workspaces")
+        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
+        page.click("form[action*='/workspaces/create'] button[type=submit]")
+        page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+    }
+
+    /**
+     * Switches the session INTO [name] through the product's own switcher.
+     *
+     * Creating a workspace does not enter it: since D-R11 the creator is a super admin acting
+     * instance-wide, not a member who was just provisioned, so the session's active workspace
+     * is still whatever it was. Nearly every fixture means "and work in it", and the switch is
+     * also the only thing that re-stamps the session cookie's `active_workspace` claim.
+     */
+    protected fun enterWorkspace(
+        page: Page,
+        name: String,
+    ) {
+        // A full reload first: the create submit is hx-boosted, so only the main content was
+        // swapped and the rail still holds the switcher rendered BEFORE this workspace existed.
+        page.reload()
+        // `force`: the select is an invisible overlay on the switcher card (the label is the
+        // hit target), so Playwright's visibility precondition never clears on it.
+        page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
+        page.waitForURL("**/dashboard")
     }
 
     /** A logged-out session — a fresh context+page pair the test must [Session.close]. */

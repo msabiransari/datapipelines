@@ -53,6 +53,10 @@ class DatasourceBrowseModel(
         model.addAttribute("hasMore", all.size > page + PAGE_SIZE)
         model.addAttribute("total", all.size)
         model.addAttribute("scopes", principal?.scopes?.map { it.name }?.toSet() ?: emptySet<String>())
+        // The row's action column. NOT `scopes`: a session carries none since D-R1, so the
+        // scope test hid Test/Edit/Delete from every signed-in human — see
+        // `AuthenticatedPrincipal.isAuthor`.
+        model.addAttribute("canAuthor", principal?.isAuthor == true)
     }
 
     /** An unrecognised wire value filters nothing — the behaviour both surfaces already had. */

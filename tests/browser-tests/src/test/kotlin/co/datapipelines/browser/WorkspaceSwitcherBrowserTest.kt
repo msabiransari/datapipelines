@@ -23,8 +23,10 @@ class WorkspaceSwitcherBrowserTest : BrowserSuite() {
 
         val first = "ws-a-" + generatedPassword("w").take(6).lowercase()
         val second = "ws-b-" + generatedPassword("w").take(6).lowercase()
-        createWorkspace(first)
-        createWorkspace(second)
+        // Deliberately NOT entering either: that creating does not switch you is this
+        // suite's own subject, and the shared fixture enters by design.
+        createWorkspaceWithoutEntering(first)
+        createWorkspaceWithoutEntering(second)
 
         // Both are options in the header's switcher; the ACTIVE default is still the FIRST
         // membership (workspaceForLogin's fallback), not the latest creation — and since

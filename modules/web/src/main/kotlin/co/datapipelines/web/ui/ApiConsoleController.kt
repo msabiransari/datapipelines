@@ -7,7 +7,6 @@ import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.api.currentPrincipal
@@ -143,7 +142,7 @@ class ApiConsoleController(
         // NEVER a literal: the count is what `tools/list` will actually return, and the
         // marketing site renders the same expression (SiteController) for the same reason.
         model.addAttribute("mcpToolCount", McpToolCatalog.NAMES.size)
-        model.addAttribute("canAuthor", Scope.satisfies(principal.scopes, Scope.AUTHOR))
+        model.addAttribute("canAuthor", principal.isAuthor)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "api/console"
     }

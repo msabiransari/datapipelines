@@ -39,6 +39,7 @@ class TemplateUiController(
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("scopes", scopes())
+        model.addAttribute("canAuthor", canAuthor())
         TemplateFilters.fill(model, dialect, type)
         // §9.5: the create form's name check is rendered from the SERVER's own grammar —
         // never a second regex typed beside it. The server validates every write regardless
@@ -64,6 +65,10 @@ class TemplateUiController(
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
         return principal?.scopes?.map { it.name }?.toSet() ?: emptySet()
     }
+
+    /** The Create Template affordance — the capability, not the scope (`isAuthor`). */
+    private fun canAuthor(): Boolean =
+        (SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal)?.isAuthor == true
 }
 
 /**

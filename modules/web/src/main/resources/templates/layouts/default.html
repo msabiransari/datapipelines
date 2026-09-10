@@ -316,8 +316,14 @@
            group and separator are hidden and the leaf truncates, so the element
            carries its full path as title — 106's pattern on the explorer's title. -->
       <div class="app-crumbs" id="app-crumbs">
-        <span class="app-crumb-group" th:if="${crumbGroup != null}" th:text="${crumbGroup}">Build</span>
-        <span class="app-crumb-sep" th:if="${crumbGroup != null}" aria-hidden="true">/</span>
+        <!-- Rendered ALWAYS and hidden when empty, never omitted: the shell is outside
+             #app-main, so a boosted navigation cannot re-render it, and shell.js mirrors
+             the new crumb by writing into these two elements (`groupEl.hidden = !group`).
+             An omitted element is one shell.js cannot find, so a user who landed on a
+             group-less screen (the dashboard) kept an empty breadcrumb for the rest of the
+             session — the JS was already written for the always-present shape. -->
+        <span class="app-crumb-group" th:text="${crumbGroup}" th:attr="hidden=${crumbGroup == null} ? 'hidden' : null">Build</span>
+        <span class="app-crumb-sep" th:attr="hidden=${crumbGroup == null} ? 'hidden' : null" aria-hidden="true">/</span>
         <b class="app-crumb-page"
            th:attr="title=${crumbGroup != null and !#strings.isEmpty(crumbGroup)} ? crumbGroup + ' / ' + crumbPage : (crumbPage ?: 'datapipelines')"
            th:text="${crumbPage} ?: 'datapipelines'">Pipelines</b>

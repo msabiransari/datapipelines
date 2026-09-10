@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionRecord
@@ -49,7 +50,10 @@ class ExecutionHistoryPartialControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(scopes: Set<Scope>) {
+    private fun authenticate(
+        scopes: Set<Scope>,
+        workspaceAdmin: Boolean = false,
+    ) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(
@@ -58,7 +62,14 @@ class ExecutionHistoryPartialControllerTest {
                     "A",
                     scopes,
                     AuthMethod.OIDC,
-                    workspace = WorkspaceContext(workspaceId, "acme"),
+                    workspace =
+                        WorkspaceContext(
+                            workspaceId,
+                            "acme",
+                            // RBAC round 1: "an admin sees the workspace's runs" is the CAPABILITY
+                            // now — `Scope.ADMIN` is a scope no principal can hold (D-R1, O-2).
+                            if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                        ),
                 ),
                 null,
                 emptyList(),
@@ -110,7 +121,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `status filters parse and an unknown status degrades to no filter`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate(emptySet(), workspaceAdmin = true)
         every {
             executions.findAll(workspaceId, any(), any(), any(), any(), any(), any())
         } returns emptyList()
@@ -124,7 +135,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `time bounds are parsed as instants and forwarded`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate(emptySet(), workspaceAdmin = true)
         every {
             executions.findAll(workspaceId, any(), any(), any(), any(), any(), any())
         } returns emptyList()
@@ -138,7 +149,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `an admin listing goes through findAll with the pipeline filter`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate(emptySet(), workspaceAdmin = true)
         val pipelineId = UUID.randomUUID()
         every {
             executions.findAll(workspaceId, any(), any(), any(), any(), any(), any())

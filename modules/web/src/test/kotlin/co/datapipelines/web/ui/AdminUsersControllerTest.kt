@@ -44,9 +44,14 @@ class AdminUsersControllerTest {
             userId = userId,
             email = "admin@example.com",
             displayName = "Admin",
-            scopes = setOf(Scope.ADMIN),
+            // RBAC round 1: instance-wide user administration is the SUPER ADMIN's
+            // (`users.is_admin`, auth.md §11A.2). `Scope.ADMIN` is not an authority any
+            // principal can hold — a session has no scopes (D-R1) and no key may hold `admin`
+            // (O-2) — so the fixture states the real one.
+            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme"),
+            superAdmin = true,
         )
 
     @AfterEach
@@ -142,9 +147,14 @@ class AdminUsersPartialControllerTest {
             userId = userId,
             email = "admin@example.com",
             displayName = "Admin",
-            scopes = setOf(Scope.ADMIN),
+            // RBAC round 1: instance-wide user administration is the SUPER ADMIN's
+            // (`users.is_admin`, auth.md §11A.2). `Scope.ADMIN` is not an authority any
+            // principal can hold — a session has no scopes (D-R1) and no key may hold `admin`
+            // (O-2) — so the fixture states the real one.
+            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme"),
+            superAdmin = true,
         )
 
     @AfterEach
