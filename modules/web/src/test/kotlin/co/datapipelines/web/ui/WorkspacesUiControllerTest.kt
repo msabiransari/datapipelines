@@ -14,6 +14,7 @@ import co.datapipelines.auth.WorkspaceInUseException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
+import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -27,6 +28,7 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.ui.ExtendedModelMap
 import org.springframework.security.core.context.SecurityContextHolder
 import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
@@ -44,6 +46,7 @@ import java.util.UUID
  */
 class WorkspacesUiControllerTest {
     private val workspaceService = mockk<WorkspaceService>()
+    private val themeResolver = mockk<ThemeResolver>()
     private val userService = mockk<UserService>()
     private val jwtService = mockk<JwtService>()
     private val controller =
@@ -52,8 +55,9 @@ class WorkspacesUiControllerTest {
             userService,
             jwtService,
             AuthProperties(),
-            mockk<ThemeResolver>(),
+            themeResolver,
         )
+
 
     private val userId = UUID.randomUUID()
     private val principal =
@@ -76,6 +80,136 @@ class WorkspacesUiControllerTest {
 
     private fun memberRow(email: String = "bob@acme.test") =
         WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", MembershipFlags(author = true), Instant.EPOCH)
+
+    // ------------------------------------------------------------------ 114 §C.1 members
+
+    /**
+     * The three checkboxes reach the SERVICE, through the same method the REST
+     * `PUT .../members/{userId}` calls. There is deliberately no second code path: the
+     * last-admin rule and the `admin -> author` normalisation live in `WorkspaceService`, and
+     * a UI binder that re-implemented either would be one more place for them to disagree.
+     */
+    @Test
+    fun `addMember carries the three role flags into the service`() {
+        authenticate()
+        val flags = MembershipFlags(author = true, promoter = true, admin = false)
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test", flags) } returns memberRow()
+
+        controller.addMember("acme", "bob@acme.test", author = true, promoter = true, admin = null) shouldBe
+            "redirect:/workspaces?ok=member_added"
+
+        verify { workspaceService.addMember(principal, "acme", "bob@acme.test", flags) }
+    }
+
+    /**
+     * An unticked box is a flag being TAKEN AWAY. The form posts all three every time and the
+     * handler REPLACES, because a form that sent only what was ticked could never express a
+     * demotion — and demotion is the operation the last-admin rule exists to refuse.
+     */
+    @Test
+    fun `setMemberFlags replaces the row - an unticked box is a demotion, not an omission`() {
+        authenticate()
+        val target = UUID.randomUUID()
+        val flags = MembershipFlags(author = true, promoter = false, admin = false)
+        every { workspaceService.setMemberFlags(principal, "acme", target, flags) } returns memberRow()
+
+        controller.setMemberFlags("acme", target, author = true, promoter = null, admin = null) shouldBe
+            "redirect:/workspaces?ok=member_flags"
+
+        verify { workspaceService.setMemberFlags(principal, "acme", target, flags) }
+    }
+
+    /**
+     * `admin=true&author=false` is passed through UNEXPANDED. The invariant is stated once, by
+     * the service and by the V23 constraint behind it; expanding it in the binder would be a
+     * third copy, and the one place a copy could drift is the one nobody tests.
+     */
+    @Test
+    fun `the binder does not expand admin into author - the service and the constraint own that`() {
+        authenticate()
+        val target = UUID.randomUUID()
+        val asPosted = MembershipFlags(author = false, promoter = false, admin = true)
+        every { workspaceService.setMemberFlags(principal, "acme", target, asPosted) } returns memberRow()
+
+        controller.setMemberFlags("acme", target, author = false, promoter = null, admin = true)
+
+        verify { workspaceService.setMemberFlags(principal, "acme", target, asPosted) }
+    }
+
+    /** The last admin cannot be demoted: a 409 from the service becomes the §5.1 toast's code. */
+    @Test
+    fun `demoting the last admin bounces back as the last_admin toast`() {
+        authenticate()
+        val target = UUID.randomUUID()
+        every { workspaceService.setMemberFlags(principal, "acme", target, any()) } throws
+            WorkspaceLastAdminException("acme")
+
+        controller.setMemberFlags("acme", target, author = true, promoter = null, admin = null) shouldBe
+            "redirect:/workspaces?error=last_admin"
+    }
+
+    // ------------------------------------------------------------------ 114 §C.3 deactivation
+
+    @Test
+    fun `deactivate and reactivate are the instance verbs, each with its own flash`() {
+        authenticate()
+        every { workspaceService.deactivate(principal, "acme") } returns mockk()
+        every { workspaceService.reactivate(principal, "acme") } returns mockk()
+
+        controller.deactivate("acme") shouldBe "redirect:/workspaces?ok=deactivated"
+        controller.reactivate("acme") shouldBe "redirect:/workspaces?ok=reactivated"
+    }
+
+    @Test
+    fun `the display name is its own verb and its own flash`() {
+        authenticate()
+        every { workspaceService.updateDisplayName(principal, "acme", "Acme Corp") } returns mockk()
+
+        controller.renameDisplay("acme", " Acme Corp ") shouldBe "redirect:/workspaces?ok=display_name"
+    }
+
+    /**
+     * §C.3(a) — zero ACTIVE memberships renders the no-workspace page instead of an empty
+     * list. A user whose only workspace was deactivated is in exactly this state, and to them
+     * a deactivated workspace and one that never existed must look the same (§11A.3).
+     *
+     * KNOWN GAP: this branch is not reachable over HTTP today — `ScopeInterceptor` refuses
+     * `/workspaces` itself for a principal with no resolved workspace, before the handler runs
+     * (see the KDoc on `screen`). The branch is pinned here so the one-line reachability fix,
+     * which is outside this round's fence, lands on tested code.
+     */
+    @Test
+    fun `a principal whose only memberships are deactivated gets the no-workspace page`() {
+        authenticate()
+        every { workspaceService.listOwn(principal) } returns
+            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true), Instant.EPOCH, false))
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        controller.screen(ExtendedModelMap(), MockHttpServletRequest()) shouldBe "workspaces/none"
+    }
+
+    @Test
+    fun `one active membership among deactivated ones keeps the list`() {
+        authenticate()
+        every { workspaceService.listOwn(principal) } returns
+            listOf(
+                WorkspaceMembership(UUID.randomUUID(), "gone", MembershipFlags(), Instant.EPOCH, false),
+                WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH, true),
+            )
+        every { workspaceService.members(principal, "acme") } returns listOf(memberRow())
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        val model = ExtendedModelMap()
+        controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
+
+        // The deactivated one is still LISTED — this principal is not a super admin, but the
+        // row carries `active=false` and the template decides what to draw from that.
+        @Suppress("UNCHECKED_CAST")
+        val rows = model["own"] as List<WorkspaceRowView>
+        rows.map { it.name to it.active } shouldBe listOf("gone" to false, "acme" to true)
+        // Only ACTIVE administered workspaces get a members table: reactivate first (§11A.2).
+        (model["managed"] as Map<*, *>).keys shouldBe setOf("acme")
+    }
 
     @Test
     fun `workspaces page renders the design-system tables and the active badge`() {

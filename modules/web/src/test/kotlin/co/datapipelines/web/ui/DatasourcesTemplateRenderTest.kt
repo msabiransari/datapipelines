@@ -385,6 +385,76 @@ class DatasourcesTemplateRenderTest {
         setVariable("usedByPipelines", emptyList<String>())
     }
 
+    /**
+     * 114 §B — the datasource action column is `canAdminWorkspace`, NOT `canAuthor`.
+     *
+     * auth.md §7.6 puts `MUTATE_WORKSPACE_DATASOURCES` (register/edit/delete) AND
+     * `TEST_DATASOURCE` on the `ws_admin` role: a datasource is a live database credential,
+     * and testing one is not a read — it opens a connection with the instance's stored secret
+     * and writes the datasource's health down. The prompt for this round said `canAuthor` for
+     * all four; §7.6 wins, and the difference is a real one — an AUTHOR is the role that would
+     * otherwise have been shown four buttons the interceptor refuses.
+     */
+    @Test
+    fun `114 - the row actions render for a workspace admin and not for an author`() {
+        val admin = engine().process("partials/datasources", context().apply { fillListModel() })
+        admin shouldContain "data-verb=\"datasource-test\""
+        admin shouldContain "data-verb=\"datasource-edit\""
+        admin shouldContain "data-verb=\"datasource-delete\""
+
+        val author =
+            engine().process(
+                "partials/datasources",
+                context().withRoles(canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author").apply {
+                    fillListModel()
+                },
+            )
+        author shouldNotContain "data-verb=\"datasource-test\""
+        author shouldNotContain "data-verb=\"datasource-edit\""
+        author shouldNotContain "data-verb=\"datasource-delete\""
+        // …and the row itself is still there: reading datasources is a viewer's right.
+        author shouldContain "pg-prod"
+    }
+
+    /** §C.2 — Grants is a SUPER admin's verb (§7.6 `MANAGE_DATASOURCE_GRANTS`), one rung above. */
+    @Test
+    fun `114 - Grants renders for a super admin and not for a workspace admin`() {
+        val superAdmin = engine().process("partials/datasources", context().apply { fillListModel() })
+        superAdmin shouldContain "data-verb=\"datasource-grants\""
+
+        val workspaceAdmin =
+            engine().process(
+                "partials/datasources",
+                context().withRoles(isSuperAdmin = false, roleLabel = "admin").apply { fillListModel() },
+            )
+        workspaceAdmin shouldNotContain "data-verb=\"datasource-grants\""
+        // The rung below Grants is still there — the two are different questions.
+        workspaceAdmin shouldContain "data-verb=\"datasource-edit\""
+    }
+
+    /**
+     * The register affordance has TWO gates and needs both: the deployment's
+     * `member-datasources-enabled` (workspaces D8, `canRegister`) and the ROLE's. The modal
+     * rides the same pair — markup nobody can submit is still markup a reader has to reason
+     * about, and its arming script would otherwise run against nodes that must not exist.
+     */
+    @Test
+    fun `114 - Register needs both the deployment gate and the workspace-admin role`() {
+        val admin = engine().process("datasources/list", context().apply { fillPageModel() })
+        admin shouldContain "data-verb=\"datasource-register\""
+        admin shouldContain "id=\"register-modal\""
+
+        val author =
+            engine().process(
+                "datasources/list",
+                context().withRoles(canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author").apply {
+                    fillPageModel()
+                },
+            )
+        author shouldNotContain "data-verb=\"datasource-register\""
+        author shouldNotContain "id=\"register-modal\""
+    }
+
     private fun WebContext.fillListModel() {
         setVariable("datasources", listOf(datasource("pg-prod", isReadonly = true), datasource("sample-trips")))
         setVariable("q", "trip")

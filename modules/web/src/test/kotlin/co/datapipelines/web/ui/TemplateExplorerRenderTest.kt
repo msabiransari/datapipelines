@@ -236,6 +236,42 @@ class TemplateExplorerRenderTest {
      * grammar now forbids and `TemplateBrowseModel` no longer even queries for. Every
      * assertion about a LEAF therefore moved onto [fillNestedLevel].
      */
+    /**
+     * 114 §B — the template twin of the pipeline ladder. Same rule, same reason: Release is
+     * the promoter's (D-R2), the three destructive verbs are the author's (D-R4), and a
+     * viewer's detail carries neither. Templates have no Switch — they are pinned by version,
+     * so there is no served pointer to move.
+     */
+    @Test
+    fun `114 - the template header renders Release only for a promoter and Purge only for an author`() {
+        val admin = render("partials/template-detail") { fillDetail() }
+        admin shouldContain "data-verb=\"template-release\""
+
+        val author =
+            render("partials/template-detail") {
+                fillDetail()
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        author shouldNotContain "data-verb=\"template-release\""
+
+        val promoter =
+            render("partials/template-detail") {
+                fillDetail()
+                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+            }
+        promoter shouldContain "data-verb=\"template-release\""
+        promoter shouldNotContain "data-verb=\"template-purge\""
+        promoter shouldNotContain "data-verb=\"template-discard\""
+
+        val viewer =
+            render("partials/template-detail") {
+                fillDetail()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true))
+            }
+        viewer shouldNotContain "data-verb="
+        viewer shouldContain "Open in editor"
+    }
+
     private fun WebContext.fillLevel() {
         setVariable("searching", false)
         setVariable("prefix", "")

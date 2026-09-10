@@ -315,6 +315,86 @@ class PipelineExplorerRenderTest {
         released shouldNotContain "Release v"
     }
 
+    /**
+     * 114 §B — the ROLE half of the same header. The lifecycle flags above answer "would the
+     * server accept this verb on this version"; these answer "may THIS PERSON ask for it", and
+     * both must be true for anything to render.
+     *
+     * The three roles are asserted as a LADDER, each against the one below it, because the
+     * capability axis is not a chain: an author's page must lose Release and a promoter's must
+     * lose the authoring verbs, which no single "less privileged" case can show.
+     */
+    @Test
+    fun `114 - the header renders Release only for a promoter and the destructive verbs only for an author`() {
+        val admin = render("partials/pipeline-detail") { fillDetail() }
+        admin shouldContain "data-verb=\"pipeline-release\""
+        admin shouldContain "data-verb=\"pipeline-discard\""
+        admin shouldContain "data-verb=\"pipeline-switch\""
+
+        // An author who is NOT a promoter — §8 test 8, verbatim: no Release, anywhere.
+        val author =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        author shouldNotContain "data-verb=\"pipeline-release\""
+        author shouldContain "data-verb=\"pipeline-discard\""
+        // O-1: switch is the lever the author and the promoter BOTH hold.
+        author shouldContain "data-verb=\"pipeline-switch\""
+
+        // A promoter who is NOT an author: Release and Switch, and nothing destructive.
+        val promoter =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+            }
+        promoter shouldContain "data-verb=\"pipeline-release\""
+        promoter shouldContain "data-verb=\"pipeline-switch\""
+        promoter shouldNotContain "data-verb=\"pipeline-discard\""
+        promoter shouldNotContain "data-verb=\"pipeline-purge\""
+
+        // A viewer: the header carries reading and the editor link, and no verb at all.
+        val viewer =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true))
+            }
+        viewer shouldNotContain "data-verb="
+        // …and still the thing a viewer came for.
+        viewer shouldContain "Open in editor"
+    }
+
+    /**
+     * The version menu, same ladder. The `⋯` itself disappears when no verb survives the
+     * role — a menu that opens on an empty list is exactly the tease "hide, don't disable"
+     * forbids, and it is the failure a per-item guard alone would leave behind.
+     */
+    @Test
+    fun `114 - the version menu hides itself entirely when the role holds none of its verbs`() {
+        val admin = render("partials/pipeline-versions") { fillDetail() }
+        admin shouldContain "tplx-vmenu"
+
+        val viewer =
+            render("partials/pipeline-versions") {
+                fillDetail()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true))
+            }
+        viewer shouldNotContain "tplx-vmenu"
+        viewer shouldNotContain "data-verb="
+        // The row itself is still there, with its Open link — a viewer reads versions.
+        viewer shouldContain "tplx-vacts"
+
+        // A promoter's menu carries Release and only Release.
+        val promoter =
+            render("partials/pipeline-versions") {
+                fillDetail()
+                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+            }
+        promoter shouldContain "data-verb=\"pipeline-release\""
+        promoter shouldNotContain "data-verb=\"pipeline-purge\""
+        promoter shouldNotContain "data-verb=\"pipeline-restore\""
+    }
+
     @Test
     fun `102 - every lifecycle verb opens its dialog partial, into the screen's container`() {
         // SUPERSEDES 106's "points at a REST verb and swaps nothing": the verbs are §4.3d

@@ -57,6 +57,41 @@ class ShellRenderTest {
         html shouldContain "/js/shell.js"
     }
 
+    /**
+     * 114 §C.4 — the role badge beside the switcher's workspace name.
+     *
+     * It sits with the workspace name because the role IS a property of the (workspace,
+     * person) pair: the same person is a viewer in one and an admin in another, so a badge
+     * anywhere else on the shell would be saying something that is not true of the page it is
+     * on. `data-role` is the stable hook; the word is [RoleModel]'s label, derived and stored
+     * nowhere (D-R2 — no single label names an additive row).
+     */
+    @Test
+    fun `the switcher carries the active workspace's role badge`() {
+        val admin =
+            engine.process("pipelines/list", webContext().apply { fillList() })
+        admin shouldContain "class=\"ds-badge app-ws-role\" data-role=\"super admin\""
+
+        val viewer =
+            engine.process(
+                "pipelines/list",
+                webContext()
+                    .withRoles(
+                        canAuthor = false,
+                        canPromote = false,
+                        canAdminWorkspace = false,
+                        isSuperAdmin = false,
+                        roleLabel = "viewer",
+                    ).apply { fillList() },
+            )
+        viewer shouldContain "data-role=\"viewer\""
+
+        // The badge lives INSIDE the label span the collapsed rail hides, so a 60px rail
+        // shows the avatar alone rather than a word with no name beside it (§3.6).
+        val label = viewer.substringAfter("app-ws-text app-rail-label")
+        label.substringBefore("</span>") shouldContain "app-ws-role"
+    }
+
     @Test
     fun `the rail renders the three groups, the collapse control and the counts`() {
         val html =
