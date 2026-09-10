@@ -194,6 +194,7 @@ test("a boosted cross-origin click falls back to plain navigation (selfRequestsO
 function mkDoc(nodes) {
   const byId = nodes.byId || {};
   const bySelector = nodes.bySelector || {};
+  const byQuery = nodes.byQuery || {};
   const classes = new Set(nodes.rootClasses || []);
   const rootAttrs = {};
   return {
@@ -207,6 +208,7 @@ function mkDoc(nodes) {
     },
     getElementById: (id) => byId[id] ?? null,
     querySelectorAll: (sel) => bySelector[sel] ?? [],
+    querySelector: (sel) => byQuery[sel] ?? null,
     activeElement: nodes.activeElement ?? null,
     rootHas: (c) => classes.has(c),
     rootAttr: (k) => rootAttrs[k],
@@ -800,4 +802,114 @@ test("the entrance class comes off on animationend, and off anyway if none ever 
   assert.equal(quiet.has(shell.ENTER_CLASS), true);
   quietClock.fireNext();
   assert.equal(quiet.has(shell.ENTER_CLASS), false);
+});
+
+// ---------------------------------------------------------------------------
+// 110 §A — the phone drawer. rail-open is a class on <html> like the collapse
+// but NEVER persisted, and the focus choreography only fires on a real state
+// CHANGE (the no-change early return is what makes an afterSettle-wired close
+// safe at desktop widths). rail-expanded records the opposite rail choice for
+// the 768–1099 default flip; only a REAL user click may write it.
+// ---------------------------------------------------------------------------
+
+test("setRailOpen toggles the class on <html>, mirrors aria-expanded, and moves focus only on a change", () => {
+  const shell = loadShell();
+  const opener = mkEl({ "aria-expanded": "false" });
+  const firstLink = mkEl({});
+  const doc = mkDoc({
+    byId: { "rail-open": opener },
+    byQuery: { ".app-nav-link": firstLink },
+  });
+
+  // Closed → open: class on <html>, opener says so, focus lands on the first link.
+  shell.setRailOpen(doc, true);
+  assert.equal(doc.rootHas(shell.RAIL_OPEN_CLASS), true);
+  assert.equal(shell.railOpen(doc), true);
+  assert.equal(opener.attr("aria-expanded"), "true");
+  assert.equal(firstLink.focused, true);
+
+  // Open → closed: focus returns to the opener.
+  shell.setRailOpen(doc, false);
+  assert.equal(shell.railOpen(doc), false);
+  assert.equal(opener.attr("aria-expanded"), "false");
+  assert.equal(opener.focused, true);
+
+  // Closed → closed (the afterSettle path on a desktop swap): a no-op that must
+  // not move focus anywhere.
+  firstLink.focused = false;
+  opener.focused = false;
+  shell.setRailOpen(doc, false);
+  assert.equal(firstLink.focused, false);
+  assert.equal(opener.focused, false);
+});
+
+test("a rail-open class already on <html> is synced at init without focus side effects", () => {
+  const shell = loadShell();
+  const opener = mkEl({ "aria-expanded": "false" });
+  const doc = mkDoc({ byId: { "rail-open": opener }, rootClasses: ["rail-open"] });
+
+  // The init call re-asserts the current state; the drawer must not be
+  // re-opened onto focus by bookkeeping.
+  shell.setRailOpen(doc, shell.railOpen(doc));
+  assert.equal(opener.attr("aria-expanded"), "true");
+  assert.equal(opener.focused, false);
+});
+
+test("only a real click records the expanded choice; the init sync must not", () => {
+  const shell = loadShell();
+  const saved = {};
+  const storage = { setItem: (k, v) => { saved[k] = v; } };
+
+  // Init-style sync (storage = null): the class is left alone so the 768–1099
+  // CSS default keeps governing an undecided user.
+  const initDoc = mkDoc({});
+  shell.setRailCollapsed(initDoc, false, null);
+  assert.equal(initDoc.rootHas(shell.EXPANDED_CLASS), false);
+
+  // A real expand: rail-expanded ON (the default must not re-collapse it) …
+  const expandDoc = mkDoc({ rootClasses: ["rail-collapsed"] });
+  shell.setRailCollapsed(expandDoc, false, storage);
+  assert.equal(expandDoc.rootHas(shell.EXPANDED_CLASS), true);
+  assert.equal(expandDoc.rootHas(shell.COLLAPSED_CLASS), false);
+  assert.equal(saved[shell.RAIL_KEY], "0");
+
+  // …and a real collapse takes it back off.
+  const collapseDoc = mkDoc({ rootClasses: ["rail-expanded"] });
+  shell.setRailCollapsed(collapseDoc, true, storage);
+  assert.equal(collapseDoc.rootHas(shell.EXPANDED_CLASS), false);
+  assert.equal(collapseDoc.rootHas(shell.COLLAPSED_CLASS), true);
+  assert.equal(saved[shell.RAIL_KEY], "1");
+});
+
+test("railVisuallyCollapsed reads the band the reader is in, not just the class", () => {
+  const shell = loadShell();
+  // A window whose matchMedia says "you are in the 768–1099 default band".
+  const inBand = { matchMedia: (q) => ({ matches: q === shell.DEFAULT_COLLAPSED_QUERY }) };
+  // A window above the band (desktop default: expanded).
+  const wide = { matchMedia: () => ({ matches: false }) };
+
+  // Desktop, undecided: expanded.
+  assert.equal(shell.railVisuallyCollapsed(mkDoc({}), wide), false);
+  // Default band, undecided: the CSS default is what the reader SEES.
+  assert.equal(shell.railVisuallyCollapsed(mkDoc({}), inBand), true);
+  // Default band, but the user expanded: their choice wins over the default.
+  assert.equal(shell.railVisuallyCollapsed(mkDoc({ rootClasses: ["rail-expanded"] }), inBand), false);
+  // An explicit collapse is collapsed everywhere, whatever the band says.
+  assert.equal(shell.railVisuallyCollapsed(mkDoc({ rootClasses: ["rail-collapsed"] }), wide), true);
+  // A window without matchMedia (the node harness) degrades to the class.
+  assert.equal(shell.railVisuallyCollapsed(mkDoc({}), null), false);
+});
+
+test("syncCollapseButton states the VISUAL state and writes nothing", () => {
+  const shell = loadShell();
+  const button = mkEl({ "aria-expanded": "true" });
+  const doc = mkDoc({ byId: { "rail-collapse": button }, rootClasses: ["rail-expanded"] });
+
+  // In the default band an undecided rail reads collapsed: the button must offer
+  // EXPAND — without adding rail-collapsed to <html> (the classless default has
+  // to stay classless; the browser owns that state, not the document).
+  shell.syncCollapseButton(doc, true);
+  assert.equal(button.attr("aria-expanded"), "false");
+  assert.equal(button.attr("title"), "Expand sidebar");
+  assert.equal(doc.rootHas(shell.COLLAPSED_CLASS), false);
 });

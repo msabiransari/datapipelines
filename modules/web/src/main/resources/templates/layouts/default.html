@@ -78,10 +78,17 @@
        this point in the parse; shell.js toggles the same class on the same
        element, so there is one source of truth for it.
 
+       110 added the mirror class for the opposite choice: from 768 to 1099px the
+       rail's DEFAULT is collapsed (a CSS media rule, so it also survives a live
+       resize), and a user who explicitly expanded it there — dp-rail = "0" —
+       must not be re-collapsed by that default. Stamping `rail-expanded` here,
+       before the first paint, for the same reason as above. Below 768 neither
+       class matters: the rail is an off-canvas drawer at phone widths.
+
        Wrapped in try/catch: localStorage throws outright in some privacy modes,
        and a shell that cannot render because a preference could not be read is
        a worse failure than a rail that opens. -->
-  <script>try{if(localStorage.getItem("dp-rail")==="1")document.documentElement.classList.add("rail-collapsed")}catch(e){}</script>
+  <script>try{var v=localStorage.getItem("dp-rail");if(v==="1")document.documentElement.classList.add("rail-collapsed");else if(v==="0")document.documentElement.classList.add("rail-expanded")}catch(e){}</script>
 
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
@@ -151,10 +158,31 @@
 
   <div class="app-shell" th:classappend="${authenticated} ? null : 'app-shell-anon'">
 
-    <aside class="app-rail" th:if="${authenticated}">
+    <!-- 110 §A: the SAME rail element all widths share. From 768 to 1099px it packs to
+         icons by default (a CSS default; a user who expands it gets `rail-expanded`,
+         stamped pre-paint by the inline script in the head). Below 768px the rail is an
+         off-canvas drawer: `position: fixed`, translated off-screen, opened by the
+         topbar's #rail-open, closed by #rail-close, Escape, the backdrop or any boosted
+         navigation — shell.js owns the `rail-open` class, which is NEVER persisted. -->
+    <aside class="app-rail" id="app-rail" th:if="${authenticated}">
+      <button type="button" id="rail-close" class="app-rail-close"
+              aria-label="Close navigation" aria-controls="app-rail">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+      </button>
       <a class="app-brand" th:href="@{/dashboard}" hx-boost="true">
         <span class="app-brand-tile" aria-hidden="true"><svg viewBox="0 0 64 64" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default)"/></svg></span><span class="app-rail-label">datapipelines</span>
       </a>
+
+      <!-- 110 §A: the search moves INTO the drawer's head at phone widths instead of
+           disappearing with it (the brief's rule: hidden is not moved). It is the same
+           decorative placeholder the topbar carries — a <div>, aria-hidden, wired to
+           nothing (§3.4) — so this second inert copy is chrome, not a second feature.
+           `display: none` above 768px; the topbar copy hides below it. -->
+      <div class="app-search app-rail-search" aria-hidden="true">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#search"></use></svg>
+        <span class="app-search-text">Search pipelines, templates, executions…</span>
+        <kbd class="app-kbd">&#8984;K</kbd>
+      </div>
 
       <!-- The workspace switcher keeps its POST form and its <select> verbatim
            (workspaces design §9) — only the chrome around it became a card. The
@@ -250,11 +278,17 @@
 
       <div class="app-rail-foot">
         <button type="button" id="rail-collapse" class="app-rail-collapse"
-                aria-expanded="true" aria-controls="app-rail-nav">
+                aria-expanded="true" aria-controls="app-rail">
           <svg class="ds-icon ds-icon-sm app-rail-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-left"></use></svg><span class="app-rail-label">Collapse</span>
         </button>
       </div>
     </aside>
+
+    <!-- 110 §A: the drawer's scrim — a sibling of the rail, rendered inert (invisible,
+         non-interactive) at every width and only lit by `html.rail-open` below 768px.
+         Tap closes the drawer; the same class locks <html> scroll while the drawer is
+         open. Same color-mix scrim idiom as the modals' .u-backdrop. -->
+    <div class="app-rail-backdrop" aria-hidden="true"></div>
 
     <!-- Signed out, the bar carries the brand and nothing else: the breadcrumb,
          the search field, the mode toggle and the avatar are all statements about
@@ -268,13 +302,25 @@
     </header>
 
     <header class="app-topbar" th:if="${authenticated}">
+      <!-- 110 §A: the phone shell's navigation opener. Hidden ≥ 768px by CSS (never by
+           JS); below that it is the FIRST control in the bar and the drawer's only
+           opener. shell.js mirrors the drawer state here as aria-expanded and returns
+           focus to this button when the drawer closes. -->
+      <button type="button" id="rail-open" class="app-rail-open"
+              aria-controls="app-rail" aria-expanded="false" aria-label="Open navigation">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#menu"></use></svg>
+      </button>
       <!-- The breadcrumb is server-rendered from AppNav.crumbFor(currentPath) and
            re-derived client-side by shell.js after a boosted swap (the top bar is
-           outside #app-main, so the swap never re-renders it). -->
+           outside #app-main, so the swap never re-renders it). 110: below 1100px the
+           group and separator are hidden and the leaf truncates, so the element
+           carries its full path as title — 106's pattern on the explorer's title. -->
       <div class="app-crumbs" id="app-crumbs">
         <span class="app-crumb-group" th:if="${crumbGroup != null}" th:text="${crumbGroup}">Build</span>
         <span class="app-crumb-sep" th:if="${crumbGroup != null}" aria-hidden="true">/</span>
-        <b class="app-crumb-page" th:text="${crumbPage} ?: 'datapipelines'">Pipelines</b>
+        <b class="app-crumb-page"
+           th:attr="title=${crumbGroup != null and !#strings.isEmpty(crumbGroup)} ? crumbGroup + ' / ' + crumbPage : (crumbPage ?: 'datapipelines')"
+           th:text="${crumbPage} ?: 'datapipelines'">Pipelines</b>
       </div>
 
       <!-- 079 §B: the search field is a PLACEHOLDER this round — visual only,

@@ -54,6 +54,26 @@
          in the DOM and stayed invisible. The six dock panes and the banner inside this root
          ARE cloaked, which is where the unbound content actually is; the root itself is a
          flex container whose children are server-rendered chrome. */-->
+  <!--/* 110 §C — the phone band. This screen is desktop-first BY DECISION, not by
+         omission: below 768px the band renders above the editor (which stays on the
+         page, rendered and scrollable underneath) and says so, with the entity's name,
+         its lifecycle badge — the same hasDraft / draftVersion / releasedVersion
+         attributes the topbar's vchip reads — and the explorer search for it. The
+         explorers take ?q= today; a ?open= deep link onto the leaf would be the better
+         seam for a later round. Hidden at every width by app.css except < 768px. */-->
+  <div class="ds-empty app-wide-screen-note">
+    <p class="ds-empty-title">Open on a wider screen to edit</p>
+    <p class="ds-empty-description">
+      <span th:text="${pipelineName}">Pipeline</span>
+      <span class="ds-badge" th:classappend="${hasDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+            th:text="${hasDraft} ? 'v' + ${draftVersion} + ' · draft pending release' : 'v' + ${releasedVersion} + ' · released'">v1 · released</span>
+      — the pipeline editor needs a canvas this screen does not have.
+    </p>
+    <p class="ds-empty-actions">
+      <a class="ds-button ds-button-secondary" th:href="@{/pipelines(q=${pipelineName})}">Open in Pipelines</a>
+    </p>
+  </div>
+
   <div x-data="pipelineEditor()" x-init="init()" class="pe-root">
 
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
