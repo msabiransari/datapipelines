@@ -67,6 +67,22 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.executor.max-concurrent-executions-global` | `unset` | **Deprecated alias** for `max-concurrent-executions-per-instance` (one release, 050/R2). Set alone → its value runs and startup logs one WARN naming the new key; set together with the new key and differing → startup refuses. The limit was always per JVM — the old name was false at N replicas |
 | `datapipelines.executor.node-query-timeout-seconds` | `60` | Per-node JDBC query timeout. A datasource's own `query_timeout_seconds`, when set, overrides this for nodes on that datasource ([Datasources §5](datasources.md#5-connection-pool-configuration)) |
 | `datapipelines.executor.execution-timeout-seconds` | `600` | Overall execution timeout |
+| `datapipelines.executor.node-timeout-seconds` | `300` | **The per-node WALL-CLOCK deadline** the executor enforces: RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE, staging included. Overridable per node by `node.settings.timeout_seconds` ([pipeline-contract §4.11](pipeline-contract.md)). Unlike `node-query-timeout-seconds`, which is the DRIVER's bound on one `execute*` call, this one is the executor's own and fires whatever the driver does |
+| `datapipelines.executor.node-timeout-max-seconds` | `900` | The ceiling a node's own `settings.timeout_seconds` may not exceed. A pipeline declaring more is refused at SAVE with `pipeline.validation.node_timeout_invalid` — refused rather than clamped, so an author who asks for 4 hours is not left debugging a silent 15 minutes |
+| `datapipelines.executor.cancel-grace-seconds` | `5` | After a node's deadline fires, how long the executor waits for the cancelled statement to actually return before abandoning it. Past it the node fails **on schedule** and the leaked statement is logged once with the execution id (`event=node.statement_abandoned`). Never a wait on the query itself — a driver that ignores `cancel()` cannot extend a node's budget, only leak a connection until its own pool reclaims it |
+| `datapipelines.executor.source-fetch-size` | `1000` | The JDBC `fetchSize` set on every DQL **source** cursor — what makes a source node stream instead of materialising its whole result inside the driver. pgjdbc uses a server-side cursor only with `autoCommit=false` **and** `fetchSize > 0`, so the executor also takes a Postgres source connection out of autocommit for the read and commits unconditionally on the way out (so a multi-statement template's side effects persist exactly as they did under autocommit); the pool restores autocommit when the lease returns. MySQL is the exception the driver forces: Connector/J streams only at `Integer.MIN_VALUE`, which the executor passes for that dialect and this key does not affect. **`0` turns streaming off** and leaves every source statement exactly as pre-108 code left it — the escape hatch for the one shape that can behave differently: a DQL template whose SQL is several statements, since pgjdbc's server-side-cursor path uses the extended query protocol, which carries only one |
+| `datapipelines.executor.progress-write-interval-seconds` | `5` | The floor between two THROTTLED live-progress writes for one execution. A staging drain reports per batch — thousands of times for a large node — and one UPDATE per batch would put a metadata-DB write on the insert path. Node boundaries are **not** throttled: a node starting or finishing is the event a watcher is waiting for, and delaying it would leave the screen naming the wrong node |
+| `datapipelines.executor.heartbeat-seconds` | `15` | How often a running execution stamps `pipeline_executions.heartbeat_at` (V21). The crash sweep reaps a `RUNNING` row whose stamp is older than **three** of these — one missed beat is a slow tick, two a loaded box, three an instance that is gone — so this also sets how fast a dead instance's rows are reaped: ~45 s plus one 15 s sweep tick, against the sixty MINUTES `datapipelines.executions.stale-timeout-minutes` alone gave. That key survives as the backstop for rows a pre-V21 instance left with no stamp at all |
+
+**Three budgets, one precedence** (the same table appears in [pipeline-contract §4.11](pipeline-contract.md#411-settingstimeout_seconds--the-nodes-own-deadline) and [dag-executor §5.3](dag-executor.md)):
+
+| Bound | Setting | Scope | Enforced by |
+|---|---|---|---|
+| Execution | `datapipelines.executor.execution-timeout-seconds` (600) | the whole execution | the executor |
+| Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node, wall clock, all five phases | the executor |
+| Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
+
+Read downward. The statement bound is the driver's and drivers honour it unevenly — measured on the shipped drivers (108 §1), which is precisely why the middle row exists. The precedence is a recommendation, not a cross-key constraint: nothing refuses a configuration that inverts it, because every inversion is harmless. A node deadline above the execution's is simply never reached — the outer bound fires first and reports `pipeline.execution.timeout`. One below the statement timeout is *stronger*, not broken: the executor stops the node before the driver would have, which is the whole point of owning a bound above the driver's. What a cross-key refusal would reliably do instead is turn "I lowered `execution-timeout-seconds` for this deployment" into a startup crash. `node-timeout-max-seconds` is deliberately NOT constrained against the execution timeout — it bounds what an author may ASK for, not what a run may take.
 
 ### 3.3 Staging (tempdb)
 
@@ -79,6 +95,8 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.staging.h2.query-timeout-seconds` | `60` | H2 query timeout |
 
 > **`max-memory-mb` is a *per-execution* ceiling, not a process-wide one.** Every concurrent execution gets its own tempdb with its own budget, so the aggregate tempdb heap a node can reach on ONE INSTANCE is `max-memory-mb` × `datapipelines.executor.max-concurrent-executions-per-instance` — with the defaults, 1024 MB × 100 **per instance** (050/R2: the multiplier is per-instance; N replicas multiply it again — [Deployment §6.6](deployment.md#66-resource-sizing)). Size the two **together** against the container's heap; setting `max-memory-mb` alone bounds one execution, not the box. A process-wide staging gate is deferred ([ROADMAP](ROADMAP.md)).
+>
+> **Startup says the arithmetic out loud (108 §C).** `ConfigValidator` logs ONE warn line at startup when `max-concurrent-executions-per-instance × max-memory-mb > 0.8 × ` the JVM's max heap, naming all three numbers and the ratio. It is a WARNING and not a refusal, deliberately: the budget is a ceiling each execution MAY reach, not one it will, and a deployment whose pipelines stage tens of megabytes is right to run 100 slots against a 1 GB budget — refusing that would break every default installation. What an operator cannot do is notice the arithmetic unaided, since the two keys live in different sections of this document and neither used to mention the other. Above the ratio, the per-execution limit would be enforced by an OOM rather than by `pipeline.staging.memory_limit_exceeded`.
 >
 > A pipeline's `settings.tempdb.config.max_memory_mb` override is **clamped to ≤ this value** — it may lower the operator's ceiling for that pipeline, never raise it. Save-time validation only checks `> 0`, so without the clamp an author could declare an arbitrarily large budget and disable the only ceiling the executor's `withConnection` paths have ([DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration)).
 
@@ -345,6 +363,29 @@ A `LAKE` datasource runs its queries **on the app's own box** — DuckDB is embe
 | `properties.dialect.threads` | (engine default — no statement emitted) | The engine's worker threads — a positive integer, e.g. `4`. Unset means DuckDB chooses (its own default tracks the box's cores) |
 | `properties.dialect.temp_directory` | (engine default — no statement emitted) | Where oversized operators spill, e.g. `/data/spill`. Must be an absolute path **under the app's data volume** — inside the container the path means nothing unless the volume backs it — with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement, and a value that would need escaping is refused, matching the lake-table location grammar) |
 
+**`threads` is deliberately left unset, and the measurement is why — though not the way the
+hypothesis expected (108 §C).** In-process DuckDB shares the JVM's CPUs with the executor, so the
+obvious guard is to cap the engine's worker threads; `max(2, cores/2)` was the proposal. Measured on
+a 10-core box as the median of 5 PAIRED runs (each pair times the scan alone and then immediately
+under load, so a drifting box moves both numbers):
+
+| `threads` | 2 staging drains | 8 staging drains |
+|---|---|---|
+| unset (all 10) | 1.07× slower | 1.11× slower |
+| `SET threads = 5` | 0.92× | 1.13× |
+
+**A 0.92× is a scan that ran FASTER under load than alone, which is not a result — it is the noise
+floor.** On a box shared with other work the contention effect is smaller than the measurement's own
+variance, and an earlier single-run shape produced swings from 1.13× to 1.82× for the same cell. So
+the honest reading is: **no evidence for a thread cap, and none against one either** — the effect
+this knob would manage is not resolvable here. The default therefore stays unset (DuckDB's own
+scheduler handles oversubscription), an operator who needs the engine bounded sets `threads`
+explicitly, and anyone who wants to settle it should re-run
+`scripts/measure/03-pressure.sh` on a dedicated box.
+
+What the runs DO agree on: a lake read on a busy box loses on the order of 10 % or more, and no
+`threads` value observed changed that.
+
 Two statements are emitted on every lake connection regardless of these keys: `SET memory_limit = '<explicit-or-default>'` (there is always a budget) and `SET preserve_insertion_order = false` — insertion order costs memory and temp-file discipline the engine would otherwise spend on a guarantee a read-only lake never asks for. It is not a knob: a lake is a read connector, and making the trade configurable would only let an operator buy back a guarantee no query path uses.
 
 ### 3.25 DuckDB extension directory (dp-lake)
@@ -493,6 +534,12 @@ datapipelines:
     max-concurrent-executions-per-instance: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_INSTANCE:100}
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
+    node-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_SECONDS:300}
+    node-timeout-max-seconds: ${DATAPIPELINES_EXECUTOR_NODE_TIMEOUT_MAX_SECONDS:900}
+    cancel-grace-seconds: ${DATAPIPELINES_EXECUTOR_CANCEL_GRACE_SECONDS:5}
+    source-fetch-size: ${DATAPIPELINES_EXECUTOR_SOURCE_FETCH_SIZE:1000}
+    progress-write-interval-seconds: ${DATAPIPELINES_EXECUTOR_PROGRESS_WRITE_INTERVAL_SECONDS:5}
+    heartbeat-seconds: ${DATAPIPELINES_EXECUTOR_HEARTBEAT_SECONDS:15}
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}

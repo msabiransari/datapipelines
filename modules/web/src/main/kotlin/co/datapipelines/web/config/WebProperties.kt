@@ -140,6 +140,18 @@ data class ExecutorProperties(
     val maxConcurrentExecutionsGlobal: Int? = null,
     val nodeQueryTimeoutSeconds: Int = 60,
     val executionTimeoutSeconds: Long = 600,
+    /** `node-timeout-seconds` (108) — the per-node WALL-CLOCK deadline the executor enforces. */
+    val nodeTimeoutSeconds: Long = 300,
+    /** `node-timeout-max-seconds` (108) — the ceiling a node's own `settings.timeout_seconds` may not exceed. */
+    val nodeTimeoutMaxSeconds: Int = 900,
+    /** `cancel-grace-seconds` (108) — how long a cancelled statement is waited on before it is abandoned. */
+    val cancelGraceSeconds: Long = 5,
+    /** `source-fetch-size` (108) — the JDBC `fetchSize` on every DQL source cursor; what makes it stream. */
+    val sourceFetchSize: Int = 1000,
+    /** `progress-write-interval-seconds` (108) — the floor between two throttled live-progress writes. */
+    val progressWriteIntervalSeconds: Long = 5,
+    /** `heartbeat-seconds` (108) — how often a running execution stamps `heartbeat_at`; the sweep reaps at 3×. */
+    val heartbeatSeconds: Long = 15,
 ) {
     /**
      * What the executor runs with: the alias's value while it is set (the one-release bridge),
@@ -160,6 +172,13 @@ data class ExecutorProperties(
         }
         require(nodeQueryTimeoutSeconds > 0) { "datapipelines.executor.node-query-timeout-seconds must be > 0" }
         require(executionTimeoutSeconds > 0) { "datapipelines.executor.execution-timeout-seconds must be > 0" }
+        require(nodeTimeoutSeconds > 0) { "datapipelines.executor.node-timeout-seconds must be > 0" }
+        require(nodeTimeoutMaxSeconds > 0) { "datapipelines.executor.node-timeout-max-seconds must be > 0" }
+        require(cancelGraceSeconds > 0) { "datapipelines.executor.cancel-grace-seconds must be > 0" }
+        // 0 is legal and means "do not stream" — see ExecutorConfig's init for why it exists.
+        require(sourceFetchSize >= 0) { "datapipelines.executor.source-fetch-size must be >= 0" }
+        require(progressWriteIntervalSeconds > 0) { "datapipelines.executor.progress-write-interval-seconds must be > 0" }
+        require(heartbeatSeconds > 0) { "datapipelines.executor.heartbeat-seconds must be > 0" }
     }
 }
 

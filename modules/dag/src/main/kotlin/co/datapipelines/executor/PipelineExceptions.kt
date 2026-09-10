@@ -106,6 +106,37 @@ class NodeQueryTimeoutException(
         cause = cause,
     )
 
+/**
+ * The node outlived its WALL-CLOCK deadline and the executor stopped it (§5.3, 108) —
+ * `pipeline.node.timeout`, HTTP 504.
+ *
+ * The sibling of [NodeQueryTimeoutException] one level up: that one is a STATEMENT's budget,
+ * noticed when the driver raises; this one is the NODE's, enforced by the executor whatever the
+ * driver does. Which is the whole point — the measurement this exists for found a Postgres node
+ * stopped cleanly at its statement budget while H2 tempdb nodes in the same pipeline ran minutes
+ * past it, because nothing above the statement had a deadline at all.
+ *
+ * @param phase where the budget went, or null when the node had not entered a phase yet (it was
+ *   still waiting on a dependency or a parallelism permit) — reported as `unknown` rather than
+ *   invented.
+ */
+class NodeTimeoutException(
+    val timeoutSeconds: Long,
+    val elapsedMs: Long,
+    val phase: NodePhase?,
+) : PipelineException(
+        code = PipelineErrorCodes.Node.TIMEOUT,
+        message =
+            "Node exceeded its wall-clock timeout of ${timeoutSeconds}s and was stopped after ${elapsedMs}ms " +
+                "(phase: ${phase?.name?.lowercase() ?: "unknown"})",
+        details =
+            mapOf(
+                "timeout_seconds" to timeoutSeconds,
+                "elapsed_ms" to elapsedMs,
+                "phase" to (phase?.name?.lowercase() ?: "unknown"),
+            ),
+    )
+
 /** No execution slot was free (§5.3) — per-user or the instance-wide ceiling (050/R2). */
 class PipelineConcurrencyLimitException(
     val scope: LimitScope,

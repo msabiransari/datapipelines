@@ -358,6 +358,7 @@ class DomainConfiguration {
         pipelines: PipelineResolver,
         properties: PipelineProperties,
         orgContext: co.datapipelines.pipeline.OrgContext,
+        executor: ExecutorProperties,
     ): PipelineValidator =
         PipelineValidator(
             datasources,
@@ -365,6 +366,11 @@ class DomainConfiguration {
             pipelines,
             properties.maxCompositionDepth,
             orgContext,
+            // 108: §12.8's ceiling on a node's own `settings.timeout_seconds`. The OPERATOR's
+            // number reaches save-time validation, so lowering it binds the pipelines already
+            // stored at the next save — a ceiling only the executor knew would be a ceiling the
+            // author is told about at 3am.
+            executor.nodeTimeoutMaxSeconds,
         )
 
     /**

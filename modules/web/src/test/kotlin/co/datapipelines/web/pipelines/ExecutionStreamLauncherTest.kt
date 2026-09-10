@@ -7,6 +7,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.executor.ExecutionCancellationService
+import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.IdempotencyOutcome
 import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.PipelineExecutor
@@ -78,6 +79,7 @@ class ExecutionStreamLauncherTest {
             executorConfig = mockk(),
             resultUrls = mockk(),
             executorMetrics = mockk(),
+            executionProgress = ExecutionProgress.NONE,
             persistenceDispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
             streams = registry,
             eventLog = mockk(relaxed = true),

@@ -46,6 +46,13 @@ class PipelineValidator(
      * executor will (§0.2) — and what makes the import re-run on the TARGET a real check.
      */
     private val orgContext: OrgContext = OrgContext.DEFAULTS,
+    /**
+     * `datapipelines.executor.node-timeout-max-seconds` (108) — the ceiling a node's own
+     * `settings.timeout_seconds` may not exceed (§12.8). Defaulted to the documented
+     * out-of-the-box value so a test or an in-memory editor model keeps constructing this class
+     * unchanged; `web` passes the bound one.
+     */
+    private val nodeTimeoutMaxSeconds: Int = DEFAULT_NODE_TIMEOUT_MAX_SECONDS,
 ) {
     /**
      * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
@@ -62,7 +69,7 @@ class PipelineValidator(
         NodeTypeRules.check(pipeline, collector)
         ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector)
         ParameterRules.check(pipeline, collector)
-        SettingsRules.check(pipeline, collector)
+        SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, collector)
         CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
         CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector)
         return collector.toResult()
@@ -75,5 +82,14 @@ class PipelineValidator(
     ): Pipeline {
         validate(pipeline, workspaceId).orThrow()
         return pipeline
+    }
+
+    companion object {
+        /**
+         * The documented default of `datapipelines.executor.node-timeout-max-seconds`
+         * (configuration.md §3.2). Mirrored here only as the constructor default; the key is
+         * defined in configuration.md alone (D8) and `web` binds it.
+         */
+        const val DEFAULT_NODE_TIMEOUT_MAX_SECONDS = 900
     }
 }

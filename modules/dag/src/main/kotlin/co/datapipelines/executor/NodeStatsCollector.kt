@@ -18,6 +18,9 @@ class NodeStatsCollector {
     private val startedAt = ConcurrentHashMap<String, Instant>()
     private val outcomes = ConcurrentHashMap<String, NodeStats>()
 
+    /** Rows staged so far by a node still draining (108 §D) — cleared by nothing; read live. */
+    private val rowsSoFar = ConcurrentHashMap<String, Long>()
+
     /** Records that [nodeId] began executing (its `node_started` moment). */
     fun started(
         nodeId: String,
@@ -52,6 +55,42 @@ class NodeStatsCollector {
     ) {
         outcomes[nodeId] = NodeStats.abortedWithCause(nodeId, error, startedAt[nodeId])
     }
+
+    /**
+     * Records how many rows [nodeId] has staged so far (108 §D).
+     *
+     * Written from the staging drain, read by [liveSnapshot] from another coroutine — hence the
+     * concurrent map, and hence no attempt at consistency between this and [startedAt]: a live
+     * progress row is a diagnostic, and a count one batch behind is the right answer one batch ago.
+     */
+    fun progress(
+        nodeId: String,
+        rowsStaged: Long,
+    ) {
+        rowsSoFar[nodeId] = rowsStaged
+    }
+
+    /**
+     * The **in-flight** snapshot (108 §D): a node that has started and not finished reports
+     * `RUNNING` with its start time and its rows so far.
+     *
+     * Deliberately a second function rather than a flag on [snapshot]. The two answer different
+     * questions and must keep giving different answers: a TERMINAL snapshot reports a
+     * started-but-unfinished node as `ABORTED` (§7.2 — the execution ended and the node did not),
+     * and relabelling that would rewrite the meaning of every stored `node_stats_json`. This one
+     * is only ever written to a row whose status is still RUNNING.
+     *
+     * A node that has **not started** is OMITTED rather than given a status. There is no `PENDING`
+     * in [NodeStatus] and inventing one is a wire change three other surfaces would have to learn;
+     * reusing `ABORTED` — what the terminal snapshot means by "never started" — would have a live
+     * screen showing "aborted" beside a run that is going perfectly. Absence says "not started
+     * yet" without claiming anything, and the DAG the reader already has says which nodes those
+     * are.
+     */
+    fun liveSnapshot(nodeIds: Collection<String>): List<NodeStats> =
+        nodeIds.mapNotNull { id ->
+            outcomes[id] ?: startedAt[id]?.let { NodeStats.running(id, it, rowsSoFar[id] ?: NodeResult.NOT_MEASURED) }
+        }
 
     /** The node ids that had started but never reported an outcome — the timeout's blame set. */
     fun runningNodeIds(): Set<String> = startedAt.keys - outcomes.keys

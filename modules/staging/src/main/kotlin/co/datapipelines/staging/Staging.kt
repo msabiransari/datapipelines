@@ -72,6 +72,16 @@ interface Staging : AutoCloseable {
         resultSet: ResultSet,
         tableName: String,
         sourceDialect: Dialect,
+        /**
+         * Called after each inserted batch with the rows staged SO FAR (108 §D).
+         *
+         * The one thing an operator watching a long node wants to know is how far it has got, and
+         * this is the only place that knows. Defaulted to a no-op so every existing caller and
+         * every fixture is unchanged, and deliberately non-suspending: it is invoked from inside
+         * the drain, and a suspending callback there would let a caller's slow I/O hold the
+         * staging lock — the exact defect §B just removed.
+         */
+        onProgress: (Long) -> Unit = {},
     ): StageResult
 
     /**

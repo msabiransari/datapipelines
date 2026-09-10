@@ -6,9 +6,13 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * The crash sweep's caller (metadata-db §8.3, deployment.md §6.2): flips `RUNNING` rows older
- * than `datapipelines.executions.stale-timeout-minutes` to `ABORTED` with
- * `pipeline.execution.instance_lost`, via [ExecutionRepository.sweepStaleRunning].
+ * The crash sweep's caller (metadata-db §8.3, deployment.md §6.2): flips abandoned `RUNNING` rows
+ * to `ABORTED` with `pipeline.execution.instance_lost`, via [ExecutionRepository.sweepStaleRunning].
+ *
+ * Abandoned means one of two things (108 §D): the row's `heartbeat_at` is older than three
+ * heartbeat intervals — ~45 seconds, and the condition that actually matters — or it carries no
+ * heartbeat at all and is older than `datapipelines.executions.stale-timeout-minutes`, the
+ * pre-V21 backstop that keeps a rolling upgrade from reaping live runs.
  *
  * ## No leader election — every replica may run this (and does)
  * The sweep is one `UPDATE … WHERE status='RUNNING' AND started_at < :t`: naturally idempotent.
@@ -31,9 +35,19 @@ import java.time.Instant
 class StaleExecutionSweeper(
     private val executions: ExecutionRepository,
     private val staleTimeout: Duration,
+    /**
+     * `datapipelines.executor.heartbeat-seconds` (108 §D). The reaping cutoff is THREE of these:
+     * one missed beat is a slow tick, two is a suspicious box, three is an instance that is gone.
+     * Anything tighter reaps live executions on a loaded machine — which is the failure mode that
+     * costs data, where waiting an extra 30 seconds costs an operator nothing.
+     */
+    private val heartbeatInterval: Duration,
 ) {
     init {
         require(!staleTimeout.isNegative && !staleTimeout.isZero) { "staleTimeout must be positive, was $staleTimeout" }
+        require(!heartbeatInterval.isNegative && !heartbeatInterval.isZero) {
+            "heartbeatInterval must be positive, was $heartbeatInterval"
+        }
     }
 
     /**
@@ -43,20 +57,23 @@ class StaleExecutionSweeper(
      */
     @Suppress("SwallowedException")
     fun sweepOnce(): Int {
-        val cutoff = Instant.now().minus(staleTimeout)
+        val now = Instant.now()
+        val cutoff = now.minus(staleTimeout)
+        val heartbeatCutoff = now.minus(heartbeatInterval.multipliedBy(MISSED_BEATS))
         val swept =
             try {
-                executions.sweepStaleRunning(cutoff)
+                executions.sweepStaleRunning(cutoff, heartbeatCutoff)
             } catch (e: DataAccessException) {
-                LOG.warn("event=execution.sweep_failed cutoff={} message=\"{}\"", cutoff, e.message)
+                LOG.warn("event=execution.sweep_failed cutoff={} heartbeat_cutoff={} message=\"{}\"", cutoff, heartbeatCutoff, e.message)
                 return 0
             }
         if (swept > 0) {
             LOG.info(
-                "event=execution.swept count={} cutoff={} " +
+                "event=execution.swept count={} cutoff={} heartbeat_cutoff={} " +
                     "message=\"stale RUNNING executions marked ABORTED (pipeline.execution.instance_lost)\"",
                 swept,
                 cutoff,
+                heartbeatCutoff,
             )
         }
         return swept
@@ -64,5 +81,8 @@ class StaleExecutionSweeper(
 
     private companion object {
         val LOG = LoggerFactory.getLogger(StaleExecutionSweeper::class.java)
+
+        /** How many heartbeats an instance may miss before it is declared gone — see the ctor. */
+        const val MISSED_BEATS = 3L
     }
 }

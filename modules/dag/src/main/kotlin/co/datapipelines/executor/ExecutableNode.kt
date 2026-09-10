@@ -48,6 +48,12 @@ data class ExecutableNode(
     val inputs: Map<String, JsonNode>? = null,
     /** CALCULATOR nodes only: the Context key this node writes (§4.10). */
     val contextKey: String? = null,
+    /**
+     * `node.settings.timeout_seconds` (pipeline-contract §6.4, 108) — this node's own wall-clock
+     * deadline, or null to take `datapipelines.executor.node-timeout-seconds`. Resolved through
+     * [ExecutorConfig.nodeTimeoutSecondsFor], never read raw.
+     */
+    val timeoutSeconds: Int? = null,
 ) {
     /** True when this node's ResultSet is the pipeline's result (§4.1). */
     val isCallerNode: Boolean get() = output == NodeOutput.Caller
@@ -68,6 +74,7 @@ data class ExecutableNode(
                 kind = node.kind,
                 inputs = node.inputs,
                 contextKey = node.contextKey,
+                timeoutSeconds = node.settings?.timeoutSeconds,
             )
     }
 }

@@ -198,6 +198,54 @@ class ExecutionRepository(
         ) == 1
 
     /**
+     * Writes the LIVE per-node progress of a still-running execution (108 §D, metadata-db §8.3).
+     *
+     * The same column and the same shape as the terminal write — `node_stats_json` — so every
+     * reader that already renders node stats renders progress for free, and nothing new has to be
+     * taught to `GET /api/v1/executions/{id}`, the run detail page or `executions_get`.
+     *
+     * **`AND status = 'RUNNING'` is the whole safety of this method.** Progress is written from a
+     * throttled ticker and from node boundaries; a terminal write can land between one of those
+     * deciding to write and its UPDATE reaching the database. Without the guard that late progress
+     * write would overwrite the FINAL stats of a finished execution with a snapshot that still
+     * says a node is running — a corrupted terminal record produced by an observability feature,
+     * which is the worst trade in the system. With it, the late write updates zero rows.
+     *
+     * @return true when a row was updated; false when the execution is unknown or already terminal
+     *   (both ordinary, neither an error).
+     */
+    fun recordProgress(
+        executionId: UUID,
+        nodeStatsJson: String,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE pipeline_executions
+               SET node_stats_json = CAST(:nodeStatsJson AS jsonb),
+                   heartbeat_at = NOW()
+             WHERE execution_id = :executionId AND status = 'RUNNING'
+            """.trimIndent(),
+            mapOf("executionId" to executionId, "nodeStatsJson" to nodeStatsJson),
+        ) == 1
+
+    /**
+     * Stamps `heartbeat_at` for a running execution (108 §D, V21).
+     *
+     * The signal is "the instance that owns this row is alive and still working on it". Same
+     * `status = 'RUNNING'` guard as [recordProgress] and for a weaker version of the same reason:
+     * beating on a terminal row writes nothing anyone reads, and the sweep only looks at RUNNING
+     * rows anyway — but a heartbeat that could touch a finished row would make "when did this
+     * execution last do anything" unanswerable.
+     *
+     * @return true when a row was updated; false when the execution is unknown or terminal.
+     */
+    fun heartbeat(executionId: UUID): Boolean =
+        jdbc.update(
+            "UPDATE pipeline_executions SET heartbeat_at = NOW() WHERE execution_id = :executionId AND status = 'RUNNING'",
+            mapOf("executionId" to executionId),
+        ) == 1
+
+    /**
      * One execution's metadata — `GET /api/v1/executions/{id}` (rest-api §10.2). Scoped to
      * [workspaceId] via its pipeline (design §5.3).
      */
@@ -373,9 +421,26 @@ class ExecutionRepository(
      * `pipeline.execution.instance_lost` and there is exactly one correct spelling of it; letting
      * each caller pass a string invited two.
      *
+     * ## Two conditions, OR'd, and neither replaces the other (108 §D)
+     *
+     * `heartbeat_at` (V21) is stamped every `heartbeat-seconds` by the instance that owns the row,
+     * so a stamp older than three beats (~45 s) means that instance is gone. That is the condition
+     * that matters: before it, a row a crashed instance left behind stayed RUNNING for
+     * `stale-timeout-minutes` — sixty of them — and the agent in T199 waited the full hour not
+     * knowing its run was dead.
+     *
+     * The age condition stays, restricted to rows with NO stamp. A pre-V21 instance never writes
+     * one, and reaping its live executions after 45 s on the strength of a column it does not know
+     * about would abort perfectly healthy runs during a rolling upgrade. So: stamped rows are
+     * judged by the stamp, unstamped rows by their age, and the sweep is safe across the version
+     * boundary in both directions.
+     *
      * @return the number of rows swept.
      */
-    fun sweepStaleRunning(olderThan: Instant): Int =
+    fun sweepStaleRunning(
+        olderThan: Instant,
+        heartbeatOlderThan: Instant,
+    ): Int =
         jdbc.update(
             """
             UPDATE pipeline_executions
@@ -383,9 +448,15 @@ class ExecutionRepository(
                    completed_at = NOW(),
                    duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
                    error_json = CAST(:errorJson AS jsonb)
-             WHERE status = 'RUNNING' AND started_at < :olderThan
+             WHERE status = 'RUNNING'
+               AND (heartbeat_at < :heartbeatOlderThan
+                    OR (heartbeat_at IS NULL AND started_at < :olderThan))
             """.trimIndent(),
-            mapOf("olderThan" to java.sql.Timestamp.from(olderThan), "errorJson" to INSTANCE_LOST_JSON),
+            mapOf(
+                "olderThan" to java.sql.Timestamp.from(olderThan),
+                "heartbeatOlderThan" to java.sql.Timestamp.from(heartbeatOlderThan),
+                "errorJson" to INSTANCE_LOST_JSON,
+            ),
         )
 
     private companion object {

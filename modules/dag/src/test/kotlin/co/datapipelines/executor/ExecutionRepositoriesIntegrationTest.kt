@@ -298,7 +298,10 @@ class ExecutionRepositoriesIntegrationTest {
         val finished = running().also(executions::create)
         executions.complete(finished.executionId, ExecutionStatus.SUCCESS, Instant.now(), 5, NODE_STATS_JSON)
 
-        val swept = executions.sweepStaleRunning(Instant.now().minus(1, ChronoUnit.HOURS))
+        // No heartbeats anywhere in this case, so the AGE backstop is the only condition that can
+        // fire — which is exactly the pre-V21 shape this assertion has always been about, and the
+        // one a rolling upgrade leaves behind.
+        val swept = executions.sweepStaleRunning(Instant.now().minus(1, ChronoUnit.HOURS), Instant.now().minus(45, ChronoUnit.SECONDS))
 
         swept shouldBe 1
         val sweptRow = executions.findById(WORKSPACE_ID, stale.executionId).shouldNotBeNull()
@@ -311,6 +314,91 @@ class ExecutionRepositoriesIntegrationTest {
 
         executions.findById(WORKSPACE_ID, fresh.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.RUNNING
         executions.findById(WORKSPACE_ID, finished.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.SUCCESS
+    }
+
+    /**
+     * 108 §D: the heartbeat is what reaps a dead instance's row in under a minute, and the
+     * sixty-minute age condition survives only for rows that carry no heartbeat at all.
+     *
+     * All three cases in one test on purpose — the claim is about which rows the ONE predicate
+     * selects, and splitting it into three would let each pass while the predicate as a whole
+     * selects the wrong set.
+     */
+    @Test
+    fun `the sweep reaps a stale heartbeat, spares a fresh one, and still reaps an unstamped row`() {
+        val staleBeat = running().also(executions::create)
+        val freshBeat = running().also(executions::create)
+        // Never stamped, and old: the pre-V21 instance's row, reaped by the age backstop alone.
+        val unstamped = running().copy(startedAt = Instant.now().minus(2, ChronoUnit.HOURS)).also(executions::create)
+        // Never stamped, and YOUNG: a row an instance wrote a second ago and has not beaten for
+        // yet. Reaping this is the failure mode that costs data, so it is asserted explicitly.
+        val youngUnstamped = running().also(executions::create)
+
+        stampHeartbeat(staleBeat.executionId, Instant.now().minus(90, ChronoUnit.SECONDS))
+        executions.heartbeat(freshBeat.executionId) shouldBe true
+
+        val swept =
+            executions.sweepStaleRunning(
+                olderThan = Instant.now().minus(1, ChronoUnit.HOURS),
+                heartbeatOlderThan = Instant.now().minus(45, ChronoUnit.SECONDS),
+            )
+
+        swept shouldBe 2
+        executions.findById(WORKSPACE_ID, staleBeat.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.ABORTED
+        executions.findById(WORKSPACE_ID, unstamped.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.ABORTED
+        executions.findById(WORKSPACE_ID, freshBeat.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.RUNNING
+        executions.findById(WORKSPACE_ID, youngUnstamped.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.RUNNING
+    }
+
+    /**
+     * 108 §D: a live progress write lands on a RUNNING row and is REFUSED by a terminal one.
+     *
+     * The refusal is the half that matters. Progress is written from a throttled ticker, so a
+     * write can be in flight when the execution finishes; without the `status = 'RUNNING'` guard
+     * it would overwrite the final stats with a snapshot that still says a node is running — a
+     * corrupted terminal record produced by an observability feature.
+     */
+    @Test
+    fun `progress writes land on a RUNNING row and are refused by a terminal one`() {
+        val live = running().also(executions::create)
+        val done = running().also(executions::create)
+        executions.complete(done.executionId, ExecutionStatus.SUCCESS, Instant.now(), 5, NODE_STATS_JSON)
+
+        val progressJson = """[{"node_id":"n1","status":"RUNNING","rows_out":42}]"""
+        executions.recordProgress(live.executionId, progressJson) shouldBe true
+        executions.recordProgress(done.executionId, progressJson) shouldBe false
+        executions.heartbeat(done.executionId) shouldBe false
+
+        // jsonb round-trips as jsonb, so the assertion is on the values, not on the byte layout.
+        val liveStats =
+            executions
+                .findById(WORKSPACE_ID, live.executionId)
+                .shouldNotBeNull()
+                .nodeStatsJson
+                .shouldNotBeNull()
+        liveStats shouldContain "RUNNING"
+        liveStats shouldContain "42"
+        // The finished row still carries what IT wrote — node "a", from the terminal write — and
+        // nothing of the progress row. The guard, stated as the thing that would otherwise be lost.
+        val doneStats =
+            executions
+                .findById(WORKSPACE_ID, done.executionId)
+                .shouldNotBeNull()
+                .nodeStatsJson
+                .shouldNotBeNull()
+        doneStats shouldContain "SUCCESS"
+        doneStats.contains("RUNNING") shouldBe false
+    }
+
+    /** Backdates a heartbeat — the only way to test a stale one without waiting for it. */
+    private fun stampHeartbeat(
+        executionId: UUID,
+        at: Instant,
+    ) {
+        jdbc.update(
+            "UPDATE pipeline_executions SET heartbeat_at = :at WHERE execution_id = :id",
+            mapOf("at" to java.sql.Timestamp.from(at), "id" to executionId),
+        )
     }
 
     // -------------------------------------------------------------- events

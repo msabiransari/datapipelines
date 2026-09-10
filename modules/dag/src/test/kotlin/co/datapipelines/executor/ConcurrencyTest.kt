@@ -5,6 +5,7 @@ import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -318,6 +319,56 @@ class ConcurrencyTest {
             }
         }
 
+    /**
+     * §5.3 (108 §A) — the NODE deadline, beside the two statement-timeout cases above, because
+     * the three are one precedence and a reader comparing them should not have to change files.
+     *
+     * The difference this case exists to state: both tests above are the DRIVER stopping one
+     * statement on our `queryTimeout`. This one is the EXECUTOR stopping the whole node, and it is
+     * set up so the driver cannot be what ends it — the statement reports no timeout at all, and
+     * [DriverLikeStatement]'s prologue swallows every cancel the executor issues. `queryTimeout`
+     * is 300 s besides. If the node still fails in ~2 s, only the wall-clock deadline can have
+     * done it.
+     */
+    @Test
+    fun `the node wall-clock deadline bounds a node the driver will not stop`() =
+        runBlocking<Unit> {
+            val driver = BlockingDriver(prologueMs = DROPPED_CANCEL_PROLOGUE_MS)
+            val source = h2Datasource("nd", listOf("CREATE TABLE nd (n INT)"))
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("wipe" to "DELETE FROM nd")),
+                registry = FakeDatasourceRegistry(mapOf("nd" to source), blockingDriver = driver),
+                config =
+                    ExecutorConfig(
+                        nodeQueryTimeoutSeconds = NO_RESCUE_QUERY_TIMEOUT_SECONDS,
+                        nodeTimeoutSeconds = 1,
+                        cancelGraceSeconds = 1,
+                        executionTimeoutSeconds = TIMEOUT_SECONDS,
+                        cancelPollIntervalSeconds = TIMEOUT_SECONDS,
+                    ),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("wipe", type = co.datapipelines.pipeline.NodeType.DML, source = "nd"))
+
+                val elapsed =
+                    kotlin.system.measureTimeMillis {
+                        val failed =
+                            shouldThrow<PipelineExecutionFailed> {
+                                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                            }
+                        failed.errorCode shouldBe PipelineErrorCodes.Node.TIMEOUT
+                        failed.errorDetails["phase"] shouldBe "execute"
+                    }
+
+                (elapsed < NODE_DEADLINE_BUDGET_MS).shouldBeTrue()
+                // The executor issued the cancel and the driver dropped it — without both, the
+                // elapsed time above could be the cancel working rather than the deadline.
+                (driver.statement.cancels.get() >= 1).shouldBeTrue()
+                driver.statement.interrupted
+                    .get()
+                    .shouldBeFalse()
+            }
+        }
+
     private companion object {
         const val PER_USER_LIMIT = 3
 
@@ -336,6 +387,12 @@ class ConcurrencyTest {
 
         /** Well inside SLOW_SQL's ~57s natural runtime — the test still falsifies. */
         const val INTERRUPT_BUDGET_MS = 25_000L
+
+        /** Longer than the node's whole budget, so every cancel lands in the prologue and is dropped. */
+        const val DROPPED_CANCEL_PROLOGUE_MS = 8_000L
+
+        /** deadline 1s + grace 1s + slack, and far below the driver call's ~8s. */
+        const val NODE_DEADLINE_BUDGET_MS = 6_000L
 
         const val FAN_OUT = 4
         const val CHAIN = 4

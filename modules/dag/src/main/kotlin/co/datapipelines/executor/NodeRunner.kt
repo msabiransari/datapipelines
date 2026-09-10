@@ -107,7 +107,37 @@ data class NodeExecutionContext(
      * no longer see (025 A5).
      */
     val workspaceId: UUID,
+    /**
+     * Which phase each node of this execution is currently inside (108) — read by the node
+     * wall-clock deadline to name the phase on `pipeline.node.timeout`. Defaulted so every
+     * existing construction site (four in `web`, every fixture) is unchanged.
+     */
+    val phases: NodePhases = NodePhases(),
+    /**
+     * Where a node's mid-flight staged-row count goes (108 §D). Defaulted to a no-op so every
+     * existing construction site and every fixture is unchanged.
+     */
+    val nodeProgress: NodeProgressSink = NodeProgressSink.NONE,
 )
+
+/**
+ * The seam between the staging drain and the execution's progress row (108 §D).
+ *
+ * A one-method interface rather than a lambda field so the no-op has a name and shows up in a
+ * stack trace as itself, and so the executor's implementation — which touches the stats collector
+ * AND the throttled writer — reads as one thing rather than a closure nested in a builder.
+ */
+fun interface NodeProgressSink {
+    /** [rowsStaged] rows of [nodeId] have been staged so far. Must not block. */
+    fun staged(
+        nodeId: String,
+        rowsStaged: Long,
+    )
+
+    companion object {
+        val NONE = NodeProgressSink { _, _ -> }
+    }
+}
 
 /**
  * Runs one node: render → connect → dispatch on `type` → dispatch on `output`
@@ -242,7 +272,7 @@ class NodeRunner(
         if (node.type == NodeType.CALCULATOR) {
             return runCalculator(node, ctx, startedAt)
         }
-        val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
+        val sql = phase(ctx, NodePhase.RENDER, node.id) { render(node, ctx) }
         return dispatchRendered(node, ctx, startedAt, sql)
     }
 
@@ -262,7 +292,7 @@ class NodeRunner(
             // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
             // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
             // never on a statement that half-executed with a silent null.
-            val bound = phase(NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
+            val bound = phase(ctx, NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
             when (node.source) {
                 is NodeSource.Tempdb -> runOnTempdb(node, bound, ctx, startedAt)
                 is NodeSource.Datasource -> runOnDatasource(node, node.source.name, bound, ctx, startedAt)
@@ -353,13 +383,13 @@ class NodeRunner(
             }
 
             is NodeOutput.Caller -> {
-                phase(NodePhase.MATERIALIZE, node.id) {
+                phase(ctx, NodePhase.MATERIALIZE, node.id) {
                     tempdbCursor(node, bound, ctx, timeout) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
                 }
             }
 
             is NodeOutput.Datasource -> {
-                phase(NodePhase.WRITEBACK, node.id) {
+                phase(ctx, NodePhase.WRITEBACK, node.id) {
                     tempdbCursor(node, bound, ctx, timeout) { rs ->
                         NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId), startedAt)
                     }
@@ -444,7 +474,7 @@ class NodeRunner(
                 SqlIdentifiers.requireValidTable(output.table, PipelineErrorCodes.Node.STAGING_FAILED),
             )
         val rows =
-            phase(NodePhase.STAGE, node.id) {
+            phase(ctx, NodePhase.STAGE, node.id) {
                 // 042 C1: the executed statement is the assembled `CREATE TABLE … AS <sql>`, so the
                 // translation runs over the FULL text here — the run()-level BoundSql carried the
                 // node SQL alone, and a prepared statement's placeholders must line up with the
@@ -497,7 +527,7 @@ class NodeRunner(
         timeout: Int,
     ): NodeResult {
         val affected =
-            phase(NodePhase.EXECUTE, node.id) {
+            phase(ctx, NodePhase.EXECUTE, node.id) {
                 ctx.staging.withConnection { connection ->
                     statementFor(connection, bound).use { statement ->
                         statement.queryTimeout = timeout
@@ -527,7 +557,7 @@ class NodeRunner(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
     ) {
-        val usedBytes = phase(NodePhase.STAGE, node.id) { ctx.staging.stats().memoryUsedBytes }
+        val usedBytes = phase(ctx, NodePhase.STAGE, node.id) { ctx.staging.stats().memoryUsedBytes }
         if (usedBytes / BYTES_PER_KB > ctx.stagingMaxMemoryMb * KB_PER_MB) {
             val overflow = StagingMemoryLimitException(usedBytes, ctx.stagingMaxMemoryMb)
             throw NodeFailedSignal(ErrorCodeMapper.map(overflow, NodePhase.STAGE, node.id), overflow)
@@ -549,7 +579,7 @@ class NodeRunner(
         // pipeline was saved is the same `datasource_not_found` an unknown name gets (no
         // existence oracle), instead of executing against a row the workspace cannot see.
         val datasource =
-            phase(NodePhase.CONNECT, node.id) {
+            phase(ctx, NodePhase.CONNECT, node.id) {
                 datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw datasourceNotFound(name)
             }
         return withResolvedDatasource(node, datasource, bound, ctx, startedAt)
@@ -599,7 +629,7 @@ class NodeRunner(
         // metadata-DB failure during the read refuses naming the METADATA db (carried code
         // `pipeline.execution.aborted`), never the healthy target. See [ReadonlyBackstop].
         if (node.type == NodeType.DML || node.type == NodeType.DDL) {
-            phase(NodePhase.CONNECT, node.id) { enforceSourceReadonly(datasource.name, node) }
+            phase(ctx, NodePhase.CONNECT, node.id) { enforceSourceReadonly(datasource.name, node) }
         }
         // A DQL node whose output is a datasource target is a write too (the third §5.7 shape),
         // and its refusal must not wait for the SOURCE query to finish (020 F9): during a flip
@@ -608,11 +638,11 @@ class NodeRunner(
         // same CONNECT phase, mirrors the DML/DDL check; the write-back shell re-checks at
         // write time (that check is authoritative — this one is the cheap early refusal).
         (node.output as? NodeOutput.Datasource)?.takeIf { node.type == NodeType.DQL }?.let { target ->
-            phase(NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
+            phase(ctx, NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
         }
         val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
         val connection =
-            phase(NodePhase.CONNECT, node.id) {
+            phase(ctx, NodePhase.CONNECT, node.id) {
                 // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
                 // `poolFor`'s `computeIfAbsent`, not from `leaseConnection` — resolving the pool
                 // first meant the ThreadLocal was still unset when the event fired, so
@@ -696,11 +726,44 @@ class NodeRunner(
         startedAt: Instant,
         timeout: Int,
         dialect: Dialect,
+    ): NodeResult {
+        val tookOutOfAutocommit = SourceStreaming.enable(conn, dialect, config.sourceFetchSize)
+        try {
+            return runDatasourceQuery(node, conn, bound, ctx, startedAt, timeout, dialect)
+        } finally {
+            // Restore autocommit's NET effect, on every path including failure (108 §B).
+            //
+            // Author SQL on a DQL node may legitimately be multi-statement, and under autocommit
+            // each of those statements committed as it ran — including the ones that had already
+            // run when a later one failed. Taking the connection out of autocommit for the read
+            // and then only committing on success would silently change that: a failed node's
+            // earlier side effects would roll back. Streaming is a transport decision and must not
+            // become a transaction-semantics decision, so the commit is unconditional.
+            //
+            // `runCatching`: the cursor is fully consumed by the time this runs, so a commit that
+            // refuses has nothing left to protect — and it must never replace the node's own
+            // failure with a bookkeeping one.
+            if (tookOutOfAutocommit) runCatching { conn.commit() }
+        }
+    }
+
+    private suspend fun runDatasourceQuery(
+        node: ExecutableNode,
+        conn: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+        dialect: Dialect,
     ): NodeResult =
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
+            SourceStreaming.fetchSizeFor(dialect, config.sourceFetchSize)?.let { statement.fetchSize = it }
             ctx.handle.withStatement(node.id, statement) {
-                val rs = phase(NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) } }
+                val rs =
+                    phase(ctx, NodePhase.EXECUTE, node.id) {
+                        ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) }
+                    }
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
             }
@@ -716,11 +779,13 @@ class NodeRunner(
         when (val output = requireOutput(node)) {
             is NodeOutput.Tempdb -> {
                 val staged =
-                    phase(NodePhase.STAGE, node.id) {
+                    phase(ctx, NodePhase.STAGE, node.id) {
                         // The SOURCE node's dialect, never H2's (staging §3.2) — mapping a Postgres
                         // or Oracle cursor through H2's table picks the wrong storage type and
                         // loses data before egress re-derivation can see it.
-                        ctx.staging.stage(rs, output.table, dialect).also { ctx.warnings.addAll(it.warnings) }
+                        ctx.staging
+                            .stage(rs, output.table, dialect) { rows -> ctx.nodeProgress.staged(node.id, rows) }
+                            .also { ctx.warnings.addAll(it.warnings) }
                     }
                 // B2 (second half): staging enforces the budget it was CONSTRUCTED with — the
                 // operator global — because `StagingFactory.create(executionId, engine)` has no
@@ -734,11 +799,11 @@ class NodeRunner(
             }
 
             is NodeOutput.Caller -> {
-                phase(NodePhase.MATERIALIZE, node.id) { deliverToCaller(node, rs, ctx, startedAt, dialect) }
+                phase(ctx, NodePhase.MATERIALIZE, node.id) { deliverToCaller(node, rs, ctx, startedAt, dialect) }
             }
 
             is NodeOutput.Datasource -> {
-                phase(NodePhase.WRITEBACK, node.id) {
+                phase(ctx, NodePhase.WRITEBACK, node.id) {
                     NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect, ctx.workspaceId), startedAt)
                 }
             }
@@ -825,7 +890,7 @@ class NodeRunner(
             if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
             ctx.handle.withStatement(node.id, statement) {
                 val affected =
-                    phase(NodePhase.EXECUTE, node.id) {
+                    phase(ctx, NodePhase.EXECUTE, node.id) {
                         ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
                     }
                 NodeResult.of(node.id, affected, startedAt)
@@ -843,7 +908,7 @@ class NodeRunner(
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                phase(NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { executeDdl(statement, bound) } }
+                phase(ctx, NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { executeDdl(statement, bound) } }
                 NodeResult.of(node.id, 0L, startedAt)
             }
         }
@@ -955,13 +1020,23 @@ class NodeRunner(
             details = mapOf("datasource" to target.datasource, "table" to target.table),
         )
 
-    /** Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code. */
+    /**
+     * Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code —
+     * and recording the phase entry, so a node stopped by its wall-clock deadline can say WHERE
+     * its budget went (108, [NodePhases]).
+     *
+     * The record is written here rather than at each call site for the reason every such record
+     * should be: this is the one function every phase already passes through, so a phase added
+     * later cannot forget to announce itself.
+     */
     private suspend fun <T> phase(
+        ctx: NodeExecutionContext,
         phase: NodePhase,
         nodeId: String,
         body: suspend () -> T,
     ): T =
         try {
+            ctx.phases.enter(nodeId, phase)
             body()
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
@@ -1004,3 +1079,69 @@ class NodeFailedSignal(
     val error: MappedError,
     cause: Throwable,
 ) : RuntimeException(error.message, cause)
+
+/**
+ * Putting a source connection and its statement into the state their driver needs to hand back
+ * rows **incrementally** (108 §B).
+ *
+ * Its own object rather than two more private methods on [NodeRunner]: the class is already at
+ * detekt's size ceiling, and this is a self-contained piece of per-dialect driver knowledge with
+ * no dependency on the runner's state — which makes it independently readable and independently
+ * testable, and keeps the per-dialect exceptions in one place where a new dialect's entry is
+ * obviously missing.
+ */
+internal object SourceStreaming {
+    /**
+     * Puts the source connection in the state its driver needs to hand back rows **incrementally**
+     * (108 §B, finding #1).
+     *
+     * pgjdbc uses a server-side cursor only when the connection is NOT in autocommit AND the
+     * statement carries a `fetchSize > 0`. The executor set neither, so every Postgres source node
+     * materialised its entire result set inside the driver before `stage()` was handed a cursor —
+     * which makes the staging memory budget a statement about a copy that already exists, and
+     * makes `insert-batch-size` a batching of rows that are all in the heap anyway.
+     *
+     * Only Postgres is switched, because only Postgres pays for the switch this way: MySQL streams
+     * on `Integer.MIN_VALUE` regardless of autocommit ([fetchSizeFor]), the embedded engines have
+     * no network hop to stream over, and taking a connection out of autocommit changes visibility
+     * semantics — worth it exactly where it buys streaming, nowhere else. The pool restores
+     * `autoCommit` when the lease is returned (HikariCP resets it on `close()`), and the node's
+     * `connection.use` is what returns it. The caller commits unconditionally on the way out —
+     * see `NodeRunner.datasourceQuery` for why that is not optional.
+     *
+     * @return true when this call is what switched autocommit off, so the caller knows to commit.
+     *
+     * This runs on the DQL cursor path only. A DML/DDL node must NOT be taken out of autocommit —
+     * its work would never commit.
+     */
+    fun enable(
+        conn: Connection,
+        dialect: Dialect,
+        sourceFetchSize: Int,
+    ): Boolean {
+        if (sourceFetchSize == 0) return false
+        if (dialect != Dialect.POSTGRES || !conn.autoCommit) return false
+        conn.autoCommit = false
+        return true
+    }
+
+    /**
+     * The `fetchSize` for a source cursor on [dialect].
+     *
+     * MySQL is the exception every JDBC codebase carries: Connector/J streams only when the fetch
+     * size is exactly `Integer.MIN_VALUE`, and treats any other value as "buffer everything". A
+     * positive number there would be the opposite of what it says.
+     *
+     * @return null when `source-fetch-size` is 0 — the operator turned streaming off, and the
+     *   statement is left exactly as pre-108 code left it.
+     */
+    fun fetchSizeFor(
+        dialect: Dialect,
+        sourceFetchSize: Int,
+    ): Int? =
+        when {
+            sourceFetchSize == 0 -> null
+            dialect == Dialect.MYSQL -> Int.MIN_VALUE
+            else -> sourceFetchSize
+        }
+}

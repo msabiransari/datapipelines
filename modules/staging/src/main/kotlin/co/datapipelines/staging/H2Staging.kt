@@ -9,8 +9,10 @@ import co.datapipelines.typesystem.MappedColumn
 import co.datapipelines.typesystem.TypeMappers
 import co.datapipelines.typesystem.TypeMappingWarning
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -59,44 +61,95 @@ class H2Staging internal constructor(
 
     override suspend fun <T> withConnection(block: suspend (Connection) -> T): T = mutex.withLock { block(connection) }
 
+    /**
+     * ## The source cursor is drained OUTSIDE the mutex (108 §B)
+     *
+     * Until 108 this whole method ran under `mutex.withLock`, which meant the per-execution
+     * staging lock was held for the ENTIRE drain — the network wait on the source database
+     * included. Two independent source nodes of one pipeline therefore staged strictly one after
+     * the other, and a tempdb SELECT queued behind a multi-million-row fetch it did not depend
+     * on. That is not what §9.2's invariant asks for: the invariant is about the **connection**,
+     * which is not safe for concurrent callers — it says nothing about the network.
+     *
+     * So the shape is now: read a batch from the source cursor holding NO lock, take the lock for
+     * the INSERT, release it, read the next batch. The staging connection is still touched by
+     * exactly one coroutine at a time — every `PreparedStatement` use, the `CREATE TABLE`, the
+     * rollback and the close are all inside the lock — while the reads that dominate the wall
+     * clock now overlap. Reads stay parallel; the tempdb's single connection stays serialized.
+     *
+     * The cost is one materialized batch (`insert-batch-size` rows) instead of binding straight
+     * out of the cursor. That is the price of not holding a lock across a network wait, and it is
+     * bounded by construction.
+     */
     override suspend fun stage(
         resultSet: ResultSet,
         tableName: String,
         sourceDialect: Dialect,
-    ): StageResult =
-        mutex.withLock {
-            val metadata = resultSet.metaData
-            val indices = 1..metadata.columnCount
+        onProgress: (Long) -> Unit,
+    ): StageResult {
+        // Metadata and type mapping read the SOURCE cursor and touch the staging connection not
+        // at all, so they hold no lock either.
+        val metadata = resultSet.metaData
+        val indices = 1..metadata.columnCount
 
-            // Column labels come from user SQL — validate before they touch generated DDL (§4.5).
-            val columnNames = StagingIdentifiers.validateColumnNames(indices.map { metadata.getColumnLabel(it) })
-            val mapped = columnNames.mapIndexed { i, name -> mapSourceColumn(sourceDialect, name, metadata, i + 1) }
-            val columns = mapped.map { it.column }
-            // Flattened in column order, one per affected column; never fatal (§8.2).
-            val warnings = mapped.flatMap { it.warnings }.map { it.withBoundedSourceType() }
-            val mappings = columns.map { LogicalTypeMapping(it.type, it.precision, it.scale) }
+        // Column labels come from user SQL — validate before they touch generated DDL (§4.5).
+        val columnNames = StagingIdentifiers.validateColumnNames(indices.map { metadata.getColumnLabel(it) })
+        val mapped = columnNames.mapIndexed { i, name -> mapSourceColumn(sourceDialect, name, metadata, i + 1) }
+        val columns = mapped.map { it.column }
+        // Flattened in column order, one per affected column; never fatal (§8.2).
+        val warnings = mapped.flatMap { it.warnings }.map { it.withBoundedSourceType() }
+        val mappings = columns.map { LogicalTypeMapping(it.type, it.precision, it.scale) }
 
-            createTable(tableName, columns)
-            // Any failure past CREATE TABLE leaves a partial table and a claimed name behind;
-            // undo both so a P4 retry of this node is not poisoned by its own first attempt.
-            val rowsStaged =
-                try {
-                    batchInsert(tableName, columns, mappings, resultSet).also { checkMemoryBudget() }
-                } catch (e: SQLException) {
-                    // A driver fault the value-overflow mapping did not claim (§4.3).
-                    rollbackStagedTable(tableName)
-                    throw e
-                } catch (e: DatapipelinesException) {
-                    // value_overflow (§4.3) or memory_limit_exceeded (§8.2) — both leave a table.
-                    rollbackStagedTable(tableName)
-                    throw e
-                }
-            // Counted only once the whole operation succeeded — a failed stage must not inflate
-            // the observability total it reports through stats().
-            stagedRowTotal += rowsStaged
+        mutex.withLock { createTable(tableName, columns) }
+        // Any failure past CREATE TABLE leaves a partial table and a claimed name behind;
+        // undo both so a P4 retry of this node is not poisoned by its own first attempt.
+        val rowsStaged =
+            try {
+                drainInto(tableName, columns, mappings, resultSet, onProgress)
+            } catch (e: CancellationException) {
+                // A node stopped by its own deadline (108 §A) unwinds through here. The rollback
+                // must still run — a half-written tempdb table read as success is the failure this
+                // exists to prevent — and it cannot run on a cancelled scope, because every
+                // suspension point on one is skipped before it starts (`withContext` calls
+                // `ensureActive`). Hence NonCancellable, bounded to the one drop.
+                rollbackAfterFailure(tableName)
+                throw e
+            } catch (e: SQLException) {
+                // A driver fault the value-overflow mapping did not claim (§4.3).
+                rollbackAfterFailure(tableName)
+                throw e
+            } catch (e: DatapipelinesException) {
+                // value_overflow (§4.3) or memory_limit_exceeded (§8.2) — both leave a table.
+                rollbackAfterFailure(tableName)
+                throw e
+            }
+        // Counted only once the whole operation succeeded — a failed stage must not inflate
+        // the observability total it reports through stats(). Under the lock like every other
+        // write to this object's state, since two nodes may now be staging at once.
+        mutex.withLock { stagedRowTotal += rowsStaged }
 
-            StageResult(tableName, rowsStaged, columns, warnings)
-        }
+        return StageResult(tableName, rowsStaged, columns, warnings)
+    }
+
+    /** [rollbackStagedTable] on a scope that may already be cancelled — see [stage]. */
+    private suspend fun rollbackAfterFailure(tableName: String) {
+        withContext(NonCancellable) { rollbackLocked(tableName) }
+    }
+
+    /**
+     * The two `NonCancellable` helpers exist so that no lambda in this class ever touches [mutex]
+     * directly, and that is not a style choice: a `private val` read from inside a lambda makes
+     * the Kotlin compiler emit a **public static** `access$getMutex$p` bridge, and
+     * `StagingConnectionAccessTest` — correctly — reads that as a public member yielding the
+     * mutex. Keeping the lock behind a private *method* leaves the generated bridge returning
+     * `Object`, and the guard keeps its teeth.
+     */
+    private suspend fun rollbackLocked(tableName: String) = mutex.withLock { rollbackStagedTable(tableName) }
+
+    private suspend fun closeLocked(
+        stmt: PreparedStatement,
+        tableName: String,
+    ) = mutex.withLock { closeQuietly(stmt, tableName) }
 
     override suspend fun stageRows(
         tableName: String,
@@ -258,19 +311,97 @@ class H2Staging internal constructor(
         }
     }
 
-    private fun batchInsert(
+    /**
+     * The 108 §B drain: read a batch from the source cursor holding no lock, take the lock for the
+     * INSERT, repeat. Returns the row count.
+     *
+     * The `PreparedStatement` outlives the individual lock acquisitions, which is safe for the
+     * one reason that matters: every *use* of it is inside the lock, so the staging connection is
+     * still touched by exactly one coroutine at a time (§9.2). It is prepared under the lock and
+     * closed under the lock — the close under [NonCancellable], because a node stopped by its
+     * deadline mid-drain would otherwise leak the statement on an already-cancelled scope.
+     */
+    private suspend fun drainInto(
         tableName: String,
         columns: List<ColumnSchema>,
         mappings: List<LogicalTypeMapping>,
         rs: ResultSet,
+        onProgress: (Long) -> Unit,
     ): Long {
-        val columnList = columns.joinToString(",") { StagingIdentifiers.quote(it.name) }
-        val placeholders = columns.joinToString(",") { "?" }
-        val sql = "INSERT INTO ${StagingIdentifiers.quote(tableName)} ($columnList) VALUES ($placeholders)"
         val sqlTypes = columns.map { H2EgressMapper.h2SqlType(it) }
+        val stmt = mutex.withLock { connection.prepareStatement(insertSql(tableName, columns)) }
+        try {
+            return drainBatches(tableName, mappings, sqlTypes, rs, stmt, onProgress)
+        } finally {
+            withContext(NonCancellable) { closeLocked(stmt, tableName) }
+        }
+    }
 
-        return try {
-            connection.prepareStatement(sql).use { stmt -> streamInto(stmt, mappings, sqlTypes, rs) }
+    private suspend fun drainBatches(
+        tableName: String,
+        mappings: List<LogicalTypeMapping>,
+        sqlTypes: List<Int>,
+        rs: ResultSet,
+        stmt: PreparedStatement,
+        onProgress: (Long) -> Unit,
+    ): Long {
+        val batchSize = config.insertBatchSize
+        var rowCount = 0L
+        var batchIndex = 0L
+        var lastBudgetCheckMs = 0L
+        while (true) {
+            // OUTSIDE the lock: the network wait on the source database, which is the whole point.
+            val batch = readBatch(rs, mappings, batchSize)
+            val exhausted = batch.size < batchSize
+            // A source with zero rows still issues one `executeBatch` — the shape the pre-108
+            // code guaranteed, and what several drivers need to consider the statement used.
+            if (batch.isNotEmpty() || rowCount == 0L) {
+                mutex.withLock {
+                    insertBatch(tableName, stmt, batch, sqlTypes)
+                    lastBudgetCheckMs = checkBudgetIfDue(batchIndex, lastBudgetCheckMs)
+                }
+            }
+            rowCount += batch.size
+            batchIndex++
+            // Outside the lock: the caller's sink is not this class's to trust with the mutex.
+            onProgress(rowCount)
+            if (exhausted) break
+        }
+        // The closing check is unconditional, whatever the throttle decided along the way: §8.2's
+        // guarantee is about the footprint a completed stage leaves behind.
+        mutex.withLock { checkMemoryBudget() }
+        return rowCount
+    }
+
+    /**
+     * Reads up to [batchSize] rows out of [rs], decoding each value through its canonical mapping
+     * (§4.4). A short batch means the cursor is exhausted.
+     */
+    private fun readBatch(
+        rs: ResultSet,
+        mappings: List<LogicalTypeMapping>,
+        batchSize: Int,
+    ): List<List<Any?>> {
+        val batch = ArrayList<List<Any?>>(batchSize)
+        while (batch.size < batchSize && rs.next()) {
+            batch.add(mappings.mapIndexed { i, m -> SourceValueReader.readValue(rs, i + 1, m) })
+        }
+        return batch
+    }
+
+    /** Binds and flushes one batch. Caller holds the mutex. */
+    private fun insertBatch(
+        tableName: String,
+        stmt: PreparedStatement,
+        batch: List<List<Any?>>,
+        sqlTypes: List<Int>,
+    ) {
+        try {
+            batch.forEach { row ->
+                row.forEachIndexed { i, value -> stmt.setObject(i + 1, value, sqlTypes[i]) }
+                stmt.addBatch()
+            }
+            stmt.executeBatch()
         } catch (e: SQLException) {
             // SQL class 22 = "data exception" (numeric out of range, value too long): a source
             // value overflowing the staged column's capacity (§4.3). Anything else is a real fault.
@@ -284,23 +415,65 @@ class H2Staging internal constructor(
         }
     }
 
-    /** Streams every source row into [stmt] in batches of `insert-batch-size`; returns the count. */
-    private fun streamInto(
-        stmt: PreparedStatement,
-        mappings: List<LogicalTypeMapping>,
-        sqlTypes: List<Int>,
-        rs: ResultSet,
+    /**
+     * The §8.2 budget check on the drain path: the FIRST batch, then at most once per
+     * [BUDGET_CHECK_INTERVAL_MS] — and **without forcing a collection unless the cheap reading
+     * says it might matter**.
+     *
+     * Both halves were learned the expensive way. [measureUsedHeapKb] calls `System.gc()`, because
+     * that is what makes the reading comparable with H2's own `MEMORY_USED()`; at the default batch
+     * size a 2M-row stage is 2 000 batches, so a per-batch check is 2 000 full collections on the
+     * insert path. Throttling to a time interval fixed the per-batch part and left the other:
+     * §B's whole point is that several nodes now drain CONCURRENTLY, so the interval is paid once
+     * per drain and three concurrent drains at 250 ms are twelve full collections a second. The
+     * first E2E of the three-source pipeline blew a two-minute budget on it.
+     *
+     * So the common path reads used heap WITHOUT collecting. That reading includes garbage, which
+     * means it can only ever be an OVER-estimate — it can raise a false alarm, never miss a real
+     * one. When it is over budget, and only then, [checkMemoryBudget] forces the collection and
+     * decides on the accurate number. Cheap when nothing is wrong, exact when something is.
+     *
+     * The first batch is always checked, so a budget already blown before this stage began is
+     * refused immediately and the guard is deterministic for a test; the closing check in
+     * [drainBatches] is unconditional and always accurate.
+     *
+     * @return the timestamp of the check that ran, or [lastCheckMs] when none was due.
+     */
+    private fun checkBudgetIfDue(
+        batchIndex: Long,
+        lastCheckMs: Long,
     ): Long {
-        val batchSize = config.insertBatchSize
-        var rowCount = 0L
-        while (rs.next()) {
-            bindRow(stmt, mappings, sqlTypes, rs)
-            stmt.addBatch()
-            if (++rowCount % batchSize == 0L) stmt.executeBatch()
+        val now = System.currentTimeMillis()
+        if (batchIndex > 0 && now - lastCheckMs < BUDGET_CHECK_INTERVAL_MS) return lastCheckMs
+        if (usedHeapKbWithoutCollecting() > config.maxMemoryMb * KB_PER_MB) checkMemoryBudget()
+        return now
+    }
+
+    /** Used heap as the JVM reports it right now — garbage included, so only ever an over-estimate. */
+    private fun usedHeapKbWithoutCollecting(): Long {
+        val runtime = Runtime.getRuntime()
+        return (runtime.totalMemory() - runtime.freeMemory()) / BYTES_PER_KB
+    }
+
+    private fun insertSql(
+        tableName: String,
+        columns: List<ColumnSchema>,
+    ): String {
+        val columnList = columns.joinToString(",") { StagingIdentifiers.quote(it.name) }
+        val placeholders = columns.joinToString(",") { "?" }
+        return "INSERT INTO ${StagingIdentifiers.quote(tableName)} ($columnList) VALUES ($placeholders)"
+    }
+
+    /** A close that refuses must not replace the exception the caller is already carrying. */
+    private fun closeQuietly(
+        stmt: PreparedStatement,
+        tableName: String,
+    ) {
+        try {
+            stmt.close()
+        } catch (e: SQLException) {
+            log.warn("tempdb insert statement close failed for table '{}' of execution {}: {}", tableName, executionId, e.message)
         }
-        // Flush the trailing partial batch — and always issue one executeBatch for an empty source.
-        if (rowCount == 0L || rowCount % batchSize != 0L) stmt.executeBatch()
-        return rowCount
     }
 
     /**
@@ -313,13 +486,12 @@ class H2Staging internal constructor(
         columns: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
     ): Long {
-        val columnList = columns.joinToString(",") { StagingIdentifiers.quote(it.name) }
-        val placeholders = columns.joinToString(",") { "?" }
-        val sql = "INSERT INTO ${StagingIdentifiers.quote(tableName)} ($columnList) VALUES ($placeholders)"
         val sqlTypes = columns.map { H2EgressMapper.h2SqlType(it) }
 
         return try {
-            connection.prepareStatement(sql).use { stmt -> streamRowsInto(stmt, tableName, columns, sqlTypes, rows) }
+            connection.prepareStatement(insertSql(tableName, columns)).use { stmt ->
+                streamRowsInto(stmt, tableName, columns, sqlTypes, rows)
+            }
         } catch (e: SQLException) {
             if (e.sqlState?.startsWith(DATA_EXCEPTION_CLASS) == true) {
                 throw StagingValueOverflowException(
@@ -351,18 +523,6 @@ class H2Staging internal constructor(
         }
         if (rowCount == 0L || rowCount % batchSize != 0L) stmt.executeBatch()
         return rowCount
-    }
-
-    /** Binds one source row into [stmt], reading each value per the canonical mapping (§4.4). */
-    private fun bindRow(
-        stmt: PreparedStatement,
-        mappings: List<LogicalTypeMapping>,
-        sqlTypes: List<Int>,
-        rs: ResultSet,
-    ) {
-        mappings.forEachIndexed { i, m ->
-            stmt.setObject(i + 1, SourceValueReader.readValue(rs, i + 1, m), sqlTypes[i])
-        }
     }
 
     /**
@@ -464,6 +624,13 @@ class H2Staging internal constructor(
         const val KB_PER_MB = 1024L
         const val BYTES_PER_KB = 1024L
         const val DATA_EXCEPTION_CLASS = "22"
+
+        /**
+         * How often the §8.2 budget may be re-measured mid-drain (108 §B). One second, not 250 ms:
+         * the interval is paid once per CONCURRENT drain, and concurrency is the thing §B added.
+         * See [checkBudgetIfDue] for why the reading at this cadence is also the cheap one.
+         */
+        const val BUDGET_CHECK_INTERVAL_MS = 1_000L
 
         /**
          * The catalog projection both "current tables" (§10) and the §3.4 cleanup sweep read, so

@@ -5,7 +5,9 @@ import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.NodeType
+import co.datapipelines.pipeline.PipelineErrorCodes
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
@@ -189,6 +191,47 @@ class SubPipelineCompositionTest {
             }
         }
 
+    /**
+     * 108 merge-time finding (2026-09-10): a PIPELINE node registers no statement, so the node
+     * deadline's `cancelStatements` is a no-op for it and the ONLY stop signal its child can
+     * receive is the scope's cancellation. That signal must go out when the deadline fires, not
+     * after `cancel-grace-seconds` of waiting for a child nobody told to stop. Pinned by the
+     * clock: with a 1 s node deadline and a 30 s grace, the parent must fail well inside the
+     * grace, and the child must be ABORTED, not still running.
+     */
+    @Test
+    fun `a PIPELINE node's own timeout_seconds stops the child at the deadline, not after the grace`() =
+        runBlocking<Unit> {
+            val childExecutionId = UUID.randomUUID()
+            childHarness().use { child ->
+                val parent =
+                    ExecutorHarness(
+                        templateEngine = Fixtures.templateEngine(mapOf("child_ref" to "")),
+                        config =
+                            ExecutorConfig(
+                                executionTimeoutSeconds = PARENT_TIMEOUT_SECONDS * CHILD_TIMEOUT_FACTOR,
+                                cancelGraceSeconds = LONG_GRACE_SECONDS,
+                            ),
+                        subPipelineRunner = childRunner(child, childExecutionId),
+                    )
+                parent.use { p ->
+                    val pipeline =
+                        Fixtures.pipeline(
+                            listOf(Fixtures.node("child_ref", type = NodeType.PIPELINE, source = "", timeoutSeconds = 1)),
+                        )
+                    val elapsedMs =
+                        kotlin.system.measureTimeMillis {
+                            shouldThrow<PipelineExecutionFailed> {
+                                p.executor.execute(Fixtures.request(pipeline))
+                            }.errorCode shouldBe PipelineErrorCodes.Node.TIMEOUT
+                        }
+                    // Deadline 1 s + the child's own unwind, never the 30 s grace.
+                    (elapsedMs < GRACE_ESCAPE_BUDGET_MS).shouldBeTrue()
+                    child.emitter.allOf<ExecutionAborted>().map { it.executionId } shouldContain childExecutionId
+                }
+            }
+        }
+
     /** The child's executor: a genuinely slow node and a deadline far beyond the parent's. */
     private fun childHarness() =
         ExecutorHarness(
@@ -204,31 +247,37 @@ class SubPipelineCompositionTest {
     ) = ExecutorHarness(
         templateEngine = Fixtures.templateEngine(mapOf("child_ref" to "")),
         config = ExecutorConfig(executionTimeoutSeconds = PARENT_TIMEOUT_SECONDS),
-        subPipelineRunner =
-            SubPipelineRunner { node, ctx ->
-                child.executor.execute(
-                    ExecuteRequest(
-                        pipelineId = UUID.randomUUID(),
-                        pipelineVersion = 1,
-                        pipeline = Fixtures.pipeline(listOf(Fixtures.node("slow", source = SLOW_DS))),
-                        userId = ctx.userId,
-                        workspaceId = ctx.workspaceId,
-                        triggeredVia = ExecutionTrigger.PIPELINE,
-                        executionId = childExecutionId,
-                        parentExecutionId = ctx.executionId,
-                        parentNodeId = node.id,
-                        rootExecutionId = ctx.rootExecutionId,
-                        compositionDepth = ctx.compositionDepth + 1,
-                    ),
-                )
-                NodeResult.of(node.id, 0, Instant.now(), childExecutionId = childExecutionId)
-            },
+        subPipelineRunner = childRunner(child, childExecutionId),
     )
+
+    private fun childRunner(
+        child: ExecutorHarness,
+        childExecutionId: UUID,
+    ) = SubPipelineRunner { node, ctx ->
+        child.executor.execute(
+            ExecuteRequest(
+                pipelineId = UUID.randomUUID(),
+                pipelineVersion = 1,
+                pipeline = Fixtures.pipeline(listOf(Fixtures.node("slow", source = SLOW_DS))),
+                userId = ctx.userId,
+                workspaceId = ctx.workspaceId,
+                triggeredVia = ExecutionTrigger.PIPELINE,
+                executionId = childExecutionId,
+                parentExecutionId = ctx.executionId,
+                parentNodeId = node.id,
+                rootExecutionId = ctx.rootExecutionId,
+                compositionDepth = ctx.compositionDepth + 1,
+            ),
+        )
+        NodeResult.of(node.id, 0, Instant.now(), childExecutionId = childExecutionId)
+    }
 
     private companion object {
         const val TEST_TIMEOUT_SECONDS = 3600L
         const val SLOW_DS = "slow_src"
         const val PARENT_TIMEOUT_SECONDS = 2L
         const val CHILD_TIMEOUT_FACTOR = 60L
+        const val LONG_GRACE_SECONDS = 30L
+        const val GRACE_ESCAPE_BUDGET_MS = 15_000L
     }
 }

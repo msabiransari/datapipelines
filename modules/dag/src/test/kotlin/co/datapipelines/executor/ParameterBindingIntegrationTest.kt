@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Parameter
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRegistry
 import co.datapipelines.templates.TemplateVersion
@@ -109,14 +110,28 @@ class ParameterBindingIntegrationTest {
         }
 
     @Test
-    fun `the interpolated form with a semicolon DROP payload drops the table — the hole the round closes`() =
+    fun `the interpolated form with a semicolon DROP payload reaches the driver as a second statement — the hole the round closes`() =
         runBlocking<Unit> {
-            // The injection works so well that the executor dies draining the now-mangled
-            // cursor — the assertion that matters is the destroyed table, not the status.
+            // The payload closes the literal and appends a whole second statement; the driver
+            // accepts the pair and the node dies on it. That is the hole, and it is undiminished:
+            // the interpolated value reaches the driver AS SQL, which the OR-payload test above
+            // demonstrates on a path with no transaction subtlety at all.
+            //
+            // What this test may no longer assert is that the DROP TOOK EFFECT. Before 108 §B it
+            // did — the table was gone. It survives now, and the cause is transport, not a fix: a
+            // POSTGRES-dialect source reads inside a transaction (a server-side cursor needs
+            // `autoCommit=false`), and on that path the trailing command of a multi-statement
+            // `executeQuery` does not run. MEASURED, not reasoned: removing the autocommit switch
+            // alone — leaving `fetchSize` in place — restores `countOf("drop_target") == 0`, and
+            // setting `source-fetch-size: 0` restores it in production too. Reported to the
+            // orchestrator as the one shape 108 §B changes: a DQL template whose SQL is several
+            // statements, on Postgres.
+            //
+            // Deliberately NOT re-asserted as "the table survives": that would pin an accident of
+            // one driver's protocol as a guarantee, and a reader would take it for a security fix.
             shouldThrow<PipelineExecutionFailed> {
                 execute("SELECT id FROM drop_target WHERE note = '\${label}'", "x'; DROP TABLE drop_target; --")
-            }
-            countOf("drop_target") shouldBe 0
+            }.errorCode shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED
         }
 
     // ------------------------------------------------------------------ helpers

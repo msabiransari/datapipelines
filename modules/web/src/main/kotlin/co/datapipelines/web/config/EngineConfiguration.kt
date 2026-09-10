@@ -6,6 +6,7 @@ import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionEventRepository
+import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
@@ -37,6 +38,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.net.URI
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -85,6 +87,13 @@ class EngineConfiguration {
             maxConcurrentExecutionsPerInstance = executor.effectiveMaxConcurrentExecutionsPerInstance,
             nodeQueryTimeoutSeconds = executor.nodeQueryTimeoutSeconds,
             executionTimeoutSeconds = executor.executionTimeoutSeconds,
+            // 108: the middle of the three budgets — one node, wall clock, executor-enforced.
+            nodeTimeoutSeconds = executor.nodeTimeoutSeconds,
+            nodeTimeoutMaxSeconds = executor.nodeTimeoutMaxSeconds,
+            cancelGraceSeconds = executor.cancelGraceSeconds,
+            sourceFetchSize = executor.sourceFetchSize,
+            progressWriteIntervalSeconds = executor.progressWriteIntervalSeconds,
+            heartbeatSeconds = executor.heartbeatSeconds,
             stagingMaxMemoryMb = staging.maxMemoryMb,
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.
@@ -204,6 +213,7 @@ class EngineConfiguration {
         resultUrls: ResultUrlFactory,
         metrics: ExecutorMetrics,
         subPipelineRunner: SubPipelineRunner,
+        progress: ExecutionProgress,
     ): PipelineExecutor =
         pipelineExecutor(
             // The shared bean is a bean-of-record (mcp-server's @ConditionalOnBean); no
@@ -232,6 +242,7 @@ class EngineConfiguration {
             // one unwired would make a PIPELINE node fail "not wired" only on whichever path
             // happens to use the shared bean.
             subPipelineRunner = subPipelineRunner,
+            progress = progress,
         )
 
     /**

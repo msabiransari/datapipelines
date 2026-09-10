@@ -89,6 +89,8 @@ class FlywayMigrationIntegrationTest {
                 // 102 — the write-surface stamps on both version tables (owner ruling
                 // 2026-09-09): created_via / updated_via, CHECK'd, defaulting 'session'.
                 "20|version write surface|true",
+                // 108 §D — the instance heartbeat the crash sweep reads (V20 was taken by 102 at merge).
+                "21|execution heartbeat|true",
             )
     }
 
@@ -419,6 +421,7 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
                 "pipeline_executions.idx_executions_correlation",
+                "pipeline_executions.idx_executions_heartbeat",
                 "pipeline_executions.idx_executions_pipeline",
                 "pipeline_executions.idx_executions_root",
                 "pipeline_executions.idx_executions_status_running",

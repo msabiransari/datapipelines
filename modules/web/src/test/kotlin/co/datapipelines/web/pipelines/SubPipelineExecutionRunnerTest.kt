@@ -5,6 +5,7 @@ import co.datapipelines.executor.DirectResultSink
 import co.datapipelines.executor.ExecutableNode
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
+import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
@@ -234,6 +235,7 @@ class SubPipelineExecutionRunnerTest {
         executorConfig = ExecutorConfig(maxCompositionDepth = maxCompositionDepth),
         resultUrls = mockk(),
         executorMetrics = metrics,
+        executionProgress = ExecutionProgress.NONE,
         persistenceDispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
         streams = mockk(),
         eventLog = mockk(relaxed = true),

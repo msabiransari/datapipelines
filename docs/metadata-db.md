@@ -290,6 +290,7 @@ CREATE TABLE pipeline_executions (
     parent_execution_id UUID        REFERENCES pipeline_executions(execution_id), -- spawning execution; NULL for roots (V3)
     parent_node_id      TEXT,                        -- PIPELINE node id in the parent that spawned this execution; NULL for roots (V3)
     root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
+    heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V21 row (V21, §8.3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
     CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE')),  -- 'PIPELINE' added by V3
     CONSTRAINT fk_executions_pipeline_version
@@ -304,6 +305,8 @@ CREATE INDEX idx_executions_user ON pipeline_executions(triggered_by, started_at
 CREATE INDEX idx_executions_correlation ON pipeline_executions(correlation_id)
     WHERE correlation_id IS NOT NULL;
 CREATE INDEX idx_executions_root ON pipeline_executions(root_execution_id);   -- family lookup / cancellation (V3)
+CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    -- the crash sweep's other access path (V21, §8.3)
+    WHERE status = 'RUNNING';
 ```
 
 **Notes:**
@@ -653,7 +656,8 @@ CREATE TABLE lake_tables (
 | `pipeline_versions` | `uq_pipeline_versions_one_draft` | explicit (partial, unique) | The one-DRAFT-per-pipeline rule of versioning §3.3 — the physical concurrency guard behind copy-on-write |
 | `pipeline_executions` | `pipeline_executions_pkey` | via PK | Lookup by `execution_id` |
 | `pipeline_executions` | `idx_executions_pipeline` | explicit | List executions for a pipeline, newest first |
-| `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions — the stale sweep's access path ([§8.3](#83-stale-execution-sweep)) |
+| `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions by AGE — the stale sweep's backstop path for rows with no heartbeat ([§8.3](#83-stale-execution-sweep)) |
+| `pipeline_executions` | `idx_executions_heartbeat` | explicit (partial) | Find in-flight executions by HEARTBEAT — the stale sweep's primary path since V21, and why a 15-second tick stays cheap ([§8.3](#83-stale-execution-sweep)) |
 | `pipeline_executions` | `idx_executions_user` | explicit | List executions by user |
 | `pipeline_executions` | `idx_executions_correlation` | explicit (partial) | Trace lookup by correlation id |
 | `pipeline_executions` | `idx_executions_root` | explicit | The whole execution family (root + descendants) in one lookup — composition lineage and cancellation key off `root_execution_id` (V3) |
@@ -927,17 +931,32 @@ UPDATE pipeline_executions
        duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
        error_json = CAST(:instanceLostError AS jsonb)
  WHERE status = 'RUNNING'
-   AND started_at < NOW() - make_interval(mins => :staleTimeoutMinutes);
+   AND (heartbeat_at < :heartbeatCutoff
+        OR (heartbeat_at IS NULL AND started_at < NOW() - make_interval(mins => :staleTimeoutMinutes)));
 ```
 
 `:staleTimeoutMinutes` ← [`datapipelines.executions.stale-timeout-minutes`](configuration.md#311-execution-history). `:instanceLostError` is the standard error envelope with code `pipeline.execution.instance_lost`.
+
+#### The heartbeat (108 §D, V21)
+
+`heartbeat_at` is stamped by the instance that OWNS the row, every [`datapipelines.executor.heartbeat-seconds`](configuration.md#32-executor) (15) while the execution runs, and again by every live-progress write. `:heartbeatCutoff` is `NOW() - 3 × heartbeat-seconds` — one missed beat is a slow tick, two a loaded box, three an instance that is gone. With the sweep ticking every 15 s, a crashed instance's rows are `ABORTED` in **under a minute**.
+
+Before V21 the age condition was the only one, so those rows stayed `RUNNING` for `stale-timeout-minutes` — sixty of them. That is not a tidiness problem: an agent in T199 waited the full hour before learning its run had died, because nothing in the system said otherwise.
+
+**The two conditions are OR'd and neither replaces the other.** The age condition survives, restricted to rows with NO stamp. A pre-V21 instance never writes one, and reaping its live executions after 45 seconds on the strength of a column it does not know about would abort healthy runs during a rolling upgrade. So: stamped rows are judged by the stamp, unstamped rows by their age, and the sweep is safe across the version boundary in both directions.
+
+#### Live progress on the same row (108 §D)
+
+`node_stats_json` is also written **while** the execution runs — the same column, the same shape as the terminal write, so every reader that renders node stats renders progress for free. It is updated at each node boundary (unthrottled: that is the event a watcher is waiting for) and from the staging drain at most once per [`datapipelines.executor.progress-write-interval-seconds`](configuration.md#32-executor). A node that has started and not finished appears with `status: "RUNNING"` ([Enums §9](enums.md#9-nodestatus--per-node-execution-outcome)) and its rows staged so far; a node that has not started is **absent** rather than given a status.
+
+Both writes carry `AND status = 'RUNNING'`, and that guard is the whole safety of the feature: a throttled write can be in flight when the execution finishes, and without it a late progress write would overwrite the FINAL stats with a snapshot that still says a node is running — a corrupted terminal record produced by an observability feature.
 
 Two things this job must get right:
 
 - **The timeout must exceed the longest legitimate execution.** `stale-timeout-minutes` is not independent of `datapipelines.executor.execution-timeout-seconds` — if it is set below it, the sweep aborts executions that are still running normally, and the row says `ABORTED` while the work continues on the instance. Keep it comfortably above the execution timeout.
 - **It is a crash sweep, not a cancellation path.** Live cancellation (client disconnect beyond grace, explicit `DELETE /api/v1/executions/{id}`, shutdown drain) travels through the Redis cancel flag (D7) and is handled by the executing instance. This job only cleans up after instances that are gone.
 
-`idx_executions_status_running` is the partial index this `WHERE` clause rides; it is why the sweep stays cheap on a large table.
+`idx_executions_status_running` (on `started_at`) and `idx_executions_heartbeat` (on `heartbeat_at`, V21) are the partial indexes this `WHERE` clause rides — both restricted to `status = 'RUNNING'`, which is why a tick every 15 seconds stays cheap on a large table.
 
 Scheduling for all three (Spring `@Scheduled`, or external cron in multi-instance deployments where a single runner is preferred) is an implementation choice, not a schema concern. Each statement is idempotent and safe to run concurrently from more than one instance.
 

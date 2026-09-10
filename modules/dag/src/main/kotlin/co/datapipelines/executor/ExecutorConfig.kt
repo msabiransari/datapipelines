@@ -23,6 +23,32 @@ import co.datapipelines.pipeline.OrgContext
  * @property nodeQueryTimeoutSeconds `datapipelines.executor.node-query-timeout-seconds`; a
  *   datasource's own `query_timeout_seconds` overrides it per [queryTimeoutSecondsFor].
  * @property executionTimeoutSeconds `datapipelines.executor.execution-timeout-seconds`.
+ * @property nodeTimeoutSeconds `datapipelines.executor.node-timeout-seconds` (108) — the
+ *   per-node WALL-CLOCK deadline the executor owns, spanning RENDER → CONNECT → EXECUTE →
+ *   STAGE → MATERIALIZE. [nodeQueryTimeoutSeconds] bounds one `execute*` call and is enforced by
+ *   the DRIVER; this bounds the node and is enforced by the executor, so a driver that honours
+ *   neither `queryTimeout` nor `cancel()` still cannot hold a node past its budget. A node may
+ *   lower or raise it within [nodeTimeoutMaxSeconds] through `node.settings.timeout_seconds`.
+ * @property nodeTimeoutMaxSeconds `datapipelines.executor.node-timeout-max-seconds` (108) — the
+ *   ceiling a node's own override may not exceed; save-time validation refuses past it
+ *   (`pipeline.validation.node_timeout_invalid`).
+ * @property sourceFetchSize `datapipelines.executor.source-fetch-size` (108) — the JDBC
+ *   `fetchSize` set on every DQL source statement, and the reason the staging memory budget is
+ *   not a fiction. pgjdbc buffers the WHOLE result set in the driver unless the connection is
+ *   `autoCommit=false` AND `fetchSize > 0`; before 108 the executor set neither, so a 2M-row
+ *   source node's rows were all in the JVM before `stage()` saw one of them and no per-batch
+ *   budget check could ever have caught it.
+ * @property progressWriteIntervalSeconds `datapipelines.executor.progress-write-interval-seconds`
+ *   (108 §D) — the floor between two THROTTLED progress writes for one execution. Node boundaries
+ *   are not throttled; only the staging drain, which reports per batch.
+ * @property heartbeatSeconds `datapipelines.executor.heartbeat-seconds` (108 §D) — how often the
+ *   owning instance stamps `pipeline_executions.heartbeat_at`. The crash sweep reaps a RUNNING row
+ *   whose stamp is older than three of these, so this is also what sets how fast a dead instance's
+ *   rows are reaped: ~45 s, against the sixty MINUTES the age backstop alone gave.
+ * @property cancelGraceSeconds `datapipelines.executor.cancel-grace-seconds` (108) — how long the
+ *   executor waits, AFTER cancelling the node's statements, for a driver to actually return.
+ *   Past it the node fails on schedule and the abandoned statement is logged once with the
+ *   execution id (§8.3.2's residual overshoot, now bounded). Never a wait on the query itself.
  * @property stagingMaxMemoryMb the global `datapipelines.staging.h2.max-memory-mb`; a pipeline's
  *   `settings.tempdb.config.max_memory_mb` overrides it for that pipeline (D6).
  * @property cancelPollIntervalSeconds `datapipelines.sse.heartbeat-interval-seconds` — the
@@ -47,6 +73,12 @@ data class ExecutorConfig(
     val maxConcurrentExecutionsPerInstance: Int = 100,
     val nodeQueryTimeoutSeconds: Int = 60,
     val executionTimeoutSeconds: Long = 600,
+    val nodeTimeoutSeconds: Long = 300,
+    val nodeTimeoutMaxSeconds: Int = 900,
+    val cancelGraceSeconds: Long = 5,
+    val sourceFetchSize: Int = 1000,
+    val progressWriteIntervalSeconds: Long = 5,
+    val heartbeatSeconds: Long = 15,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
     val maxCompositionDepth: Int = 5,
@@ -64,6 +96,27 @@ data class ExecutorConfig(
         // so a 0 here silently removes the last per-statement limit in the system.
         require(nodeQueryTimeoutSeconds > 0) { "nodeQueryTimeoutSeconds must be positive, was $nodeQueryTimeoutSeconds" }
         require(executionTimeoutSeconds > 0) { "executionTimeoutSeconds must be positive" }
+        // §5.3's precedence is documented, NOT enforced across keys, and the reason is worth
+        // stating because the first draft of this class did enforce it and had to be reverted.
+        // Every ordering a cross-key `require` would forbid is harmless: a node deadline above the
+        // execution's is simply never reached (the outer bound fires first and says so), and one
+        // below the statement timeout is stronger, not broken — the executor stops the node before
+        // the driver would have, which is the entire point of owning a bound above the driver's.
+        // What a cross-key require DOES reliably do is turn "I lowered execution-timeout-seconds
+        // for this deployment" into a startup crash, and break every caller that constructs a
+        // short-timeout config for a test. A constraint that refuses correct configurations to
+        // prevent harmless ones is not a guard.
+        require(nodeTimeoutSeconds > 0) { "nodeTimeoutSeconds must be positive, was $nodeTimeoutSeconds" }
+        require(nodeTimeoutMaxSeconds > 0) { "nodeTimeoutMaxSeconds must be positive, was $nodeTimeoutMaxSeconds" }
+        require(cancelGraceSeconds > 0) { "cancelGraceSeconds must be positive, was $cancelGraceSeconds" }
+        // ZERO IS LEGAL AND MEANS "DO NOT STREAM" — the operator's escape hatch (108 §B). A DQL
+        // node's author SQL may legitimately be multi-statement, and pgjdbc's server-side cursor
+        // path uses the extended query protocol, which does not carry multiple statements. Every
+        // pipeline we know of is a single query, but a deployment that discovers otherwise on a
+        // release weekend needs one env var, not a patch.
+        require(sourceFetchSize >= 0) { "sourceFetchSize must not be negative, was $sourceFetchSize" }
+        require(progressWriteIntervalSeconds > 0) { "progressWriteIntervalSeconds must be positive" }
+        require(heartbeatSeconds > 0) { "heartbeatSeconds must be positive, was $heartbeatSeconds" }
         require(stagingMaxMemoryMb > 0) { "stagingMaxMemoryMb must be positive" }
         require(cancelPollIntervalSeconds > 0) { "cancelPollIntervalSeconds must be positive" }
         require(maxCompositionDepth >= 1) { "maxCompositionDepth must be >= 1, was $maxCompositionDepth" }
@@ -78,6 +131,20 @@ data class ExecutorConfig(
      *   node (tempdb is not a datasource and has no per-datasource override).
      */
     fun queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds: Int?): Int = datasourceQueryTimeoutSeconds ?: nodeQueryTimeoutSeconds
+
+    /**
+     * The wall-clock deadline for one node (§5.3, 108): the node's own
+     * `settings.timeout_seconds` when it declared one, otherwise [nodeTimeoutSeconds].
+     *
+     * Clamped at [nodeTimeoutMaxSeconds] as a run-time backstop only. Save-time validation has
+     * already refused anything above the ceiling (`pipeline.validation.node_timeout_invalid`), so
+     * reaching the clamp means a body saved before the ceiling was lowered — and lowering an
+     * operator ceiling has to bind the pipelines already stored, or it is not a ceiling.
+     *
+     * @param nodeTimeoutSecondsOverride `node.settings.timeout_seconds`, or null.
+     */
+    fun nodeTimeoutSecondsFor(nodeTimeoutSecondsOverride: Int?): Long =
+        (nodeTimeoutSecondsOverride?.toLong() ?: nodeTimeoutSeconds).coerceIn(1, nodeTimeoutMaxSeconds.toLong())
 
     /**
      * The per-execution render output budget passed to `TemplateEngine.render(ref, ctx, budget)`.

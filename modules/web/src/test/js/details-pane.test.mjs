@@ -69,6 +69,9 @@ test("a DQL node's Details: source, template, output, parameters", () => {
   assert.equal(map.Template, "nyc/mobility/trips_by_borough @ v2");
   assert.equal(map.Output, "tempdb → table trips_by_borough");
   assert.equal(map.Parameters, "run_fiscal_quarter");
+  // 108 §A: a node that declares no timeout says WHERE the number comes from, so an author
+  // reading a `pipeline.node.timeout` knows whether this node set the budget or the operator did.
+  assert.equal(map.Timeout, "default (datapipelines.executor.node-timeout-seconds)");
   assert.equal(editor.isSqlNode(DQL), true, "a SQL-backed node fetches the rendered statement");
   assert.equal(editor.detailsSqlHead(DQL).includes("Rendered SQL"), true);
 });
@@ -139,4 +142,23 @@ test("logEvent appends every kind to the events log and resets it on execution_s
   editor.logEvent("execution_started", { execution_id: "e1", parameters: {} });
   assert.equal(editor.eventsLog.count(), 1, "the new run reset the log, then appended its own first event");
   assert.equal(editor.eventsLog.events[0].kind, "execution_started");
+});
+
+test("a node's own settings.timeout_seconds shows on Details as this node's budget (108 §A)", () => {
+  editor.parameters = {};
+  editor.paramKeys = [];
+  editor.pipeline = { settings: {} };
+  editor.nodeStates = {};
+  const withOwn = { ...DQL, settings: { timeout_seconds: 600 } };
+  const map = Object.fromEntries(editor.detailsMeta(withOwn));
+  assert.equal(map.Timeout, "600s (this node)");
+});
+
+test("a PIPELINE node with no timeout says the child's deadline bounds it, not a number (108 §A)", () => {
+  editor.nodeStates = {};
+  editor.childExecutions = {};
+  const map = Object.fromEntries(editor.detailsMeta(CHILD));
+  // The node deadline exempts a PIPELINE node that declares none — quoting the operator default
+  // here would name a budget that never applies to it.
+  assert.equal(map.Timeout, "child execution's own deadline");
 });

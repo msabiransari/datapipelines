@@ -8,6 +8,7 @@ import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionEventRepository
+import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
@@ -180,6 +181,7 @@ class WebSurfaceConfiguration {
         executorConfig: ExecutorConfig,
         resultUrls: ResultUrlFactory,
         executorMetrics: ExecutorMetrics,
+        executionProgress: ExecutionProgress,
         persistenceDispatcher: CoroutineDispatcher,
         streams: ExecutionStreamRegistry,
         eventLog: SseEventLog,
@@ -200,6 +202,7 @@ class WebSurfaceConfiguration {
             executorConfig = executorConfig,
             resultUrls = resultUrls,
             executorMetrics = executorMetrics,
+            executionProgress = executionProgress,
             persistenceDispatcher = persistenceDispatcher,
             streams = streams,
             eventLog = eventLog,
@@ -242,6 +245,7 @@ class WebSurfaceConfiguration {
         executorConfig: ExecutorConfig,
         resultUrls: ResultUrlFactory,
         executorMetrics: ExecutorMetrics,
+        executionProgress: ExecutionProgress,
         persistenceDispatcher: CoroutineDispatcher,
         streams: ExecutionStreamRegistry,
         eventLog: SseEventLog,
@@ -265,6 +269,7 @@ class WebSurfaceConfiguration {
             executorConfig = executorConfig,
             resultUrls = resultUrls,
             executorMetrics = executorMetrics,
+            executionProgress = executionProgress,
             persistenceDispatcher = persistenceDispatcher,
             streams = streams,
             eventLog = eventLog,
@@ -299,6 +304,7 @@ class WebSurfaceConfiguration {
         executorConfig: ExecutorConfig,
         resultUrls: ResultUrlFactory,
         executorMetrics: ExecutorMetrics,
+        executionProgress: ExecutionProgress,
         persistenceDispatcher: CoroutineDispatcher,
         streams: ExecutionStreamRegistry,
         eventLog: SseEventLog,
@@ -319,6 +325,7 @@ class WebSurfaceConfiguration {
             executorConfig = executorConfig,
             resultUrls = resultUrls,
             executorMetrics = executorMetrics,
+            executionProgress = executionProgress,
             persistenceDispatcher = persistenceDispatcher,
             streams = streams,
             eventLog = eventLog,

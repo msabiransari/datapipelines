@@ -257,7 +257,8 @@ Note: no `output` block. DML's side effect IS the output.
 | `inputs` | object | CALCULATOR nodes only | The kind's inputs, by input name. A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
 | `context_key` | string | CALCULATOR nodes only | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
 | `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
-| `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. |
+| `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
+| `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
 
 ### 4.7 `output` block reference
 
@@ -331,6 +332,42 @@ Field rules:
 At run time the node evaluates at its DAG position, writes its value, and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on its stats so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
 
 **The `context_key` is also an implicit optional execute input** (078, owner ruling 2026-09-05). A caller may supply it in the execute request's `parameters` object, typed by the kind's output — an ANY-output kind (`coalesce`, `if_null`, `map`) accepts any JSON scalar. Supplied, the node is **skipped**: it does not evaluate, the supplied value is what downstream nodes bind, and the node's stats carry `provided_by: "caller"` beside `context_key`/`context_value` so a run record shows where the value came from. Unsupplied (an explicit JSON `null` reads as unsupplied), the node runs and computes the value exactly as before. A supplied value that fails coercion is refused with `pipeline.execution.invalid_parameter_type` (§13.3), exactly like a declared parameter — to the caller there is no second kind of execute input.
+
+### 4.11 `settings.timeout_seconds` — the node's own deadline
+
+```json
+{
+  "id": "scan_trips",
+  "type": "DQL",
+  "source": "lake",
+  "template": { "id": "trips/scan", "version": 3 },
+  "output": { "target": "tempdb", "table": "trips" },
+  "depends_on": [],
+  "settings": { "timeout_seconds": 600 }
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `timeout_seconds` | integer | no | This node's WALL-CLOCK deadline, in seconds, overriding `datapipelines.executor.node-timeout-seconds` (default 300) for this node alone. Must be a positive integer no greater than `datapipelines.executor.node-timeout-max-seconds` (default 900), or the save is refused with `pipeline.validation.node_timeout_invalid` (§12.8). |
+
+**Three budgets, one precedence** (the same table appears in [configuration.md §3.2](configuration.md) and [dag-executor.md §5.3](dag-executor.md)):
+
+| Bound | Setting | Scope | Enforced by |
+|---|---|---|---|
+| Execution | `datapipelines.executor.execution-timeout-seconds` (600) | the whole execution | the executor |
+| Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node: RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE | the executor |
+| Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
+
+Read it downward: the execution deadline is the outermost, the statement timeout the innermost, and the node deadline is what closes the gap between them. The statement bound is the **driver's**, and drivers honour it unevenly — a node whose driver ignores it is stopped by the node deadline anyway, which is exactly why the middle row exists. A pipeline-level `settings.execution.timeout_seconds` is still §5.3 future work: the outermost bound is the operator's setting, not the pipeline's.
+
+A node that exceeds its deadline fails with `pipeline.node.timeout` (§13.4, HTTP 504), whose `details` carry `timeout_seconds`, `elapsed_ms` and the `phase` the budget went in.
+
+**A timeout is a signal, not a wall to route around.** The first response to a node that will not fit its budget is to make the work smaller — pre-aggregate, push the filter down, prune on the partition column. Slicing one scan into four quarterly nodes to dodge the deadline produces a pipeline that is slower, four times as likely to fail, and lies about what it does. When the scan is legitimately long, raise THIS node's `timeout_seconds` and say why.
+
+A PIPELINE node that declares no `timeout_seconds` is not bounded by the node deadline: its work is a child execution, already bounded by `execution-timeout-seconds` one level down. One that declares it, is.
+
+---
 
 ## 5. Settings
 
@@ -769,6 +806,7 @@ hole as an interpolated one, one directive earlier.
 |---|---|
 | `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is `H2` (v1) |
 | `pipeline.validation.tempdb_config_invalid` | `settings.tempdb.config` keys are valid for the chosen engine |
+| `pipeline.validation.node_timeout_invalid` | A node's `settings.timeout_seconds` is a positive integer no greater than `datapipelines.executor.node-timeout-max-seconds` (default 900). Refused rather than clamped: an author who writes 14 400 and silently runs at 900 debugs a timeout that says nothing about what they asked for. `details` carries the node id, the requested value and the ceiling (§4.11) |
 
 ### 12.9 Composition validations
 
@@ -850,6 +888,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.datasource_connection_failed` | 502 | Could not acquire connection to datasource |
 | `pipeline.node.query_execution_failed` | 502 | SQL executed but failed (syntax, permission, etc.) |
 | `pipeline.node.query_timeout` | 504 | The node's statement outlived its JDBC query timeout (the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds`) and the driver cancelled it. The detail carries `timeout_seconds` and `elapsed_ms`. Sibling of `pipeline.execution.timeout`; distinct from `query_execution_failed` because "too slow for the budget" and "wrong SQL" want different fixes |
+| `pipeline.node.timeout` | 504 | The node outlived its WALL-CLOCK deadline (`node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds`) and the executor stopped it — RENDER through MATERIALIZE, staging included. Distinct from `query_timeout`, which is ONE statement's budget enforced by the driver: this one is the executor's own and fires whatever the driver does, so a driver that honours neither `queryTimeout` nor `cancel()` still cannot hold a node past its budget. A statement that has not returned `datapipelines.executor.cancel-grace-seconds` after being cancelled is abandoned and logged once with the execution id; the node fails on schedule. The detail carries `timeout_seconds`, `elapsed_ms` and `phase` — the phase is what says whether to make the query cheaper or the staged result smaller |
 | `pipeline.node.staging_failed` | 500 | Could not stage ResultSet into tempdb |
 | `pipeline.node.writeback_failed` | 500 | Could not write ResultSet to external datasource (output.target: "datasource") |
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
@@ -1302,6 +1341,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.14 | 108 executor hardening | New §4.11: a node may declare its own WALL-CLOCK deadline, `settings.timeout_seconds` — the middle of three budgets whose precedence §4.11 now states as one table (execution ≥ node ≥ statement). §4.6 gains the `settings` row and states that `depends_on` is data flow only, never an edge added to avoid contention. §12.8 gains `pipeline.validation.node_timeout_invalid` (the ceiling is `datapipelines.executor.node-timeout-max-seconds`, refused rather than clamped) and §13.4 gains `pipeline.node.timeout` (504) — the executor's own bound, which fires whatever the driver does. Body-hash neutral: `settings` is absent on every stored node and serializes back absent. Additive per §15.2. |
 | 2026-09-09 | v1.13 | T202 node query timeout | §13.4 gains `pipeline.node.query_timeout` (504): a statement cancelled by its own JDBC query timeout reports the timeout, not `query_execution_failed` + driver text. |
 | 2026-09-08 | v1.12 | 099 draft-first (D55/D56) | §14's operation table: `POST /pipelines` lands v1 **DRAFT** with a null pointer, `GET /pipelines/{id}` is the working version, `POST …/execute` defaults to the working version, and `GET …/export` refuses a never-released pipeline with `pipeline.promotion.not_released`. No new error code and no §13 row: every refusal reuses a catalogued one. |
 | 2026-09-06 | v1.12 | 078 composition mapping | The parent→child mapping half of the calculator input ruling (v1.11): a PIPELINE node's `parameters` may now map onto a child CALCULATOR `context_key` as well as a declared parameter (supplied → the child's node is skipped, §4.10's rule composed), and a `"${ref}"` value resolves against all three parent Context tiers — a declared parameter, a parent calculator `context_key` (typed by its kind's output), an org/platform key (org STRING, platform canonical) — type-checked against the target with the unchanged codes, messages naming the tiers; an ANY-output key on either side skips the check (typed only by the run, A6's convention). **No auto-passthrough:** identically spelled parent/child calculator keys are not implicitly mapped — only explicit entries cross. The read surfaces list calculator keys under `parameters` as `{"type", "required": false, "derived": true}` (`"ANY"` for ANY-output kinds), derived on read, never stored. Additive per §15.2. |

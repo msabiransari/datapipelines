@@ -26,6 +26,8 @@ class ExecutorHarness(
     executionSlots: ExecutionSlots? = null,
     /** The composition port (design §4.1) — wired by tests that exercise PIPELINE nodes. */
     subPipelineRunner: SubPipelineRunner? = null,
+    /** The live-progress sink (108 §D) — wired by tests that observe it; NONE everywhere else. */
+    progress: ExecutionProgress = ExecutionProgress.NONE,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
@@ -43,6 +45,7 @@ class ExecutorHarness(
             resultStore = resultStore,
             eventEmitter = emitter,
             cancellationRegistry = cancellations,
+            progress = progress,
             cancellationFlags = flags,
             executionSlots = slots,
             dispatcher = dispatcher,

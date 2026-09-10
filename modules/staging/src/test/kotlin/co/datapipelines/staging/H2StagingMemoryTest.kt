@@ -2,11 +2,16 @@ package co.datapipelines.staging
 
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
+import java.sql.ResultSet
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The memory guard (§8.2): the budget decision is driven by a **measured** reading of used heap,
@@ -41,6 +46,46 @@ class H2StagingMemoryTest {
         staging.close()
     }
 
+    /**
+     * The budget stops the drain **while it is draining**, not after it has read everything
+     * (108 §B).
+     *
+     * With `stage()` reading the source cursor outside the mutex, a check that only ran when the
+     * whole cursor had been consumed would let a runaway node put its entire result in the heap
+     * before anything looked — the guard would still fire, and would still be useless. So the
+     * check runs on the first batch and then on a time throttle, and the observable that proves it
+     * is how far the SOURCE cursor got: strictly fewer reads than the source has rows.
+     *
+     * Counting reads is the right observable because the alternatives are not available — the
+     * partial table is rolled back by design, and the row count never reaches the caller.
+     *
+     * **The cursor is deliberately SLOW, and that is a statement about the guard.** The mid-drain
+     * check runs at most once per second (it was 250 ms until three concurrent drains showed what
+     * a forced collection costs at that cadence), so a drain that finishes inside one tick is
+     * checked exactly twice: at its first batch, and at its end. A stage that fast cannot be the
+     * runaway this guard exists to stop, so that is correct behaviour — but it means a test of
+     * "stops MID-drain" has to be a drain that lasts longer than a tick. One millisecond every
+     * fiftieth row over 100 000 rows is ~2 s of drain, which spans two ticks with room to spare.
+     */
+    @Test
+    fun `the budget stops the drain mid-cursor, not after the whole source is read`() {
+        val budgetMb = budgetMbAboveBaseline(HEADROOM_MB)
+        val staging = H2StagingFactory(H2StagingProperties(maxMemoryMb = budgetMb)).create(UUID.randomUUID())
+
+        val reads = AtomicInteger()
+        SourceDb().use { src ->
+            val rs = src.query("SELECT x AS id, RPAD('a', 800, 'a') AS payload FROM SYSTEM_RANGE(1, $SOURCE_ROWS)")
+            shouldThrow<StagingMemoryLimitException> { runBlocking { staging.stage(slowCounting(rs, reads), "stg_mid", Dialect.H2) } }
+        }
+
+        // Something was read — otherwise "fewer than all" is satisfied by a guard that fired
+        // before the drain began, which is a different (and untested) claim.
+        (reads.get() > 0).shouldBeTrue()
+        (reads.get() < SOURCE_ROWS).shouldBeTrue()
+
+        staging.close()
+    }
+
     @Test
     fun `a footprint within budget stages cleanly and stats reports measured memory`() {
         val budgetMb = budgetMbAboveBaseline(WIDE_HEADROOM_MB)
@@ -57,7 +102,34 @@ class H2StagingMemoryTest {
         staging.close()
     }
 
+    /**
+     * Wraps [target] so every `next()` is counted — how far the drain actually got — and costs a
+     * millisecond every [SLOW_EVERY_N_ROWS] rows, so the drain outlives the guard's check interval.
+     */
+    private fun slowCounting(
+        target: ResultSet,
+        reads: AtomicInteger,
+    ): ResultSet =
+        Proxy.newProxyInstance(
+            ResultSet::class.java.classLoader,
+            arrayOf(ResultSet::class.java),
+            InvocationHandler { _, method, args ->
+                if (method.name == "next" && reads.incrementAndGet() % SLOW_EVERY_N_ROWS == 0) Thread.sleep(1)
+                try {
+                    method.invoke(target, *(args ?: emptyArray()))
+                } catch (e: java.lang.reflect.InvocationTargetException) {
+                    throw e.targetException
+                }
+            },
+        ) as ResultSet
+
     private companion object {
+        /** Big enough that a mid-drain stop is unambiguous at the default 1 000-row batch. */
+        const val SOURCE_ROWS = 100000
+
+        /** 100 000 / 50 = 2 000 ms of drain — two of the guard's one-second ticks, with room. */
+        const val SLOW_EVERY_N_ROWS = 50
+
         /** Enough for the staging machinery, well under the ~24 MB the trip case allocates. */
         const val HEADROOM_MB = 8L
 
