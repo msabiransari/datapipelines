@@ -51,7 +51,8 @@ class SiteRenderTest {
         // painted every node in --brand and the driver refuses a broken canvas rather than
         // photographing it. `execution-result.png` did not go away; it moved to the executions
         // card, and both are asserted so a later round cannot silently drop either.
-        html shouldContain "src=\"/site/img/editor-hero.png\""
+        // Site v2: the hero is a placeholder slot until the owner's capture lands (T213).
+        html shouldContain "data-shot=\"editor-hero\""
         html shouldContain "src=\"/site/img/execution-result.png\""
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.
