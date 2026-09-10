@@ -36,7 +36,6 @@ data class LakeRegisteredTable(
      * partition pseudo-index.
      */
     val partitionColumn: String? = null,
-
     /**
      * 109 §A (V22) — the connect-time view creation's last recorded failure, NULL when the
      * view last built cleanly. The pool factory's per-table view application reads this to
