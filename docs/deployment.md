@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.8
+**Status:** v1.19
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-01
@@ -779,6 +779,38 @@ It runs as two services because no pinned image carries both a Postgres and a
 MySQL client, and installing one at container start would put an unpinned package
 fetch in the one place that has to be reproducible.
 
+### Demo Postgres sizing (T200, 109 §E)
+
+The `postgres` service that the **nyc** family restores into carries the demo's
+biggest table — `trips`, ~804 MB, ~4.9M sampled rows plus rollups — against the
+Postgres image's compiled defaults (`shared_buffers=128MB`, `random_page_cost=4.0`
+tuned for spinning disks). Under load, a simple year-2024 aggregate therefore
+ran in ~21 s: nearly every page came from the OS cache, but the planner kept
+choosing plans as if each random page cost a seek. The compose file sets:
+
+```
+command: postgres -c shared_buffers=512MB -c effective_cache_size=1536MB
+                -c work_mem=32MB -c random_page_cost=1.1
+```
+
+with the container's memory reservation raised to 1 GB to match. The numbers are
+shaped by the data: `shared_buffers` ≈ half the restored set, `effective_cache_size`
+≈ shared_buffers plus the OS page cache the box actually has, `work_mem` enough for
+the demo's hash joins and sorts, and `random_page_cost=1.1` because the volume sits
+on SSD. **This is demo sizing, not production advice** — the operator's own
+datasource is their own DBA's, and the app never tunes a database it did not bring.
+
+Measured on a quiet box (109 §E), year-2024 airport-count query
+(`pu_location_id IN (1, 132, 138)`, three runs cold→warm): compiled defaults
+**42.7 s → 23.9 s → 8.6 s** (buffers read=43,871 — nearly every page from disk);
+sized flags **20.5 s → 9.6 s → 8.1 s** (buffers hit=46,795, read=0 — the working set
+fits the 512 MB). The win is the cold/cache-pressured run, ~2.1×; warm steady-state
+is unchanged, as expected when the OS cache already holds the table. A composite
+index `(pu_location_id, pickup_date)` on the artifact itself (the datasource is
+readonly to agents, so the artifact is the only place an index can come from) takes
+the same query to **~0.95 s cold / 0.09 s warm** (index-only scan, 196 buffer hits)
+— see the 109 handback for the artifact decision.
+
 ### dp-lake — the family with no loader
 
 `sample-data/lake/<version>/` is different in kind from the two above and the
@@ -910,6 +942,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.19 | 109 §E demo Postgres sizing | **New "Demo Postgres sizing" subsection (Appendix B)**: the nyc family's `trips` table (~804 MB) meets sized-for-the-data flags — `shared_buffers=512MB`, `effective_cache_size=1536MB`, `work_mem=32MB`, `random_page_cost=1.1` (SSD) — with the container memory reservation raised to 1 GB and the "demo sizing, not production advice — the operator's own datasource is their own DBA's" boundary stated. The compose change itself is `cfb65c9c`; this section is the rationale the compose comment points at. |
 | 2026-09-08 | v1.18 | 093 announcement-day truth pass | **Appendix B's demo-families preamble corrected against the merged 089 product.** It said dp-lake was *published but not yet consumable* with "no compose profile, no loader and no `--demo` flag" while `app.sh` already accepts `--demo lake` and adds `--profile demo-lake` (app.sh lines 144/209, `SAMPLE_LAKE_ON`) — the paragraph was written at 088 and 089 shipped the consuming side. The families table gains a **lake** row; "Two independent families" becomes three; the nyc row's "2 example pipelines" becomes **6** (`scripts/sample-data/content/examples.json` holds six); the one-command and raw-compose recipes gain the third family; the `-Pmysql` sentence now says which families need it. The "family with no loader" section below is unchanged — it was already correct — and the distinction it draws (a profile and a flag, but nothing to load) is now stated in the preamble too, which is where the contradiction was read. |
 | 2026-09-07 | v1.16 | 089 dp-lake §D extension bundling | **§3.1 gains the bundled DuckDB extensions bullet**: the image now downloads `httpfs`/`aws`/`iceberg`/`avro` for DuckDB core v1.5.5 at build (+108 MB uncompressed, ~39 MB downloaded), gunzips them into `/opt/duckdb/extensions/v1.5.5/<linux_amd64|linux_arm64>/` (the build's `TARGETARCH`), and exports `DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions` — a LAKE datasource then LOADs from disk and never INSTALLs, so a hardened dp-lake deployment needs no egress to `extensions.duckdb.org` (the 089 §7.3 spike's CAN verdict, verified on this exact base image with `--network none`). `deploy/compose.yml` defaults the variable to the same path (declared in `compose-env-audit.sh`'s new `IMAGE_DEFAULT_VARS`, the first compose default that mirrors the image rather than application.yml). The operator key itself is [Configuration §3.25](configuration.md). |
 | 2026-09-07 | v1.15 | 088 dp-lake data | **Appendix B gains a third sample-data family, `dp-lake`** — NYC TLC High Volume FHV (Uber/Lyft/Via/Juno) trips published at `s3://datapipelines-co/sample-data/lake/<version>/` as Parquet partitioned by `pickup_date`, a 1-in-16 sample, a zone/day pre-aggregate and an Apache Iceberg copy of the sample. New section "**dp-lake — the family with no loader**": it is **read in place**, so there is no compose profile, no loader service and no `--demo` flag — the datasource that reads it (dialect `lake`, `sample-lake`) is round 089, and the showcase pipeline ships in its own `scripts/sample-data/content/examples-lake.json` that no deployment loads yet. The drift-guards section gains `scripts/sample-data-lake/check-published.sh --family lake <version>` and says why it is a separate script (no `examples.json`; it checks object hashes, the licence gate and the Iceberg metadata's recorded locations). Egress is stated as the operating cost: bounded by a query's date predicate, unbounded for an unfiltered scan of the ~7 GB table. No application code, no deployment change. |
