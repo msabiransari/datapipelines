@@ -68,6 +68,7 @@ class AuthHttpBoundaryTest {
 
     private val mapper = ObjectMapper()
 
+    private lateinit var superAdminIssuer: AuthenticatedPrincipal
     private lateinit var user: User
     private lateinit var readKey: String
     private lateinit var expiredKey: String
@@ -179,25 +180,36 @@ class AuthHttpBoundaryTest {
     fun seed() {
         // The shared container arrives migrated; apiKeyService.issue writes
         // api_keys.workspace_id (the V4 pin).
-        user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = false)
-        // Keys pin the seeded `default` workspace; the ADMIN creator scope bypasses the
-        // membership check (D4), so no workspace_members row is needed for this user.
+        user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = true)
+        superAdminIssuer =
+            AuthenticatedPrincipal(
+                userId = user.id,
+                email = user.email,
+                displayName = user.displayName,
+                scopes = emptySet(),
+                authMethod = AuthMethod.OIDC,
+                superAdmin = true,
+            )
+        // Keys pin the seeded `default` workspace. The issuer is a SUPER ADMIN here, which is
+        // what reaches a workspace this user holds no membership row in (D-R8) — round 1 moved
+        // that bypass off the `admin` SCOPE, which no key may hold any more (O-2).
         readKey =
             apiKeyService
-                .issue(user.id, "read-key", setOf(Scope.READ), setOf(Scope.ADMIN), DEFAULT_WORKSPACE_ID)
+                .issue(superAdminIssuer, user.id, "read-key", setOf(Scope.READ), setOf(Scope.AUTHOR), DEFAULT_WORKSPACE_ID)
                 .plaintext
         expiredKey =
             apiKeyService
                 .issue(
+                    superAdminIssuer,
                     user.id,
                     "expired-key",
                     setOf(Scope.READ),
-                    setOf(Scope.ADMIN),
+                    setOf(Scope.AUTHOR),
                     DEFAULT_WORKSPACE_ID,
                     Instant.now().minusSeconds(3600),
                 ).plaintext
         val revocable =
-            apiKeyService.issue(user.id, "revoked-key", setOf(Scope.READ), setOf(Scope.ADMIN), DEFAULT_WORKSPACE_ID)
+            apiKeyService.issue(superAdminIssuer, user.id, "revoked-key", setOf(Scope.READ), setOf(Scope.AUTHOR), DEFAULT_WORKSPACE_ID)
         apiKeyService.revoke(revocable.plaintext.substringBefore('.'), user.id)
         revokedKey = revocable.plaintext
         session = jwtService.issue(user)

@@ -164,9 +164,9 @@ class PromotionServerKeyFilterTest {
         principal.email shouldBe UserService.SYSTEM_ACTOR_EMAIL
         principal.authMethod shouldBe AuthMethod.PROMOTION
         principal.scopes shouldBe setOf(Scope.AUTHOR)
-        // Not admin: the receiver resolves the target workspace by name from the payload, so
-        // no membership bypass is needed and none is granted.
-        principal.isAdmin shouldBe false
+        // Not a super admin: the receiver resolves the target workspace by name from the
+        // payload, so no membership bypass is needed and none is granted.
+        principal.isSuperAdmin shouldBe false
         // No workspace pinned — the credential belongs to a deployment, not to a workspace.
         principal.workspace shouldBe null
         principal.workspaceName shouldBe null

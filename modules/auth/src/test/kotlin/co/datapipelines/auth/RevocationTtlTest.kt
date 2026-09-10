@@ -20,11 +20,31 @@ class RevocationTtlTest {
     private val userService = mockk<UserService>()
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val cache = AuthCache(AuthProperties(apiKeys = AuthProperties.ApiKeys(cacheTtlSeconds = ttlSeconds))) { nowNanos }
-    private val workspaceService = mockk<WorkspaceService>(relaxed = true)
+    private val workspaceService =
+        mockk<WorkspaceService>(relaxed = true) {
+            // A relaxed mock answers `isActive` false, which would refuse every key here for
+            // the wrong reason. The default is the live workspace and an author issuer.
+            every { isActive(any()) } returns true
+            every { issuerFlags(any(), any(), any()) } returns MembershipFlags(author = true)
+        }
     private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
 
     private val ownerId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
+
+    /**
+     * The issuer, as issuance names it since RBAC round 1 (D-R12/O-2): a key is minted by a
+     * person with a role in the pinned workspace, not by a bare user id.
+     */
+    private val issuerPrincipal =
+        AuthenticatedPrincipal(
+            userId = ownerId,
+            email = "owner@company.com",
+            displayName = "Owner",
+            scopes = emptySet(),
+            authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true)),
+        )
 
     private fun issueKey(): IssuedApiKey {
         val hash = slot<String>()
@@ -33,7 +53,7 @@ class RevocationTtlTest {
         }
         every { userService.snapshot(ownerId) } returns
             User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
-        return service.issue(ownerId, "k", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        return service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
     }
 
     @Test

@@ -201,6 +201,7 @@ class WorkspaceService(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
+        requirePinnedWorkspace(principal, name)
         val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) } ?: throw WorkspaceNotFoundException(name)
         val visible = principal.isSuperAdmin || (workspace.isActive && isMember(principal.userId, workspace.id))
         if (!visible) throw WorkspaceNotFoundException(name)
@@ -428,6 +429,7 @@ class WorkspaceService(
         principal: AuthenticatedPrincipal,
         name: String,
     ): WorkspaceContext? {
+        if (principal.authMethod == AuthMethod.API_KEY && principal.workspaceName != name) return null
         val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) } ?: return null
         if (!workspace.isActive) return null
         val explicit = memberships(principal.userId).firstOrNull { it.workspaceId == workspace.id }
@@ -486,6 +488,37 @@ class WorkspaceService(
         isSuperAdmin: Boolean,
         workspaceId: UUID,
     ): Boolean = isSuperAdmin || isMember(userId, workspaceId)
+
+    /**
+     * The pinned-workspace rule for key principals (auth.md §5.6, D-R9; the 025 review's
+     * BLOCKING finding, kept through round 1 by re-derivation rather than by inheritance).
+     *
+     * A key's workspace is fixed at issuance, so a key resolves EXACTLY ONE workspace. Without
+     * this, every path built on [read] would authorize against the key OWNER's whole membership
+     * set — and a key pinned to `acme` would rename, delete and re-member `globex` the moment
+     * its owner belonged to both, defeating the pin that `WorkspaceResolutionFilter` hard-refuses
+     * `DP-Workspace` to protect. That is not a hypothetical: it is the hole 025 shipped and
+     * 66fa930 closed, and RBAC round 1 rewrote every one of those paths.
+     *
+     * Enforced HERE, at the one resolution both reads and management verbs pass through, rather
+     * than as a guard on each verb — a new verb built on [read] inherits it, and a guard list is
+     * a thing you can forget to add to.
+     *
+     * The refusal is the D-R5 404, like every other unreachable workspace: "pinned elsewhere"
+     * and "does not exist" must stay indistinguishable, or the pin itself becomes an oracle.
+     * Sessions are untouched — their active workspace is switchable by design, so no pin exists
+     * to honour. A super admin's key is NOT exempt: the pin is a property of the credential, not
+     * of the person, and a leaked key must not become a skeleton key because its owner is
+     * privileged.
+     */
+    private fun requirePinnedWorkspace(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ) {
+        if (principal.authMethod == AuthMethod.API_KEY && principal.workspaceName != name) {
+            throw WorkspaceNotFoundException(name)
+        }
+    }
 
     private fun isMember(
         userId: UUID,

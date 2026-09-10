@@ -62,13 +62,30 @@ class AuthRepositoriesIntegrationTest {
 
         workspaces.addMember(ws.id, bob.id).shouldNotBeNull()
         workspaces.findMembersOf(ws.id).map { it.email } shouldContainExactlyInAnyOrder listOf("alice@company.com", "bob@company.com")
-        workspaces.roleOf(ws.id, alice.id) shouldBe WorkspaceRole.OWNER
-        workspaces.roleOf(ws.id, bob.id) shouldBe WorkspaceRole.MEMBER
-        workspaces.findMemberRow(ws.id, bob.id).shouldNotBeNull().role shouldBe WorkspaceRole.MEMBER
-        // Idempotent add: an existing membership comes back unchanged.
-        workspaces.addMember(ws.id, bob.id).shouldNotBeNull().role shouldBe WorkspaceRole.MEMBER
+        // D-R14: the creator enters as the workspace ADMIN (and therefore author, per the
+        // chk_workspace_member_admin_authors constraint); an added member with no flags is a
+        // VIEWER, which is what silence on a permission grant has to mean.
+        workspaces.flagsOf(ws.id, alice.id) shouldBe MembershipFlags(author = true, admin = true)
+        workspaces.flagsOf(ws.id, bob.id) shouldBe MembershipFlags.VIEWER
+        workspaces.findMemberRow(ws.id, bob.id).shouldNotBeNull().flags shouldBe MembershipFlags.VIEWER
+        workspaces.adminCount(ws.id) shouldBe 1
+        // Idempotent add: an existing membership comes back unchanged — re-adding does NOT
+        // silently reset somebody's role to the request's flags. Changing a role is setFlags.
+        workspaces.addMember(ws.id, bob.id, MembershipFlags(author = true)).shouldNotBeNull().flags shouldBe MembershipFlags.VIEWER
 
-        workspaces.findAll().map { it.name } shouldContainExactlyInAnyOrder listOf("default", "acme")
+        // setFlags replaces wholesale, and the admin count follows.
+        workspaces.setFlags(ws.id, bob.id, MembershipFlags(author = true, admin = true)).shouldBeTrue()
+        workspaces.adminCount(ws.id) shouldBe 2
+
+        // D-R10: deactivation is reversible and purges nothing.
+        workspaces.deactivate(ws.id, alice.id).shouldBeTrue()
+        workspaces.findById(ws.id).shouldNotBeNull().isActive.shouldBeFalse()
+        workspaces.findAllActive().map { it.name } shouldContainExactlyInAnyOrder listOf("default", "demo")
+        workspaces.reactivate(ws.id).shouldBeTrue()
+        workspaces.findById(ws.id).shouldNotBeNull().isActive.shouldBeTrue()
+
+        // `demo` is seeded by V23 itself (D-R11), so a migrated database always carries it.
+        workspaces.findAll().map { it.name } shouldContainExactlyInAnyOrder listOf("default", "demo", "acme")
 
         val renamed = workspaces.updateDisplayName(ws.id, "Acme Renamed").shouldNotBeNull()
         renamed.displayName shouldBe "Acme Renamed"

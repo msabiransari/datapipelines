@@ -64,11 +64,11 @@ class AuthErrorSpecDriftTest {
         val exceptionStatus =
             mapOf(
                 WorkspaceErrorCodes.MEMBERSHIP_REQUIRED to WorkspaceMembershipRequiredException().status,
-                WorkspaceErrorCodes.CREATION_FORBIDDEN to
-                    WorkspaceCreationForbiddenException(WorkspaceProvisioningMode.CLOSED).status,
                 WorkspaceErrorCodes.HEADER_FORBIDDEN to WorkspaceHeaderForbiddenException().status,
                 WorkspaceErrorCodes.SESSION_REQUIRED to WorkspaceSessionRequiredException().status,
                 WorkspaceErrorCodes.NOT_FOUND to WorkspaceNotFoundException("x").status,
+                WorkspaceErrorCodes.LAST_ADMIN to WorkspaceLastAdminException("x").status,
+                WorkspaceErrorCodes.INACTIVE to WorkspaceInactiveException("x").status,
                 WorkspaceErrorCodes.NAME_INVALID to WorkspaceNameInvalidException("X!").status,
                 WorkspaceErrorCodes.DUPLICATE_NAME to WorkspaceDuplicateNameException("x").status,
                 WorkspaceErrorCodes.IN_USE to WorkspaceInUseException("x", mapOf("pipelines" to 1)).status,
