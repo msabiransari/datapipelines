@@ -95,12 +95,43 @@ object SitePageRenderer {
                     pagesController.dpLake(model, response)
                 }
 
+                page.path in SITE_V2 -> {
+                    renderSiteV2(page, model, response)
+                }
+
                 else -> {
                     error("SitePageRenderer has no handler for ${page.path} — add it beside the controller's")
                 }
             }
         return process(view, model)
     }
+
+    /** Site v2's seven intent pages — split out so the registry dispatcher stays readable. */
+    private fun renderSiteV2(
+        page: SitePage,
+        model: ExtendedModelMap,
+        response: MockHttpServletResponse,
+    ): String =
+        when (page.path) {
+            SitePages.FAQ.path -> pagesController.faq(model, response)
+            SitePages.ROADMAP.path -> pagesController.roadmap(model, response)
+            SitePages.SECURITY.path -> pagesController.security(model, response)
+            SitePages.PUBLISHED_API.path -> pagesController.publishedApi(model, response)
+            SitePages.MCP_TOOLS.path -> pagesController.mcpTools(model, response)
+            SitePages.TABLEAU.path -> pagesController.tableau(model, response)
+            else -> pagesController.tableauGovernedDataset(model, response)
+        }
+
+    private val SITE_V2: Set<String> =
+        setOf(
+            SitePages.FAQ.path,
+            SitePages.ROADMAP.path,
+            SitePages.SECURITY.path,
+            SitePages.PUBLISHED_API.path,
+            SitePages.MCP_TOOLS.path,
+            SitePages.TABLEAU.path,
+            SitePages.TABLEAU_GOVERNED_DATASET.path,
+        )
 
     /** The anonymous docs index, through [DocsController]. */
     fun renderDocsIndex(): String {

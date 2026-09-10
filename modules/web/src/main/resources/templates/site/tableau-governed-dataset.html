@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/tableau}">Tableau</a></li>
+      <li aria-current="page">A governed dataset for Tableau</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the how-to under the Tableau hub. Every step is a thing that ships; the two
+       ways Tableau reads the result (an endpoint's JSON, or a table the pipeline writes) are
+       both cited. The HowTo JSON-LD mirrors the visible steps one for one. */-->
+  <!-- claim: docs/datasources.md §3 — registering datasources, the read-only flag -->
+  <!-- claim: docs/mcp-server.md §6.2 — the agent authors the draft -->
+  <!-- claim: docs/versioning.md §3 — a person releases -->
+  <!-- claim: docs/rest-api.md §19 — publish and call the endpoint -->
+  <!-- claim: docs/auth.md §7.7 — bind a key to the path -->
+  <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource -->
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "Publish a governed dataset for Tableau from several databases with datapipelines",
+    "description": "Register the sources, let an AI agent author the cross-database pipeline, release it, publish it as an endpoint or write it to a table, and connect Tableau.",
+    "totalTime": "PT2H",
+    "step": [
+      { "@type": "HowToStep", "name": "Register the sources, read-only", "text": "Register each database and the S3 bucket as a datasource, marking the ones Tableau's dataset must never write to as read-only. Credentials stay on the server, encrypted." },
+      { "@type": "HowToStep", "name": "Ask the agent for the dataset", "text": "In Claude Code or Cursor, with the MCP server added, describe the dataset in business terms. The agent reads schemas and catalogue statistics, drafts the pipeline, runs it and fixes what fails." },
+      { "@type": "HowToStep", "name": "Review the draft and release it", "text": "Open the draft in the editor, run it, read the result, and release it. The release is immutable; agents cannot release." },
+      { "@type": "HowToStep", "name": "Publish the endpoint, or write the table", "text": "Publish the released pipeline as a GET endpoint under /api/x, or add a write-back node so the result lands in a table Tableau already connects to." },
+      { "@type": "HowToStep", "name": "Scope a key to the path", "text": "Issue an API key and bind it to the endpoint's path prefix; it can call that endpoint and nothing else." },
+      { "@type": "HowToStep", "name": "Connect Tableau", "text": "Point a web data connector at the endpoint's JSON, or live-connect Tableau to the table the pipeline writes. Refresh the pipeline; the dataset refreshes." }
+    ]
+  }
+  </script>
+
+  <section class="section page-hero" aria-labelledby="gd-title">
+    <div class="container">
+      <p class="kicker">How-to · about two hours the first time</p>
+      <h1 id="gd-title" class="ds-display">Publish a governed dataset for Tableau from Postgres, MySQL and S3 — without a warehouse</h1>
+      <p class="section-lede">
+        The goal is a dataset Tableau reads that a person released, an agent maintains, and no one hand-copies between
+        systems. Six steps, each one a feature that ships today. The example is the demo's own data — taxi trips in
+        Postgres, weather in MySQL, zones in SQLite, rideshare trips as Parquet on S3 — so you can run every step on a
+        laptop before you point it at your databases.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="gd-steps">
+    <div class="container">
+      <p class="kicker">The steps</p>
+      <h2 id="gd-steps" class="ds-headline">From four sources to one dataset Tableau trusts</h2>
+      <ol class="steps">
+        <li>
+          <h3>Register the sources, read-only</h3>
+          <!-- claim: docs/datasources.md §3 -->
+          <p>
+            Each database and the bucket becomes a <em>datasource</em>: a name, a dialect, a connection, credentials
+            the server encrypts and never returns. Mark the ones the dataset only reads as <code>readonly</code> — a
+            pipeline that tries to write to them is refused at save time, before anything runs. The agent will see
+            the names and the schemas; it will never see a password.
+          </p>
+        </li>
+        <li>
+          <h3>Ask the agent for the dataset</h3>
+          <!-- claim: docs/mcp-server.md §6.2 -->
+          <p>
+            With the MCP server added to Claude Code or Cursor, describe the dataset the way you would to an analyst:
+            “rideshare share of trips per borough, split by rainy and dry days, for the last quarter.” The agent reads
+            the schemas, the catalogue statistics and the indexes, drafts a pipeline with one node per source and a
+            join in the scratch database, runs it, reads the failure when there is one, and fixes the shape. It leaves
+            a <em>draft</em>.
+          </p>
+          <div class="code-block">
+            <pre><code>claude mcp add --transport http datapipelines https://your-host/mcp \
+  --header "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
+            <button type="button" class="copy-btn" hidden>Copy</button>
+          </div>
+        </li>
+        <li>
+          <h3>Review the draft, then release it</h3>
+          <!-- claim: docs/versioning.md §3 -->
+          <p>
+            Open the draft in the editor: the graph, each node's SQL, the result of the last run. Run it yourself. When
+            the numbers are the numbers, release it. A released version is immutable — the next change becomes a new
+            draft — and an agent cannot release, by design. The dataset Tableau will read is now a version with a
+            number and a name on it.
+          </p>
+        </li>
+        <li>
+          <h3>Publish the endpoint — or write the table</h3>
+          <!-- claim: docs/rest-api.md §19 -->
+          <p>
+            <b>Endpoint:</b> publish the released pipeline under a path such as <code>/api/x/nyc/rain-share</code>. A
+            <code>GET</code> runs it with the query string bound to its declared parameters and returns the rows as
+            JSON; the response is versioned with the pipeline.
+          </p>
+          <!-- claim: docs/pipeline-contract.md §9 -->
+          <p>
+            <b>Table:</b> if Tableau already connects to one of your databases, add a write-back node so the pipeline's
+            last step lands the result in a table there. Tableau live-connects to the table it already knows; each
+            pipeline run refreshes it. No connector to learn, and the dataset still comes from a released version.
+          </p>
+        </li>
+        <li>
+          <h3>Scope a key to the path</h3>
+          <!-- claim: docs/auth.md §7.7 -->
+          <p>
+            Issue an API key and bind it to the endpoint's path prefix. That key can call <code>/api/x/nyc/…</code>
+            and nothing else — not the product's own API, not another team's endpoints. Give it to the workbook, the
+            partner, or the service that needs the dataset.
+          </p>
+          <div class="code-block">
+            <pre><code>curl -s "https://your-host/api/x/nyc/rain-share?quarter=2024-Q3" \
+  -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
+            <button type="button" class="copy-btn" hidden>Copy</button>
+          </div>
+        </li>
+        <li>
+          <h3>Connect Tableau</h3>
+          <!-- claim: docs/rest-api.md §19 -->
+          <p>
+            For the endpoint, a web data connector that reads JSON over HTTP with a header is all Tableau needs; for
+            the table, a live connection you already have. Either way the dataset behind the chart is a released
+            pipeline version — traceable, restorable, and maintained by an agent that reads the same specs you do.
+          </p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="gd-why">
+    <div class="container">
+      <p class="kicker">Why this shape</p>
+      <h2 id="gd-why" class="ds-headline">Governance is a release step, not a permission matrix</h2>
+      <div class="prose">
+        <!-- claim: docs/versioning.md §3 -->
+        <p>
+          Most “governed dataset” stories end in a certification badge someone clicks. Here the governance is
+          structural: the dataset is a version that a human released, that no one can edit in place, and that an
+          endpoint serves by number. When a chart is questioned, the answer is a version, not a conversation about who
+          changed the flow.
+        </p>
+        <!-- claim: docs/auth.md §7.7 -->
+        <p>
+          Access is structural too. Keys are scoped to endpoint paths, so the surface each consumer sees is exactly
+          the surface you published — the way you would design it if you were building the API by hand, without
+          building the API by hand.
+        </p>
+        <!-- claim: docs/staging.md §3 -->
+        <p>
+          And there is still no warehouse. The join happens in a scratch database that exists for the run; nothing is
+          copied anywhere permanent unless you chose a write-back. When Tableau's extracts arrive on the roadmap, they
+          land on your own bucket — the same principle, one step further.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="gd-shots">
+    <div class="container">
+      <p class="kicker">What each step looks like</p>
+      <h2 id="gd-shots" class="ds-headline">The screens you will actually see</h2>
+      <div class="shots">
+        <figure class="shot">
+          <figcaption>A datasource with the read-only flag set — the agent sees the schema, never the credential.</figcaption>
+          <div class="shot-placeholder" data-shot="datasources" style="--shot-ratio: 16 / 10"><b>[shot: datasources]</b>datasources list · three engines + the lake · 1440×900</div>
+        </figure>
+        <figure class="shot">
+          <figcaption>The Release dialog — the human step, with the draft's pins and what the release changes.</figcaption>
+          <div class="shot-placeholder" data-shot="release-dialog" style="--shot-ratio: 16 / 10"><b>[shot: release-dialog]</b>Release dialog · 1280×800</div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="gd-next">
+    <div class="container">
+      <h2 id="gd-next" class="ds-headline">Run it on the demo first</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        <code>./app.sh --start --demo nyc,lake</code> brings up the four sources and the pipeline that joins them. Then
+        the six steps above are a two-hour afternoon, and the third one is the only one that needs you.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
+        <a class="btn btn-secondary" th:href="@{/published-api}">How published endpoints work</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

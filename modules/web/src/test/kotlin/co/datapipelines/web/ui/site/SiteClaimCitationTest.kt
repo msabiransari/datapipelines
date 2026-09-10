@@ -41,9 +41,16 @@ class SiteClaimCitationTest {
                 "compare-dbt.html",
                 "dp-lake.html",
                 "engine.html",
+                "faq.html",
                 "federated-query.html",
                 "index.html",
+                "mcp-tools.html",
                 "pillar.html",
+                "published-api.html",
+                "roadmap.html",
+                "security.html",
+                "tableau-governed-dataset.html",
+                "tableau.html",
                 "text-to-sql-agent.html",
             )
     }

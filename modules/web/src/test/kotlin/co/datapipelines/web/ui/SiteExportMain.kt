@@ -78,17 +78,35 @@ fun main(args: Array<String>) {
 private fun missingAssets(outDir: File): Set<String> {
     val assetTag = Regex("""<(?:link|script|img)\b[^>]*>""")
     val attr = Regex("""\b(?:href|src)="([^"]*)"""")
-    return outDir
-        .walkTopDown()
-        .filter { it.isFile && it.extension == "html" }
-        .flatMap { file ->
-            assetTag
-                .findAll(file.readText())
-                .filterNot { "rel=\"canonical\"" in it.value }
-                .mapNotNull { attr.find(it.value)?.groupValues?.get(1) }
-                .filter { it.startsWith("/") }
-        }.filterNot { File(outDir, it.removePrefix("/")).isFile }
-        .toSet()
+    val fromHtml =
+        outDir
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "html" }
+            .flatMap { file ->
+                assetTag
+                    .findAll(file.readText())
+                    .filterNot { "rel=\"canonical\"" in it.value }
+                    .mapNotNull { attr.find(it.value)?.groupValues?.get(1) }
+                    .filter { it.startsWith("/") }
+            }.filterNot { File(outDir, it.removePrefix("/")).isFile }
+    // Site v2: a stylesheet's own url() references (the vendored faces) are assets too — a
+    // font the Copy task did not carry is a silent fallback to a system face, which is
+    // exactly the failure the first export had with docs.css, one level down.
+    val cssUrl = Regex("""url\("([^")]+)"\)""")
+    val fromCss =
+        outDir
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "css" }
+            .flatMap { css ->
+                cssUrl
+                    .findAll(css.readText())
+                    .map { it.groupValues[1] }
+                    .filterNot { it.startsWith("data:") || it.startsWith("http") }
+                    .map { ref -> ref to File(css.parentFile, ref).normalize() }
+                    .filterNot { (_, file) -> file.isFile }
+                    .map { (ref, _) -> "${css.relativeTo(outDir)} -> $ref" }
+            }
+    return (fromHtml + fromCss).toSet()
 }
 
 /** `/` becomes `index.html`; everything else becomes `<path>/index.html`. */

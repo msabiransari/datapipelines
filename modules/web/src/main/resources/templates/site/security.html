@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Security</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the trust page — "AI agent database access, made safe". Written for the
+       person who has to say yes to letting an agent near production, in the words of the
+       specs it summarises. The FAQ block is SiteFaqs.AGENTS_AND_SECURITY. */-->
+  <!-- claim: docs/datasources.md §7 — credentials encrypted, never returned -->
+  <!-- claim: docs/datasources.md §3 — the read-only flag -->
+  <!-- claim: docs/auth.md §7.5 — scopes -->
+  <!-- claim: docs/auth.md §7.6 — the scope matrix -->
+  <!-- claim: docs/auth.md §7.7 — key kinds and endpoint bindings -->
+  <!-- claim: docs/auth.md §8.3 — the public allowlist -->
+  <!-- claim: docs/auth.md §10 — the audit log -->
+  <!-- claim: docs/versioning.md §3 — human release -->
+  <!-- claim: docs/key-providers.md §2 — the key-provider contract -->
+  <!-- claim: docs/dag-executor.md §5 — timeouts and cancellation -->
+
+  <section class="section page-hero" aria-labelledby="sec-title">
+    <div class="container">
+      <p class="kicker">For the person who has to say yes</p>
+      <h1 id="sec-title" class="ds-display">Letting an AI agent near your databases, without handing it a password</h1>
+      <p class="section-lede">
+        The usual way to connect an agent to a database is a connection string on a laptop — one credential, every
+        privilege that credential has, no record of what the agent did with it. datapipelines is built so that shape
+        cannot occur: the agent holds a key to <em>this server</em>, the server holds the credentials, every action is
+        scoped, audited, and — for anything that reaches production — released by a person.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/auth}">Read the auth spec</a>
+        <a class="btn btn-secondary" th:href="@{/docs/datasources}">Credential storage</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sec-model">
+    <div class="container">
+      <p class="kicker">The trust model</p>
+      <h2 id="sec-model" class="ds-headline">Five boundaries, each enforced by the server, not by a prompt</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/datasources.md §7 -->
+          <h3>The agent never holds a credential</h3>
+          <p>Datasource passwords and tokens are encrypted at rest and never returned — not through a tool, not through the UI, not in a pipeline's JSON. Pipelines reference datasources by name; the server connects.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §7.5 -->
+          <h3>One key, a scope, a workspace</h3>
+          <p>An agent's key carries a scope — <code>read</code>, <code>execute</code>, <code>author</code> — and is pinned to one workspace. Every tool and every REST route declares the scope it needs; the matrix is a spec, and a test keeps the code equal to it.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §3 -->
+          <h3>Read-only where you say so</h3>
+          <p>Mark a datasource <code>readonly</code> and every write-shaped node against it is refused when the pipeline is saved, and again when it runs — two checks, so a flag flipped between them cannot ship a write.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/versioning.md §3 -->
+          <h3>Agents leave drafts; people release</h3>
+          <p>No tool releases a version. A draft is runnable — that is how an agent tests its work — but what an endpoint serves and what promotion carries is a version a person locked. A release is immutable; a discarded one is restorable.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §10 -->
+          <h3>Everything is audited</h3>
+          <p>Every MCP call, every lifecycle verb, every endpoint serve: who, through which surface (session, API key, MCP), on what, with the outcome. Never the SQL text, the row data or the parameter values — those are yours.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §8.3 -->
+          <h3>Secured by default, public by allowlist</h3>
+          <p>Every route requires a credential unless it is on an enumerated public list with a written reason — the marketing site, the docs, the health probe. A route that is not on the list is not public. A test freezes the list.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sec-keys">
+    <div class="container">
+      <p class="kicker">Keys, precisely</p>
+      <h2 id="sec-keys" class="ds-headline">What a key can reach is a property of the key, not of the caller</h2>
+      <div class="prose">
+        <!-- claim: docs/auth.md §7.6 -->
+        <p>
+          A key holds a scope, and a scope is a row in a matrix that names every operation it permits: listing and
+          reading pipelines and schemas under <code>read</code>; running them under <code>execute</code>; creating
+          and editing drafts, probing a <code>SELECT</code>, registering datasources under <code>author</code>. The
+          matrix is the authority — the MCP server and the REST API are two adapters over it — and the scope every
+          tool requires is printed beside it in the tool list.
+        </p>
+        <!-- claim: docs/auth.md §7.7 -->
+        <p>
+          A second kind of key exists for published endpoints: bound to a path prefix under <code>/api/x</code>, it can
+          call that subtree and nothing else. That is the key you give a partner, a workbook or a service — one per
+          contract, revocable by the person who owns it, useless anywhere but the paths it was bound to.
+        </p>
+        <!-- claim: docs/auth.md §7.5 -->
+        <p>
+          Keys are owned by people, pinned to a workspace, and can be revoked; validation checks the key, its expiry
+          and its owner's status on every request. Revoking one person's key never touches another's — the reason
+          keys, not shared passwords, are the only way in for programs.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sec-blast">
+    <div class="container">
+      <p class="kicker">Blast radius</p>
+      <h2 id="sec-blast" class="ds-headline">What a runaway agent can and cannot do</h2>
+      <div class="prose">
+        <!-- claim: docs/dag-executor.md §5 -->
+        <p>
+          An agent that writes a bad query gets a bounded failure, not an outage: every statement carries a query
+          timeout, every run an overall deadline, and every instance a ceiling on concurrent executions. A statement
+          that outlives its budget is cancelled at the driver and the node fails with the budget it blew and the time
+          it took. Staging memory is capped per run. A slow query is the agent's problem to fix from the plan the SQL
+          probe returns, never the database's problem to survive.
+        </p>
+        <!-- claim: docs/datasources.md §3 -->
+        <p>
+          An agent that tries to write where it should not is refused before the write, by the read-only flag on the
+          datasource and by the scope on its key. An agent that tries to release or promote finds no tool for it —
+          it can publish an endpoint, but only over a version a person already released. An agent that tries to
+          read a credential finds none in any response.
+        </p>
+        <!-- claim: docs/auth.md §10 -->
+        <p>
+          And whatever it did, the audit log says so — by key, by tool, by outcome — so the question after an incident
+          is a query, not an investigation.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sec-ops">
+    <div class="container">
+      <p class="kicker">Operating it</p>
+      <h2 id="sec-ops" class="ds-headline">Your infrastructure, your keys, your logs</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/key-providers.md §2 -->
+          <h3>Encryption keys you control</h3>
+          <p>Datasource credentials are encrypted with a master key the server reads from its environment — never from the database it protects; the key-provider contract is written for a KMS, with AWS KMS as the worked recipe, so the master key can live where your other secrets do.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §5 -->
+          <h3>Your identity provider</h3>
+          <p>People sign in through OIDC — Google, Microsoft, Okta, Keycloak, any compliant provider — or through local accounts when you choose; there is no datapipelines account to create anywhere.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/deployment.md §10 -->
+          <h3>Open source, self-hosted</h3>
+          <p>AGPL-3.0. The server runs on your machines; the code that handles your credentials is code you can read. No data leaves your network unless a pipeline you released sends it somewhere.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Security questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+</th:block>
+</html>

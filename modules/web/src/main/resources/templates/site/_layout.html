@@ -66,8 +66,10 @@
     <button type="button" class="theme-toggle" data-theme-toggle hidden>Theme: Auto</button>
     <nav class="nav-wide" aria-label="Primary">
       <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
-      <a th:href="@{/federated-query}">Federated query</a>
-      <a href="/#demo">Demo</a>
+      <a th:href="@{/published-api}">API</a>
+      <a th:href="@{/tableau}">Tableau</a>
+      <a th:href="@{/roadmap}">Roadmap</a>
+      <a th:href="@{/faq}">FAQ</a>
       <a th:href="@{/docs}">Docs</a>
       <a class="nav-github" href="https://github.com/msabiransari/datapipelines">GitHub</a>
       <a class="nav-github" th:href="@{/login}">Sign in</a>
@@ -80,8 +82,10 @@
       </summary>
       <nav class="menu" aria-label="Primary mobile">
         <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
-        <a th:href="@{/federated-query}">Federated query</a>
-        <a href="/#demo">Demo</a>
+        <a th:href="@{/published-api}">API</a>
+        <a th:href="@{/tableau}">Tableau</a>
+        <a th:href="@{/roadmap}">Roadmap</a>
+        <a th:href="@{/faq}">FAQ</a>
         <a th:href="@{/docs}">Docs</a>
         <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
         <a th:href="@{/login}">Sign in</a>
@@ -113,6 +117,9 @@
           <li><a th:href="@{/text-to-sql-agent}">Text-to-SQL agent</a></li>
           <li><a th:href="@{/federated-query}">Federated query</a></li>
           <li><a th:href="@{/dp-lake}">dp-lake</a></li>
+          <li><a th:href="@{/published-api}">SQL to API</a></li>
+          <li><a th:href="@{/mcp-tools}">The MCP tools</a></li>
+          <li><a th:href="@{/security}">Security</a></li>
         </ul>
       </div>
       <div class="footer-col">
@@ -120,12 +127,16 @@
         <ul>
           <li><a th:href="@{/compare/airflow}">vs Apache Airflow</a></li>
           <li><a th:href="@{/compare/dbt}">vs dbt</a></li>
+          <li><a th:href="@{/tableau}">With Tableau</a></li>
+          <li><a th:href="@{/tableau/governed-dataset}">A governed dataset for Tableau</a></li>
         </ul>
       </div>
       <div class="footer-col">
         <h2>Project</h2>
         <ul>
           <li><a th:href="@{/docs}">Documentation</a></li>
+          <li><a th:href="@{/faq}">FAQ</a></li>
+          <li><a th:href="@{/roadmap}">Roadmap</a></li>
           <li><a href="https://github.com/msabiransari/datapipelines">GitHub</a></li>
           <li><a th:href="@{/login}">Sign in</a></li>
         </ul>
@@ -136,3 +147,22 @@
     </div>
   </div>
 </footer>
+
+<!--/* Site v2: the FAQ block. ONE list (a List<FaqEntry> on the model) renders the visible
+     <details> AND the FAQPage JSON-LD (FaqJsonLd) — SiteFaqParityTest reads both back. Each
+     entry's `cites` is the doc it rests on; the page SOURCE still carries the claim comments
+     SiteClaimCitationTest sweeps (that guard reads templates, not renders).
+     Parameters: entries, twoCol (true on the home page and /faq), heading (a visible h2 or
+     null when the caller owns the heading). */-->
+<div th:fragment="faq(entries, twoCol, heading)" xmlns:th="http://www.thymeleaf.org">
+  <h2 id="faq-title" th:if="${heading != null}" th:text="${heading}">Questions people ask</h2>
+  <div class="faq" th:classappend="${twoCol} ? 'faq-2col' : ''">
+    <th:block th:each="e, st : ${entries}">
+      <details th:open="${st.index == 0}">
+        <summary th:text="${e.question}">Question?</summary>
+        <p th:text="${e.answer}">Answer.</p>
+      </details>
+    </th:block>
+  </div>
+  <script type="application/ld+json" th:utext="${faqJsonLd}"></script>
+</div>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Tableau</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the honest Tableau page (owner 2026-09-09: "Lets be Honest. Talk about Tableau.
+       What we are shipping. What is on the Roadmap"). Two columns — ships today / next month —
+       and never the word "alternative" for something that is not one yet. The FAQ block is
+       SiteFaqs.TABLEAU. Every ships-today claim cites a packaged spec; every roadmap item cites
+       the design record on disk and says "October 2026". */-->
+  <!-- claim: docs/rest-api.md §19 — Tableau reads the endpoint's JSON -->
+  <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource Tableau connects to -->
+  <!-- claim: docs/staging.md §3 — no warehouse between the sources and Tableau -->
+  <!-- claim: docs/versioning.md §3 — the dataset a person released -->
+  <!-- claim: docs/auth.md §7.7 — path-scoped keys -->
+  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the scheduler (October 2026) -->
+  <!-- claim: docs/ROADMAP.md §2 — dashboards (October 2026) -->
+
+  <section class="section page-hero" aria-labelledby="tb-title">
+    <div class="container">
+      <p class="kicker">Beside Tableau, not instead of it — yet</p>
+      <h1 id="tb-title" class="ds-display">Using datapipelines with Tableau: what it does today, and what next month adds</h1>
+      <p class="section-lede">
+        Tableau is very good at drawing. What costs teams the money is everything before the drawing — getting a
+        trustworthy, joined, refreshed dataset in front of it from four databases and a bucket — and everything after
+        it: putting the result inside their own product instead of a portal. datapipelines does the first part today,
+        with an AI agent doing the authoring and a person doing the releasing. The second part is next month, and this
+        page keeps the two apart.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/tableau/governed-dataset}">Publish a governed dataset for Tableau</a>
+        <a class="btn btn-secondary" th:href="@{/roadmap}">See the roadmap, dated</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tb-story">
+    <div class="container">
+      <p class="kicker">The pattern we keep seeing</p>
+      <h2 id="tb-story" class="ds-headline">Six figures for a workbook nobody can embed</h2>
+      <div class="prose">
+        <p>
+          A company buys Tableau, hires a consultancy, and gets beautiful dashboards over a dataset that took three
+          months of Prep flows, a warehouse nobody wanted, and a nightly job that breaks on the first schema change.
+          Then product asks for the same numbers inside the app customers log into. The workbook cannot be embedded on
+          those terms, so an engineer rebuilds the dashboard by hand in Angular, against an API that does not exist
+          yet — because building an API over that dataset is a second project with its own deployment, its own auth
+          and its own on-call.
+        </p>
+        <p>
+          The expensive part was never the chart. It was the dataset, the API, and the embedding — three projects
+          that each needed a team. datapipelines collapses the first two into something an agent can do in a session
+          and a person can review in an afternoon: the dataset is a versioned pipeline across your databases, and the
+          API is one release away. The third — the dashboard you embed — is next month's release, and it is built to
+          be created by the same agent and fed by the same released pipelines.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tb-two">
+    <div class="container">
+      <p class="kicker">Two columns, honestly</p>
+      <h2 id="tb-two" class="ds-headline">What ships today, and what is October 2026</h2>
+      <div class="split">
+        <div>
+          <h3><span class="status status-shipped">Ships today</span> Beside Tableau</h3>
+          <ul>
+            <!-- claim: docs/rest-api.md §19 -->
+            <li><b>A governed dataset Tableau can read.</b> Release a pipeline, publish it as a <code>GET</code> endpoint under <code>/api/x</code>; the JSON it returns is what a Tableau web data connector reads — versioned, and released by a person.</li>
+            <!-- claim: docs/pipeline-contract.md §9 -->
+            <li><b>Or land it where Tableau already looks.</b> A pipeline node can write its result into a datasource — a Postgres table Tableau live-connects to — so the dataset refreshes when the pipeline runs and Tableau never learns a new connector.</li>
+            <!-- claim: docs/staging.md §3 -->
+            <li><b>The prep step, as reviewable code.</b> Joins across Postgres, MySQL, SQL Server, Oracle, SQLite and Parquet on S3 happen in a scratch database created per run — no warehouse between your sources and Tableau, no flow file nobody can diff.</li>
+            <!-- claim: docs/auth.md §7.7 -->
+            <li><b>Access by path.</b> An API key is bound to an endpoint prefix; a client, a partner or a Tableau workbook gets its endpoint and nothing else.</li>
+            <!-- claim: docs/versioning.md §3 -->
+            <li><b>A number you can trace.</b> Every released version is immutable and audited; the dataset behind a chart is a version you can name.</li>
+          </ul>
+        </div>
+        <div>
+          <h3><span class="status">Next month · October 2026</span> The parts Tableau does that we will</h3>
+          <ul>
+            <!-- claim: docs/ROADMAP.md §2 -->
+            <li><b>Dashboards, created by your agent, that you embed in your own product</b> — fed by released pipelines and APIs, filtered per viewer. The chart lives in your app, behind your login, showing each user their rows.</li>
+            <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md -->
+            <li><b>Scheduling.</b> Schedules in folders, fired exactly once across instances, every run a first-class execution — the nightly refresh without the nightly job.</li>
+            <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
+            <li><b>JSONata and JavaScript nodes</b> for the shaping SQL is bad at — the nested response a dashboard wants, the pivot Prep did with a click.</li>
+          </ul>
+          <p class="how-footnote">Later, decided but not dated: scheduled extracts to your own bucket (Tableau reads Parquet natively), email alerts, and metrics defined once. The <a th:href="@{/roadmap}">roadmap</a> carries the same words.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tb-prep">
+    <div class="container">
+      <p class="kicker">Tableau Prep, or pipelines as code</p>
+      <h2 id="tb-prep" class="ds-headline">Where a flow stops and a pipeline starts</h2>
+      <div class="prose">
+        <!-- claim: docs/pipeline-contract.md §3 -->
+        <p>
+          A Prep flow is a diagram you edit; a pipeline here is a JSON document of SQL nodes with explicit
+          dependencies, which happens to <em>render</em> as a diagram. The difference shows up on the second week: the
+          pipeline is diffable in a pull request, versioned with a draft a reviewer can run before releasing, and
+          writable by an AI agent that reads your schemas and catalogue statistics first. The flow is a file only one
+          tool can open.
+        </p>
+        <!-- claim: docs/staging.md §3 -->
+        <p>
+          Both join across sources without a warehouse. Prep does it in memory on the machine running the flow;
+          datapipelines does it in a scratch database created for the run, where each source node's rows are staged
+          under a stable table name and the join is ordinary SQL any reviewer can read. When a source is slow, the
+          node's query timeout and the SQL probe say which node and why — the agent fixes the shape from the plan, not
+          from a spinner.
+        </p>
+        <!-- claim: docs/versioning.md §3 -->
+        <p>
+          And when the dataset is right, it is released — by a person, immutably. The flow that fed a dashboard last
+          quarter is a version you can name, restore, and point an endpoint at. That is the property a Prep flow on a
+          shared drive does not have, and it is the one that matters when the number on the board is questioned.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tb-shots">
+    <div class="container">
+      <p class="kicker">What it looks like</p>
+      <h2 id="tb-shots" class="ds-headline">The dataset behind the chart, as the reviewer sees it</h2>
+      <div class="shots">
+        <figure class="shot">
+          <figcaption>The pipeline an agent authored across four sources, in the editor, with the result dock open.</figcaption>
+          <div class="shot-placeholder" data-shot="editor-hero" style="--shot-ratio: 16 / 10"><b>[shot: editor-hero]</b>pipeline editor · demo graph · Results dock · 1600×1000</div>
+        </figure>
+        <figure class="shot">
+          <figcaption>The published endpoint in the API console — the URL Tableau reads, the key bound to its path.</figcaption>
+          <div class="shot-placeholder" data-shot="api-console" style="--shot-ratio: 16 / 10"><b>[shot: api-console]</b>API section · one published endpoint · 1440×900</div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Tableau questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tb-next">
+    <div class="container">
+      <h2 id="tb-next" class="ds-headline">Try the shipped half on your own databases</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        The demo stack joins Postgres, MySQL, SQLite and Parquet on S3 in one pipeline and publishes it as an endpoint.
+        Point a Tableau web data connector at it and you have the pattern end to end, on a laptop, in an afternoon.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/tableau/governed-dataset}">The step-by-step how-to</a>
+        <a class="btn btn-secondary" th:href="@{/docs/deployment}">Run the demo</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

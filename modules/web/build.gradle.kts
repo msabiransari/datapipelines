@@ -209,6 +209,10 @@ val websiteExportAssets =
         doFirst { exportDir.get().asFile.deleteRecursively() }
         from("src/main/resources/static/site") { into("site") }
         from("src/main/resources/static/vendor/design-system") { into("vendor/design-system") }
+        // Site v2: site.css declares its own faces (Manrope, JetBrains Mono) by relative url();
+        // the export's completeness check reads href/src, not CSS url(), so this copy is the
+        // only thing standing between the static site and system-font fallback.
+        from("src/main/resources/static/vendor/fonts") { into("vendor/fonts") }
         // 073: the public docs pages reference /css/docs.css through the layout's extraCss
         // slot. Without this the exported doc pages render as unstyled full-width prose —
         // which is exactly what the first export produced, and what a 404 on a stylesheet

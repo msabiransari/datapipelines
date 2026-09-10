@@ -37,7 +37,8 @@ class SiteRenderTest {
 
         // The H1 is unchanged by 073 — the poster's line is the pitch; only the <title> had
         // to start speaking the searcher's words.
-        html shouldContain "Agent-native Data Pipelines"
+        // Site v2: the H1 says the searcher's words, not the category name (073's research).
+        html shouldContain "Your AI agent builds the data pipelines. You press release."
         html shouldContain "<title>${SitePages.HOME.title}</title>"
         // The three former hardcoded "18"s now render from the model (033/C4).
         html shouldContain "<span>$count</span> tools cover the full lifecycle"
@@ -50,7 +51,8 @@ class SiteRenderTest {
         // painted every node in --brand and the driver refuses a broken canvas rather than
         // photographing it. `execution-result.png` did not go away; it moved to the executions
         // card, and both are asserted so a later round cannot silently drop either.
-        html shouldContain "src=\"/site/img/editor-hero.png\""
+        // Site v2: the hero is a placeholder slot until the owner's capture lands (T213).
+        html shouldContain "data-shot=\"editor-hero\""
         html shouldContain "src=\"/site/img/execution-result.png\""
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.

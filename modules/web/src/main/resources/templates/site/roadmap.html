@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Roadmap</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the public roadmap. Three bands — shipped, next month, later — with a
+       dateline the SiteRoadmapFreshnessTest keeps honest (a roadmap older than 120 days fails
+       the build). Wording ruled by the owner 2026-09-09; the "shipped" band cites the packaged
+       specs, the two roadmap bands cite the design records on disk. */-->
+  <!-- claim: docs/ROADMAP.md §2 — the v1.1 candidates -->
+  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — scheduler, ratified -->
+  <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md — JSONata / JavaScript nodes -->
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "datapipelines.co roadmap — what ships now, next month, and later",
+    "datePublished": "2026-09-09",
+    "dateModified": "2026-09-09",
+    "author": { "@type": "Organization", "name": "datapipelines.co" },
+    "publisher": { "@type": "Organization", "name": "datapipelines.co" },
+    "mainEntityOfPage": "https://datapipelines.co/roadmap"
+  }
+  </script>
+
+  <section class="section page-hero" aria-labelledby="rm-title">
+    <div class="container">
+      <p class="kicker">What ships, and when</p>
+      <h1 id="rm-title" class="ds-display">Roadmap</h1>
+      <p class="section-lede">
+        Three bands, and the words mean what they say. <strong>Shipped</strong> is in the current release and
+        specified in the packaged docs. <strong>Next month</strong> has a design record and a lane. <strong>Later</strong>
+        is decided but not scheduled. Nothing here says “coming soon” without a month beside it.
+      </p>
+      <p class="dateline" data-roadmap-updated="2026-09-09">Last updated 2026-09-09</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rm-shipped">
+    <div class="container">
+      <p class="kicker"><span class="status status-shipped">Shipped</span></p>
+      <h2 id="rm-shipped" class="ds-headline">In the current release</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6 -->
+          <h3>The MCP server</h3>
+          <p>An agent authors, runs, inspects and iterates pipelines through <span th:text="${toolCount}">34</span> tools over Streamable HTTP, with a scoped key and an audit row per call. <a th:href="@{/mcp-tools}">The tool list.</a></p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §4 -->
+          <h3>Eight engines, one pipeline</h3>
+          <p>PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, CSV and Iceberg on S3, read in place. Each node runs where its data lives.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/staging.md §3 -->
+          <h3>Joins without a warehouse</h3>
+          <p>Every run gets a scratch database that exists for exactly that run; sources are staged into it and joined there. <a th:href="@{/federated-query}">How federated query works.</a></p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/versioning.md §3 -->
+          <h3>Draft → release, by a person</h3>
+          <p>Agents leave drafts. A human releases; a release is immutable; a discarded release can be restored. Every verb is audited with the surface it came through.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>Published endpoints</h3>
+          <p>A released pipeline served as a versioned <code>GET</code> under <code>/api/x</code>, parameters bound from the query string, keys scoped to a path prefix. <a th:href="@{/published-api}">SQL to API.</a></p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §7C -->
+          <h3>Agent probes</h3>
+          <p>Catalogue statistics and indexes per table, and a bounded <code>sql_probe</code> that returns rows, wall time and the plan — so an agent fixes a slow shape from evidence.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rm-next">
+    <div class="container">
+      <p class="kicker"><span class="status">Next month · October 2026</span></p>
+      <h2 id="rm-next" class="ds-headline">Designed, in progress</h2>
+      <div class="split">
+        <div>
+          <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md -->
+          <h3>Scheduler</h3>
+          <ul>
+            <li><b>Schedules live in folders</b> beside the pipelines they run, versioned like everything else.</li>
+            <li><b>Fired exactly once</b> across every instance of the server — no duplicate runs when you scale out.</li>
+            <li><b>Every run is a first-class execution</b>: same history, same result, same cancel, same audit.</li>
+            <li>The design is ratified; the implementation round is written.</li>
+          </ul>
+        </div>
+        <div>
+          <!-- claim: docs/ROADMAP.md §2 -->
+          <h3>Dashboards</h3>
+          <ul>
+            <li><b>Created by your agent</b>, the way it creates a pipeline today.</li>
+            <li><b>Embedded in your own product</b> — not a portal you send people to.</li>
+            <li><b>Fed by released pipelines and APIs</b>, so the numbers are the ones a person released.</li>
+            <li><b>Filtered per viewer</b>: the same dashboard shows each user their own rows.</li>
+          </ul>
+        </div>
+        <div>
+          <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
+          <h3>JSONata and JavaScript nodes</h3>
+          <ul>
+            <li><b>Two new template types</b>, not new entities — they inherit versioning, pins and the release rule.</li>
+            <li><b>One <code>TRANSFORM</code> node type</b> with <code>row</code>, <code>table</code> and <code>value</code> modes: shape a nested API response, derive parameters, pivot what SQL cannot.</li>
+            <li><b>Sandboxed and bounded</b>: pure functions over staged data, no network, no filesystem, a wall-clock deadline.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rm-later">
+    <div class="container">
+      <p class="kicker"><span class="status">Later · decided, not scheduled</span></p>
+      <h2 id="rm-later" class="ds-headline">The next layer</h2>
+      <div class="split">
+        <div>
+          <!-- claim: docs/ROADMAP.md §3 -->
+          <h3>Scheduled extracts to your lake</h3>
+          <ul>
+            <li>A scheduled pipeline materialises to Parquet on your own bucket; DuckDB — and Tableau — read it back at interactive speed.</li>
+            <li>The lake you already own becomes the extract store, with no second copy of the data anywhere else.</li>
+          </ul>
+        </div>
+        <div>
+          <!-- claim: docs/ROADMAP.md §3 -->
+          <h3>Email alerts</h3>
+          <ul>
+            <li>A scheduled pipeline, a condition, an email. Nothing else is promised until it exists.</li>
+          </ul>
+        </div>
+        <div>
+          <!-- claim: docs/ROADMAP.md §3 -->
+          <h3>Metrics</h3>
+          <ul>
+            <li>Measures defined once over a pipeline's output and read by dashboards and endpoints alike.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="how-footnote">
+        What is deliberately <em>not</em> on this page: a hosted plan, native mobile apps, a story-points feature, and
+        Slack. The first two are decisions for after the next release; the last two are not planned.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rm-tableau">
+    <div class="container">
+      <p class="kicker">If you came here from Tableau</p>
+      <h2 id="rm-tableau" class="ds-headline">What this means beside Tableau</h2>
+      <p class="section-lede">
+        Today datapipelines gets a governed dataset <em>into</em> Tableau — as an API or into a database it reads. Next
+        month, the dashboards you embed in your own product. Later, the extracts on your own bucket. The
+        <a th:href="@{/tableau}">Tableau page</a> keeps the two columns — ships today, roadmap — side by side.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/tableau}">Using datapipelines with Tableau</a>
+        <a class="btn btn-secondary" th:href="@{/faq}">Read the FAQ</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

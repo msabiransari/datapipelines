@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">MCP tools</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the tool list, generated — names from McpToolCatalog.ENTRIES, scopes from
+       ScopeMatrix (McpToolGroups). The group introductions are prose, cited; the rows are
+       not typed by hand, so the page cannot name a tool the server does not ship. */-->
+  <!-- claim: docs/mcp-server.md §6.1 — the tool naming convention and count -->
+  <!-- claim: docs/mcp-server.md §6.2 — the tool definitions -->
+  <!-- claim: docs/auth.md §7.6 — the scope each tool requires -->
+  <!-- claim: docs/datasources.md §7C — catalogue statistics -->
+  <!-- claim: docs/datasources.md §7D — the SQL probe -->
+  <!-- claim: docs/versioning.md §3 — no release tool -->
+
+  <section class="section page-hero" aria-labelledby="mt-title">
+    <div class="container">
+      <p class="kicker">Generated from the server's own catalogue</p>
+      <h1 id="mt-title" class="ds-display">The MCP tools: everything an agent can do against your databases</h1>
+      <p class="section-lede">
+        <span th:text="${toolCount}">34</span> tools over Streamable HTTP, <span th:text="${mutatingCount}">16</span> of
+        them writes, every one gated by the scope its key must hold. The list below is rendered from the same catalogue
+        the server registers at startup, so it cannot drift from what your agent sees in <code>tools/list</code>. What is
+        <em>not</em> here is as deliberate as what is: there is no release tool, no promote tool, and no tool that returns
+        a credential.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add it to Claude Code</a>
+        <a class="btn btn-secondary" th:href="@{/docs/mcp-server}">Every tool's schema</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="mt-groups">
+    <div class="container">
+      <p class="kicker">By family</p>
+      <h2 id="mt-groups" class="ds-headline">Read what it may, write only drafts</h2>
+      <div class="prose">
+        <!-- claim: docs/mcp-server.md §6.1 -->
+        <p>
+          Names are <code>&lt;family&gt;_&lt;verb&gt;</code>. Reads need <code>read</code>; anything that runs SQL against
+          your data needs <code>execute</code>; anything that creates or changes a draft, registers a lake table or
+          probes a <code>SELECT</code> needs <code>author</code>. Previewing rows and probing SQL are <code>author</code>
+          rather than <code>read</code>, because a schema is metadata and a row is your customer's; catalogue statistics
+          stay <code>read</code> — a count the engine already stored is shape, not data.
+        </p>
+      </div>
+      <div th:each="g : ${toolGroups}" class="feature-group">
+        <h3 class="group-title" th:text="${g.title}">Family</h3>
+        <ul class="tool-list">
+          <li th:each="t : ${g.tools}">
+            <code th:text="${t.name}">tool_name</code>
+            <span class="status" th:text="${t.scope}">read</span>
+            <span class="status" th:if="${t.mutating}">writes</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="mt-probes">
+    <div class="container">
+      <p class="kicker">The two probes</p>
+      <h2 id="mt-probes" class="ds-headline">Statistics before the predicate, a plan before the timeout</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/datasources.md §7C -->
+          <h3>datasources_get_table_stats</h3>
+          <p>Row estimates, indexes and per-column distinct counts, null fractions and ranges — from the engine's catalogue, never a scan. An agent reads them before it writes a <code>WHERE</code>, and suggests the index that would help when none does.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §7D -->
+          <h3>sql_probe</h3>
+          <p>One classified <code>SELECT</code>, named typed parameters, a row cap and a time box; the <code>EXPLAIN</code> is captured before the run so the plan survives a timeout. On dp-lake it reports how many partitions the predicate touched.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/versioning.md §3 -->
+          <h3>What is missing on purpose</h3>
+          <p>No <code>pipelines_release</code>, no <code>promote</code>, no <code>datasources_create</code> with credentials. An agent leaves a draft; a person releases; an operator registers datasources. The absence is the design.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="mt-next">
+    <div class="container">
+      <h2 id="mt-next" class="ds-headline">Give your agent the skill, not just the tools</h2>
+      <!-- claim: docs/mcp-server.md §6.2 -->
+      <p class="section-lede">
+        The server also ships a skill — the rules an agent follows to author a pipeline well: filter lake tables
+        on their partition column, pre-aggregate before staging, never divide decimals in the scratch engine, leave
+        the release to a person. It is served at <code>/skill.md</code>, exposed as an MCP resource, and packaged as a
+        Claude Code plugin.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add the server and the skill</a>
+        <a class="btn btn-secondary" th:href="@{/security}">How access is scoped</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

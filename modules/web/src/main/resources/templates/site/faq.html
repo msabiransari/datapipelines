@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">FAQ</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the product introduction in question-and-answer form (owner 2026-09-09). The
+       entries are SiteFaqs.ALL — one Kotlin list renders every <details> AND the FAQPage
+       JSON-LD, so the snippet a search engine shows is a sentence on this page. Each answer
+       names the doc it rests on; the claim comments below are the same citations, in the form
+       SiteClaimCitationTest sweeps. */-->
+  <!-- claim: docs/mcp-server.md §6 — what it is -->
+  <!-- claim: docs/pipeline-contract.md §3 — what a pipeline is -->
+  <!-- claim: docs/datasources.md §4 — the dialects -->
+  <!-- claim: docs/staging.md §3 — no warehouse -->
+  <!-- claim: docs/deployment.md §10 — AGPL -->
+  <!-- claim: docs/datasources.md §7 — credentials never returned -->
+  <!-- claim: docs/auth.md §7.6 — what an agent may do -->
+  <!-- claim: docs/auth.md §10 — audit -->
+  <!-- claim: docs/versioning.md §3 — human release -->
+  <!-- claim: docs/rest-api.md §19 — published endpoints -->
+  <!-- claim: docs/dag-executor.md §5 — timeouts -->
+
+  <section class="section page-hero" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">The product, in the questions people ask</p>
+      <h1 id="faq-title" class="ds-display">Frequently asked questions</h1>
+      <p class="section-lede">
+        Every answer below is a statement about what the server does <em>today</em>, and every one names the
+        specification it rests on — the same documents packaged into the product under
+        <a th:href="@{/docs}">/docs</a>. What is planned lives on the <a th:href="@{/roadmap}">roadmap</a>, dated,
+        and the two answers that touch it say so.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-label="Questions by topic">
+    <div class="container">
+      <div class="faq-group" th:each="g : ${faqGroups}">
+        <h2 class="ds-headline" th:text="${g.first}">Topic</h2>
+        <div class="faq">
+          <th:block th:each="e, st : ${g.second}">
+            <details th:open="${st.index == 0}">
+              <summary th:text="${e.question}">Question?</summary>
+              <p th:text="${e.answer}">Answer.</p>
+            </details>
+          </th:block>
+        </div>
+      </div>
+      <!--/* One JSON-LD block for the whole page: SiteFaqParityTest reads it back against the
+           <details> above. */-->
+      <script type="application/ld+json" th:utext="${faqJsonLd}"></script>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-next">
+    <div class="container">
+      <p class="kicker">Still asking</p>
+      <h2 id="faq-next" class="ds-headline">Run it on your own data in a few minutes</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        The demo stack brings up the server with real sample data — taxi trips in Postgres, weather in MySQL, zones in
+        SQLite, rideshare Parquet on S3 — and a pipeline that joins all four. It is the fastest way to answer the
+        question the FAQ cannot: whether it fits <em>your</em> databases.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}"><code>./app.sh --start --demo nyc,lake</code></a>
+        <a class="btn btn-secondary" th:href="@{/add-mcp-server-to-claude-code}">Add the MCP server to Claude Code</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>
