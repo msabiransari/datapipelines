@@ -171,7 +171,16 @@ class DefaultDatasourceRegistry(
         table: LakeRegisteredTable,
     ): String? {
         if (datasource.dialect != Dialect.LAKE) return null
-        return LakeTablePreflight.check(datasource, table, duckdbExtensionDirectory)
+        // The caller (the REST/MCP register surface) holds the REDACTED entity — getVisible
+        // strips the secret — while the scratch pool must carry exactly the credential the
+        // real pool builds with. Re-read the row and decrypt it here, the pool factory's own
+        // path; a row that vanished mid-request falls back to the passed entity (NONE-kind
+        // lakes have no credential to re-attach, and the engine refusal is the answer either
+        // way).
+        val withCredential =
+            repository.findByName(datasource.name)?.let { it.toDatasource(decryptOrNull(it)) }
+                ?: datasource
+        return LakeTablePreflight.check(withCredential, table, duckdbExtensionDirectory)
     }
 
     /** 109 §A — the executor's pre-execution read: the datasource's registered tables whose view creation last FAILED. */
