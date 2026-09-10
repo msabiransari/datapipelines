@@ -68,14 +68,23 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
 - **One template, bound per node.** If two nodes run the same SQL over different values,
   that is one template with parameters, not two copies. Copies drift.
 - **On a lake table, filter on the PARTITION column.** A day-partitioned table
-  (`hvfhv_trips`, partitioned on `pickup_date`) prunes only on that column: `WHERE pickup_date
-  IN (DATE '2024-01-01', …)` or `BETWEEN` two dates touches those partitions and nothing else.
-  A filter on a sibling timestamp (`pickup_at >= TIMESTAMP …`), a `CAST(pickup_date AS …)`,
-  or any function on the column reads EVERY file and relies on row-group statistics — it
-  looks fast on a quiet box and dies at the timeout on a busy one. Never build a `UNION ALL`
-  of date-range branches to work around it; that is N full walks in one statement. One query,
-  the partition column, a list of dates. (Real miss: an 11-branch UNION over `pickup_at`,
-  cancelled at 60 s.)
+  (`hvfhv_trips`, partitioned on `pickup_date`) prunes on a predicate over that column:
+  `WHERE pickup_date IN (DATE '2024-01-01', …)`, `BETWEEN` two dates, and — measured on
+  DuckDB 1.5.5 — a deterministic expression of the column such as `CAST(pickup_date AS …)`
+  still prune. **Bound parameters prune too**: write `:d` for a date filter and the engine
+  folds the bound value into the scan (33 bound dates read 33 of 731 files, same as
+  literals). What never prunes is a predicate on a sibling column INSIDE the files
+  (`pickup_at >= TIMESTAMP …`) — that reads EVERY file and relies on row-group statistics;
+  it looks fast on a quiet box and dies at the timeout on a busy one. Never build a
+  `UNION ALL` of date-range branches to work around it; that is N full walks in one
+  statement. One query, the partition column, a list of dates. (Real miss: an 11-branch
+  UNION over `pickup_at`, cancelled at 60 s.)
+- **A table marked unavailable is broken at the lake, not by your query.** If
+  `datasources_get` shows a lake table with `last_error` set, or a node fails
+  `datasource.lake.table_unavailable`, the table's view failed to build at connect
+  (bad prefix, wrong format, unreadable files) and was skipped. Re-running the query will
+  never fix it — report the recorded `last_error` to the user and let them re-register or
+  fix the table; do not retry.
 - **After a node runs green, analyse it — and say what you found.** Read the node's timing
   and, where the platform gives you the plan (`sql_probe` when it exists; the node's
   `node_stats` otherwise), ask one question of every SOURCE node: *is the predicate and join
@@ -129,7 +138,7 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
 | Do | Don't |
 |---|---|
 | After each source node runs, check its predicate/join key against the table's indexes and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
-| Filter a lake table on its partition column, with literals or an `IN` list | Filter on a sibling timestamp, CAST the column, or UNION date-range branches |
+| Filter a lake table on its partition column, with literals, bound parameters, or an `IN` list | Filter on a sibling timestamp inside the files, or UNION date-range branches |
 | Join the lookup; answer with names | Print `HV0003` / `uber` and call it an answer |
 | Infer table roles from `*_companies`, `*_zone_day`, `*_sample` when no description exists | Ignore a table because nothing described it |
 | Aggregate and filter at the source; ship the answer's grain | Stage raw rows into H2 and aggregate there |
