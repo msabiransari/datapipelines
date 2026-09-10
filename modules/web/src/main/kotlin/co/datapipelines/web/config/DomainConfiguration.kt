@@ -84,7 +84,7 @@ class DomainConfiguration {
     fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
 
     /**
-     * `datasource_workspaces` (metadata-db §4.13) — the table that replaced
+     * `datasource_workspaces` (metadata-db §4.16) — the table that replaced
      * `datasources.workspace_id` and with it the "global" datasource (D-R7). Visibility is the
      * grant; `DatasourceRepository`'s reads carry the predicate, and this bean is the
      * management half.

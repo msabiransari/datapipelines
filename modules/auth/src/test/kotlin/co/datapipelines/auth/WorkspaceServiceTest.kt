@@ -267,10 +267,11 @@ class WorkspaceServiceTest {
     fun `a super admin creates, and the creation is audited`() {
         val principal = principal(superAdmin = true, memberships = emptyList())
         every { repository.nameExists("acme") } returns false
-        every { repository.create("acme", "Acme", false, userId) } returns wsA
-        every { repository.findByName("acme") } returns wsA
+        val acme = workspace("acme")
+        every { repository.create("acme", "Acme", false, userId) } returns acme
+        every { repository.findByName("acme") } returns acme
 
-        service().create(principal, "acme", "Acme") shouldBe wsA
+        service().create(principal, "acme", "Acme") shouldBe acme
         verify { auditLogger.log("auth.workspace.created", userId, null, null, null, any()) }
     }
 

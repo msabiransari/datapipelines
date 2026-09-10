@@ -69,19 +69,20 @@ class SampleDataBootstrapE2eTest {
     fun `startup registered both entries with their flags, global scope and the bootstrap actor`() {
         val actorId = bootstrapActorId()
 
-        rows("SELECT name, is_readonly, workspace_id, created_by, is_deleted FROM datasources ORDER BY name")
+        rows("SELECT name, is_readonly, owner_workspace_id, created_by, is_deleted FROM datasources ORDER BY name")
             .map { it["name"] } shouldContainExactly listOf(BOOT_RO, BOOT_RW)
 
         val readonly = row("SELECT * FROM datasources WHERE name = '$BOOT_RO'")
         readonly["is_readonly"] shouldBe true
-        // `global: true` = workspace_id NULL (metadata-db §4.10).
-        readonly["workspace_id"].shouldBeNull()
+        // `global: true` now means "no workspace OWNS it" (V23 `owner_workspace_id`); it no
+        // longer means "everybody sees it" — that is the grant table (D-R7).
+        readonly["owner_workspace_id"].shouldBeNull()
         readonly["created_by"] shouldBe actorId
         readonly["display_name"] shouldBe "Bootstrapped read-only"
 
         val writable = row("SELECT * FROM datasources WHERE name = '$BOOT_RW'")
         writable["is_readonly"] shouldBe false
-        writable["workspace_id"].shouldBeNull()
+        writable["owner_workspace_id"].shouldBeNull()
         writable["created_by"] shouldBe actorId
 
         // The `${'$'}{BOOTSTRAP_E2E_PASSWORD}` placeholder resolved against the process environment

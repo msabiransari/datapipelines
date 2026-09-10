@@ -46,9 +46,30 @@ class ScopeInterceptorTest {
     @AfterEach
     fun clear() = SecurityContextHolder.clearContext()
 
+    /**
+     * The workspace context every request carries since RBAC round 1: `ScopeMatrix.allowed`
+     * judges BOTH axes, so a principal with no resolved workspace is refused with
+     * `workspace.not_found` before any scope is examined (D-R5). A key's context carries its
+     * ISSUER's flags, and these suites are about the CREDENTIAL axis — so the issuer is a
+     * workspace admin here, which satisfies every capability and leaves the scope check as
+     * the only thing that can refuse.
+     */
+    private fun adminContext() =
+        WorkspaceContext(UUID.randomUUID(), "acme", MembershipFlags(author = true, promoter = true, admin = true))
+
+
     private fun authenticate(vararg scopes: Scope) {
         val principal =
-            AuthenticatedPrincipal(UUID.randomUUID(), "a@b.com", "A", scopes.toSet(), AuthMethod.API_KEY, "dpk_ABCDEFGHIJKL")
+            AuthenticatedPrincipal(
+                UUID.randomUUID(),
+                "a@b.com",
+                "A",
+                scopes.toSet(),
+                AuthMethod.API_KEY,
+                "dpk_ABCDEFGHIJKL",
+                workspaceName = "acme",
+                workspace = adminContext(),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }

@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -33,6 +34,12 @@ class JwtFilterLivenessTest {
             User(userId, "u@c.com", "U", null, "kc", "s", true, false, Instant.now(), Instant.now(), null),
         )
 
+    /** The live `users` row the filter reads per request — `is_admin` is on it since D-R1. */
+    private fun user(
+        id: java.util.UUID,
+        isActive: Boolean,
+    ) = User(id, "u@c.com", "U", null, "kc", "s", isActive, false, Instant.now(), Instant.now(), null)
+
     @AfterEach
     fun clear() = SecurityContextHolder.clearContext()
 
@@ -45,20 +52,23 @@ class JwtFilterLivenessTest {
     }
 
     @Test
-    fun `an active user's valid session authenticates with the token scopes`() {
-        every { userService.isActive(userId) } returns true
+    fun `an active user's valid session authenticates, carrying NO scopes (D-R1)`() {
+        every { userService.snapshot(userId) } returns user(userId, isActive = true)
 
         run(token)
 
         val auth = SecurityContextHolder.getContext().authentication
         auth.shouldNotBeNull()
         (auth.principal as AuthenticatedPrincipal).userId shouldBe userId
-        auth.authorities.map { it.authority }.contains("SCOPE_read") shouldBe true
+        // No SCOPE_ authorities: a session carries no scopes at all since D-R1, so granting
+        // any would be a second, stale source of truth beside the membership.
+        auth.authorities.shouldBeEmpty()
+        (auth.principal as AuthenticatedPrincipal).scopes.shouldBeEmpty()
     }
 
     @Test
     fun `a deactivated user's valid session is rejected and the cookie is cleared`() {
-        every { userService.isActive(userId) } returns false
+        every { userService.snapshot(userId) } returns user(userId, isActive = false)
 
         val response = run(token)
 

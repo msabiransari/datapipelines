@@ -326,14 +326,21 @@ class JarSmokeE2eTest {
                 )
                 s.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE', 'smoke', 'Smoke')")
                 s.execute(
-                    "INSERT INTO workspace_members (workspace_id, user_id, role) " +
-                        "VALUES ('$WORKSPACE', '$USER', 'owner')",
+                    "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) " +
+                        "VALUES ('$WORKSPACE', '$USER', TRUE, FALSE, TRUE)",
                 )
                 s.execute(
                     "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, " +
                         "credential_encrypted, created_by, is_readonly) VALUES ('$SEEDED_DATASOURCE', " +
                         "'Smoke DS', 'POSTGRES', '${postgres.jdbcUrl}', '${postgres.username}', " +
                         "'x'::bytea, '$USER', TRUE)",
+                )
+                // D-R7: visibility is the GRANT. Registering a datasource without one makes
+                // it invisible to every workspace, which is the point — nothing is visible by
+                // default any more, so a seed that skips this seeds a datasource nobody can use.
+                s.execute(
+                    "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) " +
+                        "VALUES ('$SEEDED_DATASOURCE', '$WORKSPACE', '$USER')",
                 )
                 s.execute(
                     "INSERT INTO pipelines (id, name, display_name, description, owner_id, " +

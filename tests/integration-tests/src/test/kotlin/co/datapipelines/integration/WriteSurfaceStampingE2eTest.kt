@@ -352,8 +352,8 @@ class WriteSurfaceStampingE2eTest {
                         """.trimIndent(),
                     )
                     statement.execute(
-                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
-                            " VALUES ('defa0000-0000-0000-0000-000000000001', '$ADMIN_USER_ID', 'owner')",
+                        "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)" +
+                            " VALUES ('defa0000-0000-0000-0000-000000000001', '$ADMIN_USER_ID', TRUE, FALSE, TRUE)",
                     )
                 }
                 connection

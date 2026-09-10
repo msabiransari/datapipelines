@@ -93,8 +93,48 @@ class FlywayMigrationIntegrationTest {
                 "21|execution heartbeat|true",
                 // 109 §A — the per-table lake view-creation outcome columns (both NULL = healthy).
                 "22|lake table view errors|true",
+                // 112 — RBAC round 1: capability onto the membership, workspace deactivation,
+                // the `demo` seed, and the datasource grant table that replaced "global".
+                "23|rbac core|true",
             )
     }
+
+    @Test
+    fun `V23 puts capability on the membership and visibility in the grant table`() {
+        // The column inventory, read from the SHIPPED database: the three flags exist, the
+        // `role` column is gone, and the datasource binding split into ownership + grants.
+        columnsOf("workspace_members") shouldContainExactly
+            listOf("admin", "author", "joined_at", "promoter", "user_id", "workspace_id")
+
+        columnsOf("datasource_workspaces") shouldContainExactly
+            listOf("datasource_name", "granted_at", "granted_by", "workspace_id")
+
+        columnsOf("datasources").contains("workspace_id") shouldBe false
+        columnsOf("datasources").contains("owner_workspace_id") shouldBe true
+
+        columnsOf("workspaces").contains("deactivated_at") shouldBe true
+        columnsOf("workspaces").contains("deactivated_by") shouldBe true
+    }
+
+    @Test
+    fun `V23's two indexes exist - the last-admin count and the selectable-workspace lookup`() {
+        // Named, because both back a rule rather than a query someone happened to write: the
+        // partial admin index is what makes the last-admin count cheap, and the active-workspace
+        // index is what every selection reads.
+        query(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'" +
+                " AND indexname IN ('idx_workspace_members_admins', 'idx_workspaces_active'," +
+                " 'idx_datasource_workspaces_workspace') ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("idx_datasource_workspaces_workspace", "idx_workspace_members_admins", "idx_workspaces_active")
+    }
+
+    /** Every column of [table] in the shipped database, name order. */
+    private fun columnsOf(table: String): List<String> =
+        query(
+            "SELECT column_name FROM information_schema.columns" +
+                " WHERE table_schema = 'public' AND table_name = '$table' ORDER BY 1",
+        ) { it.getString(1) }
 
     @Test
     fun `V20 stamps the write surface on both version tables, checked and defaulted`() {

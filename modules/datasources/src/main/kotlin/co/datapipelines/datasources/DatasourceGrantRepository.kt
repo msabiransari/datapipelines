@@ -8,7 +8,7 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
- * One row of `datasource_workspaces` (metadata-db §4.13): a datasource is visible to a
+ * One row of `datasource_workspaces` (metadata-db §4.16): a datasource is visible to a
  * workspace because somebody granted it (D-R7). Every grant records who and when — the
  * design says "every grant is audited", and the row itself is half of that record.
  */
@@ -21,7 +21,7 @@ data class DatasourceGrant(
 )
 
 /**
- * `datasource_workspaces` persistence (metadata-db §4.13) — the table that REPLACED
+ * `datasource_workspaces` persistence (metadata-db §4.16) — the table that REPLACED
  * `datasources.workspace_id` and with it the concept of a "global" datasource (D-R7).
  *
  * Visibility is the grant and nothing else. `DatasourceRepository`'s reads carry the

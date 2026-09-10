@@ -38,7 +38,15 @@ object ScopeMatrix {
         EXECUTE_PIPELINE(Scope.EXECUTE, Capability.EXECUTE),
         CANCEL_EXECUTION(Scope.EXECUTE, Capability.EXECUTE),
         MUTATE_PIPELINES_TEMPLATES(Scope.AUTHOR, Capability.AUTHOR),
-        TEST_DATASOURCE(Scope.AUTHOR, Capability.AUTHOR),
+        /**
+         * "Test a datasource connection" (§7.6). [Capability.WS_ADMIN], not `author`: the
+         * design's §1 table puts "register a datasource bound to THIS workspace; test it" on
+         * the workspace-admin row, and testing is not a read — it opens a live connection with
+         * the instance's stored credential and writes the datasource's health down (V9). The
+         * MCP twin `datasources_test` sits on the same capability for the same reason, while
+         * the read-only probes beside it are viewer verbs.
+         */
+        TEST_DATASOURCE(Scope.AUTHOR, Capability.WS_ADMIN),
 
         /**
          * "Introspect a datasource schema" (§7.6, datasources §7A): the three read-only schema

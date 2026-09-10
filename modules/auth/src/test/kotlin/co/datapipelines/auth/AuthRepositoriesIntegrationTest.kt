@@ -44,8 +44,13 @@ class AuthRepositoriesIntegrationTest {
         // workspace ApiKeyRepository pins is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
         jdbc.jdbcTemplate.execute(
-            "INSERT INTO workspaces (id, name, display_name)" +
-                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+            // Both shipped workspaces: `default` (V4's re-key) and `demo` (V23, D-R11). The
+            // TRUNCATE CASCADE reaches `workspaces` through `created_by`, so anything the
+            // migrations seeded has to be put back or the next assertion sees a database the
+            // product never ships.
+            "INSERT INTO workspaces (id, name, display_name) VALUES" +
+                " ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')," +
+                " ('de000000-0000-0000-0000-000000000001', 'demo', 'Demo')",
         )
     }
 

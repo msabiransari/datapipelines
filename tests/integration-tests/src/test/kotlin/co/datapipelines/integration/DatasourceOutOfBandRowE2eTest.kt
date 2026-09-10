@@ -112,6 +112,15 @@ class DatasourceOutOfBandRowE2eTest {
                     ON CONFLICT (name) DO UPDATE SET properties_json = EXCLUDED.properties_json
                     """.trimIndent(),
                 )
+                // D-R7: an out-of-band row still needs its grant, or it is invisible — which
+                // is exactly what the round changed and what a row written by hand must honour.
+                statement.execute(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    SELECT '$DS', w.id, '$ADMIN_USER_ID' FROM workspaces w WHERE w.is_deleted = FALSE
+                    ON CONFLICT DO NOTHING
+                    """.trimIndent(),
+                )
             }
         }
     }

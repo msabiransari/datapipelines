@@ -239,8 +239,11 @@ class WorkspaceService(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
-        requireSuperAdmin(principal)
+        // read() FIRST: the pin and the 404 rule are the outermost gates, so a workspace this
+        // caller cannot reach answers "no such workspace" whatever their role — a role refusal
+        // reached before the 404 would confirm the workspace exists.
         val workspace = read(principal, name)
+        requireSuperAdmin(principal)
         if (!workspaceRepository.deactivate(workspace.id, principal.userId)) {
             throw WorkspaceInactiveException(name)
         }
@@ -254,8 +257,11 @@ class WorkspaceService(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
-        requireSuperAdmin(principal)
+        // read() FIRST: the pin and the 404 rule are the outermost gates, so a workspace this
+        // caller cannot reach answers "no such workspace" whatever their role — a role refusal
+        // reached before the 404 would confirm the workspace exists.
         val workspace = read(principal, name)
+        requireSuperAdmin(principal)
         if (!workspaceRepository.reactivate(workspace.id)) {
             // Already active: the same 404 body, because "it was not deactivated" is not a
             // fact this surface owes a caller who could not have addressed it wrongly.
@@ -283,8 +289,9 @@ class WorkspaceService(
         principal: AuthenticatedPrincipal,
         name: String,
     ) {
-        requireSuperAdmin(principal)
+        // read() FIRST, for the reason [deactivate] gives.
         val workspace = read(principal, name)
+        requireSuperAdmin(principal)
         val counts = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
         if (counts.isNotEmpty()) throw WorkspaceInUseException(name, counts)
         val members = workspaceRepository.findMembersOf(workspace.id)

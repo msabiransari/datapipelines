@@ -622,8 +622,8 @@ class PublishedEndpointE2eTest {
                     )
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, role)
-                        VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', 'owner')
+                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
+                        VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', TRUE, FALSE, TRUE)
                         """.trimIndent(),
                     )
                 }

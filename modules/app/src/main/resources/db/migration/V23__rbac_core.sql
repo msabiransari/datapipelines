@@ -2,7 +2,7 @@
 -- V23 — RBAC round 1: capability moves into the workspace membership
 --
 -- Authority: docs/superpowers/specs/2026-09-10-rbac-design.md v1.0 (RATIFIED),
--- recorded as DDL in metadata-db.md §4.11 / §4.12 / §4.10 / §4.13.
+-- recorded as DDL in metadata-db.md §4.11 / §4.12 / §4.10 / §4.16.
 --
 -- Four changes, in dependency order:
 --   1. workspace_members gains the three additive capability flags and loses `role`
@@ -64,7 +64,7 @@ VALUES ('de000000-0000-0000-0000-000000000001', 'demo', 'Demo', FALSE, NULL)
 ON CONFLICT (name) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- 3. §4.13 datasource_workspaces — visibility is a grant (D-R7, D-R14)
+-- 3. §4.16 datasource_workspaces — visibility is a grant (D-R7, D-R14)
 -- ---------------------------------------------------------------------------
 -- NOTE ON THE KEY: the design record writes `datasource_id UUID REFERENCES
 -- datasources(id)`. There is no such column — `datasources` is keyed by `name TEXT`
@@ -111,7 +111,19 @@ ON CONFLICT DO NOTHING;
 ALTER TABLE datasources DROP COLUMN workspace_id;
 
 -- ---------------------------------------------------------------------------
--- 4. users.scopes — the drop the design record asked for, and why it is absent
+-- 4. api_keys: `admin` leaves the key wire (D-R12, O-2)
+-- ---------------------------------------------------------------------------
+-- `admin` was the only scope that ever bought a key an INSTANCE verb, and instance
+-- verbs — creating workspaces, managing members, releasing, promoting — are human.
+-- Stripped here so the stored rows agree with the rule; ApiKeyService ALSO filters it
+-- at validation, so the rule does not rest on this statement having run. A key left
+-- with no scopes at all keeps `read`, the §7.5 floor: emptying a credential silently
+-- would break an integration in a way nothing explains.
+UPDATE api_keys SET scopes = array_remove(scopes, 'admin') WHERE 'admin' = ANY(scopes);
+UPDATE api_keys SET scopes = ARRAY['read'] WHERE cardinality(scopes) = 0 AND kind = 'user';
+
+-- ---------------------------------------------------------------------------
+-- 5. users.scopes — the drop the design record asked for, and why it is absent
 -- ---------------------------------------------------------------------------
 -- D-R1 says "users.scopes goes away". There is no `users.scopes` column and there
 -- never was: V1 §4.1 has `is_admin` and no scope array, and the only `scopes TEXT[]`

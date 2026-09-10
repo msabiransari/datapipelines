@@ -400,9 +400,9 @@ class WorkspaceSurfacesFixRoundE2eTest {
                     )
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
-                            ('$WS_ACME', '$ALICE', 'owner'),
-                            ('$WS_GLOBEX', '$BOB', 'owner')
+                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
+                            ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
+                            ('$WS_GLOBEX', '$BOB', TRUE, FALSE, TRUE)
                         """.trimIndent(),
                     )
                 }

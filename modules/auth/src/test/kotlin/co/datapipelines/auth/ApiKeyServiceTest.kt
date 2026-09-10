@@ -299,7 +299,15 @@ class ApiKeyServiceTest {
         // both need a principal that says SERVER to give it.
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
-            service.issue(issuer, ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                setOf(Scope.ADMIN),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -314,7 +322,15 @@ class ApiKeyServiceTest {
     fun `validateServerKey accepts a server key and refuses every other kind with the SAME answer`() {
         echoInsert(kind = ApiKeyKind.SERVER)
         val server =
-            service.issue(issuer, ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                setOf(Scope.ADMIN),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         echoInsert()
         val user = service.issue(issuer, ownerId, "agent", setOf(Scope.READ), setOf(Scope.ADMIN), workspaceId)
         every { repo.findById(server.record.id) } returns server.record
@@ -333,7 +349,15 @@ class ApiKeyServiceTest {
         // The whole point of moving the credential into the key store: revocation exists.
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
-            service.issue(issuer, ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                setOf(Scope.ADMIN),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -344,7 +368,15 @@ class ApiKeyServiceTest {
     fun `an expired server key stops opening the promotion route`() {
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
-            service.issue(issuer, ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                setOf(Scope.ADMIN),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         every { repo.findById(issued.record.id) } returns
             issued.record.copy(expiresAt = Instant.now().minusSeconds(1))
         every { userService.snapshot(ownerId) } returns activeOwner()

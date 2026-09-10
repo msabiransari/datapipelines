@@ -107,13 +107,15 @@ class WorkspaceResolutionFilterTest {
     }
 
     @Test
-    fun `a session switch naming a non-membership is refused 403 membership_required`() {
-        every { workspaceService.resolveSwitch(any(), "beta") } throws WorkspaceMembershipRequiredException()
+    fun `a session switch naming an unreachable workspace is refused 404 not_found (D-R5)`() {
+        every { workspaceService.resolveSwitch(any(), "beta") } throws WorkspaceNotFoundException("beta")
 
         val response = run(oidcPrincipal(), "beta")
 
-        response.status shouldBe 403
-        response.contentAsString.contains("workspace.membership_required") shouldBe true
+        // 404, not 403: a workspace the caller cannot reach does not exist for them, and a
+        // 403 here would confirm it exists to anyone willing to try names.
+        response.status shouldBe 404
+        response.contentAsString.contains("workspace.not_found") shouldBe true
     }
 
     @Test
@@ -127,7 +129,7 @@ class WorkspaceResolutionFilterTest {
     }
 
     @Test
-    fun `a zero-membership session proceeds with no workspace - scoped operations 403 downstream`() {
+    fun `a zero-membership session proceeds with no workspace - scoped operations are refused downstream`() {
         every { workspaceService.resolveForSession(any(), null) } returns null
 
         val principal = oidcPrincipal().copy(workspaceName = null)
