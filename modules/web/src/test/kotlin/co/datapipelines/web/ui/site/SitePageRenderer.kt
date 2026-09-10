@@ -128,6 +128,7 @@ object SitePageRenderer {
             put(SitePages.FOR_AGENCIES.path, batch2Controller::forAgencies)
             put(SitePages.FOR_SAAS_TEAMS.path, batch2Controller::forSaasTeams)
             put(SitePages.FOR_ANALYSTS.path, batch2Controller::forAnalysts)
+            put(SitePages.HOW_IT_WORKS.path, pagesController::howItWorks)
         }
     }
 

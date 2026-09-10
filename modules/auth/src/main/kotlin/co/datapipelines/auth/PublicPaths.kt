@@ -153,6 +153,13 @@ object PublicPaths {
             // 111: the persona pages — one glob for the family, same shape and reasoning as
             // the rows above. The pages under it are enumerated by the page registry.
             PublicPath("/for/*", "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.", "111"),
+            // 115: the engineering page the buyer-facing home page moved its vocabulary to.
+            // Same shape and reasoning as every row above.
+            PublicPath(
+                "/how-it-works",
+                "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.",
+                "115",
+            ),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.

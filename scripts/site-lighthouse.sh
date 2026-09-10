@@ -2,8 +2,9 @@
 # site-lighthouse.sh — the marketing site's Lighthouse budget, as a guard.
 #
 # What it measures: Lighthouse's performance, accessibility, best-practices and
-# SEO categories, on five pages of the exported static site:
-#   /  /faq  /tableau  /published-api  /for/saas-teams
+# SEO categories, on six pages of the exported static site:
+#   /  /how-it-works  /faq  /tableau  /published-api  /for/saas-teams
+# (115 §C added /how-it-works.)
 #
 # The floor is 95 in every audited category on every page. Any score below the
 # floor names the page, the category and the score, and the script exits 1.
@@ -22,7 +23,7 @@
 # The Lighthouse version is PINNED (12.8.2, the newest 12.x — read from
 # https://registry.npmjs.org/lighthouse at authoring time, 2026-09-10; 13.x is
 # out but the brief pinned the 12.x line) so a score is comparable across runs.
-# Born 111 §C. Baseline: five pages, four categories, all >= 95.
+# Born 111 §C. Baseline: five pages, four categories, all >= 95. 115 added /how-it-works.
 
 set -euo pipefail
 
@@ -31,7 +32,7 @@ FLOOR=95
 EXPORT_DIR="modules/web/build/website-export"
 # Trailing slashes: the export is a directory tree, and python's http.server answers a
 # slash-less directory path with a redirect — one wasted round trip on the critical chain.
-PAGES=("/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/")
+PAGES=("/" "/how-it-works/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/")
 CATEGORIES=("performance" "accessibility" "best-practices" "seo")
 
 command -v python3 >/dev/null || { echo "site-lighthouse: python3 is required to serve the export" >&2; exit 1; }
@@ -172,4 +173,4 @@ if [ "$FAILED" -ne 0 ]; then
   echo "site-lighthouse: FAIL — at least one page scored below the floor; fix the cause, never lower the floor" >&2
   exit 1
 fi
-echo "site-lighthouse: OK — five pages, four categories, all >= $FLOOR"
+echo "site-lighthouse: OK — six pages, four categories, all >= $FLOOR"

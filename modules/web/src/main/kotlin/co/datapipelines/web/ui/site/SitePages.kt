@@ -72,14 +72,23 @@ data class EngineFacts(
  * remember — which is the point of the list existing at all.
  */
 object SitePages {
-    /** `GET /` — the homepage. Its `<h1>` stays the poster's line; the TITLE speaks the search. */
+    /**
+     * `GET /` — the homepage. 115 retargeted it from the engineer to the buyer: the title and
+     * H1 speak "no data team required" (the pillar page keeps "SQL MCP server" in its own
+     * title and H1, so the keyword moved rather than vanished).
+     */
     val HOME =
         SitePage(
             path = "/",
-            title = "MCP server for SQL databases — governed pipelines | datapipelines.co",
+            // 115 §A.1: the brief's first choice ("Show your customers their data — no data
+            // team required | datapipelines.co") is 73 chars and SiteSeoMetaTest's pin is 70,
+            // so the brief's sanctioned fallback runs instead.
+            title = "Customer-facing data, no data team required | datapipelines.co",
+            // 115 §A.1's sentence, tail-trimmed (the "embedded analytics" tail took it to 172
+            // chars against the 155 pin; the SaaS-teams page owns that phrase anyway).
             description =
-                "One MCP server for Postgres, MySQL, SQL Server, Oracle, DuckDB and SQLite: " +
-                    "read-only by default, scoped keys per agent, every call audited. Self-hosted.",
+                "Describe a dataset in a sentence. An AI agent builds it on your real databases, " +
+                    "you verify the numbers, your app calls the API. Open source, self-hosted.",
             view = "site/index",
         )
 
@@ -323,6 +332,26 @@ object SitePages {
             view = "site/for-analysts",
         )
 
+    /**
+     * 115 §A.3 — the engineering page. The buyer-facing home page keeps its vocabulary below
+     * the fold free of it; every term the fold guard bans lives here instead (the guard
+     * asserts the move, not a removal). FAQ: `SiteFaqs.APIS_AND_OPERATIONS`, the most
+     * engineering-shaped existing list.
+     */
+    val HOW_IT_WORKS =
+        SitePage(
+            path = "/how-it-works",
+            // 115 §A.3's title is 79 chars against the 70 pin, so "the MCP server" tightens
+            // to "MCP"; the keywords and the suffix both stay.
+            title = "How it works — pipelines, federated joins, MCP | datapipelines.co",
+            // 115 §A.3's description is 207 chars against the 155 pin; this is its front half,
+            // which carries the three facts the page exists to state.
+            description =
+                "An agent authors a versioned SQL pipeline over MCP, the platform runs it where the " +
+                    "data lives, and a release becomes a GET endpoint.",
+            view = "site/how-it-works",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -449,6 +478,7 @@ object SitePages {
                 FOR_AGENCIES,
                 FOR_SAAS_TEAMS,
                 FOR_ANALYSTS,
+                HOW_IT_WORKS,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

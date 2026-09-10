@@ -82,6 +82,7 @@ class PublicRouteWalkerTest {
                 "SitePagesController#engine",
                 "SitePagesController#faq",
                 "SitePagesController#federatedQuery",
+                "SitePagesController#howItWorks",
                 "SitePagesController#mcpTools",
                 "SitePagesController#pillar",
                 "SitePagesController#publishedApi",

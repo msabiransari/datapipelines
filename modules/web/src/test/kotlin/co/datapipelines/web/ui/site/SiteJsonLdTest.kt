@@ -43,7 +43,7 @@ class SiteJsonLdTest {
     }
 
     @Test
-    fun `the FAQ block carries the ten home questions, each with a substantial answer`() {
+    fun `the FAQ block carries the eight home questions, each with a substantial answer`() {
         val questions = blocks.first { it["@type"].asText() == "FAQPage" }["mainEntity"]
         (questions.size() in FAQ_MIN..FAQ_MAX) shouldBe true
 
@@ -106,9 +106,9 @@ class SiteJsonLdTest {
     }
 
     private companion object {
-        // Site v2: the home page carries SiteFaqs.HOME — ten questions, the product introduction.
-        const val FAQ_MIN = 10
-        const val FAQ_MAX = 10
+        // 115: the home page carries SiteFaqs.HOME — eight buyer questions, the introduction.
+        const val FAQ_MIN = 8
+        const val FAQ_MAX = 8
         const val LAKE_FAQ_MIN = 2
         const val LAKE_FAQ_MAX = 4
         const val MIN_ANSWER_CHARS = 120

@@ -89,7 +89,9 @@ class WebsiteFactsGuardTest {
         val demoNames = demoPipelineNames()
         val leafNames = demoNames.map { it.substringAfterLast('/') }.toSet()
 
-        val indexMentions = quotedPipelineMentions(SITE_INDEX, leafNames)
+        // 115: the buyer's home page no longer quotes demo pipeline names at all, so its leg
+        // moved to the engineering page that inherited the homepage's sections.
+        val howItWorksMentions = quotedPipelineMentions(SITE_HOW_IT_WORKS, leafNames)
         val federatedMentions = quotedPipelineMentions(SITE_FEDERATED_QUERY, leafNames)
         val dpLakeMentions = quotedPipelineMentions(SITE_DP_LAKE, leafNames)
         val engineDemos = SitePages.ENGINES.mapNotNull { it.demo }
@@ -97,12 +99,12 @@ class WebsiteFactsGuardTest {
         assertAll(
             // Non-vacuity first: an extractor that silently found nothing must not "agree".
             { demoNames.size shouldBeGreaterThan 3 },
-            { indexMentions.shouldNotBeEmpty() },
+            { howItWorksMentions.shouldNotBeEmpty() },
             { federatedMentions.shouldNotBeEmpty() },
             { dpLakeMentions.shouldNotBeEmpty() },
             { engineDemos.shouldNotBeEmpty() },
             {
-                (indexMentions + federatedMentions + dpLakeMentions + engineDemos).forEach { name ->
+                (howItWorksMentions + federatedMentions + dpLakeMentions + engineDemos).forEach { name ->
                     demoNames shouldContain name
                 }
             },
@@ -130,7 +132,10 @@ class WebsiteFactsGuardTest {
             .filter { it.substringAfterLast('/') in leafNames }
             .toSet()
 
-    /** The count a visitor reads off `/`, extracted from the rendered page. */
+    /**
+     * The count a visitor reads off `/how-it-works` (115 moved it there from the buyer-facing
+     * `/`), extracted from the rendered page.
+     */
     private fun renderedSiteCount(): Int {
         val engine =
             SpringTemplateEngine().apply {
@@ -148,7 +153,7 @@ class WebsiteFactsGuardTest {
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse())
         val html =
             engine.process(
-                "site/index",
+                "site/how-it-works",
                 WebContext(exchange).apply { setVariable("toolCount", McpToolCatalog.NAMES.size) },
             )
         return SITE_COUNT
@@ -209,7 +214,7 @@ class WebsiteFactsGuardTest {
     private companion object {
         val SITE_COUNT = Regex("""<span>(\d+)</span> tools cover the full lifecycle""")
 
-        const val SITE_INDEX = "modules/web/src/main/resources/templates/site/index.html"
+        const val SITE_HOW_IT_WORKS = "modules/web/src/main/resources/templates/site/how-it-works.html"
         const val SITE_FEDERATED_QUERY = "modules/web/src/main/resources/templates/site/federated-query.html"
         const val SITE_DP_LAKE = "modules/web/src/main/resources/templates/site/dp-lake.html"
         const val DEMO_NYC = "scripts/sample-data/content/examples.json"

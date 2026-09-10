@@ -9,7 +9,8 @@ import io.kotest.matchers.string.shouldNotBeBlank
 import org.junit.jupiter.api.Test
 
 /**
- * Batch 2's content contract for the SEVEN new intent pages (111 §D) — measured on the
+ * Batch 2's content contract for the SEVEN new intent pages (111 §D), extended by 115 §A.3
+ * to the `/how-it-works` engineering page (an eighth page in the same sweep) — measured on the
  * render through the real controller, like every other site guard:
  *
  *  1. the H1 carries the page's primary query phrase, in the searcher's words (the map below
@@ -24,11 +25,11 @@ import org.junit.jupiter.api.Test
  * (the red assertion is pasted in the handback).
  */
 class SiteBatch2ContentTest {
-    private val rendered: Map<SitePage, String> by lazy { BATCH_2.associateWith { SitePageRenderer.render(it) } }
+    private val rendered: Map<SitePage, String> by lazy { SWEEP.associateWith { SitePageRenderer.render(it) } }
 
     @Test
-    fun `the sweep sees all seven batch-2 pages`() {
-        rendered.keys.map { it.path }.toSet() shouldBe BATCH_2.map { it.path }.toSet()
+    fun `the sweep sees all eight pages`() {
+        rendered.keys.map { it.path }.toSet() shouldBe SWEEP.map { it.path }.toSet()
     }
 
     @Test
@@ -90,7 +91,7 @@ class SiteBatch2ContentTest {
         // FAQPage JSON-LD ride on the model, so a page could shed half its body and still
         // clear 1,200 rendered words. This is the §A measure — the template source, stripped
         // with the same rule the handback counts with — and it is the one that bites.
-        BATCH_2.forEach { page ->
+        SWEEP.forEach { page ->
             val source = TestRepoFiles.read("modules/web/src/main/resources/templates/${page.view}.html")
             val stripped = STRIP.replace(source, " ").trim()
             val words = stripped.split(WHITESPACE).size
@@ -100,11 +101,28 @@ class SiteBatch2ContentTest {
         }
     }
 
+    /**
+     * 115 §A.1 — the home page's primary phrase moved off the engineer's vocabulary: the
+     * pillar page `/mcp-server-for-sql-databases` keeps "SQL MCP server" in its own title and
+     * H1, so `/` targets "no data team required". Pinned here (not in the sweep above)
+     * because the home page is not a batch-2 intent page and carries no word floor.
+     */
+    @Test
+    fun `the home H1 carries its new primary phrase`() {
+        val html = SitePageRenderer.render(SitePages.HOME)
+        val h1 = H1.find(html)?.groupValues?.get(1)
+        withClue("/: no <h1>") { h1.shouldNotBeBlank() }
+        withClue("/: H1 is '$h1'") {
+            h1!!.lowercase() shouldContain "no data team required"
+        }
+    }
+
     private companion object {
         const val MIN_WORDS = 1_200
         const val MIN_BODY_LINKS = 3
 
-        val BATCH_2: List<SitePage> =
+        /** The seven batch-2 intent pages (111) plus the engineering page (115 §A.3). */
+        val SWEEP: List<SitePage> =
             listOf(
                 SitePages.COMPARE_FIVETRAN,
                 SitePages.COMPARE_POSTGRES_ONLY,
@@ -113,6 +131,7 @@ class SiteBatch2ContentTest {
                 SitePages.FOR_AGENCIES,
                 SitePages.FOR_SAAS_TEAMS,
                 SitePages.FOR_ANALYSTS,
+                SitePages.HOW_IT_WORKS,
             )
 
         /** The searcher's phrase each H1 must carry — the phrase, not the whole H1. */
@@ -125,6 +144,7 @@ class SiteBatch2ContentTest {
                 SitePages.FOR_AGENCIES.path to "client reporting api",
                 SitePages.FOR_SAAS_TEAMS.path to "embedded analytics",
                 SitePages.FOR_ANALYSTS.path to "ai sql assistant with governance",
+                SitePages.HOW_IT_WORKS.path to "how it works",
             )
 
         val H1 = Regex("""<h1[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL)
