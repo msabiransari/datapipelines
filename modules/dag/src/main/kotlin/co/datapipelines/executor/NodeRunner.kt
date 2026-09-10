@@ -623,7 +623,7 @@ class NodeRunner(
         // a registry read against the rendered SQL's table references — no connection is leased
         // for a node that cannot succeed.
         if (datasource.dialect == Dialect.LAKE) {
-            phase(ctx, NodePhase.CONNECT, node.id) { enforceLakeTablesAvailable(datasource, bound) }
+            phase(ctx, NodePhase.CONNECT, node.id) { LakeTableGate.enforceAvailable(datasourceRegistry, datasource, bound) }
         }
         // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
         // as of the SAVE; this backstop re-reads the LIVE entry (past the metadata cache) at
@@ -998,40 +998,6 @@ class NodeRunner(
             message = "Datasource '$name' is not registered in this environment.",
             details = mapOf("datasource" to name),
         )
-
-    /**
-     * 109 §A — refuses a LAKE node whose rendered SQL references a registered table whose
-     * connect-time view creation is recorded as failed (datasources.md §8C.2). Matching is
-     * token-bounded on four spellings — the dotted qualified name, its double-quoted form, the
-     * bare name, the bare quoted name — never a bare substring (`trips` must not match
-     * `trips_2024`, and a bare name must not match the tail of another namespace's
-     * `other.trips`). A bare reference under the single-namespace search-path rule resolves to
-     * that namespace's table; under multiple namespaces a bare name resolves to NOTHING, so
-     * reporting the broken same-named table is still the honest diagnosis.
-     */
-    private fun enforceLakeTablesAvailable(
-        datasource: Datasource,
-        bound: SqlBindTranslator.BoundSql,
-    ) {
-        val broken = datasourceRegistry.lakeBrokenTables(datasource.name)
-        if (broken.isEmpty()) return
-        val hit = broken.firstOrNull { table -> referencePatterns(table).any { it.containsMatchIn(bound.sql) } } ?: return
-        throw DatapipelinesException(
-            code = PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE,
-            message =
-                "Lake table '${hit.qualifiedName}' on datasource '${datasource.name}' is unavailable: " +
-                    "its connect-time view creation failed — ${hit.lastError}",
-            details = mapOf("datasource" to datasource.name, "table" to hit.qualifiedName, "last_error" to hit.lastError),
-        )
-    }
-
-    /** The four spellings a reference to [table] can take in rendered SQL, each token-bounded. */
-    private fun referencePatterns(table: LakeBrokenTable): List<Regex> {
-        val quotedQualified = (table.namespace + table.name).joinToString(".") { "\"$it\"" }
-        return listOf(table.qualifiedName, quotedQualified, table.name, "\"${table.name}\"")
-            .distinct()
-            .map { token -> Regex("""(?<![\w."])""" + Regex.escape(token) + """(?![\w"])""") }
-    }
 
     /**
      * §13.4 sibling of `datasource_not_found`: the datasource resolved at write-time, but its
