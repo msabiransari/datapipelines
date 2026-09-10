@@ -1,8 +1,5 @@
 package co.datapipelines.integration
 
-import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -20,7 +17,6 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.assertTimeoutPreemptively
-import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.ApplicationContext
@@ -494,19 +490,6 @@ class TaxiVsRideshareFourEngineE2eTest {
                 .invoke(workspaceService, user, email)
         val workspaceId = context.javaClass.getMethod("getId").invoke(context) as UUID
         return userId to workspaceId
-    }
-
-    private fun capturingLogs(block: () -> Unit): List<String> {
-        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        root.addAppender(appender)
-        try {
-            block()
-        } finally {
-            root.detachAppender(appender)
-            appender.stop()
-        }
-        return appender.list.map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
     }
 
     // ------------------------------------------------------------------ metadata SQL

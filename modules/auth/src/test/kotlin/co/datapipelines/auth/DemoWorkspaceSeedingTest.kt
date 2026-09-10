@@ -29,7 +29,14 @@ class DemoWorkspaceSeedingTest {
 
     private val seeded = mutableListOf<Pair<UUID, UUID>>()
     private val seeder =
-        DemoWorkspaceSeeder(workspaces, auditLogger, userService) { workspaceId, userId -> seeded += workspaceId to userId }
+        DemoWorkspaceSeeder(
+            workspaces,
+            auditLogger,
+            userService,
+            // Named: `instanceDatasourceGrants` is now the last parameter, so a trailing
+            // lambda binds to THAT fun interface, not to the content seeder.
+            contentSeeder = { workspaceId, userId -> seeded += workspaceId to userId },
+        )
 
     /** The well-known id the seeder pins (metadata-db §4.11 convention). */
     private val demoId = DemoWorkspaceSeeder.DEMO_WORKSPACE_ID

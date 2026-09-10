@@ -1564,7 +1564,7 @@ GET /workspaces/{name}
 POST /workspaces
 {"name": "team-etl", "display_name": "Team ETL"}
 ```
-`display_name` optional (defaults to `name`). Per provisioning mode (configuration §3.17): `auto-per-user`/`self-serve` allow any authenticated principal; `closed` refuses non-admins with `403 workspace.creation_forbidden`. The creator enters as `owner`. Errors: `400 workspace.validation.name_invalid` (`[a-z0-9_-]+`, 1–63), `409 workspace.validation.duplicate_name` (global namespace, soft-deleted included).
+`display_name` optional (defaults to `name`). **Super admins only** (D-R11): provisioning modes were retired with round 1, and with them `workspace.creation_forbidden` — a non-super-admin is refused by the matrix's own `auth.role_required`. The creator takes NO membership row: a super admin is an implicit member of every workspace (D-R8), and an explicit one would be indistinguishable from a granted membership in the audit. Errors: `400 workspace.validation.name_invalid` (`[a-z0-9_-]+`, 1–63), `409 workspace.validation.duplicate_name` (global namespace, soft-deleted included).
 
 ### 17.4 Update workspace
 

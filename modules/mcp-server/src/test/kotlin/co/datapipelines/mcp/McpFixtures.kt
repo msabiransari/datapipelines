@@ -39,13 +39,22 @@ object McpFixtures {
     val WORKSPACE_ID: UUID = UUID.fromString("44444444-4444-4444-4444-444444444444")
 
     /**
-     * The workspace every fixture principal operates in. Its flags are a WORKSPACE ADMIN's
-     * since RBAC round 1: `ScopeMatrix.allowedTool` judges both axes now, and these suites are
-     * about the TOOLS and the credential axis — so the role axis has to be satisfied or every
-     * one of them would fail on a refusal that is not what it is testing. The role axis has its
-     * own suite (`RoleMatrixTest`) and its own doc guard.
+     * The workspace every fixture principal operates in. `ScopeMatrix.allowedTool` judges both
+     * axes now, and these suites are about the TOOLS and the credential axis — so the role axis
+     * has to be satisfied or every one of them would fail on a refusal that is not what it is
+     * testing. The role axis has its own suite (`RoleMatrixTest`) and its own doc guard.
+     *
+     * An AUTHOR and promoter, deliberately NOT an admin: `ExecutionRecord.visibleTo` gives a
+     * workspace admin every run in the workspace, so an admin default would make "another
+     * user's execution is invisible" untestable — the suites would pass on the wrong reason and
+     * the isolation they assert would be unguarded. The one tool that needs the admin rung
+     * (`datasources_test`, TEST_DATASOURCE) takes [WORKSPACE_ADMIN] explicitly.
      */
     val WORKSPACE: WorkspaceContext =
+        WorkspaceContext(WORKSPACE_ID, "acme", MembershipFlags(author = true, promoter = true))
+
+    /** [WORKSPACE] with the admin flag — for the verbs and visibility that need that rung. */
+    val WORKSPACE_ADMIN: WorkspaceContext =
         WorkspaceContext(WORKSPACE_ID, "acme", MembershipFlags(author = true, promoter = true, admin = true))
 
     /** The default key id principals carry (the dispatcher tests assert it verbatim). */
@@ -59,6 +68,7 @@ object McpFixtures {
         userId: UUID = USER,
         method: AuthMethod = AuthMethod.API_KEY,
         keyId: String = KEY_ID,
+        workspace: WorkspaceContext = WORKSPACE,
     ): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
             userId = userId,
@@ -68,7 +78,7 @@ object McpFixtures {
             authMethod = method,
             keyId = keyId,
             // Every tool/catalog/reader path resolves the workspace through requireWorkspace().
-            workspace = WORKSPACE,
+            workspace = workspace,
         )
 
     fun ctx(
@@ -76,7 +86,9 @@ object McpFixtures {
         userId: UUID = USER,
         idempotencyKey: String? = null,
         keyId: String = KEY_ID,
-    ): McpToolContext = McpToolContext(principal(*scopes, userId = userId, keyId = keyId), CORRELATION_ID, idempotencyKey)
+        workspace: WorkspaceContext = WORKSPACE,
+    ): McpToolContext =
+        McpToolContext(principal(*scopes, userId = userId, keyId = keyId, workspace = workspace), CORRELATION_ID, idempotencyKey)
 
     /**
      * A REAL [PipelineService] over the suite's own mocked collaborators (056).

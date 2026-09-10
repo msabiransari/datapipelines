@@ -168,10 +168,6 @@ class DomainConfiguration {
     fun systemActorSeeder(userService: UserService): SystemActorSeeder = SystemActorSeeder(userService)
 
     /**
-     * D-R11 — the `demo` workspace at first boot, and the example content into it. See
-     * [DemoWorkspaceStartup] for the O-3 rule that a DEACTIVATED `demo` is never recreated.
-     */
-    /**
      * D-R7's one narrow exception, wired: the workspace the PRODUCT ships gets the instance
      * datasources its shipped examples reference. See `InstanceDatasourceGrants`.
      */
@@ -183,7 +179,13 @@ class DomainConfiguration {
             grants.grantAllInstanceDatasourcesTo(workspaceId, grantedBy)
         }
 
+    /**
+     * D-R11 — the `demo` workspace at first boot, and the example content into it. See
+     * [DemoWorkspaceStartup] for the O-3 rule that a DEACTIVATED `demo` is never recreated.
+     */
     @Bean
+    // The examples gate asks whether the bootstrap datasources exist, so the order it depends
+    // on is DECLARED rather than lucky: seeding before registration skips every example file.
     @org.springframework.context.annotation.DependsOn("bootstrapDatasourceStartup")
     fun demoWorkspaceStartup(seeder: co.datapipelines.auth.DemoWorkspaceSeeder): DemoWorkspaceStartup = DemoWorkspaceStartup(seeder)
 

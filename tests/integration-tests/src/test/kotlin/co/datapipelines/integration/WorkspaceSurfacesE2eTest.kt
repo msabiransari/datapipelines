@@ -52,7 +52,6 @@ class WorkspaceSurfacesE2eTest {
     private val aliceKey get() = ALICE_KEY.plaintext
     private val bobKey get() = BOB_KEY.plaintext
     private val carolKey get() = CAROL_KEY.plaintext
-    private val adminKey get() = ADMIN_KEY.plaintext
 
     // ------------------------------------------------------------ datasource isolation (§5.3)
 

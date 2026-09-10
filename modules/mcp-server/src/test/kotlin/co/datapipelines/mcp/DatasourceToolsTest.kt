@@ -20,7 +20,12 @@ import java.util.UUID
 class DatasourceToolsTest {
     private val registry = mockk<DatasourceRegistry>()
     private val readCtx = McpFixtures.ctx(Scope.READ)
-    private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
+
+    /**
+     * `datasources_test` is TEST_DATASOURCE — `ws_admin` on the role axis (design §1): a probe
+     * opens a real connection with the stored credential, which is not an authoring act.
+     */
+    private val adminCtx = McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN)
 
     @Test
     fun `list never returns a password`() {
@@ -120,7 +125,7 @@ class DatasourceToolsTest {
             TestResult(connected = true, testedAt = Instant.parse("2026-08-09T12:00:00Z"), serverVersion = "PostgreSQL 16.2")
 
         @Suppress("UNCHECKED_CAST")
-        val payload = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<String, Any?>
+        val payload = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), adminCtx) as Map<String, Any?>
 
         assertAll(
             { payload.keys shouldBe setOf("connected", "server_version", "error") },
@@ -141,7 +146,7 @@ class DatasourceToolsTest {
             )
 
         @Suppress("UNCHECKED_CAST")
-        val payload = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<String, Any?>
+        val payload = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), adminCtx) as Map<String, Any?>
 
         assertAll(
             { payload["connected"] shouldBe false },
@@ -158,7 +163,7 @@ class DatasourceToolsTest {
         every { registry.getVisible("nope", McpFixtures.WORKSPACE_ID) } returns null
 
         shouldThrow<DatapipelinesException> {
-            DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "nope")), authorCtx)
+            DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "nope")), adminCtx)
         }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
     }
 
@@ -173,7 +178,7 @@ class DatasourceToolsTest {
         val registry = FakeDatasourceRegistry(listOf(boundElsewhere))
 
         shouldThrow<DatapipelinesException> {
-            DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+            DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), adminCtx)
         }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
         registry.testedNames shouldBe emptyList<String>()
     }
@@ -191,10 +196,10 @@ class DatasourceToolsTest {
             )
 
         @Suppress("UNCHECKED_CAST")
-        val global = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "global-pg")), authorCtx) as Map<String, Any?>
+        val global = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "global-pg")), adminCtx) as Map<String, Any?>
 
         @Suppress("UNCHECKED_CAST")
-        val own = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "own-pg")), authorCtx) as Map<String, Any?>
+        val own = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "own-pg")), adminCtx) as Map<String, Any?>
 
         assertAll(
             { global["connected"] shouldBe true },

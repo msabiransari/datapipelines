@@ -361,18 +361,6 @@ class SampleDataBootstrapE2eTest {
     }
 
     /**
-     * Boots the whole application with [overrides] on top of this class's infrastructure, to prove
-     * a refusal is the WHOLE app refusing rather than one bean throwing in isolation.
-     *
-     * Values go in as command-line arguments, not `SpringApplicationBuilder.properties(...)`:
-     * that method installs them as *default* properties, the lowest-precedence source, so
-     * `application.yml`'s `${'$'}{SPRING_DATASOURCE_URL}` would still win and fail to resolve.
-     * The context is SERVLET because auth's `SecurityFilterChain` needs `HttpSecurity`, which only
-     * exists in a servlet web application; `server.port=0` never binds, because the bootstrap step
-     * runs inside `refresh()` and throws before the connector starts.
-     */
-
-    /**
      * Removes the `demo` workspace so the next boot CREATES it — and therefore seeds.
      *
      * Example seeding is a once-per-deployment act since D-R11: `DemoWorkspaceSeeder` imports
@@ -406,11 +394,28 @@ class SampleDataBootstrapE2eTest {
                 statement.execute(
                     "DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
                 )
+                // D-R7: the seeder grants the instance datasources to `demo` on creation, and
+                // those grant rows reference the workspace — deleting the row without them is
+                // a foreign-key violation, not a clean reset.
+                statement.execute(
+                    "DELETE FROM datasource_workspaces WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
                 statement.execute("DELETE FROM workspaces WHERE name = 'demo'")
             }
         }
     }
 
+    /**
+     * Boots the whole application with [overrides] on top of this class's infrastructure, to prove
+     * a refusal is the WHOLE app refusing rather than one bean throwing in isolation.
+     *
+     * Values go in as command-line arguments, not `SpringApplicationBuilder.properties(...)`:
+     * that method installs them as *default* properties, the lowest-precedence source, so
+     * `application.yml`'s `${'$'}{SPRING_DATASOURCE_URL}` would still win and fail to resolve.
+     * The context is SERVLET because auth's `SecurityFilterChain` needs `HttpSecurity`, which only
+     * exists in a servlet web application; `server.port=0` never binds, because the bootstrap step
+     * runs inside `refresh()` and throws before the connector starts.
+     */
     private fun bootApp(overrides: Map<String, String>): ConfigurableApplicationContext {
         val args = (baseProperties() + overrides).map { (key, value) -> "--$key=$value" }.toTypedArray()
         return SpringApplicationBuilder(DatapipelinesApplication::class.java)

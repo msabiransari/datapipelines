@@ -131,6 +131,9 @@ class WorkspaceIsolationSweepTest {
         // MISTAKES.md's "a guard that cannot go red" entry describes.
         val swept = sweepableRoutes()
 
+        // Printed, not merely asserted: the handback and every future gate reader wants the
+        // NUMBER, and a floor tells you only that it was not zero.
+        println("event=sweep.inventory routes=${swept.size} tools=${MCP_TOOL_ARGUMENTS.size}")
         swept.size shouldBeGreaterThanOrEqual MINIMUM_SWEPT_ROUTES
         withClue("the sweep reaches the three URL families a foreign id can travel in") {
             swept.any { it.path.startsWith("/api/v1/pipelines") } shouldBe true
