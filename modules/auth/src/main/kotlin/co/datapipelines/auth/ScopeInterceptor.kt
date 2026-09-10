@@ -87,14 +87,50 @@ class ScopeInterceptor(
                 true
             }
 
-            !Scope.satisfies(principal.scopes, operation.minScope) -> {
-                denyScope(request, response, principal, operation)
-            }
-
             else -> {
-                true
+                when (val decision = ScopeMatrix.allowed(principal, operation, principal.workspace)) {
+                    is ScopeMatrix.Decision.Allowed -> {
+                        auditSuperAdminAction(request, principal, operation)
+                        true
+                    }
+
+                    is ScopeMatrix.Decision.Refused -> {
+                        deny(request, response, principal, operation, decision)
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * D-R8 — a super admin acting in a workspace they hold no explicit membership in leaves a
+     * row saying so. Emitted on the ALLOW path, at the one choke point every governed handler
+     * passes, so no route can be added that reaches a foreign workspace unaudited (the same
+     * default-deny reasoning the unannotated branch exists for).
+     *
+     * Reads only (`VIEW`-capability operations) are deliberately included: D-R5's whole promise
+     * is that a workspace's contents are invisible from outside, and the one principal exempted
+     * from that promise is the one whose reads most need to be on the record.
+     */
+    private fun auditSuperAdminAction(
+        request: HttpServletRequest,
+        principal: AuthenticatedPrincipal,
+        operation: ScopeMatrix.RestOperation,
+    ) {
+        val context = principal.workspace ?: return
+        if (!context.actingViaSuperAdmin) return
+        auditLogger.log(
+            event = SUPER_ADMIN_ACTING,
+            userId = principal.userId,
+            keyId = principal.keyId,
+            details =
+                mapOf(
+                    "operation" to operation.name,
+                    "workspace" to context.name,
+                    "path" to request.requestURI,
+                    "method" to request.method,
+                ) + AuditLogger.actingVia(context),
+        )
     }
 
     /**
@@ -131,28 +167,46 @@ class ScopeInterceptor(
         return false
     }
 
-    /** Audits `auth.scope.denied` (§10.1) and writes 403 `auth.scope.insufficient`. */
-    private fun denyScope(
+    /**
+     * Audits `auth.scope.denied` (§10.1) and writes the refusal the matrix decided — its
+     * catalogued code, its status and its details, unmodified.
+     *
+     * The interceptor does not re-derive WHY: [ScopeMatrix.allowed] already distinguished the
+     * credential axis (`auth.scope.insufficient`), the role axis (`auth.role_required`), a
+     * key whose issuer was demoted (`auth.key_issuer_role_lost`) and an unreachable workspace
+     * (`workspace.not_found`), and a second judgement here is a second place for them to drift.
+     */
+    private fun deny(
         request: HttpServletRequest,
         response: HttpServletResponse,
         principal: AuthenticatedPrincipal,
         operation: ScopeMatrix.RestOperation,
+        decision: ScopeMatrix.Decision.Refused,
     ): Boolean {
-        val required = operation.minScope
         auditLogger.log(
             event = "auth.scope.denied",
             userId = principal.userId,
             keyId = principal.keyId,
-            details =
-                mapOf(
-                    "operation" to operation.name,
-                    "required" to required.wire,
-                    "held" to principal.scopes.map { it.wire },
-                ),
+            details = mapOf("operation" to operation.name, "code" to decision.code) + decision.details,
         )
-        errorWriter.write(request, response, ScopeInsufficientException(required, principal.scopes))
+        errorWriter.write(
+            request = request,
+            response = response,
+            status = statusFor(decision.code),
+            code = decision.code,
+            message = decision.message,
+            userMessage = decision.userMessage,
+            details = decision.details,
+        )
         return false
     }
+
+    /**
+     * The HTTP status for a matrix refusal. Only `workspace.not_found` is a 404 — that is
+     * D-R5's entire point, and it must not be a 403 by accident here after every repository
+     * was taught to make it a 404.
+     */
+    private fun statusFor(code: String): Int = if (code == WorkspaceErrorCodes.NOT_FOUND) HTTP_NOT_FOUND else HTTP_FORBIDDEN
 
     /** The §7.6 operation this handler declares — method annotation first, class-level fallback. */
     private fun declaredOperation(handler: HandlerMethod): ScopeMatrix.RestOperation? =
@@ -280,5 +334,9 @@ class ScopeInterceptor(
             )
 
         private const val HTTP_FORBIDDEN = 403
+        private const val HTTP_NOT_FOUND = 404
+
+        /** D-R8's audit event (auth.md §10.1) — a super admin acting outside their memberships. */
+        const val SUPER_ADMIN_ACTING = "auth.super_admin_acting"
     }
 }

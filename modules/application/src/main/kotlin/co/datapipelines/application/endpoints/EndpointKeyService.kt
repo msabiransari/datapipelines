@@ -77,10 +77,10 @@ class EndpointKeyService(
 
         val issued =
             apiKeys.issue(
+                issuer = principal,
                 ownerId = principal.userId,
                 name = name,
                 scopes = scopes,
-                creatorScopes = principal.scopes,
                 workspaceId = workspaceId,
                 expiresAt = expiresAt,
                 kind = kind,

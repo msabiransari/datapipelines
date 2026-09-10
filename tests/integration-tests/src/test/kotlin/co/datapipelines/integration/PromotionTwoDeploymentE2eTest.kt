@@ -1006,8 +1006,8 @@ class PromotionTwoDeploymentE2eTest {
 
             devJdbc = Jdbc(postgresDev.jdbcUrl, postgresDev.username, postgresDev.password)
             uatJdbc = Jdbc(postgresUat.jdbcUrl, postgresUat.username, postgresUat.password)
-            devKey = E2eAuth.generateKey("promotion-e2e-dev", arrayOf("admin"))
-            uatKey = E2eAuth.generateKey("promotion-e2e-uat", arrayOf("admin"))
+            devKey = E2eAuth.generateKey("promotion-e2e-dev", arrayOf("read", "execute", "author"))
+            uatKey = E2eAuth.generateKey("promotion-e2e-uat", arrayOf("read", "execute", "author"))
             devJdbc.seedKey(devKey)
             uatJdbc.seedKey(uatKey)
         }

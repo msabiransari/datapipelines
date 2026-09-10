@@ -4,6 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
@@ -43,6 +44,9 @@ import java.util.UUID
  * implementation of registration to fall back on — every case below goes red.
  */
 class DatasourceCreatePathTest {
+    /** D-R7: registration grants the datasource to its own workspace in the same breath. */
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val registry = mockk<DatasourceRegistry>()
     private val workspaceService = mockk<WorkspaceService>(relaxed = true)
     private val mapper = JsonMapper.builder().build()
@@ -59,7 +63,7 @@ class DatasourceCreatePathTest {
         return DatasourcesController(
             registry,
             rules,
-            DatasourceCreateService(registry, rules::resolveCreateBinding),
+            DatasourceCreateService(registry, rules::resolveCreateBinding, grants),
             DatasourceUpdateService(registry, rules),
         )
     }
@@ -69,9 +73,10 @@ class DatasourceCreatePathTest {
             userId,
             "a@b.c",
             "A",
-            if (admin) setOf(Scope.ADMIN) else setOf(Scope.AUTHOR),
+            setOf(Scope.AUTHOR),
             AuthMethod.API_KEY,
-            workspace = workspace,
+            workspace = workspace.copy(flags = MembershipFlags(author = true, promoter = true, admin = true)),
+            superAdmin = admin,
         )
 
     private fun authenticate(admin: Boolean) {
@@ -106,7 +111,7 @@ class DatasourceCreatePathTest {
         saved shouldHaveSize 1
         val rest = saved.single()
         assertAll(
-            { rest.workspaceId shouldBe workspaceId },
+            { rest.ownerWorkspaceId shouldBe workspaceId },
             { rest.isReadonly shouldBe true },
             // §3.3 allowlist normalization happens on the way in, once, at the save boundary.
             { rest.introspectionIncludeSchemas shouldBe listOf("apex_reporting") },
@@ -133,7 +138,7 @@ class DatasourceCreatePathTest {
 
         controller().create(restBody(""","global":true"""))
 
-        saved.map { it.workspaceId } shouldBe listOf(null)
+        saved.map { it.ownerWorkspaceId } shouldBe listOf(null)
     }
 
     @Test

@@ -37,14 +37,14 @@ class FakeDatasourceRegistry(
     override fun listVisible(
         dialect: Dialect?,
         workspaceId: UUID,
-    ): List<Datasource> = list(dialect).filter { it.workspaceId == null || it.workspaceId == workspaceId }
+    ): List<Datasource> = list(dialect).filter { it.ownerWorkspaceId == null || it.ownerWorkspaceId == workspaceId }
 
     override fun get(name: String): Datasource? = stored.firstOrNull { it.name == name }
 
     override fun getVisible(
         name: String,
         workspaceId: UUID,
-    ): Datasource? = get(name)?.takeIf { it.workspaceId == null || it.workspaceId == workspaceId }
+    ): Datasource? = get(name)?.takeIf { it.ownerWorkspaceId == null || it.ownerWorkspaceId == workspaceId }
 
     // The live reads (044 F6 made them abstract — a missing override is a compile error, not a
     // silent cache-through hole). An in-memory fake IS live-through: the same map serves both.

@@ -109,12 +109,11 @@ services:
       # Workspace provisioning (configuration.md §3.17). Compose defaults MUST
       # mirror application.yml's defaults — an empty string here would override
       # the app default and break enum/boolean binding.
-      # auto-per-user = demo shape: first login provisions a personal workspace.
-      # NOTE (022 owns the workspace-creation surface): under self-serve there is
-      # no UI/API to create a workspace yet, so a fresh deployment that wants
-      # usable workspaces before 022 lands should set auto-per-user.
-      DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:-self-serve}
-      DATAPIPELINES_WORKSPACES_OPEN_JOIN: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:-false}
+      # PROVISIONING_MODE and OPEN_JOIN were REMOVED in RBAC round 1 (D-R11) and are
+      # refused BY NAME at startup — an env var here would refuse this stack's own boot,
+      # because Spring's relaxed binding reads DATAPIPELINES_WORKSPACES_* as the key.
+      # Workspaces are created by super admins; `demo` ships and every user with no
+      # membership joins it as a viewer on first login.
       DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:-true}
 
       # Config-declared startup content (configuration.md §3.18). BOTH ARE PATHS,

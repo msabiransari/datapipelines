@@ -5,6 +5,7 @@ import io.jsonwebtoken.security.Keys
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -35,17 +36,17 @@ class JwtServiceTest {
         )
 
     @Test
-    fun `issue then validate round-trips subject, email and scopes`() {
+    fun `issue then validate round-trips subject and email - and carries NO scopes (D-R1)`() {
         val u = user(isAdmin = false)
         val claims = service.validate(service.issue(u))
 
         claims.subject shouldBe u.id.toString()
         claims["email"] shouldBe u.email
         @Suppress("UNCHECKED_CAST")
-        val scopes = claims["scopes"] as List<String>
-        scopes shouldContain "author"
-        scopes shouldContain "read"
-        scopes shouldNotContain "admin"
+        // RBAC round 1 removed the claim: a session's capability is its MEMBERSHIP in the
+        // active workspace, and the old value — a global `author` for every non-admin — is
+        // exactly the global capability the round removes.
+        claims["scopes"].shouldBeNull()
     }
 
     @Test
@@ -58,10 +59,13 @@ class JwtServiceTest {
     }
 
     @Test
-    fun `admin user gets the admin scope at issue (D14)`() {
+    fun `an admin user gets no scope claim either - is_admin is read from the live row (D-R1)`() {
         val claims = service.validate(service.issue(user(isAdmin = true)))
-        @Suppress("UNCHECKED_CAST")
-        (claims["scopes"] as List<String>) shouldContain "admin"
+
+        // The super-admin answer moved OFF the token deliberately: `JwtAuthenticationFilter`
+        // reads `users.is_admin` from the liveness cache on every request, so a revoked super
+        // admin loses it within one TTL instead of at the token's 8h expiry.
+        claims["scopes"].shouldBeNull()
     }
 
     @Test

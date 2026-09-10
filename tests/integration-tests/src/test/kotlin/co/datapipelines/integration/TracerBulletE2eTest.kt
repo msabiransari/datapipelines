@@ -462,7 +462,7 @@ class TracerBulletE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("read", "execute", "author"))
         private val READ_ONLY_KEY = E2eAuth.generateKey("e2e-read-key", arrayOf("read"))
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */

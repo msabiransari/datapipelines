@@ -224,7 +224,7 @@ class ApiKeysPartialControllerTest {
         authenticate()
         val scopes = slot<Set<Scope>>()
         every {
-            apiKeyService.issue(any(), any(), capture(scopes), any(), any(), any(), ApiKeyKind.SERVER)
+            apiKeyService.issue(any(), any(), any(), capture(scopes), any(), any(), ApiKeyKind.SERVER)
         } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 

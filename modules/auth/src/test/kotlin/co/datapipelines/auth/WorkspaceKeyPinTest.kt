@@ -16,14 +16,16 @@ import java.util.UUID
  * renamed, deleted and edited the membership of `globex` when its owner owned both,
  * defeating the pin `WorkspaceResolutionFilter` hard-refuses `DP-Workspace` to protect.
  *
- * The refusal reuses the owner-or-admin check's no-oracle 403: "pinned elsewhere" and
- * "not a member" must stay indistinguishable, or the pin itself becomes an existence
- * oracle. Sessions are untouched — their active workspace is switchable by design. Two
- * exemptions, both because no EXISTING workspace is overreached: `create` (there is no
- * target workspace yet; creation grants the caller ownership of a NEW workspace only,
- * and the `author` floor plus the per-mode refusal are its gates) and the `open-join`
- * self-join (it touches only the caller's OWN membership in a workspace the deployment
- * declared open; the joiner enters as `member`).
+ * RBAC round 1 kept the rule and moved it: it now sits at `read`/`contextFor`, the ONE
+ * resolution every read and every management verb passes through, so a verb added later
+ * inherits it instead of needing to be added to a guard list. Its refusal became the D-R5
+ * 404, like every other unreachable workspace — "pinned elsewhere" and "does not exist"
+ * stay indistinguishable, or the pin itself is an oracle. Sessions are untouched (their
+ * active workspace is switchable by design), and `create` is exempt because there is no
+ * EXISTING workspace to overreach into — its own gate is `super_admin`.
+ *
+ * A super admin's key is NOT exempt: the pin is a property of the credential, not of the
+ * person, and a leaked key must not become a skeleton key because its owner is privileged.
  */
 class WorkspaceKeyPinTest {
     private val repository = mockk<WorkspaceRepository>(relaxed = true)
@@ -35,15 +37,14 @@ class WorkspaceKeyPinTest {
             repository,
             userRepository,
             AuthCache(AuthProperties()),
-            WorkspacesProperties(),
             null,
             auditLogger,
-            null,
             contentCheck,
         )
 
     private val ownerId = UUID.randomUUID()
     private val memberId = UUID.randomUUID()
+    private val wsAdminFlags = MembershipFlags(author = true, admin = true)
     private val acme = workspace("acme", "Acme")
     private val globex = workspace("globex", "Globex")
 
@@ -64,8 +65,8 @@ class WorkspaceKeyPinTest {
     private fun stubOwnedWorld() {
         every { repository.membershipsOf(ownerId) } returns
             listOf(
-                WorkspaceMembership(acme.id, acme.name, WorkspaceRole.OWNER, Instant.EPOCH),
-                WorkspaceMembership(globex.id, globex.name, WorkspaceRole.OWNER, Instant.EPOCH),
+                WorkspaceMembership(acme.id, acme.name, wsAdminFlags, Instant.EPOCH),
+                WorkspaceMembership(globex.id, globex.name, wsAdminFlags, Instant.EPOCH),
             )
         every { repository.findByName("acme") } returns acme
         every { repository.findByName("globex") } returns globex
@@ -78,7 +79,7 @@ class WorkspaceKeyPinTest {
             ownerId,
             "alice@company.com",
             "Alice",
-            Scope.AUTHOR.expand(),
+            setOf(Scope.AUTHOR),
             AuthMethod.API_KEY,
             keyId = "dpk_TESTKEY",
             workspaceName = "acme",
@@ -90,7 +91,8 @@ class WorkspaceKeyPinTest {
             ownerId,
             "alice@company.com",
             "Alice",
-            Scope.AUTHOR.expand(),
+            // D-R1: a session carries no scopes; its capability is the membership.
+            emptySet(),
             AuthMethod.OIDC,
         )
 
@@ -105,68 +107,36 @@ class WorkspaceKeyPinTest {
     @Test
     fun `an api key pinned to acme cannot rename globex - though the user owns both`() {
         stubOwnedWorld()
-        shouldThrow<WorkspaceMembershipRequiredException> { service.updateDisplayName(key(), "globex", "Renamed") }
+        shouldThrow<WorkspaceNotFoundException> { service.updateDisplayName(key(), "globex", "Renamed") }
     }
 
     @Test
     fun `an api key pinned to acme cannot delete globex`() {
         stubOwnedWorld()
-        shouldThrow<WorkspaceMembershipRequiredException> { service.delete(key(), "globex") }
+        shouldThrow<WorkspaceNotFoundException> { service.delete(key(), "globex") }
     }
 
     @Test
     fun `an api key pinned to acme cannot add a member to globex`() {
         stubOwnedWorld()
-        shouldThrow<WorkspaceMembershipRequiredException> { service.addMember(key(), "globex", "bob@company.com") }
+        shouldThrow<WorkspaceNotFoundException> { service.addMember(key(), "globex", "bob@company.com") }
     }
 
     @Test
     fun `an api key pinned to acme cannot remove a member from globex`() {
         stubOwnedWorld()
-        shouldThrow<WorkspaceMembershipRequiredException> { service.removeMember(key(), "globex", memberId) }
+        shouldThrow<WorkspaceNotFoundException> { service.removeMember(key(), "globex", memberId) }
     }
 
     @Test
-    fun `the pin refusal is the no-oracle 403 - pinned elsewhere and not a member are indistinguishable`() {
+    fun `the pin refusal is the D-R5 404 - pinned elsewhere and does not exist are indistinguishable`() {
         stubOwnedWorld()
         // The control refusal: a session principal managing a workspace that does not
-        // exist. The pin refusal must be the SAME exception, code and status — a
-        // distinct answer would let a key probe which workspace it is pinned to.
-        val notAMember = shouldThrow<WorkspaceMembershipRequiredException> { service.updateDisplayName(session(), "ghost", "X") }
-        val pinnedElsewhere = shouldThrow<WorkspaceMembershipRequiredException> { service.updateDisplayName(key(), "globex", "X") }
+        // exist. The pin refusal must be the SAME exception, code and status — a distinct
+        // answer would let a key enumerate the deployment's workspaces one name at a time.
+        val notAMember = shouldThrow<WorkspaceNotFoundException> { service.updateDisplayName(session(), "ghost", "X") }
+        val pinnedElsewhere = shouldThrow<WorkspaceNotFoundException> { service.updateDisplayName(key(), "globex", "X") }
         (pinnedElsewhere.code to pinnedElsewhere.status) shouldBe (notAMember.code to notAMember.status)
-    }
-
-    @Test
-    fun `open-join does NOT exempt an api key from the pin - the exemption is session-only`() {
-        stubOwnedWorld()
-        val openJoinService =
-            WorkspaceService(
-                repository,
-                userRepository,
-                AuthCache(AuthProperties()),
-                WorkspacesProperties(openJoin = true),
-                null,
-                auditLogger,
-                null,
-                contentCheck,
-            )
-        // This assertion was INVERTED before merge (orchestrator review of 025b). The
-        // exemption originally covered API keys too, on the reasoning that a self-join
-        // "touches only the caller's own membership". That is true and insufficient: the
-        // open-join branch resolves the target by NAME with read()'s membership check
-        // deliberately skipped, so a key pinned to acme could write a `workspace_members`
-        // row into ANY live workspace. The row outlives revocation of the key, and
-        // membership alone satisfies `read` and `members` — neither consults the pin — so
-        // one leaked agent key could walk every workspace's roster at scope `read`.
-        //
-        // The exemption exists for the shipped self-service UI, which is session-gated
-        // (WorkspacesUiController.requireSessionPrincipal), so no key needs it.
-        shouldThrow<WorkspaceMembershipRequiredException> {
-            openJoinService.addMember(key(), "globex", "alice@company.com")
-        }
-        // ...and a SESSION still joins, so the feature itself is intact.
-        openJoinService.addMember(session(), "globex", "alice@company.com")
     }
 
     @Test
@@ -185,6 +155,7 @@ class WorkspaceKeyPinTest {
         every { repository.nameExists("newco") } returns false
         every { repository.create("newco", "Newco", false, ownerId) } returns workspace("newco", "Newco")
 
-        service.create(key(), "newco", "Newco").name shouldBe "newco"
+        // …and its gate is `super_admin` since D-R11, which is what this key's owner is here.
+        service.create(key().copy(superAdmin = true), "newco", "Newco").name shouldBe "newco"
     }
 }

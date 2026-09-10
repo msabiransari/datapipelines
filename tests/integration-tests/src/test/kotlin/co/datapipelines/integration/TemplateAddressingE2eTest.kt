@@ -458,7 +458,13 @@ class TemplateAddressingE2eTest {
             run {
                 val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
                 val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-                SeededKey(name = "e2e-043-key", scopes = arrayOf("admin"), id = id, plaintext = plaintext, hash = argon2Hash(plaintext))
+                SeededKey(
+                    name = "e2e-043-key",
+                    scopes = arrayOf("read", "execute", "author"),
+                    id = id,
+                    plaintext = plaintext,
+                    hash = argon2Hash(plaintext),
+                )
             }
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */

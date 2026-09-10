@@ -625,7 +625,7 @@ class PipelineShapesE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("read", "execute", "author"))
         private val EXECUTOR_KEY = E2eAuth.generateKey("e2e-executor-key", arrayOf("execute"))
         private val READER_ONLY_KEY = E2eAuth.generateKey("e2e-reader-key", arrayOf("read"))
 

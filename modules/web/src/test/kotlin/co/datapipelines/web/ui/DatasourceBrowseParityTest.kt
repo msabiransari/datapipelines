@@ -71,6 +71,8 @@ class DatasourceBrowseParityTest {
             ),
         )
 
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val rules = DatasourceWorkspaceRules(mockk(relaxed = true), WorkspacesProperties())
 
     private fun pageController() = DatasourceUiController(DatasourceBrowseModel(registry), WorkspacesProperties(), themeResolver)
@@ -81,6 +83,7 @@ class DatasourceBrowseParityTest {
             registry,
             rules,
             DatasourceUpdateService(registry, rules),
+            grants,
             DatasourceReferences.NONE,
         )
 

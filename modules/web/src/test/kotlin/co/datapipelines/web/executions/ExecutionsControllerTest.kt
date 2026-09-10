@@ -2,6 +2,7 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.AbortReason
@@ -67,6 +68,7 @@ class ExecutionsControllerTest {
     private fun authenticate(
         userId: UUID,
         scopes: Set<Scope>,
+        workspaceAdmin: Boolean = false,
     ) {
         val principal =
             AuthenticatedPrincipal(
@@ -76,7 +78,14 @@ class ExecutionsControllerTest {
                 scopes,
                 AuthMethod.API_KEY,
                 "dpk_x",
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                workspace =
+                    WorkspaceContext(
+                        workspaceId,
+                        "acme",
+                        // RBAC round 1: a KEY whose owner is a workspace admin sees the workspace's
+                        // runs; `Scope.ADMIN` no longer exists on the key axis at all (O-2).
+                        if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                    ),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -104,7 +113,7 @@ class ExecutionsControllerTest {
 
     @Test
     fun `admin may cancel any execution`() {
-        authenticate(UUID.randomUUID(), setOf(Scope.ADMIN))
+        authenticate(UUID.randomUUID(), setOf(Scope.READ), workspaceAdmin = true)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
@@ -158,7 +167,7 @@ class ExecutionsControllerTest {
         controller.list(null, null, null, null, null, null)
         verify(exactly = 1) { executions.findByUser(any(), owner, null, null, null, null, any(), any()) }
 
-        authenticate(UUID.randomUUID(), setOf(Scope.ADMIN))
+        authenticate(UUID.randomUUID(), setOf(Scope.READ), workspaceAdmin = true)
         every { executions.findAll(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         controller.list(null, null, null, null, null, null)
         verify(exactly = 1) { executions.findAll(any(), null, null, null, null, any(), any()) }

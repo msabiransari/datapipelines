@@ -228,13 +228,13 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 
 ### 3.17 Workspaces
 
-Workspace provisioning mode (design 2026-08-16-workspaces §7, [auth.md §4.2/§5.6](auth.md#56-workspace-resolution--the-dp-workspace-header)): `auto-per-user` mints a personal workspace on first OIDC login; `self-serve` lets any authenticated user create workspaces; `closed` restricts creation to `admin`.
+Workspaces are created by **super admins** ([auth.md §4.2/§5.6](auth.md#56-workspace-resolution--the-dp-workspace-header), [§12](auth.md#11a-roles)). The one workspace the product ships is `demo`, and a user with no membership becomes a **viewer** of it on first login.
 
 | YAML path | Default | Description |
 |---|---|---|
-| `datapipelines.workspaces.provisioning-mode` | `self-serve` | `auto-per-user` \| `self-serve` \| `closed` |
-| `datapipelines.workspaces.open-join` | `false` | `self-serve` only: `true` lists all workspaces as joinable by any authenticated user; `false` = members are added by a workspace owner. `open-join: true` under `closed` provisioning is refused at startup (§7) — it would re-open the membership surface `closed` exists to keep admin-only |
-| `datapipelines.workspaces.member-datasources-enabled` | `true` | May non-admin members create workspace-bound datasources (datasource visibility gate) |
+| `datapipelines.workspaces.member-datasources-enabled` | `true` | May a workspace ADMIN register a datasource bound to their own workspace? `false` makes datasource registration a super-admin-only act instance-wide. Visibility is still the grant either way ([auth.md §11A](auth.md#11a-roles)) |
+
+**Removed in RBAC round 1** (`provisioning-mode`, `open-join`). Capability moved onto the workspace membership, and with it went the modes that decided who could create a workspace: `auto-per-user` (a personal workspace per login), `self-serve` (anyone creates) and `closed` (admin only), plus `open-join` (anyone self-joins). **Both keys are refused BY NAME at startup** (§7) rather than ignored — a deployment that still says `auto-per-user` is a deployment expecting a personal workspace per user, and silently giving it something else is how an operator finds out from a user. Delete the key; there is no replacement to set, because the behaviour is no longer a knob.
 
 ### 3.18 Bootstrap
 
@@ -553,8 +553,6 @@ datapipelines:
         server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:}
 
   workspaces:
-    provisioning-mode: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}
-    open-join: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:false}
     member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}
 
   staging:
@@ -749,3 +747,4 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 | 2026-09-02 | v1.7 | 048 bootstrap seeding fixes | Two §7 rules added, no new keys: (a) the `examples-file` cross-key rule pairing it with `datapipelines.workspaces.provisioning-mode` = `auto-per-user` (021/F5 — the pair validated green while the seeder was structurally unreachable, on the shipped default); (b) `bootstrap` and `local` reserved as OIDC provider names (021/F8 — the `users.provider` placeholders were squatting in an operator-configurable namespace with nothing reserving them). §3.18 gains the matching cross-key paragraph |
 | 2026-09-02 | v1.8 | 050 multi-instance round 2 | §3.2: `max-concurrent-executions-global` renamed `max-concurrent-executions-per-instance` (the limit was always per JVM — the old name false at N replicas; 050/R2), old key kept as a one-release deprecated alias (alone → WARN naming the new key; both set and differing → §7 refusal); §3.2 heap note and §5 template updated to the per-instance multiplier; §7 gains the alias rule. §3.11: `event-retention-days` now bound and scheduled (the hourly retention job, M2's sibling) |
 | 2026-09-01 | v1.6 | 039 deployment role | Added §3.19 Deployment: `datapipelines.deployment.name` (label only — logged once at boot beside the authoring state; nothing branches on it, pinned by a guard test; deliberately not on `/info`) and `datapipelines.deployment.authoring-enabled` (default `true`; `false` turns the deployment into a promotion receiver whose authoring writes refuse with `*.authoring.disabled`; startup refuses if drafts exist while disabled). The reserved `datapipelines.deployment.promotion.*` sub-block is deliberately NOT declared here — it ships with promotion (Versioning §10.6's fenced sample), per this doc's shipped-keys-only rule. Matching §7 bullets (the one-sided receiver-also-authors WARN; the refuse-on-existing-drafts rule) and §5 template block |
+| 2026-09-10 | v1.9 | 112 RBAC round 1 | §3.17: `datapipelines.workspaces.provisioning-mode` and `datapipelines.workspaces.open-join` **removed** (D-R11 — capability moved onto the workspace membership, so who may create a workspace is a role, not a mode). Both are refused BY NAME at startup rather than ignored, and both are gone from the §5 template, `application.yml` and the shipped `.env` — a placeholder with a default is a set key to Spring's relaxed binding, so leaving them there would have refused the product's own boot. §7 loses the two rules that read them (the mode-value check and the `open-join`-under-`closed` check) and the `examples-file` cross-key rule (example seeding now runs once, when `DemoWorkspaceSeeder` creates `demo`); it gains one rule that names both removed keys. `member-datasources-enabled` survives, re-described: it gates whether a workspace ADMIN may register a datasource bound to their own workspace |

@@ -112,6 +112,18 @@ class EndpointKeyConfinementTest {
                 authMethod = AuthMethod.API_KEY,
                 keyId = "dpk_ABCDEFGHIJKL",
                 keyKind = kind,
+                // Since RBAC round 1 `ScopeMatrix.allowed` judges BOTH axes, so a principal
+                // with no resolved workspace is refused with `workspace.not_found` before any
+                // scope is read (D-R5). These suites are about the KIND confinement, so the
+                // context is a workspace admin's: everything the confinement lets through must
+                // then reach the handler rather than dying on an unrelated refusal.
+                workspaceName = "acme",
+                workspace =
+                    WorkspaceContext(
+                        UUID.randomUUID(),
+                        "acme",
+                        MembershipFlags(author = true, promoter = true, admin = true),
+                    ),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())

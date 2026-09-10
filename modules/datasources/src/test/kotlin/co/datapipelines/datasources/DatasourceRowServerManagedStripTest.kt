@@ -97,7 +97,7 @@ class DatasourceRowServerManagedStripTest {
         queryTimeoutSeconds = null,
         introspectionIncludeSchemas = emptyList(),
         isReadonly = false,
-        workspaceId = null,
+        ownerWorkspaceId = null,
         workspaceName = null,
         isDeleted = false,
         createdAt = Instant.EPOCH,

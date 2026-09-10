@@ -42,6 +42,8 @@ class DatasourceUiControllerTest {
         )
 
     private val userId = UUID.randomUUID()
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val workspaceId = UUID.randomUUID()
 
     private fun datasource(
@@ -88,6 +90,7 @@ class DatasourceUiControllerTest {
             rules,
             co.datapipelines.application.datasources
                 .DatasourceUpdateService(registry, rules),
+            grants,
             co.datapipelines.datasources.DatasourceReferences.NONE,
         )
 

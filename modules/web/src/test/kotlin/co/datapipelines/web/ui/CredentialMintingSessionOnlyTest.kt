@@ -28,8 +28,9 @@ import java.util.UUID
  *
  * The hole this closes, found by adversarial verification of the merged 026 round and
  * confirmed against the source: `AdminUsersPartialController.requireAdmin` was a pure
- * scope test, and `AuthenticatedPrincipal.isAdmin` is *defined as* holding [Scope.ADMIN] —
- * so it could not tell a browser session from a `dpk_` key. `ApiKeyFilter` has no path
+ * scope test — and a scope test cannot tell a browser session from a `dpk_` key. (RBAC round 1
+ * moved that gate to `users.is_admin`, the super admin; the session requirement it fails to
+ * express is unchanged, which is why this suite still exists.) `ApiKeyFilter` has no path
  * test and `ApiKeyCredentialMatcher` makes key requests CSRF-exempt, so an admin-scoped key
  * reached these partials with a single header, created a local admin, read the one-time
  * password out of the response body, and signed in. The resulting `dp_session` is NOT
@@ -71,9 +72,14 @@ class CredentialMintingSessionOnlyTest {
             userId = userId,
             email = "admin@example.com",
             displayName = "Admin",
-            scopes = setOf(Scope.ADMIN),
+            // RBAC round 1: the authority these routes require is `users.is_admin` — the super
+            // admin (auth.md §11A.2), not a scope. A key OWNED by a super admin still reaches
+            // the role gate, which is what keeps this suite's subject — the SESSION gate that
+            // fires AFTER it — the thing under test rather than an accident of the role check.
+            scopes = emptySet(),
             authMethod = method,
             workspace = WorkspaceContext(workspaceId, "acme"),
+            superAdmin = true,
         )
 
     private fun authenticateAs(method: AuthMethod) {
@@ -209,13 +215,15 @@ class CredentialMintingSessionOnlyTest {
     fun `a non-admin session is still refused before the session check ever applies`() {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
-                principal(AuthMethod.OIDC).copy(scopes = setOf(Scope.READ)),
+                // Not a super admin — the role gate, which RBAC round 1 moved off the scope
+                // axis onto `users.is_admin`.
+                principal(AuthMethod.OIDC).copy(scopes = setOf(Scope.READ), superAdmin = false),
                 null,
                 emptyList(),
             )
 
-        // Scope remains the first gate; the session check is an ADDITIONAL requirement on
-        // top of admin, never a replacement for it.
+        // The ROLE remains the first gate; the session check is an ADDITIONAL requirement on
+        // top of it, never a replacement for it.
         shouldThrow<org.springframework.security.access.AccessDeniedException> {
             partials.createLocalUser(model, "new@example.com", "New User")
         }

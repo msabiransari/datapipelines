@@ -25,8 +25,12 @@ import javax.crypto.spec.SecretKeySpec
  * LargeClass cap) — same suite shape, same self-contained companion (the module's
  * no-shared-base convention):
  *
- * - **F4**: `open-join` end to end — a non-member joins with his own email (the suite runs
- *   with `open-join: true`).
+ * - **F4**: `open-join` end to end. REMOVED with the feature in RBAC round 1 (D-R11): there
+ *   is no self-service join, a super admin adds members with their roles, and the config key
+ *   that turned it on is refused at startup by name.
+ * - **F4b**: KEPT. The feature that opened the 025 hole is gone; the hole is not, and the
+ *   pin rule that closes it was rewritten this round — so the case is worth more now, not
+ *   less. Its answer moved from 403 to the D-R5 404.
  * - **F5**: a global datasource referenced only by ANOTHER workspace's pipeline is still
  *   `datasource.in_use` (409 naming the reference).
  * - **F6**: a read-scoped key cannot reach the mutating UI partials; an author key can.
@@ -48,52 +52,22 @@ class WorkspaceSurfacesFixRoundE2eTest {
     private val adminKey get() = ADMIN_KEY.plaintext
     private val readonlyKey get() = READONLY_KEY.plaintext
 
-    @Test
-    fun `F4 - open-join - a non-member joins with their OWN email, then reads the workspace`() {
-        ensureSeeded()
-        // Bob owns globex and is NOT a member of acme. This row 403ed membership_required
-        // before the fix — addMember's membership pre-check ran before the self-join branch.
-        //
-        // Driven by a SESSION, not a key: self-service join is a human act and the shipped
-        // UI is session-gated (WorkspacesUiController.requireSessionPrincipal). Driving it
-        // with a key is what forced the exemption that let a pinned key write a membership
-        // row into any workspace — see the sibling test below.
-        val csrf = "join-csrf"
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .cookie(SESSION_COOKIE, sessionJwt(BOB, "bob@globex.test", "globex"))
-            .cookie(CSRF_COOKIE, csrf)
-            .header(CSRF_HEADER, csrf)
-            .body("""{"email":"bob@globex.test"}""")
-            .`when`()
-            .post("/api/v1/workspaces/acme/members")
-            .then()
-            .statusCode(200)
-            .body("data.role", Matchers.equalTo("member"))
-
-        given()
-            .port(port)
-            .cookie(SESSION_COOKIE, sessionJwt(BOB, "bob@globex.test", "globex"))
-            .`when`()
-            .get("/api/v1/workspaces/acme")
-            .then()
-            .statusCode(200)
-            .body("data.name", Matchers.equalTo("acme"))
-    }
-
     /**
-     * The other half of F4, and the reason the exemption is session-only.
+     * The 025 blocking finding, still guarded — the feature that opened it is gone, the hole
+     * it opened is not.
      *
-     * The open-join branch resolves the target by NAME with `read()`'s membership check
-     * deliberately skipped. Exempting API keys from the pin therefore let a key pinned to
-     * globex write a `workspace_members` row into ANY live workspace — a row that outlives
-     * revocation of the key, and that alone passes the membership checks in `read` and
-     * `members`, neither of which consults the pin. One leaked agent key could then walk
-     * every workspace's roster (emails, display names, user ids) at scope `read`.
+     * `open-join` let a key pinned to globex write a `workspace_members` row into ANY live
+     * workspace: a row that outlives revocation of the key, and that alone passes the checks
+     * in `read` and `members`, neither of which consulted the pin. One leaked agent key could
+     * walk every workspace's roster (emails, display names, user ids) at scope `read`.
+     *
+     * RBAC round 1 removed `open-join` AND moved the pin rule to `read`/`contextFor`, the one
+     * resolution every path crosses — so this case now fails at the pin before any branch can
+     * be reached. The ANSWER changed with it: `404 workspace.not_found`, because "pinned
+     * elsewhere" and "does not exist" must stay indistinguishable or the pin is an oracle.
      */
     @Test
-    fun `F4b - open-join does NOT exempt an API key from its workspace pin`() {
+    fun `F4b - a key pinned to globex cannot write a membership row into acme`() {
         ensureSeeded()
         given()
             .port(port)
@@ -103,15 +77,16 @@ class WorkspaceSurfacesFixRoundE2eTest {
             .`when`()
             .post("/api/v1/workspaces/acme/members")
             .then()
-            .statusCode(403)
-            .body("error.code", Matchers.equalTo("workspace.membership_required"))
+            .statusCode(404)
+            .body("error.code", Matchers.equalTo("workspace.not_found"))
     }
 
     @Test
-    fun `F5 - a global datasource referenced only by ANOTHER workspace's pipeline is still in_use - 409 naming the reference`() {
+    fun `F5 - a SHARED datasource referenced only by ANOTHER workspace's pipeline is still in_use - 409 naming the reference`() {
         ensureSeeded()
         ensureDatasourcesRegistered()
-        // Bob (globex) authors a pipeline reading the GLOBAL datasource; the acme-pinned
+        // Bob (globex) authors a pipeline reading the SHARED datasource — shared by GRANT since
+        // D-R7, which is what makes the reference cross-workspace; the acme-pinned
         // admin's DELETE must still refuse — the guard counts every workspace now.
         given()
             .port(port)
@@ -289,7 +264,48 @@ class WorkspaceSurfacesFixRoundE2eTest {
         datasourcesRegistered = true
         register(ALICE_KEY.plaintext, DS_ACME, H2_ACME_URL)
         register(BOB_KEY.plaintext, DS_GLOBEX, H2_GLOBEX_URL)
-        register(ADMIN_KEY.plaintext, DS_GLOBAL, H2_GLOBAL_URL, global = true)
+        registerInstanceDatasource(DS_GLOBAL, H2_GLOBAL_URL)
+        // D-R7: "global" is gone. What made this datasource shared is now an explicit GRANT
+        // per workspace — so F5's premise ("referenced by ANOTHER workspace's pipeline") needs
+        // globex to have been granted it, exactly as a super admin would have done.
+        grant(DS_GLOBAL, "acme")
+        grant(DS_GLOBAL, "globex")
+    }
+
+    /** Registers a datasource no workspace owns — session-only since O-2 (it needs `admin` scope). */
+    private fun registerInstanceDatasource(
+        name: String,
+        jdbcUrl: String,
+    ) {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, FIX_ROUND_CSRF)
+            .header(CSRF_HEADER, FIX_ROUND_CSRF)
+            .body(
+                """{"name": "$name", "display_name": "Fix $name", "dialect": "H2",
+                   "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD","global":true}""",
+            ).`when`()
+            .post("/api/v1/datasources")
+            .then()
+            .statusCode(201)
+    }
+
+    /** Grants [datasource] to [workspace] as the super admin — the D-R7 verb, session-only. */
+    private fun grant(
+        datasource: String,
+        workspace: String,
+    ) {
+        given()
+            .port(port)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, FIX_ROUND_CSRF)
+            .header(CSRF_HEADER, FIX_ROUND_CSRF)
+            .`when`()
+            .post("/api/v1/datasources/$datasource/grants/$workspace")
+            .then()
+            .statusCode(200)
     }
 
     private fun register(
@@ -317,6 +333,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SESSION_COOKIE = "dp_session"
+        private const val FIX_ROUND_CSRF = "fix-round-csrf"
         private const val CSRF_COOKIE = "dp_csrf"
         private const val CSRF_HEADER = "DP-CSRF-Token"
         private const val SECRET_BYTES = 32
@@ -343,7 +360,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
-        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author", "admin"), ownerId = ROOT)
+        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
         private val READONLY_KEY = E2eAuth.generateKey("readonly-key", arrayOf("read"), ownerId = ALICE)
 
         private fun sessionJwt(
@@ -400,9 +417,9 @@ class WorkspaceSurfacesFixRoundE2eTest {
                     )
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
-                            ('$WS_ACME', '$ALICE', 'owner'),
-                            ('$WS_GLOBEX', '$BOB', 'owner')
+                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
+                            ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
+                            ('$WS_GLOBEX', '$BOB', TRUE, FALSE, TRUE)
                         """.trimIndent(),
                     )
                 }
@@ -472,7 +489,6 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
             // design §7: the open-join self-service row runs against the FULL app in this
             // suite — bob (a globex owner, not an acme member) joins acme with his own email.
-            registry.add("datapipelines.workspaces.open-join") { "true" }
         }
 
         private val oidc = OidcDiscoveryStub()

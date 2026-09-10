@@ -137,12 +137,19 @@ class McpToolDispatcherTest {
     }
 
     @Test
-    fun `admin satisfies every tool because scopes are hierarchical`() {
+    fun `the top of BOTH axes satisfies every tool - author scope, workspace admin role`() {
         assertAll(
             ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys.map { tool ->
                 {
                     val spy = SpyTool(tool)
-                    dispatcher(spy).call(McpFixtures.request(tool), McpFixtures.ctx(Scope.ADMIN)).isError() shouldBe false
+                    // `author` is the top KEY scope (O-2 removed `admin` from that axis) and
+                    // `ws_admin` the top role a membership carries — one tool, `datasources_test`,
+                    // sits on that rung, so a scope-only fixture no longer satisfies everything.
+                    dispatcher(spy)
+                        .call(
+                            McpFixtures.request(tool),
+                            McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
+                        ).isError() shouldBe false
                     spy.calls shouldBe 1
                 }
             },
@@ -154,7 +161,7 @@ class McpToolDispatcherTest {
         val tool = SpyTool("pipelines_delete")
         ScopeMatrix.requiredScopeForTool("pipelines_delete") shouldBe null
 
-        val result = dispatcher(tool).call(McpFixtures.request("pipelines_delete"), McpFixtures.ctx(Scope.ADMIN))
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_delete"), McpFixtures.ctx(Scope.AUTHOR))
 
         assertAll(
             { result.isError() shouldBe true },
@@ -189,7 +196,7 @@ class McpToolDispatcherTest {
     fun `an unknown tool is a protocol error`() {
         val error =
             shouldThrow<McpError> {
-                dispatcher(SpyTool("pipelines_list")).call(McpFixtures.request("nope"), McpFixtures.ctx(Scope.ADMIN))
+                dispatcher(SpyTool("pipelines_list")).call(McpFixtures.request("nope"), McpFixtures.ctx(Scope.AUTHOR))
             }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }

@@ -483,6 +483,22 @@ object PipelineErrorCodes {
          * response from distinguishing a wrong key from a disabled receiver.
          */
         const val PROMOTION_KEY_INVALID = "auth.promotion.key_invalid"
+
+        /**
+         * §13.7 — the principal's ROLE in the active workspace is below the operation's
+         * (RBAC design §2, D-R1). Two segments, not three: the role axis has no ENTITY
+         * dimension — it is a property of the caller's membership, not of a thing they named.
+         */
+        const val ROLE_REQUIRED = "auth.role_required"
+
+        /** §13.7 — the key was valid; its issuer no longer holds the capability (D-R12). */
+        const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
+
+        /** §13.7 — issuance asked for a scope keys may no longer hold; today that is `admin` (O-2). */
+        const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
+
+        /** §13.7 — the workspace this key is pinned to has been deactivated (D-R10). */
+        const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */
@@ -540,6 +556,14 @@ object PipelineErrorCodes {
 
         /** §13.8 (089 §A) — unregister named a lake table that is not registered (404). */
         const val LAKE_TABLE_NOT_FOUND = "datasource.lake_table_not_found"
+
+        /**
+         * §13.8 — the datasource exists on the instance but is not GRANTED to the caller's
+         * workspace (D-R7). A 404, because an ungranted datasource is INVISIBLE: "this exists,
+         * you may not see it" turns the flat, global datasource namespace into an enumeration
+         * oracle one request at a time.
+         */
+        const val GRANT_REQUIRED = "datasource.grant_required"
 
         /**
          * §13.8 (109 §A) — a pipeline node referenced a registered lake table whose connect-time
@@ -707,26 +731,37 @@ object PipelineErrorCodes {
      * pattern as [Auth] vs §13.7.
      */
     object Workspace {
-        /** §13.12 — the principal is not a member of the addressed workspace (or has zero memberships). */
+        /**
+         * §13.12 — the principal has NO active workspace at all (zero memberships). Not the
+         * answer for an ADDRESSED workspace: since D-R5 that is [NOT_FOUND], and this code
+         * survives only where no name was supplied and so none can leak.
+         */
         const val MEMBERSHIP_REQUIRED = "workspace.membership_required"
-
-        /** §13.12 — the provisioning mode forbids this caller creating a workspace. */
-        const val CREATION_FORBIDDEN = "workspace.creation_forbidden"
 
         /** §13.12 — `DP-Workspace` on an API-key request; a key's workspace is pinned at issuance (D3). */
         const val HEADER_FORBIDDEN = "workspace.header_forbidden"
 
         /**
          * §13.12 — an API-key principal reached a session-only workspace action (the UI's
-         * create/join/members/delete/switch). A key cannot hold — let alone mint — a
+         * create/members/delete/switch). A key cannot hold — let alone mint — a
          * `dp_session`, and `switch` mints one from the USER's scopes, so the class of
          * action is refused for the credential outright (025 A2; the 96240ed hotfix
          * carried `workspace.header_forbidden` as the interim code).
          */
         const val SESSION_REQUIRED = "workspace.session_required"
 
-        /** §13.12 — unknown workspace name, for a principal who could otherwise see any workspace (an admin). */
+        /**
+         * §13.12 — the addressed workspace does not exist FOR THIS CALLER (D-R5): unknown name,
+         * non-member, or deactivated, all one answer so nothing about a workspace is probeable.
+         * Also refuses a promotion batch naming a workspace the receiver does not have (O-4).
+         */
         const val NOT_FOUND = "workspace.not_found"
+
+        /** §13.12 — the membership change would leave the workspace with no admin. */
+        const val LAST_ADMIN = "workspace.last_admin"
+
+        /** §13.12 — a super admin addressed a DEACTIVATED workspace on a path that must refuse it. */
+        const val INACTIVE = "workspace.inactive"
 
         /** §13.12 — workspace name fails `[a-z0-9_-]+`, 1–63. */
         const val NAME_INVALID = "workspace.validation.name_invalid"
@@ -736,7 +771,8 @@ object PipelineErrorCodes {
 
         /**
          * §13.12 — delete blocked: workspace still owns non-deleted
-         * pipelines/templates/datasources (or a removal would orphan its owner).
+         * pipelines/templates/datasources. Deactivation (D-R10) needs no such check: it
+         * purges nothing.
          */
         const val IN_USE = "workspace.in_use"
     }

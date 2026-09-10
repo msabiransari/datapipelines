@@ -192,12 +192,39 @@ Fixed at template **create** and identical on every version of a template (`temp
 
 Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope has all lower scopes too.
 
-| Value | Includes | Description |
+| Value | Includes | Description | Issuable to a key? |
+|---|---|---|---|
+| `read` | — | Read pipelines, templates, datasources (metadata), executions | yes |
+| `execute` | `read` | Execute pipelines; retrieve execution results | yes |
+| `author` | `execute`, `read` | Create / modify pipelines and templates | yes |
+| `admin` | `author`, `execute`, `read` | Manage datasources, users, system config | **no** — RBAC round 1 removed it from the key wire (O-2): it was the only scope that bought a key an INSTANCE verb, and instance verbs are human |
+
+**This is the CREDENTIAL axis, and since RBAC round 1 it is an API-key property only** — a session JWT carries no `scopes` claim. What a signed-in person may do is [`Capability`](#8b-capability--what-a-membership-may-do) in the active workspace. Both axes are enforced for a key: its scope AND its issuer's current role ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
+
+---
+
+## 8B. `Capability` — what a membership may do
+
+**Source:** [Auth §11A](auth.md#11a-roles) (the role table), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) (the per-operation minimums)
+**Used by:** auth (`ScopeMatrix.allowed`), every REST handler and MCP tool.
+
+The ROLE axis. It travels with a **membership**, not with a credential (RBAC design D-R1): the same person is a viewer in one workspace and an author in another, which is why it cannot live on the user.
+
+**Deliberately NOT a hierarchy**, unlike [`Scope`](#8-scope--api-key-authorization-scope). An author may not `release` and a promoter may not author, so neither dominates the other — each value is a predicate over the membership row's three flags (`author`, `promoter`, `admin`; all false = viewer), never an ordinal comparison.
+
+| Value | Held by | Description |
 |---|---|---|
-| `read` | — | Read pipelines, templates, datasources (metadata), executions |
-| `execute` | `read` | Execute pipelines; retrieve execution results |
-| `author` | `execute`, `read` | Create / modify pipelines and templates |
-| `admin` | `author`, `execute`, `read` | Manage datasources, users, system config |
+| `view` | any member | Read everything in the workspace |
+| `execute` | any member | Execute pipelines, read results, cancel own runs, run capped read-only SQL probes (D-R3: "viewers execute") |
+| `author` | `author` | Create/edit drafts, discard, restore, purge, publish endpoints, register lake tables, issue own keys |
+| `switch` | `author` OR `promoter` | Switch the served version — the rollback lever (O-1). Its own value because it is the one verb both hold and neither implies |
+| `promote` | `promoter` OR `admin` | `release` and `promote` — the DevOps verbs |
+| `ws_admin` | `admin` | Members and roles, workspace-bound datasource registration, the workspace audit trail |
+| `super_admin` | `users.is_admin` | Instance verbs: create/deactivate workspaces, users, config, datasource grants. Implicitly a member of every workspace (D-R8), audited as `auth.super_admin_acting` |
+
+`admin → author` is a database CHECK (`chk_workspace_member_admin_authors`, [metadata-db §4.12](metadata-db.md#412-workspace_members)), so `author` reads straight off the row rather than re-spelling the implication at each predicate.
+
+**Where the two axes disagree, and neither is redundant:** `execute` is the second SCOPE but the viewer-level CAPABILITY — a `read` key may not execute, a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but `view` capability (a viewer gets capped read-only SELECT by design).
 
 ---
 
@@ -339,9 +366,19 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.user.activated` | Admin reactivated a user |
 | `auth.user.admin_granted` | Admin granted admin scope to user |
 | `auth.user.admin_revoked` | Admin revoked admin scope from user |
-| `auth.workspace.provisioned` | Personal workspace auto-created on first login (`auto-per-user` mode) |
-| `auth.workspace.created` | Workspace created through the service path |
+| `auth.workspace.created` | Workspace created — by a super admin through the service path, or by the boot seeder for `demo` (details carry `actor: system`) |
+| `auth.workspace.updated` | A workspace's display name was changed |
+| `auth.workspace.deleted` | A workspace was soft-deleted (empty only) — distinct from `workspace.deactivated`, which purges nothing |
+| `auth.workspace.stranded_content` | Content committed into a workspace concurrently with its deletion and is now invisible with its name held — the detector, not a refusal |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request |
+| `auth.super_admin_acting` | A super admin acted in a workspace they hold no explicit membership in (RBAC design D-R8). Emitted at the scope interceptor's one choke point on every governed handler, READS INCLUDED — the 404 rule's whole promise is that a workspace is invisible from outside, and the one principal exempt from it is the one whose reads most need to be on the record. `details` carry the operation, the workspace, the path and `acting_via: super_admin` |
+| `workspace.member_added` | A member was added, with their capability flags (`details.flags`). The first-login demo join carries `reason: first_login_demo_viewer` |
+| `workspace.member_removed` | A member was removed |
+| `workspace.member_flags_changed` | A member's capability flags were replaced — `details.from` and `details.to` carry both sets, because a membership row keeps no history of its own |
+| `workspace.deactivated` | A workspace was deactivated (RBAC design D-R10). Nothing it owns is purged; the five effects follow from readers consulting its state |
+| `workspace.reactivated` | A deactivated workspace was restored |
+| `datasource.granted` | A datasource was granted to a workspace (D-R7) — the verb that decides who can see a live database credential's data. `details.already_granted` distinguishes a new grant from an idempotent re-grant |
+| `datasource.revoked` | A datasource's grant to a workspace was removed. The datasource itself is untouched |
 | `endpoint.served` | A published endpoint served a request (074). Details carry the endpoint id, the execution id and the outcome; the key id is the row's own `key_id`. This row is also what proves an endpoint key may read that execution's result |
 | `endpoint.key_bound` | An API key was bound to a node of the endpoint tree |
 | `endpoint.key_unbound` | An API key's binding to a node was removed |
@@ -473,7 +510,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `TemplateEngine` | templates | templates |
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
-| `Scope` | auth | every endpoint |
+| `Scope` | auth | every endpoint (API keys only since RBAC round 1) |
+| `Capability` | [auth.md §11A](auth.md#11a-roles) | auth, every endpoint and MCP tool |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |
 | `ExecutionStatus` | rest-api | dag-executor, mcp-server, persistence |
 | `SseEventType` | rest-api | dag-executor, mcp-server |
@@ -517,3 +555,4 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-09-02 | v1.7 | MCP audit (052) | §15 gains the **MCP audit events** table: `mcp.tool.called` (registered here for the first time — the dispatcher has emitted it since the original mcp-server build) and `mcp.tool.write` (new, 052/R4: one event per mutating tool call, node runs included). Authority for both: MCP §14; same `audit_log` sink as the auth/datasource events. Cross-reference row widened to name the §15 sub-tables. |
 | 2026-09-08 | v1.8 | 101 version lifecycle | §15 gains the **version lifecycle audit events** table: `pipeline.version.discarded`/`restored`/`purged`, `pipeline.purged`, `pipeline.current_switched`, and the template twins — the first lifecycle audit events anywhere (release and draft writes were previously unaudited). Authority: Versioning §3/§7; emitted by the 101 REST verbs, all session-only. `scripts/docs-audit.sh`'s §15 event extraction widened to the `pipeline`/`template` domains (the endpoint/074 and mcp/052 precedent) so these are recognised as events, not demanded as §13 error codes. |
 | 2026-09-07 | v1.5 | 087 connector seams | New **§5A `CredentialKind`** (`password` \| `token` \| `private_key` \| `service_account_json` \| `none`) — what a datasource's stored credential IS, authored by [Datasources §3.4](datasources.md#34-credential-kinds); the cross-reference table gains its row. §5 `Dialect` gains **`LAKE`** (object storage read in place; DuckDB is the engine, with a different §5.6 posture from `DUCKDB`) — not a reserved value: it ships with an adapter, a driver mapping and a CHECK. |
+| 2026-09-10 | v1.9 | 112 RBAC round 1 | New **§8B `Capability`** — the ROLE axis, carried by the workspace MEMBERSHIP rather than by a credential (D-R1), and deliberately not a hierarchy: an author may not `release` and a promoter may not author, so each value is a predicate over the membership row, never an ordinal. §8 `Scope` gains an "issuable to a key?" column: `admin` left the key wire (O-2), and a session carries no scopes at all. §15 gains the round's audit events — `auth.super_admin_acting` (D-R8, emitted on READS too, because the 404 rule's promise is that a workspace is invisible from outside and the one principal exempt from it is the one whose reads most need recording), `workspace.member_added`/`removed`/`flags_changed`, `workspace.deactivated`/`reactivated`, `datasource.granted`/`revoked` — and loses `auth.workspace.provisioned` with the `auto-per-user` mode that emitted it. Cross-reference table gains the `Capability` row. |

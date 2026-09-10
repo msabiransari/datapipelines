@@ -274,6 +274,6 @@ class LakeBootstrapSeederTest {
 
         val principal = importedPrincipals.single()
         principal.userId shouldBe actor
-        principal.isAdmin shouldBe true // the D8 global-mutation gate's whole question
+        principal.isSuperAdmin shouldBe true // the D8 global-mutation gate's whole question
     }
 }

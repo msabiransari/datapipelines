@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KEY_SCOPES
 import co.datapipelines.auth.Scope
 import java.time.Instant
 import java.time.LocalDate
@@ -62,7 +63,9 @@ object ApiKeyForm {
             Scope.READ to "list and inspect — runs nothing",
             Scope.EXECUTE to "run released pipelines (includes read)",
             Scope.AUTHOR to "create and change templates, pipelines, datasources (includes execute)",
-            Scope.ADMIN to "everything, including users and workspaces (includes author)",
+            // `admin` is deliberately ABSENT (O-2): a key may not hold it, issuance refuses it
+            // with `auth.key_scope_unavailable`, and a form that offers a choice the server
+            // rejects is a form that teaches people the wrong model.
         )
 
     /** The presets, in the order the select renders them. */
@@ -118,7 +121,10 @@ object ApiKeyForm {
      */
     fun scopeChoices(held: Set<Scope>): List<ScopeChoice> =
         Scope.entries
-            .filter { Scope.satisfies(held, it) }
+            // O-2: `admin` is not a KEY scope. Without this filter an issuer who satisfies it
+            // walks off the end of SCOPE_MEANINGS, which no longer has an entry for it, and the
+            // form throws where it should simply offer one choice fewer.
+            .filter { it in KEY_SCOPES && Scope.satisfies(held, it) }
             .map { ScopeChoice(it.wire, it.wire, SCOPE_MEANINGS.getValue(it)) }
 
     /**

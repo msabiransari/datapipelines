@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import io.restassured.RestAssured.given
@@ -51,7 +52,6 @@ class WorkspaceSurfacesE2eTest {
     private val aliceKey get() = ALICE_KEY.plaintext
     private val bobKey get() = BOB_KEY.plaintext
     private val carolKey get() = CAROL_KEY.plaintext
-    private val adminKey get() = ADMIN_KEY.plaintext
 
     // ------------------------------------------------------------ datasource isolation (§5.3)
 
@@ -59,10 +59,33 @@ class WorkspaceSurfacesE2eTest {
     fun `a listing sees the active workspace's bound datasources plus global - and NOTHING else, with an exact total`() {
         ensureSeeded()
         ensureDatasourcesRegistered()
-        val alice = datasources(aliceKey)
-        alice.map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_ACME, DS_GLOBAL)
-        val bob = datasources(bobKey)
-        bob.map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX, DS_GLOBAL)
+        // D-R7: "global" is gone. An INSTANCE datasource (no owning workspace) is visible to
+        // nobody until a super admin GRANTS it — which is the whole change, so this asserts
+        // both sides of it rather than only the end state.
+        datasources(aliceKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_ACME, DS_GLOBAL)
+        datasources(bobKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX, DS_GLOBAL)
+
+        // …and a datasource granted to NEITHER is invisible to both, which is the half that
+        // makes the two above a statement about grants rather than about registration.
+        registerInstanceDatasource(DS_UNGRANTED, H2_GLOBAL_URL)
+        datasources(aliceKey).map { it["name"] } shouldNotContain DS_UNGRANTED
+        datasources(bobKey).map { it["name"] } shouldNotContain DS_UNGRANTED
+    }
+
+    /** Grants [datasource] to [workspace] as the super admin — the D-R7 verb, session-only. */
+    private fun grant(
+        datasource: String,
+        workspace: String,
+    ) {
+        given()
+            .port(port)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
+            .`when`()
+            .post("/api/v1/datasources/$datasource/grants/$workspace")
+            .then()
+            .statusCode(200)
     }
 
     @Test
@@ -76,6 +99,9 @@ class WorkspaceSurfacesE2eTest {
             .get("/api/v1/datasources?offset=0&limit=1")
             .then()
             .statusCode(200)
+            // Two: acme's own plus the granted instance one — and NOT the ungranted third.
+            // The point of this case is that the TOTAL knows it; a post-filter would count
+            // rows it then hides.
             .body("data.pagination.total", Matchers.equalTo(2))
             .body("data.items.size()", Matchers.equalTo(1))
             .body("data.pagination.has_more", Matchers.equalTo(true))
@@ -120,7 +146,8 @@ class WorkspaceSurfacesE2eTest {
             .body("data.items.name", Matchers.hasItem(DS_ACME))
             .body("data.items.name", Matchers.not(Matchers.hasItem(DS_GLOBEX)))
 
-        // A switch to a non-membership stays the 019 403 — including on this surface.
+        // A switch to a non-membership is the D-R5 404 — including on this surface. It was the
+        // 019 403 until RBAC round 1: "forbidden" told the caller the workspace EXISTS.
         given()
             .port(port)
             .cookie(SESSION_COOKIE, sessionJwt(ALICE, "alice@acme.test", "acme"))
@@ -128,8 +155,8 @@ class WorkspaceSurfacesE2eTest {
             .`when`()
             .get("/api/v1/datasources")
             .then()
-            .statusCode(403)
-            .body("error.code", Matchers.equalTo("workspace.membership_required"))
+            .statusCode(404)
+            .body("error.code", Matchers.equalTo("workspace.not_found"))
     }
 
     @Test
@@ -151,7 +178,10 @@ class WorkspaceSurfacesE2eTest {
     // ------------------------------------------------------------ workspace CRUD §8 codes
 
     @Test
-    fun `create returns 201 with the creator as owner`() {
+    fun `create returns 201 with the creator as the workspace ADMIN - and it is session-only`() {
+        // D-R11: workspaces are created by SUPER ADMINS, and O-2 removed `admin` from the key
+        // wire — so no API key reaches this at all, on either axis. Alice's key is refused
+        // below; the verb runs on ROOT's session.
         ensureSeeded()
         given()
             .port(port)
@@ -161,17 +191,32 @@ class WorkspaceSurfacesE2eTest {
             .`when`()
             .post("/api/v1/workspaces")
             .then()
-            .statusCode(201)
-            .body("data.name", Matchers.equalTo(FRESH_WS))
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .contentType(ContentType.JSON)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
+            .body("""{"name":"$FRESH_WS","display_name":"Fresh"}""")
+            .`when`()
+            .post("/api/v1/workspaces")
+            .then()
+            .statusCode(201)
+            .body("data.name", Matchers.equalTo(FRESH_WS))
+
+        // `role` left the wire with the column (D-R2): the flags are what a membership is.
+        given()
+            .port(port)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
             .`when`()
             .get("/api/v1/workspaces")
             .then()
             .statusCode(200)
-            .body("data.find { it.name == '$FRESH_WS' }.role", Matchers.equalTo("owner"))
+            .body("data.find { it.name == '$FRESH_WS' }.admin", Matchers.equalTo(true))
+            .body("data.find { it.name == '$FRESH_WS' }.author", Matchers.equalTo(true))
     }
 
     @Test
@@ -180,7 +225,9 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
             .body("""{"name":"Bad Name!"}""")
             .`when`()
             .post("/api/v1/workspaces")
@@ -195,7 +242,9 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
             .body("""{"name":"globex"}""")
             .`when`()
             .post("/api/v1/workspaces")
@@ -205,7 +254,7 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
-    fun `unknown and non-member are the same 403 for a member - the admin gets the 404`() {
+    fun `unknown, non-member and deactivated are ONE 404 - the super admin sees the same code (D-R5)`() {
         ensureSeeded()
         for (name in listOf("ghost", "globex")) {
             given()
@@ -214,13 +263,16 @@ class WorkspaceSurfacesE2eTest {
                 .`when`()
                 .get("/api/v1/workspaces/$name")
                 .then()
-                .statusCode(403)
-                .body("error.code", Matchers.equalTo("workspace.membership_required"))
+                .statusCode(404)
+                .body("error.code", Matchers.equalTo("workspace.not_found"))
         }
 
+        // …and the SUPER ADMIN gets the identical answer. Before D-R5 this was the one split
+        // that existed: members got 403 and only an admin got a real 404. One answer now, so
+        // the status itself stops being a signal about who is asking.
         given()
             .port(port)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
             .`when`()
             .get("/api/v1/workspaces/ghost")
             .then()
@@ -230,11 +282,15 @@ class WorkspaceSurfacesE2eTest {
 
     @Test
     fun `delete is 409 in_use naming each blocking content kind`() {
+        // D-R10 made delete an INSTANCE verb (deactivation is what operators want), so it runs
+        // on a super admin's session — the content check it is really about is unchanged.
         ensureSeeded()
         ensureDatasourcesRegistered()
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
             .`when`()
             .delete("/api/v1/workspaces/acme")
             .then()
@@ -244,10 +300,13 @@ class WorkspaceSurfacesE2eTest {
             .body("error.details.counts.templates", Matchers.equalTo(1))
             .body("error.details.counts.datasources", Matchers.equalTo(1))
 
-        // globex owns ONLY a bound datasource — the count names exactly that kind.
+        // globex owns ONLY a bound datasource — the count names exactly that kind. Same
+        // credential class as above: delete is an instance verb (D-R10), so no key reaches it.
         given()
             .port(port)
-            .header(API_KEY_HEADER, bobKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
             .`when`()
             .delete("/api/v1/workspaces/globex")
             .then()
@@ -257,7 +316,7 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
-    fun `update is owner-or-admin - a plain member gets the same 403, the owner renames`() {
+    fun `update is ws_admin - a plain author's key is refused, the workspace admin renames`() {
         ensureSeeded()
         given()
             .port(port)
@@ -267,8 +326,11 @@ class WorkspaceSurfacesE2eTest {
             .`when`()
             .put("/api/v1/workspaces/acme")
             .then()
+            // Carol is an AUTHOR of acme, not an admin. Her key's SCOPE is fine, so the axis
+            // that refuses is the role one — and because the credential is a key, the code
+            // says the issuer's role is short rather than the caller's (D-R12).
             .statusCode(403)
-            .body("error.code", Matchers.equalTo("workspace.membership_required"))
+            .body("error.code", Matchers.equalTo("auth.key_issuer_role_lost"))
 
         given()
             .port(port)
@@ -285,7 +347,7 @@ class WorkspaceSurfacesE2eTest {
     // ------------------------------------------------------------ members §9
 
     @Test
-    fun `an owner lists, adds and removes members - removing an OWNER is in_use blocked_by owner_membership`() {
+    fun `a ws admin lists, adds and removes members - and cannot remove the LAST admin`() {
         ensureSeeded()
         given()
             .port(port)
@@ -305,7 +367,11 @@ class WorkspaceSurfacesE2eTest {
             .post("/api/v1/workspaces/acme/members")
             .then()
             .statusCode(200)
-            .body("data.role", Matchers.equalTo("member"))
+            // Silence on a permission grant means the least a membership can be: a VIEWER
+            // (D-R11). `role` left the wire with the column — the flags are the membership.
+            .body("data.author", Matchers.equalTo(false))
+            .body("data.promoter", Matchers.equalTo(false))
+            .body("data.admin", Matchers.equalTo(false))
 
         given()
             .port(port)
@@ -315,7 +381,9 @@ class WorkspaceSurfacesE2eTest {
             .then()
             .statusCode(204)
 
-        // An owner target is the in_use refusal — ownership transfer is not a v1 operation.
+        // Alice is acme's only admin. Removing her is `workspace.last_admin` — its own code
+        // rather than the old `in_use`, because the caller's next step is "promote somebody
+        // else first", which is a different instruction from "empty the workspace first".
         given()
             .port(port)
             .header(API_KEY_HEADER, aliceKey)
@@ -323,8 +391,7 @@ class WorkspaceSurfacesE2eTest {
             .delete("/api/v1/workspaces/acme/members/$ALICE")
             .then()
             .statusCode(409)
-            .body("error.code", Matchers.equalTo("workspace.in_use"))
-            .body("error.details.blocked_by", Matchers.equalTo("owner_membership"))
+            .body("error.code", Matchers.equalTo("workspace.last_admin"))
     }
 
     @Test
@@ -522,7 +589,35 @@ class WorkspaceSurfacesE2eTest {
         datasourcesRegistered = true
         register(ALICE_KEY.plaintext, DS_ACME, H2_ACME_URL)
         register(BOB_KEY.plaintext, DS_GLOBEX, H2_GLOBEX_URL)
-        register(ADMIN_KEY.plaintext, DS_GLOBAL, H2_GLOBAL_URL, global = true)
+        registerInstanceDatasource(DS_GLOBAL, H2_GLOBAL_URL)
+        // Granted HERE, once, rather than inside the visibility case: a test that grants makes
+        // every later test's answer depend on execution order, and the paging total is exactly
+        // the assertion that would then pass or fail by accident.
+        grant(DS_GLOBAL, "acme")
+        grant(DS_GLOBAL, "globex")
+    }
+
+    /**
+     * Registers a datasource no workspace owns. Session-only since O-2: it is
+     * `MUTATE_DATASOURCES`, which needs `admin` on the credential axis, and no key holds that.
+     */
+    private fun registerInstanceDatasource(
+        name: String,
+        jdbcUrl: String,
+    ) {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
+            .body(
+                """{"name": "$name", "display_name": "Surfaces $name", "dialect": "H2",
+                   "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD","global":true}""",
+            ).`when`()
+            .post("/api/v1/datasources")
+            .then()
+            .statusCode(201)
     }
 
     private fun register(
@@ -569,6 +664,9 @@ class WorkspaceSurfacesE2eTest {
         private const val DS_ACME = "ds-acme"
         private const val DS_GLOBEX = "ds-globex"
         private const val DS_GLOBAL = "ds-global"
+
+        /** Registered and granted to NOBODY — the D-R7 control (see the visibility case). */
+        private const val DS_UNGRANTED = "ds-ungranted"
         private const val FRESH_WS = "fresh-team"
 
         private const val H2_USER = "sa"
@@ -588,7 +686,7 @@ class WorkspaceSurfacesE2eTest {
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
         private val CAROL_KEY = E2eAuth.generateKey("carol-key", arrayOf("read", "execute", "author"), ownerId = CAROL)
-        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author", "admin"), ownerId = ROOT)
+        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
 
         private fun sessionJwt(
             userId: String,
@@ -645,10 +743,10 @@ class WorkspaceSurfacesE2eTest {
                     )
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
-                            ('$WS_ACME', '$ALICE', 'owner'),
-                            ('$WS_ACME', '$CAROL', 'member'),
-                            ('$WS_GLOBEX', '$BOB', 'owner')
+                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
+                            ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
+                            ('$WS_ACME', '$CAROL', TRUE, FALSE, FALSE),
+                            ('$WS_GLOBEX', '$BOB', TRUE, FALSE, TRUE)
                         """.trimIndent(),
                     )
                     seedInUseContent(statement)

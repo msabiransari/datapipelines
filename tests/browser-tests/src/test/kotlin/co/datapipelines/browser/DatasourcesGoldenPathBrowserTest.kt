@@ -289,7 +289,10 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
         // usage question, so a member is never shown a confirm whose POST would refuse.
         startTrace()
         loginReadyUser()
-        val shared = registerThrough("shared-" + generatedPassword("ds").take(10).lowercase(), global = true)
+        // D-R7: an INSTANCE datasource ("global" on the wire) is owned by no workspace and
+        // therefore visible in none — not even to the super admin who registered it. It is a
+        // GRANT that makes it visible, which is why this registration does not wait for a row.
+        val shared = registerThrough("shared-" + generatedPassword("ds").take(10).lowercase(), global = true, expectRow = false)
 
         val member =
             seedLocalUser(
@@ -305,8 +308,11 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
             session.page.fill("#login-password", member.oneTimePassword)
             session.page.click("form button[type=submit]")
             session.page.waitForURL("**/dashboard")
-            // A member's own workspace; the GLOBAL datasource is visible from any of them.
-            createWorkspaceOn(session.page, "mem-" + generatedPassword("w").take(8).lowercase())
+            // The member works in `default` (the fixture's membership) and cannot create a
+            // workspace at all since D-R11 — creating is the super admin's act. So the grant
+            // that makes the instance datasource visible to them names `default`, and it is
+            // made through the product's own verb by the super admin who registered it.
+            grantToDefaultWorkspace(shared)
 
             session.page.navigate("$baseUrl/datasources")
             session.page
@@ -334,6 +340,7 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
     private fun registerThrough(
         name: String,
         global: Boolean = false,
+        expectRow: Boolean = true,
     ): String {
         page.navigate("$baseUrl/datasources")
         page.click("text=Register Datasource")
@@ -346,8 +353,30 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
         page.waitForResponse("**/partials/datasources") {
             page.click("#register-modal button[type=submit]")
         }
-        rowFor(name).waitFor()
+        if (expectRow) rowFor(name).waitFor()
         return name
+    }
+
+    /**
+     * `POST /api/v1/datasources/{name}/grants/default` as the signed-in super admin — the
+     * grants verb (D-R7), driven from the page so the session cookie and the CSRF
+     * double-submit pair are the real ones. There is no grants SCREEN yet; that is round 2.
+     */
+    private fun grantToDefaultWorkspace(name: String) {
+        val status =
+            page.evaluate(
+                """async (name) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const res = await fetch('/api/v1/datasources/' + name + '/grants/default', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+                  });
+                  return res.status;
+                }""",
+                name,
+            )
+        status shouldBe 200
     }
 
     private fun rowFor(name: String) =

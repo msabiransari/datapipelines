@@ -92,11 +92,17 @@ Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, 
 API keys are:
 - Issued per-user-per-agent from the UI's API screen (e.g., "Claude Desktop key", "GLM key"); HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only).
 - Revocable, optionally expiring.
-- Scoped `read` / `execute` / `author` / `admin` (hierarchical, [Auth §7.5](auth.md#75-scopes)). A key's scopes are a subset of its creator's scopes at issue time.
+- Scoped `read` / `execute` / `author` (hierarchical, [Auth §7.5](auth.md#75-scopes)). **`admin` is no longer issuable to a key** — it was the only scope that ever bought a key an INSTANCE verb, and instance verbs are human. A key's scopes are a subset of what its issuer can do in the pinned workspace at issue time.
 
 **An agent's key is a `user` key — the same kind a program uses over REST.** The UI labels it "Agent / API key" for exactly that reason: one credential kind, two surfaces. The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
 
-**Scope enforcement.** The minimum scope for every MCP tool is defined once in the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative) — this spec restates each tool's requirement in §6.2 for readability but the matrix is authoritative on any conflict. The `admin` scope exists (global datasource management, user administration) but **no MCP tool's minimum scope is `admin`**. `datasources_create` (§6.2.22) sits on `author` like the rest; binding a datasource `global: true` does require admin, but that is a workspaces D8 rule inside the shared create service, not a scope floor — the same rule REST applies. Editing and deleting datasources remain UI/REST-only. An `admin` key still works everywhere, since scopes are hierarchical.
+**Enforcement is TWO axes, and a key must satisfy both** ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative), [§11A](auth.md#11a-roles)). The minimum SCOPE and the minimum ROLE for every MCP tool are defined once in that matrix — this spec restates each tool's requirement in §6.2 for readability, but the matrix is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers both here and at the REST interceptor.
+
+**A key can do at most what its ISSUER can do NOW.** On every request the key's own scope is checked against the tool's minimum, AND the issuer's CURRENT membership in the pinned workspace is checked against the tool's minimum role — re-read inside the same 60s validation-cache TTL as revocation. So a key whose issuer was demoted or removed from the workspace stops working within about a minute, and the refusal is `auth.key_issuer_role_lost` rather than `auth.role_required`: retrying with that key will never work, and a new key from someone who still holds the role is the fix.
+
+No MCP tool's minimum role is `promote` or `super_admin`, and none is `ws_admin` except `datasources_test` (it opens a live connection and writes the datasource's health down — an operational act). Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key holds `admin` scope. Registering, editing and deleting datasources remain UI/REST-only.
+
+**Datasource visibility is a GRANT** ([Auth §11A](auth.md#11a-roles)). A datasource not granted to the key's pinned workspace does not exist for it: `datasources_list` is the truth, and guessing a name gets the not-found envelope, never a "forbidden".
 
 **Security chain.** `/mcp` (both `POST` and `GET`) is an explicit matcher in the Spring Security filter chain: CSRF-exempt (no cookie auth to forge against), no session cookies accepted, same scope enforcement as REST, same per-user rate limits ([REST API §12](rest-api.md#12-rate-limiting)). See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 
@@ -206,7 +212,7 @@ A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_
 
 ### 6.2 Tool definitions
 
-Every tool definition below carries a **Scope** row: the minimum scope the calling API key must hold. Those values are sourced from the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative), which is authoritative — if this doc and the matrix ever disagree, the matrix wins. Scopes are hierarchical (`author` ⊃ `execute` ⊃ `read`; `admin` ⊃ all), so a listed scope is a floor, not an exact match. No v1 MCP tool requires `admin` (§4.1).
+Every tool definition below carries a **Scope** row: the minimum scope the calling API key must hold. Those values are sourced from the [Auth §7.6 operation matrix](auth.md#76-operation-matrix--two-axes-authoritative), which is authoritative — if this doc and the matrix ever disagree, the matrix wins. Scopes are hierarchical (`author` ⊃ `execute` ⊃ `read`; `admin` ⊃ all), so a listed scope is a floor, not an exact match. No v1 MCP tool requires `admin` (§4.1).
 
 Every tool's result envelope, including its error shape, is §6.3.
 
@@ -983,7 +989,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 
 Returns `{path, deleted: true}`, or `endpoint.not_found`.
 
-**Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+**Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 
 **Mutating.** Declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3). The audit row carries the datasource NAME and never the credential.
 
@@ -1095,7 +1101,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
 }
 ```
 
-**Scope:** `author` — the datasource-mutation floor ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
+**Scope:** `author` — the datasource-mutation floor ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
 
 **Mutating.** Declared `mutating` in the tool catalog: every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -1566,7 +1572,7 @@ The error payload inside the tool result matches the [REST API `error` object](r
 ### 9.3 Transport errors
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
-- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
+- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -1644,7 +1650,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - [ ] API key validated on every request, not just session establishment — via `DP-API-Key` **and** `Authorization: Bearer dpk_...`, both through the single [Auth §7.3](auth.md#73-validation-flow) path. No second, laxer code path for the Bearer form.
 - [ ] Session JWTs (`dp_session` cookie, non-`dpk_` Bearer tokens) are **rejected** on `/mcp` — verify with a test that a valid browser session cannot call a tool.
 - [ ] Key revocation and owner deactivation take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
-- [ ] Scope enforced per tool against the [Auth §7.6 matrix](auth.md#76-scope--operation-matrix-authoritative) — one test per tool asserting the next-lower scope is refused with `auth.scope.insufficient`.
+- [ ] Scope enforced per tool against the [Auth §7.6 matrix](auth.md#76-operation-matrix--two-axes-authoritative) — one test per tool asserting the next-lower scope is refused with `auth.scope.insufficient`.
 - [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a valid `read` key cannot read another user's results.
 - [ ] `resources/list` filtered by the caller's scope and ownership (§7.3), not just paginated.
 - [ ] Datasource passwords never included in tool results or resources; `datasources_test` failures do not echo credentials or JDBC URLs.

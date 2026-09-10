@@ -2,6 +2,7 @@ package co.datapipelines.web.workspaces
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
@@ -10,7 +11,6 @@ import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceNameInvalidException
 import co.datapipelines.auth.WorkspaceNotFoundException
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException
@@ -68,13 +68,13 @@ class WorkspacesControllerTest {
     }
 
     @Test
-    fun `create returns 201's payload with name, display_name, is_personal, created_at`() {
+    fun `create returns 201's payload, now carrying the workspace's active state (D-R10)`() {
         authenticate()
         every { service.create(any(), "acme", "Acme") } returns ws
 
         val data = controller.create(mapper.readTree("""{"name":"acme","display_name":"Acme"}""")).data
 
-        data.keys shouldBe setOf("name", "display_name", "is_personal", "created_at")
+        data.keys shouldBe setOf("name", "display_name", "is_personal", "created_at", "active", "deactivated_at")
     }
 
     @Test
@@ -121,23 +121,35 @@ class WorkspacesControllerTest {
     }
 
     @Test
-    fun `the member listing projects identity, role and join date`() {
+    fun `the member listing projects identity, capability flags and join date`() {
         authenticate()
         every { service.members(any(), "acme") } returns
-            listOf(WorkspaceMemberRow(userId, "alice@company.com", "Alice", WorkspaceRole.OWNER, Instant.EPOCH))
+            listOf(WorkspaceMemberRow(userId, "alice@company.com", "Alice", MembershipFlags(author = true, admin = true), Instant.EPOCH))
 
         val row = controller.members("acme").data.single()
 
-        row.keys shouldBe setOf("user_id", "email", "display_name", "role", "joined_at")
-        row["role"] shouldBe "owner"
+        row.keys shouldBe setOf("user_id", "email", "display_name", "author", "promoter", "admin", "joined_at")
+        // A workspace admin: `admin` true and, by the database's own invariant, `author` too.
+        row["author"] shouldBe true
+        row["admin"] shouldBe true
+        row["promoter"] shouldBe false
     }
 
     @Test
-    fun `list-own rows carry the caller's role`() {
+    fun `list-own rows carry the caller's capability FLAGS, not a role label (D-R2)`() {
         authenticate()
         every { service.listOwn(any()) } returns
-            listOf(co.datapipelines.auth.WorkspaceMembership(ws.id, "acme", WorkspaceRole.OWNER, Instant.EPOCH))
+            listOf(co.datapipelines.auth.WorkspaceMembership(ws.id, "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH))
 
-        controller.list().data.single()["role"] shouldBe "owner"
+        val row = controller.list().data.single()
+
+        // `role` left the wire with the column. It is NOT replaced by a computed "highest
+        // role" string: the flags are additive, so any single label would have to lie about
+        // one of them — "author who also releases" has no name.
+        row["role"] shouldBe null
+        row["author"] shouldBe true
+        row["promoter"] shouldBe false
+        row["admin"] shouldBe true
+        row["active"] shouldBe true
     }
 }

@@ -55,7 +55,7 @@ class ExecutionHistoryBrowseModel(
         offset: Int,
     ): String {
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
+        val isAdmin = principal.isWorkspaceAdmin
         val wanted = status?.let { runCatching { ExecutionStatus.valueOf(it.trim().uppercase()) }.getOrNull() }
         val page = maxOf(0, offset)
         val raw =

@@ -119,8 +119,8 @@ class AuthControllerTest {
 
     @Test
     fun `create returns the plaintext exactly once`() {
-        authenticate(setOf(Scope.ADMIN))
-        every { apiKeyService.issue(userId, "claude", setOf(Scope.READ), setOf(Scope.ADMIN), any(), null) } returns
+        authenticate(setOf(Scope.AUTHOR))
+        every { apiKeyService.issue(any(), userId, "claude", setOf(Scope.READ), any(), null) } returns
             IssuedApiKey(key("dpk_new", false), "dpk_new.secret")
 
         val data = controller.createKey(CreateApiKeyRequest(name = "claude", scopes = listOf("read"))).data
@@ -131,7 +131,7 @@ class AuthControllerTest {
     @Test
     fun `scopes outside the caller's own are the 403 the service raises`() {
         authenticate(setOf(Scope.READ))
-        every { apiKeyService.issue(userId, "x", setOf(Scope.ADMIN), setOf(Scope.READ), any(), null) } throws
+        every { apiKeyService.issue(any(), userId, "x", setOf(Scope.ADMIN), any(), null) } throws
             ScopeInsufficientException(Scope.ADMIN, setOf(Scope.READ))
 
         val error =

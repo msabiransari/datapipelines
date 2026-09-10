@@ -32,8 +32,20 @@ class UiWorkspaceAdvice(
     private val workspaceService: WorkspaceService,
     private val themeResolver: ThemeResolver,
 ) {
+    /**
+     * The switcher's options.
+     *
+     * `listOwn`, not `memberships`: a SUPER ADMIN holds no explicit membership in the
+     * workspaces they administer (D-R8 makes them an implicit member of every one), and
+     * D-R11 made creating a workspace their act — so a switcher built from explicit
+     * memberships offers a super admin nothing, not even the workspace they just created,
+     * while `/workspaces` lists them all. Deactivated workspaces are filtered out here and
+     * only here: `/workspaces` shows them greyed because that screen is where they are
+     * reactivated, but a workspace nobody may enter must not be offered as a destination.
+     */
     @ModelAttribute("workspaceOptions")
-    fun workspaceOptions(): List<WorkspaceMembership>? = principal()?.let { workspaceService.memberships(it.userId) }
+    fun workspaceOptions(): List<WorkspaceMembership>? =
+        principal()?.let { principal -> workspaceService.listOwn(principal).filter { it.workspaceActive } }
 
     @ModelAttribute("activeWorkspace")
     fun activeWorkspace(): String? = principal()?.workspace?.name

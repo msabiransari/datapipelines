@@ -40,7 +40,7 @@ class LakeTableToolsTest {
             displayName = "Sample lake",
             dialect = Dialect.LAKE,
             jdbcUrl = "jdbc:duckdb:",
-            workspaceId = McpFixtures.WORKSPACE_ID,
+            ownerWorkspaceId = McpFixtures.WORKSPACE_ID,
         )
 
     private val registry = FakeDatasourceRegistry(listOf(lake))

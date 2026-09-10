@@ -341,7 +341,7 @@ class CalculatorSurfaceE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-calc-surface-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-calc-surface-key", arrayOf("read", "execute", "author"))
 
         /** Set by Order(1), read by the later legs — the composition suite's pattern. */
         private var pipelineId: String? = null

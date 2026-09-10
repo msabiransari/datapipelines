@@ -471,7 +471,7 @@ class BootstrapCredentialResyncIntegrationTest {
         /** The datasource AS DEFINED, minus the credential and minus `updated_at`. */
         const val DEFINITION_COLUMNS =
             "name, display_name, description, dialect, jdbc_url, username, properties_json::text AS props, " +
-                "query_timeout_seconds, introspection_include_schemas_json::text AS incl, is_readonly, workspace_id, " +
+                "query_timeout_seconds, introspection_include_schemas_json::text AS incl, is_readonly, owner_workspace_id, " +
                 "is_deleted, created_at, created_by"
 
         /** Everything that existed before V9 — the definition plus `updated_at`. */

@@ -72,6 +72,11 @@ none is auto-created: a folder exists exactly when something is named under it.
 boundary — membership decides who can read and execute. The root segment is an organising
 claim, not a permission: putting a pipeline under `finance/` grants nobody anything.
 
+**Your key is pinned to one workspace and can do at most what its issuer can do there;
+nothing from another workspace exists for you.** A name or id you did not get from a listing
+is not-found, never "forbidden" — so guessing tells you nothing, and a listing is the only
+truth about what is there.
+
 **Shape: `<owner>/<area>/<asset>`.** 2–4 levels is typical.
 
 - **A pipeline and the templates it uses share a prefix.** That is the whole payoff — one

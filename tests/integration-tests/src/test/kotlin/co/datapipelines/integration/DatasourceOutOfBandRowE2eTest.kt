@@ -112,6 +112,15 @@ class DatasourceOutOfBandRowE2eTest {
                     ON CONFLICT (name) DO UPDATE SET properties_json = EXCLUDED.properties_json
                     """.trimIndent(),
                 )
+                // D-R7: an out-of-band row still needs its grant, or it is invisible — which
+                // is exactly what the round changed and what a row written by hand must honour.
+                statement.execute(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    SELECT '$DS', w.id, '$ADMIN_USER_ID' FROM workspaces w WHERE w.is_deleted = FALSE
+                    ON CONFLICT DO NOTHING
+                    """.trimIndent(),
+                )
             }
         }
     }
@@ -160,7 +169,7 @@ class DatasourceOutOfBandRowE2eTest {
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000003"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-oob-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-oob-key", arrayOf("read", "execute", "author"))
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres

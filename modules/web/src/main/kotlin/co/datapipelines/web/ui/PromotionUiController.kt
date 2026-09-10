@@ -89,7 +89,7 @@ class PromotionUiController(
      * rather than on a generic error page.
      */
     @PostMapping("/promotion/promote")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.PROMOTE_VERSION)
     fun promote(
         @RequestParam(name = "name", required = false) names: List<String>?,
     ): String {

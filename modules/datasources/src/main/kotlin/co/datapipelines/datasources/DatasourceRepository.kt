@@ -46,9 +46,9 @@ class DatasourceRow(
     val queryTimeoutSeconds: Int?,
     val introspectionIncludeSchemas: List<String>,
     val isReadonly: Boolean,
-    /** The bound workspace (V4), or null = global (D9). */
-    val workspaceId: UUID?,
-    /** The bound workspace's name, joined at read time; null exactly when [workspaceId] is null. */
+    /** The OWNING workspace (V23 `owner_workspace_id`), or null for an instance datasource (D-R7). */
+    val ownerWorkspaceId: UUID?,
+    /** The owning workspace's name, joined at read time; null exactly when [ownerWorkspaceId] is null. */
     val workspaceName: String?,
     /**
      * The V9 last-connection-test outcome (§8.1B), or null when never probed — which is what
@@ -86,7 +86,7 @@ class DatasourceRow(
             properties = properties.copy(hikari = properties.hikari.filterKeys { it.lowercase() !in RefusedPropertyKeys.SERVER_MANAGED }),
             introspectionIncludeSchemas = introspectionIncludeSchemas,
             isReadonly = isReadonly,
-            workspaceId = workspaceId,
+            ownerWorkspaceId = ownerWorkspaceId,
             workspaceName = workspaceName,
             lastTest = lastTest,
         )
@@ -159,10 +159,9 @@ class DatasourceRepository(
     }
 
     /**
-     * Every datasource VISIBLE to [workspaceId] (workspaces design §5.3): the workspace's
-     * bound rows plus every global one (`workspace_id IS NULL`), name order. The predicate
-     * lives in the SQL — never a controller-side post-filter — so paging totals count
-     * exactly what the principal can see (a post-filter leaks via paging counts).
+     * Every datasource GRANTED to [workspaceId] (RBAC design §4, D-R7), name order. The
+     * predicate lives in the SQL — never a controller-side post-filter — so paging totals
+     * count exactly what the principal can see (a post-filter leaks via paging counts).
      */
     fun findAllVisible(
         workspaceId: UUID,
@@ -172,7 +171,7 @@ class DatasourceRepository(
         return jdbc.query(
             """
             $SELECT_COLUMNS
-             WHERE d.is_deleted = FALSE AND (d.workspace_id IS NULL OR d.workspace_id = :workspaceId)$dialectFilter
+             WHERE d.is_deleted = FALSE AND $GRANTED_PREDICATE$dialectFilter
              ORDER BY d.name
             """.trimIndent(),
             MapSqlParameterSource().addValue("workspaceId", workspaceId).addValue("dialect", dialect?.wire),
@@ -181,10 +180,10 @@ class DatasourceRepository(
     }
 
     /**
-     * The live row for [name] when VISIBLE to [workspaceId] (its bound rows + global), else
-     * null — by-name GET of another workspace's datasource behaves as not-found (design
-     * §5.3, the no-oracle rule). [findByName] stays unfiltered for the name-keyed internal
-     * paths (save, pool build, D10 live read).
+     * The live row for [name] when GRANTED to [workspaceId], else null — an UNGRANTED
+     * datasource is invisible, not forbidden (D-R5/D-R7): by-name access behaves exactly as
+     * not-found. [findByName] stays unfiltered for the name-keyed internal paths (save, pool
+     * build, D10 live read), which run after authorization rather than instead of it.
      */
     fun findVisibleByName(
         name: String,
@@ -194,7 +193,7 @@ class DatasourceRepository(
             .query(
                 """
                 $SELECT_COLUMNS
-                 WHERE d.is_deleted = FALSE AND d.name = :name AND (d.workspace_id IS NULL OR d.workspace_id = :workspaceId)
+                 WHERE d.is_deleted = FALSE AND d.name = :name AND $GRANTED_PREDICATE
                 """.trimIndent(),
                 MapSqlParameterSource().addValue("name", name).addValue("workspaceId", workspaceId),
                 mapper(),
@@ -216,7 +215,7 @@ class DatasourceRepository(
      * the existing credential is KEPT (a PUT that omits it) — except for
      * [CredentialKind.NONE], where null is the credential and the column is cleared, which is
      * why the branch reads the KIND and not just the argument. `is_readonly`
-     * and `workspace_id` update to the entity's values — the D8-gated flag writes cross the
+     * and `owner_workspace_id` update to the entity's values — the D8-gated flag writes cross the
      * registry save boundary, which is what makes a flip reach the pool (see INSERT_SQL's note).
      */
     fun update(
@@ -236,7 +235,7 @@ class DatasourceRepository(
                 .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
                 .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
                 .addValue("isReadonly", datasource.isReadonly)
-                .addValue("workspaceId", datasource.workspaceId)
+                .addValue("ownerWorkspaceId", datasource.ownerWorkspaceId)
                 .addValue("credentialEncrypted", credentialEncrypted)
         // NONE writes its NULL; every other kind keeps the stored blob when the caller sent none.
         val writesCredential = credentialEncrypted != null || datasource.credentialKind == CredentialKind.NONE
@@ -340,7 +339,7 @@ class DatasourceRepository(
         .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
         .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
         .addValue("isReadonly", datasource.isReadonly)
-        .addValue("workspaceId", datasource.workspaceId)
+        .addValue("ownerWorkspaceId", datasource.ownerWorkspaceId)
         .addValue("createdBy", createdBy)
 
     /**
@@ -376,7 +375,7 @@ class DatasourceRepository(
                 queryTimeoutSeconds = rs.getObject("query_timeout_seconds") as? Int,
                 introspectionIncludeSchemas = readIncludeSchemas(rs.getString("introspection_include_schemas_json")),
                 isReadonly = rs.getBoolean("is_readonly"),
-                workspaceId = rs.getObject("workspace_id", UUID::class.java),
+                ownerWorkspaceId = rs.getObject("owner_workspace_id", UUID::class.java),
                 workspaceName = rs.getString("workspace_name"),
                 lastTest = readLastTest(rs),
                 isDeleted = rs.getBoolean("is_deleted"),
@@ -450,16 +449,35 @@ class DatasourceRepository(
             "d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, " +
                 "d.credential_kind, d.credential_encrypted, " +
                 "d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json, " +
-                "d.is_readonly, d.workspace_id, w.name AS workspace_name, " +
+                "d.is_readonly, d.owner_workspace_id, w.name AS workspace_name, " +
                 "d.last_test_at, d.last_test_ok, d.last_test_message, " +
                 "d.is_deleted, d.created_at, d.updated_at, d.created_by"
 
-        /** Every read joins `workspaces` for the additive `workspace` name (LEFT — global rows have NULL). */
+        /**
+         * Every read joins `workspaces` for the additive `workspace` name — LEFT, because an
+         * INSTANCE datasource (no owning workspace, D-R7) has NULL there.
+         */
         const val SELECT_COLUMNS =
-            "SELECT $COLUMNS FROM datasources d LEFT JOIN workspaces w ON w.id = d.workspace_id"
+            "SELECT $COLUMNS FROM datasources d LEFT JOIN workspaces w ON w.id = d.owner_workspace_id"
 
         /**
-         * `is_readonly` and `workspace_id` are written on INSERT and UPDATE both — the
+         * The visibility predicate (D-R7): a datasource is visible to a workspace exactly when
+         * a GRANT row says so. "Global" is gone — the V23 backfill turned every former
+         * `workspace_id IS NULL` row into one grant per existing workspace, so nothing that
+         * was visible yesterday stopped being visible, and nothing is visible by default any
+         * more.
+         *
+         * An `EXISTS` sub-select rather than a join: a datasource granted to N workspaces must
+         * not multiply its own row N times in a listing, and `EXISTS` also lets the SQL keep
+         * the predicate where paging counts it (a controller-side post-filter leaks the hidden
+         * set through the totals).
+         */
+        const val GRANTED_PREDICATE =
+            "EXISTS (SELECT 1 FROM datasource_workspaces g " +
+                "WHERE g.datasource_name = d.name AND g.workspace_id = :workspaceId)"
+
+        /**
+         * `is_readonly` and `owner_workspace_id` are written on INSERT and UPDATE both — the
          * surfaces slice's flag writes (workspaces design §6/D8) cross the registry's save
          * boundary, which evicts the pool on every update so a `readonly` flip takes effect
          * at the next pool build. The D8 gates (who may flip what) live at the web surface;
@@ -477,23 +495,23 @@ class DatasourceRepository(
                     (name, display_name, description, dialect, jdbc_url, username,
                      credential_kind, credential_encrypted,
                      properties_json, query_timeout_seconds, introspection_include_schemas_json,
-                     is_readonly, workspace_id, created_by)
+                     is_readonly, owner_workspace_id, created_by)
                 VALUES
                     (:name, :displayName, :description, :dialect, :jdbcUrl, :username,
                      :credentialKind, :credentialEncrypted,
                      CAST(:propertiesJson AS jsonb), :queryTimeoutSeconds,
-                     CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :workspaceId, :createdBy)
+                     CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :ownerWorkspaceId, :createdBy)
                 RETURNING name, display_name, description, dialect, jdbc_url, username, credential_kind, credential_encrypted,
                     properties_json, query_timeout_seconds, introspection_include_schemas_json,
-                    is_readonly, workspace_id, last_test_at, last_test_ok, last_test_message,
+                    is_readonly, owner_workspace_id, last_test_at, last_test_ok, last_test_message,
                     is_deleted, created_at, updated_at, created_by
             )
             SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.credential_kind, d.credential_encrypted,
                    d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
-                   d.is_readonly, d.workspace_id, w.name AS workspace_name,
+                   d.is_readonly, d.owner_workspace_id, w.name AS workspace_name,
                    d.last_test_at, d.last_test_ok, d.last_test_message,
                    d.is_deleted, d.created_at, d.updated_at, d.created_by
-              FROM inserted d LEFT JOIN workspaces w ON w.id = d.workspace_id
+              FROM inserted d LEFT JOIN workspaces w ON w.id = d.owner_workspace_id
             """.trimIndent()
 
         val UPDATE_WITH_CREDENTIAL_SQL = updateSql(includeCredential = true)
@@ -521,20 +539,20 @@ class DatasourceRepository(
                            query_timeout_seconds = :queryTimeoutSeconds,
                            introspection_include_schemas_json = CAST(:introspectionIncludeSchemas AS jsonb),
                            is_readonly = :isReadonly,
-                           workspace_id = :workspaceId,
+                           owner_workspace_id = :ownerWorkspaceId,
                            updated_at = NOW()
                      WHERE name = :name AND is_deleted = FALSE
                     RETURNING name, display_name, description, dialect, jdbc_url, username, credential_kind, credential_encrypted,
                         properties_json, query_timeout_seconds, introspection_include_schemas_json,
-                        is_readonly, workspace_id, last_test_at, last_test_ok, last_test_message,
+                        is_readonly, owner_workspace_id, last_test_at, last_test_ok, last_test_message,
                         is_deleted, created_at, updated_at, created_by
                 )
                 SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.credential_kind, d.credential_encrypted,
                        d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
-                       d.is_readonly, d.workspace_id, w.name AS workspace_name,
+                       d.is_readonly, d.owner_workspace_id, w.name AS workspace_name,
                        d.last_test_at, d.last_test_ok, d.last_test_message,
                        d.is_deleted, d.created_at, d.updated_at, d.created_by
-                  FROM updated d LEFT JOIN workspaces w ON w.id = d.workspace_id
+                  FROM updated d LEFT JOIN workspaces w ON w.id = d.owner_workspace_id
                 """.trimIndent()
         }
     }

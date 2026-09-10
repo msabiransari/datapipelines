@@ -36,8 +36,10 @@ class AuthPropertiesSpecDriftTest {
     @Test
     fun `workspaces property defaults match configuration-md section 3-17`() {
         val props = WorkspacesProperties()
-        documented.getValue("datapipelines.workspaces.provisioning-mode") shouldBe props.provisioningMode.wire
-        documented.getValue("datapipelines.workspaces.open-join") shouldBe props.openJoin.toString()
+        // `provisioning-mode` and `open-join` were REMOVED in RBAC round 1 (D-R11) and are gone
+        // from §3.17 and from the properties class both, so there is nothing left to compare
+        // for them — `ConfigValidatorTest` asserts the other half: that SETTING either refuses
+        // startup by name.
         documented.getValue("datapipelines.workspaces.member-datasources-enabled") shouldBe props.memberDatasourcesEnabled.toString()
     }
 

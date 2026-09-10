@@ -17,9 +17,6 @@ object WorkspaceErrorCodes {
     /** 403 — the principal is not a member of the addressed workspace (design §5.1/§7). */
     const val MEMBERSHIP_REQUIRED = "workspace.membership_required"
 
-    /** 403 — the provisioning mode forbids this caller creating a workspace (design §7). */
-    const val CREATION_FORBIDDEN = "workspace.creation_forbidden"
-
     /** 400 — `DP-Workspace` was sent on an API-key request; a key's workspace is pinned at issuance (D3). */
     const val HEADER_FORBIDDEN = "workspace.header_forbidden"
 
@@ -33,11 +30,34 @@ object WorkspaceErrorCodes {
     const val SESSION_REQUIRED = "workspace.session_required"
 
     /**
-     * 404 — an unknown workspace name, for a principal who could otherwise see any workspace
-     * (a global `admin`, design §8). For everyone else unknown and non-member are the same
-     * 403 [MEMBERSHIP_REQUIRED] — no existence oracle (the 019 precedent).
+     * 404 — the addressed workspace does not exist **for this caller** (D-R5). Since RBAC
+     * round 1 this is what a non-member gets too: "if he tries to access a resource, it
+     * should return 404 since that resource technically does not exist" (the owner's words).
+     * Unknown name, non-member, and deactivated-for-a-member are ONE answer, so nothing about
+     * a workspace is probeable. It also refuses a promotion batch naming a workspace the
+     * receiver does not have (O-4) — nothing is auto-created.
+     *
+     * This REPLACES [MEMBERSHIP_REQUIRED] on every path a caller-supplied name or id reaches.
+     * That code survives only where no workspace was addressed at all (a principal with zero
+     * memberships), because there is no name there to keep secret.
      */
     const val NOT_FOUND = "workspace.not_found"
+
+    /**
+     * 409 — the mutation would leave the workspace with no admin (design §1). Its own code
+     * rather than [IN_USE]: the caller's next step is "promote somebody else first", which is
+     * a different instruction from "empty the workspace first".
+     */
+    const val LAST_ADMIN = "workspace.last_admin"
+
+    /**
+     * 404 — the workspace is DEACTIVATED (D-R10). A member selecting it gets this, not a
+     * distinct code: to a member a deactivated workspace and a workspace that never existed
+     * must look the same, or deactivation becomes a signal. A KEY pinned to it gets
+     * [AuthErrorCodes.KEY_WORKSPACE_INACTIVE] instead — the pin already proves existence, so
+     * there is nothing left to hide and an operator needs the truth.
+     */
+    const val INACTIVE = "workspace.inactive"
 
     /** 400 — workspace name fails `[a-z0-9_-]+`, 1–63 (metadata-db §4.11). */
     const val NAME_INVALID = "workspace.validation.name_invalid"
@@ -52,10 +72,11 @@ object WorkspaceErrorCodes {
     val ALL: Set<String> =
         setOf(
             MEMBERSHIP_REQUIRED,
-            CREATION_FORBIDDEN,
             HEADER_FORBIDDEN,
             SESSION_REQUIRED,
             NOT_FOUND,
+            LAST_ADMIN,
+            INACTIVE,
             NAME_INVALID,
             DUPLICATE_NAME,
             IN_USE,
@@ -76,17 +97,6 @@ class WorkspaceMembershipRequiredException(
         HTTP_FORBIDDEN,
         detail,
         "You are not a member of that workspace.",
-    )
-
-/** The provisioning mode forbids this creation (design §7): `closed` refuses non-admins outright. */
-class WorkspaceCreationForbiddenException(
-    mode: WorkspaceProvisioningMode,
-) : AuthException(
-        WorkspaceErrorCodes.CREATION_FORBIDDEN,
-        HTTP_FORBIDDEN,
-        "Workspace creation is not permitted in provisioning mode '${mode.wire}'",
-        "Creating a workspace is not permitted on this server. Contact an administrator.",
-        details = mapOf("provisioning_mode" to mode.wire),
     )
 
 /**
@@ -118,9 +128,9 @@ class WorkspaceSessionRequiredException :
     )
 
 /**
- * An unknown workspace name addressed by a principal who could otherwise see any workspace —
- * a global `admin` (design §8). Members never see this: for them unknown and non-member are
- * the same 403 [WorkspaceMembershipRequiredException], so the name cannot be probed.
+ * The addressed workspace does not exist for this caller (D-R5): unknown name, not a member,
+ * or deactivated. ONE answer for all three — the 404 rule. Super admins reach every workspace
+ * (D-R8), so for them this really does mean "no such workspace".
  */
 class WorkspaceNotFoundException(
     name: String,
@@ -129,6 +139,37 @@ class WorkspaceNotFoundException(
         HTTP_NOT_FOUND,
         "Workspace '$name' not found.",
         "We couldn't find that workspace.",
+        details = mapOf("workspace" to name),
+    )
+
+/**
+ * The mutation would leave [name] with no admin (design §1). Refused at the service, not by a
+ * constraint: "at least one admin" is a cross-row invariant a CHECK cannot state, and a
+ * trigger's refusal would carry no catalogued code.
+ */
+class WorkspaceLastAdminException(
+    name: String,
+) : AuthException(
+        WorkspaceErrorCodes.LAST_ADMIN,
+        HTTP_CONFLICT,
+        "Workspace '$name' must keep at least one admin.",
+        "A workspace needs at least one admin. Give someone else the admin role first.",
+        details = mapOf("workspace" to name),
+    )
+
+/**
+ * A super admin addressed a DEACTIVATED workspace on a path that must refuse it (D-R10).
+ * Members never see this code — for them a deactivated workspace is [WorkspaceNotFoundException],
+ * because deactivation must not be a signal — and keys get
+ * [AuthErrorCodes.KEY_WORKSPACE_INACTIVE].
+ */
+class WorkspaceInactiveException(
+    name: String,
+) : AuthException(
+        WorkspaceErrorCodes.INACTIVE,
+        HTTP_NOT_FOUND,
+        "Workspace '$name' is deactivated.",
+        "That workspace has been deactivated.",
         details = mapOf("workspace" to name),
     )
 

@@ -2,6 +2,7 @@ package co.datapipelines.application.datasources
 
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -69,6 +70,7 @@ fun interface DatasourceCreateBinding {
 class DatasourceCreateService(
     private val datasources: DatasourceRegistry,
     private val binding: DatasourceCreateBinding,
+    private val grants: DatasourceGrantRepository,
 ) {
     /**
      * Registers the datasource described by [body] on behalf of [principal].
@@ -85,7 +87,7 @@ class DatasourceCreateService(
         val datasource =
             DatasourcePayloadBinder.bind(body, requirePassword = true).copy(
                 isReadonly = DatasourcePayloadBinder.booleanFlag(body, "readonly") ?: false,
-                workspaceId =
+                ownerWorkspaceId =
                     binding.resolve(
                         principal,
                         DatasourcePayloadBinder.booleanFlag(body, "global"),
@@ -99,6 +101,12 @@ class DatasourceCreateService(
                 mapOf("datasource_name" to datasource.name),
             )
         }
-        return datasources.save(datasource, principal.userId)
+        val saved = datasources.save(datasource, principal.userId)
+        // D-R7: visibility is the grant, and registering a datasource you then cannot see would
+        // be a bug wearing a rule's clothes. A workspace-owned datasource is granted to its own
+        // workspace here; an INSTANCE datasource (no owner) is granted to nothing — a super
+        // admin grants it explicitly, which is the decision the design wants made out loud.
+        saved.ownerWorkspaceId?.let { owner -> grants.grantOnRegistration(saved.name, owner, principal.userId) }
+        return saved
     }
 }

@@ -192,28 +192,28 @@ class SecurityConfig(
             setSecure(authProperties.secureCookies())
         }
 
-    /** Registers the scope interceptor on the MVC pipeline (auth.md §8.1). */
-    @Bean
-    fun scopeInterceptorConfigurer(): WebMvcConfigurer =
-        object : WebMvcConfigurer {
-            override fun addInterceptors(registry: InterceptorRegistry) {
-                registry.addInterceptor(scopeInterceptor)
-            }
-        }
-
     /**
-     * Registers the forced password change gate on the MVC pipeline (auth.md §5A.4)
-     * — ahead of EVERY handler except the single allowlist in
-     * [ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS], so a future controller is
-     * gated by default and cannot forget it.
+     * Registers both MVC interceptors, IN ORDER (auth.md §8.1, §5A.4).
+     *
+     * They were two configurer beans until RBAC round 1, which made the order load-bearing:
+     * `ScopeInterceptor` now refuses a principal with no reachable workspace before it looks
+     * at anything else (D-R5), and a user who must change their password may well have no
+     * workspace — so with the scope gate first they got `workspace.not_found` instead of
+     * "change your password", and the one instruction that could unstick them was unreachable.
+     *
+     * The forced-change gate goes first on the merits, not just to fix a test: it is about
+     * whether the CREDENTIAL may be used at all, which is upstream of what its holder may do.
+     * It is ahead of EVERY handler except [ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS],
+     * so a future controller is gated by default and cannot forget it.
      */
     @Bean
-    fun forcedChangeInterceptorConfigurer(): WebMvcConfigurer =
+    fun mvcInterceptorConfigurer(): WebMvcConfigurer =
         object : WebMvcConfigurer {
             override fun addInterceptors(registry: InterceptorRegistry) {
                 registry
                     .addInterceptor(forcedPasswordChangeInterceptor)
                     .excludePathPatterns(ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS)
+                registry.addInterceptor(scopeInterceptor)
             }
         }
 

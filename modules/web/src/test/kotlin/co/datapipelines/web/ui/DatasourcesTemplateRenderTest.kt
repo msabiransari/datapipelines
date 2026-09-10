@@ -393,6 +393,10 @@ class DatasourcesTemplateRenderTest {
         setVariable("hasMore", true)
         setVariable("total", 42)
         setVariable("scopes", setOf("ADMIN"))
+        // The action column's gate since RBAC round 1: the CAPABILITY, not the scope — a
+        // session carries no scopes at all (D-R1), so the old `scopes` test hid Test/Edit/
+        // Delete from every signed-in human.
+        setVariable("canAuthor", true)
     }
 
     private fun WebContext.fillPageModel() {
@@ -408,6 +412,10 @@ class DatasourcesTemplateRenderTest {
         setVariable("dialects", listOf("POSTGRES", "MYSQL"))
         setVariable("selectedDialect", "")
         setVariable("scopes", setOf("ADMIN"))
+        // The action column's gate since RBAC round 1: the CAPABILITY, not the scope — a
+        // session carries no scopes at all (D-R1), so the old `scopes` test hid Test/Edit/
+        // Delete from every signed-in human.
+        setVariable("canAuthor", true)
         setVariable("isAdmin", true)
         setVariable("memberDatasourcesEnabled", false)
         setVariable("canRegister", true)

@@ -622,8 +622,8 @@ class PublishedEndpointE2eTest {
                     )
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, role)
-                        VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', 'owner')
+                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
+                        VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', TRUE, FALSE, TRUE)
                         """.trimIndent(),
                     )
                 }
@@ -653,7 +653,7 @@ class PublishedEndpointE2eTest {
         private const val OTHER_WORKSPACE = "defa0000-0000-0000-0000-0000000000ee"
         private val ADMIN_USER: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("ep-admin-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("ep-admin-key", arrayOf("read", "execute", "author"))
         private val FOREIGN_KEY = E2eAuth.generateKey("ep-foreign-key", arrayOf("execute"))
 
         private val postgres get() = SharedE2e.postgres

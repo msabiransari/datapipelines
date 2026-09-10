@@ -71,7 +71,7 @@ class ExecutionToolsTest {
         val all =
             ExecutionsListTool(executions).call(
                 McpArguments(mapOf("pipeline_id" to McpFixtures.PIPELINE_ID.toString())),
-                McpFixtures.ctx(Scope.ADMIN),
+                McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
             ) as List<*>
 
         all.size shouldBe 2
@@ -161,7 +161,7 @@ class ExecutionToolsTest {
         val payload =
             ExecutionsGetTool(executions).call(
                 McpArguments(mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString())),
-                McpFixtures.ctx(Scope.ADMIN),
+                McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
             ) as Map<String, Any?>
 
         payload["triggered_by"] shouldBe McpFixtures.OTHER_USER.toString()

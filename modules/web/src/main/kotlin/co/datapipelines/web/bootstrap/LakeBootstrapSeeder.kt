@@ -53,7 +53,7 @@ import java.util.UUID
  * ## The principal
  *
  * Registration is recorded against the bootstrap actor (`lake_tables.registered_by`), the
- * deployment's configured bootstrap ADMIN — so the principal carries `Scope.ADMIN` as a
+ * deployment's configured bootstrap ADMIN — so the principal carries `superAdmin` as a
  * statement of fact (`UserService.provisionBootstrapActor` grants admin by construction), which
  * is also what the D8 global-mutation gate reads. `AuthMethod.OIDC` is the closest fit for a
  * human administrator's row; nothing on the import path reads it.
@@ -214,8 +214,13 @@ class LakeBootstrapSeeder(
             userId = user.id,
             email = user.email,
             displayName = user.displayName,
-            scopes = setOf(Scope.ADMIN),
+            // The `admin` SCOPE is gone as an authority since RBAC round 1 (D-R1): what makes
+            // the bootstrap actor able to register an instance datasource is `users.is_admin`,
+            // i.e. SUPER ADMIN. The scope stays for the credential axis of anything that still
+            // reads it; the flag is what the capability axis judges.
+            scopes = setOf(Scope.AUTHOR),
             authMethod = AuthMethod.OIDC,
+            superAdmin = true,
         )
     }
 }

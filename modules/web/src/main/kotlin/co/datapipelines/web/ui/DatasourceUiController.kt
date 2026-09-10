@@ -67,5 +67,5 @@ class DatasourceUiController(
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 
-    private fun isAdmin(): Boolean = principal()?.isAdmin == true
+    private fun isAdmin(): Boolean = principal()?.isSuperAdmin == true
 }

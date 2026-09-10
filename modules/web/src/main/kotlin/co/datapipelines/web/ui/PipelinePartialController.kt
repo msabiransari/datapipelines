@@ -102,7 +102,7 @@ class PipelinePartialController(
             principal.requireWorkspace().id,
             id,
             principal.userId,
-            Scope.satisfies(principal.scopes, Scope.ADMIN),
+            principal.isWorkspaceAdmin,
         )
     }
 

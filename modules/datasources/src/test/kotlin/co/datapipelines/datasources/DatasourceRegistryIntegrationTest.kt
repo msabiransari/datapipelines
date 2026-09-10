@@ -174,7 +174,11 @@ class DatasourceRegistryIntegrationTest {
     fun `getVisibleLive sees a row-level flip immediately while getVisible serves the cache (044 F4)`() {
         val registry = registry()
         val workspace = insertWorkspace("live_ws")
-        registry.save(Fixtures.h2(name = "bound_live", secret = "pw").copy(workspaceId = workspace), owner)
+        registry.save(Fixtures.h2(name = "bound_live", secret = "pw").copy(ownerWorkspaceId = workspace), owner)
+        // D-R7: OWNING a datasource is not SEEING it. Visibility is the grant, and the
+        // application layer writes it at registration (`DatasourceCreateService`); this suite
+        // drives the registry directly, so it writes its own.
+        grant("bound_live", workspace)
         // Warm the visibility cache with the writable entry — what a save validated against.
         registry.getVisible("bound_live", workspace).shouldNotBeNull().isReadonly shouldBe false
 
@@ -762,6 +766,18 @@ class DatasourceRegistryIntegrationTest {
                 UUID::class.java,
             ),
         )
+
+    /** The `datasource_workspaces` row that makes [datasource] visible to [workspaceId] (D-R7). */
+    private fun grant(
+        datasource: String,
+        workspaceId: UUID,
+    ) {
+        jdbc.update(
+            "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)" +
+                " VALUES (:ds, :ws, :by) ON CONFLICT DO NOTHING",
+            mapOf("ds" to datasource, "ws" to workspaceId, "by" to owner),
+        )
+    }
 
     private fun insertWorkspace(name: String): UUID =
         checkNotNull(

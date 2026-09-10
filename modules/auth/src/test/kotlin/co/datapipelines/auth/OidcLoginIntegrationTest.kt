@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -100,10 +101,11 @@ class OidcLoginIntegrationTest {
         val claims = jwtService.validate(session)
         claims["email"] shouldBe "alice@datapipelines.co"
 
-        @Suppress("UNCHECKED_CAST")
-        val scopes = claims["scopes"] as List<String>
-        // Bootstrap admin (§4.4 / D14): alice is the configured bootstrap email → admin.
-        scopes shouldContain "admin"
+        // The `scopes` claim is GONE (D-R1): a session's capability is its membership, and
+        // the one global answer left — `is_admin` — is read from the live user row on every
+        // request rather than frozen into an 8h token. The bootstrap grant is asserted on that
+        // row below, which is where it actually lives.
+        claims["scopes"].shouldBeNull()
 
         // The user row was created with the OIDC identity and is_admin true.
         val row =

@@ -195,7 +195,10 @@ catalog |= {c for c in re.findall(CODE_RE, texts.get("docs/datasources.md", ""))
 # in §15 before any doc may cite it, and §13 catalog codes are unaffected.
 enums_txt = texts.get("docs/enums.md", "")
 sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
-events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template)\.[a-z_]+(?:\.[a-z_]+)*",
+# `workspace` joined the audit namespaces in RBAC round 1 (member_added, member_removed,
+# member_flags_changed, deactivated, reactivated) — enums.md §15 remains the authority that
+# has to DEFINE one before any doc may cite it.
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))

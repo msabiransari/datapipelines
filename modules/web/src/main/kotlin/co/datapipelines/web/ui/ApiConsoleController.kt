@@ -7,7 +7,6 @@ import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.api.currentPrincipal
@@ -121,7 +120,7 @@ class ApiConsoleController(
         // 091 — the form's options. Rendered from the SAME source the partial validates against
         // (`ApiKeyForm`), so a select can never offer a value the server refuses. Order is the
         // owner's ruling: Kind → Scope → Name → Expiry → Bindings, scope and bindings conditional.
-        model.addAttribute("kindChoices", ApiKeyForm.kindChoices(principal.isAdmin))
+        model.addAttribute("kindChoices", ApiKeyForm.kindChoices(principal.isSuperAdmin))
         model.addAttribute("scopeChoices", ApiKeyForm.scopeChoices(principal.scopes))
         model.addAttribute("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
         model.addAttribute("expiryCustomWire", ApiKeyForm.CUSTOM)
@@ -143,7 +142,7 @@ class ApiConsoleController(
         // NEVER a literal: the count is what `tools/list` will actually return, and the
         // marketing site renders the same expression (SiteController) for the same reason.
         model.addAttribute("mcpToolCount", McpToolCatalog.NAMES.size)
-        model.addAttribute("canAuthor", Scope.satisfies(principal.scopes, Scope.AUTHOR))
+        model.addAttribute("canAuthor", principal.isAuthor)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "api/console"
     }

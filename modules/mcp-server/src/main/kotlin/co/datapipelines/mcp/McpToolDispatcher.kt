@@ -135,40 +135,32 @@ class McpToolDispatcher(
     }
 
     /**
-     * The §7.6 gate. Returns the refusal payload when the principal may not call [toolName], or
-     * null when it may.
+     * The §7.6 gate — BOTH axes (RBAC design §2). Returns the refusal payload when the
+     * principal may not call [toolName], or null when it may.
+     *
+     * Delegates entirely to [ScopeMatrix.allowedTool]: the scope minimum, the key issuer's
+     * current capability in the pinned workspace, the unreachable-workspace 404 and the
+     * fail-closed "this tool is in neither map" branch are all decided there, so this surface
+     * and the REST interceptor cannot answer the same question two ways.
      */
     private fun scopeRefusal(
         toolName: String,
         ctx: McpToolContext,
-    ): McpErrorPayload? {
-        val required = ScopeMatrix.requiredScopeForTool(toolName)
-        if (required == null) {
-            // Fail closed: an implemented tool with no documented minimum must not run.
-            log.error("MCP tool {} has no scope in the auth §7.6 matrix; refusing the call", toolName)
-            return McpErrorPayload(
-                code = PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT,
-                message = "Tool '$toolName' has no documented scope requirement and cannot be called.",
-                userMessage = "You do not have permission to perform this action.",
-                details = mapOf("tool" to toolName),
-            )
+    ): McpErrorPayload? =
+        when (val decision = ScopeMatrix.allowedTool(ctx.principal, toolName, ctx.principal.workspace)) {
+            is ScopeMatrix.Decision.Allowed -> {
+                null
+            }
+
+            is ScopeMatrix.Decision.Refused -> {
+                McpErrorPayload(
+                    code = decision.code,
+                    message = decision.message,
+                    userMessage = decision.userMessage,
+                    details = decision.details + mapOf("tool" to toolName),
+                )
+            }
         }
-        if (Scope.satisfies(ctx.principal.scopes, required)) return null
-        return McpErrorPayload(
-            code = PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT,
-            message = "Principal lacks required scope for this operation",
-            userMessage = "You do not have permission to perform this action.",
-            details =
-                mapOf(
-                    "tool" to toolName,
-                    "required" to required.wire,
-                    "held" to
-                        ctx.principal.scopes
-                            .map { it.wire }
-                            .sorted(),
-                ),
-        )
-    }
 
     /**
      * The single audit choke point. Every call site flows through here, so no outcome can

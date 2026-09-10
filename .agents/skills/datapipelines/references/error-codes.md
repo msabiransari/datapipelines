@@ -8,6 +8,10 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 |---|---|---|
 | `auth.api_key.missing` / `auth.api_key.invalid` | Credential problem | Ask the user for a fresh key |
 | `auth.scope.insufficient` | Key lacks the required scope | Ask for a broader key, or change what you asked |
+| `auth.role_required` | Your key's issuer lacks the ROLE for this action in this workspace — a different axis from scope, and a broader key will not help | Ask a workspace admin to grant the role, or do the part you can do. `details.required` / `details.held` name both sides |
+| `auth.key_issuer_role_lost` | The key was valid; its issuer's role changed | Retrying will never work — a NEW key from someone who still holds the role is the fix. Say so plainly; do not loop |
+| `datasource.grant_required` / `datasource.not_found` | The datasource is not granted to your workspace, or does not exist — deliberately indistinguishable | `datasources_list` is the truth. **Do not guess names**: an ungranted datasource is invisible, so a guess can never succeed and each one is noise |
+| `workspace.not_found` | The workspace you addressed does not exist for you: unknown, not yours, or deactivated — one answer for all three | Nothing to retry and nothing to probe. Your key's workspace is fixed at issuance; ask the user for a key in the workspace they mean |
 | `pipeline.validation.*` (`cycle_detected`, `dangling_dependency`, `duplicate_node_id`, `parameter_precision_missing`, …) | Pipeline JSON is invalid | Fix the JSON — never retry as-is |
 | `template.validation.*` (`syntax_error`, `dangerous_construct`, …) | Template body rejected | Fix the Freemarker and re-render |
 | `template.not_found` / `datasource.not_found` | Reference points at nothing | Create the referenced entity or fix the id |

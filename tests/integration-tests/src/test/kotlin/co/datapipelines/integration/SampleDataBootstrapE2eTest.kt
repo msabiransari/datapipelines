@@ -8,6 +8,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -69,19 +70,20 @@ class SampleDataBootstrapE2eTest {
     fun `startup registered both entries with their flags, global scope and the bootstrap actor`() {
         val actorId = bootstrapActorId()
 
-        rows("SELECT name, is_readonly, workspace_id, created_by, is_deleted FROM datasources ORDER BY name")
+        rows("SELECT name, is_readonly, owner_workspace_id, created_by, is_deleted FROM datasources ORDER BY name")
             .map { it["name"] } shouldContainExactly listOf(BOOT_RO, BOOT_RW)
 
         val readonly = row("SELECT * FROM datasources WHERE name = '$BOOT_RO'")
         readonly["is_readonly"] shouldBe true
-        // `global: true` = workspace_id NULL (metadata-db §4.10).
-        readonly["workspace_id"].shouldBeNull()
+        // `global: true` now means "no workspace OWNS it" (V23 `owner_workspace_id`); it no
+        // longer means "everybody sees it" — that is the grant table (D-R7).
+        readonly["owner_workspace_id"].shouldBeNull()
         readonly["created_by"] shouldBe actorId
         readonly["display_name"] shouldBe "Bootstrapped read-only"
 
         val writable = row("SELECT * FROM datasources WHERE name = '$BOOT_RW'")
         writable["is_readonly"] shouldBe false
-        writable["workspace_id"].shouldBeNull()
+        writable["owner_workspace_id"].shouldBeNull()
         writable["created_by"] shouldBe actorId
 
         // The `${'$'}{BOOTSTRAP_E2E_PASSWORD}` placeholder resolved against the process environment
@@ -127,13 +129,15 @@ class SampleDataBootstrapE2eTest {
     // ------------------------------------------------------------------ D9
 
     @Test
-    fun `an auto-per-user first login gets a personal workspace holding the imported examples`() {
+    fun `a first login with no membership joins demo, and demo holds the imported examples`() {
+        // D-R11 moved this: the examples are seeded ONCE, into `demo`, when the boot seeder
+        // creates it — not per user, per login. What a first login does now is JOIN that
+        // workspace as a viewer, so the user sees content somebody else's boot imported.
         val email = "demo-${UUID.randomUUID().toString().take(8)}@example.com"
 
         val (userId, workspaceId) = firstLogin(email)
 
-        // The workspace is the personal one provisioning just created...
-        row("SELECT * FROM workspaces WHERE id = '$workspaceId'")["is_personal"] shouldBe true
+        row("SELECT * FROM workspaces WHERE id = '$workspaceId'")["name"] shouldBe "demo"
 
         // ...and it holds the examples, read back through the same tables the REST API reads.
         rows("SELECT name FROM pipelines WHERE workspace_id = '$workspaceId' ORDER BY name")
@@ -141,8 +145,15 @@ class SampleDataBootstrapE2eTest {
         rows("SELECT name FROM templates WHERE workspace_id = '$workspaceId' ORDER BY name")
             .map { it["name"] } shouldContainExactly listOf(EXAMPLE_TEMPLATE)
 
-        // Imported as the new user, into their own workspace — not as the bootstrap admin.
-        scalar<UUID>("SELECT owner_id FROM pipelines WHERE workspace_id = '$workspaceId'") shouldBe userId
+        // Imported as the SYSTEM actor (auth.md §4.5): no human created what the product
+        // ships, and the user who happens to log in first did not author it.
+        scalar<UUID>("SELECT owner_id FROM pipelines WHERE workspace_id = '$workspaceId'") shouldNotBe userId
+
+        // …and the joiner is a VIEWER of it, which is the D-R11 rule in one row.
+        row(
+            "SELECT author, promoter, admin FROM workspace_members" +
+                " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
+        ).let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
 
         // The example pipeline reads the bootstrap-registered readonly datasource: §12 validation
         // resolved that reference at import time, which is the two halves of this slice meeting.
@@ -172,44 +183,72 @@ class SampleDataBootstrapE2eTest {
     }
 
     @Test
-    fun `an examples fixture that does not import fails the provisioning login loudly`() {
-        // Structurally fine, so it passes the startup read — and semantically broken, so it fails
-        // §12 validation at import. The failure must reach the login rather than hand the user a
-        // personal workspace that is quietly missing its examples.
+    fun `an examples fixture that does not import refuses the BOOT, loudly and findably`() {
+        // Structurally fine, so it passes the startup read — and semantically broken, so it
+        // fails §12 validation at import.
+        //
+        // WHERE it fails moved with D-R11. Seeding used to run on an `auto-per-user` first
+        // login, so the refusal reached a person trying to sign in; it now runs once, when
+        // `DemoWorkspaceSeeder` creates `demo` at boot. That is strictly better — a broken
+        // examples file is an operator's problem and now surfaces at deploy time rather than
+        // at the first user's login — and it is why this case asserts a refused CONTEXT.
+        //
+        // The fail-LOUD contract is what is really under test either way: a `demo` workspace
+        // that silently lacks the examples the deployment configured is indistinguishable from
+        // one that was seeded, so the seeder must throw rather than shrug.
         val broken =
             writeFile(
                 "broken-examples.json",
                 examplesJson().replace("\"source\": \"$BOOT_RO\"", "\"source\": \"no-such-datasource\""),
             )
+        resetDemoWorkspace()
 
-        bootAppAnd(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())) { context ->
-            val email = "broken-${UUID.randomUUID().toString().take(8)}@example.com"
+        val error =
+            assertThrows<Exception> {
+                bootApp(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())).close()
+            }
 
-            lateinit var error: Throwable
-            val lines = capturingLogs { error = assertThrows<Exception> { firstLogin(email, context) } }
+        // §13.2 `pipeline.import.missing_datasource` — the missing name travels in `details`,
+        // so the message is what a caller of this suite can assert on.
+        rootCauseMessage(error).shouldContain("has unmet dependencies in this environment")
+        rootCauseMessage(error).shouldContain(EXAMPLE_PIPELINE)
 
-            // §13.2 `pipeline.import.missing_datasource` — the missing name travels in `details`,
-            // so the message is what a caller of this suite can assert on.
-            rootCauseMessage(error).shouldContain("has unmet dependencies in this environment")
-            rootCauseMessage(error).shouldContain(EXAMPLE_PIPELINE)
+        // …and nothing was left behind: a refused boot must not hand the deployment a `demo`
+        // workspace holding half an import.
+        scalar<Long>(
+            "SELECT COUNT(*) FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name = 'demo'",
+        ) shouldBe 0L
 
-            // 048/§A — and the operator can find it. The refusal is deliberate; what it lacked
-            // was an event: "I can't log in" against a 500 with nothing structured behind it was
-            // an unanswerable support report (reported by 042 as T63). The line names the
-            // fixture that failed and the catalogued code, beside the workspace and the user.
-            val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
-            failure.shouldContain("fixture_kind=pipeline")
-            failure.shouldContain("fixture=$EXAMPLE_PIPELINE")
-            failure.shouldContain("error_code=pipeline.import.missing_datasource")
-            failure.shouldContain("user_id=")
-            lines.none { it.contains("event=workspace.examples_seeded") } shouldBe true
-            // And the workspace it was seeding is not left behind as a usable empty one: the
-            // login failed, so nothing downstream of provisioning ran.
-            scalar<Long>(
-                "SELECT COUNT(*) FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name LIKE 'broken-%'",
-            ) shouldBe
-                0L
-        }
+        // 048/§A's log contract (`event=workspace.examples_seed_failed`, naming the fixture and
+        // the catalogued code) is NOT asserted here, and deliberately: `SpringApplication`
+        // re-initialises the logging system on startup, so an appender attached before the boot
+        // is discarded before the seeder ever writes. Asserting it would be asserting an empty
+        // list. It is asserted in `running the startup step again …`, which logs inside an
+        // already-running context — the only place the capture is real.
+    }
+
+    @Test
+    fun `a good examples file seeds DEMO at boot, once, and says so`() {
+        // The positive half of the seeding contract, asserted where a boot can be captured.
+        // `TaxiVsRideshareFourEngineE2eTest` asserts the resulting STATE; this asserts the act.
+        resetDemoWorkspace()
+
+        val good = writeFile("good-examples.json", examplesJson()).toString()
+        bootApp(mapOf("datapipelines.bootstrap.examples-file" to good)).close()
+
+        // The OUTCOME, not the log line: `SpringApplication` re-initialises logging on startup,
+        // so a boot-time event cannot be captured by an appender attached beforehand.
+        rows("SELECT p.name FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name = 'demo'")
+            .map { it["name"] } shouldContainExactly listOf(EXAMPLE_PIPELINE)
+        val seededAt = scalar<Any>("SELECT created_at FROM workspaces WHERE name = 'demo'")
+
+        // …and a SECOND boot seeds nothing: `demo` exists, so the seeder does not create it and
+        // therefore does not import. Once per deployment, which is what O-3 rests on.
+        bootApp(mapOf("datapipelines.bootstrap.examples-file" to good)).close()
+
+        rows("SELECT p.name FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name = 'demo'")
+            .map { it["name"] } shouldContainExactly listOf(EXAMPLE_PIPELINE)
+        scalar<Any>("SELECT created_at FROM workspaces WHERE name = 'demo'") shouldBe seededAt
     }
 
     @Test
@@ -291,7 +330,8 @@ class SampleDataBootstrapE2eTest {
     }
 
     /**
-     * The `auto-per-user` first login, at the two calls `OidcSuccessHandler` makes.
+     * A first login, at the two calls `OidcSuccessHandler` makes. Since D-R11 the second one
+     * joins `demo` when the user has no membership at all.
      * @return the new user's id and the id of the workspace login stamped.
      */
     private fun firstLogin(
@@ -321,6 +361,51 @@ class SampleDataBootstrapE2eTest {
     }
 
     /**
+     * Removes the `demo` workspace so the next boot CREATES it — and therefore seeds.
+     *
+     * Example seeding is a once-per-deployment act since D-R11: `DemoWorkspaceSeeder` imports
+     * the content only when it creates the workspace, and never re-creates one that exists
+     * (O-3). This module's suites share one database, which is one deployment, so a test that
+     * wants to observe seeding has to put the deployment back in the state where seeding
+     * happens. Without this the boot below succeeds silently and the assertion about a broken
+     * fixture asserts nothing — which is exactly how it first failed.
+     */
+    private fun resetDemoWorkspace() {
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    DELETE FROM pipeline_versions WHERE pipeline_id IN
+                        (SELECT id FROM pipelines WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo'));
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    "DELETE FROM pipelines WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                statement.execute(
+                    """
+                    DELETE FROM template_versions WHERE template_id IN
+                        (SELECT id FROM templates WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo'));
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    "DELETE FROM templates WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                statement.execute(
+                    "DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                // D-R7: the seeder grants the instance datasources to `demo` on creation, and
+                // those grant rows reference the workspace — deleting the row without them is
+                // a foreign-key violation, not a clean reset.
+                statement.execute(
+                    "DELETE FROM datasource_workspaces WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                statement.execute("DELETE FROM workspaces WHERE name = 'demo'")
+            }
+        }
+    }
+
+    /**
      * Boots the whole application with [overrides] on top of this class's infrastructure, to prove
      * a refusal is the WHOLE app refusing rather than one bean throwing in isolation.
      *
@@ -336,22 +421,6 @@ class SampleDataBootstrapE2eTest {
         return SpringApplicationBuilder(DatapipelinesApplication::class.java)
             .web(WebApplicationType.SERVLET)
             .run(*args)
-    }
-
-    /** Boots, runs [block] against that context, and always closes it. */
-    private fun bootAppAnd(
-        overrides: Map<String, String>,
-        block: (ApplicationContext) -> Unit,
-    ) = bootApp(overrides).use(block)
-
-    private fun rootCauseMessage(error: Throwable): String {
-        var current: Throwable = error
-        val seen = StringBuilder(current.message.orEmpty())
-        while (current.cause != null && current.cause !== current) {
-            current = current.cause!!
-            seen.append('\n').append(current.message.orEmpty())
-        }
-        return seen.toString()
     }
 
     private fun capturingLogs(block: () -> Unit): List<String> {
@@ -371,7 +440,7 @@ class SampleDataBootstrapE2eTest {
     private fun datasourceSnapshot(): List<Map<String, Any?>> =
         rows(
             "SELECT name, display_name, dialect, jdbc_url, username, encode(credential_encrypted, 'hex') AS pw," +
-                " properties_json::text AS props, is_readonly, is_deleted, workspace_id, created_by, created_at, updated_at" +
+                " properties_json::text AS props, is_readonly, is_deleted, owner_workspace_id, created_by, created_at, updated_at" +
                 " FROM datasources ORDER BY name",
         )
 
@@ -418,6 +487,17 @@ class SampleDataBootstrapE2eTest {
         private val datasourcesFile: Path = writeFile("bootstrap-datasources.yml", bootstrapYaml())
         private val examplesFile: Path = writeFile("examples.json", examplesJson())
 
+        /** Every message in the cause chain, joined — a §13 code can surface at any depth. */
+        private fun rootCauseMessage(error: Throwable): String {
+            var current: Throwable = error
+            val seen = StringBuilder(current.message.orEmpty())
+            while (current.cause != null && current.cause !== current) {
+                current = current.cause!!
+                seen.append('\n').append(current.message.orEmpty())
+            }
+            return seen.toString()
+        }
+
         private fun writeFile(
             name: String,
             content: String,
@@ -456,7 +536,7 @@ class SampleDataBootstrapE2eTest {
                   "id": "$EXAMPLE_TEMPLATE",
                   "dialect": "H2",
                   "display_name": "Bootstrap example",
-                  "description": "Seeded into every personal workspace",
+                  "description": "Seeded into the demo workspace",
                   "imports": [],
                   "body": "SELECT 1 AS n"
                 }
@@ -525,7 +605,6 @@ class SampleDataBootstrapE2eTest {
                 "datapipelines.auth.oidc.providers[0].display-name" to "Test Google",
                 "datapipelines.auth.base-url" to "http://localhost:8080",
                 "datapipelines.auth.bootstrap-admin-email" to ADMIN_EMAIL,
-                "datapipelines.workspaces.provisioning-mode" to "auto-per-user",
             )
 
         @DynamicPropertySource

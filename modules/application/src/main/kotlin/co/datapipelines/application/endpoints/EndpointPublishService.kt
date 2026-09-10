@@ -127,7 +127,7 @@ class EndpointPublishService(
         // A URL is global, but managing one is not: an endpoint belongs to the workspace that
         // published it, and another workspace's endpoint is invisible rather than forbidden —
         // the same not-found discipline every workspace-scoped read follows.
-        if (existing.workspaceId != workspaceId && !principal.isAdmin) return false
+        if (existing.workspaceId != workspaceId && !principal.isSuperAdmin) return false
 
         val removed = endpoints.deleteByPath(pathPattern)
         if (removed) {
@@ -151,7 +151,7 @@ class EndpointPublishService(
         pathPattern: String,
     ): PublishedEndpoint? =
         endpoints.findByPath(pathPattern)?.takeIf {
-            it.workspaceId == principal.requireWorkspace().id || principal.isAdmin
+            it.workspaceId == principal.requireWorkspace().id || principal.isSuperAdmin
         }
 
     /** §4.2 — the rule that makes serving over GET defensible, re-checked on every serve too. */

@@ -292,7 +292,7 @@ class WriteSurfaceStampingE2eTest {
     companion object {
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-via-stamping-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-via-stamping-key", arrayOf("read", "execute", "author"))
 
         /** FIXED, not random: the session leg mints its own JWT against this secret. */
         private const val JWT_SECRET = "dGVzdC1qd3Qtc2VjcmV0LWZvci12aWEtc3RhbXBpbmctMzI="
@@ -352,8 +352,8 @@ class WriteSurfaceStampingE2eTest {
                         """.trimIndent(),
                     )
                     statement.execute(
-                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
-                            " VALUES ('defa0000-0000-0000-0000-000000000001', '$ADMIN_USER_ID', 'owner')",
+                        "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)" +
+                            " VALUES ('defa0000-0000-0000-0000-000000000001', '$ADMIN_USER_ID', TRUE, FALSE, TRUE)",
                     )
                 }
                 connection

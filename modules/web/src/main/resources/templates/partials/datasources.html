@@ -101,7 +101,7 @@
               <a th:if="${ds.dialect.wire == 'LAKE'}"
                  class="ds-button ds-button-secondary ds-button-sm"
                  th:href="@{/datasources/{name}(name=${ds.name})}">Tables</a>
-              <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
+              <th:block th:if="${canAuthor}">
                 <!-- Result goes to the #toast stack; the row and table are never
                      touched, so the table layout cannot break. hx-disabled-elt
                      blocks the double-submit (§5.1 Loading state). -->

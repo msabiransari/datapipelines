@@ -79,30 +79,31 @@ class JwtAuthenticationFilter(
         try {
             val claims = jwtService.validate(jwt)
             val userId = UUID.fromString(claims.subject)
-            if (!userService.isActive(userId)) throw DeactivatedUserException(userId)
-
-            @Suppress("UNCHECKED_CAST")
-            val scopeTokens = claims["scopes"] as? List<String> ?: emptyList()
-            val scopes = scopeTokens.map { Scope.fromWire(it) }.toSet()
+            // The live user row, not just its liveness: `is_admin` is the ONE global capability
+            // left (D-R1) and it is read here, per request, through the same 60s cache. A JWT
+            // claim would keep a revoked super admin super for the token's whole 8h life.
+            val user = userService.snapshot(userId)?.takeIf { it.isActive } ?: throw DeactivatedUserException(userId)
             val principal =
                 AuthenticatedPrincipal(
                     userId = userId,
                     email = claims["email"] as String,
                     displayName = claims["name"] as String,
-                    scopes = scopes,
+                    // D-R1 — a SESSION carries no scopes. Capability is the membership, resolved
+                    // per request by `WorkspaceResolutionFilter` into `workspace.flags`. The
+                    // `scopes` claim `JwtService` used to stamp derived a global `author` for
+                    // every non-admin, which is precisely the global capability being removed;
+                    // any token still carrying it is ignored rather than honoured.
+                    scopes = emptySet(),
                     authMethod = AuthMethod.OIDC,
                     loginMethod = LoginMethod.fromAmr(claims[JwtService.AMR_CLAIM] as String?),
                     keyId = null,
                     // The stamped claim (design §5.1) — unresolved at this point; the
-                    // WorkspaceResolutionFilter membership-checks it into `workspace`.
+                    // WorkspaceResolutionFilter resolves it into `workspace` with its flags.
                     workspaceName = claims["active_workspace"] as String?,
+                    superAdmin = user.isAdmin,
                 )
             SecurityContextHolder.getContext().authentication =
-                UsernamePasswordAuthenticationToken(
-                    principal,
-                    null,
-                    scopes.map { SimpleGrantedAuthority("SCOPE_${it.wire}") },
-                )
+                UsernamePasswordAuthenticationToken(principal, null, emptyList())
         } catch (e: SessionExpiredException) {
             reject("session_expired", request, response, e)
         } catch (e: SessionInvalidException) {

@@ -158,8 +158,14 @@ class ApiErrorCatalogSpecDriftTest {
          * 155 → 156 with 109 §B (the empty-dialect-property refusal): §13.8 gains
          * `datasource.validation.property_empty` (400), landed in the SAME commit as its
          * constants and catalog row.
+         *
+         * 156 → 162 with RBAC round 1 (112): four `auth.*` rows (`role_required`,
+         * `key_issuer_role_lost`, `key_scope_unavailable`, `key_workspace_inactive`), one
+         * §13.8 (`datasource.grant_required`) and two §13.12 (`workspace.last_admin`,
+         * `workspace.inactive`), less one retired — `workspace.creation_forbidden` went with
+         * the provisioning modes. Re-derived from the parse, not from the arithmetic.
          */
-        const val SECTION_13_ROW_COUNT = 156
+        const val SECTION_13_ROW_COUNT = 162
 
         /**
          * §12's distinct validation codes.

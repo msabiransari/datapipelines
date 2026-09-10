@@ -4,6 +4,7 @@ import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterAll
@@ -93,8 +94,48 @@ class FlywayMigrationIntegrationTest {
                 "21|execution heartbeat|true",
                 // 109 §A — the per-table lake view-creation outcome columns (both NULL = healthy).
                 "22|lake table view errors|true",
+                // 112 — RBAC round 1: capability onto the membership, workspace deactivation,
+                // the `demo` seed, and the datasource grant table that replaced "global".
+                "23|rbac core|true",
             )
     }
+
+    @Test
+    fun `V23 puts capability on the membership and visibility in the grant table`() {
+        // The column inventory, read from the SHIPPED database: the three flags exist, the
+        // `role` column is gone, and the datasource binding split into ownership + grants.
+        columnsOf("workspace_members") shouldContainExactly
+            listOf("admin", "author", "joined_at", "promoter", "user_id", "workspace_id")
+
+        columnsOf("datasource_workspaces") shouldContainExactly
+            listOf("datasource_name", "granted_at", "granted_by", "workspace_id")
+
+        columnsOf("datasources").contains("workspace_id") shouldBe false
+        columnsOf("datasources").contains("owner_workspace_id") shouldBe true
+
+        columnsOf("workspaces").contains("deactivated_at") shouldBe true
+        columnsOf("workspaces").contains("deactivated_by") shouldBe true
+    }
+
+    @Test
+    fun `V23's two indexes exist - the last-admin count and the selectable-workspace lookup`() {
+        // Named, because both back a rule rather than a query someone happened to write: the
+        // partial admin index is what makes the last-admin count cheap, and the active-workspace
+        // index is what every selection reads.
+        query(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'" +
+                " AND indexname IN ('idx_workspace_members_admins', 'idx_workspaces_active'," +
+                " 'idx_datasource_workspaces_workspace') ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("idx_datasource_workspaces_workspace", "idx_workspace_members_admins", "idx_workspaces_active")
+    }
+
+    /** Every column of [table] in the shipped database, name order. */
+    private fun columnsOf(table: String): List<String> =
+        query(
+            "SELECT column_name FROM information_schema.columns" +
+                " WHERE table_schema = 'public' AND table_name = '$table' ORDER BY 1",
+        ) { it.getString(1) }
 
     @Test
     fun `V20 stamps the write surface on both version tables, checked and defaulted`() {
@@ -353,7 +394,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the fifteen tables of metadata-db §4`() {
+    fun `creates exactly the sixteen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -363,10 +404,12 @@ class FlywayMigrationIntegrationTest {
                 """.trimIndent(),
             ) { it.getString(1) }
 
-        tables shouldContainExactly
+        // In-any-order for the same collation reason as the index assertion below.
+        tables shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys",
                 "audit_log",
+                "datasource_workspaces",
                 "datasources",
                 // 074 (V11) — the published-endpoint registry and its key bindings.
                 "endpoint_key_bindings",
@@ -386,6 +429,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    @Suppress("LongMethod") // the inventory IS the assertion; splitting it hides what is asserted
     fun `creates exactly the indexes of metadata-db §5 and no others`() {
         // The negative half matters most: §5 deliberately does NOT create
         // idx_events_execution (duplicate of the uq_events_execution_event
@@ -404,7 +448,13 @@ class FlywayMigrationIntegrationTest {
                 """.trimIndent(),
             ) { it.getString(1) }
 
-        indexes shouldContainExactly
+        // In-any-order, deliberately. The CONTENT is the contract — "exactly these indexes and
+        // no others" — and the ORDER is Postgres's `en_US.UTF-8` collation, which does not
+        // sort `_` where codepoint order would: `datasource_workspaces` versus `datasources`
+        // lands differently in the database than in a Kotlin list literal. Asserting the order
+        // too would make this guard fail for a reason that has nothing to do with indexes,
+        // which is the collation trap this project has already paid for once.
+        indexes shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys.api_keys_pkey",
                 "api_keys.idx_api_keys_endpoint_kind",
@@ -414,6 +464,8 @@ class FlywayMigrationIntegrationTest {
                 "audit_log.idx_audit_event",
                 "audit_log.idx_audit_timestamp",
                 "audit_log.idx_audit_user",
+                "datasource_workspaces.datasource_workspaces_pkey",
+                "datasource_workspaces.idx_datasource_workspaces_workspace",
                 "datasources.datasources_pkey",
                 "datasources.idx_datasources_active",
                 "endpoint_key_bindings.endpoint_key_bindings_pkey",
@@ -447,7 +499,9 @@ class FlywayMigrationIntegrationTest {
                 "users.uq_users_provider_subject",
                 "users.users_email_key",
                 "users.users_pkey",
+                "workspace_members.idx_workspace_members_admins",
                 "workspace_members.workspace_members_pkey",
+                "workspaces.idx_workspaces_active",
                 "workspaces.workspaces_name_key",
                 "workspaces.workspaces_pkey",
             )
@@ -512,7 +566,9 @@ class FlywayMigrationIntegrationTest {
                 "chk_template_versions_via",
                 "chk_triggered_via",
                 "chk_type_dialect",
-                "chk_workspace_member_role",
+                // V23 replaced the role CHECK with the invariant that outlived it: a workspace
+                // admin can author, stated once in the database (RBAC design §1).
+                "chk_workspace_member_admin_authors",
             )
     }
 
@@ -812,16 +868,19 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `V4 adds the datasource scoping columns - nullable workspace, readonly defaulting false`() {
-        // metadata-db §4.10: NULL workspace_id = global (existing rows backfill NULL, D9);
-        // columns only — the datasources module does not change in this slice.
+    fun `V23 leaves the datasource OWNER column and the readonly flag, workspace_id gone`() {
+        // metadata-db §4.10: V4's `workspace_id` (NULL = global) was replaced in V23 by
+        // `owner_workspace_id` (NULL = an instance datasource) plus the `datasource_workspaces`
+        // grant table (§4.16). Ownership and visibility were one column and are now two
+        // concepts, so the column this test used to assert must be ABSENT — its presence would
+        // mean the drop did not run.
         val columns =
             query(
                 """
                 SELECT column_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
                   FROM information_schema.columns
                  WHERE table_schema = 'public' AND table_name = 'datasources'
-                   AND column_name IN ('workspace_id', 'is_readonly')
+                   AND column_name IN ('workspace_id', 'owner_workspace_id', 'is_readonly')
                  ORDER BY 1
                 """.trimIndent(),
             ) { it.getString(1) }
@@ -829,7 +888,7 @@ class FlywayMigrationIntegrationTest {
         columns shouldContainExactly
             listOf(
                 "is_readonly|NO|false",
-                "workspace_id|YES|NONE",
+                "owner_workspace_id|YES|NONE",
             )
     }
 

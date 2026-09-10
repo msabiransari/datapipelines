@@ -83,6 +83,16 @@ class DomainConfiguration {
     @Bean
     fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
 
+    /**
+     * `datasource_workspaces` (metadata-db §4.16) — the table that replaced
+     * `datasources.workspace_id` and with it the "global" datasource (D-R7). Visibility is the
+     * grant; `DatasourceRepository`'s reads carry the predicate, and this bean is the
+     * management half.
+     */
+    @Bean
+    fun datasourceGrantRepository(jdbc: NamedParameterJdbcTemplate): co.datapipelines.datasources.DatasourceGrantRepository =
+        co.datapipelines.datasources.DatasourceGrantRepository(jdbc)
+
     /** The D8 rules the REST datasource surface and the UI's form partial share (workspaces design §8). */
     @Bean
     fun datasourceWorkspaceRules(
@@ -106,7 +116,8 @@ class DomainConfiguration {
     fun datasourceCreateService(
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
-    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding)
+        grants: co.datapipelines.datasources.DatasourceGrantRepository,
+    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants)
 
     /**
      * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the
@@ -155,6 +166,28 @@ class DomainConfiguration {
      */
     @Bean
     fun systemActorSeeder(userService: UserService): SystemActorSeeder = SystemActorSeeder(userService)
+
+    /**
+     * D-R7's one narrow exception, wired: the workspace the PRODUCT ships gets the instance
+     * datasources its shipped examples reference. See `InstanceDatasourceGrants`.
+     */
+    @Bean
+    fun instanceDatasourceGrants(
+        grants: co.datapipelines.datasources.DatasourceGrantRepository,
+    ): co.datapipelines.auth.InstanceDatasourceGrants =
+        co.datapipelines.auth.InstanceDatasourceGrants { workspaceId, grantedBy ->
+            grants.grantAllInstanceDatasourcesTo(workspaceId, grantedBy)
+        }
+
+    /**
+     * D-R11 — the `demo` workspace at first boot, and the example content into it. See
+     * [DemoWorkspaceStartup] for the O-3 rule that a DEACTIVATED `demo` is never recreated.
+     */
+    @Bean
+    // The examples gate asks whether the bootstrap datasources exist, so the order it depends
+    // on is DECLARED rather than lucky: seeding before registration skips every example file.
+    @org.springframework.context.annotation.DependsOn("bootstrapDatasourceStartup")
+    fun demoWorkspaceStartup(seeder: co.datapipelines.auth.DemoWorkspaceSeeder): DemoWorkspaceStartup = DemoWorkspaceStartup(seeder)
 
     /**
      * The AES-256-GCM encryptor for stored datasource passwords (datasources §7.1), over the
@@ -296,7 +329,10 @@ class DomainConfiguration {
                 runCatching { currentPrincipal() }.getOrNull()
             val facts =
                 when (val workspaceId = principal?.workspace?.id) {
-                    null -> registry.getLive(name)?.takeIf { it.workspaceId == null }
+                    // No workspace on the principal: only a datasource no workspace OWNS can
+                    // be reached, because there is no grant to consult (D-R7).
+                    null -> registry.getLive(name)?.takeIf { it.ownerWorkspaceId == null }
+
                     else -> registry.getVisibleLive(name, workspaceId)
                 }
             facts?.let { DatasourceFacts(it.dialect, it.isReadonly) }
@@ -323,7 +359,7 @@ class DomainConfiguration {
                 templates.list(workspaceId, offset = 0, limit = UNBOUNDED).takeIf { it.isNotEmpty() }?.let { put("templates", it.size) }
                 datasources
                     .list()
-                    .count { it.workspaceId == workspaceId }
+                    .count { it.ownerWorkspaceId == workspaceId }
                     .takeIf { it > 0 }
                     ?.let { put("datasources", it) }
             }

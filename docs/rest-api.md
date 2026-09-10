@@ -49,7 +49,7 @@ Every `/api/v1/**` endpoint requires authentication via one of:
 - **Session cookie** (`dp_session`) — for browser-based UI flows. Set by the OIDC login flow (`GET /oauth2/authorization/{provider}` → callback), not by any REST endpoint. There are no `/auth/login` or `/auth/refresh` endpoints — see [Auth §5](auth.md#5-oidc-login-flow).
 - **API key** — for programmatic clients. Sent in header: `DP-API-Key: dpk_...`.
 
-Required scopes per operation are defined once in the [Auth §7.6 scope matrix](auth.md#76-scope--operation-matrix-authoritative). API keys are issued per-user-per-agent from the UI (management endpoints in §16).
+Required scopes per operation are defined once in the [Auth §7.6 scope matrix](auth.md#76-operation-matrix--two-axes-authoritative). API keys are issued per-user-per-agent from the UI (management endpoints in §16).
 
 ### 3.3 Content negotiation
 
@@ -792,7 +792,7 @@ Every completed execution with a caller node has its full result **materialized 
 GET /executions/{execution_id}/result?offset=0&limit=10000&format=json
 ```
 
-Auth: `read` scope + ownership of the execution (`admin` may read any). The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+Auth: `read` scope + ownership of the execution (`admin` may read any). The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 
 ### 7.3 Response (JSON format, default)
 
@@ -1166,7 +1166,7 @@ GET /datasources/{name}/tables?schema={schema}
 GET /datasources/{name}/tables/{table}/columns?schema={schema}
 ```
 
-Read-only live schema metadata ([Datasources §7A](datasources.md#7a-schema-introspection)) over JDBC `DatabaseMetaData`, with column types mapped to the canonical Type System types. Scope: `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)) — same precedent as the connection test, since each call opens a live connection.
+Read-only live schema metadata ([Datasources §7A](datasources.md#7a-schema-introspection)) over JDBC `DatabaseMetaData`, with column types mapped to the canonical Type System types. Scope: `author` ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) — same precedent as the connection test, since each call opens a live connection.
 
 Responses (the §4.1 envelope around `data`):
 
@@ -1203,7 +1203,7 @@ POST   /datasources/{name}/tables/import
 GET    /datasources/{name}/lake-tables
 ```
 
-The registry of tables a **LAKE**-dialect datasource serves ([metadata-db §4.15](metadata-db.md#415-lake_tables), the 2026-09-07 lake-datasource design record §2). A LAKE datasource reads object storage in place and the engine cannot LIST a bucket — these rows are its catalog. Scope: `author` for the three writes ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)); mutating a GLOBAL datasource's registry additionally requires admin (workspaces D8, enforced in-handler). The listing is `read`. Every operation refuses a non-LAKE datasource with `400 datasource.validation.lake_dialect_required`.
+The registry of tables a **LAKE**-dialect datasource serves ([metadata-db §4.15](metadata-db.md#415-lake_tables), the 2026-09-07 lake-datasource design record §2). A LAKE datasource reads object storage in place and the engine cannot LIST a bucket — these rows are its catalog. Scope: `author` for the three writes ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)); mutating a GLOBAL datasource's registry additionally requires admin (workspaces D8, enforced in-handler). The listing is `read`. Every operation refuses a non-LAKE datasource with `400 datasource.validation.lake_dialect_required`.
 
 **Register one table** — `POST /datasources/{name}/tables`, 201:
 
@@ -1345,7 +1345,7 @@ Availability: the Redis event log lives **1 hour** past completion (not configur
 DELETE /executions/{execution_id}
 ```
 
-Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative).
+Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative).
 
 Works from **any** instance: the request writes a Redis cancellation flag that the executing instance honors within ~one heartbeat interval ([DAG Executor §8.3.1](dag-executor.md#831-the-registry)). The `204` acknowledges the cancellation *request*; the `execution_aborted` event marks its completion.
 
@@ -1540,7 +1540,7 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 
 ## 17. Workspace Endpoints
 
-Workspaces are the unit of team isolation ([workspaces design](superpowers/specs/2026-08-16-workspaces-design.md) §9; [Auth §5.6](auth.md#56-workspace-resolution--the-dp-workspace-header) resolves the ACTIVE workspace per request). Every endpoint below lives under `/api/v1`. Scope minimums are in [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative); the role/mode gates (owner-or-admin, provisioning mode, `open-join`) are enforced in the service layer, default-deny.
+Workspaces are the unit of team isolation ([workspaces design](superpowers/specs/2026-08-16-workspaces-design.md) §9; [Auth §5.6](auth.md#56-workspace-resolution--the-dp-workspace-header) resolves the ACTIVE workspace per request). Every endpoint below lives under `/api/v1`. Scope minimums are in [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative); the role/mode gates (owner-or-admin, provisioning mode, `open-join`) are enforced in the service layer, default-deny.
 
 **The no-oracle rule** ([pipeline-contract §13.12](pipeline-contract.md#1312-workspace-resolution)): for anyone but a global admin, an unknown workspace name and a workspace the caller is not a member of are the SAME `403 workspace.membership_required` — a name cannot be probed. A global admin (who could otherwise see any workspace) gets a real `404 workspace.not_found`. A member who is not the owner of a workspace they ARE in gets the same 403 for management operations — role probing is an oracle too.
 
@@ -1564,7 +1564,7 @@ GET /workspaces/{name}
 POST /workspaces
 {"name": "team-etl", "display_name": "Team ETL"}
 ```
-`display_name` optional (defaults to `name`). Per provisioning mode (configuration §3.17): `auto-per-user`/`self-serve` allow any authenticated principal; `closed` refuses non-admins with `403 workspace.creation_forbidden`. The creator enters as `owner`. Errors: `400 workspace.validation.name_invalid` (`[a-z0-9_-]+`, 1–63), `409 workspace.validation.duplicate_name` (global namespace, soft-deleted included).
+`display_name` optional (defaults to `name`). **Super admins only** (D-R11): provisioning modes were retired with round 1, and with them `workspace.creation_forbidden` — a non-super-admin is refused by the matrix's own `auth.role_required`. The creator takes NO membership row: a super admin is an implicit member of every workspace (D-R8), and an explicit one would be indistinguishable from a granted membership in the audit. Errors: `400 workspace.validation.name_invalid` (`[a-z0-9_-]+`, 1–63), `409 workspace.validation.duplicate_name` (global namespace, soft-deleted included).
 
 ### 17.4 Update workspace
 

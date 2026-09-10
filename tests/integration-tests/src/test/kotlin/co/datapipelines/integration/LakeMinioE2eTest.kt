@@ -372,7 +372,7 @@ class LakeMinioE2eTest {
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000089"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-it-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-it-key", arrayOf("read", "execute", "author"))
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
 
         @Container

@@ -19,7 +19,8 @@ root, so you ask.
 
 **What folders are NOT:**
 
-- **Not permissions.** Workspaces are.
+- **Not permissions.** The workspace is the isolation boundary, and your ROLE in it is what
+  you may do there — see `error-codes.md` for `auth.role_required`.
 - **Not a rename mechanism.** A name is the asset's identity — child references
   (`{name, version}`), pins, execution history and promotion all key on it. **Choose the
   folder at creation**; there is no move, for either kind.

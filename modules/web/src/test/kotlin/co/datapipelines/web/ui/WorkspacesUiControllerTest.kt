@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
@@ -13,9 +14,7 @@ import co.datapipelines.auth.WorkspaceInUseException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
-import co.datapipelines.auth.WorkspacesProperties
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -53,7 +52,6 @@ class WorkspacesUiControllerTest {
             userService,
             jwtService,
             AuthProperties(),
-            WorkspacesProperties(),
             mockk<ThemeResolver>(),
         )
 
@@ -77,12 +75,12 @@ class WorkspacesUiControllerTest {
     }
 
     private fun memberRow(email: String = "bob@acme.test") =
-        WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", WorkspaceRole.MEMBER, Instant.EPOCH)
+        WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", MembershipFlags(author = true), Instant.EPOCH)
 
     @Test
     fun `workspaces page renders the design-system tables and the active badge`() {
         val membership =
-            WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.OWNER, Instant.EPOCH)
+            WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH)
         val html =
             engine().process(
                 "workspaces/index",

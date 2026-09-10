@@ -29,8 +29,22 @@ object DatasourceAuditEvents {
      */
     const val KEY_ROTATION = "datasource.key_rotation"
 
+    /**
+     * A datasource was granted to a workspace (RBAC design D-R7): the verb that decides who
+     * can reach a live database's data. `details.already_granted` separates a new grant from
+     * an idempotent re-grant.
+     *
+     * Emitted by `web`'s grant surface rather than by this module — the constant lives here
+     * because the drift guard tracks the `datasource.*` domain, and a name spelled in one
+     * module and asserted in another is exactly what that guard exists to keep honest.
+     */
+    const val GRANTED = "datasource.granted"
+
+    /** A datasource's grant to a workspace was removed; the datasource itself is untouched. */
+    const val REVOKED = "datasource.revoked"
+
     /** Every registered name — the drift-test surface. */
-    val ALL = listOf(POOL_BUILD, POOL_REBUILD, CONNECTION_TEST, KEY_ROTATION)
+    val ALL = listOf(POOL_BUILD, POOL_REBUILD, CONNECTION_TEST, KEY_ROTATION, GRANTED, REVOKED)
 }
 
 /**

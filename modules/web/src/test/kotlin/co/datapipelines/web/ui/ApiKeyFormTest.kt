@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KEY_SCOPES
 import co.datapipelines.auth.Scope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -94,7 +95,10 @@ class ApiKeyFormTest {
         assertAll(
             { ApiKeyForm.scopeChoices(setOf(Scope.READ)).map { it.wire } shouldBe listOf("read") },
             { ApiKeyForm.scopeChoices(setOf(Scope.EXECUTE)).map { it.wire } shouldBe listOf("read", "execute") },
-            { ApiKeyForm.scopeChoices(setOf(Scope.ADMIN)).map { it.wire } shouldBe listOf("read", "execute", "author", "admin") },
+            { ApiKeyForm.scopeChoices(setOf(Scope.AUTHOR)).map { it.wire } shouldBe listOf("read", "execute", "author") },
+            // O-2: `admin` is not offered even to a principal who satisfies it — no key may
+            // hold it, and a form that offers what issuance refuses teaches the wrong model.
+            { ApiKeyForm.scopeChoices(setOf(Scope.ADMIN)).map { it.wire } shouldBe listOf("read", "execute", "author") },
             { ApiKeyForm.scopeChoices(emptySet()) shouldBe emptyList() },
         )
     }
@@ -102,7 +106,7 @@ class ApiKeyFormTest {
     @Test
     fun `every scope has a meaning, and none of them is an HTTP verb`() {
         assertAll(
-            { ApiKeyForm.SCOPE_MEANINGS.keys shouldBe Scope.entries.toSet() },
+            { ApiKeyForm.SCOPE_MEANINGS.keys shouldBe KEY_SCOPES },
             {
                 withClue("a verb leaked into the capability vocabulary") {
                     ApiKeyForm.SCOPE_MEANINGS.values.none { meaning ->

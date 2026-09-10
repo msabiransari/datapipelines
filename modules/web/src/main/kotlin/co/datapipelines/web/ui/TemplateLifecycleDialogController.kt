@@ -40,7 +40,7 @@ class TemplateLifecycleDialogController(
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/templates/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
     fun releaseDialog(
         model: Model,
         @RequestParam name: String,
@@ -53,7 +53,7 @@ class TemplateLifecycleDialogController(
     }
 
     @PostMapping("/partials/templates/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
     fun release(
         model: Model,
         response: HttpServletResponse,

@@ -30,10 +30,12 @@ import javax.crypto.spec.SecretKeySpec
  * - an API key operates in its **pinned** workspace; a cross-workspace pipeline UUID is a
  *   404, and `DP-Workspace` on a key request is **refused** (`400 workspace.header_forbidden`);
  * - a session principal switches with `DP-Workspace` — a member switch resolves, a
- *   non-member switch is `403 workspace.membership_required`, and an unknown name is the
- *   same 403 (no existence probe);
- * - a zero-membership principal (`carol`) authenticates and 403s on every workspace-scoped
- *   operation, API-key issuance included.
+ *   non-member switch is `404 workspace.not_found` (D-R5), and an unknown name is the
+ *   SAME 404, so nothing about a workspace is probeable;
+ * - a zero-membership principal (`carol`) authenticates and is refused on every
+ *   workspace-scoped operation, API-key issuance included. That one stays a 403
+ *   `workspace.membership_required`: no workspace was ADDRESSED, so there is no name whose
+ *   existence a 403 could leak.
  *
  * Rows are seeded directly via SQL (the 016 rule: isolation at the row level where
  * possible); session JWTs are minted locally over the suite's own signing secret — HS256
@@ -156,7 +158,7 @@ class WorkspaceIsolationIntegrationTest {
     }
 
     @Test
-    fun `a session switch naming a non-membership is 403 membership_required - same as an unknown name`() {
+    fun `a session switch naming a non-membership is 404 not_found - same as an unknown name (D-R5)`() {
         ensureSeeded()
         given()
             .port(port)
@@ -165,8 +167,8 @@ class WorkspaceIsolationIntegrationTest {
             .`when`()
             .get("/api/v1/pipelines")
             .then()
-            .statusCode(403)
-            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.membership_required"))
+            .statusCode(404)
+            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.not_found"))
 
         given()
             .port(port)
@@ -175,14 +177,14 @@ class WorkspaceIsolationIntegrationTest {
             .`when`()
             .get("/api/v1/pipelines")
             .then()
-            .statusCode(403)
-            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.membership_required"))
+            .statusCode(404)
+            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.not_found"))
     }
 
     // ---------------------------------------------------------------- zero memberships
 
     @Test
-    fun `a zero-membership principal 403s on workspace-scoped operations, issuance included`() {
+    fun `a zero-membership principal is refused on workspace-scoped operations, issuance included`() {
         ensureSeeded()
         given()
             .port(port)
@@ -190,8 +192,11 @@ class WorkspaceIsolationIntegrationTest {
             .`when`()
             .get("/api/v1/pipelines")
             .then()
-            .statusCode(403)
-            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.membership_required"))
+            // 404 workspace.not_found, from ScopeMatrix.allowed's null-context branch: for a
+            // caller with nowhere to be, every workspace-scoped operation names a workspace
+            // that does not exist FOR THEM (D-R5).
+            .statusCode(404)
+            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.not_found"))
 
         // Double-submit CSRF (auth §8.4): cookie and header must match — any value works.
         val csrf = "test-csrf-token"
@@ -205,8 +210,8 @@ class WorkspaceIsolationIntegrationTest {
             .`when`()
             .post("/api/v1/auth/api-keys")
             .then()
-            .statusCode(403)
-            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.membership_required"))
+            .statusCode(404)
+            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.not_found"))
     }
 
     // ---------------------------------------------------------------- helpers
@@ -256,16 +261,18 @@ class WorkspaceIsolationIntegrationTest {
         private const val SECRET_BYTES = 32
 
         private const val ALICE = "aaa00000-0000-0000-0000-000000000001"
-        private const val BOB = "bbb00000-0000-0000-0000-000000000002"
+
+        /** Exposed for [WorkspaceIsolationSweepTest], which drives this suite's world. */
+        const val BOB = "bbb00000-0000-0000-0000-000000000002"
         private const val CAROL = "ccc00000-0000-0000-0000-000000000003"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
         private const val PIPE_ACME = "a1b00000-0000-0000-0000-000000000001"
-        private const val PIPE_GLOBEX = "b2b00000-0000-0000-0000-000000000002"
+        const val PIPE_GLOBEX = "b2b00000-0000-0000-0000-000000000002"
         private const val TPL_ACME_ID = "a3b00000-0000-0000-0000-000000000001"
         private const val TPL_GLOBEX_ID = "b4b00000-0000-0000-0000-000000000002"
         private const val EXEC_ACME = "a5b00000-0000-0000-0000-000000000001"
-        private const val EXEC_GLOBEX = "b6b00000-0000-0000-0000-000000000002"
+        const val EXEC_GLOBEX = "b6b00000-0000-0000-0000-000000000002"
 
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"report","display_name":"Report","description":"",""" +
@@ -309,6 +316,16 @@ class WorkspaceIsolationIntegrationTest {
 
         private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
+        /**
+         * An `acme` AUTHOR's session and key, for [WorkspaceIsolationSweepTest] — which walks
+         * every route with them rather than re-seeding a second world. One fixture, one set of
+         * identifiers: a sweep against a DIFFERENT seed would prove isolation between two
+         * things this suite never showed were isolated.
+         */
+        fun acmeSession(): String = sessionJwt(ALICE, "alice@acme.test", "acme")
+
+        fun acmeKey(): String = ALICE_KEY.plaintext
+
         private var seeded = false
 
         /**
@@ -327,6 +344,7 @@ class WorkspaceIsolationIntegrationTest {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 seedRows(connection)
                 seedContent(connection)
+                seedGlobexOnlyDatasource(connection)
                 seedKeys(connection)
             }
         }
@@ -351,9 +369,9 @@ class WorkspaceIsolationIntegrationTest {
                 )
                 statement.execute(
                     """
-                    INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
-                        ('$WS_ACME', '$ALICE', 'owner'),
-                        ('$WS_GLOBEX', '$BOB', 'owner')
+                    INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
+                        ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
+                        ('$WS_GLOBEX', '$BOB', TRUE, FALSE, TRUE)
                     """.trimIndent(),
                 )
             }
@@ -400,6 +418,33 @@ class WorkspaceIsolationIntegrationTest {
                     VALUES
                         ('$EXEC_ACME', '$PIPE_ACME', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', 'REST', '$EXEC_ACME'),
                         ('$EXEC_GLOBEX', '$PIPE_GLOBEX', 1, 'SUCCESS', '{}'::jsonb, '$BOB', 'REST', '$EXEC_GLOBEX')
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        /**
+         * A datasource granted to `globex` and to NOBODY else (D-R7) — the fixture the sweep
+         * points every `datasources_*` tool at. Under the grant model an ungranted datasource
+         * is invisible, so this is the row that makes "a foreign datasource is not-found" a
+         * claim about isolation rather than about a name nobody registered.
+         */
+        private fun seedGlobexOnlyDatasource(connection: java.sql.Connection) {
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    INSERT INTO datasources (name, display_name, dialect, jdbc_url, username,
+                                             credential_encrypted, created_by, owner_workspace_id)
+                    VALUES ('globex-only-db', 'Globex only', 'H2', 'jdbc:h2:mem:globex_only', 'sa',
+                            'x'::bytea, '$BOB', '$WS_GLOBEX')
+                    ON CONFLICT (name) DO NOTHING
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    VALUES ('globex-only-db', '$WS_GLOBEX', '$BOB')
+                    ON CONFLICT DO NOTHING
                     """.trimIndent(),
                 )
             }

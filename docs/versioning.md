@@ -91,8 +91,17 @@ Five verbs act on versions, and they pair with the statuses exactly:
 - **Restore** is the DISCARDED verb (`POST …/versions/{v}/restore`): the row returns to
   RELEASED — its original `released_at`/`released_by` return, the discard stamps clear.
   **Discard is reversible; purge is not.**
-- **Release** is the DRAFT→RELEASED verb (§5.3, unchanged).
-- **Switch** is the pointer verb (§3.4).
+- **Release** is the DRAFT→RELEASED verb (§5.3, unchanged). **Who may:** a **promoter** or a
+  workspace admin — deliberately NOT an author. The promoter role exists precisely so that
+  "can edit" and "can release" are two separate answers ([Auth §11A](auth.md#11a-roles)).
+- **Switch** is the pointer verb (§3.4). **Who may:** an **author, a promoter or a workspace
+  admin** — the one verb all three hold and none implies. It is the rollback lever, and taking
+  it from the author who owns the content or the promoter who runs the environment would leave
+  the wrong person holding it.
+
+**Who may run the rest:** discard, restore and purge are AUTHORING verbs — an author holds all
+three. That is safe because the system does not allow purging a release: purge is the DRAFT
+verb, and discard is reversible. Promotion is the promoter's, with release.
 
 A DRAFT is never discarded and a RELEASED version is never purged: the verbs refuse with
 `pipeline.version.not_released` / `template.version.not_released` and

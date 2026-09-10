@@ -519,7 +519,7 @@ class WorkspacesReadonlyE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-readonly-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-readonly-key", arrayOf("read", "execute", "author"))
 
         private fun randomSecret(): String =
             Base64

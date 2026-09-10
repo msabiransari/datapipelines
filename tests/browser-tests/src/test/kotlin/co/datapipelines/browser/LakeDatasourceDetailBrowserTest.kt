@@ -132,6 +132,19 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
                             rs.getObject(1, UUID::class.java)
                         }
                     }
+                // D-R12: a key can do at most what its ISSUER can do in the pinned workspace
+                // NOW. Without a membership there the issuer is a viewer, and every authoring
+                // call the suite makes would be `auth.key_issuer_role_lost` — a correct refusal
+                // for a fixture that forgot to say who the person is.
+                connection
+                    .prepareStatement(
+                        "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)" +
+                            " VALUES (?, ?, TRUE, FALSE, TRUE) ON CONFLICT (workspace_id, user_id) DO NOTHING",
+                    ).use { ps ->
+                        ps.setObject(1, workspaceId)
+                        ps.setObject(2, userId)
+                        ps.executeUpdate()
+                    }
                 connection
                     .prepareStatement(
                         "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -140,7 +153,11 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
                         ps.setObject(2, userId)
                         ps.setString(3, "browser-lake-detail-key")
                         ps.setString(4, hash)
-                        ps.setArray(5, connection.createArrayOf("text", arrayOf("admin")))
+                        // O-2: `admin` is not a scope a key may hold. A workspace-owned
+                        // datasource registration is `author` on the credential axis and
+                        // `ws_admin` on the role one — and this key's owner is an admin of the
+                        // workspace it is pinned to, which is where that capability now lives.
+                        ps.setArray(5, connection.createArrayOf("text", arrayOf("read", "execute", "author")))
                         ps.setObject(6, workspaceId)
                         ps.executeUpdate()
                     }

@@ -22,11 +22,46 @@ class ApiKeyServiceTest {
     private val userService = mockk<UserService>()
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val cache = AuthCache(AuthProperties())
-    private val workspaceService = mockk<WorkspaceService>(relaxed = true)
+
+    /**
+     * Relaxed, then STUBBED for the two per-request re-reads validation now makes (D-R12).
+     * A relaxed mock answers `isActive` with `false`, which would refuse every key in this
+     * file for the wrong reason — the default must be the live workspace, so a test that
+     * cares about deactivation says so itself.
+     */
+    private val workspaceService =
+        mockk<WorkspaceService>(relaxed = true) {
+            every { isActive(any()) } returns true
+            every { issuerFlags(any(), any(), any()) } returns MembershipFlags(author = true)
+        }
     private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
 
     private val ownerId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
+
+    /** A key-borne issuer holding only `read` — the escalation guard's other side (§7.4). */
+    private fun readKeyIssuer() =
+        issuer.copy(
+            scopes = setOf(Scope.READ),
+            authMethod = AuthMethod.API_KEY,
+            keyId = "dpk_READONLYISSUER",
+            workspaceName = "acme",
+        )
+
+    /**
+     * The ISSUER, as RBAC round 1 requires issuance to name it (D-R12/O-2): a key is minted by
+     * a person with a role in the pinned workspace, not by a bare user id. An AUTHOR here,
+     * which is the minimum O-2 allows.
+     */
+    private val issuer =
+        AuthenticatedPrincipal(
+            userId = ownerId,
+            email = "owner@company.com",
+            displayName = "Owner",
+            scopes = emptySet(),
+            authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true)),
+        )
 
     private fun activeOwner() =
         User(ownerId, "owner@company.com", "Owner", null, "keycloak", "sub", true, false, Instant.now(), Instant.now(), null)
@@ -81,7 +116,7 @@ class ApiKeyServiceTest {
     @Test
     fun `issue returns a dpk_ plaintext and persists only the hash`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.AUTHOR), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
 
         issued.plaintext shouldStartWith "dpk_"
         issued.record.id shouldStartWith "dpk_"
@@ -93,7 +128,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a freshly issued key validates and resolves the owner principal`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.EXECUTE), setOf(Scope.AUTHOR), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.EXECUTE), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -108,7 +143,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a wrong secret for a real key id is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -119,7 +154,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a revoked key is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
 
         shouldThrow<ApiKeyInvalidException> { service.validate(issued.plaintext) }
@@ -128,7 +163,7 @@ class ApiKeyServiceTest {
     @Test
     fun `an expired key maps to api_key expired`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record.copy(expiresAt = Instant.now().minusSeconds(60))
 
         shouldThrow<ApiKeyExpiredException> { service.validate(issued.plaintext) }
@@ -137,7 +172,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a key whose owner is inactive is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner().copy(isActive = false)
 
@@ -153,20 +188,7 @@ class ApiKeyServiceTest {
     @Test
     fun `escalation guard - a read creator cannot mint an author key (§7-4)`() {
         shouldThrow<ScopeInsufficientException> {
-            service.issue(ownerId, "Escalate", setOf(Scope.AUTHOR), creatorScopes = setOf(Scope.READ), workspaceId = workspaceId)
-        }
-    }
-
-    @Test
-    fun `issuance into a workspace the creator cannot access is refused (§7-4)`() {
-        val denying =
-            mockk<WorkspaceService> {
-                every { requireAccess(any(), any(), any()) } throws WorkspaceMembershipRequiredException()
-            }
-        val guarded = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), denying)
-
-        shouldThrow<WorkspaceMembershipRequiredException> {
-            guarded.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.AUTHOR), workspaceId)
+            readKeyIssuer().let { service.issue(it, ownerId, "Escalate", setOf(Scope.AUTHOR), workspaceId = workspaceId) }
         }
     }
 
@@ -181,7 +203,7 @@ class ApiKeyServiceTest {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
 
-        withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
+        withDefaults.issue(issuer, ownerId, "Claude", emptySet(), workspaceId = workspaceId)
 
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.EXECUTE)
     }
@@ -195,7 +217,7 @@ class ApiKeyServiceTest {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
 
-        withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
+        withDefaults.issue(issuer, ownerId, "Claude", emptySet(), workspaceId = workspaceId)
 
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.READ)
     }
@@ -218,7 +240,7 @@ class ApiKeyServiceTest {
         }
         val logged =
             captureWarnings(ApiKeyService::class.java) {
-                withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
+                withDefaults.issue(issuer, ownerId, "Claude", emptySet(), workspaceId = workspaceId)
             }
 
         logged.any { it.contains("nonsense") } shouldBe true
@@ -237,21 +259,24 @@ class ApiKeyServiceTest {
         echoInsert(kind = ApiKeyKind.SERVER)
 
         val refusal =
-            shouldThrow<ScopeInsufficientException> {
+            shouldThrow<RoleRequiredException> {
                 service.issue(
+                    issuer = issuer,
                     ownerId = ownerId,
                     name = "uat receiver",
                     scopes = emptySet(),
-                    creatorScopes = setOf(Scope.AUTHOR),
                     workspaceId = workspaceId,
                     kind = ApiKeyKind.SERVER,
                 )
             }
-        refusal.details["required"] shouldBe Scope.ADMIN.wire
+        // The floor moved from a SCOPE to the issuer's super-admin flag (D-R1): a server key
+        // is the promotion receiver's whole credential, and "who may mint one" is an instance
+        // question, which is exactly the kind of question a scope stopped being able to answer.
+        refusal.details["required"] shouldBe Capability.SUPER_ADMIN.wire
     }
 
     @Test
-    fun `an admin mints a server key with NO scopes - the default-scopes fallback never applies`() {
+    fun `a super admin mints a server key with NO scopes - the default-scopes fallback never applies`() {
         val scopes = slot<Set<Scope>>()
         every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any(), ApiKeyKind.SERVER) } answers {
             record(id = firstArg(), scopes = arg(4), kind = ApiKeyKind.SERVER)
@@ -259,11 +284,13 @@ class ApiKeyServiceTest {
 
         val issued =
             service.issue(
+                issuer = issuer.copy(superAdmin = true),
                 ownerId = ownerId,
                 name = "uat receiver",
                 // Asked for, and correctly ignored: a server key's authority is its route family.
+                // `admin` here is NOT the O-2 refusal: a SCOPELESS kind never reaches the scope
+                // check at all, because its requested set is emptied before it.
                 scopes = setOf(Scope.ADMIN),
-                creatorScopes = setOf(Scope.ADMIN),
                 workspaceId = workspaceId,
                 kind = ApiKeyKind.SERVER,
             )
@@ -280,7 +307,14 @@ class ApiKeyServiceTest {
         // both need a principal that says SERVER to give it.
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
-            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -295,9 +329,16 @@ class ApiKeyServiceTest {
     fun `validateServerKey accepts a server key and refuses every other kind with the SAME answer`() {
         echoInsert(kind = ApiKeyKind.SERVER)
         val server =
-            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         echoInsert()
-        val user = service.issue(ownerId, "agent", setOf(Scope.READ), setOf(Scope.ADMIN), workspaceId)
+        val user = service.issue(issuer, ownerId, "agent", setOf(Scope.READ), workspaceId)
         every { repo.findById(server.record.id) } returns server.record
         every { repo.findById(user.record.id) } returns user.record
         every { userService.snapshot(ownerId) } returns activeOwner()
@@ -314,7 +355,14 @@ class ApiKeyServiceTest {
         // The whole point of moving the credential into the key store: revocation exists.
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
-            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -325,7 +373,14 @@ class ApiKeyServiceTest {
     fun `an expired server key stops opening the promotion route`() {
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
-            service.issue(ownerId, "uat receiver", emptySet(), setOf(Scope.ADMIN), workspaceId, kind = ApiKeyKind.SERVER)
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
         every { repo.findById(issued.record.id) } returns
             issued.record.copy(expiresAt = Instant.now().minusSeconds(1))
         every { userService.snapshot(ownerId) } returns activeOwner()

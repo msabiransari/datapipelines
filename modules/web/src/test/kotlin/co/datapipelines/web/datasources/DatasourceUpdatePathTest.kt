@@ -4,6 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
@@ -50,6 +51,9 @@ import java.util.UUID
  * registry, and every case below goes red.
  */
 class DatasourceUpdatePathTest {
+    /** D-R7: registration grants the datasource to its own workspace in the same breath. */
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val registry = mockk<DatasourceRegistry>()
     private val workspaceService = mockk<WorkspaceService>(relaxed = true)
     private val mapper = JsonMapper.builder().build()
@@ -67,11 +71,11 @@ class DatasourceUpdatePathTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://db:5432/app",
             username = "readonly",
-            workspaceId = workspaceId,
+            ownerWorkspaceId = workspaceId,
             workspaceName = "acme",
         )
 
-    private val global = bound.copy(workspaceId = null, workspaceName = null)
+    private val global = bound.copy(ownerWorkspaceId = null, workspaceName = null)
 
     private fun rules(memberGate: Boolean) =
         DatasourceWorkspaceRules(workspaceService, WorkspacesProperties(memberDatasourcesEnabled = memberGate))
@@ -80,7 +84,7 @@ class DatasourceUpdatePathTest {
         DatasourcesController(
             registry,
             rules,
-            DatasourceCreateService(registry, rules::resolveCreateBinding),
+            DatasourceCreateService(registry, rules::resolveCreateBinding, grants),
             DatasourceUpdateService(registry, rules),
         )
 
@@ -90,6 +94,7 @@ class DatasourceUpdatePathTest {
             registry,
             rules,
             DatasourceUpdateService(registry, rules),
+            grants,
             DatasourceReferences.NONE,
         )
 
@@ -100,9 +105,15 @@ class DatasourceUpdatePathTest {
                     userId,
                     "a@b.c",
                     "A",
-                    if (admin) setOf(Scope.ADMIN) else setOf(Scope.AUTHOR),
+                    setOf(Scope.AUTHOR),
                     AuthMethod.API_KEY,
-                    workspace = WorkspaceContext(workspaceId, "acme"),
+                    workspace =
+                        WorkspaceContext(
+                            workspaceId,
+                            "acme",
+                            MembershipFlags(author = true, promoter = true, admin = true),
+                        ),
+                    superAdmin = admin,
                 ),
                 null,
                 emptyList(),
@@ -162,7 +173,7 @@ class DatasourceUpdatePathTest {
         assertAll(
             { saved.map { it.jdbcUrl }.distinct() shouldBe listOf("jdbc:postgresql://db:5432/other") },
             // Absent flags keep the stored binding — on both surfaces.
-            { saved.map { it.workspaceId }.distinct() shouldBe listOf(workspaceId) },
+            { saved.map { it.ownerWorkspaceId }.distinct() shouldBe listOf(workspaceId) },
         )
     }
 
@@ -223,6 +234,6 @@ class DatasourceUpdatePathTest {
         restUpdate(rules, ""","global":true""")
         uiUpdate(rules, global = true, globalPresent = true)
 
-        saved.map { it.workspaceId } shouldBe listOf(null, null)
+        saved.map { it.ownerWorkspaceId } shouldBe listOf(null, null)
     }
 }

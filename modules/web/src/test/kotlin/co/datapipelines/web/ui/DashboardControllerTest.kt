@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionRecord
@@ -39,6 +40,7 @@ class DashboardControllerTest {
     private fun authenticate(
         id: UUID,
         scopes: Set<Scope>,
+        workspaceAdmin: Boolean = false,
     ) {
         val principal =
             AuthenticatedPrincipal(
@@ -47,7 +49,13 @@ class DashboardControllerTest {
                 "User",
                 scopes,
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                workspace =
+                    WorkspaceContext(
+                        workspaceId,
+                        "acme",
+                        // RBAC round 1: the capability axis answers "is this an administrator".
+                        if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                    ),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -111,7 +119,7 @@ class DashboardControllerTest {
 
     @Test
     fun `admin sees all pipelines and executions`() {
-        authenticate(adminId, setOf(Scope.ADMIN))
+        authenticate(adminId, emptySet(), workspaceAdmin = true)
         every { pipelines.countAll(any()) } returns 1
         every { executions.findAll(any(), limit = 100, offset = 0) } returns listOf(record())
 

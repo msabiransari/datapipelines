@@ -252,7 +252,7 @@ class UnsizedNumericStagingIntegrationTest {
         private val EXECUTION_BUDGET: Duration = Duration.ofMinutes(2)
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-unsized-numeric-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-unsized-numeric-key", arrayOf("read", "execute", "author"))
 
         private val random = SecureRandom()
 

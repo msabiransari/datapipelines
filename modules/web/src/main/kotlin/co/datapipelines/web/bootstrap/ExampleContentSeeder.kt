@@ -1,6 +1,6 @@
 package co.datapipelines.web.bootstrap
 
-import co.datapipelines.auth.PersonalWorkspaceSeeder
+import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.PipelineImportService
@@ -62,7 +62,7 @@ class ExampleContentSeeder(
     private val pipelineImportService: PipelineImportService,
     private val templateImportService: TemplateImportService,
     private val datasources: DatasourceRegistry,
-) : PersonalWorkspaceSeeder {
+) : WorkspaceContentSeeder {
     private val log = LoggerFactory.getLogger(ExampleContentSeeder::class.java)
 
     // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an

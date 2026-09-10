@@ -250,7 +250,7 @@ class TemplatesController(
      * The name is the body's `name` field (§9.6).
      */
     @PostMapping("/release")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
     fun release(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestBody body: String,
@@ -354,7 +354,7 @@ class TemplatesController(
 
     /** §8 (101) — the manual switch: `current = version`, live and posture-eligible. The receiver's lever. */
     @PostMapping("/current")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
     fun switchCurrent(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {

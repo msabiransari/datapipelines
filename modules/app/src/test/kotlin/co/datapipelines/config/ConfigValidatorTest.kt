@@ -151,47 +151,35 @@ class ConfigValidatorTest {
     }
 
     @Test
-    fun `an unknown workspaces provisioning mode is refused`() {
-        val report = ConfigValidator.validate(validSnapshot().copy(workspacesProvisioningMode = "free-for-all"))
+    fun `a set provisioning-mode is refused BY NAME - RBAC round 1 removed it (D-R11)`() {
+        // Ignoring the key would be worse than refusing it: a deployment that still says
+        // `auto-per-user` is a deployment expecting a personal workspace per user, and
+        // silently giving it something else is how an operator finds out from a user.
+        val report = ConfigValidator.validate(validSnapshot().copy(workspacesProvisioningMode = "auto-per-user"))
 
-        report.violations.shouldHaveSize(1)
-        report.violations.single().shouldContain("provisioning-mode")
-        report.violations.single().shouldContain("free-for-all")
+        report.violations shouldHaveSize 1
+        report.violations.single().contains("datapipelines.workspaces.provisioning-mode") shouldBe true
+        report.violations.single().contains("REMOVED") shouldBe true
     }
 
-    /**
-     * §3.17 says `open-join` is a `self-serve` knob; `closed` + `open-join: true` would
-     * re-open the membership surface closed mode exists to keep admin-only (the self-join
-     * branch gates on `open-join` alone). Refused on exactly that pair; the other three
-     * combinations of a set `open-join`/`closed` are clean.
-     */
     @Test
-    fun `open-join true under closed provisioning is refused, and the other three combinations are clean`() {
-        val refused =
-            ConfigValidator.validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "closed"))
+    fun `a set open-join is refused BY NAME too - even when it says false`() {
+        // `false` is still a deployment that believes in a knob that no longer exists, and
+        // the belief is what needs correcting.
+        val report = ConfigValidator.validate(validSnapshot().copy(workspacesOpenJoinSet = true))
 
-        refused.violations.shouldHaveSize(1)
-        refused.violations.single().shouldContain("datapipelines.workspaces.open-join")
-        refused.violations.single().shouldContain("datapipelines.workspaces.provisioning-mode")
-        refused.violations.single().shouldContain("closed")
+        report.violations shouldHaveSize 1
+        report.violations.single().contains("datapipelines.workspaces.open-join") shouldBe true
+    }
 
-        ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "self-serve"))
-            .violations
-            .shouldBeEmpty()
-        ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "auto-per-user"))
-            .violations
-            .shouldBeEmpty()
-        ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = false, workspacesProvisioningMode = "closed"))
-            .violations
-            .shouldBeEmpty()
-        // An unset mode is the shipped default (self-serve) — open-join stays meaningful.
-        ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = null))
-            .violations
-            .shouldBeEmpty()
+    @Test
+    fun `both removed keys are named separately - an operator fixes both in one pass`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(workspacesProvisioningMode = "closed", workspacesOpenJoinSet = true),
+            )
+
+        report.violations shouldHaveSize 2
     }
 
     @Test
@@ -281,10 +269,10 @@ class ConfigValidatorTest {
                 resultTtlMinSeconds = 60,
                 resultTtlDefaultSeconds = 300,
                 resultTtlMaxSeconds = 3600,
-                workspacesProvisioningMode = "self-serve",
                 bootstrapDatasourcesFile = "/etc/datapipelines/bootstrap-datasources.yml",
                 bootstrapExamplesFile = "/etc/datapipelines/examples.json",
                 bootstrapAdminEmail = "admin@example.com",
+                workspacesProvisioningMode = null,
                 activeProfiles = emptySet(),
                 vendoredThemes = setOf("saas"),
             )
@@ -361,76 +349,12 @@ class ConfigValidatorTest {
                 validSnapshot().copy(
                     bootstrapExamplesFile = "/etc/dp/examples.json",
                     bootstrapAdminEmail = null,
-                    workspacesProvisioningMode = "auto-per-user",
                 ),
             ).violations
             .shouldBeEmpty()
     }
 
     // ------------------------------------------------------------------ §3.18 / §3.17 (048 F5)
-
-    @Test
-    fun `an examples file under a mode that never seeds names BOTH keys`() {
-        // The silent-config class the sibling cross-key rule exists to prevent: the seeder bean
-        // is built, the file is read and structurally checked — and `seed` is never called,
-        // because only `auto-per-user` provisions the personal workspace that triggers it.
-        val report =
-            ConfigValidator.validate(
-                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = "self-serve"),
-            )
-
-        report.violations.shouldHaveSize(1)
-        report.violations.single().shouldContain("datapipelines.bootstrap.examples-file")
-        report.violations.single().shouldContain("datapipelines.workspaces.provisioning-mode")
-        report.violations.single().shouldContain("auto-per-user")
-    }
-
-    @Test
-    fun `an unset provisioning mode is the shipped default, and is refused the same way`() {
-        // application.yml ships `${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}`, so
-        // "the operator set no mode" IS self-serve — the seeder is just as unreachable.
-        val report =
-            ConfigValidator.validate(
-                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = null),
-            )
-
-        report.violations.shouldHaveSize(1)
-        report.violations.single().shouldContain("datapipelines.workspaces.provisioning-mode")
-    }
-
-    @Test
-    fun `closed mode with an examples file is refused too, and auto-per-user is clean`() {
-        ConfigValidator
-            .validate(validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = "CLOSED"))
-            .violations
-            .shouldHaveSize(1)
-
-        ConfigValidator
-            .validate(
-                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = " auto-per-user "),
-            ).violations
-            .shouldBeEmpty()
-    }
-
-    @Test
-    fun `an empty examples file path is the feature off, not a misconfigured pair`() {
-        // Unset = off (§3.18), and application.yml's default binds the empty string.
-        ConfigValidator.validate(validSnapshot().copy(bootstrapExamplesFile = "  ")).violations.shouldBeEmpty()
-        ConfigValidator.validate(validSnapshot().copy(bootstrapExamplesFile = null)).violations.shouldBeEmpty()
-    }
-
-    @Test
-    fun `an unknown mode beside an examples file reports the mode itself, not the pair`() {
-        // One cause, one violation: a typo'd mode is already named by its own check, and
-        // adding a second line about seeding would send the operator down the wrong key.
-        val report =
-            ConfigValidator.validate(
-                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = "atuo-per-user"),
-            )
-
-        report.violations.shouldHaveSize(1)
-        report.violations.single().shouldContain("is not one of")
-    }
 
     // ------------------------------------------------------------------ §7 (055) promotion target
 

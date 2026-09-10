@@ -91,8 +91,8 @@ class OrgConfigKeysSpecDriftTest {
         shipped["datapipelines.observability.logging.format"] shouldBe "\${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}"
         shipped["datapipelines.ui.theme"] shouldBe "\${DATAPIPELINES_UI_THEME:saas}"
         shipped["datapipelines.executions.error-detail"] shouldBe "\${DATAPIPELINES_EXECUTIONS_ERROR_DETAIL:full}"
-        shipped["datapipelines.workspaces.provisioning-mode"] shouldBe
-            "\${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}"
+        shipped["datapipelines.workspaces.member-datasources-enabled"] shouldBe
+            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"
         shipped["datapipelines.jwt.secret"] shouldBe "\${DATAPIPELINES_JWT_SECRET}"
 
         // 075 appended env/posture/demo after the whole tree, for the same reason. If THAT

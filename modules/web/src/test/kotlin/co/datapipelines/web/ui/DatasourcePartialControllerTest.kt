@@ -49,12 +49,15 @@ class DatasourcePartialControllerTest {
 
     /** The delete dialog's usage question. Default: nothing references anything (§6.2). */
     private var references = co.datapipelines.datasources.DatasourceReferences.NONE
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val controller =
         DatasourcePartialController(
             DatasourceBrowseModel(datasources),
             datasources,
             rules,
             DatasourceUpdateService(datasources, rules),
+            grants,
         ) { name -> references.referencesTo(name) }
 
     private val userId = UUID.randomUUID()
@@ -102,7 +105,7 @@ class DatasourcePartialControllerTest {
      * the D8 rules read, so a fixture that sets only the name is a GLOBAL row wearing a label,
      * and every bound-row test written against it would silently exercise the global branch.
      */
-    private fun bound(name: String) = ds(name, workspaceName = "acme").copy(workspaceId = workspaceId)
+    private fun bound(name: String) = ds(name, workspaceName = "acme").copy(ownerWorkspaceId = workspaceId)
 
     // ------------------------------------------------------------ list
 
@@ -220,13 +223,63 @@ class DatasourcePartialControllerTest {
                     it.name shouldBe "warehouse"
                     it.username shouldBe "u"
                     it.isReadonly shouldBe true
-                    it.workspaceId shouldBe workspaceId
+                    it.ownerWorkspaceId shouldBe workspaceId
                 },
                 userId,
             )
         }
         model["oob"] shouldBe true
         model["registeredName"] shouldBe "warehouse"
+    }
+
+    @Test
+    fun `registering through the form GRANTS the datasource to its own workspace - D-R7`() {
+        // Without this the form registers a datasource its own author cannot see: visibility is
+        // the grant, so every read (the REST twin included) answers 404 on a row that exists.
+        every { rules.resolveCreateBinding(any(), any(), any()) } returns workspaceId
+        every { datasources.exists("granted") } returns false
+        every { datasources.listVisible(null, workspaceId) } returns emptyList()
+
+        controller.register(
+            model,
+            name = "granted",
+            dialect = "postgres",
+            jdbcUrl = "jdbc:postgresql://h/db",
+            credentialKind = "password",
+            username = "u",
+            password = "pw",
+            displayName = null,
+            description = null,
+            global = false,
+            readonly = false,
+            params = emptyMap(),
+        )
+
+        verify { grants.grantOnRegistration("granted", workspaceId, userId) }
+    }
+
+    @Test
+    fun `an INSTANCE datasource is granted to nothing - a super admin grants it out loud`() {
+        every { rules.resolveCreateBinding(any(), any(), any()) } returns null
+        every { datasources.exists("instance-wide") } returns false
+        every { datasources.listVisible(null, workspaceId) } returns emptyList()
+
+        controller.register(
+            model,
+            name = "instance-wide",
+            dialect = "postgres",
+            jdbcUrl = "jdbc:postgresql://h/db",
+            credentialKind = "password",
+            username = "u",
+            password = "pw",
+            displayName = null,
+            description = null,
+            global = true,
+            readonly = false,
+            params = emptyMap(),
+        )
+
+        verify(exactly = 0) { grants.grantOnRegistration(any(), any(), any()) }
     }
 
     @Test

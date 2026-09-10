@@ -2,33 +2,21 @@ package co.datapipelines.auth
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 
-/** How workspaces come into existence (design §7, configuration.md §3.17). */
-enum class WorkspaceProvisioningMode {
-    /** Every first OIDC login auto-creates a personal workspace (the datapipelines.co demo shape). */
-    AUTO_PER_USER,
-
-    /** Any authenticated user creates workspaces (company default); join per `open-join`. */
-    SELF_SERVE,
-
-    /** Only `admin` creates workspaces and manages membership — the future invite flow's base. */
-    CLOSED,
-    ;
-
-    /** Lowercase hyphenated wire/config form (`auto-per-user`) — the configuration.md §3.17 spelling. */
-    val wire: String get() = name.lowercase().replace('_', '-')
-}
-
 /**
- * The `datapipelines.workspaces.*` keys (configuration.md §3.17). `auto-per-user` etc.
- * bind to [WorkspaceProvisioningMode] by Spring's relaxed enum binding (case- and
- * dash-insensitive); [ConfigValidator][co.datapipelines.config.ConfigValidator] rejects
- * anything else at startup with a named violation.
+ * The `datapipelines.workspaces.*` keys (configuration.md §3.17).
+ *
+ * ## What round 1 removed (D-R11)
+ * `provisioning-mode` and `open-join` are GONE — workspaces are created by super admins and
+ * the out-of-the-box workspace is `demo`. Both keys are refused BY NAME at startup
+ * (`ConfigValidator`) rather than ignored: a deployment that still sets `auto-per-user` is a
+ * deployment expecting per-user workspaces, and silently giving it something else is how an
+ * operator finds out from a user.
  */
 @ConfigurationProperties(prefix = "datapipelines.workspaces")
 data class WorkspacesProperties(
-    val provisioningMode: WorkspaceProvisioningMode = WorkspaceProvisioningMode.SELF_SERVE,
-    /** `self-serve` only: `true` lists all workspaces as joinable by any authenticated user. */
-    val openJoin: Boolean = false,
-    /** D8 gate: may non-admin members create workspace-bound datasources (consumed by slice 021). */
+    /**
+     * May a workspace ADMIN register a datasource bound to their own workspace (design §4)?
+     * `false` makes datasource registration a super-admin-only act instance-wide.
+     */
     val memberDatasourcesEnabled: Boolean = true,
 )

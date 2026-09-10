@@ -938,6 +938,10 @@ Defined and described in [Auth §9](auth.md#9-auth-errors); cataloged here as th
 | `auth.login.locked` | 403 | Local login rejected: account locked after consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
 | `auth.password.change_required` | 403 | Session principal must change password before any other operation ([Auth §5A.4](auth.md#5a4-forced-password-change)) |
 | `auth.session.required` | 403 | An API-key principal reached a credential-minting operation (admin local-account create, password reset, `disable-local`, `unlock`, self-service password change); a key that mints an interactive credential escalates itself into an unpinned session that outlives its own revocation ([Auth §5A.7](auth.md#5a7-credential-minting-is-session-only)) |
+| `auth.role_required` | 403 | The principal's ROLE in the active workspace is below the operation's ([RBAC design §2](superpowers/specs/2026-09-10-rbac-design.md)). `details.required` names the capability, `details.held` what the membership carries. Distinct from `auth.scope.insufficient`, which is the CREDENTIAL axis: a viewer's session gets this, a `read` key on an authoring route gets that ([Auth §11A](auth.md#11a-roles)) |
+| `auth.key_issuer_role_lost` | 403 | The API key was valid; the person who issued it no longer holds the capability the operation needs (D-R12). Its own code because the recovery differs and cannot be guessed — this key will never work again for this operation, and the fix is a new key from somebody who still holds the role. A demotion takes effect within one validation-cache TTL (60s), so a key can begin refusing mid-session ([Auth §7.4](auth.md#74-issuance)) |
+| `auth.key_scope_unavailable` | 400 | Key issuance requested a scope keys may not hold. Since RBAC round 1 that is `admin`: release, promote and membership are human verbs, so no key expresses them (O-2). A 400 and not a 403 — the credential making the request is fine, the requested scope is not one keys have |
+| `auth.key_workspace_inactive` | 403 | The workspace this key is pinned to has been deactivated (D-R10). A 403 rather than a member's 404: the pin already proves the workspace exists, so there is no oracle to protect and an operator needs the truth. Reactivating the workspace restores the key |
 | `auth.api_key.expiry_invalid` | 400 | Key issuance named an expiry this surface cannot use: an unknown preset, a custom date that does not parse, a custom date already in the past, or `custom` with no date. `details.reason` is `unknown_preset` \| `date_unparseable` \| `date_in_past` \| `date_missing`, and `details.value` echoes the offending value truncated. A 400 rather than a 401/403: the credential is fine, the request body is not ([Auth §7.4](auth.md#74-issuance)) |
 | `auth.promotion.key_invalid` | 401 | The promotion peer credential was absent, malformed, or did not match the receiver's configured promotion server key. The SAME code answers a receiver that has no key configured at all — promotion is disabled there and fail-closed, and one code keeps the response from telling a wrong key apart from a disabled receiver ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
@@ -959,6 +963,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
+| `datasource.grant_required` | 404 | The datasource exists on the instance but is not GRANTED to the caller's workspace ([RBAC design §4](superpowers/specs/2026-09-10-rbac-design.md), D-R7). A 404 and not a 403 because the 404 rule has no exception for datasources: an ungranted datasource is INVISIBLE, and "this exists, you may not see it" turns the flat, global datasource namespace into an enumeration oracle — every name on the instance probeable one request at a time |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
 | `datasource.lease_in_transaction` | 500 | A customer-database connection was requested while a metadata transaction was open on the thread — refused by design (one transaction, one database; see [dag-executor §16](dag-executor.md#16-consistency-model)) |
 | `datasource.validation.lake_dialect_required` | 400 | A lake-table operation (register / import / unregister / list) was attempted on a datasource whose dialect is not `LAKE` (089 §A) |
@@ -1032,22 +1037,26 @@ Defined and described in [REST API §7](rest-api.md#7-result-delivery).
 
 ### 13.12 Workspace resolution
 
-Raised by the workspace resolution layer (auth §5) — the per-request `DP-Workspace` switch
-and API-key pinning — and by the workspace CRUD surface (auth §5.6, REST API §17). The
-no-oracle rule governs: unknown-workspace and not-a-member are the SAME 403
-`workspace.membership_required` for every principal except a global admin, who could
-otherwise see any workspace and so gets a real 404.
+Raised by the workspace resolution layer ([Auth §5](auth.md#5-oidc-login-flow)) — the per-request
+`DP-Workspace` switch and API-key pinning — and by the workspace CRUD and membership surfaces.
+
+**The 404 rule governs (RBAC design D-R5).** A workspace the caller cannot reach — unknown name,
+not a member, or deactivated — is ONE answer: `workspace.not_found`, the same status and body a
+genuinely missing row produces. Never a 403. `workspace.membership_required` survives in exactly
+one place, where no workspace was ADDRESSED at all (a principal with zero memberships), because
+there is no name there whose existence a 403 could leak.
 
 | Code | HTTP | Description |
 |---|---|---|
-| `workspace.membership_required` | 403 | Principal is not a member of the addressed workspace (or has zero memberships); also covers unknown names, so the switch cannot probe existence |
-| `workspace.creation_forbidden` | 403 | The provisioning mode forbids this caller creating a workspace |
+| `workspace.membership_required` | 403 | The principal has no active workspace at all (zero memberships). Not used for an addressed workspace — that is `workspace.not_found` |
 | `workspace.header_forbidden` | 400 | `DP-Workspace` sent on an API-key request; a key's workspace is pinned at issuance and cannot switch |
-| `workspace.session_required` | 403 | An API-key principal reached a session-only workspace action (the UI's create/join/members/delete/switch); the key's workspace is pinned at issuance and `switch` mints a session, so the credential class is refused outright |
-| `workspace.not_found` | 404 | Unknown workspace name, for a principal who could otherwise see any workspace (a global admin); members never see this code |
+| `workspace.session_required` | 403 | An API-key principal reached a session-only workspace action (the UI's create/members/delete/switch); the key's workspace is pinned at issuance and `switch` mints a session, so the credential class is refused outright |
+| `workspace.not_found` | 404 | The addressed workspace does not exist FOR THIS CALLER: unknown name, non-member, or deactivated — one answer for all three (D-R5), so nothing about a workspace is probeable. Also refuses a promotion batch naming a workspace the receiver does not have (O-4); nothing is auto-created |
+| `workspace.last_admin` | 409 | The membership change would leave the workspace with no admin. Its own code rather than `workspace.in_use`: the caller's next step is "give someone else the admin role first", which is a different instruction from "empty the workspace first" |
+| `workspace.inactive` | 404 | A super admin addressed a deactivated workspace on a path that must refuse it (D-R10). Members never see this code — for them a deactivated workspace is `workspace.not_found`, because deactivation must not become a signal — and API keys get `auth.key_workspace_inactive` |
 | `workspace.validation.name_invalid` | 400 | Workspace name fails `[a-z0-9_-]+`, 1–63 |
 | `workspace.validation.duplicate_name` | 409 | Workspace name exists (global namespace, soft-deleted included — house rule) |
-| `workspace.in_use` | 409 | Delete blocked: workspace still owns non-deleted pipelines/templates/datasources; also refuses a member removal that would leave the workspace without an owner (`details.blocked_by: owner_membership`) |
+| `workspace.in_use` | 409 | Delete blocked: workspace still owns non-deleted pipelines/templates/datasources. Deactivation (D-R10) is the operation that needs no such check — it purges nothing |
 
 ### 13.13 Versioning / draft-release lifecycle / promotion
 

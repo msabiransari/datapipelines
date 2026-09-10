@@ -61,7 +61,12 @@ class BootstrapConfigKeysSpecDriftTest {
         // The blocks that would have been swallowed by a wrongly-indented insert, plus the key
         // the §3.18 cross-key rule pairs with.
         loaded["datapipelines.auth.bootstrap-admin-email"] shouldBe "\${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:}"
-        loaded["datapipelines.workspaces.provisioning-mode"] shouldBe "\${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}"
+        // `provisioning-mode` was the neighbour this guard used to name; RBAC round 1 removed
+        // it (D-R11), so the surviving key in the same block takes its place. The guard's
+        // subject is the INDENTATION, not the key — a block that re-parents its neighbours is
+        // the failure, and it needs a live neighbour to be visible at all.
+        loaded["datapipelines.workspaces.member-datasources-enabled"] shouldBe
+            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"
         loaded["datapipelines.audit.retention-days"] shouldBe "\${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}"
         loaded["datapipelines.observability.logging.format"] shouldBe "\${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}"
         loaded["datapipelines.ui.theme"] shouldBe "\${DATAPIPELINES_UI_THEME:saas}"

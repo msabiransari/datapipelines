@@ -405,7 +405,7 @@ class DraftFirstGoldenPathE2eTest {
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val random = SecureRandom()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-draft-first-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-draft-first-key", arrayOf("read", "execute", "author"))
 
         private var pipelineId: String = ""
         private var draftHash: String = ""

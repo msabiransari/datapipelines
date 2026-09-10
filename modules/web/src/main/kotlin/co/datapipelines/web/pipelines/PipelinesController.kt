@@ -163,7 +163,7 @@ class PipelinesController(
      * UI-driven in practice (D4: agents never release); no MCP tool is exposed.
      */
     @PostMapping("/{id}/release")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
     fun release(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
@@ -327,7 +327,7 @@ class PipelinesController(
      * audited.
      */
     @PostMapping("/{id}/current")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
     fun switchCurrent(
         @PathVariable id: UUID,
         @RequestBody body: JsonNode,

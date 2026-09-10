@@ -50,17 +50,13 @@ class ConfigValidator(
          * `ConfigValidatorCheckCountTest`, which counts the `check*` functions below and
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
+         *
+         * 24 until RBAC round 1, which removed THREE checks with the behaviour they read — the
+         * provisioning-mode value check, the open-join/mode agreement check and the
+         * examples-file/mode cross-key rule — and added one that refuses both removed keys by
+         * name.
          */
-        internal const val CHECK_COUNT = 24
-
-        /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
-        private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
-
-        /** §3.17 — the one mode that provisions the personal workspace D9 seeds into. */
-        private const val SEEDING_MODE = "auto-per-user"
-
-        /** How an absent mode reads in a violation: application.yml always supplies the default. */
-        private const val SHIPPED_DEFAULT_MODE_NOTE = "unset, i.e. the shipped default self-serve"
+        internal const val CHECK_COUNT = 22
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -114,9 +110,7 @@ class ConfigValidator(
             PostureRules.checkPosture(snapshot, violations)
             PostureRules.checkPostureProfileAlignment(snapshot, violations)
             PostureRules.checkHardenedPosture(snapshot, violations, warnings)
-            checkWorkspacesProvisioningMode(snapshot, violations)
-            checkWorkspacesOpenJoinMode(snapshot, violations)
-            checkExamplesSeederReachable(snapshot, violations)
+            checkRemovedWorkspaceKeys(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
             checkPromotionTarget(snapshot, violations)
@@ -426,80 +420,43 @@ class ConfigValidator(
         }
 
         /**
-         * §7 / §3.17 — `datapipelines.workspaces.open-join` names a real mode (§3.17). A typo
-         * here fails enum binding anyway; this names the offending value in the §7 format
-         * instead of as a binder stack trace.
+         * §7 / §3.17 — the keys RBAC round 1 REMOVED, refused BY NAME.
+         *
+         * `provisioning-mode` and `open-join` are gone: workspaces are created by super admins
+         * and the out-of-the-box workspace is `demo` (D-R11). Ignoring a set key would be worse
+         * than refusing it — a deployment that still says `auto-per-user` is a deployment
+         * expecting a personal workspace per user, and silently giving it something else is how
+         * an operator finds out from a user. So startup names the key, says it was removed, and
+         * says what replaced it.
+         *
+         * This is the same rule the removed `checkWorkspacesOpenJoinMode` enforced from the
+         * other side, and it replaces it: there is no mode left for `open-join` to disagree
+         * with.
          */
-        private fun checkWorkspacesProvisioningMode(
+        private fun checkRemovedWorkspaceKeys(
             snapshot: ConfigSnapshot,
             violations: MutableList<String>,
         ) {
-            val mode = snapshot.workspacesProvisioningMode?.trim()?.lowercase() ?: return
-            if (mode !in PROVISIONING_MODES) {
+            if (snapshot.workspacesProvisioningMode != null) {
                 violations +=
-                    "datapipelines.workspaces.provisioning-mode '$mode' is not one of " +
-                    "${PROVISIONING_MODES.sorted()} (§3.17)."
+                    "datapipelines.workspaces.provisioning-mode is set but was REMOVED in RBAC round 1 " +
+                    "(§3.17): workspaces are created by super admins, and the workspace that ships is " +
+                    "'demo', which every user with no membership joins as a viewer on first login. " +
+                    "Remove the key."
+            }
+            if (snapshot.workspacesOpenJoinSet) {
+                violations +=
+                    "datapipelines.workspaces.open-join is set but was REMOVED in RBAC round 1 (§3.17): " +
+                    "there is no self-service join — a super admin adds members, with their roles. " +
+                    "Remove the key."
             }
         }
 
-        /**
-         * §7 / §3.17 — `open-join: true` under `closed` provisioning. §3.17 defines
-         * `open-join` as a `self-serve`-mode knob, and this is not dead-config hygiene:
-         * the self-join branch in `WorkspaceService.addMember` gates on `open-join`
-         * alone, so `closed` + `open-join: true` would let any authenticated user join
-         * any workspace — the exact management monopoly `closed` exists to give the
-         * admin. Refused, naming both keys.
-         *
-         * A misspelled mode is left to [checkWorkspacesProvisioningMode], which already
-         * names it — two violations for one typo would point at the wrong key. An unset
-         * mode is the shipped default (`self-serve`), where `open-join` is meaningful.
-         */
-        private fun checkWorkspacesOpenJoinMode(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            if (!snapshot.workspacesOpenJoin) return
-            val mode = snapshot.workspacesProvisioningMode?.trim()?.lowercase()
-            if (mode != null && mode !in PROVISIONING_MODES) return
-            if (mode == "closed") {
-                violations +=
-                    "datapipelines.workspaces.open-join is true while datapipelines.workspaces.provisioning-mode " +
-                    "is 'closed' (§3.17): open-join exists for self-serve provisioning, and under closed it " +
-                    "would re-open the membership surface closed mode exists to keep admin-only. " +
-                    "Set the mode to 'self-serve', or turn open-join off."
-            }
-        }
-
-        /**
-         * §7 / §3.18 — an examples file the seeder can never reach.
-         *
-         * `ExampleContentSeeder` runs from `WorkspaceService.ensurePersonalWorkspace`, and only
-         * `auto-per-user` provisioning ever calls it (design §7). Under any other mode the bean
-         * is still built and the file still read and structurally checked at startup — so a
-         * deployment that sets `examples-file` and leaves the mode at its SHIPPED DEFAULT
-         * (`self-serve`, §3.17) validates green, boots clean, and seeds nothing, with no line
-         * anywhere saying why. That is the silent-config class [checkBootstrapActorConfigured]
-         * exists to prevent, so it is refused the same way: name both keys, set both or neither.
-         *
-         * A mode that is unset is the shipped default, i.e. NOT the seeding mode; a mode that is
-         * misspelled is left to [checkWorkspacesProvisioningMode], which already names it — two
-         * violations for one typo would point the operator at the wrong key.
-         */
-        private fun checkExamplesSeederReachable(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            if (snapshot.bootstrapExamplesFile.isNullOrBlank()) return
-            val mode = snapshot.workspacesProvisioningMode?.trim()?.lowercase()
-            if (mode != null && mode !in PROVISIONING_MODES) return
-            if (mode == SEEDING_MODE) return
-            violations +=
-                "datapipelines.bootstrap.examples-file is set but datapipelines.workspaces.provisioning-mode " +
-                "is '${mode ?: SHIPPED_DEFAULT_MODE_NOTE}' (§3.17): example seeding runs only when " +
-                "'$SEEDING_MODE' provisions a personal workspace at first login, so the configured " +
-                "examples would never be seeded and nothing would say so. Set the mode to " +
-                "'$SEEDING_MODE', or unset the examples file."
-        }
+        // §7 / §3.18 — the "an examples file nothing will read" check went with the
+        // provisioning modes. `ExampleContentSeeder` now runs from `DemoWorkspaceSeeder` when
+        // it CREATES `demo`, once in a deployment's life (D-R11), so there is no mode left for
+        // the file to be unreachable under. What remains is `checkBootstrapActorConfigured`'s
+        // rule that seeding needs an actor.
 
         /**
          * §7 / §3.18 — bootstrap datasource registration needs an actor.
@@ -801,7 +758,10 @@ class ConfigValidator(
                     environment.getProperty("datapipelines.endpoints.timeout-default-seconds", Int::class.java),
                 endpointsTimeoutMaxSeconds = environment.getProperty("datapipelines.endpoints.timeout-max-seconds", Int::class.java),
                 workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
-                workspacesOpenJoin = environment.getProperty("datapipelines.workspaces.open-join", Boolean::class.java) ?: false,
+                // Whether the key is PRESENT, not what it says: a removed key is refused for
+                // being set at all, and `open-join: false` is still a deployment that believes
+                // in a knob that no longer exists.
+                workspacesOpenJoinSet = environment.getProperty("datapipelines.workspaces.open-join") != null,
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
                 bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
                 bootstrapAdminEmail = environment.getProperty("datapipelines.auth.bootstrap-admin-email"),
@@ -977,7 +937,7 @@ internal data class ConfigSnapshot(
     val endpointsTimeoutMaxSeconds: Int? = null,
     val workspacesProvisioningMode: String?,
     /** §3.17 — read here only for the open-join/closed cross-key rule; auth owns its semantics. */
-    val workspacesOpenJoin: Boolean = false,
+    val workspacesOpenJoinSet: Boolean = false,
     /** §3.18 — unset (or blank) = bootstrap datasource registration is off. */
     val bootstrapDatasourcesFile: String?,
     /** §3.18 — unset (or blank) = example seeding is off. Carried so the §7 log reports it. */
@@ -1047,7 +1007,7 @@ internal data class ConfigSnapshot(
             "resultTtlDefaultSeconds=$resultTtlDefaultSeconds, " +
             "resultTtlMaxSeconds=$resultTtlMaxSeconds, " +
             "workspacesProvisioningMode=$workspacesProvisioningMode, " +
-            "workspacesOpenJoin=$workspacesOpenJoin, " +
+            "workspacesOpenJoinSet=$workspacesOpenJoinSet, " +
             "bootstrapDatasourcesFile=$bootstrapDatasourcesFile, " +
             "bootstrapExamplesFile=$bootstrapExamplesFile, " +
             "bootstrapAdminEmail=$bootstrapAdminEmail, " +

@@ -4,6 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
@@ -39,6 +40,9 @@ import java.util.UUID
  * JSON, not the Kotlin map.
  */
 class DatasourcesControllerTest {
+    /** D-R7: registration grants the datasource to its own workspace in the same breath. */
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val registry = mockk<DatasourceRegistry>()
     private val workspaceService = mockk<co.datapipelines.auth.WorkspaceService>(relaxed = true)
     private val rules =
@@ -49,7 +53,7 @@ class DatasourcesControllerTest {
     // over the SAME registry and the SAME rules instance the assembled application wires — a
     // mocked service here would test that the controller delegates and nothing about what
     // `POST /api/v1/datasources` actually does.
-    private val registrations = DatasourceCreateService(registry, rules::resolveCreateBinding)
+    private val registrations = DatasourceCreateService(registry, rules::resolveCreateBinding, grants)
     private val controller = DatasourcesController(registry, rules, registrations, DatasourceUpdateService(registry, rules))
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
@@ -70,7 +74,10 @@ class DatasourcesControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(scopes: Set<Scope> = setOf(Scope.ADMIN)) {
+    private fun authenticate(
+        scopes: Set<Scope> = setOf(Scope.AUTHOR),
+        superAdmin: Boolean = true,
+    ) {
         val principal =
             AuthenticatedPrincipal(
                 userId,
@@ -78,7 +85,8 @@ class DatasourcesControllerTest {
                 "A",
                 scopes,
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true, promoter = true, admin = true)),
+                superAdmin = superAdmin,
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -280,7 +288,7 @@ class DatasourcesControllerTest {
     @Test
     fun `update without a password keeps the stored credential, and an unknown name 404s`() {
         authenticate()
-        val bound = datasource().copy(workspaceId = workspaceId, workspaceName = "acme")
+        val bound = datasource().copy(ownerWorkspaceId = workspaceId, workspaceName = "acme")
         every { registry.getVisible("pg-prod", workspaceId) } returns bound
         val updateBody = mapper.readTree("""{"dialect":"POSTGRES","jdbc_url":"jdbc:postgresql://db2:5432/app","username":"ro"}""")
         every { registry.save(match { it.secret == null && it.jdbcUrl == "jdbc:postgresql://db2:5432/app" }, userId) } returns

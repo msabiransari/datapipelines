@@ -376,7 +376,7 @@ class ParallelStagingProgressE2eTest {
         private const val PROGRESS_POLL_MS = 25L
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-parallel-admin-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-parallel-admin-key", arrayOf("read", "execute", "author"))
 
         private var authSeeded = false
         private val authLock = Any()

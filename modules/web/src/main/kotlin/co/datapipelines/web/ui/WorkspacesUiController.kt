@@ -4,16 +4,14 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Capability
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LoginMethod
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
-import co.datapipelines.auth.WorkspaceProvisioningMode
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspaceSessionRequiredException
-import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.auth.sessionCookie
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
@@ -42,7 +40,6 @@ class WorkspacesUiController(
     private val userService: UserService,
     private val jwtService: JwtService,
     private val authProperties: AuthProperties,
-    private val workspacesProperties: WorkspacesProperties,
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/workspaces")
@@ -54,21 +51,21 @@ class WorkspacesUiController(
         val principal = requirePrincipal()
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("own", workspaceService.listOwn(principal))
-        model.addAttribute("joinable", workspaceService.joinable(principal))
-        model.addAttribute("openJoin", workspacesProperties.openJoin)
-        model.addAttribute(
-            "canCreate",
-            workspacesProperties.provisioningMode != WorkspaceProvisioningMode.CLOSED || principal.isAdmin,
-        )
-        model.addAttribute("provisioningMode", workspacesProperties.provisioningMode.wire)
-        model.addAttribute("isAdmin", principal.isAdmin)
-        // The member listing a workspace OWNER manages (the screen's second half); plain
-        // members see their own role via the switcher's badge instead.
+        // D-R11: workspaces are created by super admins, and `open-join` is gone with the
+        // provisioning modes. The model attributes stay so the template keeps compiling
+        // against one shape; the ANSWERS are now the role's, not a config key's. The screen
+        // itself (checkbox members, deactivation) is round 2 — 113.
+        model.addAttribute("joinable", emptyList<Any>())
+        model.addAttribute("openJoin", false)
+        model.addAttribute("canCreate", principal.isSuperAdmin)
+        model.addAttribute("isAdmin", principal.isSuperAdmin)
+        // The member listing a workspace ADMIN manages (the screen's second half); viewers and
+        // authors see their own role via the switcher's badge instead.
         model.addAttribute(
             "managed",
             workspaceService
                 .listOwn(principal)
-                .filter { it.role == WorkspaceRole.OWNER || principal.isAdmin }
+                .filter { Capability.WS_ADMIN.satisfiedBy(it.flags) || principal.isSuperAdmin }
                 .associate { membership ->
                     membership.workspaceName to
                         runCatching { workspaceService.members(principal, membership.workspaceName) }.getOrDefault(emptyList())

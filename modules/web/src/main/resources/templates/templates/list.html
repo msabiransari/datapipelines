@@ -36,7 +36,7 @@
         <button type="button" class="ds-button ds-button-secondary tplx-browse"
                 data-explorer-drawer-open aria-expanded="false" aria-controls="template-tree-pane">Browse</button>
         <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()"
-                th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">Create Template</button>
+                th:if="${canAuthor}">Create Template</button>
       </div>
     </div>
 

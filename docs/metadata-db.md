@@ -438,6 +438,8 @@ CREATE UNIQUE INDEX uq_template_versions_one_draft
 
 Environment-specific database connections. See [Datasources spec](datasources.md). This table is where [Datasources §7.2](datasources.md#72-schema) points; every semantic that section lists is satisfied below.
 
+**Visibility is NOT here.** V23 replaced `workspace_id` (whose NULL meant "global") with two separate things: `owner_workspace_id`, which records the workspace that REGISTERED the datasource — NULL for an instance datasource a super admin registered — and `datasource_workspaces` (§4.16), the grant table that decides who can SEE it. Ownership and visibility were one column and are now two concepts, because a datasource shared with five teams has one owner and five grants (D-R7).
+
 ```sql
 CREATE TABLE datasources (
     name                    TEXT        PRIMARY KEY,        -- 'pg-prod'
@@ -451,7 +453,7 @@ CREATE TABLE datasources (
     properties_json         JSONB       NOT NULL DEFAULT '{}',  -- {"hikari": {...}, "jdbc": {...}}
     query_timeout_seconds   INTEGER,                        -- NULL = fall back to the global executor default
     introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]', -- §7A allowlist: schemas exempt from the system-schema exclusion (V2)
-    workspace_id            UUID        REFERENCES workspaces(id),    -- NULL = global (V4)
+    owner_workspace_id      UUID        REFERENCES workspaces(id),    -- the OWNING workspace; NULL = an instance datasource (V23)
     is_readonly             BOOLEAN     NOT NULL DEFAULT FALSE,       -- write-shaped uses forbidden (V4)
     last_test_at            TIMESTAMPTZ,                              -- last connection test: when (V9)
     last_test_ok            BOOLEAN,                                  -- last connection test: did it authenticate and answer (V9)
@@ -510,12 +512,16 @@ CREATE TABLE workspaces (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name         TEXT        NOT NULL UNIQUE,          -- [a-z0-9_-]+, 1–63, immutable (referenced in config/UX)
     display_name TEXT        NOT NULL,
-    is_personal  BOOLEAN     NOT NULL DEFAULT FALSE,   -- TRUE only for auto-per-user provisioned workspaces
+    is_personal  BOOLEAN     NOT NULL DEFAULT FALSE,   -- historical: the retired auto-per-user mode set it
     created_by   UUID        REFERENCES users(id),     -- NULL = system-provisioned (R1)
     is_deleted   BOOLEAN     NOT NULL DEFAULT FALSE,
+    deactivated_at TIMESTAMPTZ,                        -- D-R10: deactivate, never delete (V23)
+    deactivated_by UUID      REFERENCES users(id),     -- who deactivated it (V23)
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_workspaces_active ON workspaces(name) WHERE is_deleted = FALSE AND deactivated_at IS NULL;
 ```
 
 **Notes:**
@@ -523,26 +529,35 @@ CREATE TABLE workspaces (
 - **The `default` workspace carries the well-known constant UUID `defa0000-0000-0000-0000-000000000001` (re-base resolution R2).** V4 seeds it (`created_by NULL`, `is_personal = FALSE`) and backfills every pre-existing pipeline/template/api-key row onto it (D9: the pre-workspaces world was one shared space). Slice-1 repositories pin this constant in code — deliberately **not** a column DEFAULT and **not** a boot-time lookup or config key: the constant is deterministic across deployments and greppable, and slice 2 replaces the pins with real workspace resolution by finding every occurrence of the value. A boot-time DB lookup or a config key was considered and rejected for exactly those reasons.
 - `name` is globally UNIQUE (the namespace is flat — workspaces themselves are not scoped) and immutable, like datasource names. No CHECK constraint here: the `[a-z0-9_-]+`, 1–63 rule is validated by the application on write, matching how `templates.name` is handled (contrast `datasources`, whose CHECK exists because a bad name breaks every referencing pipeline).
 - `is_deleted` is the house soft-delete flag; the uniqueness of `name` includes soft-deleted rows (house rule — the name is not reusable until the row is hard-deleted).
+- **`deactivated_at` is the D-R10 state, and it is not a delete.** A deactivated workspace cannot be selected, its endpoints answer 404, keys pinned to it are refused, its schedules do not fire, and a super admin's listing shows it greyed with the date. **Nothing it owns is purged — ever**, which is the whole reason the state exists: deactivation is reversible and deletion is not. To a member a deactivated workspace is indistinguishable from one that never existed (`workspace.not_found`), so deactivation cannot be read as a signal; an API key pinned to it gets `auth.key_workspace_inactive` instead, because the pin already proves existence and an operator needs the truth.
+- **The `demo` workspace carries the well-known constant UUID `de000000-0000-0000-0000-000000000001`**, the same convention `default` uses — but it is created by `DemoWorkspaceSeeder` **at first boot**, not by V23. The migration deliberately does not seed it: the seeder imports the example content in the same act, and SQL cannot (it goes through the pipeline and template import services), so a migration-time insert would have made the seeder dead code and handed every deployment an empty `demo` with nothing saying why. It is the one workspace the product ships (D-R11) and the one a user with no membership joins as a **viewer** on first login. The boot-time seeder is idempotent and **never recreates a DEACTIVATED `demo`** (O-3): a seeder that re-creates what somebody deliberately turned off is a seeder that cannot be turned off.
+- `is_personal` is historical. The `auto-per-user` provisioning mode that set it was removed in RBAC round 1 (D-R11); existing personal workspaces stay as ordinary workspaces with their sole member as admin (D-R14).
 
 ### 4.12 `workspace_members`
 
-Membership with a coarse role (workspaces design D4). Global `is_admin` bypasses membership checks entirely (existing admin semantics).
+**Membership IS capability** (RBAC design D-R1/D-R2): a person's role is per workspace, carried as three additive flags. A row with all three false is a **viewer**. `users.is_admin` is the one global capability left and means **super admin** (§4.1).
 
 ```sql
 CREATE TABLE workspace_members (
     workspace_id UUID        NOT NULL REFERENCES workspaces(id),
     user_id      UUID        NOT NULL REFERENCES users(id),
-    role         TEXT        NOT NULL DEFAULT 'member',
+    author       BOOLEAN     NOT NULL DEFAULT FALSE,   -- create/edit/discard/restore/purge, publish endpoints, issue own keys (V23)
+    promoter     BOOLEAN     NOT NULL DEFAULT FALSE,   -- release and promote (V23)
+    admin        BOOLEAN     NOT NULL DEFAULT FALSE,   -- members, roles, workspace-bound datasources, the audit trail (V23)
     joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (workspace_id, user_id),
-    CONSTRAINT chk_workspace_member_role CHECK (role IN ('owner', 'member'))
+    CONSTRAINT chk_workspace_member_admin_authors CHECK (NOT admin OR author)
 );
+
+CREATE INDEX idx_workspace_members_admins ON workspace_members(workspace_id) WHERE admin;
 ```
 
 **Notes:**
-- **V4 enters every pre-existing user as `'owner'` of `default`.** Before workspaces, every active user had full capability over the shared content; the owner role is the backfill that preserves that world (D9). New memberships created later default to `'member'`.
-- The role set is deliberately closed (CHECK): `owner` manages the workspace and its members, `member` authors within it. Finer-grained workspace roles are deferred with per-datasource ACLs (workspaces design D4).
-- No `updated_at`: membership rows are inserted and deleted, and role flips are rare administrative acts — `joined_at` carries the only timestamp the model needs.
+- **Flags, not a role column, because the roles are additive (D-R2).** "An author who also releases" and "a DevOps person who ONLY releases" are both one row, and no single label can name both. The `role TEXT` column (`owner` | `member`) and its CHECK were dropped in V23.
+- **V23's backfill: `owner → admin + author`, `member → author`.** A `member` already had the whole authoring surface — session capability was `JwtService.scopesFor`, which gave every non-admin user `author` globally — so `member → author` preserves exactly what worked the day before rather than demoting anyone.
+- **`admin → author` is a CHECK, not a convention.** A workspace admin can author (RBAC design §1), and stating it once in the database is what lets every capability predicate read `author` off the row instead of re-spelling the implication at each site. The service normalises before writing so a caller who ticks only "admin" gets what they asked for rather than a constraint violation with no catalogued code.
+- **The last-admin rule is NOT a constraint.** "At least one admin per workspace" is a cross-row invariant no CHECK can express, and a trigger's refusal would carry no catalogued error code — so it is enforced in `WorkspaceService` and answered as `workspace.last_admin` (409). The partial index above is what makes the count cheap.
+- No `updated_at`: membership rows are inserted, updated and deleted, and `joined_at` carries the only timestamp the model needs. **The audit trail is where role changes live** — `workspace.member_flags_changed` records the before and after (auth.md §10.1).
 
 ### 4.13 `published_endpoints`
 
@@ -632,6 +647,29 @@ CREATE TABLE lake_tables (
 
 ---
 
+### 4.16 `datasource_workspaces`
+
+**Visibility is a grant** (RBAC design §4, D-R7). A datasource is registered once — credentials are instance secrets — and granted to N workspaces. There is no "global" datasource any more: nothing is visible by default.
+
+```sql
+CREATE TABLE datasource_workspaces (
+    datasource_name TEXT        NOT NULL REFERENCES datasources(name) ON DELETE CASCADE,
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),
+    granted_by      UUID        NOT NULL REFERENCES users(id),
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (datasource_name, workspace_id)
+);
+
+CREATE INDEX idx_datasource_workspaces_workspace ON datasource_workspaces(workspace_id);
+```
+
+**Notes:**
+- **Keyed by `datasource_name`, not by an id.** `datasources` is keyed by `name TEXT` (§4.10) and always has been; the RBAC design record's `datasource_id UUID` names a column that does not exist.
+- **V23's backfill preserves yesterday's visibility exactly.** A workspace-bound datasource is granted to its own workspace and `owner_workspace_id` is set to it; a former `global` datasource (`workspace_id IS NULL`) is granted to EVERY existing workspace and owns none. `granted_by` is the datasource's own `created_by` — the honest actor, and it keeps the migration from having to mint a users row.
+- **`ON DELETE CASCADE` on the datasource, never on the workspace.** Removing a datasource removes its grants; a workspace is DEACTIVATED, never deleted (D-R10), so its grants must survive to be there when it is reactivated.
+- **Every grant is audited** (`datasource.granted` / `datasource.revoked`, auth.md §10.1). The row records who and when; the audit trail records the decision.
+- Revoking a grant does not touch the datasource. A workspace that loses one loses only its ability to SEE it — pipelines there that referenced it then fail with the ordinary not-found, which is the honest answer: it no longer exists for them.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -677,6 +715,10 @@ CREATE TABLE lake_tables (
 | `workspaces` | `workspaces_pkey` | via PK | Lookup by id |
 | `workspaces` | `workspaces_name_key` | via UNIQUE | Workspace lookup by name (config/UX references) |
 | `workspace_members` | `workspace_members_pkey` | via PK | Membership check `(workspace_id, user_id)` |
+| `workspace_members` | `idx_workspace_members_admins` | explicit, partial (`WHERE admin`) | The last-admin count (§4.12) — enforced in the service, so the count runs on every membership change |
+| `workspaces` | `idx_workspaces_active` | explicit, partial | Selectable workspaces (`is_deleted = FALSE AND deactivated_at IS NULL`) — every workspace selection reads it |
+| `datasource_workspaces` | `datasource_workspaces_pkey` | via PK | The visibility check `(datasource_name, workspace_id)` — the hot per-read predicate (§4.16) |
+| `datasource_workspaces` | `idx_datasource_workspaces_workspace` | explicit | "Everything this workspace can see", the listing's access path |
 | `published_endpoints` | `published_endpoints_pkey` | via PK | Lookup by id |
 | `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
 | `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
@@ -721,7 +763,8 @@ table and the test's expected-table list in the same commit.
 | `users` | environment-local | User | — | `email` | Identities are per-deployment; imported rows' `created_by` names the importing actor (versioning §10.6's service principal, when promotion ships) |
 | `api_keys` | environment-local | ApiKey | — | — | Credentials are per-deployment by definition |
 | `workspaces` | environment-local | Workspace | — | `name` | Isolation topology is per-deployment |
-| `workspace_members` | environment-local | Membership | — | — | Follows `users` and `workspaces`, both local |
+| `workspace_members` | environment-local | Membership | — | — | Follows `users` and `workspaces`, both local. It is also where CAPABILITY lives since V23 (§4.12), which makes it doubly local: a role granted in one environment must not travel to another — that is the whole point of having a promoter who can release on staging and not in production |
+| `datasource_workspaces` | environment-local | DatasourceGrant | — | — | A grant joins two environment-local rows — a [`datasources`](#410-datasources) row whose credential never leaves the deployment, and a [`workspaces`](#411-workspaces) row whose isolation topology is per-deployment. The receiving environment's super admin grants there, as part of the same setup that registers the datasource (RBAC design D-R7, O-4) |
 | `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
 | `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
@@ -1004,6 +1047,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-09-05 | v1.8 | V11 migration (074) | New **§4.13 `published_endpoints`** and **§4.14 `endpoint_key_bindings`** (migration V11, [REST API §19](rest-api.md#19-published-endpoints)) — a released pipeline served as `GET /api/x/…`, and which API keys authorise which node of that tree. §4.2 `api_keys` gains `kind` (`user` \| `endpoint`, CHECK-constrained, `DEFAULT 'user'` so the whole pre-V11 table backfills correctly) plus the partial index `idx_api_keys_endpoint_kind`. `pipeline_executions.chk_triggered_via` widens to admit `'ENDPOINT'` — a closed set since V1, so without this the first serve would fail on the constraint rather than on anything the design describes. §5 index table and §5A's classification updated: both new tables are **promotable** (a URL contract is authored, and bindings travel by key NAME because `api_keys` itself is environment-local — a target missing that name refuses the batch with `endpoint.promotion.key_missing`). |
 | 2026-09-05 | v1.9 | V12 migration (077) | §4.8 `templates`: `name` requires a **folder** ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and migration **V12** carries the deploy gate for stored names — a `DO`-block pre-check that aborts naming every flat offender, active and soft-deleted, and **no DDL at all**. No table, column, index, constraint or classification changes, which is why every other section of this document is untouched. The gate deliberately ignores `pipelines`: that name is validated at save only, so a legacy flat pipeline still runs and an abort over it would be a false alarm ([Template Hierarchy §14.2](template-hierarchy-design.md)). |
 | 2026-09-07 | v1.10 | V13 + V14 migrations (087) | §4.10 `datasources`: `password_encrypted` → **`credential_encrypted`, now NULLABLE**, plus **`credential_kind TEXT NOT NULL DEFAULT 'password'`** and a nullable `username` (V13, [Datasources §3.4](datasources.md#34-credential-kinds)). Three CHECKs: the kind is one of the enums.md §5A set, `kind = 'none'` ⟺ no ciphertext (which is what makes `password_set` derivable rather than a stored flag), and `username` is present exactly when the kind allows it. The backfill is TRUE rather than a guess — every pre-087 row went through a save path that required a username and a password. The credential blob stays kind-agnostic under the V10 versioned envelope, so rotation is untouched. **V14** widens `chk_datasource_dialect` to admit `'LAKE'` (dropped and recreated — Postgres has no ALTER for a CHECK expression); no data changes, since no existing row can hold a value that did not exist. |
+| 2026-09-10 | v1.12 | V23 migration (112, RBAC round 1) | **§4.12 `workspace_members` is now the capability record** (RBAC design D-R1/D-R2): `role TEXT` and its CHECK are gone, replaced by three additive flags — `author`, `promoter`, `admin` — with `chk_workspace_member_admin_authors` stating "admin implies author" once, in the database, so every predicate can read `author` off the row. A row with all three false is a viewer. V23's backfill is `owner → admin+author`, `member → author`, which preserves exactly what worked the day before: session capability WAS `JwtService.scopesFor`, giving every non-admin user `author` globally. The last-admin rule is deliberately NOT a constraint (a cross-row invariant no CHECK can state, and a trigger's refusal carries no catalogued code) — `WorkspaceService` enforces it and answers `workspace.last_admin`; `idx_workspace_members_admins` makes its count cheap. **§4.11 `workspaces` gains `deactivated_at` / `deactivated_by`** (D-R10: deactivate, never delete — nothing is purged, ever) (D-R11's `demo` workspace is created by `DemoWorkspaceSeeder` at boot, NOT by this migration — the seeder imports the example content in the same act and SQL cannot, so seeding the row here would have made the seeder dead code). **§4.10 `datasources` loses `workspace_id`** and gains `owner_workspace_id`: ownership and visibility were one column and are now two concepts. **New §4.16 `datasource_workspaces`** is the visibility half (D-R7) — "global" is gone, and V23's backfill grants every former global datasource to every existing workspace so nothing visible yesterday stopped being visible. It is keyed by `datasource_name`, because `datasources` is keyed by its name and there is no id to point at (the design record's `datasource_id UUID` names a column that has never existed). **`users.scopes` was NOT dropped: it never existed** — the only `scopes TEXT[]` in the schema is `api_keys.scopes`, which stays, and what carried global session capability was Kotlin, not a column. |
 | 2026-09-07 | v1.11 | V15 migration (089 §A) | New **§4.15 `lake_tables`** — the dp-lake catalog: which Parquet/Iceberg tables a LAKE-dialect datasource serves (the 2026-09-07 lake-datasource design record §2). `datasource_id` is TEXT referencing `datasources(name)` — the datasource PK IS its name; there is no surrogate id to point at. `namespace` is 087's segment list as a Postgres `TEXT[]`; `format` is CHECKed (`parquet` \| `iceberg`) because a third value would generate bad view SQL later; the named `uq_lake_tables_datasource_namespace_name` lets the service map a re-registration to the catalogued `datasource.lake_table_duplicate`, and its index doubles as the list-by-datasource access path, so §5 gains no separate FK index. §3 ERD, §5 index table and §5A's classification updated: the table is **environment-local** — it points at an environment-local datasource row and at bucket locations whose credentials never leave the deployment. |
 | 2026-09-10 | v1.16 | V22 migration (109 §A) | `lake_tables` gains `last_error TEXT` / `last_error_at TIMESTAMPTZ` — the per-table connect-time view-creation outcome (datasources.md §8C.2): a failing view is recorded and skipped rather than failing the pool build. Both NULL = healthy; transition-only writes; cleared on the next successful view creation. §4.15 sketch and notes amended. |
 | 2026-09-08 | v1.13 | V18 migration (099, backfilled entry) | `pipelines.current_version` / `templates.current_version` drop `DEFAULT 0` and `NOT NULL` and become nullable, and any `0` sentinel rows are nulled — creation lands version 1 as a DRAFT (D55), so a fresh entity has a version and no pointer at all. §4.4/§4.8 sketches and notes updated (this entry was missing from the Appendix when 099 landed — the sketches still said `NOT NULL DEFAULT 0`; caught while amending them for V19). |
