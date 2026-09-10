@@ -623,7 +623,7 @@ class NodeRunner(
         // a registry read against the rendered SQL's table references — no connection is leased
         // for a node that cannot succeed.
         if (datasource.dialect == Dialect.LAKE) {
-            phase(NodePhase.CONNECT, node.id) { enforceLakeTablesAvailable(datasource, bound) }
+            phase(ctx, NodePhase.CONNECT, node.id) { enforceLakeTablesAvailable(datasource, bound) }
         }
         // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
         // as of the SAVE; this backstop re-reads the LIVE entry (past the metadata cache) at
