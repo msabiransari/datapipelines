@@ -139,6 +139,9 @@ class WorkspaceIsolationSweepTest {
             swept.any { it.path.startsWith("/api/v1/pipelines") } shouldBe true
             swept.any { it.path.startsWith("/api/v1/datasources") } shouldBe true
             swept.any { it.path.startsWith("/partials/") } shouldBe true
+            // 112 merge review: the executions family (metadata, result cursor, SSE replay, cancel)
+            // must be swept WITH an execution id — see substitute().
+            swept.any { it.path.startsWith("/api/v1/executions/" + WorkspaceIsolationIntegrationTest.EXEC_GLOBEX) } shouldBe true
         }
         withClue("every swept route actually carries a foreign identifier") {
             swept.none { route -> FOREIGN_VALUES.values.none { it in route.path } } shouldBe true
@@ -280,9 +283,15 @@ class WorkspaceIsolationSweepTest {
         // No variable = no caller-supplied id = nothing this suite can be about (see the KDoc).
         if (variables.isEmpty()) return null
         var path = pattern
+        // 112 merge review: execution routes name their variable `id` too (`/api/v1/executions/{id}`,
+        // `/executions/{id}`, `/partials/executions/{id}/…`), so a pipeline id substituted there
+        // resolved to "no such execution" in EVERY workspace and the differential could not go
+        // red for the whole executions family. The path family picks the identifier.
+        val executionsFamily = EXECUTION_PATH_MARKERS.any { it in pattern }
         variables.forEach { match ->
             val variable = match.groupValues[1].substringBefore(':')
-            val value = values[variable] ?: return null
+            val key = if (variable == "id" && executionsFamily) "executionId" else variable
+            val value = values[key] ?: return null
             path = path.replace(match.value, value)
         }
         return path.takeUnless { "{" in it }
@@ -483,6 +492,10 @@ class WorkspaceIsolationSweepTest {
          * `globex`'s identifiers, by the variable NAME a route uses for them. Every value here
          * exists in `globex` and in no other workspace, so a 200 can only mean a leak.
          */
+
+        /** Route patterns whose `{id}` is an EXECUTION id, not a pipeline's. */
+        val EXECUTION_PATH_MARKERS: List<String> = listOf("/api/v1/executions/", "/executions/", "/partials/executions/")
+
         val FOREIGN_VALUES: Map<String, String> =
             mapOf(
                 "id" to WorkspaceIsolationIntegrationTest.PIPE_GLOBEX,

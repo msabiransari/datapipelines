@@ -158,18 +158,21 @@ class ExecutionDetailControllerTest {
     }
 
     @Test
-    fun `the cancel affordance needs a RUNNING row AND execute scope`() {
-        authenticate(setOf(Scope.READ))
+    fun `the cancel affordance needs a RUNNING row - any workspace member may cancel`() {
+        // 112 (merge review): a session carries no scopes; EXECUTE is viewer-level capability
+        // (D-R3), so the affordance turns on the row's status alone for every member. The
+        // scope-based form rendered no Cancel button for ANY human — the defect this pins.
+        authenticate(emptySet())
         val running = record(ExecutionStatus.RUNNING)
         every { executions.findById(workspaceId, executionId) } returns running
         stubReads(running, null)
 
         val model = ExtendedModelMap()
         controller.detail(executionId, model)
-        model["canCancel"] shouldBe false
+        model["canCancel"] shouldBe true
 
         SecurityContextHolder.clearContext()
-        authenticate(setOf(Scope.EXECUTE))
+        authenticate(emptySet())
         val done = record(ExecutionStatus.SUCCESS)
         every { executions.findById(workspaceId, executionId) } returns done
         stubReads(done, view())

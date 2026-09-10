@@ -121,12 +121,7 @@ class ApiKeyService(
      * additionally by its OWN scopes, which is the original privilege-escalation guard and the
      * half that must not be lost: a `read` key must never mint an `author` one.
      */
-    private fun ceilingFor(issuer: AuthenticatedPrincipal): Set<Scope> =
-        if (issuer.authMethod == AuthMethod.API_KEY) {
-            Scope.effective(issuer.scopes).intersect(KEY_SCOPES)
-        } else {
-            KEY_SCOPES
-        }
+    private fun ceilingFor(issuer: AuthenticatedPrincipal): Set<Scope> = issuanceCeiling(issuer)
 
     /**
      * The configured default scopes for a new key, falling back to `read` when the
@@ -296,12 +291,26 @@ class ApiKeyService(
         return sb.toString()
     }
 
-    private companion object {
-        const val KEY_PREFIX = ApiKeyCredential.KEY_PREFIX
-        const val ID_LEN = 12
-        const val SECRET_LEN = 48
+    companion object {
+        /**
+         * The scopes a key minted by [issuer] may hold — the same rule [issue] enforces, exposed
+         * so the console's form offers exactly what the service would accept (112 merge review:
+         * the form used to read the session's scope set, which is EMPTY for every human since
+         * D-R1, and offered nothing). A person's ceiling is every key scope; a key minting a key
+         * is capped by its own scopes — the privilege-escalation guard that must not be lost.
+         */
+        fun issuanceCeiling(issuer: AuthenticatedPrincipal): Set<Scope> =
+            if (issuer.authMethod == AuthMethod.API_KEY) {
+                Scope.effective(issuer.scopes).intersect(KEY_SCOPES)
+            } else {
+                KEY_SCOPES
+            }
+
+        private const val KEY_PREFIX = ApiKeyCredential.KEY_PREFIX
+        private const val ID_LEN = 12
+        private const val SECRET_LEN = 48
 
         // RFC 4648 base32 alphabet (no padding, unambiguous, scanner-friendly).
-        const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
     }
 }

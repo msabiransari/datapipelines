@@ -5,6 +5,7 @@ import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.ApiKeyRepository
+import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -121,7 +122,9 @@ class ApiConsoleController(
         // (`ApiKeyForm`), so a select can never offer a value the server refuses. Order is the
         // owner's ruling: Kind → Scope → Name → Expiry → Bindings, scope and bindings conditional.
         model.addAttribute("kindChoices", ApiKeyForm.kindChoices(principal.isSuperAdmin))
-        model.addAttribute("scopeChoices", ApiKeyForm.scopeChoices(principal.scopes))
+        // RBAC (112 merge review): the form offers what the SERVICE would accept — the issuance
+        // ceiling — never the session scope set, which is empty for every human since D-R1.
+        model.addAttribute("scopeChoices", ApiKeyForm.scopeChoices(ApiKeyService.issuanceCeiling(principal)))
         model.addAttribute("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
         model.addAttribute("expiryCustomWire", ApiKeyForm.CUSTOM)
         // The picker offers the LITERAL prefixes of this workspace's published paths, never a

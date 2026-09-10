@@ -155,8 +155,16 @@ class ExecutionDetailPartialControllerTest {
     // ------------------------------------------------------------ cancel
 
     @Test
-    fun `cancel without execute scope is forbidden even with read`() {
-        authenticate(setOf(Scope.READ))
+    fun `cancel without a workspace context is forbidden - a session holds capability, not scope`() {
+        // 112 (merge review): a session carries NO scopes (D-R1), so the old "read scope only"
+        // case cannot arise; what a session can lack is a WORKSPACE, and without one there is
+        // no capability to satisfy. Any member of the workspace may cancel (EXECUTE is viewer-level).
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(userId, "a@b.c", "A", emptySet(), AuthMethod.OIDC, workspace = null),
+                null,
+                emptyList(),
+            )
         val error =
             io.kotest.assertions.throwables.shouldThrow<ResponseStatusException> {
                 controller.cancel(executionId, model)

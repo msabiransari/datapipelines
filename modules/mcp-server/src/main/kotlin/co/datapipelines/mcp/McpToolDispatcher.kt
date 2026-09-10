@@ -195,6 +195,10 @@ class McpToolDispatcher(
                 identifierExtras(request)
                 code?.let { put("code", it) }
                 put("elapsed_ms", (System.nanoTime() - startedAt) / NANOS_PER_MILLI)
+                // D-R8 (112 merge review): a super admin's key acting in a workspace where they
+                // hold no explicit membership is marked here exactly as the REST interceptor
+                // marks a session — the audit promise covers both surfaces or it is not a promise.
+                if (ctx.principal.workspace?.actingViaSuperAdmin == true) put("acting_via", "super_admin")
             }
         try {
             auditSink.log(

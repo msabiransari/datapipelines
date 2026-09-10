@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Capability
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -56,7 +57,10 @@ class ExecutionDetailController(
         model.addAttribute("resultUrl", resultUrlFactory.urlFor(record.executionId))
         model.addAttribute("resultView", resultView)
         model.addAttribute("correlationId", record.correlationId?.toString() ?: CorrelationId.current())
-        model.addAttribute("canCancel", record.status == ExecutionStatus.RUNNING && Scope.satisfies(principal.scopes, Scope.EXECUTE))
+        // RBAC (112 merge review): a session holds capability, never scopes — the scope form
+        // rendered no Cancel button for any human.
+        val canExecute = principal.workspace?.flags?.let { Capability.EXECUTE.satisfiedBy(it) } == true
+        model.addAttribute("canCancel", record.status == ExecutionStatus.RUNNING && canExecute)
         model.addAttribute("isAdmin", principal.isWorkspaceAdmin)
 
         val nodeStats = record.nodeStatsJson?.let { ExecutorJson.mapper.readTree(it) }
