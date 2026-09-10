@@ -22,6 +22,24 @@
        output below the editor sharing its width (template-editor.css). -->
   <!-- The template under edit, as DATA: lifecycle.js reads it here instead of the server
        inlining a value into a script body (which is what made the script un-extractable). -->
+  <!--/* 110 §C — the phone band, the pipeline editor's twin (desktop-first by
+         DECISION; hidden everywhere but < 768px). The badge is the same
+         hasDraft / draftVersion pair the header above renders. The explorer takes
+         ?q= today; a ?open= deep link would be the better seam for a later round. */-->
+  <div class="ds-empty app-wide-screen-note">
+    <p class="ds-empty-title">Open on a wider screen to edit</p>
+    <p class="ds-empty-description">
+      <span th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</span>
+      <span class="ds-badge" th:classappend="${hasDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+            th:if="${hasDraft}"
+            th:text="'Draft v' + ${draftVersion} + ' — pending release'">Draft v2 — pending release</span>
+      — the template editor needs a width this screen does not have.
+    </p>
+    <p class="ds-empty-actions">
+      <a class="ds-button ds-button-secondary" th:href="@{/templates(q=${templateName})}">Open in Templates</a>
+    </p>
+  </div>
+
   <div class="te-page" th:attr="data-template-id=${template?.id ?: ''}">
   <div class="u-row u-between">
     <div>
