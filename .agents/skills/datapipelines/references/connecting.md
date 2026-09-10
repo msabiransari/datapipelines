@@ -36,24 +36,30 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   tools, then author it), `debug_failed_execution` (walk a failed execution to a
   diagnosis).
 
-- **Which key you need, and why not `admin`.** Your credential is a **`user` key** — the kind
-  the UI calls "Agent / API key" (one kind, two surfaces: MCP and REST). Ask for the LOWEST
-  scope that covers what you were asked to do: `read` to inspect, `execute` to run, `author` to
-  create or change. **Do not ask for `admin`.** No MCP tool requires it, so it buys you nothing
-  you can use — and it turns a key that lives in a config file, a transcript and a client's logs
-  into one that can manage users and workspaces. If a tool answers `auth.scope.insufficient`,
-  name the ONE scope you need and why. The other two key kinds are not yours: an `endpoint` key
-  serves published endpoints, a `server` key is one deployment's credential for another, and
-  `/mcp` refuses both with `endpoint.key_kind_refused`.
+- **Which key you need.** Your credential is a **`user` key** — the kind the UI calls
+  "Agent / API key" (one kind, two surfaces: MCP and REST). Ask for the LOWEST scope that
+  covers what you were asked to do: `read` to inspect, `execute` to run, `author` to create or
+  change. **`admin` is not a scope a key can hold at all** — asking for one is refused with
+  `auth.key_scope_unavailable`, because release, promotion and membership are human verbs. If
+  a tool answers `auth.scope.insufficient`, name the ONE scope you need and why. The other two
+  key kinds are not yours: an `endpoint` key serves published endpoints, a `server` key is one
+  deployment's credential for another, and `/mcp` refuses both with
+  `endpoint.key_kind_refused`.
 
-- **Scopes** (hierarchical: `admin ⊃ author ⊃ execute ⊃ read`): `read` = list/get;
-  `execute` = run; `author` = create/update pipelines + templates (also template render,
-  datasource test, schema introspection, the three `lake_tables_*` dp-lake registry writes,
-  and workspace-bound datasource mutation). Creating, updating and deleting a datasource are
-  REST/UI only — **no credential travels through an agent** (094): ask a person to add the
-  datasource in the UI, then use it by name. Mutating a GLOBAL datasource's lake registry needs
-  `admin`. A tool or endpoint rejects with
-  `auth.scope.insufficient` when the key's scope is too low.
+- **Scopes** (hierarchical: `author ⊃ execute ⊃ read`): `read` = list/get; `execute` = run;
+  `author` = create/update pipelines + templates (also template render, schema introspection
+  and the three `lake_tables_*` dp-lake registry writes). Creating, updating, deleting and
+  TESTING a datasource are REST/UI only — **no credential travels through an agent** (094):
+  ask a person to add the datasource in the UI, then use it by name.
+
+- **Your scope is a ceiling, not a grant.** Every request is checked on TWO axes: the key's
+  own scope, and the ROLE its ISSUER holds in the pinned workspace **right now**. So a key can
+  do at most what the person who minted it can do today, and if their role changes the key
+  starts refusing with `auth.key_issuer_role_lost` within about a minute. That one is not
+  retryable at any scope — the fix is a new key from somebody who still holds the role.
+
+- **A viewer's key can read and run; it cannot author.** `auth.role_required` means the ROLE
+  is short, not the scope, so asking for a broader key will not help — ask a workspace admin.
 
 - **You cannot register a datasource, and there is no tool that lets you.** **No credential
   travels through an agent.** A secret passed through you transits your context, your transcript
@@ -110,7 +116,7 @@ Same server, HTTP + JSON, authenticated with `-H "DP-API-Key: dpk_..."`:
 
 ```bash
 curl -s http://localhost:8080/api/v1/pipelines                     # list
-curl -s http://localhost:8080/api/v1/datasources -X POST           # register (admin)
+curl -s http://localhost:8080/api/v1/datasources -X POST           # register (a person, in the UI)
   -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." -d '{...}'
 curl -s http://localhost:8080/api/v1/pipelines/{id}/execute -X POST # run (SSE stream)
   -H "Accept: text/event-stream" -H "DP-API-Key: dpk_..." -d '{"parameters": {}}'
