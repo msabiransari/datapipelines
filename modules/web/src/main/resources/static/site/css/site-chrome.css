@@ -1607,6 +1607,27 @@ code {
   color: var(--text-primary);
 }
 
+/* 115: the "before" column lists pains — a check mark on "a chart that is wrong the
+   first time" reads as endorsement. The pain variant marks each line with a cross. */
+.fact-list--pain li::before {
+  content: "\00d7";
+  color: var(--text-tertiary);
+}
+
+/* 115: four outcome cards on the home page — three-up leaves the fourth alone on its
+   own row; two-by-two at tablet, four-up at desktop. */
+@media (min-width: 40rem) {
+  .features-grid--four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 64rem) {
+  .features-grid--four {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .demo-note {
   margin-top: var(--space-6);
   font-size: var(--text-sm);

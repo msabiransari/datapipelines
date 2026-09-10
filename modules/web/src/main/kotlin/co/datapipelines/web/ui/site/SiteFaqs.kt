@@ -213,47 +213,47 @@ object SiteFaqs {
                 "Do I need a data engineer?",
                 "No. You describe the dataset; an AI agent builds and runs it against your databases and shows you every " +
                     "step. Someone who can read a table of numbers and press Release is the whole team. If you have " +
-                    "engineers, they review SQL instead of writing a service — the release step is docs/versioning.md §3.",
+                    "engineers, they review SQL instead of writing a service. (The release step: docs/versioning.md §3.)",
                 "docs/versioning.md §3",
             ),
             FaqEntry(
                 "Where does my data go?",
                 "Nowhere. The software runs on your servers, reads each database in place, does the joining in memory " +
                     "for the duration of a run, and returns the result. Your database passwords stay on the server; the " +
-                    "AI agent never sees them. The details: docs/datasources.md §7 and docs/staging.md §3.",
+                    "AI agent never sees them. (Details: docs/datasources.md §7 and docs/staging.md §3.)",
                 "docs/datasources.md §7, docs/staging.md §3",
             ),
             FaqEntry(
                 "What do I get on day one, and what comes next month?",
                 "Day one: datasets built from a sentence, an API for each one your product can call, and governed " +
                     "Tableau access. Next month: datasets that refresh on a schedule and a dashboard you embed in your " +
-                    "own app. The roadmap page carries the dates — docs/ROADMAP.md §2.",
+                    "own app. The roadmap page carries the dates. (Source: docs/ROADMAP.md §2.)",
                 "docs/ROADMAP.md §2",
             ),
             FaqEntry(
                 "How do I know the numbers are right?",
                 "You look. Every step shows the rows it produced, the logic is readable SQL, and every run is recorded " +
-                    "with its inputs so a number can be reproduced. Nothing goes live until you press Release. The " +
-                    "record a run leaves is docs/rest-api.md §10.",
+                    "with its inputs so a number can be reproduced. Nothing goes live until you press Release. (The " +
+                    "record a run leaves: docs/rest-api.md §10.)",
                 "docs/rest-api.md §10",
             ),
             FaqEntry(
                 "Can each customer see only their own rows?",
                 "Yes, through your app: a published API takes parameters your app supplies (the customer's id, the " +
                     "month), and a partner's key is bound to that one API path. Per-customer rules on embedded " +
-                    "dashboards ship with the dashboards. The mechanics: docs/rest-api.md §19.3 and docs/auth.md §7.7.",
+                    "dashboards ship with the dashboards. (The mechanics: docs/rest-api.md §19.3 and docs/auth.md §7.7.)",
                 "docs/rest-api.md §19.3, docs/auth.md §7.7",
             ),
             FaqEntry(
                 "Do I have to use an AI agent?",
                 "No. The same datasets can be built by hand in the app's editor. The agent is the fast path, not the " +
-                    "only one — the editor is the deliberate second path, documented in docs/ui-screens.md §4.4.",
+                    "only one. (The editor: docs/ui-screens.md §4.4.)",
                 "docs/ui-screens.md §4.4",
             ),
             FaqEntry(
                 "What does it cost?",
                 "Nothing to run: it is open source under AGPL-3.0 and you host it. There is no hosted plan today; " +
-                    "when there is, the roadmap page will say so first. The licence and packaging: docs/deployment.md §10.",
+                    "when there is, the roadmap page will say so first. (Licence and packaging: docs/deployment.md §10.)",
                 "docs/deployment.md §10",
             ),
             FaqEntry(
