@@ -1,0 +1,27 @@
+/* ============================================================
+   site-fonts-mono.css — the JetBrains Mono faces, loaded LATE.
+   ============================================================
+   Split from site.css (111 §C): 184 KB of mono faces sat on the
+   render-blocking chain behind the Lighthouse performance floor.
+   The link carries media="print" and site.js flips it to "all"
+   before first paint on a normal parse, so fast connections get
+   the real face and slow ones keep the fallback — the same trade
+   font-display: optional makes. Do not move these rules back
+   into site.css (the bundle rides the critical chain).
+   ============================================================ */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("../../vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("../../vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+}

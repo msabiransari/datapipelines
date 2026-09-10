@@ -13,6 +13,8 @@
 
   <section class="section page-hero" aria-labelledby="engine-title">
     <div class="container">
+      <!-- claim: docs/datasources.md §7, docs/auth.md §7.5, docs/auth.md §10 -->
+      <p class="eyebrow">Read-only by default · one scoped key per agent · every call audited</p>
       <p class="kicker" th:text="|${engine.dialect} dialect|">DIALECT</p>
       <h1 id="engine-title" class="ds-display" th:text="|${engine.displayName} MCP server|">Engine MCP server</h1>
       <p class="section-lede">
@@ -169,6 +171,32 @@
       </ul>
       <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Datasources specification &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/deployment.md §3.5 — does the driver ship in the image -->
+      <!-- claim: docs/mcp-server.md §4.1 — how the agent authenticates -->
+      <!-- claim: docs/datasources.md §7.1 — is the credential exposed to the agent -->
+      <!-- claim: docs/mcp-server.md §6.1 — can the agent register the datasource -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'This engine, in questions')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Connect an agent to this engine today</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        Register the datasource, mint a scoped key, paste one config block — the setup page walks all of it, and the
+        demo stack gives you a safe place to try the whole loop first.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Client setup, step by step</a>
+        <a class="btn btn-secondary" th:href="@{/docs/deployment}">Run the demo</a>
+      </div>
     </div>
   </section>
 

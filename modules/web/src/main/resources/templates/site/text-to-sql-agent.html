@@ -12,6 +12,8 @@
 
   <section class="section page-hero" aria-labelledby="tts-title">
     <div class="container">
+      <!-- claim: docs/mcp-server.md §6.1, docs/versioning.md §3 -->
+      <p class="eyebrow">We do not generate SQL · the agent does · the pipeline is versioned</p>
       <p class="kicker">Text to SQL, and then what?</p>
       <h1 id="tts-title" class="ds-display">From a question to a pipeline your team can rerun</h1>
       <p class="section-lede">
@@ -100,6 +102,32 @@
       </ul>
       <p><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here &rarr;</a> &middot;
          <a th:href="@{/add-mcp-server-to-claude-code}">Connect your agent &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/mcp-server.md §6.1 — does datapipelines generate the SQL -->
+      <!-- claim: docs/pipeline-contract.md §3.1 — what happens to the query after it answers -->
+      <!-- claim: docs/pipeline-contract.md §13 — what the agent gets when a query fails -->
+      <!-- claim: docs/staging.md §1 — can it join two databases in one question -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Text-to-SQL questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Ask the question that keeps coming back</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        The one you answered three times this month is the right pilot. On the demo stack, the answer becomes a
+        pipeline with a version number — and the fourth time, nobody asks you.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
+        <a class="btn btn-secondary" th:href="@{/federated-query}">The cross-database question, worked</a>
+      </div>
     </div>
   </section>
 

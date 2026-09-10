@@ -28,11 +28,16 @@
   <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
   <link rel="manifest" th:href="@{/site/brand/site.webmanifest}">
   <meta name="theme-color" content="#1F4FD8">
-  <link rel="stylesheet" th:href="@{/vendor/design-system/tokens.css}">
-  <link rel="stylesheet" th:href="@{/vendor/design-system/base.css}">
-  <link rel="stylesheet" th:href="@{/vendor/design-system/motion.css}">
-  <link id="dp-theme" rel="stylesheet" th:href="@{/vendor/design-system/themes/auto.css}">
-  <link rel="stylesheet" th:href="@{/site/css/site.css}">
+  <!-- Site v2 batch 2 (111 §C): the whole head chain rides one bundled request
+       (site-chrome.css) — see _layout.html for the derivation and the guard. The Manrope
+       preload (the body/LCP face) rides at the top of the request queue; the mono faces
+       load in the late sheet instead (see _layout.html), off the critical chain. -->
+  <link rel="preload" as="font" type="font/woff2" crossorigin th:href="@{/vendor/fonts/manrope/manrope-latin-wght-normal.woff2}">
+  <link rel="stylesheet" th:href="@{/site/css/site-chrome.css}">
+  <link id="dp-theme" rel="stylesheet" th:href="@{/vendor/design-system/themes/auto.css}" disabled>
+  <!--/* The mono faces ride the LATE sheet (111 §C): media="print" keeps their 184 KB off
+       the render-blocking chain; site.js flips it to all before first paint. */-->
+  <link rel="stylesheet" th:href="@{/site/css/site-fonts-mono.css}" media="print" data-late-style>
   <!--/* 073 §D — structured data. Two blocks, both parsed by SiteJsonLdTest (a block that
        stops being valid JSON is worse than no block: the crawler drops it silently). Every
        FAQ answer restates something this site claims elsewhere WITH its citation, so the

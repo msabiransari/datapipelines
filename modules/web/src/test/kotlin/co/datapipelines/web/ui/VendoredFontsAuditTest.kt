@@ -190,20 +190,41 @@ class VendoredFontsAuditTest {
      */
     @Test
     fun `site css declares the marketing faces against the vendored files`() {
-        val css =
+        // 111 §C split the declarations across two sheets: Manrope (the body/LCP face) stays
+        // in site.css, whose bytes ride the critical chain via site-chrome.css; the two
+        // JetBrains Mono faces moved to site-fonts-mono.css, which loads LATE (media="print",
+        // flipped by site.js) so their 184 KB never blocks first paint. Both sheets must keep
+        // pointing at the vendored files, and the mono faces must NOT sneak back into site.css.
+        val site =
             resolver
                 .getResource("classpath:static/site/css/site.css")
                 .inputStream
                 .readBytes()
                 .decodeToString()
+        val mono =
+            resolver
+                .getResource("classpath:static/site/css/site-fonts-mono.css")
+                .inputStream
+                .readBytes()
+                .decodeToString()
 
-        (declaredHashes("manrope") + declaredHashes("jetbrains-mono"))
+        declaredHashes("manrope")
             .keys
             .filter { it.endsWith(".woff2") }
-            .forEach { path -> css shouldContain "url(\"../../${path}\")" }
-        css.split("@font-face").size - 1 shouldBe EXPECTED_FACES
-        css.split("font-display: optional;").size - 1 shouldBe EXPECTED_FACES
-        css shouldNotContain "font-display: swap;"
+            .forEach { path -> site shouldContain "url(\"../../${path}\")" }
+        site.split("@font-face").size - 1 shouldBe EXPECTED_SITE_FACES
+        site.split("font-display: optional;").size - 1 shouldBe EXPECTED_SITE_FACES
+
+        declaredHashes("jetbrains-mono")
+            .keys
+            .filter { it.endsWith(".woff2") }
+            .forEach { path -> mono shouldContain "url(\"../../${path}\")" }
+        mono.split("@font-face").size - 1 shouldBe EXPECTED_MONO_FACES
+        mono.split("font-display: optional;").size - 1 shouldBe EXPECTED_MONO_FACES
+
+        site shouldNotContain "JetBrainsMono"
+        site shouldNotContain "font-display: swap;"
+        mono shouldNotContain "font-display: swap;"
     }
 
     private companion object {
@@ -219,7 +240,10 @@ class VendoredFontsAuditTest {
                 "cdn.jsdelivr.net/npm/@fontsource",
             )
 
+        /** The app-side sheet still declares all four faces (the app keeps Inter; the two sheets never load together). */
         const val EXPECTED_FACES = 4
+        const val EXPECTED_SITE_FACES = 2
+        const val EXPECTED_MONO_FACES = 2
         const val MIN_LICENCE_CHARS = 3_000
         const val MIN_SWEPT_SOURCES = 30
     }

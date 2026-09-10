@@ -1,4 +1,800 @@
 /* ============================================================
+   site-chrome.css — GENERATED. Do not edit; regenerate instead.
+   ============================================================
+   Byte-exact concatenation of, in order:
+     static/vendor/design-system/tokens.css
+     static/vendor/design-system/base.css
+     static/vendor/design-system/motion.css
+     static/vendor/design-system/themes/auto.css
+     static/site/css/site.css
+
+   Why it exists (111 §C): the public site's head loaded these three
+   sheets as separate render-blocking requests, and Lighthouse's
+   performance floor (95, scripts/site-lighthouse.sh) failed on the
+   request chain alone. One bundled request, same bytes, same cascade
+   order; the swappable theme sheet (themes/auto.css) and the site's
+   own site.css keep their own links, in the original positions.
+
+   Guard: SiteCssBundleParityTest fails when any source drifts from
+   this file. Regenerate:
+     scripts/build-site-chrome.sh
+   ============================================================ */
+
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================
+   This file declares the semantic contract. Do NOT put
+   concrete values here. Concrete values live in themes/.
+   Your application and components should reference these tokens.
+   ============================================================ */
+
+:root {
+  /* --------------------------------------------------------
+     Surface (backgrounds)
+     -------------------------------------------------------- */
+  --surface-page:             var(--_surface-page);
+  --surface-default:          var(--_surface-default);
+  --surface-raised:           var(--_surface-raised);
+  --surface-overlay:          var(--_surface-overlay);
+  --surface-inset:            var(--_surface-inset);
+  --surface-hover:            var(--_surface-hover);
+  --surface-active:           var(--_surface-active);
+  --surface-selected:         var(--_surface-selected);
+
+  /* --------------------------------------------------------
+     Text
+     -------------------------------------------------------- */
+  --text-primary:             var(--_text-primary);
+  --text-secondary:           var(--_text-secondary);
+  --text-muted:               var(--_text-muted);
+  --text-inverted:            var(--_text-inverted);
+  --text-link:                var(--_text-link);
+  --text-link-hover:          var(--_text-link-hover);
+  --text-danger:              var(--_text-danger);
+  --text-success:             var(--_text-success);
+  --text-warning:             var(--_text-warning);
+
+  /* --------------------------------------------------------
+     Border
+     -------------------------------------------------------- */
+  --border-default:           var(--_border-default);
+  --border-hover:             var(--_border-hover);
+  --border-focus:             var(--_border-focus);
+  --border-subtle:            var(--_border-subtle);
+  --border-danger:            var(--_border-danger);
+
+  /* --------------------------------------------------------
+     Accent (actions + semantics)
+     -------------------------------------------------------- */
+  --accent-primary:           var(--_accent-primary);
+  --accent-primary-hover:     var(--_accent-primary-hover);
+  --accent-primary-active:    var(--_accent-primary-active);
+  --accent-primary-text:      var(--_accent-primary-text);
+
+  --accent-secondary:         var(--_accent-secondary);
+  --accent-secondary-hover:   var(--_accent-secondary-hover);
+  --accent-secondary-text:    var(--_accent-secondary-text);
+
+  --accent-danger:            var(--_accent-danger);
+  --accent-danger-hover:      var(--_accent-danger-hover);
+  --accent-danger-text:       var(--_accent-danger-text);
+
+  --accent-success:           var(--_accent-success);
+  --accent-success-bg:        var(--_accent-success-bg);
+  --accent-warning:           var(--_accent-warning);
+  --accent-warning-bg:        var(--_accent-warning-bg);
+  --accent-info:              var(--_accent-info);
+  --accent-info-bg:           var(--_accent-info-bg);
+
+  /* --------------------------------------------------------
+     Focus Ring
+     -------------------------------------------------------- */
+  --focus-ring:               var(--_focus-ring);
+  --focus-ring-offset:        var(--_focus-ring-offset);
+
+  /* --------------------------------------------------------
+     Disabled / Read-only
+     -------------------------------------------------------- */
+  --opacity-disabled:         0.5;
+  --opacity-readonly:         0.7;
+  --cursor-disabled:          not-allowed;
+  --cursor-readonly:          default;
+
+  /* --------------------------------------------------------
+     Z-Index Scale
+     -------------------------------------------------------- */
+  --z-base:                   0;
+  --z-dropdown:               100;
+  --z-sticky:                 200;
+  --z-fixed:                  300;
+  --z-drawer:                 400;
+  --z-modal-backdrop:         500;
+  --z-modal:                  600;
+  --z-popover:                700;
+  --z-toast:                  800;
+  --z-tooltip:                900;
+
+  /* --------------------------------------------------------
+     Breakpoints (reference values in px)
+     -------------------------------------------------------- */
+  --breakpoint-sm:            640px;
+  --breakpoint-md:            768px;
+  --breakpoint-lg:            1024px;
+  --breakpoint-xl:            1280px;
+  --breakpoint-2xl:           1536px;
+
+  /* --------------------------------------------------------
+     Icon Sizes
+     -------------------------------------------------------- */
+  --icon-xs:                  12px;
+  --icon-sm:                  16px;
+  --icon-md:                  20px;
+  --icon-lg:                  24px;
+  --icon-xl:                  32px;
+
+  /* --------------------------------------------------------
+     Field Heights (inputs, buttons, selects)
+     -------------------------------------------------------- */
+  --field-height-sm:          32px;
+  --field-height-base:        40px;
+  --field-height-lg:          48px;
+
+  /* --------------------------------------------------------
+     Layout
+     -------------------------------------------------------- */
+  --container-sm:             640px;
+  --container-md:             768px;
+  --container-lg:             1024px;
+  --container-xl:             1200px;
+  --container-2xl:            1400px;
+  --sidebar-width:            280px;
+  --header-height:            60px;
+
+  /* --------------------------------------------------------
+     Elevation (shadows)
+     -------------------------------------------------------- */
+  --shadow-xs:                var(--_shadow-xs);
+  --shadow-sm:                var(--_shadow-sm);
+  --shadow-md:                var(--_shadow-md);
+  --shadow-lg:                var(--_shadow-lg);
+  --shadow-xl:                var(--_shadow-xl);
+  --shadow-inset:             var(--_shadow-inset);
+
+  /* --------------------------------------------------------
+     Radius
+     -------------------------------------------------------- */
+  --radius-none:              0px;
+  --radius-sm:                4px;
+  --radius-base:              6px;
+  --radius-md:                8px;
+  --radius-lg:                12px;
+  --radius-xl:                16px;
+  --radius-2xl:               24px;
+  --radius-pill:              9999px;
+  --radius-full:              50%;
+
+  /* --------------------------------------------------------
+     Spacing (rem-based, 1rem = 16px default)
+     -------------------------------------------------------- */
+  --space-0:                  0rem;
+  --space-px:                 1px;
+  --space-0-5:                0.125rem;  /* 2px */
+  --space-1:                  0.25rem;   /* 4px */
+  --space-1-5:                0.375rem;  /* 6px */
+  --space-2:                  0.5rem;    /* 8px */
+  --space-2-5:                0.625rem;  /* 10px */
+  --space-3:                  0.75rem;   /* 12px */
+  --space-3-5:                0.875rem;  /* 14px */
+  --space-4:                  1rem;      /* 16px */
+  --space-5:                  1.25rem;   /* 20px */
+  --space-6:                  1.5rem;    /* 24px */
+  --space-7:                  1.75rem;   /* 28px */
+  --space-8:                  2rem;      /* 32px */
+  --space-9:                  2.25rem;   /* 36px */
+  --space-10:                 2.5rem;    /* 40px */
+  --space-12:                 3rem;      /* 48px */
+  --space-14:                 3.5rem;    /* 56px */
+  --space-16:                 4rem;      /* 64px */
+  --space-20:                 5rem;      /* 80px */
+  --space-24:                 6rem;      /* 96px */
+
+  /* Semantic spacing */
+  --gap-xs:                   var(--space-1);
+  --gap-sm:                   var(--space-2);
+  --gap-md:                   var(--space-4);
+  --gap-lg:                   var(--space-6);
+  --gap-xl:                   var(--space-8);
+
+  /* --------------------------------------------------------
+     Typography
+     -------------------------------------------------------- */
+  --font-sans:                var(--_font-sans);
+  --font-serif:               var(--_font-serif);
+  --font-mono:                var(--_font-mono);
+
+  --text-xs:                  0.75rem;    /* 12px */
+  --text-sm:                  0.875rem;   /* 14px */
+  --text-base:                1rem;       /* 16px */
+  --text-lg:                  1.125rem;   /* 18px */
+  --text-xl:                  1.25rem;    /* 20px */
+  --text-2xl:                 1.5rem;     /* 24px */
+  --text-3xl:                 1.875rem;   /* 30px */
+  --text-4xl:                 2.25rem;    /* 36px */
+
+  --weight-normal:            400;
+  --weight-medium:            500;
+  --weight-semibold:          600;
+  --weight-bold:              700;
+
+  --leading-none:             1;
+  --leading-tight:            1.25;
+  --leading-snug:             1.375;
+  --leading-normal:           1.5;
+  --leading-relaxed:          1.625;
+
+  --tracking-tight:           -0.025em;
+  --tracking-normal:          0em;
+  --tracking-wide:            0.025em;
+
+  /* --------------------------------------------------------
+     Motion
+     -------------------------------------------------------- */
+  --duration-instant:         0ms;
+  --duration-fast:            100ms;
+  --duration-base:            150ms;
+  --duration-normal:          200ms;
+  --duration-slow:            300ms;
+  --duration-slower:          500ms;
+
+  --ease-linear:              linear;
+  --ease-in:                  cubic-bezier(0.4, 0, 1, 1);
+  --ease-out:                 cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out:              cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:              cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --stagger-none:             0ms;
+  --stagger-fast:             20ms;
+  --stagger-base:             40ms;
+  --stagger-slow:             80ms;
+
+}
+
+/* --------------------------------------------------------
+   prefers-contrast: more (WCAG 1.4.11, opt-in amplification)
+   --------------------------------------------------------
+   The OS asks for more contrast: raise the STRUCTURAL tokens past their
+   floors. Both source tokens are audited at 4.5:1 on surface-default, so
+   these mappings guarantee the raises with zero concrete values. */
+@media (prefers-contrast: more) {
+  :root {
+    --border-default: var(--text-primary);
+    --border-subtle: var(--text-secondary);
+  }
+}
+
+/* ============================================================
+   BASE STYLES
+   Modern reset + globals referencing tokens.
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -moz-tab-size: 4;
+  tab-size: 4;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  background-color: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  text-rendering: optimizeLegibility;
+}
+
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  overflow-wrap: break-word;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-offset) var(--surface-default),
+              0 0 0 calc(var(--focus-ring-offset) + 2px) var(--focus-ring);
+  border-radius: var(--radius-base);
+}
+
+/* Links */
+a {
+  color: var(--text-link);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: var(--text-link-hover);
+  text-decoration: underline;
+}
+
+/* Typography scale */
+.ds-display {
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.ds-headline {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.ds-title {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.ds-subtitle {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+}
+
+.ds-body {
+  font-size: var(--text-base);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-normal);
+}
+
+.ds-body-sm {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-normal);
+}
+
+.ds-caption {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.ds-mono {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dividers */
+hr,
+.ds-divider {
+  border: 0;
+  height: 1px;
+  background-color: var(--border-subtle);
+  margin: var(--gap-md) 0;
+}
+
+/* Scrollbar (WebKit) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-focus);
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-primary);
+  color: var(--accent-primary-text);
+}
+
+/* ============================================================
+   MOTION SYSTEM
+   Keyframes + utility classes for consistent animation.
+   Respects prefers-reduced-motion.
+   ============================================================ */
+
+/* --------------------------------------------------------
+   Keyframes
+   -------------------------------------------------------- */
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes ds-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes ds-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ds-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ds-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ds-scale-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes ds-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes ds-pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+@keyframes ds-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* --------------------------------------------------------
+   Utility Classes
+   -------------------------------------------------------- */
+.ds-animate-fade-in {
+  animation: ds-fade-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+.ds-animate-fade-out {
+  animation: ds-fade-out var(--duration-normal) var(--ease-in) forwards;
+}
+
+.ds-animate-slide-up {
+  animation: ds-slide-up var(--duration-normal) var(--ease-out) forwards;
+}
+
+.ds-animate-slide-down {
+  animation: ds-slide-down var(--duration-normal) var(--ease-out) forwards;
+}
+
+.ds-animate-scale-in {
+  animation: ds-scale-in var(--duration-normal) var(--ease-spring) forwards;
+}
+
+.ds-animate-scale-out {
+  animation: ds-scale-out var(--duration-normal) var(--ease-in) forwards;
+}
+
+.ds-animate-pulse {
+  animation: ds-pulse-soft 2s var(--ease-in-out) infinite;
+}
+
+.ds-animate-spin {
+  animation: ds-spin 1s linear infinite;
+}
+
+/* Stagger children animations */
+.ds-stagger-children > * {
+  opacity: 0;
+  animation: ds-slide-up var(--duration-normal) var(--ease-out) forwards;
+}
+.ds-stagger-children > *:nth-child(1)  { animation-delay: calc(var(--stagger-base) * 0); }
+.ds-stagger-children > *:nth-child(2)  { animation-delay: calc(var(--stagger-base) * 1); }
+.ds-stagger-children > *:nth-child(3)  { animation-delay: calc(var(--stagger-base) * 2); }
+.ds-stagger-children > *:nth-child(4)  { animation-delay: calc(var(--stagger-base) * 3); }
+.ds-stagger-children > *:nth-child(5)  { animation-delay: calc(var(--stagger-base) * 4); }
+.ds-stagger-children > *:nth-child(6)  { animation-delay: calc(var(--stagger-base) * 5); }
+.ds-stagger-children > *:nth-child(7)  { animation-delay: calc(var(--stagger-base) * 6); }
+.ds-stagger-children > *:nth-child(8)  { animation-delay: calc(var(--stagger-base) * 7); }
+.ds-stagger-children > *:nth-child(9)  { animation-delay: calc(var(--stagger-base) * 8); }
+.ds-stagger-children > *:nth-child(10) { animation-delay: calc(var(--stagger-base) * 9); }
+
+/* Skeleton / Shimmer loading state */
+.ds-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-inset) 25%,
+    var(--surface-hover) 50%,
+    var(--surface-inset) 75%
+  );
+  background-size: 200% 100%;
+  animation: ds-shimmer 1.5s infinite linear;
+  border-radius: var(--radius-base);
+}
+
+/* Smooth transitions for interactive elements */
+.ds-transition {
+  transition: color var(--duration-fast) var(--ease-out),
+              background-color var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+}
+
+.ds-transition-slow {
+  transition: all var(--duration-slow) var(--ease-out);
+}
+
+/* Hover lift effect for cards */
+.ds-hover-lift {
+  transition: transform var(--duration-base) var(--ease-out),
+              box-shadow var(--duration-base) var(--ease-out);
+}
+.ds-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast:    0ms;
+    --duration-base:    0ms;
+    --duration-normal:  0ms;
+    --duration-slow:    0ms;
+    --duration-slower:  0ms;
+    --stagger-fast:     0ms;
+    --stagger-base:     0ms;
+    --stagger-slow:     0ms;
+  }
+
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ds-animate-fade-in,
+  .ds-animate-fade-out,
+  .ds-animate-slide-up,
+  .ds-animate-slide-down,
+  .ds-animate-scale-in,
+  .ds-animate-scale-out,
+  .ds-animate-pulse,
+  .ds-animate-spin,
+  .ds-shimmer,
+  .ds-stagger-children > * {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+
+  .ds-shimmer {
+    background-position: 0 0 !important;
+  }
+
+  .ds-hover-lift:hover {
+    transform: none;
+  }
+
+  /* Preserve focus ring visibility even when motion is reduced */
+  :focus-visible {
+    transition-duration: var(--duration-fast) !important;
+  }
+}
+
+
+/* Toast animations */
+@keyframes ds-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ds-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
+/* ============================================================
+   THEME: AUTO
+   ============================================================
+   Respects the OS-level color scheme preference.
+   Loads light/professional values by default, then overrides
+   with dark values when prefers-color-scheme: dark is active.
+   ============================================================ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Light defaults (based on professional theme) */
+  --_surface-page:            #f4f6f8;
+  --_surface-default:         #ffffff;
+  --_surface-raised:          #ffffff;
+  --_surface-overlay:         #ffffff;
+  --_surface-inset:           #eef0f3;
+  --_surface-hover:           #eef0f3;
+  --_surface-active:          #e4e7ec;
+  --_surface-selected:        #cbd1e8;
+
+  --_text-primary:            #0a0e1a;
+  --_text-secondary:          #2d3448;
+  --_text-muted:              #5e6578;
+  --_text-inverted:           #ffffff;
+  --_text-link:               #1e40af;
+  --_text-link-hover:         #172554;
+  --_text-danger:             #b91c1c;
+  --_text-success:            #14532d;
+  --_text-warning:            #854d0e;
+
+  --_border-default:          #8f939d;
+  --_border-hover:            #8a909c;
+  --_border-focus:            #81899a;
+  --_border-subtle:           #b4b6bc;
+  --_border-danger:           #fecaca;
+
+  --_accent-primary:          #0f1d40;
+  --_accent-primary-hover:    #1a2e5e;
+  --_accent-primary-active:   #253d7a;
+  --_accent-primary-text:     #ffffff;
+
+  --_accent-secondary:        #eef0f5;
+  --_accent-secondary-hover:  #dfe3ec;
+  --_accent-secondary-text:   #0f1d40;
+
+  --_accent-danger:           #b91c1c;
+  --_accent-danger-hover:     #991b1b;
+  --_accent-danger-text:      #ffffff;
+
+  --_accent-success:          #15803d;
+  --_accent-success-bg:       #dcfce7;
+  --_accent-warning:          #a16207;
+  --_accent-warning-bg:       #fef9c3;
+  --_accent-info:             #1d4ed8;
+  --_accent-info-bg:          #dbeafe;
+
+  --_focus-ring:              #4f46e5;
+  --_focus-ring-offset:       2px;
+
+  --_shadow-xs:               0 1px 2px 0 rgb(15 29 64 / 0.04);
+  --_shadow-sm:               0 1px 2px 0 rgb(15 29 64 / 0.06), 0 1px 1px -1px rgb(15 29 64 / 0.04);
+  --_shadow-md:               0 3px 5px -1px rgb(15 29 64 / 0.06), 0 1px 3px -1px rgb(15 29 64 / 0.04);
+  --_shadow-lg:               0 8px 12px -3px rgb(15 29 64 / 0.06), 0 3px 5px -3px rgb(15 29 64 / 0.04);
+  --_shadow-xl:               0 16px 24px -6px rgb(15 29 64 / 0.06), 0 6px 8px -6px rgb(15 29 64 / 0.04);
+  --_shadow-inset:            inset 0 1px 2px 0 rgb(15 29 64 / 0.04);
+
+  --_font-sans:               "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --_font-serif:              ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --_font-mono:               "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --_surface-page:            #0b0f19;
+    --_surface-default:         #111827;
+    --_surface-raised:          #1f2937;
+    --_surface-overlay:         #1f2937;
+    --_surface-inset:           #030712;
+    --_surface-hover:           #1f2937;
+    --_surface-active:          #374151;
+    --_surface-selected:        #1e3a8a;
+
+    --_text-primary:            #f9fafb;
+    --_text-secondary:          #d1d5db;
+    --_text-muted:              #9ca3af;
+    --_text-inverted:           #111827;
+    --_text-link:               #60a5fa;
+    --_text-link-hover:         #93c5fd;
+    --_text-danger:             #fca5a5;
+    --_text-success:            #86efac;
+    --_text-warning:            #fde047;
+
+    --_border-default:          #5e6673;
+    --_border-hover:            #616976;
+    --_border-focus:            #6b7280;
+    --_border-subtle:           #444d58;
+    --_border-danger:           #7f1d1d;
+
+    --_accent-primary:          #f9fafb;
+    --_accent-primary-hover:    #e5e7eb;
+    --_accent-primary-active:   #d1d5db;
+    --_accent-primary-text:     #111827;
+
+    --_accent-secondary:        #1f2937;
+    --_accent-secondary-hover:  #374151;
+    --_accent-secondary-text:   #f9fafb;
+
+    --_accent-danger:           #dc2626;
+    --_accent-danger-hover:     #b91c1c;
+    --_accent-danger-text:      #ffffff;
+
+    --_accent-success:          #4ade80;
+    --_accent-success-bg:       #064e3b;
+    --_accent-warning:          #eab308;
+    --_accent-warning-bg:       #713f12;
+    --_accent-info:             #7dd3fc;
+    --_accent-info-bg:          #0c4a6e;
+
+    --_focus-ring:              #60a5fa;
+    --_focus-ring-offset:       2px;
+
+    --_shadow-xs:               0 1px 2px 0 rgb(0 0 0 / 0.25);
+    --_shadow-sm:               0 1px 3px 0 rgb(0 0 0 / 0.25), 0 1px 2px -1px rgb(0 0 0 / 0.25);
+    --_shadow-md:               0 4px 6px -1px rgb(0 0 0 / 0.25), 0 2px 4px -2px rgb(0 0 0 / 0.25);
+    --_shadow-lg:               0 10px 15px -3px rgb(0 0 0 / 0.25), 0 4px 6px -4px rgb(0 0 0 / 0.25);
+    --_shadow-xl:               0 20px 25px -5px rgb(0 0 0 / 0.25), 0 8px 10px -6px rgb(0 0 0 / 0.25);
+    --_shadow-inset:            inset 0 2px 4px 0 rgb(0 0 0 / 0.25);
+
+    --_font-sans:               ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --_font-serif:              ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    --_font-mono:               ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+}
+
+/* ============================================================
    SITE STYLES — datapipelines.co marketing site (v2, "Console")
    A layer over the vendored design system: every spacing, radius,
    motion and surface value references its tokens. The site adds

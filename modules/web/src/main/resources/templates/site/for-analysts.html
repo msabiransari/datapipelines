@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">For analysts</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2 batch 2: the analyst page. The persona is one person, many sources, an agent
+       as the pair. The sections follow the working day: ask, join across engines, diagnose a
+       slow query with the probes, release and serve. Nothing here promises a natural-language
+       box — the agent is the interface. */-->
+  <!-- claim: docs/mcp-server.md §6.2 — the agent authors the draft over real schemas -->
+  <!-- claim: docs/staging.md §3 — the cross-engine join in the per-run scratch database -->
+  <!-- claim: docs/datasources.md §7C — catalogue statistics from the engine's own catalog -->
+  <!-- claim: docs/datasources.md §7D — the SQL probe, plan captured before the run -->
+  <!-- claim: docs/versioning.md §3 — release when you trust it -->
+  <!-- claim: docs/rest-api.md §19 — the released version served as an endpoint -->
+  <!-- claim: docs/datasources.md §3 — read-only datasources, writes refused -->
+
+  <section class="section page-hero" aria-labelledby="an-title">
+    <div class="container">
+      <p class="kicker">One person, five databases, an agent as the pair</p>
+      <h1 id="an-title" class="ds-display">The AI SQL assistant with governance: ask in your words, get a pipeline you can read</h1>
+      <p class="section-lede">
+        The analyst's day is spread across the tools: the trip data in Postgres, the reference tables in SQLite, the
+        weather feed in MySQL, the exports on S3 — and no one tool sees two of them. The agent changes the drafting;
+        this server changes what the draft becomes: a versioned pipeline over your real schemas, joined in a scratch
+        database, released when you trust it, served as an endpoint when someone else needs the number. No
+        natural-language box — your agent is the interface, and it works through governed tools.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Connect your agent</a>
+        <a class="btn btn-secondary" th:href="@{/federated-query}">See the cross-database join</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="an-ask">
+    <div class="container">
+      <p class="kicker">The working loop</p>
+      <h2 id="an-ask" class="ds-headline">Ask in your words, get a pipeline you can read</h2>
+      <div class="prose">
+        <!-- claim: docs/mcp-server.md §6.2 -->
+        <p>
+          You describe the question the way you would to a colleague: "rideshare share of trips per borough, split
+          by rainy and dry days". The agent grounds itself first — your real schemas, catalogue statistics, the
+          indexes — then drafts the pipeline, runs it, reads the failure when there is one, and fixes the shape.
+          What lands in front of you is not a chat answer: it is a JSON document of named SQL nodes you can open,
+          read, and argue with. The SQL is yours to audit, because an analysis you cannot read is an analysis you
+          cannot defend.
+        </p>
+        <!-- claim: docs/datasources.md §3 -->
+        <p>
+          The governance half is what makes pointing an agent at production acceptable: datasources are registered
+          read-only wherever nothing should ever write, and a write-shaped node is refused at save time and again
+          at run time. The agent explores; it does not mutate.
+        </p>
+        <p>
+          And the loop is fast in the way that matters: because the agent holds the whole tool surface — schemas,
+          statistics, probe, draft, run, result — the distance between "question" and "checked answer" is one
+          session. You stay the editor; the agent is the desk researcher who never gets bored of re-running the
+          query with the join fixed. The parts of the craft that were never typing — judgment about which numbers
+          matter, skepticism about the convenient answer — stay yours, and the pipeline format is what makes your
+          review of the machine's work possible at all.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="an-morning">
+    <div class="container">
+      <p class="kicker">One question, five sources</p>
+      <h2 id="an-morning" class="ds-headline">A morning with five databases, as it goes now</h2>
+      <ol class="steps">
+        <li>
+          <h3>Ask the question in your words</h3>
+          <p>"Revenue by borough, with the rainy-day split, against last quarter." No tool selection, no export plan — the agent plans the sources.</p>
+        </li>
+        <li>
+          <h3>The agent reads before it writes</h3>
+          <!-- claim: docs/mcp-server.md §6.2 -->
+          <p>Schemas, tables, columns and a few real values from each of the five sources — the grounding pass that keeps a plausible query over a misremembered column out of your morning.</p>
+        </li>
+        <li>
+          <h3>The pipeline runs where the data lives</h3>
+          <!-- claim: docs/staging.md §3 -->
+          <p>One node per source, in each engine's own dialect; every result staged into the run's scratch database; the join as ordinary SQL over them; the scratch database gone when the run ends.</p>
+        </li>
+        <li>
+          <h3>You read the SQL, not a vibe</h3>
+          <p>The deliverable is a JSON document of named nodes — the join is right there in the file, so the review is a read, and the question "why this number?" has a line-numbered answer.</p>
+        </li>
+        <li>
+          <h3>Release it, and Monday stops asking</h3>
+          <!-- claim: docs/rest-api.md §19 -->
+          <p>When you trust it: release, publish, and the endpoint serves the version you signed — the same answer, on demand, for whoever asks next.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="an-join">
+    <div class="container">
+      <p class="kicker">The join</p>
+      <h2 id="an-join" class="ds-headline">The join you could never do in one tool</h2>
+      <div class="prose">
+        <!-- claim: docs/staging.md §3 -->
+        <p>
+          The question that breaks single-tool workflows — revenue by borough, where the trips are in Postgres and
+          the zone lookup is in SQLite — is an ordinary pipeline here. Each source node runs as a query at its own
+          engine, in that engine's dialect; each result is staged as a table in a scratch database created for that
+          one run; the join is ordinary SQL over those tables; and the scratch database is dropped when the run
+          ends. Five sources, one analyst, nothing landed anywhere — the worked example runs it on real NYC data,
+          and the lake reads Parquet and Iceberg on S3 in place when the fifth source is a bucket rather than a
+          database.
+        </p>
+      </div>
+      <figure class="shot">
+        <figcaption>The agent's session: schemas read from three engines, the draft iterated, the run verified — the loop that used to be five browser tabs.</figcaption>
+        <div class="shot-placeholder" data-shot="mcp-session" style="--shot-ratio: 16 / 10"><b>[shot: mcp-session]</b>Claude Code session · multi-engine tools · draft and run · 1440×900</div>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="an-probe">
+    <div class="container">
+      <p class="kicker">The diagnosis</p>
+      <h2 id="an-probe" class="ds-headline">The probe that says why it is slow</h2>
+      <div class="prose">
+        <!-- claim: docs/datasources.md §7C -->
+        <p>
+          Two agent tools turn "it feels slow" into a diagnosis. Catalogue statistics read one table's row
+          estimates, indexes and per-column bounds from the engine's own catalog — never a scan — so the agent sees
+          that the filter it wrote matches 40 million rows, not 40 thousand.
+        </p>
+        <!-- claim: docs/datasources.md §7D -->
+        <p>
+          The SQL probe runs one bounded SELECT — row cap and time box — and captures the EXPLAIN plan
+          <em>before</em> the query, so the plan survives the timeout it explains. The agent fixes the shape from
+          evidence: push the aggregation into the source node, add the predicate the index wants, stop staging a
+          billion rows to count them.
+        </p>
+        <p>
+          The loop closes without you in the middle: the agent that drafted the query is the one holding the
+          probe's output, so "why is it slow" and "fix it" happen in the same session instead of across a ticket.
+          What comes back is a changed draft and a re-run with numbers attached — diagnosis and fix in one
+          artifact, which you read the way you would read a colleague's work: quickly, because the reasoning is
+          written down.
+        </p>
+      </div>
+      <figure class="shot">
+        <figcaption>The execution detail after a run: per-node status, rows and timing — the evidence the probes and the run leave behind.</figcaption>
+        <div class="shot-placeholder" data-shot="execution-result" style="--shot-ratio: 16 / 10"><b>[shot: execution-result]</b>execution detail · node table · result · 1440×900</div>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="an-release">
+    <div class="container">
+      <p class="kicker">The hand-off</p>
+      <h2 id="an-release" class="ds-headline">Release when you trust it — and it is an API</h2>
+      <div class="prose">
+        <!-- claim: docs/versioning.md §3 -->
+        <p>
+          When the numbers are the numbers, you release: a person's verb, an immutable version, a diff anyone can
+          read next quarter when the figure is questioned. The draft stays a draft until then — the agent can
+          iterate all day, but the version your team repeats is the one a person signed off.
+        </p>
+        <!-- claim: docs/rest-api.md §19 -->
+        <p>
+          And the release is the last step of the analyst's job and the first step of everyone else's: publish the
+          endpoint and the finance team's script, the dashboard's refresh, or the PM's curl call all read the same
+          versioned answer — parameters bound, keys scoped — instead of asking you to re-run it every Monday. The
+          question stops being yours to carry, and the answer stops depending on your calendar.
+        </p>
+        <p>
+          The quieter benefit compounds: because every analysis is a versioned document rather than a session that
+          ended, the person who joins next quarter inherits readable pipelines instead of folklore. The query the
+          team "always runs" has a name, a history, and a diff for every time its definition changed — which is
+          the difference between an analysis and an opinion with a chart.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/mcp-server.md §6.2 — do I have to write the SQL myself -->
+      <!-- claim: docs/staging.md §3 — how the join across five databases works -->
+      <!-- claim: docs/datasources.md §7C — the probe that says why it is slow -->
+      <!-- claim: docs/versioning.md §3 — how a query becomes something the team can rerun -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Analyst questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="an-next">
+    <div class="container">
+      <h2 id="an-next" class="ds-headline">Give the agent your Monday question</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        The demo stack is five minutes and four sources; the question you hand the agent first should be the one you
+        answer by hand every week. Compare its pipeline with your spreadsheet, and keep whichever you can defend —
+        only one of them has a diff.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
+        <a class="btn btn-secondary" th:href="@{/mcp-tools}">The tools the agent gets</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

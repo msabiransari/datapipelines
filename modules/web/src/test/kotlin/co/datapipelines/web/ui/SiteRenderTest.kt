@@ -45,8 +45,11 @@ class SiteRenderTest {
         html shouldContain "/mcp — $count MCP tools"
         html shouldContain "($count tools)"
         // Assets resolve through the app's own static surface, never the retired website/ copy.
-        html shouldContain "href=\"/vendor/design-system/tokens.css\""
-        html shouldContain "href=\"/site/css/site.css\""
+        // 111 §C: the foundation sheets ride the generated site-chrome.css bundle (one
+        // render-blocking request, parity-guarded by SiteCssBundleParityTest); the swap sheet
+        // loads disabled and the site sheet rides inside the bundle.
+        html shouldContain "href=\"/site/css/site-chrome.css\""
+        html shouldContain "href=\"/vendor/design-system/themes/auto.css\""
         // 098 §G: the hero is the EDITOR now — the shot 093 could not take, because the canvas
         // painted every node in --brand and the driver refuses a broken canvas rather than
         // photographing it. `execution-result.png` did not go away; it moved to the executions

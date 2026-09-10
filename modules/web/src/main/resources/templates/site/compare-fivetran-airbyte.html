@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/compare/airflow}">Compare</a></li>
+      <li aria-current="page">Fivetran or Airbyte</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2 batch 2: the ELT comparison. The thesis is a fork, not a fight: ELT copies
+       data into a warehouse on a schedule; this runs the query at the source and joins in a
+       per-run scratch database, so there is no copy, no warehouse and no sync lag — and the
+       result is an API. The page is honest about the half ELT does that this does not:
+       history, and the warehouse itself. */-->
+  <!-- claim: docs/staging.md §3 — the per-run scratch join, nothing landed -->
+  <!-- claim: docs/rest-api.md §19 — the result served as a versioned endpoint -->
+  <!-- claim: docs/pipeline-contract.md §9 — write-back is a table, not a warehouse -->
+  <!-- claim: docs/datasources.md §7 — the server holds the credentials, not the agent -->
+  <!-- claim: docs/versioning.md §3 — a person releases what the agent drafted -->
+  <!-- claim: docs/ROADMAP.md §3 — scheduled extracts to your lake are later, not now -->
+
+  <section class="section page-hero" aria-labelledby="fa-title">
+    <div class="container">
+      <p class="kicker">Sync the data, or query it where it is</p>
+      <h1 id="fa-title" class="ds-display">The Fivetran alternative that skips the copy: a query at the source, not a warehouse</h1>
+      <p class="section-lede">
+        Fivetran and Airbyte are ELT tools: connectors that copy your operational databases into a warehouse on a
+        schedule, so that transformation can happen there. datapipelines is a different shape — every node runs as a
+        query at its source, the join happens in a scratch database created for that one run and dropped after it, and
+        the result is released as a versioned API. No copy, no warehouse, no sync lag. This page is about when that
+        difference matters, and — just as honestly — when it does not.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/federated-query}">How the no-copy join works</a>
+        <a class="btn btn-secondary" th:href="@{/docs/deployment}">Run the demo first</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="fa-jobs">
+    <div class="container">
+      <p class="kicker">What each one is for</p>
+      <h2 id="fa-jobs" class="ds-headline">Two tools that share a vocabulary and not a job</h2>
+      <div class="prose">
+        <p>
+          Fivetran and Airbyte solve a real problem: the data your analytics needs lives in a dozen systems, and the
+          warehouse needs it delivered, on time, in the right shape, every night. Their connectors handle the
+          long tail — hundreds of sources, incremental syncs, retries, schema drift — so the warehouse stays fed
+          without a team writing extract scripts. If the destination is the point, they are the right tools, and
+          the honest part of this page is saying so up front.
+        </p>
+        <p>
+          datapipelines solves a different one. Most teams' operational questions — the revenue by borough, the
+          churn by cohort, the stockout risk by store — live in two or three databases, and the question crosses
+          them. The ELT answer is: copy both into a warehouse first. The datapipelines answer is: run each source's
+          query where the data lives, stage the results into a scratch database that exists for exactly that run,
+          join them there with ordinary SQL, and drop the scratch database when the run ends. The pipeline is a
+          versioned JSON document an agent can draft and a person can release; the result can be published as a
+          <code>GET</code> endpoint. Between the question and the answer, nothing is copied anywhere permanent.
+        </p>
+        <p>
+          The vocabulary overlaps, which is why the comparison gets asked for: both products say "pipeline", both
+          say "sync", both promise the numbers without hand-written scripts. The test to apply is one question —
+          <em>where does the work happen?</em> If the honest answer is "in a system built to receive copies", the
+          tool is ELT and proud of it. If the answer is "at the sources, joined in a workbench that vanishes", it
+          is this. The rest of the page is that one answer, priced in the currencies that matter: freshness,
+          surface area, and the step where the number becomes something a program can call.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="fa-cost">
+    <div class="container">
+      <p class="kicker">The cost of a copy</p>
+      <h2 id="fa-cost" class="ds-headline">What the nightly copy adds — and what answering in place removes</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/staging.md §3 -->
+          <h3>Freshness</h3>
+          <p>A sync runs on a schedule, so the warehouse answers with the data as of the last load — an hour, a night, a weekend old. A query at the source answers with now. When the consumer is a person refreshing a dashboard that is a preference; when it is an application serving a customer, it is a bug report waiting to happen.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/staging.md §3 -->
+          <h3>A second store to run</h3>
+          <p>The copy has to live somewhere, and the somewhere is a warehouse: a deployment to run, secure, tune and pay an on-call for — before a single question has been answered. The scratch database here is created when a run starts and destroyed when it ends; there is no standing system between your databases and the answer.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §7 -->
+          <h3>Your data in two places</h3>
+          <p>Every copy widens the blast radius: the customers table now exists in the warehouse too, with its own access rules, its own retention, its own things to forget. Answering in place means the PII never leaves the system that already governs it — the agent reads it through a key, the server holds the credentials, and nothing lands.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>The API is still a second project</h3>
+          <p>Say the ELT pipeline finishes. The numbers are in the warehouse. The product team still needs an endpoint that serves them — a service, a deployment, an auth story. Here the release <em>is</em> the API step: a published endpoint serves the released version, keys bind to its path, and nothing else has to be built.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="fa-stops">
+    <div class="container">
+      <p class="kicker">Where datapipelines stops</p>
+      <h2 id="fa-stops" class="ds-headline">The four things to not ask of this tool</h2>
+      <div class="prose">
+        <!-- claim: docs/staging.md §3 -->
+        <p>
+          First, history. The query sees the source as it is now, and the scratch database is dropped after the run —
+          if the source overwrites yesterday, yesterday is gone, and no query at the source will bring it back.
+          History is the ELT tools' home ground; that is one of the reasons they exist.
+        </p>
+        <!-- claim: docs/pipeline-contract.md §9 -->
+        <p>
+          Second, the warehouse itself. Write-back here means a pipeline node can land its result in a table of a
+          datasource you already run — useful for feeding a BI tool, and explicitly not a columnar warehouse with a
+          modelling layer on top. Third, scheduling: pipelines run on demand, by an agent, a REST call or a person;
+          the scheduler is the next-month roadmap item, and scheduled extracts to your own lake are later. A
+          roadmap page dates both. Fourth, transformation breadth: the work is SQL, plus JSONata and JavaScript
+          transform nodes that are themselves a roadmap item — if the job is Python operators orchestrating a
+          platform, the <a th:href="@{/compare/airflow}">Airflow comparison</a> says plainly that Airflow is the
+          answer.
+        </p>
+        <p>
+          None of these four is a defect; each is a boundary drawn on purpose, and the page would rather you know
+          them before the pilot than after. The pattern that works: teams keep the ELT copy where history and the
+          warehouse genuinely earn their keep, and answer the operational, cross-source, fresh-number questions
+          here — the two coexist, and the <a th:href="@{/faq}">FAQ</a> has the "can I use both?" answer in one
+          paragraph.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="fa-choose">
+    <div class="container">
+      <p class="kicker">The short version</p>
+      <h2 id="fa-choose" class="ds-headline">Choose by the job in front of you</h2>
+      <div class="split">
+        <div>
+          <h3>Choose Fivetran or Airbyte when…</h3>
+          <ul>
+            <li>the destination is the point — a warehouse must stay fed, every night, from many sources;</li>
+            <li>you need history the sources overwrite — the copy is the archive;</li>
+            <li>the analysts already live in the warehouse, and its modelling layer is an asset, not a tax;</li>
+            <li>the sources are SaaS APIs a connector already handles well.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Choose datapipelines when…</h3>
+          <ul>
+            <li>the question crosses two or three operational databases and neither engine can see the other;</li>
+            <li>the answer must be fresh, because an application or an agent consumes it now;</li>
+            <li>the result should be an API — versioned, keyed, released by a person — not another table;</li>
+            <li>you would rather not stand up a warehouse to join four tables.
+              <a th:href="@{/compare/postgres-only}">The Postgres-only comparison</a> is the small-case version of
+              the same argument.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="fa-shot">
+    <div class="container">
+      <p class="kicker">What it looks like</p>
+      <h2 id="fa-shot" class="ds-headline">The answer, where the copy would have been</h2>
+      <figure class="shot">
+        <figcaption>The demo lake pipeline <code>nyc/mobility/taxi_vs_rideshare</code> mid-run — each source read in place, the join staged, the result in the results dock. No warehouse between them.</figcaption>
+        <div class="shot-placeholder" data-shot="execution-result" style="--shot-ratio: 16 / 10"><b>[shot: execution-result]</b>execution detail · node table · staged join result · 1440×900</div>
+      </figure>
+      <div class="prose">
+        <!-- claim: docs/deployment.md §Appendix B -->
+        <p>
+          The demo stack runs this pattern end to end: <code>./app.sh --start --demo nyc,lake</code> brings up
+          Postgres, MySQL, SQLite and Parquet on S3, and the seeded pipelines — <code>nyc/mobility/revenue_by_borough</code>
+          joins two engines, <code>nyc/mobility/taxi_vs_rideshare</code> adds the lake — answer questions the ELT
+          shape would have copied four sources to reach.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/staging.md §3 — does datapipelines copy my data -->
+      <!-- claim: docs/rest-api.md §19 — can it replace a nightly sync / can I use both -->
+      <!-- claim: docs/ROADMAP.md §3 — history the source overwrites -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Fivetran and Airbyte questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="fa-next">
+    <div class="container">
+      <h2 id="fa-next" class="ds-headline">Point it at your two databases this afternoon</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        The demo proves the shape on a laptop; your sources prove it for real. Register the databases, let the agent
+        draft the join, release it when the numbers are the numbers — and the endpoint is the answer, not a copy of
+        the question.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
+        <a class="btn btn-secondary" th:href="@{/published-api}">How the result becomes an API</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

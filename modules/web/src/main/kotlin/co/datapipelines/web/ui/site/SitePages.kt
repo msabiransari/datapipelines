@@ -241,6 +241,88 @@ object SitePages {
             view = "site/tableau-governed-dataset",
         )
 
+    // ---- Site v2 batch 2 (111): seven more intent pages, same rules as the batch above.
+
+    /** "fivetran alternative" + "airbyte vs" + "elt without a warehouse". */
+    val COMPARE_FIVETRAN =
+        SitePage(
+            path = "/compare/fivetran-airbyte",
+            title = "Fivetran or Airbyte vs datapipelines — sync or query at the source",
+            description =
+                "ELT tools copy your data into a warehouse on a schedule. datapipelines queries at the source, " +
+                    "joins in a per-run scratch database; the result is an API.",
+            view = "site/compare-fivetran-airbyte",
+        )
+
+    /** "do i need a data warehouse" + "just use postgres" + "postgres as a data warehouse". */
+    val COMPARE_POSTGRES_ONLY =
+        SitePage(
+            path = "/compare/postgres-only",
+            title = "Do you need a data warehouse? When Postgres alone is not enough",
+            description =
+                "For one database, Postgres alone is right. The second source, the agent needing read-only " +
+                    "access, the partner API and the release step arrive next.",
+            view = "site/compare-postgres-only",
+        )
+
+    /** "tableau prep alternative" + "tableau prep vs sql". */
+    val TABLEAU_PREP =
+        SitePage(
+            path = "/tableau/prep-vs-pipelines-as-code",
+            title = "Tableau Prep or pipelines as code — a flow is a file, this is code",
+            description =
+                "A Tableau Prep flow is a file one tool opens. A pipeline here is a JSON document of SQL nodes " +
+                    "you can diff, version, hand to an agent and release.",
+            view = "site/tableau-prep-vs-pipelines",
+        )
+
+    /**
+     * "scheduled extract to s3" + "data driven alerts from sql" + "embedded dashboards row level
+     * security" — a ROADMAP page: every roadmap item on it says roadmap, next month or later.
+     */
+    val TABLEAU_ROADMAP =
+        SitePage(
+            path = "/tableau/extracts-alerts-dashboards",
+            title = "Embedded dashboards, extracts to S3, alerts — the roadmap",
+            description =
+                "Embedded dashboards, scheduled extracts to your own bucket, email alerts: what the roadmap " +
+                    "dates, what ships today, and what is not planned.",
+            view = "site/tableau-extracts-alerts-dashboards",
+        )
+
+    /** "client reporting api" + "white label reporting" + "one pipeline per client". */
+    val FOR_AGENCIES =
+        SitePage(
+            path = "/for/agencies",
+            title = "A client reporting API per client — datapipelines for agencies",
+            description =
+                "One workspace and one key per client, an agent drafting every pipeline, a release you can name " +
+                    "in the invoice, an API for the portal today.",
+            view = "site/for-agencies",
+        )
+
+    /** "product analytics without a warehouse" + "customer facing analytics api" + "embedded analytics". */
+    val FOR_SAAS_TEAMS =
+        SitePage(
+            path = "/for/saas-teams",
+            title = "Embedded analytics without a warehouse — the API ships today",
+            description =
+                "Show customers their own numbers in your app: an agent authors the pipeline, a person " +
+                    "releases it, a versioned endpoint serves each viewer.",
+            view = "site/for-saas-teams",
+        )
+
+    /** "one analyst five databases" + "join data across databases without etl" + "ai sql assistant with governance". */
+    val FOR_ANALYSTS =
+        SitePage(
+            path = "/for/analysts",
+            title = "The AI SQL assistant with governance — one analyst, five databases",
+            description =
+                "Ask in your words, get a pipeline you can read: the agent drafts the SQL, the join crosses " +
+                    "engines in a scratch database, a release makes it an API.",
+            view = "site/for-analysts",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -360,6 +442,13 @@ object SitePages {
                 MCP_TOOLS,
                 TABLEAU,
                 TABLEAU_GOVERNED_DATASET,
+                COMPARE_FIVETRAN,
+                COMPARE_POSTGRES_ONLY,
+                TABLEAU_PREP,
+                TABLEAU_ROADMAP,
+                FOR_AGENCIES,
+                FOR_SAAS_TEAMS,
+                FOR_ANALYSTS,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

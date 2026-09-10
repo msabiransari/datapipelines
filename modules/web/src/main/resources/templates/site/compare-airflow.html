@@ -12,6 +12,8 @@
 
   <section class="section page-hero" aria-labelledby="cmp-title">
     <div class="container">
+      <!-- claim: docs/dag-executor.md §5 -->
+      <p class="eyebrow">No scheduler · SQL pipelines across operational databases · agent-authored</p>
       <p class="kicker">Honest comparison</p>
       <h1 id="cmp-title" class="ds-display">datapipelines.co vs Apache Airflow</h1>
       <p class="section-lede">
@@ -87,6 +89,32 @@
       <p><a th:href="@{/compare/dbt}">The dbt comparison &rarr;</a> &middot;
          <a th:href="@{/federated-query}">The cross-database join &rarr;</a> &middot;
          <a th:href="@{/docs/rest-api}">REST API specification &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/dag-executor.md §5 — does this replace Airflow's scheduler -->
+      <!-- claim: docs/rest-api.md §6 — can Airflow trigger these pipelines -->
+      <!-- claim: docs/mcp-server.md §6.1 — can an agent author the work -->
+      <!-- claim: docs/versioning.md §3.1 — are reruns reproducible -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The Airflow comparison, in questions')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Keep Airflow. Give it something worth orchestrating.</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        The demo stack runs the cross-database pipeline an Airflow operator would trigger — see what the executed
+        work looks like before you wire the two together.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
+        <a class="btn btn-secondary" th:href="@{/published-api}">How results become endpoints</a>
+      </div>
     </div>
   </section>
 

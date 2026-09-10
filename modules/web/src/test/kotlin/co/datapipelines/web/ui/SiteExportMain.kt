@@ -122,8 +122,15 @@ private fun writePage(
             File(outDir, path.trim('/')).also { it.mkdirs() }.let { File(it, "index.html") }
         }
     target.parentFile.mkdirs()
-    target.writeText(html)
+    // 111 §C: the claim comments are an audit trail for the SOURCE templates (the guards read
+    // templates/, never this export), so stripping them here costs nobody anything and saves
+    // the fallback/S3 upload ~10-15% of its HTML bytes. Thymeleaf's own `<!--/* */-->`
+    // comments were already removed at render; what is left is author commentary.
+    target.writeText(HTML_COMMENT.replace(html, ""))
 }
+
+/** A non-greedy HTML comment, including the delimiters. JSON-LD blocks carry none. */
+private val HTML_COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
 
 /** Class-literal anchor for the classloader lookup above; Kotlin top-level functions have no owner type to name. */
 private class SiteExportMarker

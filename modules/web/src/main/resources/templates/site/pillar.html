@@ -12,6 +12,8 @@
 
   <section class="section page-hero" aria-labelledby="pillar-title">
     <div class="container">
+      <!-- claim: docs/mcp-server.md §6.1, docs/deployment.md §10 -->
+      <p class="eyebrow">MCP server · <span th:text="${toolCount}">34</span> tools · six engines · AGPL-3.0</p>
       <p class="kicker">MCP server for SQL databases</p>
       <h1 id="pillar-title" class="ds-display">One SQL MCP server for six database engines</h1>
       <p class="section-lede">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.</p>
@@ -125,6 +127,33 @@
         <li><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here</a> — what the agent authors, and what reviews it.</li>
         <li><a th:href="@{/docs/datasources}">Datasources specification</a> — dialects, pools, the read-only flag, credential encryption.</li>
       </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/datasources.md §4 — which databases one server reaches -->
+      <!-- claim: docs/datasources.md §7 — does the agent ever see a password -->
+      <!-- claim: docs/datasources.md §5.7 — what stops a write against a read-only source -->
+      <!-- claim: docs/auth.md §11.4 — how do I revoke one agent -->
+      <!-- claim: docs/auth.md §10 — is every tool call audited -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The MCP server, in questions')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Point your agent at the demo first</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        One command brings up the server, six engines' worth of demo sources and the pipelines that join them. The
+        afternoon you spend on the demo is the cheapest way to find out what governed agent access feels like.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
+        <a class="btn btn-secondary" th:href="@{/security}">Read the security model</a>
+      </div>
     </div>
   </section>
 

@@ -26,7 +26,14 @@
     if (!themeLink) {
       return;
     }
-    themeLink.setAttribute('href', THEME_DIR + mode + '.css');
+    /* 111 §C: auto's values ride the site-chrome bundle, so auto DISABLES the swap
+       sheet (no fetch, no render-blocking request) instead of re-pointing it. */
+    if (mode === 'auto') {
+      themeLink.disabled = true;
+    } else {
+      themeLink.disabled = false;
+      themeLink.setAttribute('href', THEME_DIR + mode + '.css');
+    }
     if (mode === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
     } else {
@@ -60,6 +67,20 @@
       }
     });
   }
+
+  /* ------------------------------------------------------
+     Late stylesheets (111 §C)
+     The mono faces ship in a media="print" sheet so their
+     bytes stay off the render-blocking chain; this flips it
+     to "all". Runs before first paint on a normal parse,
+     because this script sits at the end of the body.
+     ------------------------------------------------------ */
+  Array.prototype.forEach.call(
+    document.querySelectorAll('link[data-late-style]'),
+    function (link) {
+      link.media = 'all';
+    }
+  );
 
   /* ------------------------------------------------------
      Copy-to-clipboard on code blocks

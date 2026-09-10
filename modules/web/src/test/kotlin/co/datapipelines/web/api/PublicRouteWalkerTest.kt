@@ -90,6 +90,15 @@ class PublicRouteWalkerTest {
                 "SitePagesController#tableau",
                 "SitePagesController#tableauGovernedDataset",
                 "SitePagesController#textToSqlAgent",
+                // Site v2 batch 2 (111): the seven intent pages got their own controller
+                // (detekt TooManyFunctions), same shape and same reasoning.
+                "SiteV2Batch2Controller#compareFivetranAirbyte",
+                "SiteV2Batch2Controller#comparePostgresOnly",
+                "SiteV2Batch2Controller#forAgencies",
+                "SiteV2Batch2Controller#forAnalysts",
+                "SiteV2Batch2Controller#forSaasTeams",
+                "SiteV2Batch2Controller#tableauPrep",
+                "SiteV2Batch2Controller#tableauRoadmap",
                 // Crawler infrastructure (073) — robots.txt is a static file, not a handler.
                 "SitemapController#sitemap",
                 // The packaged spec set (073) and the agent skill (095): jar-packaged
