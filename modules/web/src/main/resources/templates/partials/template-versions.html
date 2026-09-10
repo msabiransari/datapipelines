@@ -1,19 +1,20 @@
 <!-- A leaf's versions, newest first (template-hierarchy-design §9.2; versioning §6), rendered
-     by 106 as the acting column's Versions tab.
+      by 106 as the acting column's Versions tab; the verbs reshaped by 102 into the row's
+      ⋯ overflow menu (§4.3d's template twins — no Switch: templates are pinned by version).
 
-     COMPACT ROWS, NOT A TABLE — the pipelines twin's reasoning verbatim: this is the narrow
-     column of a two-column detail, and a five-column table there wraps its headers and hides
-     its last column behind a scroll.
+      COMPACT ROWS, NOT A TABLE — the pipelines twin's reasoning verbatim: this is the narrow
+      column of a two-column detail, and a five-column table there wraps its headers and hides
+      its last column behind a scroll.
 
-     The status is the VERSION ROW's own now (101 put DISCARDED on template versions too), not
-     derived from the draft pointer: deriving it was correct while DRAFT/RELEASED were the only
-     two states and became a lie the moment a third existed.
+      The status is the VERSION ROW's own now (101 put DISCARDED on template versions too), not
+      derived from the draft pointer: deriving it was correct while DRAFT/RELEASED were the only
+      two states and became a lie the moment a third existed.
 
-     The "in use" number is the 040 D6 per-version count — distinct pipelines pinning that
-     version in their working version, from the same used-by service the MCP `templates_used_by`
-     tool and the `template.in_use` delete guard read. It is worded by the model
-     ([VersionRowView.usageLabel]) so that this partial and the pipelines one cannot disagree
-     about what the number counts. -->
+      The "in use" number is the 040 D6 per-version count — distinct pipelines pinning that
+      version in their working version, from the same used-by service the MCP `templates_used_by`
+      tool and the `template.in_use` delete guard read. It is worded by the model
+      ([VersionRowView.usageLabel]) so that this partial and the pipelines one cannot disagree
+      about what the number counts. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist">
   <p class="ds-empty-description" th:if="${#lists.isEmpty(versions)}">This template has no versions.</p>
 
@@ -25,6 +26,7 @@
     <span class="tplx-vmeta">
       <span th:text="${v.createdAgo}" th:title="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">3 days ago</span>
       <span> · </span><span th:text="${v.actor}">Muhammad</span>
+      <span th:if="${v.via != 'session'}" class="u-muted" th:text="' · via ' + ${v.via == 'api_key' ? 'API key' : 'MCP'}"> · via MCP</span>
       <span> · </span><span th:text="${v.usageLabel}">2 pipelines</span>
       <span th:if="${v.isCurrent}"> · </span><span th:if="${v.isCurrent}" class="tplx-current">current</span>
     </span>
@@ -32,29 +34,34 @@
       <a class="ds-button ds-button-ghost ds-button-sm"
          th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open</a>
 
-      <button th:if="${v.canRelease}" type="button" class="ds-button ds-button-ghost ds-button-sm" data-verb="POST"
-              th:attr="data-verb-url=@{/api/v1/templates/release},
-                       data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;}',
-                       data-if-match=${draftHash},
-                       data-confirm='Release v' + ${v.version} + '? A released version is immutable.'">Release…</button>
+      <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
+           RELEASED → Discard; DISCARDED → Restore. No Switch — see the header comment. -->
+      <th:block th:if="${v.canRelease or v.canPurge or v.canDiscard or v.canRestore}">
+        <details class="tplx-vmenu">
+          <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
+          <div class="tplx-vmenu-list" role="menu" data-vmenu>
+            <button th:if="${v.canRelease}" type="button" role="menuitem" class="tplx-vmenu-item"
+                    th:attr="hx-get=@{'/partials/templates/lifecycle/release'(name=${templateId})},
+                             hx-target='#tx-dialog', hx-swap='innerHTML'"
+                    th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
 
-      <button th:if="${v.canPurge}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
-              data-verb="DELETE"
-              th:attr="data-verb-url=@{/api/v1/templates/version(name=${templateId},version=${v.version})},
-                       data-confirm='Discard draft v' + ${v.version} + '? It is removed permanently.',
-                       data-after=${versionCount == 1} ? 'reload' : null">Discard draft</button>
+            <button th:if="${v.canPurge}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+                    th:attr="hx-get=@{'/partials/templates/lifecycle/purge'(name=${templateId}, version=${v.version})},
+                             hx-target='#tx-dialog', hx-swap='innerHTML'"
+                    th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
 
-      <button th:if="${v.canDiscard}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
-              data-verb="POST"
-              th:attr="data-verb-url=@{/api/v1/templates/version/discard},
-                       data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;,&quot;version&quot;:' + ${v.version} + '}',
-                       data-confirm='Discard v' + ${v.version} + '? It can be restored later.'">Discard</button>
+            <button th:if="${v.canDiscard}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+                    th:attr="hx-get=@{'/partials/templates/lifecycle/discard'(name=${templateId}, version=${v.version})},
+                             hx-target='#tx-dialog', hx-swap='innerHTML'"
+                    th:text="'Discard v' + ${v.version} + '…'">Discard v1…</button>
 
-      <button th:if="${v.canRestore}" type="button" class="ds-button ds-button-ghost ds-button-sm"
-              data-verb="POST"
-              th:attr="data-verb-url=@{/api/v1/templates/version/restore},
-                       data-verb-body='{&quot;name&quot;:&quot;' + ${templateId} + '&quot;,&quot;version&quot;:' + ${v.version} + '}',
-                       data-confirm='Restore v' + ${v.version} + ' to RELEASED?'">Restore</button>
+            <button th:if="${v.canRestore}" type="button" role="menuitem" class="tplx-vmenu-item"
+                    th:attr="hx-get=@{'/partials/templates/lifecycle/restore'(name=${templateId}, version=${v.version})},
+                             hx-target='#tx-dialog', hx-swap='innerHTML'"
+                    th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
+          </div>
+        </details>
+      </th:block>
     </span>
   </div>
 </div>

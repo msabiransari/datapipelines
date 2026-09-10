@@ -177,7 +177,7 @@ class TemplateTreeRenderTest {
     }
 
     @Test
-    fun `a leaf's versions carry RELEASED and DRAFT badges and no destructive action`() {
+    fun `a leaf's versions carry RELEASED and DRAFT badges, and only allowed verbs in the menu`() {
         val html = render("partials/template-versions") { fillVersions() }
 
         html shouldContain "DRAFT"
@@ -185,13 +185,20 @@ class TemplateTreeRenderTest {
         html shouldContain "ds-badge ds-badge-warning"
         html shouldContain "ds-badge ds-badge-success"
         html shouldContain "/templates/editor?name=$DEEP_PATH"
-        // 106: the version row now carries 101's verbs, so "no destructive action" narrowed to
-        // "no rename, no move, and nothing that writes a version in place" — a version is
-        // immutable (§5.1) and a name is identity (§4.5). Discard and Restore are lifecycle,
-        // not edits, and each points at the REST verb 101 shipped.
+        // 102: each row's verbs live in the ⋯ overflow menu, and a verb §3.5 refuses for the
+        // row's status is ABSENT, not disabled — the table and the screen cannot disagree.
+        // "No destructive action" stays narrowed to "no rename, no move, nothing that writes a
+        // version in place" (106): a version is immutable (§5.1), a name is identity (§4.5).
         listOf("Rename", "Move", "hx-put").forEach { html shouldNotContain it }
-        html shouldContain "data-verb-url=\"/api/v1/templates/version/discard\""
-        html shouldContain "data-verb-url=\"/api/v1/templates/release\""
+        html shouldContain "details class=\"tplx-vmenu\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/release?name=$DEEP_PATH\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/purge?name=$DEEP_PATH&amp;version=2\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/discard?name=$DEEP_PATH&amp;version=1\""
+        html shouldContain "hx-target=\"#tx-dialog\""
+        // The template rows offer no Switch, and the fetch path is gone.
+        html shouldNotContain "Switch to v"
+        html shouldNotContain "data-verb-url="
+        html shouldNotContain "data-confirm="
     }
 
     @Test

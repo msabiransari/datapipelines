@@ -1,0 +1,39 @@
+<!-- The template Discard dialog (ui-screens §4.3d/§4.6, 102) — reversible; the in-use
+     pinners are `template.in_use`'s own evidence, and a pinned version renders no button. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="template-discard">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="tlc-discard-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="tlc-discard-title"
+        th:text="'Discard v' + ${dlg.version} + '?'">Discard v1?</h2>
+
+    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines)}">
+      <p class="u-secondary u-text-sm">
+        <strong th:text="'v' + ${dlg.version}">v1</strong> cannot be discarded: it is pinned by live
+        pipeline version(s) — remove or repoint them first.
+      </p>
+      <ul class="u-text-sm u-mb-md" data-discard-pinnerPipelines>
+        <li th:each="p : ${dlg.pinnerPipelines}" class="u-mono" th:text="${p}">parent/pipeline</li>
+      </ul>
+    </th:block>
+
+    <th:block th:if="${#lists.isEmpty(dlg.pinnerPipelines)}">
+      <p class="u-secondary u-text-sm" th:if="${dlg.isCurrent}">
+        v<span th:text="${dlg.version}">1</span> is the resolved version —
+        <span th:text="${dlg.fallback}">v2 becomes the version a pin without a number resolves to.</span>
+      </p>
+      <p class="u-secondary u-text-sm" th:if="${!dlg.isCurrent}">
+        v<span th:text="${dlg.version}">1</span> is not the resolved version — the pointer does not move.
+      </p>
+      <p class="u-secondary u-text-sm u-mb-md">Discard is reversible — Restore brings it back.</p>
+
+      <form th:attr="hx-post=@{'/partials/templates/lifecycle/discard'(name=${dlg.id}, version=${dlg.version})},
+                       hx-target='#template-detail', hx-swap='innerHTML'">
+        <button type="submit" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+                th:text="'Discard v' + ${dlg.version}">Discard v1</button>
+      </form>
+    </th:block>
+  </div>
+</div>

@@ -189,6 +189,7 @@ open class PipelineService(
         workspaceId: UUID,
         bodyJson: String,
         actor: UUID,
+        via: WriteSurface,
     ): SavedPipeline {
         // versioning §5.5: creation is authoring — a promotion receiver refuses it, before
         // anything is parsed or written.
@@ -201,6 +202,7 @@ open class PipelineService(
                 validated.canonicalJson,
                 actor,
                 CreateLifecycle.DRAFT,
+                via,
             )
         // Read back the row the database stored (its hash included) — a hand-built detail is
         // how a default or CHECK becomes invisible (metadata-db §6.1). It is the DRAFT detail
@@ -233,6 +235,7 @@ open class PipelineService(
         bodyJson: String,
         expectedHash: String,
         actor: UUID,
+        via: WriteSurface,
     ): SavedPipeline {
         val validated = validate(bodyJson, workspaceId)
         val written =
@@ -243,6 +246,7 @@ open class PipelineService(
                 canonical = validated.canonicalJson,
                 expectedHash = expectedHash,
                 actor = actor,
+                via = via,
             )
         // A no-op reports the current RELEASED state and must NOT carry a draft pointer: nothing
         // was opened. Otherwise the pointer is the row just written — `PipelineDraftService`

@@ -1,0 +1,7 @@
+<!-- The template twin of the Shape A wrapper (ui-screens §4.6, 102). -->
+<div xmlns:th="http://www.thymeleaf.org">
+  <div th:replace="~{partials/template-detail :: detail}"></div>
+  <div hidden data-lifecycle-applied="1"></div>
+  <div th:if="${lifecycleToastTitle != null}"
+       th:replace="~{partials/toast-oob :: oob('success', ${lifecycleToastTitle}, ${lifecycleToastMessage})}"></div>
+</div>

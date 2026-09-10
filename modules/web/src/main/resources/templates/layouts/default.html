@@ -394,7 +394,13 @@
         <th:block th:if="${code == 'member_added'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was added.')}"></div></th:block>
         <th:block th:if="${code == 'member_removed'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was removed.')}"></div></th:block>
         <th:block th:if="${code == 'deleted'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was deleted.')}"></div></th:block>
-      </th:block>
+      
+        <!-- 102 — the lifecycle dialogs' editor/entity legs answer HX-Redirect with one of
+             these codes; the toast lands after the navigation, from this bin (§4.3d). -->
+        <th:block th:if="${code == 'released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked.')}"></div></th:block>
+        <th:block th:if="${code == 'draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft and its runs are gone. This cannot be undone.')}"></div></th:block>
+        <th:block th:if="${code == 'entity_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Pipeline purged', 'The pipeline, its draft and its runs are gone.')}"></div></th:block>
+        <th:block th:if="${code == 'template_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Template purged', 'The template and its draft are gone.')}"></div></th:block></th:block>
     </div>
     <th:block th:replace="${content}"/>
   </main>

@@ -7,6 +7,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
@@ -83,7 +84,7 @@ class TemplateCreatePartialTest {
         val captured = slot<TemplateDraft>()
         every { repository.existsId(any(), any()) } returns false
         every { validator.validateOrThrow(capture(captured), any()) } answers { captured.captured }
-        every { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) } answers {
+        every { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } answers {
             val d = secondArg<TemplateDraft>()
             Template(
                 id = d.id!!,
@@ -167,7 +168,9 @@ class TemplateCreatePartialTest {
 
         (response as ModelAndView).status shouldBe HttpStatus.BAD_REQUEST
         refusalMessage(response) shouldContain "already exists"
-        verify(exactly = 0) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) }
+        verify(
+            exactly = 0,
+        ) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) }
     }
 
     @Test
@@ -178,7 +181,9 @@ class TemplateCreatePartialTest {
 
         (response as ModelAndView).status shouldBe HttpStatus.BAD_REQUEST
         refusalMessage(response) shouldContain "Unknown template type"
-        verify(exactly = 0) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT) }
+        verify(
+            exactly = 0,
+        ) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) }
     }
 
     @Test

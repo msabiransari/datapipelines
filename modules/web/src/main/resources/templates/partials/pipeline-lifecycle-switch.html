@@ -1,0 +1,39 @@
+<!-- The Switch dialog (ui-screens §4.3d, 102): the sticky pointer's manual lever. RELEASED
+     is always eligible; a DRAFT is only under the development posture (the flag the service's
+     own eligibility check reads); discarded rows are shown DISABLED with "restore first" —
+     the one place a §3.5 refusal is shown rather than absent, because the row the user is
+     looking for is right there. Not authoring-gated (§3.1: the receiver's rollback lever). -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="pipeline-switch">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="plc-switch-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="plc-switch-title">Switch current version</h2>
+
+    <p class="u-secondary u-text-sm">
+      <span th:text="${dlg.name}">test/pipeline</span> — endpoints published on this pipeline serve the
+      current version after this.
+    </p>
+
+    <form class="u-mt-md"
+          th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${dlg.id})},
+                   hx-target='#pipeline-detail', hx-swap='innerHTML'">
+      <div class="tplx-switchrows" role="radiogroup" aria-label="Current version">
+        <label th:each="o : ${dlg.options}" class="tplx-switchrow"
+               th:classappend="${!o.eligible} ? 'tplx-switchrow-disabled'">
+          <input type="radio" name="version" th:value="${o.version}"
+                 th:attr="checked=${o.version == (preselect != null ? preselect : dlg.currentVersion)} ?: null"
+                 th:disabled="${!o.eligible}">
+          <span class="ds-badge ds-badge-default app-chip-mono" th:text="'v' + ${o.version}">v3</span>
+          <span class="ds-badge"
+                th:classappend="${o.status.name() == 'RELEASED'} ? 'ds-badge-success' : (${o.status.name() == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-default')"
+                th:text="${o.status}">RELEASED</span>
+          <span th:if="${o.isCurrent}" class="ds-badge ds-badge-info">current</span>
+          <span th:if="${!o.eligible}" class="u-muted u-text-sm">restore first</span>
+        </label>
+      </div>
+      <button type="submit" class="ds-button ds-button-primary u-full u-mt-md" hx-disabled-elt="this">Switch</button>
+    </form>
+  </div>
+</div>

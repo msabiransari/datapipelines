@@ -6,6 +6,7 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
@@ -279,7 +280,8 @@ class TemplateEditorControllerTest {
         every { templates.findVersionDetail(any(), "test/my_template.sql", 2) } returns releasedDetail(2)
         val written = slot<TemplateDraft>()
         val expectedHash = slot<String>()
-        every { drafts.write(any(), "test/my_template.sql", capture(written), capture(expectedHash), userId) } returns draftDetail(3)
+        every { drafts.write(any(), "test/my_template.sql", capture(written), capture(expectedHash), userId, WriteSurface.SESSION) } returns
+            draftDetail(3)
 
         val response = redirect(controller.edit("test/my_template.sql", 1))
 
@@ -302,7 +304,7 @@ class TemplateEditorControllerTest {
         response.headers.getFirst("HX-Redirect") shouldBe "/templates/editor?name=test%2Fmy_template.sql"
         // The invariant: the UI never asks for a second draft, and never overwrites the
         // author's in-progress one with the body of the version they were merely reading.
-        verify(exactly = 0) { drafts.write(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { drafts.write(any(), any(), any(), any(), any(), WriteSurface.SESSION) }
     }
 
     @Test
@@ -317,7 +319,7 @@ class TemplateEditorControllerTest {
 
         refusal.viewName shouldBe "partials/inline-refusal"
         (refusal.model["message"] as String) shouldContain "was not found"
-        verify(exactly = 0) { drafts.write(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { drafts.write(any(), any(), any(), any(), any(), WriteSurface.SESSION) }
     }
 
     @Test

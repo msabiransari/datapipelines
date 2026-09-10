@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateEngine
@@ -119,7 +120,8 @@ class TemplatesControllerTest {
     fun `create validates and stores, returning version 1`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns template()
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
+            template()
 
         val stored = controller.create(createBody).data
         stored.id shouldBe "test/fetch_orders.sql"
@@ -263,7 +265,7 @@ class TemplatesControllerTest {
                 createdAt = Instant.parse("2026-08-02T00:00:00Z"),
                 createdBy = userId,
             )
-        every { drafts.write(any(), "test/fetch_orders.sql", any(), "hash-v2", userId) } returns detail
+        every { drafts.write(any(), "test/fetch_orders.sql", any(), "hash-v2", userId, WriteSurface.SESSION) } returns detail
         every { repository.findVersion(any(), "test/fetch_orders.sql", 3) } returns
             template(3).copy(status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v3")
         val data = controller.update("hash-v2", updateBody).data
@@ -277,7 +279,7 @@ class TemplatesControllerTest {
                 "Template 'nope.sql' not found.",
                 emptyMap(),
             )
-        every { drafts.write(any(), "nope.sql", any(), any(), userId) } throws notFoundError
+        every { drafts.write(any(), "nope.sql", any(), any(), userId, WriteSurface.SESSION) } throws notFoundError
         val thrown =
             shouldThrow<DatapipelinesException> { controller.update("hash-v2", updateBody.replace("test/fetch_orders.sql", "nope.sql")) }
         thrown.code shouldBe "template.not_found"
@@ -421,7 +423,7 @@ class TemplatesControllerTest {
     fun `create accepts an html payload without a dialect and echoes the type`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT) } returns
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
             template().copy(type = TemplateType.HTML, dialect = null)
 
         val stored =
@@ -519,7 +521,7 @@ class TemplatesControllerTest {
         every { repository.existsId(any(), "new.sql") } returns false
         // D55: the IMPORT path is not authoring — it lands RELEASED, and the stub says so, so a
         // regression that routed an import through the authoring create would not match here.
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } returns
+        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED, WriteSurface.SESSION) } returns
             template().copy(id = "new.sql")
 
         val body =

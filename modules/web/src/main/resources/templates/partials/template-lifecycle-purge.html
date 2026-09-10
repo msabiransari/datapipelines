@@ -1,0 +1,42 @@
+<!-- The template Purge dialog (ui-screens §4.3d/§4.6, 102) — THE irreversible one, and the
+     template twin's warning is stronger: a sole draft's purge takes the TEMPLATE with it
+     (§5.4). The in-use pre-read is graph rule 1 (`template.in_use` — there is no
+     template.version.pinned); a pinned version renders the pinners and no button. Typed
+     confirm `v<n>`, enforced client- and server-side. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="template-purge">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="tlc-purge-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="tlc-purge-title"
+        th:text="'Purge v' + ${dlg.version} + '?'">Purge v2?</h2>
+
+    <th:block th:if="${dlg.refusal != null}">
+      <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">in use</p>
+      <ul class="u-text-sm u-mb-md" data-purge-pinnerPipelines>
+        <li th:each="p : ${dlg.inUsePipelines}" class="u-mono" th:text="${p}">parent/pipeline</li>
+      </ul>
+    </th:block>
+
+    <th:block th:if="${dlg.refusal == null}">
+      <p class="u-secondary u-text-sm">
+        The draft is deleted permanently — this cannot be undone.
+        <span th:if="${dlg.soleVersion}">It is the only version, so the TEMPLATE goes with it.</span>
+      </p>
+
+      <form th:attr="hx-post=@{'/partials/templates/lifecycle/purge'(name=${dlg.id}, version=${dlg.version})},
+                       hx-target=${from == 'editor'} ? null : '#template-detail',
+                       hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+        <input type="hidden" name="from" th:value="${from}">
+        <label class="ds-form-label u-mt-md" th:for="'tlc-purge-confirm'">
+          Type <span class="u-mono" th:text="${dlg.expected}">v2</span> to confirm
+        </label>
+        <input class="ds-input u-mono" id="tlc-purge-confirm" data-confirm-input name="confirm" autocomplete="off"
+               spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
+        <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+                disabled hx-disabled-elt="this" th:text="'Purge v' + ${dlg.version}">Purge v2</button>
+      </form>
+    </th:block>
+  </div>
+</div>

@@ -1,30 +1,28 @@
 /*
- * 106 — the explorers' detail pane: its tabs, its lifecycle verbs, and the tree drawer the
- * narrow layout needs. Shared by BOTH explorers, exactly as template-explorer.js is: the
- * panes and cards are found by markers, never by a screen-specific id.
+ * 106 — the explorers' detail pane: its tabs and the tree drawer the narrow layout needs.
+ * Shared by BOTH explorers, exactly as template-explorer.js is: the panes and cards are found
+ * by markers, never by a screen-specific id.
  *
- * FOUR small jobs, and deliberately no framework.
+ * 102 removed the fetch-and-confirm verb path 106 shipped against the REST routes (the verbs
+ * are §4.3d dialog partials now — their POSTs answer Shape A with a `lifecycle-changed`
+ * payload) and added the tree badge refresh that payload drives: the leaf's version badge
+ * follows the POST's OWN facts (working version, draft flag), never a client-side guess, and
+ * a dialog landing closes any open ⋯ menu.
+ *
+ * THREE small jobs, and deliberately no framework.
  *
  * 1. TABS. The acting card's Versions / Runs / Usage panels. htmx loads the two lazy tabs
  *    (`hx-trigger="click once"`); this only decides which panel is VISIBLE, and it does so
  *    with `hidden` rather than a display rule, so the swap target is in the DOM before its
  *    fragment lands and htmx has something to swap into.
  *
- * 2. THE LIFECYCLE VERBS, over `fetch` rather than htmx. 101's REST verbs are a JSON API:
- *    the template half takes a JSON REQUEST BODY (`{"name": …, "version": …}`) and htmx
- *    form-encodes its values, so driving them with `hx-post` would need the json-enc
- *    extension this app does not vendor. One `fetch` path drives both halves instead, which
- *    also keeps the `If-Match` precondition ("you release what you tested", §4.2) and the
- *    double-submit CSRF header in ONE place rather than spread over `hx-headers` attributes
- *    whose merge with <body>'s inherited token is a detail of htmx we should not depend on.
+ * 2. THE TREE BADGE REFRESH. `lifecycle-changed` arrives with the Shape A response of every
+ *    lifecycle POST, carrying {leafId|leafName, workingVersion, hasDraft} read from the row
+ *    the POST just wrote. The leaf's badges are rewritten from that payload; when the working
+ *    version is null (no live version remains) the version badge goes away, which is the
+ *    state the empty detail will confirm on the next selection.
  *
- * 3. THE REFRESH AFTER A VERB. Nothing is patched into the DOM from a guess: a discard can
- *    move the sticky pointer (D60) and a sole-draft purge takes the entity with it. A
- *    success therefore RE-READS the detail fragment from the server — or reloads the page
- *    when the row itself is gone, because the TREE has to lose the leaf too and this pane may
- *    never touch the tree (the 067 render guard).
- *
- * 4. THE DRAWER. Below 1100px the tree is an overlay over the detail rather than a column
+ * 3. THE DRAWER. Below 1100px the tree is an overlay over the detail rather than a column
  *    beside it. Opening is one class on `.tplx-body`; every rule that positions it lives in
  *    template-tree.css, so this file decides no width, no breakpoint and no colour. It closes
  *    on Escape, on the backdrop, and when a selection lands — selecting a leaf is the reason
@@ -47,82 +45,64 @@
     });
   }
 
-  // ---------------------------------------------------------- 2/3. the verbs
-
-  function csrfToken() {
-    var match = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
-    return match ? decodeURIComponent(match[1]) : '';
-  }
-
-  function detailPane() {
-    return document.getElementById('pipeline-detail') || document.getElementById('template-detail');
-  }
-
-  function refreshDetail() {
-    var source = document.querySelector('[data-detail-url]');
-    var pane = detailPane();
-    if (!source || !pane || !window.htmx) return;
-    window.htmx.ajax('GET', source.getAttribute('data-detail-url'), { target: '#' + pane.id, swap: 'innerHTML' });
-  }
+  // -------------------------------------------------- 2. the tree badge refresh
 
   /**
-   * The server's own words out of a refusal body.
-   *
-   * `{"error":{"code","message"}}` is the app's one error shape (rules/02); anything that is
-   * not that — a proxy's HTML, an empty body — is passed through as text rather than replaced
-   * by a house "something went wrong", because `pipeline.version.pinned` and the list it names
-   * is the whole reason the user pressed the button.
+   * The badge rewrite, driven ONLY by the payload's server facts. Exported for
+   * `node --test` with the leaf row and badges passed in as plain elements would tie the
+   * test to the DOM; instead the decision is one function of facts, and the DOM half stays
+   * thin: applyBadge(leaf, {workingVersion, hasDraft}).
    */
-  function messageOf(text) {
-    try {
-      var parsed = JSON.parse(text);
-      return (parsed && parsed.error && parsed.error.message) || text;
-    } catch (ignored) {
-      return text;
+  function badgeFacts(leaf, payload) {
+    return {
+      version: payload && typeof payload.workingVersion === 'number' ? 'v' + payload.workingVersion : null,
+      hasDraft: !!(payload && payload.hasDraft),
+    };
+  }
+
+  function applyBadge(leaf, payload) {
+    if (!leaf) return;
+    var facts = badgeFacts(leaf, payload);
+    var version = leaf.querySelector('.tpl-leaf-version');
+    if (facts.version === null) {
+      if (version) version.remove();
+    } else if (version) {
+      version.textContent = facts.version;
+    } else {
+      // A leaf with no badge yet (never released, then restored/imported): add one beside
+      // the label, matching the tree's own markup shape.
+      var label = leaf.querySelector('.tpl-label');
+      if (label) {
+        var span = document.createElement('span');
+        span.className = 'ds-badge ds-badge-default tpl-leaf-version';
+        span.textContent = facts.version;
+        label.after(span);
+      }
     }
+    var draft = leaf.querySelector('.tpl-leaf-draft');
+    if (!facts.hasDraft && draft) draft.remove();
   }
 
-  function report(message) {
-    if (window.DpToast) window.DpToast.show('error', 'The server refused that', message);
+  function leafFor(detail) {
+    if (!detail) return null;
+    if (detail.leafId) {
+      return document.querySelector('[data-leaf-id="' + detail.leafId + '"] .tpl-leaf-version, [data-leaf-id="' + detail.leafId + '"]');
+    }
+    if (detail.leafName) {
+      return document.querySelector('[data-leaf-name="' + detail.leafName.replace(/"/g, '\\"') + '"]');
+    }
+    return null;
   }
 
-  function runVerb(button) {
-    var confirmation = button.getAttribute('data-confirm');
-    if (confirmation && !window.confirm(confirmation)) return;
-    var headers = { 'DP-CSRF-Token': csrfToken() };
-    var hash = button.getAttribute('data-if-match');
-    if (hash) headers['If-Match'] = hash;
-    var body = button.getAttribute('data-verb-body');
-    if (body) headers['Content-Type'] = 'application/json';
-    button.disabled = true;
-    window
-      .fetch(button.getAttribute('data-verb-url'), {
-        method: button.getAttribute('data-verb'),
-        credentials: 'same-origin',
-        headers: headers,
-        body: body || undefined,
-      })
-      .then(function (response) {
-        if (!response.ok) {
-          return response.text().then(function (text) {
-            button.disabled = false;
-            report(messageOf(text));
-          });
-        }
-        if (button.getAttribute('data-after') === 'reload') {
-          window.location.reload();
-          return null;
-        }
-        refreshDetail();
-        return null;
-      })
-      .catch(function (error) {
-        button.disabled = false;
-        report(String(error));
-      });
+  function onLifecycleChanged(event) {
+    // htmx's HX-Trigger contract (ze() in the vendored source): a JSON-OBJECT payload fires
+    // as the detail ITSELF; only string payloads arrive wrapped as {value: str}. Accept both.
+    var payload = event.detail && event.detail.value ? event.detail.value : event.detail
+    if (!payload) return;
+    applyBadge(leafFor(payload), payload);
   }
 
-  // --------------------------------------------------------------- 4. drawer
+  // --------------------------------------------------------------- 3. drawer
 
   function explorerBody() {
     return document.querySelector('.tplx-body');
@@ -160,12 +140,6 @@
       if (wanted) selectTab(wanted);
       return;
     }
-    var verb = event.target.closest('[data-verb-url]');
-    if (verb) {
-      event.preventDefault();
-      runVerb(verb);
-      return;
-    }
     if (event.target.closest('[data-explorer-drawer-open]')) {
       var pane = explorerBody();
       setDrawer(!(pane && pane.classList.contains('is-drawer-open')));
@@ -184,11 +158,14 @@
       var target = event.detail && event.detail.target;
       if (target && (target.id === 'pipeline-detail' || target.id === 'template-detail')) setDrawer(false);
     });
+
+    // 102: every lifecycle POST's Shape A response fires this with its own facts.
+    document.body.addEventListener('lifecycle-changed', onLifecycleChanged);
   }
 
   // The pure halves, for `node --test` (the shell.js / template-explorer.js convention). The
   // DOM adapters above are the browser suite's to prove; these are the decisions they delegate.
-  var api = { messageOf: messageOf, csrfToken: csrfToken, selectTab: selectTab, setDrawer: setDrawer };
+  var api = { selectTab: selectTab, setDrawer: setDrawer, badgeFacts: badgeFacts, applyBadge: applyBadge };
   if (typeof window !== 'undefined') window.explorerDetail = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

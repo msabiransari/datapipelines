@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.28
+**Status:** v1.31
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-09
@@ -406,15 +406,13 @@ does, and both explorers render the same shape.
 
 **1 — Header.** The folder path is an EYEBROW (`.tplx-detail-path`, mono, muted) and the leaf
 name is the `h2`; the full path still rides on `title`. The actions sit on the right: **Open in
-editor** (primary) plus the lifecycle verbs 101 shipped, rendered by state — `Release v<n>…`
-when a draft exists, **Discard** when a release exists, **Delete** only while the entity's one
-version is a draft (which is the only state 101's entity purge accepts). Each posts to the REST
-verb itself, carries the `If-Match` hash where 101 requires one, and swaps nothing;
-`explorer-detail.js` re-reads the whole fragment on success rather than patching the DOM from a
-guess, and reloads the page for a verb that removes the row (the tree has to lose the leaf, and
-this fragment may never touch the tree). 102's confirm partial had not merged when 106 was
-built, so the confirms are plain `window.confirm` strings on `data-confirm` — that attribute is
-the seam 102 replaces.
+editor** (primary) plus the lifecycle verbs 101 shipped, opened as §4.3d dialogs since 102 —
+`Release v<n>…` when a draft exists, **Discard v<cur>…** when the current version is released,
+**Purge pipeline…** only in the `{D}` shape, **Switch…** at ≥ 2 live eligible versions, at most
+one destructive among them. Each `hx-get`s its dialog partial into `#px-dialog`; the POST goes
+to the dialog's own partial route, which calls the service 101 wired and answers Shape A / Shape
+C (§5.1) — the plain `window.confirm` strings 106 shipped on `data-confirm`, and the `fetch`
+path that drove them, are gone.
 
 **2 — Reading column** (`.tplx-read`, the wider one). *Overview*: the chips (`v<n>`, the draft /
 released state, node count, `tempdb · <engine>`, datasource count), the description at a **78ch
@@ -441,8 +439,10 @@ Versions are **compact rows, never a table**: the acting column measures ~260px 
 1440, and three ghost buttons in an `auto` track leave a six-column table's meta cell about ten
 pixels (measured — `ExplorerDetailBrowserTest` asserts the meta column's readable width for
 exactly that reason). Each row states version · status · created · who · runs, marks the sticky
-pointer as `current` (D60 — which is not "the latest released"), and carries the verbs 101 would
-accept on THAT row: Release…, Discard draft (the purge), Discard, Restore.
+pointer as `current` (D60 — which is not "the latest released"), and carries a per-row overflow
+menu (⋯) with exactly the verbs §3.5 allows that row's status — DRAFT → Release, Purge;
+RELEASED → Discard, Switch-to (when not current); DISCARDED → Restore; a verb the table refuses
+is absent, not disabled (§4.3d).
 
 **Runs** is this pipeline's last 20 executions, so reading a pipeline no longer means leaving for
 §4.8 and filtering it back down. Its visibility is §4.8's, unchanged: an admin sees the
@@ -485,10 +485,66 @@ screen, `/dashboard` included (measured on this branch at 390px: dashboard 154px
 `app.css` and the shell layout, not the explorers; 106 asserts instead that the explorer REGION
 fits its own box at 390 and that nothing inside the detail sticks out of the detail.
 
+#### 4.3d Lifecycle verbs — both explorers and both editors (102)
+
+Every version-lifecycle verb 101 shipped ([Versioning §3.5](versioning.md#35-the-lifecycle-table))
+is reachable from a **confirm dialog**, one partial per verb, opened into a single per-screen
+container — `#px-dialog` (pipelines explorer), `#tx-dialog` (templates explorer), `#pe-dialog`
+(pipeline editor), `#te-dialog` (template editor) — emptied on close, `Escape` closed, focus
+landing on the first control, the destructive button `ds-button-danger` and last in tab order.
+The exemplar is §4.5's delete dialog (094 §B): the question is asked BEFORE the button exists,
+the refused branch renders NO button, and the POST re-runs the guard because the screen is
+never the authority. A dialog route is session-only (`LifecycleVerbs.requireSession`) — an API
+key is refused `auth.session.required` exactly as the REST verbs refuse it; the dialogs call the
+same services 101 wired, never the REST controllers over HTTP and never a second copy of a guard.
+
+| Verb | Dialog (`GET`, into the container) | What it shows before its one button | Shapes that render it |
+|---|---|---|---|
+| Release | `…/lifecycle/release` | the draft's number, who last wrote it and when, every template pin with its status — a DRAFT or MISSING pin is refused colour, says "release the template first", and the button is NOT rendered; else "Releasing makes v`<n>` the current version and locks it." | any with a DRAFT |
+| Purge draft | `…/lifecycle/purge?version=v` | the version and its execution count; the button reads "Purge v`<n>` and `<k>` runs" and needs the typed confirm `v<n>` | any with a DRAFT |
+| Discard | `…/lifecycle/discard?version=v` | whether the version is current (then the §3.4 fallback: "v`<m>` becomes current" or "nothing eligible remains — the pipeline will have no current version and its endpoints will answer 503"); parents that pin it (listed, no button); "Discard is reversible — Restore brings it back." | RELEASED rows |
+| Restore | `…/lifecycle/restore?version=v` | whether restoring moves the pointer (v > current, or current is NULL); "Restoring makes v`<n>` a live release again." | DISCARDED rows |
+| Purge entity | `…/lifecycle/purge-entity` | only in the `{D}` shape (else the `last_release` branch, no button); the exclusive draft templates the service offers, with a checkbox "also purge these `<k>` templates (they are pinned by nothing else)"; typed confirm is the entity's NAME | `{D}` |
+| Switch | `…/lifecycle/switch` | the live versions as radio rows (RELEASED always; DRAFT under development posture), the current one marked, discarded ones disabled with "restore first"; "endpoints published on this pipeline serve v`<n>` after this." Not authoring-gated (§3.1: the receiver's rollback lever) | ≥ 2 live eligible versions |
+
+The templates twin is addressed by NAME in query/body ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)):
+`GET /partials/templates/lifecycle/{verb}?name=&version=`. It has every dialog above except
+Switch — templates are pinned by version; there is no served pointer to switch. The pipeline
+purge-draft POST rides the **versioned** purge (`DELETE /api/v1/pipelines/{id}/versions/{v}`
+beneath): the dialog names an explicit version, so there is no two-writer hash protocol to
+honour, and the typed confirm carries the same fact the button states.
+
+**Success is Shape A; refusal is Shape C.** A POST that lands re-renders the explorer's detail
+region (the same fragment a selection loads — 106's model, not a copy) with the `toast-oob`
+fragment spliced in and `HX-Trigger: lifecycle-changed` whose payload carries the new
+working-version facts, so the tree leaf's badge follows server truth (`v3 draft` → `v3`) rather
+than a client guess. A verb that removes the ROW (the entity purge) answers `HX-Redirect` back
+to the explorer with a flash toast instead — the tree must lose the leaf, and this fragment may
+never touch the tree. Every refusal — `pinned` with its pinners, `last_release`, `not_released`,
+`not_discarded`, `not_eligible`, `not_draft`, `version.conflict`, `authoring.disabled`,
+`template.in_use` — arrives as §5.1 Shape C carrying the real 4xx, never a native dialog. In
+the editors the POST answers `HX-Redirect` back to the editor URL with the flash toast: the
+page's draft state (`PEDraft`, the version chips) is embedded across the document, so the
+honest refresh is the document itself, exactly as the pre-102 editor already reloaded.
+
+**One destructive verb per entity per view** (owner rule). The detail header shows at most one
+of Purge pipeline / Discard / Purge draft — `{D}` gets Purge pipeline beside Release; a released
+current gets Discard; a draft with no header-destructive gets Purge draft; everything else
+lives on the row it names. The version rows (§4.3b's compact list) carry their verbs in a
+per-row overflow menu (⋯): DRAFT → Release, Purge; RELEASED → Discard, Switch-to (when not
+current); DISCARDED → Restore. A verb the §3.5 table refuses for that row's shape is NOT
+rendered — absent, not disabled — so the table and the screen cannot disagree; the POST still
+re-runs the guard.
+
+**No native `window.confirm` / `window.alert` anywhere in the lifecycle UI** — a static test
+pins it (the four editor sites and the explorers' verb wiring are grep'd; the `hx-confirm` on
+`api/console.html` is htmx's own attribute, not a native call, and is excluded by path).
+
 ### 4.4 Pipeline Editor
 
 Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows that touch THIS document's shared contracts are noted here:
 
+- **Draft lifecycle actions (102):** the topbar's Release / Discard draft buttons open the §4.3d dialogs in `#pe-dialog` — the release dialog shows the draft's pins and refuses on a DRAFT template pin; the discard dialog is the PURGE (versioning §5.4 — the pre-102 confirm text claiming "an executed draft is kept as history" was false and is gone). A success answers `HX-Redirect` back to the editor with a flash toast (the page's draft state is document-wide); a refusal is §5.1 Shape C. No native `confirm`/`alert` remains on this screen (the pre-102 `draft.js` carried three — a static test pins the count at zero).
 - **The v2 canvas (080, owner-approved mock):** dotted-grid stage, the mock's node card (type-accent icon tile, id + eyebrow, mono facts, footer state + run numbers), bezier edges with three states, minimap, legend, controls and the fit-that-never-zooms-in ceiling. Its tokens are ONE block at the top of `app.css` (`/* app tokens (080): node-type accents */`) — the five node-type accent pairs plus `--brand(-soft)`, `--border-faint`, `--grid-dot` and the `--edge*` strokes — bridged to design-system tokens so every theme re-skins it. 079's shell v2 is told the block exists and must not redeclare it.
 - **The dock (080):** Details | Results | Errors | Events — the 065 inspector overlay is a tab now (owner ruling 2026-09-05), the dock is always present, the chevron collapse is the only contraction, and there is still no close. **Notifications:** unchanged in shape — `pipeline_completed` and `execution_aborted` toast via `DpToast.show` (§5.1 Shape D), `pipeline_failed` keeps the modal — but exactly-once is now structural: the 076 afterSettle rescue stacked Alpine components on a history-restored root (one click → N executions → N toasts), and it destroys the stale tree before re-binding (`editor-toast-once.test.mjs`). Every SSE event of every kind also lands in the **Events** tab in arrival order. **The dock's height is the user's (104).** It was a fixed 232px that could only be collapsed and restored — the owner's report was *"it has a fixed height. You can min/max it but cannot change the height. I want it to be flexible and the user should be able to drag the height."* A `role="separator"` handle straddles the dock's top border (drag, or focus it and use the arrows: ±16px, Shift ±64px, Home/End for the floor and ceiling, double-click to reset). The floor is 120px and the ceiling leaves the canvas a 160px readable strip. The size is one CSS custom property (`--pe-dock-pane-h`) written on `<html>` and remembered in `localStorage` under `dp.pane.editor-dock`; `static/js/splitter.js` is a parser-blocking script ABOVE the markup, so a remembered height is the height of the FIRST frame rather than a shift onto it. Collapse still wins while it is on — expanding restores the remembered height. **The canvas follows:** `.pe-body` is `flex: 1`, so a taller dock is a shorter stage, and graph.js's stage `ResizeObserver` now routes through `handleStageResize` — `cy.resize()` always, re-fit ONLY if the view was still the fit (082/098: fit never zooms IN, and a user who has panned to a corner keeps their view). One path also covers the rail collapsing and the window resizing. The row transition is switched off for the duration of a drag, which is also the only motion `prefers-reduced-motion` users would have met here.
 - **SQL section (§8.3 there):** the Details tab loads `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (a `READ_RESOURCES` read partial, htmx.ajax on selection) and highlights it client-side with the zero-dependency `sql-highlight.js`; the copy confirmation is a live-region announcement plus a 1.5s button-label swap — deliberately NOT a toast (high-frequency, self-evident). CALCULATOR and PIPELINE nodes skip the fetch (client-built evaluation / child mapping).
@@ -563,12 +619,16 @@ Every level is a **server-side prefix query** ([§8](template-hierarchy-design.m
 
 **The detail pane is the pipelines explorer's twin (106; the shape and the breakpoints are
 §4.3b and §4.3c, and they are not restated here).** Header: the folder path as an eyebrow, the
-leaf as the title, Open in editor plus 101's verbs (`Release v<n>…`, Discard, Delete). Reading
+leaf as the title, Open in editor plus 101's verbs as §4.3d's template twins in `#tx-dialog`
+(`Release v<n>…`, Discard, Purge template — no Switch: templates are pinned by version, and
+there is no served pointer to switch). Reading
 column: *Overview* — the chips (`v<n>`, draft/released, `type`, `dialect`, `engine`), the
 description, the **References** row and the first 12 lines of the current body with a jump to
 the Source tab; and *Used by* — every pipeline pinning any version, with the version, from
 `TemplateUsageService.referencedAnywhere`, which is the same evidence the `template.in_use`
-delete guard answers with. Acting column: **Versions · Source · Runs**.
+delete guard answers with. Acting column: **Versions · Source · Runs**. The purge dialogs'
+typed confirm names the version, and the entity purge's names the template's NAME — §5.1's
+typed-confirm convention.
 
 Versions and Source are both in the FIRST PAINT — the working body and the version list are
 already read to render the header, so a second request would buy nothing; only Runs is lazy.
@@ -611,6 +671,7 @@ confused for one another.
 | htmx | Yes — the version `<select>` swaps the source column (`hx-get="/partials/templates/editor/source?name={path}"`, the select's own `version` riding along, into `#template-source`, `outerHTML`) and **Edit** posts to `/partials/templates/editor/edit` (`#tpl-edit-refusal`, `innerHTML`; success answers `HX-Redirect`). "Render Preview" posts to `/partials/templates/render?name={path}&version={v}`, rendered into `#preview-output` |
 
 Content:
+- **Draft lifecycle actions (102):** Release / Discard draft open the §4.3d template twins in `#te-dialog`, addressed by NAME in the query (§9.6). Success answers `HX-Redirect` back to the editor with a flash toast; refusal is §5.1 Shape C. The pre-102 inline `tplLifecycle` script carried the native `confirm`/`alert` pair and is gone (the static zero-native-dialog test covers this file).
 - **Editor pane**: textarea with the Freemarker body — plain monospace by decision (041 D5: highlighting an editing surface means an overlay or contenteditable; not this round), sized to fill the viewport below the header and scroll inside itself rather than growing the page.
 - **Description panel** (read-only in the preview column): the template's free-text `description`. Since a template declares no variables, this is the only in-app hint about what context it expects ([Templates §2.5](templates.md#2-design-principles)).
 - **Render context input** — **free-form**. Templates do not declare their variables; the calling *pipeline's* `parameters` block is the single declaration point ([Templates §3.2](templates.md#32-field-reference)), so the editor has nothing to enumerate and MUST NOT try. Two equivalent input modes over the same underlying value, toggled by a tab:
@@ -1088,6 +1149,8 @@ Every list, panel and form on these screens implements the same three states. Th
 - **Shape C — refusal as toast.** The response keeps its real 4xx status, its body is the `toast-oob` fragment, and it sets `HX-Retarget: #toast` + `HX-Reswap: beforeend`; `bridgeErrors` (see **Error rendering**) is what lets htmx swap it.
 - **Shape D — client-originated (the exception, not a convenience).** `DpToast.show(variant, title, message)` in `toast.js` builds the one toast shape and appends it to `#toast`, for events that arrive with no HTTP response to attach an OOB swap to — the pipeline editor's SSE terminal events (`pipeline_completed`, `execution_aborted`, `pipeline_failed`). It is built with `createElement` + `textContent`, never `innerHTML`: titles and bodies carry abort reasons, node ids and error text, none of which is trusted markup. Any outcome that arrives on an HTTP response uses A, B or C — nothing else in the codebase gets a second toast builder. Both markup definitions — `partials/toast.html` and `show` — assert ONE contract: root classes `ds-toast ds-toast-{variant}`, `role="status"`, exactly three children in the order close / title / body, pinned by `ToastMarkupParityTest` (server) and `toast.test.mjs` (client).
 
+**Typed confirm (102) — the irreversible actions ask the user to TYPE the thing that will be destroyed.** A destructive verb that cannot be undone (the version purge, the entity purge) does not arm its button on a click alone: the dialog renders a field naming exactly what to type — `v4` for a version, the entity's NAME for a purge — and the `ds-button-danger` stays disabled until the typed value matches. It is the second use of the convention after the CLI's `--clean` (same reason: the action deletes rows, not state), and it is enforced TWICE: client-side for the button state, and server-side — the `confirm` form field is checked before the lifecycle service runs, and a mismatch is `400 pipeline.version.confirm_mismatch` / `template.version.confirm_mismatch` (§5.1 Shape C), so a dialog forged or scripted around the field still cannot purge anything. Reversible verbs (Release, Discard, Restore, Switch) do not type-confirm — their one click names one version, and the undo is a sibling verb.
+
 ---
 
 ## 6. Error Pages
@@ -1123,6 +1186,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.31 | 102 lifecycle dialogs | **§4.3d (new) — every lifecycle verb 101 shipped is reachable from a confirm dialog**, one partial per verb, in both explorers (`#px-dialog` / `#tx-dialog`) and both editors (`#pe-dialog` / `#te-dialog`); the template twins are addressed by name in the query. The 094 datasource-delete shape throughout: refusal branches render NO button, the POST re-runs the guard, refusals are §5.1 Shape C with the real 4xx, success is Shape A (re-rendered detail + toast + `HX-Trigger: lifecycle-changed` for the tree badge) — entity purges and editor verbs answer `HX-Redirect` with a flash toast. **Typed confirm (§5.1)** on the two irreversible verbs — type `v4`, type the entity's NAME — enforced client-side for the button and server-side as `400 *.confirm_mismatch` before the service runs; second use after the CLI's `--clean`. §4.3b's header carries at most ONE destructive verb (owner rule) and the version rows move their verbs into a per-row ⋯ menu where a §3.5-refused verb is absent, not disabled. §4.4/§4.7: the editors' native `window.confirm`/`window.alert` sites are gone (a static test pins zero), including the pre-101 discard text that had become false. Two new codes: `pipeline.version.confirm_mismatch` / `template.version.confirm_mismatch` (§13.13/§13.9, landed with constants and catalog rows in the same commit). |
 | 2026-09-09 | v1.30 | 097 the hybrid boundary made uniform | **§2.1 gains the FOURTH shape it never described** — a "Page-route mutation (PRG)" row plus its response contract (a `redirect:` back to the page, `?ok=`/`?error=` KEYS the layout maps to copy, and the §5.1 toast the `#toast-flash` bin turns them into — 076 §B had already retired the banners the round brief expected to find) and the two reasons a mutation may live there: its success changes the SHELL, or it must work without JS. The eight handlers are enumerated and justified one by one in `MutatingHandlerScopeFloorTest.PAGE_ROUTE_MUTATIONS`, whose new arm fails on any mutating handler outside `/partials` and `/api` that is not on that list — so the scheduler cannot invent a third idiom. **§5 gains the BrowseModel rule** (one `<Entity>BrowseModel` + a page controller + a partial controller; neither filters, pages or projects on its own), drift-tested by `BrowseModelConventionTest` over five pairs, and states the first-paint rule with the dashboard as its ONE exception. The rule is written because three screens had already paid for its absence: datasources' two hand-written filters had diverged (`GET /datasources?q=postgres` returned nothing while the typed search returned rows), executions painted a spinner and fetched its rows on a load trigger while ignoring the filters in its own URL, and admin users built its `<tr>`s as strings in Kotlin. All three now project through a model; the admin table and four other Kotlin-built markup sites became Thymeleaf fragments, and `InlineWidthAuditTest` widened from templates to every module's `main/kotlin` with an empty allowlist. **§4.7** — the template editor's ~135-line inline script left the template for `static/js/template-editor/lifecycle.js`: one CSRF reader (`static/js/csrf.js`), `htmx.ajax` for the `/partials` render (§2.1 as written), an in-page confirmation and toasts in place of `window.confirm`/`alert`, and nodes in place of `innerHTML`. |
 | 2026-09-08 | v1.26 | 099 draft-first (D55/D56) | **§4.3** — a new pipeline appears as `v1 draft`: the leaf and search rows name the WORKING version (the draft's number when one exists), because `p.currentVersion` alone rendered `vnull` once creation stopped releasing. The Release action stays the editor's and renders for a v1 draft exactly as for any later one. **§4.8/§4.9** — the executions list and detail label a **DRAFT** run beside the version (`data-draft-run`), from versioning §8's derivation; a v1 run is routinely a draft run now, so the number alone no longer says whether a result came from reviewed content. |
 | 2026-09-08 | v1.29 | 091 keys — one page for three kinds | **§4.10 reduced to a LINK; §4.18 card 2 became the key management screen.** One table, one form, one row model: kind, prefix, reach (scopes \| bindings \| the promotion route family), created, expires and last used — each relative in the cell and absolute UTC on hover — plus revoke. Revoked AND expired keys keep their row and lose the affordance, because §7.3 refuses both. The form's order is the owner's ruling — **Kind → Scope → Name → Expiry → Bindings** — with scope and bindings conditional on the kind and their inputs DISABLED rather than merely hidden (a disabled input is not submitted, and a scope on a scopeless kind is refused, not dropped). Kind renders as radio cards with a sentence each; `user` is labelled "Agent / API key" (one kind, two surfaces) and `server` (091's third kind) is admin-only. Scope lists the CAPABILITIES with their meanings, never HTTP verbs. Expiry is a select resolved server-side from the same table the page renders from, with `400 auth.api_key.expiry_invalid` for anything unusable — never a silent fallback to "never". The binding picker offers only LITERAL published prefixes, because the authorizer walks the concrete request path's ancestors and a `{variable}` node would authorise nothing. The Kotlin row builder and its parity test are deleted: the page, the post-create OOB refresh and the post-revoke rows now render one fragment. |

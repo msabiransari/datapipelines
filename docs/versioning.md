@@ -233,7 +233,8 @@ first."*
 `include_exclusive_draft_templates: true`: the service computes the set of DRAFT template
 versions the draft body pins that no OTHER live pipeline version pins, and either purges
 them with the pipeline (true) or merely returns them in the response (false, the default)
-— either way the caller sees the set, so the UI (102) can offer the cleanup.
+— either way the caller sees the set, so the UI (102's entity-purge dialog, §4.3d) offers
+the cleanup as a checkbox and the default is the same offer the response carries.
 
 #### 3.5.1 Notation and blanket rules
 
@@ -387,6 +388,14 @@ silently inherit that ambiguity.
 
 The editor shows draft metadata with a "pending release" affordance; the list shows the
 released name until lock.
+
+**What surface the write arrived on (102, owner ruling 2026-09-09).** Every version row on
+both tables carries `created_via` / `updated_via` — `'session' | 'api_key' | 'mcp'`, stamped
+at the ENTRY POINT (the REST controllers map the principal's auth method; the MCP tools pass
+`mcp`; import and seed paths keep the `'session'` default) — while `created_by` / `updated_by`
+keep naming the PERSON on every path, key principals included (a key's writes are its owner's):
+no key id is ever stored on a row. A release stamps nothing new — D4 already says a release is
+a human in a session, which is asserted, not recorded.
 
 **Draft-write-time uniqueness check (ratified, and the reason this is safe).** Because
 `UNIQUE (name)` lives on the row and the row is not updated until release, a draft rename

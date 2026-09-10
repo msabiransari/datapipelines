@@ -2,6 +2,7 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.throwables.shouldThrow
@@ -61,11 +62,8 @@ class TypedTemplatesMigrationTest {
         // at V8 can no longer serve them — the later migrations run AFTER the pre-V8 rows exist,
         // exactly as a live deployment would have received them. The migration under test is
         // still V8's.
-        ShippedMigrations.migrations(dir).filter { it.first in 9..18 }.forEach { pair ->
+        ShippedMigrations.migrations(dir).filter { it.first > 8 }.forEach { pair ->
             jdbc.jdbcTemplate.execute(pair.second.readText())
-        }
-        ShippedMigrations.paths().filter { it.contains("V19__") }.forEach {
-            jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(it).readText())
         }
     }
 
@@ -118,7 +116,7 @@ class TypedTemplatesMigrationTest {
 
         val identical = TemplateFixtures.draft(id = "test/pre_v8_report.sql", body = "SELECT 42 AS answer")
         val outcome =
-            repository.createDraft(WORKSPACE_ID, "test/pre_v8_report.sql", identical, stored.bodyHash, ACTOR_ID)
+            repository.createDraft(WORKSPACE_ID, "test/pre_v8_report.sql", identical, stored.bodyHash, ACTOR_ID, WriteSurface.SESSION)
 
         assertSoftly {
             // The no-op signal: the returned detail is the current RELEASED version, not a draft.
@@ -136,7 +134,7 @@ class TypedTemplatesMigrationTest {
         val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "test/legacy_orders.sql"))
         val changed = TemplateFixtures.draft(id = "test/legacy_orders.sql", body = "SELECT 2")
         val outcome =
-            repository.createDraft(WORKSPACE_ID, "test/legacy_orders.sql", changed, stored.bodyHash, ACTOR_ID)
+            repository.createDraft(WORKSPACE_ID, "test/legacy_orders.sql", changed, stored.bodyHash, ACTOR_ID, WriteSurface.SESSION)
 
         outcome?.status shouldBe PipelineVersionStatus.DRAFT
         draftCount("test/legacy_orders.sql") shouldBe 1
@@ -160,7 +158,7 @@ class TypedTemplatesMigrationTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                service.write(WORKSPACE_ID, "test/legacy_orders.sql", offending, stored.bodyHash, ACTOR_ID)
+                service.write(WORKSPACE_ID, "test/legacy_orders.sql", offending, stored.bodyHash, ACTOR_ID, WriteSurface.SESSION)
             }
         thrown.code shouldBe PipelineErrorCodes.Template.TYPE_IMMUTABLE
         thrown.details["established_type"] shouldBe "sql"

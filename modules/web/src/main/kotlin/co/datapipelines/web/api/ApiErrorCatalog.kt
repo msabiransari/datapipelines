@@ -170,6 +170,11 @@ object ApiErrorCatalog {
             // §13.13 (055) — a transport failure reaching the target: 502, against the
             // promotion family's 409. It is the one promotion code that is not a refusal.
             PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE to HttpStatus.BAD_GATEWAY,
+            // §13.13/§13.9 (102) — the typed-confirm dialog guard is a 400 against both
+            // version families' 409 default: the caller's own input was wrong, nothing about
+            // the version refused. Wired explicitly for that reason (025 A2).
+            PipelineErrorCodes.Versioning.CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,

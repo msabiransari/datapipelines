@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -108,7 +109,7 @@ class PipelineServiceIntegrationTest {
 
     @Test
     fun `create validates, canonicalizes and stores version 1 as a DRAFT with no released pointer`() {
-        val saved = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val saved = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
 
         withClue("§3.2 as ruled by D55 — creation is authoring: v1 lands DRAFT, a human releases it") {
             saved.version?.status shouldBe PipelineVersionStatus.DRAFT
@@ -135,7 +136,7 @@ class PipelineServiceIntegrationTest {
         // The release path's preconditions read the DRAFT (`expected_hash` against the draft row),
         // never a released row, so the very first release works exactly like any later one. Before
         // D55 this case could not arise: v1 was born released.
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
 
         val released =
             service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
@@ -151,7 +152,7 @@ class PipelineServiceIntegrationTest {
 
     @Test
     fun `workingVersion is the draft when one exists, else the release, and null when there is neither`() {
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         val fresh = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
         withClue("a fresh create: the draft v1 is the only thing there is to run") {
             service.workingVersion(WORKSPACE_ID, fresh) shouldBe 1
@@ -168,6 +169,7 @@ class PipelineServiceIntegrationTest {
                 body(renamed("Edited")),
                 checkNotNull(service.findCurrentVersion(WORKSPACE_ID, created.record.id)).bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
         val withDraft = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
         withClue("release v1 + draft v2: the DRAFT wins — 'the last version' is what the pipeline IS") {
@@ -185,7 +187,7 @@ class PipelineServiceIntegrationTest {
     fun `a pipeline whose only draft was purged is gone entirely`() {
         // 101: the sole-draft purge IS the entity purge (§3.2) — there is no version-less
         // entity any more, D57; the "nothing to run" state is the DISCARDED entity instead.
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
 
         service.purge(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash)
 
@@ -202,7 +204,7 @@ class PipelineServiceIntegrationTest {
         // happens in the service, so REST and MCP cannot disagree about whether it happens.
         val duplicate = Fixtures.pipeline(nodes = listOf(Fixtures.node(id = "same"), Fixtures.node(id = "same")))
 
-        shouldThrow<PipelineValidationException> { service.create(WORKSPACE_ID, body(duplicate), owner) }
+        shouldThrow<PipelineValidationException> { service.create(WORKSPACE_ID, body(duplicate), owner, WriteSurface.SESSION) }
 
         countRows("pipelines") shouldBe 0
     }
@@ -215,7 +217,7 @@ class PipelineServiceIntegrationTest {
 
         val error =
             shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                receiver.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+                receiver.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
             }
 
         error.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
@@ -230,12 +232,19 @@ class PipelineServiceIntegrationTest {
         // path — a receiver's only writer (versioning §5.5/§10).
         val body = Fixtures.pipeline()
         val record =
-            repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner, CreateLifecycle.RELEASED)
+            repository.create(
+                WORKSPACE_ID,
+                NewPipeline.from(body, owner),
+                serializer.write(body),
+                owner,
+                CreateLifecycle.RELEASED,
+                WriteSurface.SESSION,
+            )
         val receiver = serviceWith(AuthoringGuard(false))
 
         withClue("create is refused, so a v1 DRAFT cannot be born here") {
             shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                receiver.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/nope")), owner)
+                receiver.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/nope")), owner, WriteSurface.SESSION)
             }.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
         }
         withClue("and update is refused, so a draft cannot be opened over the release either") {
@@ -246,6 +255,7 @@ class PipelineServiceIntegrationTest {
                     body(renamed("Edited on a receiver")),
                     checkNotNull(receiver.findCurrentVersion(WORKSPACE_ID, record.id)).bodyHash,
                     owner,
+                    WriteSurface.SESSION,
                 )
             }.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
         }
@@ -263,7 +273,7 @@ class PipelineServiceIntegrationTest {
         val created = createReleased()
         val hash = created.version.bodyHash
 
-        val first = service.update(WORKSPACE_ID, created.record.id, body(renamed("First edit")), hash, owner)
+        val first = service.update(WORKSPACE_ID, created.record.id, body(renamed("First edit")), hash, owner, WriteSurface.SESSION)
         val firstDraft = checkNotNull(first.version)
         withClue("§5.1 — copy-on-write: the first write after a release opens the draft") {
             firstDraft.status shouldBe PipelineVersionStatus.DRAFT
@@ -277,6 +287,7 @@ class PipelineServiceIntegrationTest {
                 body(renamed("Second edit")),
                 firstDraft.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
 
         withClue("§5.2 — later writes overwrite that same draft: one draft row, not a version per save") {
@@ -291,7 +302,7 @@ class PipelineServiceIntegrationTest {
         val created = createReleased()
         val hash = created.version.bodyHash
 
-        val noop = service.update(WORKSPACE_ID, created.record.id, body(Fixtures.pipeline()), hash, owner)
+        val noop = service.update(WORKSPACE_ID, created.record.id, body(Fixtures.pipeline()), hash, owner, WriteSurface.SESSION)
 
         withClue("§5.1 — nothing was opened, so the answer must not paint a draft pointer onto it") {
             noop.version?.status shouldBe PipelineVersionStatus.RELEASED
@@ -302,11 +313,11 @@ class PipelineServiceIntegrationTest {
 
     @Test
     fun `a stale hash is refused with the catalogued conflict`() {
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
 
         val error =
             shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                service.update(WORKSPACE_ID, created.record.id, body(renamed("x")), "not-the-hash", owner)
+                service.update(WORKSPACE_ID, created.record.id, body(renamed("x")), "not-the-hash", owner, WriteSurface.SESSION)
             }
 
         error.code shouldBe PipelineErrorCodes.Versioning.VERSION_CONFLICT
@@ -322,6 +333,7 @@ class PipelineServiceIntegrationTest {
                 body(renamed("Ready")),
                 created.version.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
 
         val released =
@@ -336,7 +348,7 @@ class PipelineServiceIntegrationTest {
     fun `release refuses while a pinned template version is still a draft`() {
         // versioning §6 — templates lock first. The gate reads the TemplateVersionStatuses port,
         // which is how `pipeline-contract` asks `templates` a question without depending on it.
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         val draft =
             service.update(
                 WORKSPACE_ID,
@@ -344,6 +356,7 @@ class PipelineServiceIntegrationTest {
                 body(renamed("Ready")),
                 checkNotNull(created.version).bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
         templateStatus = PipelineVersionStatus.DRAFT
 
@@ -374,7 +387,7 @@ class PipelineServiceIntegrationTest {
             Fixtures.pipeline(
                 nodes = listOf(calculator, Fixtures.node(id = "reads", dependsOn = listOf(calculator.id))),
             )
-        val created = service.create(WORKSPACE_ID, body(withCalculator), owner)
+        val created = service.create(WORKSPACE_ID, body(withCalculator), owner, WriteSurface.SESSION)
 
         val released =
             service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
@@ -393,6 +406,7 @@ class PipelineServiceIntegrationTest {
                 body(renamed("Throwaway")),
                 created.version.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
 
         val outcome = service.purge(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
@@ -414,7 +428,7 @@ class PipelineServiceIntegrationTest {
             service.findWorking(WORKSPACE_ID, created.record.id)?.version?.status shouldBe PipelineVersionStatus.RELEASED
         }
 
-        service.update(WORKSPACE_ID, created.record.id, body(renamed("Edited")), created.version.bodyHash, owner)
+        service.update(WORKSPACE_ID, created.record.id, body(renamed("Edited")), created.version.bodyHash, owner, WriteSurface.SESSION)
 
         val working = checkNotNull(service.findWorking(WORKSPACE_ID, created.record.id))
         withClue("versioning §7 — an authoring read must show the draft, or an editor rebases on stale content") {
@@ -439,8 +453,8 @@ class PipelineServiceIntegrationTest {
         // and its HTMX partial). One implementation, asserted once.
         // Distinct display names and descriptions, because the three columns are matched
         // separately and a shared fixture value would make the assertions untestable.
-        service.create(WORKSPACE_ID, body(named("test/monthly_revenue", "Monthly Revenue", "By customer")), owner)
-        service.create(WORKSPACE_ID, body(named("test/daily_churn", "Daily Churn", "Cancellations per day")), owner)
+        service.create(WORKSPACE_ID, body(named("test/monthly_revenue", "Monthly Revenue", "By customer")), owner, WriteSurface.SESSION)
+        service.create(WORKSPACE_ID, body(named("test/daily_churn", "Daily Churn", "Cancellations per day")), owner, WriteSurface.SESSION)
 
         service.list(WORKSPACE_ID, query = "REVENUE").map { it.name } shouldContainExactly listOf("test/monthly_revenue")
         withClue("display_name is matched too, case-insensitively") {
@@ -456,21 +470,30 @@ class PipelineServiceIntegrationTest {
     @Test
     fun `the owner filter is pushed to SQL`() {
         val other = insertUser(email = "other@example.com", subject = "sub-2")
-        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/mine")), owner)
-        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/theirs")), other)
+        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/mine")), owner, WriteSurface.SESSION)
+        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/theirs")), other, WriteSurface.SESSION)
 
         service.list(WORKSPACE_ID, ownerId = other).map { it.name } shouldContainExactly listOf("test/theirs")
     }
 
     @Test
     fun `page reports the truthful total and the draft badges of the rows it returned`() {
-        val ids = (1..PAGED_ROWS).map { service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/p_$it")), owner) }
+        val ids =
+            (1..PAGED_ROWS).map {
+                service.create(
+                    WORKSPACE_ID,
+                    body(Fixtures.pipeline(name = "test/p_$it")),
+                    owner,
+                    WriteSurface.SESSION,
+                )
+            }
         service.update(
             WORKSPACE_ID,
             ids.first().record.id,
             body(renamed("Has a draft")),
             checkNotNull(ids.first().version).bodyHash,
             owner,
+            WriteSurface.SESSION,
         )
 
         val page = service.page(WORKSPACE_ID, query = null, offset = 0, size = 2)
@@ -488,7 +511,7 @@ class PipelineServiceIntegrationTest {
         // 101: these pre-existing reads lost their in-module coverage share when the verbs
         // grew the module; this test pins them where they live (the web controllers' tests
         // exercise them through HTTP, which this module's kover cannot see).
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
 
         withClue("list by datasource name resolves through the repository's pushed-down filter") {
@@ -518,7 +541,7 @@ class PipelineServiceIntegrationTest {
 
     @Test
     fun `the version verbs answer not_found for unknown versions and last_release for released entities`() {
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
 
         val unknown = 99
@@ -555,7 +578,7 @@ class PipelineServiceIntegrationTest {
 
     @Test
     fun `the lifecycle read helpers - any-status lookup, live probe, pin scans, row delete`() {
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
         val id = created.record.id
 
@@ -600,7 +623,7 @@ class PipelineServiceIntegrationTest {
                     },
             )
 
-        val created = serviceWithOffer.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = serviceWithOffer.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         val result = serviceWithOffer.purgeEntity(WORKSPACE_ID, created.record.id, includeExclusiveDraftTemplates = true)
 
         offered shouldContainExactly listOf("test/only_mine.sql")
@@ -611,7 +634,7 @@ class PipelineServiceIntegrationTest {
     @Test
     fun `purgeEntity removes an only-draft pipeline and reports its exclusive draft templates`() {
         // 101: DELETE /{id} is the entity purge — the only-draft case; the row GOES.
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
 
         val result = service.purgeEntity(WORKSPACE_ID, created.record.id)
 
@@ -627,7 +650,7 @@ class PipelineServiceIntegrationTest {
 
     @Test
     fun `findExecutable resolves the body and the parsed pipeline for a version`() {
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner)
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         val record = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
 
         // D55: a create lands a DRAFT, so the version to resolve is the WORKING one —
@@ -654,7 +677,7 @@ class PipelineServiceIntegrationTest {
      * §3.2 assumption creeping back in through the test source.
      */
     private fun createReleased(pipeline: Pipeline = Fixtures.pipeline()): PipelineReleaseService.Released {
-        val created = service.create(WORKSPACE_ID, body(pipeline), owner)
+        val created = service.create(WORKSPACE_ID, body(pipeline), owner, WriteSurface.SESSION)
         return service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
     }
 

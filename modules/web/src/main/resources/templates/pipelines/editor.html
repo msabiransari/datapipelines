@@ -67,16 +67,23 @@
               th:text="${hasDraft} ? 'v' + ${draftVersion} + ' · draft pending release' : 'v' + ${releasedVersion} + ' · released'">v1 · released</span>
       </div>
       <div class="pe-topbar-actions">
-        <!-- versioning §3.5/§7: the pending-release actions. Shown only while a draft
-             exists — Execute targets the draft, and Release is the human action that
-             moves the list to the draft's name (agents never release, D4). -->
+        <!-- versioning §3.5/§7, since 102 through the §4.3d dialogs (never a native
+             confirm): Release opens the release dialog — it shows the draft's template pins
+             and refuses on a DRAFT pin — and Discard draft opens the PURGE dialog (§5.4: the
+             pre-102 text claiming an executed draft "is kept as history" was false). The POST
+             answers HX-Redirect and the page reloads: the editor's draft state is
+             document-wide. Agents never release (D4). -->
         <button th:if="${hasDraft}" class="ds-button ds-button-primary ds-button-sm"
-                id="pe-release-draft" th:attr="data-id=${pipelineId}, data-hash=${draftHash}">
-          Release v<span th:text="${draftVersion}"></span>
+                id="pe-release-draft"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipelineId}, from='editor')},
+                         hx-target='#pe-dialog', hx-swap='innerHTML'">
+          Release v<span th:text="${draftVersion}"></span>…
         </button>
         <button th:if="${hasDraft}" class="ds-button ds-button-secondary ds-button-sm"
-                id="pe-discard-draft" th:attr="data-id=${pipelineId}, data-hash=${draftHash}">
-          Discard draft
+                id="pe-discard-draft"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipelineId}, version=${draftVersion}, from='editor')},
+                         hx-target='#pe-dialog', hx-swap='innerHTML'">
+          Purge draft…
         </button>
       </div>
       <div class="pe-spacer"></div>
@@ -434,5 +441,9 @@
     </div>
   </div>
 
+
+  <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d). -->
+  <div id="pe-dialog"></div>
+  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
 </th:block>
 </html>

@@ -15,6 +15,7 @@ import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.ValidationResult
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.JsonNode
@@ -159,8 +160,10 @@ class PipelineImportService(
                         actorId,
                         // Not authoring (D55): an import carries content that was released where it
                         // came from, and the seeders ride this very path — the system actor is not
-                        // an agent asking for a review, so version 1 lands RELEASED.
+                        // an agent asking for a review, so version 1 lands RELEASED. The via stamp
+                        // keeps the RELEASED arm's default: an import is not a keyed surface (§3.7).
                         CreateLifecycle.RELEASED,
+                        WriteSurface.SESSION,
                     )
                 } catch (e: DuplicateKeyException) {
                     throw idAlreadyTaken(requestedId, e)

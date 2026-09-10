@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -107,7 +108,15 @@ class PipelineRepositoryIntegrationTest {
         // and the import create differ in exactly two stored facts, and both are read back from
         // the row rather than from what the caller passed.
         val body = Fixtures.pipeline()
-        val drafted = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner, CreateLifecycle.DRAFT)
+        val drafted =
+            repository.create(
+                WORKSPACE_ID,
+                NewPipeline.from(body, owner),
+                serializer.write(body),
+                owner,
+                CreateLifecycle.DRAFT,
+                WriteSurface.SESSION,
+            )
         val released =
             repository.create(
                 WORKSPACE_ID,
@@ -115,6 +124,7 @@ class PipelineRepositoryIntegrationTest {
                 serializer.write(Fixtures.pipeline(name = "test/imported")),
                 owner,
                 CreateLifecycle.RELEASED,
+                WriteSurface.SESSION,
             )
 
         withClue("authoring: version 1 is a DRAFT and nothing is released") {
@@ -148,7 +158,15 @@ class PipelineRepositoryIntegrationTest {
         // the defect the old COALESCE fixed) — and the FIRST import onto a current-less
         // entity sets the pointer.
         val body = Fixtures.pipeline()
-        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner, CreateLifecycle.DRAFT)
+        val record =
+            repository.create(
+                WORKSPACE_ID,
+                NewPipeline.from(body, owner),
+                serializer.write(body),
+                owner,
+                CreateLifecycle.DRAFT,
+                WriteSurface.SESSION,
+            )
 
         val appended = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, body, serializer.write(body), owner))
 
@@ -450,7 +468,8 @@ class PipelineRepositoryIntegrationTest {
         val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id)).bodyHash
         val v2 = v1.copy(nodes = listOf(Fixtures.node(id = "extract", source = "pg-current")))
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), releasedHash, owner))
+        val draft =
+            checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), releasedHash, owner, WriteSurface.SESSION))
         checkNotNull(
             repository.releaseDraft(WORKSPACE_ID, record.id, v2.name, v2.displayName, v2.description, draft.bodyHash, owner),
         )
@@ -598,7 +617,14 @@ class PipelineRepositoryIntegrationTest {
         // the authority, and atomicity holds: no orphan version row behind the refusal.
         val fresh = Fixtures.pipeline(name = "fresh")
         val freshRecord =
-            repository.create(WORKSPACE_ID, NewPipeline.from(fresh, owner), serializer.write(fresh), owner, CreateLifecycle.DRAFT)
+            repository.create(
+                WORKSPACE_ID,
+                NewPipeline.from(fresh, owner),
+                serializer.write(fresh),
+                owner,
+                CreateLifecycle.DRAFT,
+                WriteSurface.SESSION,
+            )
         val thrown =
             shouldThrow<DatapipelinesException> {
                 repository.appendReleasedVersion(
@@ -729,7 +755,10 @@ class PipelineRepositoryIntegrationTest {
         val (record, v1, v1Detail) = createdPipeline()
         val v2 = v1.copy(displayName = "Draft name")
 
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
 
         draft.version shouldBe 2
         draft.status shouldBe PipelineVersionStatus.DRAFT
@@ -751,7 +780,10 @@ class PipelineRepositoryIntegrationTest {
     fun `a no-op createDraft - body identical to released - creates no draft and returns the RELEASED state`() {
         val (record, v1, v1Detail) = createdPipeline()
 
-        val noop = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner))
+        val noop =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
 
         // The no-op signal (versioning §5.1): the current RELEASED state, not a draft.
         noop.version shouldBe 1
@@ -762,7 +794,10 @@ class PipelineRepositoryIntegrationTest {
         countRows("pipeline_versions") shouldBe 1
         repository.findDraftDetail(WORKSPACE_ID, record.id) shouldBe null
         val v2 = v1.copy(displayName = "A real change")
-        checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner)).version shouldBe 2
+        checkNotNull(
+            repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+        ).version shouldBe
+            2
     }
 
     @Test
@@ -771,7 +806,7 @@ class PipelineRepositoryIntegrationTest {
 
         // Identical body but a wrong precondition: D3 (no last-write-wins) outranks
         // tidiness — the write must not be absorbed as a no-op through the stale path.
-        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), "deadbeef", owner).shouldBeNull()
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), "deadbeef", owner, WriteSurface.SESSION).shouldBeNull()
         countRows("pipeline_versions") shouldBe 1
         repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 1
         v1Detail.bodyHash shouldNotBe "deadbeef"
@@ -782,25 +817,36 @@ class PipelineRepositoryIntegrationTest {
         val (record, v1, v1Detail) = createdPipeline()
         val draft =
             checkNotNull(
-                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "someone's draft"), v1Detail.bodyHash, owner),
+                repository.createDraft(
+                    WORKSPACE_ID,
+                    record.id,
+                    changedBody(v1, "someone's draft"),
+                    v1Detail.bodyHash,
+                    owner,
+                    WriteSurface.SESSION,
+                ),
             )
 
         // The caller based on the released row and PUT the released body back unchanged
         // while a draft exists: the truthful answer is 409-with-the-draft's-state (null
         // here), never "RELEASED, no draft" — the draft owns the working state.
-        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner).shouldBeNull()
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner, WriteSurface.SESSION).shouldBeNull()
         checkNotNull(repository.findDraftDetail(WORKSPACE_ID, record.id)).bodyHash shouldBe draft.bodyHash
     }
 
     @Test
     fun `a draft edited back to its released parent is left alone - never auto-discarded`() {
         val (record, v1, v1Detail) = createdPipeline()
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
 
         // Reverting the draft's content to exactly the released body: the draft row STAYS
         // (written in place, §5.2) — silently deleting it would destroy its number and
         // updated_by history. Discard is the explicit path.
-        val reverted = checkNotNull(repository.writeDraft(WORKSPACE_ID, record.id, serializer.write(v1), draft.bodyHash, owner))
+        val reverted =
+            checkNotNull(repository.writeDraft(WORKSPACE_ID, record.id, serializer.write(v1), draft.bodyHash, owner, WriteSurface.SESSION))
 
         reverted.status shouldBe PipelineVersionStatus.DRAFT
         checkNotNull(repository.findDraftDetail(WORKSPACE_ID, record.id)).version shouldBe draft.version
@@ -817,6 +863,7 @@ class PipelineRepositoryIntegrationTest {
                     serializer.write(v1.copy(description = "first")),
                     v1Detail.bodyHash,
                     owner,
+                    WriteSurface.SESSION,
                 ),
             )
 
@@ -828,6 +875,7 @@ class PipelineRepositoryIntegrationTest {
                     serializer.write(v1.copy(description = "second")),
                     draft.bodyHash,
                     owner,
+                    WriteSurface.SESSION,
                 ),
             )
 
@@ -845,11 +893,14 @@ class PipelineRepositoryIntegrationTest {
         val (record, v1, v1Detail) = createdPipeline()
         // The draft body must DIFFER from the released one — since the no-op rule (§5.1)
         // an identical body would not open a draft at all.
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
         val stale = "deadbeef"
 
-        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner).shouldBeNull()
-        repository.writeDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner).shouldBeNull()
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner, WriteSurface.SESSION).shouldBeNull()
+        repository.writeDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner, WriteSurface.SESSION).shouldBeNull()
         repository.releaseDraft(WORKSPACE_ID, record.id, v1.name, v1.displayName, v1.description, stale, owner).shouldBeNull()
         repository.purgeDraft(WORKSPACE_ID, record.id, stale, draftEligible = true).shouldBeNull()
 
@@ -862,7 +913,10 @@ class PipelineRepositoryIntegrationTest {
     fun `releaseDraft flips the draft, bumps the pointer, and rides the metadata`() {
         val (record, v1, v1Detail) = createdPipeline()
         val v2 = v1.copy(name = "test/monthly_revenue", displayName = "The Draft Name", description = "The draft description")
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
 
         val released =
             checkNotNull(
@@ -894,7 +948,10 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `purging a never-executed draft hard-deletes it and returns the number to the pool`() {
         val (record, v1, v1Detail) = createdPipeline()
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
 
         val outcome = checkNotNull(repository.purgeDraft(WORKSPACE_ID, record.id, draft.bodyHash, draftEligible = true))
 
@@ -903,7 +960,7 @@ class PipelineRepositoryIntegrationTest {
         countRows("pipeline_versions") shouldBe 1
         // The number returns to the pool: a new (genuinely different) draft re-allocates v2.
         checkNotNull(
-            repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft again"), v1Detail.bodyHash, owner),
+            repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft again"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
         ).version shouldBe 2
     }
 
@@ -911,7 +968,10 @@ class PipelineRepositoryIntegrationTest {
     fun `purging an executed draft deletes it WITH its executions - the tombstone is withdrawn`() {
         // 101 (§3.1/§5.4): development runs of a thing that never shipped are not history.
         val (record, v1, v1Detail) = createdPipeline()
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
         insertExecution(record.id, draft.version)
 
         val outcome = checkNotNull(repository.purgeDraft(WORKSPACE_ID, record.id, draft.bodyHash, draftEligible = true))
@@ -922,14 +982,14 @@ class PipelineRepositoryIntegrationTest {
         countRows("pipeline_executions") shouldBe 0
         // The executions went with the row, so the number is free again: a new draft re-allocates v2.
         checkNotNull(
-            repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft three"), v1Detail.bodyHash, owner),
+            repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft three"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
         ).version shouldBe 2
     }
 
     @Test
     fun `a second DRAFT row violates the one-draft partial unique index`() {
         val (record, v1, v1Detail) = createdPipeline()
-        repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner)
+        repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION)
 
         // Raw SQL, bypassing the repository's guard entirely: the INDEX is the authority.
         val thrown =
@@ -975,7 +1035,7 @@ class PipelineRepositoryIntegrationTest {
                         var detail: PipelineVersionDetail? = null
                         var error: Throwable? = null
                         try {
-                            detail = isolated.createDraft(WORKSPACE_ID, record.id, bodyJson, v1Detail.bodyHash, owner)
+                            detail = isolated.createDraft(WORKSPACE_ID, record.id, bodyJson, v1Detail.bodyHash, owner, WriteSurface.SESSION)
                         } catch (t: Throwable) {
                             error = t
                         }
@@ -1025,6 +1085,7 @@ class PipelineRepositoryIntegrationTest {
                 serializer.write(draftOne),
                 v1Detail.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
         first.version.status shouldBe PipelineVersionStatus.DRAFT
         first.version.version shouldBe 2
@@ -1039,6 +1100,7 @@ class PipelineRepositoryIntegrationTest {
                 serializer.write(draftTwo),
                 first.version.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
         second.version.version shouldBe 2
         countRows("pipeline_versions") shouldBe 3 // v1 + one draft… + the other pipeline's v1
@@ -1047,14 +1109,22 @@ class PipelineRepositoryIntegrationTest {
         val renamed = v1.copy(name = "other_name")
         val thrown =
             shouldThrow<DatapipelinesException> {
-                service.write(WORKSPACE_ID, record.id, renamed, serializer.write(renamed), second.version.bodyHash, owner)
+                service.write(
+                    WORKSPACE_ID,
+                    record.id,
+                    renamed,
+                    serializer.write(renamed),
+                    second.version.bodyHash,
+                    owner,
+                    WriteSurface.SESSION,
+                )
             }
         thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
 
         // A stale base is a 409 carrying the current draft's state (§4.2).
         val stale =
             shouldThrow<DatapipelinesException> {
-                service.write(WORKSPACE_ID, record.id, v1, serializer.write(v1), v1Detail.bodyHash, owner)
+                service.write(WORKSPACE_ID, record.id, v1, serializer.write(v1), v1Detail.bodyHash, owner, WriteSurface.SESSION)
             }
         stale.code shouldBe PipelineErrorCodes.Versioning.VERSION_CONFLICT
         stale.details["current_body_hash"] shouldBe second.version.bodyHash
@@ -1063,7 +1133,7 @@ class PipelineRepositoryIntegrationTest {
         // Unknown pipeline: not-found, not a conflict.
         val notFound =
             shouldThrow<DatapipelinesException> {
-                service.write(WORKSPACE_ID, UUID.randomUUID(), v1, serializer.write(v1), v1Detail.bodyHash, owner)
+                service.write(WORKSPACE_ID, UUID.randomUUID(), v1, serializer.write(v1), v1Detail.bodyHash, owner, WriteSurface.SESSION)
             }
         notFound.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
     }
@@ -1073,7 +1143,7 @@ class PipelineRepositoryIntegrationTest {
         val service = PipelineDraftService(repository, AuthoringGuard(true))
         val (record, v1, v1Detail) = createdPipeline()
 
-        val written = service.write(WORKSPACE_ID, record.id, v1, serializer.write(v1), v1Detail.bodyHash, owner)
+        val written = service.write(WORKSPACE_ID, record.id, v1, serializer.write(v1), v1Detail.bodyHash, owner, WriteSurface.SESSION)
 
         // §5.1's no-op: RELEASED state, no draft, the STORED body — nothing burned.
         written.version.status shouldBe PipelineVersionStatus.RELEASED
@@ -1094,7 +1164,15 @@ class PipelineRepositoryIntegrationTest {
 
         val refused =
             shouldThrow<DatapipelinesException> {
-                disabled.write(WORKSPACE_ID, record.id, v1.copy(description = "edit"), changedBody(v1, "edit"), v1Detail.bodyHash, owner)
+                disabled.write(
+                    WORKSPACE_ID,
+                    record.id,
+                    v1.copy(description = "edit"),
+                    changedBody(v1, "edit"),
+                    v1Detail.bodyHash,
+                    owner,
+                    WriteSurface.SESSION,
+                )
             }
         refused.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
         refused.details["config_key"] shouldBe AuthoringGuard.CONFIG_KEY
@@ -1136,7 +1214,7 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `findAllDraftPipelineNames names every draft across workspaces - the boot check's evidence`() {
         val (record, v1, v1Detail) = createdPipeline()
-        repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner)
+        repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION)
 
         repository.findAllDraftPipelineNames() shouldContainExactly listOf("test/monthly_revenue")
     }
@@ -1147,7 +1225,10 @@ class PipelineRepositoryIntegrationTest {
         // what the database stored for that body.
         val (record, v1, v1Detail) = createdPipeline()
         v1Detail.bodyHash shouldBe repository.computeBodyHash(serializer.write(v1))
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner))
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
         draft.bodyHash shouldBe repository.computeBodyHash(serializer.write(v1.copy(description = "draft")))
     }
 
@@ -1236,7 +1317,14 @@ class PipelineRepositoryIntegrationTest {
         val withDraft = Fixtures.pipeline(name = "has_draft")
         val record = repository.createReleased(WORKSPACE_ID, NewPipeline.from(withDraft, owner), serializer.write(withDraft), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id)).bodyHash
-        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(withDraft.copy(description = "draft")), releasedHash, owner)
+        repository.createDraft(
+            WORKSPACE_ID,
+            record.id,
+            serializer.write(withDraft.copy(description = "draft")),
+            releasedHash,
+            owner,
+            WriteSurface.SESSION,
+        )
         val plain = Fixtures.pipeline(name = "no_draft")
         val plainRecord = repository.createReleased(WORKSPACE_ID, NewPipeline.from(plain, owner), serializer.write(plain), owner)
 
@@ -1272,7 +1360,7 @@ class PipelineRepositoryIntegrationTest {
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
         val draftBody = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         checkNotNull(
-            repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(draftBody), releasedHash, owner),
+            repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(draftBody), releasedHash, owner, WriteSurface.SESSION),
         )
 
         // Direction 1: the working scan reports the draft's adoption of t@2.
@@ -1299,7 +1387,9 @@ class PipelineRepositoryIntegrationTest {
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
         val v2Body = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         val draft =
-            checkNotNull(repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(v2Body), releasedHash, owner))
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(v2Body), releasedHash, owner, WriteSurface.SESSION),
+            )
         checkNotNull(
             repository.releaseDraft(WORKSPACE_ID, p1Record.id, v2Body.name, v2Body.displayName, v2Body.description, draft.bodyHash, owner),
         )
@@ -1439,4 +1529,4 @@ private fun PipelineRepository.createReleased(
     pipeline: NewPipeline,
     bodyJson: String,
     createdBy: java.util.UUID,
-): PipelineRecord = create(workspaceId, pipeline, bodyJson, createdBy, CreateLifecycle.RELEASED)
+): PipelineRecord = create(workspaceId, pipeline, bodyJson, createdBy, CreateLifecycle.RELEASED, WriteSurface.SESSION)

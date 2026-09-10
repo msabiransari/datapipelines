@@ -279,25 +279,29 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `106 - the header renders exactly the verbs the lifecycle allows`() {
-        // A draft over a release: Release yes; Delete no (101 purges the ENTITY only while the
-        // only version is a draft); Discard yes (the pointer names a release).
+    fun `106 - the header renders exactly the verbs the lifecycle allows, through 102's dialogs`() {
+        // A draft over a release: Release yes; Purge pipeline no (101 purges the ENTITY only
+        // while the only version is a draft); Discard of the released current yes — and since
+        // 102 §B.1 that is the ONE destructive the header carries, so no Purge draft either
+        // (it lives on the draft's row).
         val overRelease = render("partials/pipeline-detail") { fillDetail() }
         overRelease shouldContain "Release v2…"
-        overRelease shouldContain ">Discard<"
-        overRelease shouldNotContain ">Delete<"
+        overRelease shouldContain "Discard v1…"
+        overRelease shouldNotContain "Purge pipeline"
 
-        // A never-released pipeline: Delete, and no Discard.
+        // A never-released pipeline: Purge pipeline, and no Discard.
         val draftOnly =
             render("partials/pipeline-detail") {
                 fillDetail()
                 setVariable("canDelete", true)
                 setVariable("canDiscardCurrent", false)
+                setVariable("canPurgeDraftInHeader", false)
+                setVariable("canSwitchHeader", false)
                 setVariable("versions", listOf(draftRow()))
                 setVariable("versionCount", 1)
             }
-        draftOnly shouldContain ">Delete<"
-        draftOnly shouldNotContain ">Discard<"
+        draftOnly shouldContain "Purge pipeline…"
+        draftOnly shouldNotContain "Discard v"
         draftOnly shouldContain "Release v2…"
 
         // Nothing to release: no Release button at all.
@@ -312,17 +316,26 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `106 - every lifecycle button points at a REST verb 101 shipped, and swaps nothing`() {
+    fun `102 - every lifecycle verb opens its dialog partial, into the screen's container`() {
+        // SUPERSEDES 106's "points at a REST verb and swaps nothing": the verbs are §4.3d
+        // dialogs now — hx-get into #px-dialog — and the DIALOG's POST is what calls the
+        // service (the plain-confirm fetch path to the REST routes is gone, with its
+        // data-verb/data-confirm/data-if-match attributes).
         val html = render("partials/pipeline-detail") { fillDetail() } + render("partials/pipeline-versions") { fillDetail() }
 
-        html shouldContain "data-verb-url=\"/api/v1/pipelines/$LEAF_ID/release\""
-        html shouldContain "data-verb-url=\"/api/v1/pipelines/$LEAF_ID/versions/1/discard\""
-        html shouldContain "data-verb-url=\"/api/v1/pipelines/$LEAF_ID/versions/2\""
-        // The hash precondition rides the button (versioning §4.2) — release what you tested.
-        html shouldContain "data-if-match=\"h2\""
-        // Every one carries a confirm, and none of them is a UI-only route.
-        html shouldContain "data-confirm="
-        html shouldNotContain "/partials/pipelines/$LEAF_ID/release"
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/release\""
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/discard?version=1\""
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/purge?version=2\""
+        // The HEADER's Switch carries no version (the dialog lists them); a row's Switch-to
+        // names its version — pinned by the dialog render suite, not this fixture (its only
+        // released row IS current, so no row-level Switch renders here).
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/switch\""
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/restore?version=0\""
+        html shouldContain "hx-target=\"#px-dialog\""
+        // The fetch path is gone entirely: no verb attributes, no plain confirms.
+        html shouldNotContain "data-verb-url="
+        html shouldNotContain "data-confirm="
+        html shouldNotContain "data-if-match="
     }
 
     @Test
@@ -506,12 +519,13 @@ class PipelineExplorerRenderTest {
         setVariable("lastRun", null)
         setVariable("lastRunAgo", null)
         setVariable("lastRunBy", null)
-        setVariable("versions", listOf(draftRow(), releasedRow()))
+        setVariable("versions", listOf(draftRow(), releasedRow(), discardedRow()))
         setVariable("versionCount", 2)
         setVariable("runCount", 7)
         setVariable("usageCount", 0)
         setVariable("releasableVersion", 2)
         setVariable("canDelete", false)
+        setVariable("canSwitchHeader", true)
         setVariable("canDiscardCurrent", true)
     }
 
@@ -537,6 +551,19 @@ class PipelineExplorerRenderTest {
             usage = 1,
             usageUnit = "run",
             isCurrent = true,
+        )
+
+    /** A DISCARDED row: the row menu's Restore target (§3.5's {R,X,D}-side of the fixture). */
+    private fun discardedRow() =
+        VersionRowView.of(
+            version = 0,
+            status = PipelineVersionStatus.DISCARDED,
+            createdAt = Instant.parse("2026-08-31T10:00:00Z"),
+            actor = "Muhammad",
+            now = Instant.parse("2026-09-03T10:00:00Z"),
+            usage = 0,
+            usageUnit = "run",
+            isCurrent = false,
         )
 
     private fun WebContext.fillPage() {

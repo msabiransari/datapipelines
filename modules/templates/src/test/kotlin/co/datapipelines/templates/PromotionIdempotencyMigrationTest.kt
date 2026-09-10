@@ -96,11 +96,8 @@ class PromotionIdempotencyMigrationTest {
         // at V8 can no longer serve them — the later migrations run AFTER the pre-V8 rows exist,
         // exactly as a live deployment would have received them. The migration under test is
         // still V8's.
-        ShippedMigrations.migrations(dir).filter { it.first in 9..18 }.forEach { pair ->
+        ShippedMigrations.migrations(dir).filter { it.first > 8 }.forEach { pair ->
             jdbc.jdbcTemplate.execute(pair.second.readText())
-        }
-        ShippedMigrations.paths().filter { it.contains("V19__") }.forEach {
-            jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(it).readText())
         }
     }
 

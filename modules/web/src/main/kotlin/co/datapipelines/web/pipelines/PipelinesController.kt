@@ -11,6 +11,7 @@ import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.api.writeSurface
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -75,7 +76,7 @@ class PipelinesController(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
-        val saved = pipelines.create(principal.requireWorkspace().id, body, principal.userId)
+        val saved = pipelines.create(principal.requireWorkspace().id, body, principal.userId, principal.writeSurface())
         return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version, saved.draft))
     }
 
@@ -150,6 +151,7 @@ class PipelinesController(
                 bodyJson = body,
                 expectedHash = expectedHash,
                 actor = principal.userId,
+                via = principal.writeSurface(),
             )
         return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version, saved.draft))
     }

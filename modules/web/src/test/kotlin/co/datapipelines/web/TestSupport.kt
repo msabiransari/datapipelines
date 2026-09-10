@@ -264,9 +264,10 @@ fun pipelineBrowseModelOver(
     datasources: co.datapipelines.pipeline.DatasourceRegistry = co.datapipelines.pipeline.DatasourceRegistry.EMPTY,
     actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
     runStats: co.datapipelines.web.ui.PipelineRunStats = io.mockk.mockk(),
+    authoring: co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(enabled = true),
 ): co.datapipelines.web.ui.PipelineBrowseModel =
     co.datapipelines.web.ui
-        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats)
+        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats, authoring)
 
 /** The templates twin of [pipelineBrowseModelOver], for the same reason. */
 fun templateBrowseModelOver(

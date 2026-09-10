@@ -11,6 +11,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
@@ -78,7 +79,16 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), any()) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } returns
+        every {
+            pipelines.create(
+                any(),
+                any<NewPipeline>(),
+                any(),
+                userId,
+                co.datapipelines.pipeline.CreateLifecycle.RELEASED,
+                WriteSurface.SESSION,
+            )
+        } returns
             record
 
         val response = controller.import(body)
@@ -148,7 +158,16 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } throws
+        every {
+            pipelines.create(
+                any(),
+                any<NewPipeline>(),
+                any(),
+                userId,
+                co.datapipelines.pipeline.CreateLifecycle.RELEASED,
+                WriteSurface.SESSION,
+            )
+        } throws
             DuplicateKeyException("pipelines_pkey")
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
@@ -165,7 +184,16 @@ class PipelineTransferControllerTest {
         authenticate()
         every { validator.validate(any(), any()) } returns ValidationResult.VALID
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.create(any(), any<NewPipeline>(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.RELEASED) } throws
+        every {
+            pipelines.create(
+                any(),
+                any<NewPipeline>(),
+                any(),
+                userId,
+                co.datapipelines.pipeline.CreateLifecycle.RELEASED,
+                WriteSurface.SESSION,
+            )
+        } throws
             DuplicateKeyException("pipelines_pkey")
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")

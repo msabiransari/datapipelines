@@ -94,6 +94,7 @@
     <li class="tpl-node" role="none" th:each="p : ${pipelines}">
       <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false"
               th:attr="hx-get=@{/partials/pipelines/detail(id=${p.id})},
+                       data-leaf-id=${p.id},
                        data-editor-url=@{'/pipelines/' + ${p.id} + '/editor'}"
               hx-target="#pipeline-detail" hx-swap="innerHTML"
               hx-sync="#pipeline-detail:replace"
@@ -115,13 +116,14 @@
              the released one otherwise. `p.currentVersion` alone printed "vnull" for every
              freshly created pipeline the moment creation started landing a DRAFT. -->
         <th:block th:with="d=${drafts != null ? drafts[p.id] : null}">
-          <span class="ds-badge ds-badge-default"
+          <!-- 102: the version badge carries its class hook — the lifecycle-changed listener
+               rewrites it from the POST's own payload (server facts, never a guess). -->
+          <span class="ds-badge ds-badge-default tpl-leaf-version"
                 th:if="${d != null or p.currentVersion != null}"
                 th:text="${'v' + (d != null ? d.version : p.currentVersion)}">v1</span>
-          <!-- versioning §7: unreleased edits stay visible in the list. The pane keeps the badge
-               compact; the version number and the release action live in the editor. -->
-          <span th:if="${d != null}" class="ds-badge ds-badge-warning"
-                th:title="'Draft v' + ${d.version} + ' is pending release — release it from the editor to publish.'">draft</span>
+          <!-- versioning §7: unreleased edits stay visible in the list. -->
+          <span th:if="${d != null}" class="ds-badge ds-badge-warning tpl-leaf-draft"
+                th:title="'Draft v' + ${d.version} + ' is pending release — release it to publish.'">draft</span>
         </th:block>
       </button>
     </li>

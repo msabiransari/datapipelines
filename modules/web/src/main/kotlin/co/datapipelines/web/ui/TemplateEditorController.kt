@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
@@ -125,7 +126,7 @@ class TemplateEditorController(
             templates.findVersionDetail(workspaceId, name, current.version)
                 ?: return refusal("Template '$name' has no current release to base a draft on.")
         return try {
-            drafts.write(workspaceId, name, selected.asDraft(), base.bodyHash, actor)
+            drafts.write(workspaceId, name, selected.asDraft(), base.bodyHash, actor, WriteSurface.SESSION)
             null
         } catch (e: DatapipelinesException) {
             refusal(e.message ?: "The draft could not be opened.")

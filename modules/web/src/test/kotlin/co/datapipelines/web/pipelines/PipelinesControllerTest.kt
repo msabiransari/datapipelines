@@ -18,6 +18,7 @@ import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
@@ -131,7 +132,7 @@ class PipelinesControllerTest {
         // D55: the lifecycle argument is part of the expectation — a create that asked for a
         // RELEASED v1 would not match this stub, so the mock is the guard for the ruling.
         every {
-            repository.create(any(), any<NewPipeline>(), any(), any(), CreateLifecycle.DRAFT)
+            repository.create(any(), any<NewPipeline>(), any(), any(), CreateLifecycle.DRAFT, WriteSurface.SESSION)
         } returns record.copy(currentVersion = null)
         every { repository.findDraftDetail(any(), pipelineId) } returns
             releasedDetail.copy(status = PipelineVersionStatus.DRAFT, releasedAt = null, releasedBy = null)
@@ -276,7 +277,7 @@ class PipelinesControllerTest {
                 updatedBy = userId,
                 updatedAt = Instant.parse("2026-08-02T00:00:00Z"),
             )
-        every { drafts.write(any(), pipelineId, any(), any(), "hash-v1", userId) } returns
+        every { drafts.write(any(), pipelineId, any(), any(), "hash-v1", userId, WriteSurface.SESSION) } returns
             PipelineDraftService.DraftWrite(record, draftDetail, body)
         every { repository.findDraftDetail(any(), pipelineId) } returns draftDetail
 
@@ -298,7 +299,7 @@ class PipelinesControllerTest {
         val storedBody = """{"schema_version":1,"name":"monthly_revenue"}"""
         // versioning §5.1: identical body ⇒ the service returns the RELEASED detail and
         // the STORED body; the response must say so plainly — not a 4xx, not a draft.
-        every { drafts.write(any(), pipelineId, any(), any(), "hash-v1", userId) } returns
+        every { drafts.write(any(), pipelineId, any(), any(), "hash-v1", userId, WriteSurface.SESSION) } returns
             PipelineDraftService.DraftWrite(record, releasedDetail, storedBody)
         every { repository.findDraftDetail(any(), pipelineId) } returns null
 

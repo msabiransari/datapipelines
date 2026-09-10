@@ -167,21 +167,36 @@ class TemplateExplorerRenderTest {
     }
 
     @Test
-    fun `106 - the templates header renders 101's verbs, pointing at the REST routes`() {
+    fun `102 - the templates header opens 101's verbs as dialogs, one destructive at most`() {
+        // SUPERSEDES 106's "pointing at the REST routes": the verbs hx-get the §4.3d template
+        // twins into #tx-dialog (§9.6: the name travels in the query, never a path segment),
+        // and at most ONE destructive renders in the header.
         val html = render("partials/template-detail") { fillDetail() }
 
         html shouldContain "Release v2…"
-        html shouldContain "data-verb-url=\"/api/v1/templates/release\""
-        html shouldContain "data-if-match=\"h2\""
-        // A template with a draft has nothing to discard yet; Delete needs the sole-draft state.
-        html shouldNotContain ">Delete<"
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/release?name=$DEEP_PATH\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/discard?name=$DEEP_PATH&amp;version=1\""
+        html shouldContain "hx-target=\"#tx-dialog\""
+        // The {R,D} shape: Discard of the resolved release, and NO entity purge in the
+        // header (the draft's Purge lives on the draft's ROW, which this same render carries).
+        html shouldContain "Discard v1…"
+        html shouldNotContain "Purge template"
+        // No Switch — templates are pinned by version; there is no served pointer to switch.
+        html shouldNotContain ">Switch"
+        // The fetch path is gone.
+        html shouldNotContain "data-verb-url="
+        html shouldNotContain "data-confirm="
 
         val draftOnly =
             render("partials/template-detail") {
                 fillDetail()
                 setVariable("canDelete", true)
+                setVariable("canDiscardCurrent", false)
+                setVariable("canPurgeDraftInHeader", false)
             }
-        draftOnly shouldContain ">Delete<"
+        draftOnly shouldContain "Purge template…"
+        // (No header-Discard assertion here: this render keeps the version rows, whose own
+        // menu legitimately offers Discard — the header's flag is what canDiscardCurrent drove.)
     }
 
     @Test
@@ -275,6 +290,11 @@ class TemplateExplorerRenderTest {
         setVariable("draftHash", "h2")
         setVariable("releasableVersion", 2)
         setVariable("canDelete", false)
+        // 102 §B.1's header flags (the {R,D} shape: Discard of the resolved release).
+        setVariable("canDiscardCurrent", true)
+        setVariable("canPurgeDraftInHeader", false)
+        setVariable("currentReleaseVersion", 1)
+        setVariable("createdVia", "session")
         setVariable("inUse", mapOf(2 to 1, 1 to 2))
         setVariable("versionCount", 2)
         setVariable("runCount", 0)

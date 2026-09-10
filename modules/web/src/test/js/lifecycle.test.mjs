@@ -119,119 +119,17 @@ const lifecycle = globalThis.window.TplLifecycle;
 
 /* ---------------------------------------------------------------- the fixture */
 
-let fetches = [];
 function reset() {
   for (const key of Object.keys(elements)) delete elements[key];
-  fetches = [];
   toasts.length = 0;
   reloads.length = 0;
   ajaxCalls.length = 0;
   contextRows = [];
   el("te-page").attributes["data-template-id"] = "acme/rev.sql";
-  el("tpl-release-draft").attributes["data-id"] = "acme/rev.sql";
-  el("tpl-release-draft").attributes["data-hash"] = "hash-v3";
-  el("tpl-discard-draft").attributes["data-id"] = "acme/rev.sql";
-  el("tpl-discard-draft").attributes["data-hash"] = "hash-v3";
-  el("tpl-discard-confirm").classes.add("u-backdrop-hidden");
 }
 
-function stubFetch(response) {
-  globalThis.fetch = (url, init) => {
-    fetches.push({ url, init });
-    return Promise.resolve(response);
-  };
-}
-
-const ok = { ok: true, status: 200, json: () => Promise.resolve({}) };
-function refusal(message) {
-  return {
-    ok: false,
-    status: 409,
-    json: () => Promise.resolve({ error: { message } }),
-  };
-}
-
-/* ---------------------------------------------------------------- release */
-
-test("release posts the hash-guarded, CSRF-headed body and reloads on success", async () => {
-  reset();
-  stubFetch(ok);
-
-  await lifecycle.lifecycle("release");
-
-  assert.equal(fetches.length, 1);
-  const { url, init } = fetches[0];
-  assert.equal(url, "/api/v1/templates/release");
-  assert.equal(init.method, "POST");
-  // §9.6: the name is in the BODY, never a path segment.
-  assert.equal(init.body, JSON.stringify({ name: "acme/rev.sql" }));
-  assert.equal(init.headers["If-Match"], "hash-v3");
-  // The token is URL-decoded on the way into the header (the cookie holds it encoded).
-  assert.equal(init.headers["DP-CSRF-Token"], "tok/en");
-  assert.equal(reloads.length, 1);
-});
-
-test("a refused release re-enables the button and reports the server's message as a toast", async () => {
-  reset();
-  stubFetch(refusal("The draft has moved on."));
-
-  await lifecycle.lifecycle("release");
-
-  assert.equal(reloads.length, 0);
-  assert.equal(el("tpl-release-draft").disabled, false);
-  assert.deepEqual(toasts, [
-    { variant: "danger", title: "Release refused", message: "The draft has moved on." },
-  ]);
-});
-
-test("a refusal with no envelope still says something, and never a bare undefined", async () => {
-  reset();
-  stubFetch({ ok: false, status: 500, json: () => Promise.reject(new Error("not json")) });
-
-  await lifecycle.lifecycle("release");
-
-  assert.equal(toasts[0].message, "HTTP 500");
-});
-
-/* ---------------------------------------------------------------- discard */
-
-test("discard asks first — it opens the in-page confirmation and posts nothing", async () => {
-  reset();
-  stubFetch(ok);
-
-  const result = lifecycle.lifecycle("discard");
-
-  assert.equal(result, null);
-  assert.equal(fetches.length, 0);
-  assert.equal(el("tpl-discard-confirm").classes.has("u-backdrop-hidden"), false);
-});
-
-test("confirming the discard closes the dialog and posts to the discard endpoint", async () => {
-  reset();
-  stubFetch(ok);
-  lifecycle.lifecycle("discard");
-
-  await lifecycle.confirmDiscard();
-
-  assert.equal(el("tpl-discard-confirm").classes.has("u-backdrop-hidden"), true);
-  assert.equal(fetches.length, 1);
-  assert.equal(fetches[0].url, "/api/v1/templates/draft/discard");
-  assert.equal(fetches[0].init.headers["If-Match"], "hash-v3");
-  assert.equal(reloads.length, 1);
-});
-
-test("keeping the draft closes the dialog and never posts", async () => {
-  reset();
-  stubFetch(ok);
-  lifecycle.lifecycle("discard");
-
-  lifecycle.closeConfirm();
-
-  assert.equal(el("tpl-discard-confirm").classes.has("u-backdrop-hidden"), true);
-  assert.equal(fetches.length, 0);
-});
-
-/* ---------------------------------------------------------------- the context rail */
+// 102: the release/discard cases left with the lifecycle half — those buttons open the
+// §4.3d dialogs now (lifecycle-dialog.js), pinned by LifecycleDialogBrowserTest.
 
 test("the tab state is classes, never styles written from script", () => {
   reset();

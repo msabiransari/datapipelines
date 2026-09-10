@@ -1,0 +1,52 @@
+<!-- The entity purge dialog (ui-screens §4.3d, 102): offered only in the {D} shape (§3.5) —
+     the `last_release` branch opens the dialog and renders no button. The exclusive
+     draft-templates offer is §3.5's own (include_exclusive_draft_templates, false here), and
+     the typed confirm names the PIPELINE. The row, its draft and its executions go; the POST
+     redirects so the tree loses the leaf. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="pipeline-purge-entity">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="plc-purge-entity-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="plc-purge-entity-title"
+        th:text="'Purge ' + ${dlg.leafName} + '?'">Purge my_pipeline?</h2>
+
+    <th:block th:if="${dlg.refusal != null}">
+      <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">last_release</p>
+    </th:block>
+
+    <th:block th:if="${dlg.refusal == null}">
+      <p class="u-secondary u-text-sm">
+        The pipeline, its draft and its
+        <strong th:text="${dlg.runCount}">0</strong> run<span th:if="${dlg.runCount != 1}">s</span>
+        are deleted permanently — this cannot be undone.
+      </p>
+
+      <th:block th:if="${!#lists.isEmpty(dlg.exclusiveTemplates)}">
+        <label class="ds-form-label u-mt-md">
+          <input type="checkbox" name="include_exclusive" value="true">
+          Also purge these <span th:text="${#lists.size(dlg.exclusiveTemplates)}">2</span> template(s)
+          (they are pinned by nothing else)
+        </label>
+        <ul class="u-text-sm u-mb-md" data-exclusive-templates>
+          <li th:each="t : ${dlg.exclusiveTemplates}" class="u-mono" th:text="${t}">test/only_here.sql</li>
+        </ul>
+      </th:block>
+
+      <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${dlg.id})},
+                       hx-target=${from == 'editor'} ? null : '#pipeline-detail',
+                       hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+        <input type="hidden" name="from" th:value="${from}">
+        <label class="ds-form-label">
+          Type the pipeline's name — <span class="u-mono" th:text="${dlg.expected}">test/my_pipeline</span> — to confirm
+        </label>
+        <input class="ds-input u-mono" data-confirm-input name="confirm" autocomplete="off" spellcheck="false"
+               th:attr="data-confirm-expect=${dlg.expected}">
+        <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+                disabled hx-disabled-elt="this"
+                th:text="'Purge ' + ${dlg.leafName}">Purge my_pipeline</button>
+      </form>
+    </th:block>
+  </div>
+</div>

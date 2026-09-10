@@ -1,0 +1,26 @@
+<!-- The Restore dialog (ui-screens §4.3d, 102): DISCARDED → RELEASED, the pointer moving
+     only above-current-or-NULL (§3.4's restore rule, stated in the row's own words). -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="pipeline-restore">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="plc-restore-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="plc-restore-title"
+        th:text="'Restore v' + ${dlg.version} + '?'">Restore v2?</h2>
+
+    <p class="u-secondary u-text-sm">
+      Restoring makes v<span th:text="${dlg.version}">2</span> a live release again.
+      <span th:if="${dlg.movesPointer}" th:text="' v' + ${dlg.version} + ' becomes current.'"> v2 becomes current.</span>
+      <span th:if="${!dlg.movesPointer and dlg.currentVersion != null}"
+            th:text="' The pointer stays at v' + ${dlg.currentVersion} + '.'"> The pointer stays at v3.</span>
+    </p>
+
+    <form class="u-mt-md"
+          th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${dlg.id}, version=${dlg.version})},
+                   hx-target='#pipeline-detail', hx-swap='innerHTML'">
+      <button type="submit" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+              th:text="'Restore v' + ${dlg.version}">Restore v2</button>
+    </form>
+  </div>
+</div>

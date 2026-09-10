@@ -452,7 +452,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the release button carries a confirm and the hash - 102 has not merged, so it is the plain one`() {
+    fun `the release button opens the 4_3d dialog - the plain confirm is gone`() {
+        // SUPERSEDES 106's plain-confirm pin (data-verb-url/data-confirm/data-if-match):
+        // 102 replaced the fetch-and-confirm wiring with the §4.3d dialog partials. The hash
+        // precondition moved SERVER-side — the dialog's POST reads the draft's hash, and a
+        // stale one is the service's pipeline.version.conflict (the golden path drives it).
         startTrace()
         ready()
         seed()
@@ -460,11 +464,20 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/pipelines")
         selectLeaf()
 
-        val release = page.locator("[data-verb-url$='/release']").first()
+        val release =
+            page.locator(
+                ".tplx-detail-actions button",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText("Release v1"),
+            )
         release.isVisible shouldBe true
-        release.getAttribute("data-confirm")!!.contains("Release v1") shouldBe true
-        // The hash precondition rides the button: you release what you tested (versioning §4.2).
-        release.getAttribute("data-if-match")!!.isNotEmpty() shouldBe true
+        page.waitForResponse("**/lifecycle/release*") { release.click() }
+        page.locator("#px-dialog [data-lifecycle-dialog='pipeline-release']").waitFor()
+        // No verb attributes anywhere on the pane — the fetch path is gone.
+        page.locator("#pipeline-detail [data-verb-url]").count() shouldBe 0
+        page.keyboard().press("Escape")
+        page.locator("#px-dialog [data-lifecycle-dialog]").count() shouldBe 0
     }
 
     // ---------------------------------------------------------- the evidence

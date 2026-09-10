@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateEngine
@@ -207,7 +208,7 @@ class TemplateToolsTest {
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
         // D55: DRAFT is part of the expectation — a RELEASED create would not match this stub.
         every {
-            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT)
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.MCP)
         } returns McpFixtures.template()
 
         TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
@@ -328,7 +329,7 @@ class TemplateToolsTest {
         val draft = slot<TemplateDraft>()
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
         every {
-            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT)
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.MCP)
         } returns McpFixtures.template(isLibrary = true)
 
         val library =

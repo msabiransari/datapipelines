@@ -3,6 +3,7 @@ package co.datapipelines.templates
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -110,7 +111,7 @@ class TemplateRepositoryIntegrationTest {
         // D55: `templates_create`, `POST /templates` and the editor all land a DRAFT; only the
         // import path (promotion, seeders) lands RELEASED. Asserted against the database, and
         // against the reads that are supposed to mean "latest RELEASED".
-        val stored = repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT)
+        val stored = repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
 
         stored.version shouldBe 1
         stored.status shouldBe PipelineVersionStatus.DRAFT
@@ -135,7 +136,7 @@ class TemplateRepositoryIntegrationTest {
         // otherwise have made a template an agent just created INVISIBLE: `v.version =
         // t.current_version` matches nothing while the pointer is NULL (D55). Caught by a browser
         // test whose templates tree came up empty — no unit test looked at it.
-        repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT)
+        repository.create(workspaceId, draft(), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
 
         withClue("the flat listing and its count") {
             repository.list(workspaceId, offset = 0, limit = 10).map { it.id } shouldContainExactly
@@ -216,7 +217,14 @@ class TemplateRepositoryIntegrationTest {
         repository.createReleased(workspaceId, draft(id = "test/a.sql", body = "SELECT 1"), actor)
         val a = repository.findLatest(workspaceId, "test/a.sql")!!
         val aDraft =
-            repository.createDraft(workspaceId, "test/a.sql", draft(id = "test/a.sql", body = "SELECT 2"), a.bodyHash, actor)!!
+            repository.createDraft(
+                workspaceId,
+                "test/a.sql",
+                draft(id = "test/a.sql", body = "SELECT 2"),
+                a.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            )!!
         repository.createReleased(workspaceId, draft(id = "test/b.sql"), actor)
         repository.createReleased(workspaceId, draft(id = "test/c.sql"), actor)
         discardOnlyRelease("test/c.sql")
@@ -492,6 +500,7 @@ class TemplateRepositoryIntegrationTest {
                     draft(body = "SELECT 2"),
                     released.bodyHash,
                     actor,
+                    WriteSurface.SESSION,
                 ),
             )
 
@@ -521,6 +530,7 @@ class TemplateRepositoryIntegrationTest {
                     draft(body = "SELECT 1", displayName = "Renamed, same SQL"),
                     released.bodyHash,
                     actor,
+                    WriteSurface.SESSION,
                 ),
             )
 
@@ -540,6 +550,7 @@ class TemplateRepositoryIntegrationTest {
                 draft(body = "SELECT 2"),
                 released.bodyHash,
                 actor,
+                WriteSurface.SESSION,
             ),
         ).version shouldBe 2
     }
@@ -549,7 +560,15 @@ class TemplateRepositoryIntegrationTest {
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 1"), "stale", actor).shouldBeNull()
+        repository
+            .createDraft(
+                workspaceId,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 1"),
+                "stale",
+                actor,
+                WriteSurface.SESSION,
+            ).shouldBeNull()
 
         jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
         repository.findDraftDetail(workspaceId, "test/fetch_orders.sql").shouldBeNull()
@@ -561,12 +580,27 @@ class TemplateRepositoryIntegrationTest {
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val draft =
             checkNotNull(
-                repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
+                repository.createDraft(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    released.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                ),
             )
 
         // The released body PUT back unchanged while a draft exists: 409 material (null),
         // never "RELEASED, no draft" — the draft owns the working state.
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 1"), released.bodyHash, actor).shouldBeNull()
+        repository
+            .createDraft(
+                workspaceId,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 1"),
+                released.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            ).shouldBeNull()
         checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).bodyHash shouldBe draft.bodyHash
     }
 
@@ -576,11 +610,27 @@ class TemplateRepositoryIntegrationTest {
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val draft =
             checkNotNull(
-                repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
+                repository.createDraft(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    released.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                ),
             )
 
         val reverted =
-            checkNotNull(repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 1"), draft.bodyHash, actor))
+            checkNotNull(
+                repository.writeDraft(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 1"),
+                    draft.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                ),
+            )
 
         reverted.status shouldBe PipelineVersionStatus.DRAFT
         checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).version shouldBe draft.version
@@ -598,11 +648,21 @@ class TemplateRepositoryIntegrationTest {
                     draft(body = "SELECT 2"),
                     released.bodyHash,
                     actor,
+                    WriteSurface.SESSION,
                 ),
             )
 
         val second =
-            checkNotNull(repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 3"), first.bodyHash, actor))
+            checkNotNull(
+                repository.writeDraft(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 3"),
+                    first.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                ),
+            )
 
         second.version shouldBe 2
         checkNotNull(repository.findVersion(workspaceId, "test/fetch_orders.sql", 2)).body shouldBe "SELECT 3"
@@ -613,10 +673,33 @@ class TemplateRepositoryIntegrationTest {
     fun `stale hashes write nothing on every template mutation`() {
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+        repository.createDraft(
+            workspaceId,
+            "test/fetch_orders.sql",
+            draft(body = "SELECT 2"),
+            released.bodyHash,
+            actor,
+            WriteSurface.SESSION,
+        )
 
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 9"), "stale", actor).shouldBeNull()
-        repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 9"), "stale", actor).shouldBeNull()
+        repository
+            .createDraft(
+                workspaceId,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 9"),
+                "stale",
+                actor,
+                WriteSurface.SESSION,
+            ).shouldBeNull()
+        repository
+            .writeDraft(
+                workspaceId,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 9"),
+                "stale",
+                actor,
+                WriteSurface.SESSION,
+            ).shouldBeNull()
         repository.releaseDraft(workspaceId, "test/fetch_orders.sql", "stale", actor).shouldBeNull()
         repository.purgeDraft(workspaceId, "test/fetch_orders.sql", "stale", draftEligible = true) shouldBe false
 
@@ -636,6 +719,7 @@ class TemplateRepositoryIntegrationTest {
                     draft(body = "SELECT 2"),
                     released.bodyHash,
                     actor,
+                    WriteSurface.SESSION,
                 ),
             )
 
@@ -661,6 +745,7 @@ class TemplateRepositoryIntegrationTest {
                     draft(body = "SELECT 2"),
                     released.bodyHash,
                     actor,
+                    WriteSurface.SESSION,
                 ),
             )
 
@@ -674,6 +759,7 @@ class TemplateRepositoryIntegrationTest {
                 draft(body = "SELECT 3"),
                 released.bodyHash,
                 actor,
+                WriteSurface.SESSION,
             ),
         ).version shouldBe 2
     }
@@ -682,7 +768,14 @@ class TemplateRepositoryIntegrationTest {
     fun `a second DRAFT row violates the one-draft partial unique index`() {
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+        repository.createDraft(
+            workspaceId,
+            "test/fetch_orders.sql",
+            draft(body = "SELECT 2"),
+            released.bodyHash,
+            actor,
+            WriteSurface.SESSION,
+        )
 
         val templateId =
             checkNotNull(
@@ -711,20 +804,43 @@ class TemplateRepositoryIntegrationTest {
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
-        val first = service.write(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
-        val second = service.write(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 3"), first.bodyHash, actor)
+        val first =
+            service.write(
+                workspaceId,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 2"),
+                released.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            )
+        val second =
+            service.write(
+                workspaceId,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 3"),
+                first.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            )
         second.version shouldBe 2
 
         val stale =
             io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                service.write(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 4"), released.bodyHash, actor)
+                service.write(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 4"),
+                    released.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                )
             }
         stale.code shouldBe PipelineErrorCodes.Template.VERSION_CONFLICT
         stale.details["current_body_hash"] shouldBe second.bodyHash
 
         val notFound =
             io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                service.write(workspaceId, "test/nope.sql", draft(id = "test/nope.sql"), released.bodyHash, actor)
+                service.write(workspaceId, "test/nope.sql", draft(id = "test/nope.sql"), released.bodyHash, actor, WriteSurface.SESSION)
             }
         notFound.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
     }
@@ -740,7 +856,14 @@ class TemplateRepositoryIntegrationTest {
 
         val refused =
             io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                disabled.write(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 9"), released.bodyHash, actor)
+                disabled.write(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 9"),
+                    released.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                )
             }
         refused.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
         refused.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
@@ -769,7 +892,14 @@ class TemplateRepositoryIntegrationTest {
     fun `findAllDraftTemplateNames names every draft - the boot check's evidence`() {
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+        repository.createDraft(
+            workspaceId,
+            "test/fetch_orders.sql",
+            draft(body = "SELECT 2"),
+            released.bodyHash,
+            actor,
+            WriteSurface.SESSION,
+        )
 
         repository.findAllDraftTemplateNames() shouldContainExactly listOf("test/fetch_orders.sql")
     }
@@ -832,6 +962,7 @@ class TemplateRepositoryIntegrationTest {
                 draft(id = "test/legacy.sql", body = "SELECT 2"),
                 stored.bodyHash,
                 actor,
+                WriteSurface.SESSION,
             ),
         )
     }
@@ -894,7 +1025,14 @@ class TemplateRepositoryIntegrationTest {
             .shouldBe(PipelineVersionStatus.RELEASED)
         repository.findVersionStatus(workspaceId, "test/fetch_orders.sql", 9).shouldBeNull()
 
-        repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+        repository.createDraft(
+            workspaceId,
+            "test/fetch_orders.sql",
+            draft(body = "SELECT 2"),
+            released.bodyHash,
+            actor,
+            WriteSurface.SESSION,
+        )
         val drafts = repository.findDrafts(workspaceId, listOf("test/fetch_orders.sql", "absent.sql"))
         drafts.keys shouldContainExactly setOf("test/fetch_orders.sql")
         drafts["test/fetch_orders.sql"]?.version shouldBe 2
@@ -929,4 +1067,4 @@ private fun TemplateRepository.createReleased(
     workspaceId: java.util.UUID,
     draft: TemplateDraft,
     createdBy: java.util.UUID,
-): Template = create(workspaceId, draft, createdBy, co.datapipelines.pipeline.CreateLifecycle.RELEASED)
+): Template = create(workspaceId, draft, createdBy, co.datapipelines.pipeline.CreateLifecycle.RELEASED, WriteSurface.SESSION)

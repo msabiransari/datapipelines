@@ -1,16 +1,16 @@
-<!-- The acting column's VERSIONS tab (106) — every version of the selected pipeline, newest
-     first, with the verbs 101 would actually accept on it.
+<!-- The acting column's VERSIONS tab (106; the verbs reshaped by 102) — every version of the
+      selected pipeline, newest first, with the verbs §3.5 allows THAT row.
 
-     COMPACT ROWS, NOT A TABLE. The pane is the narrow column of a two-column detail; a
-     six-column table there wraps its headers and hides its last column behind a scroll (the
-     failure the /api-console screenshot found on 2026-09-08). A row states the same six facts
-     in a grid that can reflow: version · status · (created · who · runs) · actions.
+      COMPACT ROWS, NOT A TABLE. The pane is the narrow column of a two-column detail; a
+      six-column table there wraps its headers and hides its last column behind a scroll (the
+      failure the /api-console screenshot found on 2026-09-08). A row states the same six facts
+      in a grid that can reflow: version · status · (created · who · runs) · actions.
 
-     Every button posts to the REST verb 101 shipped and swaps nothing — explorer-detail.js
-     re-fetches the whole detail when one succeeds, so a pointer move (D60) or a purged sole
-     draft is reflected by re-reading the server, never by patching the DOM from a guess.
-     The flags come from the model ([VersionRowView]): the template renders what the server
-     would accept, and never derives a lifecycle rule of its own. -->
+      The row's verbs live in a per-row overflow menu (⋯), a native <details> popover like the
+      tree's folders — no JS to open, and explorer-detail.js closes menus on outside clicks,
+      Escape and dialog opens. A verb the §3.5 table refuses for the row's status is NOT
+      rendered (absent, never disabled), so the table and the screen cannot disagree; the POST
+      still re-runs the guard. The flags come from the model ([VersionRowView]). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist">
   <p class="ds-empty-description" th:if="${#lists.isEmpty(versions)}">This pipeline has no versions.</p>
 
@@ -22,6 +22,7 @@
     <span class="tplx-vmeta">
       <span th:text="${v.createdAgo}" th:title="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">3 days ago</span>
       <span> · </span><span th:text="${v.actor}">Muhammad</span>
+      <span th:if="${v.via != 'session'}" class="u-muted" th:text="' · via ' + ${v.via == 'api_key' ? 'API key' : 'MCP'}"> · via MCP</span>
       <span> · </span><span th:text="${v.usageLabel}">7 runs</span>
       <!-- D60: the sticky pointer, which is NOT "the latest released" — saying so in the row
            is the only place a reader can see the difference. -->
@@ -31,28 +32,39 @@
       <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
          th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open</a>
 
-      <button th:if="${v.canRelease}" type="button" class="ds-button ds-button-ghost ds-button-sm" data-verb="POST"
-              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/release'},
-                       data-if-match=${draftHash},
-                       data-confirm='Release v' + ${v.version} + '? A released version is immutable.'">Release…</button>
+      <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
+           RELEASED → Discard, Switch-to (not current); DISCARDED → Restore. -->
+      <th:block th:if="${v.canRelease or v.canPurge or v.canDiscard or v.canRestore or v.canSwitch}">
+        <details class="tplx-vmenu">
+          <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
+          <div class="tplx-vmenu-list" role="menu" data-vmenu>
+            <button th:if="${v.canRelease}" type="button" role="menuitem" class="tplx-vmenu-item"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
+                             hx-target='#px-dialog', hx-swap='innerHTML'"
+                    th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
 
-      <!-- A DRAFT is PURGED, not discarded (101 §5.4): the row and its executions go, and a
-           sole draft takes the pipeline with it — which is why this one reloads. -->
-      <button th:if="${v.canPurge}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
-              data-verb="DELETE"
-              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${v.version}},
-                       data-confirm='Discard draft v' + ${v.version} + '? The draft and its executions are removed permanently.',
-                       data-after=${versionCount == 1} ? 'reload' : null">Discard draft</button>
+            <button th:if="${v.canPurge}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version})},
+                             hx-target='#px-dialog', hx-swap='innerHTML'"
+                    th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
 
-      <button th:if="${v.canDiscard}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
-              data-verb="POST"
-              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${v.version} + '/discard'},
-                       data-confirm='Discard v' + ${v.version} + '? It can be restored later.'">Discard</button>
+            <button th:if="${v.canDiscard}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version})},
+                             hx-target='#px-dialog', hx-swap='innerHTML'"
+                    th:text="'Discard v' + ${v.version} + '…'">Discard v2…</button>
 
-      <button th:if="${v.canRestore}" type="button" class="ds-button ds-button-ghost ds-button-sm"
-              data-verb="POST"
-              th:attr="data-verb-url=@{'/api/v1/pipelines/' + ${pipeline.id} + '/versions/' + ${v.version} + '/restore'},
-                       data-confirm='Restore v' + ${v.version} + ' to RELEASED?'">Restore</button>
+            <button th:if="${v.canSwitch}" type="button" role="menuitem" class="tplx-vmenu-item"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version})},
+                             hx-target='#px-dialog', hx-swap='innerHTML'"
+                    th:text="'Switch to v' + ${v.version} + '…'">Switch to v1…</button>
+
+            <button th:if="${v.canRestore}" type="button" role="menuitem" class="tplx-vmenu-item"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version})},
+                             hx-target='#px-dialog', hx-swap='innerHTML'"
+                    th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
+          </div>
+        </details>
+      </th:block>
     </span>
   </div>
 </div>

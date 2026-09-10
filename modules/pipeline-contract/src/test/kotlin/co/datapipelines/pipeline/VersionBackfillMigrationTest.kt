@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.WriteSurface
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -61,11 +62,8 @@ class VersionBackfillMigrationTest {
         // V19 discard stamps, so a schema stopped at V6 can no longer serve them. The
         // backfill under test is still V6's — these later migrations run AFTER the pre-V6
         // rows exist, exactly as a live deployment would have received them.
-        ShippedMigrations.migrations(dir).filter { it.first in 7..18 }.forEach { pair ->
+        ShippedMigrations.migrations(dir).filter { it.first > 6 }.forEach { pair ->
             jdbc.jdbcTemplate.execute(pair.second.readText())
-        }
-        ShippedMigrations.paths().filter { it.contains("V19__") }.forEach {
-            jdbc.jdbcTemplate.execute(Fixtures.repoFile(it).readText())
         }
 
         repository = PipelineRepository(jdbc)
@@ -109,6 +107,7 @@ class VersionBackfillMigrationTest {
                 serializer.write(Fixtures.pipeline(name = "test/precondition_legacy")),
                 detail.bodyHash,
                 owner,
+                WriteSurface.SESSION,
             )
         draft.shouldBeInstanceOf<PipelineVersionDetail>()
         draft.version shouldBe 2
@@ -124,7 +123,7 @@ class VersionBackfillMigrationTest {
         val draftBody = serializer.write(body)
         val draft =
             checkNotNull(
-                repository.createDraft(WORKSPACE_ID, record.id, draftBody, detail.bodyHash, owner),
+                repository.createDraft(WORKSPACE_ID, record.id, draftBody, detail.bodyHash, owner, WriteSurface.SESSION),
             )
         val released =
             checkNotNull(
@@ -141,7 +140,7 @@ class VersionBackfillMigrationTest {
         val record = checkNotNull(repository.findByName(WORKSPACE_ID, "test/third_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
         val body = serializer.write(Fixtures.pipeline(name = "test/third_legacy"))
-        repository.createDraft(WORKSPACE_ID, record.id, body, detail.bodyHash, owner)
+        repository.createDraft(WORKSPACE_ID, record.id, body, detail.bodyHash, owner, WriteSurface.SESSION)
 
         val thrown =
             shouldThrow<org.springframework.dao.DuplicateKeyException> {

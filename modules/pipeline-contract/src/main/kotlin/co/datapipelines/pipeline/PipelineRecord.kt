@@ -59,6 +59,10 @@ data class PipelineVersionRecord(
     val createdAt: Instant,
     val createdBy: UUID,
     val releasedAt: Instant? = null,
+    /** Which surface created the row (V20, 102) — `'session' | 'api_key' | 'mcp'`. */
+    val createdVia: String = WriteSurface.SESSION.wire,
+    /** Which surface made the last draft write (V20, 102) — what a DRAFT row should show. */
+    val updatedVia: String = WriteSurface.SESSION.wire,
 )
 
 /**

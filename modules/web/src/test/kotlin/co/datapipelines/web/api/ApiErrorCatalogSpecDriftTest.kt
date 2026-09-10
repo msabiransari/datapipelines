@@ -135,8 +135,17 @@ class ApiErrorCatalogSpecDriftTest {
          * (`template.version.not_released` / `not_discarded` / `last_release` / `not_eligible`),
          * landed in the SAME commit as their constants and catalog rows. Re-derived from the
          * document's own parse.
+         *
+         * 149 → 150 with T202 (`pipeline.node.query_timeout`, §13.4 — a statement cancelled
+         * by its own JDBC query timeout reports the timeout as 504, not a failed execution).
+         *
+         * 150 → 152 with 102 (the lifecycle dialogs): §13.13 gains
+         * `pipeline.version.confirm_mismatch` and §13.9 `template.version.confirm_mismatch`,
+         * both 400 AGAINST their families' 409 default — the caller's typed confirm was
+         * wrong; nothing about the version refused. Landed in the SAME commit as their
+         * constants and explicit catalog rows. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 150
+        const val SECTION_13_ROW_COUNT = 152
 
         /**
          * §12's distinct validation codes.

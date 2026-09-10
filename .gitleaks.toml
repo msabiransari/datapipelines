@@ -101,3 +101,14 @@ condition = "AND"
 paths = ['''modules/web/src/main/resources/static/vendor/design-system/vendor-manifest\.json$''']
 regexTarget = "secret"
 regexes = ['''^[a-f0-9]{64}$''']
+# tests/integration-tests WriteSurfaceStampingE2eTest.kt — the session leg mints
+# its own JWT against a FIXED test secret so the app context and the test agree;
+# base64 of the literal "test-jwt-secret-for-via-stamping-32", a placeholder
+# known only to this test's own @DynamicPropertySource, securing nothing.
+# (2026-09-09)
+[[allowlists]]
+description = "WriteSurfaceStampingE2eTest.kt: fixed test-local JWT secret (2026-09-09)"
+condition = "AND"
+paths = ['''tests/integration-tests/src/test/kotlin/co/datapipelines/integration/WriteSurfaceStampingE2eTest\.kt$''']
+regexTarget = "secret"
+regexes = ['''^dGVzdC1qd3Qtc2VjcmV0LWZvci12aWEtc3RhbXBpbmctMzI=$''']

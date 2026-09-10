@@ -42,6 +42,7 @@ class TemplateDraftService(
         draft: TemplateDraft,
         expectedHash: String,
         actor: UUID,
+        via: co.datapipelines.pipeline.WriteSurface,
     ): TemplateVersionDetail {
         // §5.5: the template mirror of the pipeline guard — fail-closed at the write path.
         authoring.requireTemplateAuthoring()
@@ -59,11 +60,11 @@ class TemplateDraftService(
 
         val existingDraft = templates.findDraftDetail(workspaceId, id)
         if (existingDraft != null) {
-            templates.writeDraft(workspaceId, id, resolved, expectedHash, actor)?.let { return it }
+            templates.writeDraft(workspaceId, id, resolved, expectedHash, actor, via)?.let { return it }
             // No rows: stale hash, or the draft was discarded mid-write — fall through to
             // the create branch, whose guard decides.
         }
-        return templates.createDraft(workspaceId, id, resolved, expectedHash, actor)
+        return templates.createDraft(workspaceId, id, resolved, expectedHash, actor, via)
             ?: throw staleBase(workspaceId, id)
     }
 

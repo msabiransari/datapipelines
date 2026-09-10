@@ -12,6 +12,8 @@
   <script th:src="@{/js/template-explorer.js}" defer></script>
   <!-- 106: the detail pane's tabs, its lifecycle verbs and the narrow layout's tree drawer. -->
   <script th:src="@{/js/explorer-detail.js}" defer></script>
+  <!-- 102: the lifecycle dialogs' close/focus/typed-confirm layer (§4.3d). -->
+  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
 
   <!-- 058 — the explorer: TREE LEFT, the selected template RIGHT. The 047 accordion put each
        template's versions table under its own row, pushing every other row down; the owner's
@@ -241,5 +243,8 @@
       initCreateTemplateModal();
     }
   </script>
+
+  <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d), the pipelines twin. -->
+  <div id="tx-dialog"></div>
 </th:block>
 </html>

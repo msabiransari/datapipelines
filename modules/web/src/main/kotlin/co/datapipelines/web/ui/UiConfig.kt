@@ -101,5 +101,28 @@ class UiConfig {
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         actorNames: ActorNames,
         runStats: PipelineRunStats,
-    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats)
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats, authoring)
+
+    /** 102: the lifecycle dialogs' facts — the same scans the services' own guards read. */
+    @Bean
+    @Suppress("LongParameterList") // one collaborator per §4.3d fact, exactly like the browse models
+    fun pipelineLifecycleDialogModel(
+        repository: co.datapipelines.pipeline.PipelineRepository,
+        templates: co.datapipelines.pipeline.TemplateVersionStatuses,
+        exclusiveTemplates: co.datapipelines.pipeline.ExclusiveDraftTemplates,
+        runStats: PipelineRunStats,
+        actorNames: ActorNames,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): PipelineLifecycleDialogModel =
+        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring)
+
+    /** 102: the template twin of [pipelineLifecycleDialogModel]. */
+    @Bean
+    fun templateLifecycleDialogModel(
+        templates: TemplateRepository,
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        actorNames: ActorNames,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, pipelines, actorNames, authoring)
 }

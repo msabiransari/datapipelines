@@ -1,6 +1,6 @@
 /*
- * The template editor's behaviour (097 §D) — the draft lifecycle, the render-context rail
- * and the preview call.
+ * The template editor's behaviour (097 §D) — the render-context rail and the preview call.
+ * (The draft lifecycle half left in 102: Release / Purge draft are §4.3d dialogs now.)
  *
  * It was a ~135-line `<script th:inline="javascript">` in templates/templates/editor.html,
  * the only inline script body in the app. Being inline it was outside
@@ -10,8 +10,6 @@
  * URL — which §2.1 gives to htmx, not to fetch.
  *
  * What the file talks to, and how (§2.1):
- *   - `/api/v1/templates/release` and `/api/v1/templates/draft/discard` by `fetch`, with the
- *     `DP-CSRF-Token` header from the ONE reader (js/csrf.js) and the `If-Match` draft hash;
  *   - `/partials/templates/render` through `htmx.ajax`, like the pipeline editor's node-SQL
  *     seam (pipeline-editor/init.js) — a partial is a fragment for htmx to swap, and going
  *     through htmx is also what makes the CSRF header the layout's job rather than this
@@ -47,86 +45,10 @@
     return (page && page.getAttribute("data-template-id")) || "";
   }
 
-  function toast(variant, title, message) {
-    if (typeof window !== "undefined" && window.DpToast) window.DpToast.show(variant, title, message);
-  }
-
-  function csrfToken() {
-    return typeof window !== "undefined" && window.DpCsrf ? window.DpCsrf.token() : "";
-  }
-
-  /* ------------------------------------------------------------------ the draft lifecycle */
-
-  /**
-   * versioning §5.3/§5.4: release and discard are hash-guarded POSTs to the REST surface,
-   * through the same CSRF double-submit pair every cookie-authenticated fetch uses.
-   *
-   * Discard asks first — and asks IN THE PAGE (`#tpl-discard-confirm`, the house backdrop +
-   * `.app-modal` idiom), because a `window.confirm` is a browser dialog the product cannot
-   * style, cannot test through the browser suite and cannot dismiss from its own code.
-   */
-  function lifecycle(action) {
-    if (action === "discard") {
-      openConfirm();
-      return null;
-    }
-    return submit("release");
-  }
-
-  function openConfirm() {
-    var modal = byId("tpl-discard-confirm");
-    if (modal) modal.classList.remove("u-backdrop-hidden");
-  }
-
-  function closeConfirm() {
-    var modal = byId("tpl-discard-confirm");
-    if (modal) modal.classList.add("u-backdrop-hidden");
-  }
-
-  function confirmDiscard() {
-    closeConfirm();
-    return submit("discard");
-  }
-
-  /**
-   * §9.6: the template name never travels in a URL path segment (a `%2F` is refused 400
-   * below routing), so both verbs carry it in the JSON body.
-   */
-  function submit(action) {
-    var btn = byId(action === "release" ? "tpl-release-draft" : "tpl-discard-draft");
-    if (!btn) return null;
-    var id = btn.getAttribute("data-id") || templateId();
-    var hash = btn.getAttribute("data-hash");
-    btn.disabled = true;
-    var url = action === "release" ? "/api/v1/templates/release" : "/api/v1/templates/draft/discard";
-    return fetch(url, {
-      method: "POST",
-      headers: { "DP-CSRF-Token": csrfToken(), "If-Match": hash, "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ name: id }),
-    })
-      .then(function (response) {
-        if (response.ok) {
-          if (typeof window !== "undefined" && window.location) window.location.reload();
-          return null;
-        }
-        return response
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (err) {
-            throw new Error((err && err.error && err.error.message) || "HTTP " + response.status);
-          });
-      })
-      .catch(function (err) {
-        btn.disabled = false;
-        toast("danger", action === "release" ? "Release refused" : "Discard refused", err.message);
-        return null;
-      });
-  }
-
-  /* ------------------------------------------------------------------ the context rail */
+  /* The draft lifecycle (Release / Discard) that this file carried from 097 §D is gone:
+     since 102 those buttons open the §4.3d dialogs (`#te-dialog`, js/lifecycle-dialog.js),
+     which own the confirm, the CSRF header and the If-Match hash. What stays here is the
+     render-context rail, the tab state and the preview call. */
 
   /** The tab state is CLASSES, not styles written onto the elements from script. */
   function switchTab(tab) {
@@ -273,9 +195,6 @@
   }
 
   var api = {
-    lifecycle: lifecycle,
-    confirmDiscard: confirmDiscard,
-    closeConfirm: closeConfirm,
     switchTab: switchTab,
     addContextRow: addContextRow,
     removeContextRow: removeContextRow,
@@ -292,7 +211,6 @@
     window.TplLifecycle = api;
     // The page's `onclick` attributes call these by name; they are the file's public
     // surface as much as `TplLifecycle` is.
-    window.tplLifecycle = lifecycle;
     window.switchTab = switchTab;
     window.addContextRow = addContextRow;
     window.removeContextRow = removeContextRow;

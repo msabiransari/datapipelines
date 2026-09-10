@@ -70,6 +70,7 @@ class PipelineDraftService(
         canonical: String,
         expectedHash: String,
         actor: UUID,
+        via: WriteSurface,
     ): DraftWrite {
         // §5.5: drafts are an authoring capability — a promotion receiver refuses at the
         // write path, fail-closed, before anything is read or written.
@@ -92,14 +93,14 @@ class PipelineDraftService(
 
         val existingDraft = pipelines.findDraftDetail(workspaceId, pipelineId)
         if (existingDraft != null) {
-            pipelines.writeDraft(workspaceId, pipelineId, canonical, expectedHash, actor)?.let {
+            pipelines.writeDraft(workspaceId, pipelineId, canonical, expectedHash, actor, via)?.let {
                 return DraftWrite(record, it, canonical)
             }
             // No rows: either the hash was stale, or the draft was discarded mid-write and
             // this caller may become the new first writer — fall through to the create
             // branch, whose guard decides.
         }
-        val created = pipelines.createDraft(workspaceId, pipelineId, canonical, expectedHash, actor)
+        val created = pipelines.createDraft(workspaceId, pipelineId, canonical, expectedHash, actor, via)
         if (created?.status == PipelineVersionStatus.RELEASED) {
             // A no-op write (versioning §5.1): the incoming body already equals the
             // released one, so no draft was created and no version number was consumed.
