@@ -85,6 +85,8 @@ class FlywayMigrationIntegrationTest {
                 "18|draft first create|true",
                 // 101 — the version lifecycle: discard stamps + the is_deleted retirement.
                 "19|version lifecycle|true",
+                // 109 §A — the per-table lake view-creation outcome columns (both NULL = healthy).
+                "20|lake table view errors|true",
             )
     }
 

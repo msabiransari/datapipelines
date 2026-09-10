@@ -289,7 +289,7 @@ class NodeRunnerTest {
     // ------------------------------- lake table availability (109 §A, datasources.md §8C.2)
 
     /** An in-memory LAKE datasource — the refusal under test fires at CONNECT, before any lease. */
-    private fun lakeDatasource(name: String) = Datasource(name, name, Dialect.LAKE, "jdbc:duckdb:")
+    private fun lakeDatasource(name: String) = Datasource(name = name, displayName = name, dialect = Dialect.LAKE, jdbcUrl = "jdbc:duckdb:")
 
     @Test
     fun `a node referencing a broken lake table fails lake_table_unavailable before connecting`() =
