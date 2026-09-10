@@ -67,6 +67,9 @@ class PipelineEditorController(
 
         model.addAttribute("pipelineJson", pipelineJson)
         model.addAttribute("pipelineId", id)
+        // 110 §C: the phone band above the editor names the entity (the JSON blob is
+        // data for the scripts, not something a template can render a name out of).
+        model.addAttribute("pipelineName", record.displayName)
         model.addAttribute("hasDraft", draft != null)
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
