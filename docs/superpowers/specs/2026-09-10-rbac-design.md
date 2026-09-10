@@ -1,6 +1,6 @@
 # Design: RBAC — capability moves into the workspace membership; five roles, one matrix, one sweep
 
-**Status:** RATIFIED v1.1 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
+**Status:** RATIFIED v1.2 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
 two rounds (§9) and lands **before the release tag** — the owner: "We are entering serious
 territory and I would like to tighten the security now rather than later."
 
@@ -12,8 +12,9 @@ rule), `mcp-server.md` (the key rule) and the skill (`error-codes.md`) when the 
 **What exists today, so the delta is exact** (verified in source 2026-09-10): workspaces
 isolate pipelines, templates, executions, endpoints and keys (`V4__workspaces_rekey`);
 `workspace_members(workspace_id, user_id, role)` with `role IN ('owner','member')` carrying no
-capability; capability is the user's GLOBAL `users.scopes` (`read | execute | author | admin`)
-+ `users.is_admin`; membership is an orthogonal yes/no check in the same interceptor;
+capability; capability is GLOBAL and derived in Kotlin — `JwtService.scopesFor(user)`: every non-admin
+user is a global `author`, `is_admin` is `admin` (there is NO `users.scopes` column; 112 found
+the record's earlier claim of one false — only `api_keys.scopes` exists); membership is an orthogonal yes/no check in the same interceptor;
 `ScopeMatrix` maps every REST operation class and every MCP tool to a minimum scope, drift-
 tested against `auth.md §7.6`; keys are pinned to one workspace with scopes ⊆ issuer's; the
 session JWT carries `active_workspace`, the rail has a switcher, `DP-Workspace: <name>`
@@ -26,7 +27,7 @@ global); provisioning modes `auto-per-user | self-serve | closed` (`workspaces d
 
 | # | Decision | Rationale (the owner's words where they were) |
 |---|---|---|
-| **D-R1** | **Capability lives in the membership, not the user.** A person has a role per workspace; `users.scopes` goes away except that `is_admin` becomes **super admin**. | "A user may be a viewer in a workspace but author in another." |
+| **D-R1** | **Capability lives in the membership, not the user.** A person has a role per workspace; the global-author derivation (`JwtService.scopesFor`) goes away and `is_admin` becomes **super admin**. | "A user may be a viewer in a workspace but author in another." |
 | **D-R2** | **Five roles.** `viewer` → `author` → `promoter` (release only) / `workspace admin` (the old owner) → `super admin` (instance). Roles are **additive flags on the membership row** (`author`, `promoter`, `admin`; a member with no flags is a viewer), so "author who also releases" and "DevOps who only releases" are both one row. | Promoter: "They are the DevOps guys — can only release." Workspace admin: "convert owner to workspace admin and call admin super admin." |
 | **D-R3** | **Viewers execute.** Read everything in the workspace, run pipelines, read results, probe read-only SQL. Cannot modify. | "Viewer means he can do everything read-only… executing them should be fine." |
 | **D-R4** | **Authors own the authoring verbs including discard / restore / switch / purge.** Only `release` and `promote` are withheld. | "These actions are also authoring. We are safe because the system does not allow purging of a release." |
@@ -39,7 +40,7 @@ global); provisioning modes `auto-per-user | self-serve | closed` (`workspaces d
 | **D-R11** | **Workspaces are created by super admins.** `auto-per-user` and `self-serve` provisioning go; the out-of-the-box workspace is **`demo`**, and every social-login user becomes a **viewer of `demo`** on first login. Personal workspaces are removed. | "Only workspace which comes out of the box is demo and every user who logs in using social will be a member of demo workspace as viewer." |
 | **D-R12** | **Keys are issued by authors and above**, scope ≤ the issuer's capability in that workspace, re-checked on every request against the issuer's CURRENT membership (a demoted or removed issuer's keys die with the change). | "Allow author to be able to do that. In higher environments there won't be an author but admins anyway." |
 | **D-R13** | **Viewers exist on non-dev servers** (support reads executions); the hardened posture keeps refusing authoring writes as today — roles and posture are two checks, neither replaces the other. | "I like the idea of having viewers on non-dev." |
-| **D-R14** | **Migration**: `owner → workspace admin`, `member → author`; `users.scopes` dropped; `is_admin → super admin`; existing personal workspaces stay as ordinary workspaces (their sole member becomes its admin); `global` datasources become granted-to-all-existing-workspaces rows. | Ruled "yes" on the migration table. |
+| **D-R14** | **Migration**: `owner → workspace admin`, `member → author` (a PRESERVATION — every pre-V23 member already held the whole authoring surface through the global derivation, so anything less would silently remove capability on upgrade); the global derivation removed; `is_admin → super admin`; existing personal workspaces stay as ordinary workspaces (their sole member becomes its admin); `global` datasources become granted-to-all-existing-workspaces rows. | Ruled "yes" on the migration table. |
 
 ---
 
@@ -122,11 +123,11 @@ probe — the 404 rule is about what a workspace CONTAINS.
 
 ```sql
 CREATE TABLE datasource_workspaces (
-    datasource_id UUID NOT NULL REFERENCES datasources(id),
-    workspace_id  UUID NOT NULL REFERENCES workspaces(id),
-    granted_by    UUID NOT NULL REFERENCES users(id),
-    granted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (datasource_id, workspace_id)
+    datasource_name TEXT        NOT NULL REFERENCES datasources(name),   -- datasources' PK is the NAME (V1 §4.10), not an id
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),
+    granted_by      UUID        NOT NULL REFERENCES users(id),           -- backfill: datasources.created_by, the honest actor
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (datasource_name, workspace_id)
 );
 ```
 
@@ -209,6 +210,7 @@ switcher lists active memberships; super admins see every active workspace.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-10 | v1.2 | 112 handback | Two record errors corrected from the code: there is no `users.scopes` column (capability was Kotlin-derived); `datasources` is keyed by `name`, so the grant table is `datasource_name`; `granted_by` backfills from `created_by`. |
 | 2026-09-10 | v1.1 | 112 (in flight) | §3: the sweep's invariant restated as "the response must not depend on whether the foreign row exists" (two calls, matching status + body fingerprint); user ids excluded from the substitution table. |
 | 2026-09-10 | v1.0 | owner ratification | O-1–O-4 ruled (§10); status RATIFIED; prompt 112 is round 1. |
 | 2026-09-10 | v0.1 | orchestrator, after the owner's rulings | Initial record: fourteen decisions from the conversation, the role table, the two-axis matrix, the 404 sweep, datasource grants, provisioning + demo, deactivation, rounds, open items. |
