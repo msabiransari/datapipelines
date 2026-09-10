@@ -81,7 +81,6 @@ class EndpointKeyService(
                 ownerId = principal.userId,
                 name = name,
                 scopes = scopes,
-                creatorScopes = principal.scopes,
                 workspaceId = workspaceId,
                 expiresAt = expiresAt,
                 kind = kind,

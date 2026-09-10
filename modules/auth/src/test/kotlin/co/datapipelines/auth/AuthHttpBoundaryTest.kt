@@ -195,7 +195,7 @@ class AuthHttpBoundaryTest {
         // that bypass off the `admin` SCOPE, which no key may hold any more (O-2).
         readKey =
             apiKeyService
-                .issue(superAdminIssuer, user.id, "read-key", setOf(Scope.READ), setOf(Scope.AUTHOR), DEFAULT_WORKSPACE_ID)
+                .issue(superAdminIssuer, user.id, "read-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
                 .plaintext
         expiredKey =
             apiKeyService
@@ -204,12 +204,11 @@ class AuthHttpBoundaryTest {
                     user.id,
                     "expired-key",
                     setOf(Scope.READ),
-                    setOf(Scope.AUTHOR),
                     DEFAULT_WORKSPACE_ID,
                     Instant.now().minusSeconds(3600),
                 ).plaintext
         val revocable =
-            apiKeyService.issue(superAdminIssuer, user.id, "revoked-key", setOf(Scope.READ), setOf(Scope.AUTHOR), DEFAULT_WORKSPACE_ID)
+            apiKeyService.issue(superAdminIssuer, user.id, "revoked-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
         apiKeyService.revoke(revocable.plaintext.substringBefore('.'), user.id)
         revokedKey = revocable.plaintext
         session = jwtService.issue(user)

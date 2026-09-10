@@ -44,6 +44,16 @@ class ApiKeyServiceTest {
      * a person with a role in the pinned workspace, not by a bare user id. An AUTHOR here,
      * which is the minimum O-2 allows.
      */
+
+    /** A key-borne issuer holding only `read` — the escalation guard's other side (§7.4). */
+    private fun readKeyIssuer() =
+        issuer.copy(
+            scopes = setOf(Scope.READ),
+            authMethod = AuthMethod.API_KEY,
+            keyId = "dpk_READONLYISSUER",
+            workspaceName = "acme",
+        )
+
     private val issuer =
         AuthenticatedPrincipal(
             userId = ownerId,
@@ -107,7 +117,7 @@ class ApiKeyServiceTest {
     @Test
     fun `issue returns a dpk_ plaintext and persists only the hash`() {
         echoInsert()
-        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), setOf(Scope.AUTHOR), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
 
         issued.plaintext shouldStartWith "dpk_"
         issued.record.id shouldStartWith "dpk_"
@@ -119,7 +129,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a freshly issued key validates and resolves the owner principal`() {
         echoInsert()
-        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.EXECUTE), setOf(Scope.AUTHOR), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.EXECUTE), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -134,7 +144,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a wrong secret for a real key id is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -145,7 +155,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a revoked key is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
 
         shouldThrow<ApiKeyInvalidException> { service.validate(issued.plaintext) }
@@ -154,7 +164,7 @@ class ApiKeyServiceTest {
     @Test
     fun `an expired key maps to api_key expired`() {
         echoInsert()
-        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record.copy(expiresAt = Instant.now().minusSeconds(60))
 
         shouldThrow<ApiKeyExpiredException> { service.validate(issued.plaintext) }
@@ -163,7 +173,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a key whose owner is inactive is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner().copy(isActive = false)
 
@@ -179,7 +189,7 @@ class ApiKeyServiceTest {
     @Test
     fun `escalation guard - a read creator cannot mint an author key (§7-4)`() {
         shouldThrow<ScopeInsufficientException> {
-            service.issue(issuer, ownerId, "Escalate", setOf(Scope.AUTHOR), creatorScopes = setOf(Scope.READ), workspaceId = workspaceId)
+            readKeyIssuer().let { service.issue(it, ownerId, "Escalate", setOf(Scope.AUTHOR), workspaceId = workspaceId) }
         }
     }
 
@@ -194,7 +204,7 @@ class ApiKeyServiceTest {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
 
-        withDefaults.issue(issuer, ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
+        withDefaults.issue(issuer, ownerId, "Claude", emptySet(), workspaceId = workspaceId)
 
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.EXECUTE)
     }
@@ -208,7 +218,7 @@ class ApiKeyServiceTest {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
 
-        withDefaults.issue(issuer, ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
+        withDefaults.issue(issuer, ownerId, "Claude", emptySet(), workspaceId = workspaceId)
 
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.READ)
     }
@@ -231,7 +241,7 @@ class ApiKeyServiceTest {
         }
         val logged =
             captureWarnings(ApiKeyService::class.java) {
-                withDefaults.issue(issuer, ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
+                withDefaults.issue(issuer, ownerId, "Claude", emptySet(), workspaceId = workspaceId)
             }
 
         logged.any { it.contains("nonsense") } shouldBe true
@@ -256,7 +266,6 @@ class ApiKeyServiceTest {
                     ownerId = ownerId,
                     name = "uat receiver",
                     scopes = emptySet(),
-                    creatorScopes = setOf(Scope.AUTHOR),
                     workspaceId = workspaceId,
                     kind = ApiKeyKind.SERVER,
                 )
@@ -283,7 +292,6 @@ class ApiKeyServiceTest {
                 // `admin` here is NOT the O-2 refusal: a SCOPELESS kind never reaches the scope
                 // check at all, because its requested set is emptied before it.
                 scopes = setOf(Scope.ADMIN),
-                creatorScopes = setOf(Scope.ADMIN),
                 workspaceId = workspaceId,
                 kind = ApiKeyKind.SERVER,
             )
@@ -305,7 +313,6 @@ class ApiKeyServiceTest {
                 ownerId,
                 "uat receiver",
                 emptySet(),
-                setOf(Scope.ADMIN),
                 workspaceId,
                 kind = ApiKeyKind.SERVER,
             )
@@ -328,12 +335,11 @@ class ApiKeyServiceTest {
                 ownerId,
                 "uat receiver",
                 emptySet(),
-                setOf(Scope.ADMIN),
                 workspaceId,
                 kind = ApiKeyKind.SERVER,
             )
         echoInsert()
-        val user = service.issue(issuer, ownerId, "agent", setOf(Scope.READ), setOf(Scope.ADMIN), workspaceId)
+        val user = service.issue(issuer, ownerId, "agent", setOf(Scope.READ), workspaceId)
         every { repo.findById(server.record.id) } returns server.record
         every { repo.findById(user.record.id) } returns user.record
         every { userService.snapshot(ownerId) } returns activeOwner()
@@ -355,7 +361,6 @@ class ApiKeyServiceTest {
                 ownerId,
                 "uat receiver",
                 emptySet(),
-                setOf(Scope.ADMIN),
                 workspaceId,
                 kind = ApiKeyKind.SERVER,
             )
@@ -374,7 +379,6 @@ class ApiKeyServiceTest {
                 ownerId,
                 "uat receiver",
                 emptySet(),
-                setOf(Scope.ADMIN),
                 workspaceId,
                 kind = ApiKeyKind.SERVER,
             )

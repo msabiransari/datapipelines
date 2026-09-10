@@ -4,6 +4,7 @@ import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterAll
@@ -403,7 +404,8 @@ class FlywayMigrationIntegrationTest {
                 """.trimIndent(),
             ) { it.getString(1) }
 
-        tables shouldContainExactly
+        // In-any-order for the same collation reason as the index assertion below.
+        tables shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys",
                 "audit_log",
@@ -445,7 +447,13 @@ class FlywayMigrationIntegrationTest {
                 """.trimIndent(),
             ) { it.getString(1) }
 
-        indexes shouldContainExactly
+        // In-any-order, deliberately. The CONTENT is the contract — "exactly these indexes and
+        // no others" — and the ORDER is Postgres's `en_US.UTF-8` collation, which does not
+        // sort `_` where codepoint order would: `datasource_workspaces` versus `datasources`
+        // lands differently in the database than in a Kotlin list literal. Asserting the order
+        // too would make this guard fail for a reason that has nothing to do with indexes,
+        // which is the collation trap this project has already paid for once.
+        indexes shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys.api_keys_pkey",
                 "api_keys.idx_api_keys_endpoint_kind",
@@ -455,10 +463,10 @@ class FlywayMigrationIntegrationTest {
                 "audit_log.idx_audit_event",
                 "audit_log.idx_audit_timestamp",
                 "audit_log.idx_audit_user",
-                "datasources.datasources_pkey",
-                "datasources.idx_datasources_active",
                 "datasource_workspaces.datasource_workspaces_pkey",
                 "datasource_workspaces.idx_datasource_workspaces_workspace",
+                "datasources.datasources_pkey",
+                "datasources.idx_datasources_active",
                 "endpoint_key_bindings.endpoint_key_bindings_pkey",
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",

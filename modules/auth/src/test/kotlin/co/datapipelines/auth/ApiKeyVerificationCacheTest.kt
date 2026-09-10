@@ -72,7 +72,7 @@ class ApiKeyVerificationCacheTest {
         }
         every { userService.snapshot(ownerId) } returns
             User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
-        val issued = service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        val issued = service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         return issued
     }

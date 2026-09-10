@@ -53,7 +53,7 @@ class RevocationTtlTest {
         }
         every { userService.snapshot(ownerId) } returns
             User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
-        return service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
+        return service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), workspaceId)
     }
 
     @Test

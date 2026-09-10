@@ -37,7 +37,7 @@ class ApiKeyService(
     /**
      * Issues a key for [ownerId], pinned to [workspaceId] (D3). Two guards, both
      * server-side: the requested [scopes] MUST be a subset of the creator's effective
-     * scopes ([creatorScopes]) — the privilege-escalation guard (§7.4) — and the creator
+     * scopes ([ceilingFor] the issuer) — the privilege-escalation guard (§7.4) — and the creator
      * MUST be a member of [workspaceId] (the §7.4 workspace restriction, design §5.2),
      * else [WorkspaceMembershipRequiredException]. No default on [workspaceId]: issuance
      * without an explicit workspace decision must not compile.
@@ -51,7 +51,6 @@ class ApiKeyService(
         ownerId: UUID,
         name: String,
         scopes: Set<Scope>,
-        creatorScopes: Set<Scope>,
         workspaceId: UUID,
         expiresAt: Instant? = null,
         kind: ApiKeyKind = ApiKeyKind.DEFAULT,
@@ -66,9 +65,10 @@ class ApiKeyService(
         // INSTANCE verb. Refused by name so a caller learns which scopes exist rather than
         // silently receiving a weaker key than it asked for.
         requested.firstOrNull { it !in KEY_SCOPES }?.let { throw KeyScopeUnavailableException(it) }
-        if (!ScopeMatrix.keyScopesWithinCreator(requested, creatorScopes)) {
+        val ceiling = ceilingFor(issuer)
+        if (!ScopeMatrix.keyScopesWithinCreator(requested, ceiling)) {
             val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
-            throw ScopeInsufficientException(required = overreach, held = creatorScopes)
+            throw ScopeInsufficientException(required = overreach, held = ceiling)
         }
         // §7.7 — a SERVER key is the promotion receiver's whole credential: whoever holds it can
         // write pipelines, templates and datasource references into this deployment. Minting one
@@ -106,6 +106,27 @@ class ApiKeyService(
         )
         return IssuedApiKey(record = record, plaintext = fullKey)
     }
+
+    /**
+     * The most a key this issuer mints may hold (§7.4, D-R12).
+     *
+     * It used to be the creator's own SCOPE set, passed in by the caller. That stopped being
+     * answerable in RBAC round 1: a session carries no scopes at all (D-R1), so the subset
+     * guard compared every request against the empty set and **no signed-in person could mint
+     * any key**. Found by `JarSmokeE2eTest`, whose whole subject is a real jar minting one.
+     *
+     * The honest ceiling is the one the design states: *scope ≤ the issuer's capability in
+     * that workspace*. Issuance already requires `author` there (O-2 — viewers never mint
+     * keys), so a human's ceiling is every scope a key may hold. A KEY minting a key is capped
+     * additionally by its OWN scopes, which is the original privilege-escalation guard and the
+     * half that must not be lost: a `read` key must never mint an `author` one.
+     */
+    private fun ceilingFor(issuer: AuthenticatedPrincipal): Set<Scope> =
+        if (issuer.authMethod == AuthMethod.API_KEY) {
+            Scope.effective(issuer.scopes).intersect(KEY_SCOPES)
+        } else {
+            KEY_SCOPES
+        }
 
     /**
      * The configured default scopes for a new key, falling back to `read` when the
