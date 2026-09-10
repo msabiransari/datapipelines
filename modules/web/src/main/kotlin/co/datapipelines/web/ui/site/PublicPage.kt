@@ -36,6 +36,7 @@ object PublicPage {
         response: HttpServletResponse,
         page: SitePage,
         toolCount: Int,
+        faq: List<FaqEntry> = emptyList(),
     ): String {
         response.setHeader(
             HttpHeaders.CACHE_CONTROL,
@@ -51,6 +52,10 @@ object PublicPage {
         // Every page's footer links the six engine pages, so the registry — not seven
         // hand-written <li>s — is what the link graph is built from.
         model.addAttribute("engines", SitePages.ENGINES)
+        // Site v2: the page's FAQ, rendered twice from one list — the visible <details> and
+        // the FAQPage JSON-LD (FaqJsonLd is the only writer of that block). Empty = no block.
+        model.addAttribute("faqEntries", faq)
+        model.addAttribute("faqJsonLd", if (faq.isEmpty()) "" else FaqJsonLd.render(faq))
         return page.view
     }
 }

@@ -95,7 +95,7 @@ class SitePagesController {
     fun dpLake(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.DP_LAKE, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.DP_LAKE, toolCount(), SiteFaqs.DP_LAKE)
 
     /**
      * The tool count, from the compile-time catalog rather than an injected `List<McpTool>`:
@@ -103,4 +103,54 @@ class SitePagesController {
      * list would render "0 tools" on any deployment without the engine.
      */
     private fun toolCount(): Int = McpToolCatalog.NAMES.size
+
+    // ---- Site v2 (2026-09-09): the intent pages. Same shape: GET, anonymous, no DB read.
+    @GetMapping("/faq")
+    fun faq(
+        model: Model,
+        response: HttpServletResponse,
+    ): String {
+        model.addAttribute("faqGroups", SiteFaqs.ALL)
+        return PublicPage.render(model, response, SitePages.FAQ, toolCount(), SiteFaqs.ALL.flatMap { it.second })
+    }
+
+    @GetMapping("/roadmap")
+    fun roadmap(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.ROADMAP, toolCount())
+
+    @GetMapping("/security")
+    fun security(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.SECURITY, toolCount(), SiteFaqs.AGENTS_AND_SECURITY)
+
+    @GetMapping("/published-api")
+    fun publishedApi(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.PUBLISHED_API, toolCount(), SiteFaqs.APIS_AND_OPERATIONS.take(2))
+
+    @GetMapping("/mcp-tools")
+    fun mcpTools(
+        model: Model,
+        response: HttpServletResponse,
+    ): String {
+        model.addAttribute("toolGroups", McpToolGroups.groups())
+        model.addAttribute("mutatingCount", McpToolCatalog.MUTATING.size)
+        return PublicPage.render(model, response, SitePages.MCP_TOOLS, toolCount())
+    }
+
+    @GetMapping("/tableau")
+    fun tableau(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.TABLEAU, toolCount(), SiteFaqs.TABLEAU)
+
+    @GetMapping("/tableau/governed-dataset")
+    fun tableauGovernedDataset(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.TABLEAU_GOVERNED_DATASET, toolCount())
 }

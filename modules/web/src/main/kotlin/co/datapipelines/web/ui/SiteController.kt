@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.ui.site.PublicPage
+import co.datapipelines.web.ui.site.SiteFaqs
 import co.datapipelines.web.ui.site.SitePages
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Controller
@@ -35,5 +36,5 @@ class SiteController {
     fun home(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.HOME, McpToolCatalog.NAMES.size)
+    ): String = PublicPage.render(model, response, SitePages.HOME, McpToolCatalog.NAMES.size, SiteFaqs.HOME)
 }

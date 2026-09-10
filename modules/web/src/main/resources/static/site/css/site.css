@@ -1,8 +1,104 @@
 /* ============================================================
-   SITE STYLES — datapipelines.co marketing site
-   Token-only: every value references the vendored design
-   tokens. No hex colors, no pixel literals.
+   SITE STYLES — datapipelines.co marketing site (v2, "Console")
+   A layer over the vendored design system: every spacing, radius,
+   motion and surface value references its tokens. The site adds
+   exactly one identity of its own — the amber accent and the
+   Manrope / JetBrains Mono faces — declared ONCE in the block
+   below and referenced everywhere else. Theme is a stylesheet
+   swap (site.js), so every rule here must read in light, dark
+   and auto; the accent is chosen to hold on both grounds.
    ============================================================ */
+
+/* --------------------------------------------------------
+   Faces — self-hosted (VendoredFontsAuditTest: no font host,
+   ever). Relative URLs: this file is served at /site/css/.
+   `optional` like app.css: a late face must never reflow.
+   -------------------------------------------------------- */
+
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: optional;
+  src: url("../../vendor/fonts/manrope/manrope-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: optional;
+  src: url("../../vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("../../vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("../../vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+/* --------------------------------------------------------
+   Site identity tokens — the ONE place the site departs from
+   the design system's palette. Amber reads on the dark ground
+   (contrast 9.6:1 on --_surface-page) and on the light one
+   (the -ink variant carries text on amber).
+   -------------------------------------------------------- */
+
+:root {
+  --site-font-sans: "Manrope", var(--font-sans);
+  --site-font-mono: "JetBrains Mono", var(--font-mono);
+  --site-accent: #e39b1a;
+  --site-accent-hover: #f2b13a;
+  --site-accent-ink: #14110a;
+  --site-accent-soft: rgba(227, 155, 26, 0.14);
+  --site-accent-line: rgba(227, 155, 26, 0.38);
+  --site-glow: radial-gradient(60% 55% at 50% 0%, var(--site-accent-soft), transparent 70%);
+  --site-tracking-display: -0.03em;
+  --site-measure: 62ch;
+}
+
+html {
+  font-family: var(--site-font-sans);
+}
+
+body {
+  font-family: var(--site-font-sans);
+}
+
+h1, h2, h3, h4,
+.ds-display, .ds-headline {
+  font-family: var(--site-font-sans);
+  letter-spacing: var(--site-tracking-display);
+  text-wrap: balance;
+}
+
+h1 { font-weight: 800; }
+h2, h3 { font-weight: var(--weight-bold); }
+
+code, pre, kbd, .mono {
+  font-family: var(--site-font-mono);
+}
+
+a {
+  color: var(--text-link);
+}
+
+::selection {
+  background: var(--site-accent);
+  color: var(--site-accent-ink);
+}
 
 /* --------------------------------------------------------
    Layout primitives
@@ -46,12 +142,28 @@ html {
 }
 
 .kicker {
+  font-family: var(--site-font-mono);
   font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
-  color: var(--accent-info);
+  color: var(--site-accent);
   margin-bottom: var(--space-2);
+}
+
+/* The eyebrow pill above a hero title: mono, amber-lined, one line of fact. */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--site-accent);
+  background: var(--site-accent-soft);
+  border: var(--space-px) solid var(--site-accent-line);
+  border-radius: var(--radius-pill);
 }
 
 code {
@@ -125,7 +237,7 @@ code {
 .brand svg {
   width: var(--icon-lg);
   height: var(--icon-lg);
-  color: var(--accent-info);
+  color: var(--site-accent);
 }
 
 .theme-toggle {
@@ -248,6 +360,7 @@ code {
 
 .hero {
   padding-block: var(--space-12) var(--space-12);
+  background: var(--site-glow);
 }
 
 @media (min-width: 48rem) {
@@ -298,7 +411,29 @@ code {
   border-radius: var(--radius-lg);
   border: var(--space-px) solid var(--border-default);
   background: var(--surface-inset);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-xl, var(--shadow-lg));
+}
+
+/* Centred hero (home, hubs): the title as the thesis, the product below it. */
+.hero-center {
+  text-align: center;
+}
+.hero-center .hero-sub {
+  margin-inline: auto;
+  max-width: 40rem;
+}
+.hero-center .btn-row {
+  justify-content: center;
+}
+.hero-center h1 {
+  margin-top: var(--space-4);
+  margin-inline: auto;
+  max-width: 20ch;
+  font-size: clamp(var(--text-3xl), 5vw, calc(var(--text-4xl) * 1.35));
+  line-height: var(--leading-tight);
+}
+.hero-center .hero-shot {
+  margin-top: var(--space-10);
 }
 
 .hero-shot figcaption {
@@ -573,14 +708,22 @@ code {
   gap: var(--gap-sm);
   padding: var(--space-5);
   background: var(--surface-default);
-  border: var(--space-px) solid var(--border-default);
+  border: var(--space-px) solid var(--border-subtle);
   border-radius: var(--radius-lg);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+}
+.card:hover {
+  border-color: var(--site-accent-line);
+}
+.card h3 {
+  font-size: var(--text-lg);
 }
 
 .glyph {
   width: var(--icon-xl);
   height: var(--icon-xl);
-  color: var(--accent-info);
+  color: var(--site-accent);
 }
 
 .card h3 {
@@ -706,7 +849,29 @@ code {
   border: var(--space-px) solid var(--border-default);
   border-radius: var(--radius-lg);
   background: var(--surface-inset);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
+}
+
+/* A screenshot slot the owner has not shot yet: same frame, same ratio, a
+   mono label naming the capture (data-shot) — the page never reflows when
+   the image arrives, and a reviewer sees exactly what will be there. */
+.shot-placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: var(--shot-ratio, 16 / 10);
+  padding: var(--space-6);
+  border: var(--space-px) dashed var(--site-accent-line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+.shot-placeholder b {
+  display: block;
+  color: var(--site-accent);
+  margin-bottom: var(--space-2);
 }
 
 .shot-scroll:focus-visible {
@@ -839,6 +1004,245 @@ code {
   margin-top: var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------
+   Proof strip — four facts under the hero, mono keys, bold values.
+   -------------------------------------------------------- */
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-md);
+  padding-block: var(--space-6);
+  border-top: var(--space-px) solid var(--border-subtle);
+  border-bottom: var(--space-px) solid var(--border-subtle);
+}
+
+@media (min-width: 48rem) {
+  .strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.strip-k {
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--site-accent);
+}
+
+.strip-v {
+  margin-top: var(--space-1);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--site-tracking-display);
+}
+
+.strip-v b {
+  font-size: var(--text-2xl);
+  margin-inline-end: var(--space-2);
+}
+
+/* --------------------------------------------------------
+   Story — the three numbered beats (ask → draft → release).
+   Numbers carry information: it IS a sequence.
+   -------------------------------------------------------- */
+
+.story {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gap-md);
+  margin-top: var(--space-8);
+}
+
+@media (min-width: 48rem) {
+  .story {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.story-step {
+  padding: var(--space-5);
+  background: var(--surface-default);
+  border: var(--space-px) solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.story-n {
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xs);
+  color: var(--site-accent);
+  margin-bottom: var(--space-2);
+}
+
+.story-step h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+}
+
+.story-step p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------
+   FAQ — native <details>, two columns wide, the answer in the
+   reading measure. The same list renders the FAQPage JSON-LD.
+   -------------------------------------------------------- */
+
+.faq {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 var(--gap-xl);
+  margin-top: var(--space-6);
+}
+
+@media (min-width: 64rem) {
+  .faq-2col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.faq details {
+  border-top: var(--space-px) solid var(--border-subtle);
+  padding-block: var(--space-3);
+}
+
+.faq details:last-child {
+  border-bottom: var(--space-px) solid var(--border-subtle);
+}
+
+.faq summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  align-items: baseline;
+  list-style: none;
+  cursor: pointer;
+  font-weight: var(--weight-bold);
+  min-height: 2.75rem;
+  line-height: var(--leading-snug);
+}
+
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq summary::after {
+  content: "+";
+  flex: none;
+  font-family: var(--site-font-mono);
+  color: var(--site-accent);
+}
+
+.faq details[open] summary::after {
+  content: "\2013";
+}
+
+.faq details > p,
+.faq details > ul {
+  margin: var(--space-2) 0 0;
+  max-width: var(--site-measure);
+  color: var(--text-secondary);
+}
+
+.faq-group {
+  margin-top: var(--space-8);
+}
+
+.faq-group h2 {
+  margin-bottom: var(--space-2);
+}
+
+/* --------------------------------------------------------
+   Status bands — shipped / next month / later. The tag is a
+   colourless mono chip; the meaning is in the word, never
+   only in a hue.
+   -------------------------------------------------------- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  border: var(--space-px) solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+}
+
+.status-shipped {
+  border-color: var(--site-accent-line);
+  color: var(--site-accent);
+  background: var(--site-accent-soft);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gap-md);
+  margin-top: var(--space-6);
+}
+
+@media (min-width: 64rem) {
+  .split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.split > div {
+  padding: var(--space-5);
+  background: var(--surface-default);
+  border: var(--space-px) solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.split h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0 0 var(--space-3);
+}
+
+.split ul {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  color: var(--text-secondary);
+}
+
+.split li {
+  margin-block: var(--space-2);
+}
+
+.split li b {
+  color: var(--text-primary);
+}
+
+.prose {
+  max-width: var(--site-measure);
+}
+
+.prose p, .prose li {
+  color: var(--text-secondary);
+  line-height: var(--leading-relaxed);
+}
+
+.prose h2 {
+  margin-top: var(--space-10);
+}
+
+.prose h3 {
+  margin-top: var(--space-6);
+}
+
+.dateline {
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 /* --------------------------------------------------------

@@ -62,63 +62,7 @@
     "description": "A self-hosted MCP server and pipeline engine for SQL databases: agents author declarative SQL pipelines against Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, and run them under scoped, audited, read-only-by-default credentials."
   }
   </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "Which SQL databases does the datapipelines.co MCP server support?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Seven dialects: Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB and H2. Postgres, SQL Server, SQLite, DuckDB and H2 ship in the published image; the MySQL and Oracle drivers are added by rebuilding with a Gradle profile or dropping the jar into lib/, because of their licenses. See the dialect catalog in docs/datasources.md section 4.1 and the driver matrix in docs/deployment.md section 3.5."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Can an AI agent write to my database through the MCP server?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Only where you allow it. A datasource flagged read-only refuses the three write-shaped uses in the pipeline contract - a DML node source, a DDL node source, and any node writing its output back to a datasource - at save time and again at execution time, against the live row. The documented deployment pattern is a SELECT-only database user as well, because the flag is contract and the credential is the guarantee. See docs/datasources.md section 5.7."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How does an agent authenticate to the MCP server?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "With an API key, and nothing else. The /mcp endpoint accepts DP-API-Key or Authorization: Bearer dpk_... and rejects browser session cookies outright. Keys are Argon2id-hashed, shown once, pinned to one workspace, carry hierarchical scopes read, execute, author and admin, and stop working within about a minute of revocation. See docs/auth.md section 7 and docs/mcp-server.md section 4.1."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is every MCP tool call audited?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. The dispatcher emits mcp.tool.called for every tool call and mcp.tool.write for every mutating one, into the same audit log that carries the login, API-key and datasource-decryption events. See docs/auth.md section 10.1 and docs/mcp-server.md section 14."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Can one pipeline join tables that live in two different databases?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. Each source is queried in place, its result set is staged into an in-memory H2 database created for that one execution, and the join runs there. The staging database is destroyed when the execution ends, so nothing is landed and no warehouse is involved. See docs/staging.md section 1."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is datapipelines.co self-hosted and open source?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Both. It is AGPL-3.0 licensed and runs on your own hardware as a Docker image or a plain JVM process, with Postgres for metadata and Redis for results. Credentials never leave your deployment. See docs/deployment.md."
-        }
-      }
-    ]
-  }
-  </script>
-</head>
+  </head>
 <body id="top">
   <a class="skip-link" href="#main">Skip to content</a>
 
@@ -130,33 +74,79 @@
   <main id="main">
 
     <!-- ============================ HERO ============================ -->
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="container hero-grid">
+    <!--/* Site v2 (direction B, owner 2026-09-09): the title is the thesis, in the searcher's
+         words — 073's research found nobody types the category name the old H1 carried. The
+         product is the hero image; the four facts under it are the proof strip. */-->
+    <section class="hero hero-center" aria-labelledby="hero-title">
+      <div class="container">
         <div class="hero-copy ds-animate-slide-up">
-          <h1 id="hero-title" class="ds-display">Agent-native Data Pipelines</h1>
-          <p class="hero-sub">Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).</p>
-          <!-- claim: docs/deployment.md Appendix B -->
-          <div class="code-block">
-            <pre><code>./app.sh --start --demo nyc,trade,lake</code></pre>
-            <button type="button" class="copy-btn" hidden>Copy</button>
-          </div>
-          <p class="hero-note">One command, three published sample-data families — NYC taxi trips, US trade, and <a th:href="@{/dp-lake}">dp-lake</a>: 24 months of rideshare trips as Parquet on S3, read in place. <code>--demo nyc</code> alone is the smallest useful stack.</p>
+          <!-- claim: docs/mcp-server.md §6.1, docs/deployment.md §10 -->
+          <p class="eyebrow">MCP server · <span th:text="${toolCount}">34</span> tools · AGPL-3.0 · one Docker image</p>
+          <h1 id="hero-title" class="ds-display">Your AI agent builds the data pipelines. You press release.</h1>
+          <p class="hero-sub">Connect Claude Code, Cursor or any MCP client to Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB and Parquet on S3 — read-only where you say, audited always, joined without a warehouse — and ship what it builds as versioned APIs.</p>
           <div class="btn-row">
-            <a class="btn btn-primary" th:href="@{/login}">Try Right Now</a>
-            <a class="btn btn-secondary" href="#demo">Get started</a>
+            <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add the MCP server</a>
+            <a class="btn btn-secondary" href="#demo">Run the demo</a>
             <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">
               <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M8 4v12m8-8v8M8 4a2 2 0 1 0 .01 0M8 4h5l3 3m0 0h2a2 2 0 1 1-.01 0M8 16a2 2 0 1 0 .01 0" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+                <path d="M8 4v12m8-8v8M8 4a2 2 0 1 0 .01 0M8 4h5l3 3m0 0h2a2 2 0 1 1-.01 0M8 16a2 2 0 1 0 .01 0" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               GitHub
             </a>
           </div>
         </div>
         <figure class="hero-shot ds-animate-fade-in">
-          <!-- screenshot: the pipeline editor on the seeded nyc/mobility/taxi_vs_rideshare pipeline after a SUCCESS run — untouched capture from `./gradlew siteShots` (098 §G). 093 could not take this one: the canvas painted every node, edge and label in --brand, and the driver refuses a brand-coloured canvas rather than photographing it (SiteShotsMain.canvasPaintsSanely). 758891c fixed the resolver; this is the first run the guard let through. -->
-          <img th:src="@{/site/img/editor-hero.png}" width="1440" height="1000" alt="The pipeline editor on nyc/mobility/taxi_vs_rideshare, version 1, released, after a completed run. The settings pane on the left shows the name, the display name &#39;Taxi vs rideshare, by borough, dry vs rainy&#39; and the description. On the canvas, six node cards: stage_taxi reading sample-trips over POSTGRES, stage_rideshare reading sample-lake over LAKE, stage_zones reading sample-reference over SQLITE, stage_rain reading sample-weather over MYSQL, a CALCULATOR node window_span deriving date_diff into window_span_days, and a join node of the same name as the pipeline, running in tempdb over H2. Each card carries a Done marker and its row count, and the edges are labelled with the rows flowing along them — 4,569 from the taxi stage, 8,003 from the rideshare stage, 263 from the zones stage, 31 from the rain stage. Under the graph the results dock is open on Results 12, beside Errors 0 and Events 15, with the rows themselves: borough, weather, taxi_trips, rideshare_trips, rideshare_share_pct, taxi_trips_per_day and rideshare_trips_per_day." loading="eager" fetchpriority="high">
-          <figcaption>One pipeline, four engines and a calculator, after a real run — every node showing the rows it produced, and the rows themselves in the dock beneath. Postgres, a data lake read in place, SQLite and MySQL, joined in one query.</figcaption>
+          <!-- screenshot: the pipeline editor on the seeded nyc/mobility/taxi_vs_rideshare pipeline after a SUCCESS run — a capture from `./gradlew siteShots`; replaced by the owner's post-testing capture (data-shot: editor-hero). -->
+          <img th:src="@{/site/img/editor-hero.png}" width="1440" height="1000" data-shot="editor-hero" loading="eager" fetchpriority="high" alt="The pipeline editor on nyc/mobility/taxi_vs_rideshare, version 1, released, after a completed run: five node cards on the canvas — four source nodes and a tempdb join — each showing the rows it produced, with the result dock open beneath showing the joined rows.">
+          <figcaption>One pipeline, four engines, after a real run — every node showing the rows it produced, and the rows themselves in the dock beneath.</figcaption>
         </figure>
+        <div class="strip">
+          <!-- claim: docs/datasources.md §4.1 -->
+          <div><div class="strip-k">Engines</div><div class="strip-v"><b>8</b>incl. S3 Parquet</div></div>
+          <!-- claim: docs/datasources.md §7 -->
+          <div><div class="strip-k">Credentials in the agent</div><div class="strip-v"><b>0</b>the server holds them</div></div>
+          <!-- claim: docs/versioning.md §3 -->
+          <div><div class="strip-k">Release</div><div class="strip-v"><b>1</b>human step, always</div></div>
+          <!-- claim: docs/auth.md §10 -->
+          <div><div class="strip-k">Audit</div><div class="strip-v"><b>every</b>call, by key</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ STORY ============================ -->
+    <!--/* Site v2: the owner's pattern — six figures for a Tableau workbook nobody can embed, a
+         dashboard rebuilt by hand in Angular, an API that was a second project. The API half
+         ships; the dashboard half is October 2026 and the copy says so. */-->
+    <section class="section" id="story" aria-labelledby="story-title">
+      <div class="container">
+        <p class="kicker">From data to an API in a day</p>
+        <h2 id="story-title" class="ds-headline">The chart was never the expensive part</h2>
+        <p class="section-lede">
+          Teams pay six figures for dashboards they cannot embed in their own product, then rebuild them by hand in
+          Angular against an API that does not exist yet — because the API was always a second project. Here the
+          dataset is a pipeline your agent authors across your databases, the API is one release away, and the
+          dashboards you embed are <a th:href="@{/roadmap}">next month</a>.
+        </p>
+        <div class="story">
+          <div class="story-step">
+            <div class="story-n">01 · Ask</div>
+            <!-- claim: docs/datasources.md §7C -->
+            <h3>Describe the dataset</h3>
+            <p>"Which rideshare company gains share on rainy days, by borough?" The agent reads schemas, catalogue statistics and indexes over MCP — never a row it is not allowed to.</p>
+          </div>
+          <div class="story-step">
+            <div class="story-n">02 · Draft</div>
+            <!-- claim: docs/versioning.md §3 -->
+            <h3>It builds, runs, and fixes</h3>
+            <p>Nodes on Postgres, MySQL and the lake; a join in the scratch database; a parameter for the quarter. It runs the draft, reads the failure, fixes the shape. It cannot release.</p>
+          </div>
+          <div class="story-step">
+            <div class="story-n">03 · Release</div>
+            <!-- claim: docs/rest-api.md §19 -->
+            <h3>You release and publish</h3>
+            <p>Review the graph, release v1, publish <code>/api/x/nyc/rain-share</code>, hand a partner a key scoped to that path. No service written, nothing deployed.</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -872,56 +862,28 @@
     <!-- ============================ ROADMAP ============================ -->
     <section class="section" id="roadmap" aria-labelledby="roadmap-title">
       <div class="container">
-        <p class="kicker">What's next</p>
+        <p class="kicker">What's next, with months on it</p>
         <h2 id="roadmap-title" class="ds-headline">Roadmap</h2>
-        <p class="section-lede">Planned work — no dates promised. Everything here is explicitly future-tense; the rest of this page describes what ships today, caveats attached.</p>
-
-        <div class="roadmap-grid">
-          <article class="roadmap-hero">
-            <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Result visualization & dashboards", the first row -->
-            <span class="roadmap-badge">Coming soon</span>
-            <h3>Result visualization &amp; dashboards</h3>
-            <p>Charts and dashboards over pipeline results, in-product.</p>
-            <svg class="diagram roadmap-placeholder" viewBox="0 0 360 200" role="img" aria-labelledby="ph-title ph-desc">
-              <title id="ph-title">Placeholder for upcoming charts and dashboards</title>
-              <desc id="ph-desc">An abstract dashed placeholder frame with ghost bar shapes and a coming soon label — deliberately not a real chart.</desc>
-              <rect class="dg-frame" x="20" y="16" width="320" height="168" rx="10"/>
-              <rect class="dg-ghost" x="70" y="104" width="34" height="56" rx="4"/>
-              <rect class="dg-ghost" x="130" y="72" width="34" height="88" rx="4"/>
-              <rect class="dg-ghost" x="190" y="120" width="34" height="40" rx="4"/>
-              <rect class="dg-ghost" x="250" y="88" width="34" height="72" rx="4"/>
-              <text class="dg-sub" x="180" y="46" font-size="12" text-anchor="middle">charts &amp; dashboards live here — coming soon</text>
-            </svg>
-          </article>
-
-          <ul class="roadmap-list">
-            <li class="roadmap-item">
-              <h3>Pipeline and template editing in the UI</h3>
-              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Pipeline CRUD and template CRUD in the UI", the first row; docs/pipeline-editor.md §11.3 -->
-              <p>Create, edit and save from the browser. Today both editors display, preview, release and execute; authoring goes through MCP and the REST API, which is a deliberate v1 choice and not an oversight. When it lands it rides the existing draft lifecycle — a released version is never the edit target.</p>
-            </li>
-            <li class="roadmap-item">
-              <h3>DuckDB as a staging engine</h3>
-              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "DuckDB as staging engine (settings.tempdb.engine: \"DUCKDB\")" -->
-              <p><code>settings.tempdb.engine: "DUCKDB"</code> for large analytical joins. DuckDB already ships as a dialect, as the trade demo's own engine, and as the engine underneath dp-lake; backing the staging tempdb with it is what remains. Today every execution stages into an in-memory H2.</p>
-            </li>
-            <li class="roadmap-item">
-              <h3>A scheduler</h3>
-              <!-- claim: docs/ROADMAP.md §3.2 ("Pipeline-level scheduling — cron-style declarations"), docs/superpowers/specs/2026-09-07-scheduler-design.md -->
-              <p>Schedules in folders, fired exactly once across instances, with every run a first-class execution — the same history, node stats, events and cancellation a manual run gets. The design is ratified and the engine chosen; <strong>nothing of it is built</strong>. Today a pipeline runs when you run it, when an agent runs it, or when something calls its published endpoint.</p>
-            </li>
-            <li class="roadmap-item">
-              <h3>Auto-created write-back tables</h3>
-              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Auto-create target table for write-back (output.auto_create: true)" -->
-              <p><code>output.auto_create: true</code> emits a <code>CREATE TABLE IF NOT EXISTS</code> from the ResultSet's own metadata, so writing a result back no longer needs a DDL node in front of it.</p>
-            </li>
-            <li class="roadmap-item">
-              <h3>A shipped KMS key provider</h3>
-              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates), docs/key-providers.md §7 (the provider status table) -->
-              <p>The contract half already ships: credentials carry a key version, <code>datapipelines.db.key-provider</code> selects the source, and one contract test every implementation passes. Of the five providers in the catalogue exactly one — <code>env</code>, keys from configuration — is shipped; AWS KMS, GCP KMS, Azure Key Vault and Vault transit are a written procedure and a worked recipe, not a design, and not code you can run yet.</p>
-            </li>
-          </ul>
+        <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates); docs/superpowers/specs/2026-09-07-scheduler-design.md -->
+        <p class="section-lede">
+          <strong>Next month:</strong> a scheduler (schedules in folders, fired exactly once across instances); dashboards
+          created by your agent that you embed in your own product, fed by released pipelines and APIs, filtered per
+          viewer; JSONata and JavaScript transform nodes. <strong>Later:</strong> scheduled extracts to your own bucket,
+          email alerts, metrics defined once. Everything else on this page ships today.
+        </p>
+        <div class="btn-row">
+          <a class="btn btn-primary" th:href="@{/roadmap}">The roadmap, dated</a>
+          <a class="btn btn-secondary" th:href="@{/tableau}">What it means beside Tableau</a>
         </div>
+      </div>
+    </section>
+
+    <!-- ============================ FAQ ============================ -->
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="container">
+        <p class="kicker">The product, in ten questions</p>
+        <div th:replace="~{site/_layout :: faq(${faqEntries}, true, 'Questions people ask before they run it')}"></div>
+        <p class="features-pointer">More on the <a th:href="@{/faq}">full FAQ</a>.</p>
       </div>
     </section>
 

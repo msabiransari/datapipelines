@@ -3,44 +3,12 @@
       th:replace="~{site/_layout :: page(~{::content})}">
 <th:block th:fragment="content">
 
-  <!--/* 089 §G — structured data for the dp-lake page, parsed by SiteJsonLdTest. Every FAQ
-       answer restates something this site or the specs claim WITH its citation, so the
-       schema cannot say more than the docs do (the index.html rule). */-->
+  <!--/* 089 §G — the FAQ, since site v2 rendered from SiteFaqs.DP_LAKE: the visible <details>
+       and the FAQPage JSON-LD are one list (SiteV2GuardsTest checks parity), so the schema
+       cannot say more than the page does. */-->
   <!-- claim: docs/datasources.md §8C — FAQ "what is dp-lake" -->
   <!-- claim: docs/datasources.md §8C.2 — FAQ "partition pruning" -->
   <!-- claim: docs/datasources.md §8C.7 — FAQ "Iceberg" -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "What is dp-lake?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "A way to query Parquet and Apache Iceberg tables on S3 or S3-compatible object storage in place: no warehouse, no load step, read-only. DuckDB is the engine, and the catalog is the server's own registry, dp-catalog, because the engine cannot list a bucket - tables are registered by REST or over MCP. See docs/datasources.md section 8C."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Does dp-lake copy my data out of S3?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "No. Every registered table becomes a view at connect over the objects in your bucket, and the engine reads only what a query's predicates name - a filter on the partition column reads only the matching partitions. Nothing is downloaded at registration or at demo start; reads are in place, at query time. See docs/datasources.md section 8C.2."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How do I register an Iceberg table in dp-lake?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "By its current metadata file - s3://bucket/table/metadata/00042-<uuid>.metadata.json - not by the table root: DuckDB 1.5.5 cannot resolve a pyiceberg table's root, so the registry row names the file, and you re-register when the table commits. See docs/datasources.md section 8C.7."
-        }
-      }
-    ]
-  }
-  </script>
 
   <nav class="breadcrumbs" aria-label="Breadcrumb">
     <ol>
@@ -175,6 +143,13 @@
       <p><a th:href="@{/federated-query}">Federated query &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Datasources specification &rarr;</a> &middot;
          <a th:href="@{/docs/environments}">Run the demo &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'dp-lake, in three questions')}"></div>
     </div>
   </section>
 

@@ -41,6 +41,13 @@ class PublicPathsTest {
                 "/compare/*",
                 "/federated-query",
                 "/dp-lake",
+                "/faq",
+                "/roadmap",
+                "/security",
+                "/published-api",
+                "/mcp-tools",
+                "/tableau",
+                "/tableau/*",
                 "/docs",
                 "/docs/*",
                 "/skill.md",
@@ -129,8 +136,9 @@ class PublicPathsTest {
          * 27 rows: the 033 site pair, the seven 073 intent-cluster pages, 089's `/dp-lake`,
          * the docs pair, 095's skill pair, the two crawler files, three probes, the
          * login/OIDC trio, four static-asset patterns and `/error`. 096 §B removed the
-         * `webjars` glob (28 -> 27) when htmx was vendored under `static/vendor`.
+         * `webjars` glob (28 -> 27) when htmx was vendored under `static/vendor`. Site v2 added
+         * seven intent-page rows (27 -> 34).
          */
-        const val DOCUMENTED_ROWS = 27
+        const val DOCUMENTED_ROWS = 34
     }
 }

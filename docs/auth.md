@@ -931,6 +931,13 @@ Two things are deliberately **not** rows in this table:
 | `/compare/*` | The comparison pages (airflow, dbt): GET-only constant content, one segment deep, no datastore. | 073 |
 | `/federated-query` | Intent-cluster page: GET-only constant content, no datastore and no principal on the request. | 073 |
 | `/dp-lake` | The dp-lake product page: same shape and same reasoning as the 073 intent-cluster pages. | 089 |
+| `/faq` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | site-v2 |
+| `/roadmap` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | site-v2 |
+| `/security` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | site-v2 |
+| `/published-api` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | site-v2 |
+| `/mcp-tools` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | site-v2 |
+| `/tableau` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | site-v2 |
+| `/tableau/*` | Site v2 intent pages under the Tableau hub: GET-only constant content, no datastore and no principal on the request. | site-v2 |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
 | `/docs/*` | One packaged spec per slug, rendered from the jar; the same text is already public on GitHub. | 073 |
 | `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |

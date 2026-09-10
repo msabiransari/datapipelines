@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">SQL to API</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2: the published-endpoints page — "turn a SQL query into an API". Every behaviour
+       named here is rest-api.md §19's; the FAQ block is the two API entries of SiteFaqs. */-->
+  <!-- claim: docs/rest-api.md §19 — the published endpoint contract -->
+  <!-- claim: docs/auth.md §7.7 — key kinds and path bindings -->
+  <!-- claim: docs/versioning.md §3 — a release is what gets published -->
+  <!-- claim: docs/pipeline-contract.md §9 — the caller node is the response -->
+
+  <section class="section page-hero" aria-labelledby="pa-title">
+    <div class="container">
+      <p class="kicker">Published endpoints</p>
+      <h1 id="pa-title" class="ds-display">Turn a SQL query into an API — versioned, parameterised, scoped by key</h1>
+      <p class="section-lede">
+        Building an API over a dataset is usually a second project: a service, a deployment, auth, pagination,
+        on-call. Here it is one step after a release. A released pipeline is published under a path, a <code>GET</code>
+        runs it with bound parameters and returns JSON, and a key scoped to that path is the whole access story.
+        From data to an API in a day is the shipped half of the sentence; the dashboards you embed are
+        <a th:href="@{/roadmap}">next month's</a>.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/rest-api}">The endpoint contract</a>
+        <a class="btn btn-secondary" th:href="@{/tableau/governed-dataset}">A worked example</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pa-how">
+    <div class="container">
+      <p class="kicker">The mechanism</p>
+      <h2 id="pa-how" class="ds-headline">A release, a path, a key</h2>
+      <ol class="steps">
+        <li>
+          <h3>Release the pipeline</h3>
+          <!-- claim: docs/versioning.md §3 -->
+          <p>Only a released, side-effect-free pipeline can be published — a version a person locked, with no node that writes anywhere. The endpoint serves whatever version its pipeline's pointer names, so switching the served version is a lifecycle verb, not a redeploy.</p>
+        </li>
+        <li>
+          <h3>Publish it under a path</h3>
+          <!-- claim: docs/rest-api.md §19 -->
+          <p>A path is one to ten segments, literal or <code>{variable}</code>: <code>/api/x/nyc/rain-share</code>, <code>/api/x/customers/{id}/orders</code>. Path variables bind to the pipeline's declared parameters by name; the query string supplies the rest. Ambiguous patterns are refused at publish time, not resolved at call time.</p>
+        </li>
+        <li>
+          <h3>Bind a key to the path</h3>
+          <!-- claim: docs/auth.md §7.7 -->
+          <p>An API key is bound to a path prefix. A caller holding it can reach that subtree of <code>/api/x</code> and nothing else — not the product's own API, not another workspace's endpoints. Give a partner one key per contract and the contract is enforced by the router.</p>
+        </li>
+        <li>
+          <h3>Call it</h3>
+          <!-- claim: docs/rest-api.md §19 -->
+          <p>A <code>GET</code> with the key in <code>DP-API-Key</code>. Validation reports every defect at once — an unknown parameter, a repeated one, a missing required one, a wrong type — because a client fixes a request once, not four times.</p>
+        </li>
+      </ol>
+      <div class="code-block">
+        <pre><code>GET /api/x/nyc/rain-share?quarter=2024-Q3
+DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
+
+200 OK
+{
+  "execution_id": "…",
+  "schema":  [ { "name": "borough", "type": "STRING" },
+               { "name": "rideshare_rain_lift", "type": "BIGDECIMAL", "precision": 18, "scale": 2 } ],
+  "rows":    [ ["Manhattan", "1.18"], ["Brooklyn", "1.07"] ],
+  "row_count": 5, "total_rows": 5, "has_more": false,
+  "result_url": "…", "expires_at": "…", "ttl_seconds": 300
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pa-shape">
+    <div class="container">
+      <p class="kicker">What the response is</p>
+      <h2 id="pa-shape" class="ds-headline">The result, paged, with a cursor — never a cached one</h2>
+      <div class="prose">
+        <!-- claim: docs/rest-api.md §19 -->
+        <p>
+          The body is the same <code>data_ready</code> payload the product's own execution stream produces: a schema
+          with typed columns, the first page of rows, the total, and a cursor URL for the rest. Each call is a fresh
+          execution of the released version, run in-process as the endpoint's workspace, audited with the key, the
+          endpoint and the execution id. The response carries <code>Cache-Control: no-store</code> on purpose — a
+          result belongs to one execution, and a shared cache that held one would hand a second caller another
+          caller's rows.
+        </p>
+        <!-- claim: docs/rest-api.md §19 -->
+        <p>
+          When an endpoint's own timeout elapses, the execution is not killed and the client is not lied to: the
+          response is <code>202</code> with the execution id, a status URL and the result URL, and the rows are there
+          when the run finishes. A <code>504</code> would say the upstream failed; it did not.
+        </p>
+        <!-- claim: docs/pipeline-contract.md §9 -->
+        <p>
+          What is returned is the pipeline's <em>caller node</em> — declared, not guessed from the graph's shape — so
+          a pipeline that also writes to a table, or stages six intermediate results, still returns exactly one
+          declared result.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pa-not">
+    <div class="container">
+      <p class="kicker">What it is not</p>
+      <h2 id="pa-not" class="ds-headline">A read surface, by construction</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>GET only</h3>
+          <p>Every other method is <code>405</code> with <code>Allow: GET</code>. A published pipeline cannot have a write-shaped node, and the check is re-run at serve time — a pipeline that gained a write after publishing answers <code>503</code>, not a write.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>Not enumerable</h3>
+          <p>An unknown path and a disabled endpoint return the same <code>404</code> body, so the registry cannot be walked one URL at a time.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §7.7 -->
+          <h3>Never a browser session</h3>
+          <p>A session cookie is <code>401</code> here. This is a machine surface: keys, bound to paths, owned by a person who can revoke them.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>Rate- and concurrency-limited</h3>
+          <p><code>429</code> with <code>Retry-After</code> when a caller exceeds its budget or the instance's execution slots — the same limits the product's own runs live under.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pa-story">
+    <div class="container">
+      <p class="kicker">Why it matters</p>
+      <h2 id="pa-story" class="ds-headline">The API was always the expensive part</h2>
+      <div class="prose">
+        <p>
+          Teams that already have the data and already have the chart still spend a quarter getting the number into
+          their own product, because “expose this dataset as an API” means a service, a schema, an auth story, a
+          deployment pipeline and someone to wake up when it fails. That quarter is what a published endpoint
+          removes. The agent authors the pipeline against your databases and iterates it until the numbers are right;
+          you review and release; the endpoint exists. No service was written. Nothing was deployed. The on-call is
+          the server you were already running.
+        </p>
+        <p>
+          It is also why the roadmap's dashboards are built the way they are — created by the same agent, fed by the
+          same released pipelines and endpoints, embedded in your product rather than hosted in ours. The endpoint is
+          the contract; the dashboard is a consumer of it, like any other.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pa-shot">
+    <div class="container">
+      <p class="kicker">Where you manage them</p>
+      <h2 id="pa-shot" class="ds-headline">The API section: endpoints, keys, the MCP server — one screen</h2>
+      <figure class="shot">
+        <figcaption>Published endpoints with the version each one serves, the keys bound to each path, and the MCP connection details.</figcaption>
+        <div class="shot-placeholder" data-shot="api-console" style="--shot-ratio: 16 / 10"><b>[shot: api-console]</b>API section · one published endpoint · 1440×900</div>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Published endpoints, in two questions')}"></div>
+    </div>
+  </section>
+
+</th:block>
+</html>

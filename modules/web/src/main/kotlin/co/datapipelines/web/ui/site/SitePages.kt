@@ -176,6 +176,71 @@ object SitePages {
             view = "site/dp-lake",
         )
 
+    // ---- Site v2 (2026-09-09): the intent pages. Titles ≤ 70, descriptions ≤ 155 (SiteSeoMetaTest).
+    val FAQ =
+        SitePage(
+            path = "/faq",
+            title = "FAQ — datapipelines.co, the MCP pipeline server, in questions",
+            description =
+                "What it is, what an agent can and cannot do, how the API works, where it runs, and what is on the " +
+                    "roadmap — every answer cites the spec it rests on.",
+            view = "site/faq",
+        )
+    val ROADMAP =
+        SitePage(
+            path = "/roadmap",
+            title = "Roadmap — what ships now, next month, and later | datapipelines.co",
+            description =
+                "Shipped: MCP server, eight engines, published APIs. Next month: scheduler, embedded dashboards, " +
+                    "JSONata and JavaScript nodes. Later: lake extracts, alerts.",
+            view = "site/roadmap",
+        )
+    val SECURITY =
+        SitePage(
+            path = "/security",
+            title = "AI agent database access, made safe — scoped keys, read-only, audited",
+            description =
+                "How an AI agent reaches your databases without a password: scoped keys, read-only datasources, " +
+                    "encrypted credentials, human release, a full audit log.",
+            view = "site/security",
+        )
+    val PUBLISHED_API =
+        SitePage(
+            path = "/published-api",
+            title = "Turn a SQL query into an API — published endpoints | datapipelines.co",
+            description =
+                "A released pipeline becomes a versioned GET endpoint under /api/x with bound parameters and " +
+                    "path-scoped keys. Data to API in a day, nothing to deploy.",
+            view = "site/published-api",
+        )
+    val MCP_TOOLS =
+        SitePage(
+            path = "/mcp-tools",
+            title = "The MCP tools — what an agent can do against your databases",
+            description =
+                "Every tool the MCP server exposes, generated from its own catalogue: schema reads, catalogue " +
+                    "statistics, the SQL probe, drafts, execution, results.",
+            view = "site/mcp-tools",
+        )
+    val TABLEAU =
+        SitePage(
+            path = "/tableau",
+            title = "Using datapipelines with Tableau — today, and what V2 adds",
+            description =
+                "Feed Tableau a governed dataset from Postgres, MySQL, SQL Server and S3 without a warehouse, " +
+                    "as an API or a table it reads. What ships now, what is next.",
+            view = "site/tableau",
+        )
+    val TABLEAU_GOVERNED_DATASET =
+        SitePage(
+            path = "/tableau/governed-dataset",
+            title = "Publish a governed dataset for Tableau from several databases",
+            description =
+                "Step by step: an agent authors the cross-database pipeline, a person releases it, and Tableau " +
+                    "reads the result as a JSON endpoint or a live table.",
+            view = "site/tableau-governed-dataset",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -288,6 +353,13 @@ object SitePages {
                 COMPARE_DBT,
                 FEDERATED_QUERY,
                 DP_LAKE,
+                FAQ,
+                ROADMAP,
+                SECURITY,
+                PUBLISHED_API,
+                MCP_TOOLS,
+                TABLEAU,
+                TABLEAU_GOVERNED_DATASET,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

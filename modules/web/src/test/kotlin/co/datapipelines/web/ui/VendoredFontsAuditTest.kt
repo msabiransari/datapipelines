@@ -70,12 +70,12 @@ class VendoredFontsAuditTest {
             .associate { it.groupValues[1] to it.groupValues[2] }
     }
 
-    private val declared: Map<String, String> = declaredHashes("inter") + declaredHashes("jetbrains-mono")
+    private val declared: Map<String, String> = declaredHashes("inter") + declaredHashes("jetbrains-mono") + declaredHashes("manrope")
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     @Test
-    fun `the manifest declares both families and every file this round vendored`() {
+    fun `the manifest declares the three families and every file this round vendored`() {
         // Non-vacuity: a parse that stopped matching would make every assertion below pass
         // by auditing nothing. Both families, and the exact file set, are named here.
         declared.keys.sorted() shouldContainExactly
@@ -86,6 +86,9 @@ class VendoredFontsAuditTest {
                 "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2",
                 "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2",
                 "vendor/fonts/jetbrains-mono/OFL.txt",
+                "vendor/fonts/manrope/OFL.txt",
+                "vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2",
+                "vendor/fonts/manrope/manrope-latin-wght-normal.woff2",
             )
         manifest shouldContain "\"license\": \"OFL-1.1\""
     }
@@ -163,7 +166,8 @@ class VendoredFontsAuditTest {
         // Relative, never absolute: app.css is served at /css/app.css, so `../vendor/...`
         // survives a non-root context path. An absolute `/vendor/...` would 404 there —
         // the same trap partials/theme-swap.html documents for the theme stylesheet.
-        declared.keys
+        (declaredHashes("inter") + declaredHashes("jetbrains-mono"))
+            .keys
             .filter { it.endsWith(".woff2") }
             .forEach { path -> css shouldContain "url(\"../${path}\")" }
         css.split("@font-face").size - 1 shouldBe EXPECTED_FACES
@@ -176,6 +180,29 @@ class VendoredFontsAuditTest {
         css.split("font-display: optional;").size - 1 shouldBe EXPECTED_FACES
         // And the property the round replaced is gone, so a half-applied revert cannot
         // leave two faces on each policy with the count still adding up.
+        css shouldNotContain "font-display: swap;"
+    }
+
+    /**
+     * Site v2: the marketing site declares ITS faces (Manrope for display and body, JetBrains
+     * Mono for code) in site.css — served at /site/css/, hence the `../../` — under the same
+     * `optional` policy. The app keeps Inter; the two sheets never load together.
+     */
+    @Test
+    fun `site css declares the marketing faces against the vendored files`() {
+        val css =
+            resolver
+                .getResource("classpath:static/site/css/site.css")
+                .inputStream
+                .readBytes()
+                .decodeToString()
+
+        (declaredHashes("manrope") + declaredHashes("jetbrains-mono"))
+            .keys
+            .filter { it.endsWith(".woff2") }
+            .forEach { path -> css shouldContain "url(\"../../${path}\")" }
+        css.split("@font-face").size - 1 shouldBe EXPECTED_FACES
+        css.split("font-display: optional;").size - 1 shouldBe EXPECTED_FACES
         css shouldNotContain "font-display: swap;"
     }
 

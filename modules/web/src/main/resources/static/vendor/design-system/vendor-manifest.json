@@ -57,7 +57,7 @@
     "sha256": "ea4b3acc5c0ab4d4429707b62a7b3eb3ff99cf683f6212265962683b877d951e",
     "source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.js",
     "license": "MIT",
-    "note": "059 \u2014 HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
+    "note": "059 — HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
   },
   "lucide-sprite": {
     "package": "lucide-static",
@@ -108,7 +108,7 @@
       "file-code",
       "file"
     ],
-    "note": "059 \u2014 subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 \u00a7B: the sprite now covers EVERY icon the app references \u2014 the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
+    "note": "059 — subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 §B: the sprite now covers EVERY icon the app references — the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
     "license_file": "vendor/icons/LICENSE.lucide",
     "subset_sha256": {
       "db": "ba411fddd776d3937bb0afb44a17e08561cf00483b48922033697233a41c320c",
@@ -161,7 +161,7 @@
     "source": "org.webjars.npm:htmx.org:2.0.10 -> META-INF/resources/webjars/htmx.org/2.0.10/dist/htmx.min.js",
     "license": "0BSD",
     "license_file": "vendor/htmx/LICENSE",
-    "note": "096 \u00a7B \u2014 htmx was the ONLY webjar, served from /webjars/** : a ** glob over a namespace the dependency graph fills rather than this repository. Vendored like Alpine, Cytoscape and dagre so the allowlist loses that entry (MISTAKES.md, 'Frontend Dependencies via CDN' \u2014 a dependency-supplied servlet namespace is the same class of trust as a CDN). The bytes are the webjar's own dist/htmx.min.js, sha256-identical to the artifact this round removed; VendoredHtmxAuditTest pins the hash and refuses any /webjars/ reference in the layouts."
+    "note": "096 §B — htmx was the ONLY webjar, served from /webjars/** : a ** glob over a namespace the dependency graph fills rather than this repository. Vendored like Alpine, Cytoscape and dagre so the allowlist loses that entry (MISTAKES.md, 'Frontend Dependencies via CDN' — a dependency-supplied servlet namespace is the same class of trust as a CDN). The bytes are the webjar's own dist/htmx.min.js, sha256-identical to the artifact this round removed; VendoredHtmxAuditTest pins the hash and refuses any /webjars/ reference in the layouts."
   },
   "dagre": {
     "version": "0.8.5",
@@ -193,7 +193,7 @@
     "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
     "license": "OFL-1.1",
     "license_file_upstream": "LICENSE.txt",
-    "note": "079 \u00a7G \u2014 the two VARIABLE web faces from the release zip's web/ folder, vendored so every machine renders the design system's declared \"Inter\" instead of a system fallback. Upstream ships the OFL text as LICENSE.txt; it is vendored verbatim as OFL.txt so one audit rule covers both font directories. No Google Fonts, no CDN."
+    "note": "079 §G — the two VARIABLE web faces from the release zip's web/ folder, vendored so every machine renders the design system's declared \"Inter\" instead of a system fallback. Upstream ships the OFL text as LICENSE.txt; it is vendored verbatim as OFL.txt so one audit rule covers both font directories. No Google Fonts, no CDN."
   },
   "jetbrains-mono": {
     "package": "JetBrains/JetBrainsMono",
@@ -210,6 +210,24 @@
     },
     "source": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
     "license": "OFL-1.1",
-    "note": "079 \u00a7G \u2014 weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/."
+    "note": "079 §G — weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/."
+  },
+  "manrope": {
+    "package": "@fontsource-variable/manrope",
+    "version": "5.3.0",
+    "files": [
+      "vendor/fonts/manrope/manrope-latin-wght-normal.woff2",
+      "vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2",
+      "vendor/fonts/manrope/OFL.txt"
+    ],
+    "sha256": {
+      "vendor/fonts/manrope/manrope-latin-wght-normal.woff2": "a30ddcd349703aff7464c34bef3fffdff405ee50c113440d7c8693c02d210972",
+      "vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2": "3911b66d9f2e005a4b989223405d0e5032619c668597ba467cc76a23c8fffcfb",
+      "vendor/fonts/manrope/OFL.txt": "d826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30"
+    },
+    "source": "https://registry.npmjs.org/@fontsource-variable/manrope/-/manrope-5.3.0.tgz",
+    "license": "OFL-1.1",
+    "license_file_upstream": "LICENSE",
+    "note": "Site v2 (2026-09-09) — the marketing site's display/body face (direction B). Variable weight axis, latin + latin-ext subsets from the pinned fontsource package (upstream sharanda/manrope's GitHub API answered 404 on 2026-09-09, so the npm package is the pinned, hash-recorded source). Vendored verbatim; the app keeps Inter. No Google Fonts, no CDN."
   }
 }

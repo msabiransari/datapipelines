@@ -95,6 +95,34 @@ object SitePageRenderer {
                     pagesController.dpLake(model, response)
                 }
 
+                page.path == SitePages.FAQ.path -> {
+                    pagesController.faq(model, response)
+                }
+
+                page.path == SitePages.ROADMAP.path -> {
+                    pagesController.roadmap(model, response)
+                }
+
+                page.path == SitePages.SECURITY.path -> {
+                    pagesController.security(model, response)
+                }
+
+                page.path == SitePages.PUBLISHED_API.path -> {
+                    pagesController.publishedApi(model, response)
+                }
+
+                page.path == SitePages.MCP_TOOLS.path -> {
+                    pagesController.mcpTools(model, response)
+                }
+
+                page.path == SitePages.TABLEAU.path -> {
+                    pagesController.tableau(model, response)
+                }
+
+                page.path == SitePages.TABLEAU_GOVERNED_DATASET.path -> {
+                    pagesController.tableauGovernedDataset(model, response)
+                }
+
                 else -> {
                     error("SitePageRenderer has no handler for ${page.path} — add it beside the controller's")
                 }
