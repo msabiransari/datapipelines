@@ -202,7 +202,7 @@ class AuthLayoutRenderTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 
     /**
      * 098 §D — the login form renders EXACTLY ONE `_csrf` hidden input.

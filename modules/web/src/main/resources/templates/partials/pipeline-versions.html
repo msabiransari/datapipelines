@@ -34,36 +34,46 @@
 
       <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
            RELEASED → Discard, Switch-to (not current); DISCARDED → Restore. -->
-      <th:block th:if="${v.canRelease or v.canPurge or v.canDiscard or v.canRestore or v.canSwitch}">
+      <!-- 114 §B — state AND role. Each `may*` is the row's lifecycle flag ANDed with the
+           ACTIVE membership's capability, and the menu itself is hidden when none survives:
+           a ⋯ that opens on an empty list is exactly the tease the "hide, don't disable"
+           rule forbids. Release is `canPromote` alone (D-R2); Switch is either (O-1). -->
+      <th:block th:with="mayRelease=${v.canRelease and canPromote == true},
+                         mayPurge=${v.canPurge and canAuthor == true},
+                         mayDiscard=${v.canDiscard and canAuthor == true},
+                         mayRestore=${v.canRestore and canAuthor == true},
+                         maySwitch=${v.canSwitch and (canAuthor == true or canPromote == true)}">
+      <th:block th:if="${mayRelease or mayPurge or mayDiscard or mayRestore or maySwitch}">
         <details class="tplx-vmenu">
           <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
           <div class="tplx-vmenu-list" role="menu" data-vmenu>
-            <button th:if="${v.canRelease}" type="button" role="menuitem" class="tplx-vmenu-item"
+            <button th:if="${mayRelease}" data-verb="pipeline-release" type="button" role="menuitem" class="tplx-vmenu-item"
                     th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
                              hx-target='#px-dialog', hx-swap='innerHTML'"
                     th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
 
-            <button th:if="${v.canPurge}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+            <button th:if="${mayPurge}" data-verb="pipeline-purge" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
                     th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version})},
                              hx-target='#px-dialog', hx-swap='innerHTML'"
                     th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
 
-            <button th:if="${v.canDiscard}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+            <button th:if="${mayDiscard}" data-verb="pipeline-discard" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
                     th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version})},
                              hx-target='#px-dialog', hx-swap='innerHTML'"
                     th:text="'Discard v' + ${v.version} + '…'">Discard v2…</button>
 
-            <button th:if="${v.canSwitch}" type="button" role="menuitem" class="tplx-vmenu-item"
+            <button th:if="${maySwitch}" data-verb="pipeline-switch" type="button" role="menuitem" class="tplx-vmenu-item"
                     th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version})},
                              hx-target='#px-dialog', hx-swap='innerHTML'"
                     th:text="'Switch to v' + ${v.version} + '…'">Switch to v1…</button>
 
-            <button th:if="${v.canRestore}" type="button" role="menuitem" class="tplx-vmenu-item"
+            <button th:if="${mayRestore}" data-verb="pipeline-restore" type="button" role="menuitem" class="tplx-vmenu-item"
                     th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version})},
                              hx-target='#px-dialog', hx-swap='innerHTML'"
                     th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
           </div>
         </details>
+      </th:block>
       </th:block>
     </span>
   </div>

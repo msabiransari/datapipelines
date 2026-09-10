@@ -145,7 +145,7 @@ class ApiConsoleController(
         // NEVER a literal: the count is what `tools/list` will actually return, and the
         // marketing site renders the same expression (SiteController) for the same reason.
         model.addAttribute("mcpToolCount", McpToolCatalog.NAMES.size)
-        model.addAttribute("canAuthor", principal.isAuthor)
+        RoleModel.stamp(model, principal)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "api/console"
     }

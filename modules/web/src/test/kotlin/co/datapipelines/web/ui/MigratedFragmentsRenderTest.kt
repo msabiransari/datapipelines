@@ -44,7 +44,7 @@ class MigratedFragmentsRenderTest {
                 JakartaServletWebApplication
                     .buildApplication(MockServletContext())
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            ).apply { model.forEach { (k, v) -> setVariable(k, v) } },
+            ).withRoles().apply { model.forEach { (k, v) -> setVariable(k, v) } },
         )
 
     @Test

@@ -144,7 +144,7 @@ class TableTypeFaceAuditTest {
                 Triple("partials/execution-node-stats.html", "n.has('context_key')", "§4.9 context key → value"),
                 Triple("partials/datasources.html", "ds.jdbcUrl", "§4.5 JDBC URL"),
                 Triple("partials/datasources.html", "ds.username", "§4.5 username"),
-                Triple("workspaces/index.html", "membership.workspaceName}\">team", "§4.13 workspace name"),
+                Triple("workspaces/index.html", "ws.name}\">team", "§4.13 workspace name"),
                 Triple("promotion/index.html", "candidate.name}\">daily_revenue", "§4.17 pipeline path"),
                 Triple("partials/executions.html", "p.name}\">nyc/mobility/x", "§4.8 pipeline machine path"),
                 Triple("partials/recent-executions.html", "p.name}\">nyc/mobility/x", "dashboard machine path"),

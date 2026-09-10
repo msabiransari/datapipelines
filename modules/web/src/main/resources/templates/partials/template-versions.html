@@ -36,31 +36,37 @@
 
       <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
            RELEASED → Discard; DISCARDED → Restore. No Switch — see the header comment. -->
-      <th:block th:if="${v.canRelease or v.canPurge or v.canDiscard or v.canRestore}">
+      <!-- 114 §B — state AND role; the menu is hidden entirely when no verb survives. -->
+      <th:block th:with="mayRelease=${v.canRelease and canPromote == true},
+                         mayPurge=${v.canPurge and canAuthor == true},
+                         mayDiscard=${v.canDiscard and canAuthor == true},
+                         mayRestore=${v.canRestore and canAuthor == true}">
+      <th:block th:if="${mayRelease or mayPurge or mayDiscard or mayRestore}">
         <details class="tplx-vmenu">
           <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
           <div class="tplx-vmenu-list" role="menu" data-vmenu>
-            <button th:if="${v.canRelease}" type="button" role="menuitem" class="tplx-vmenu-item"
+            <button th:if="${mayRelease}" data-verb="template-release" type="button" role="menuitem" class="tplx-vmenu-item"
                     th:attr="hx-get=@{'/partials/templates/lifecycle/release'(name=${templateId})},
                              hx-target='#tx-dialog', hx-swap='innerHTML'"
                     th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
 
-            <button th:if="${v.canPurge}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+            <button th:if="${mayPurge}" data-verb="template-purge" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
                     th:attr="hx-get=@{'/partials/templates/lifecycle/purge'(name=${templateId}, version=${v.version})},
                              hx-target='#tx-dialog', hx-swap='innerHTML'"
                     th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
 
-            <button th:if="${v.canDiscard}" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+            <button th:if="${mayDiscard}" data-verb="template-discard" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
                     th:attr="hx-get=@{'/partials/templates/lifecycle/discard'(name=${templateId}, version=${v.version})},
                              hx-target='#tx-dialog', hx-swap='innerHTML'"
                     th:text="'Discard v' + ${v.version} + '…'">Discard v1…</button>
 
-            <button th:if="${v.canRestore}" type="button" role="menuitem" class="tplx-vmenu-item"
+            <button th:if="${mayRestore}" data-verb="template-restore" type="button" role="menuitem" class="tplx-vmenu-item"
                     th:attr="hx-get=@{'/partials/templates/lifecycle/restore'(name=${templateId}, version=${v.version})},
                              hx-target='#tx-dialog', hx-swap='innerHTML'"
                     th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
           </div>
         </details>
+      </th:block>
       </th:block>
     </span>
   </div>

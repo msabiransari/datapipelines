@@ -86,6 +86,11 @@
         <span class="pe-vchip" th:classappend="${hasDraft} ? 'pe-vchip-draft'"
               th:text="${hasDraft} ? 'v' + ${draftVersion} + ' · draft pending release' : 'v' + ${releasedVersion} + ' · released'">v1 · released</span>
       </div>
+      <!-- 114 §A — a viewer's editor is READ-ONLY: it loads (canRead), the mutating verbs
+           are absent, and the line below says so once, quietly. No toast: nothing failed. -->
+      <p th:if="${canAuthor != true and canPromote != true}" class="app-note" data-role-note="read-only">
+        Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.
+      </p>
       <div class="pe-topbar-actions">
         <!-- versioning §3.5/§7, since 102 through the §4.3d dialogs (never a native
              confirm): Release opens the release dialog — it shows the draft's template pins
@@ -93,13 +98,13 @@
              pre-102 text claiming an executed draft "is kept as history" was false). The POST
              answers HX-Redirect and the page reloads: the editor's draft state is
              document-wide. Agents never release (D4). -->
-        <button th:if="${hasDraft}" class="ds-button ds-button-primary ds-button-sm"
+        <button th:if="${hasDraft == true and canPromote}" data-verb="pipeline-release" class="ds-button ds-button-primary ds-button-sm"
                 id="pe-release-draft"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipelineId}, from='editor')},
                          hx-target='#pe-dialog', hx-swap='innerHTML'">
           Release v<span th:text="${draftVersion}"></span>…
         </button>
-        <button th:if="${hasDraft}" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${hasDraft == true and canAuthor}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
                 id="pe-discard-draft"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipelineId}, version=${draftVersion}, from='editor')},
                          hx-target='#pe-dialog', hx-swap='innerHTML'">
@@ -110,14 +115,14 @@
       <div class="pe-status" x-bind:class="statusClass()" role="status">
         <span class="pe-status-dot"></span><span x-text="runStatus.text">Idle</span>
       </div>
-      <button class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline()">
+      <button th:if="${canExecute}" data-verb="pipeline-execute" class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline()">
         <!-- 085 §B: the sprite's play, not a hand-drawn filled triangle — one icon
              source, and the stroke glyph matches the canvas controls beside it. -->
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#play"></use></svg>
         <span x-show="!isExecuting">Execute</span>
         <span x-show="isExecuting">Running…</span>
       </button>
-      <button x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution()">
+      <button th:if="${canExecute}" data-verb="execution-cancel" x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution()">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#square"></use></svg>
         Cancel
       </button>

@@ -48,9 +48,12 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 
 - **Scopes** (hierarchical: `author ⊃ execute ⊃ read`): `read` = list/get; `execute` = run;
   `author` = create/update pipelines + templates (also template render, schema introspection
-  and the three `lake_tables_*` dp-lake registry writes). Creating, updating, deleting and
-  TESTING a datasource are REST/UI only — **no credential travels through an agent** (094):
-  ask a person to add the datasource in the UI, then use it by name.
+  and the three `lake_tables_*` dp-lake registry writes). Creating, updating and deleting a
+  datasource are REST/UI only — **no credential travels through an agent** (094): ask a person
+  to add the datasource in the UI, then use it by name. `datasources_test` DOES exist as a
+  tool, but on the ROLE axis it needs `ws_admin`, so most keys get `auth.role_required` from
+  it — testing opens a live connection with the stored credential and writes the datasource's
+  health down, which is an operator's act, not a read.
 
 - **Your scope is a ceiling, not a grant.** Every request is checked on TWO axes: the key's
   own scope, and the ROLE its ISSUER holds in the pinned workspace **right now**. So a key can
@@ -70,8 +73,20 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   `datasources_list`. (There was a `datasources_create` tool; it carried a warning in its own
   description, and a description is not a control, so it was removed.)
 
+- **Which datasources can my key see? The ones GRANTED to its workspace — nothing else.**
+  There is no such thing as a global datasource any more. A datasource is registered once and
+  granted to N workspaces; `datasources_list` returns exactly the grants your pinned workspace
+  holds, each row carrying `granted: true` and a `workspace` naming the workspace that
+  REGISTERED it (the field is OMITTED — never null — when a super admin registered it at the
+  instance level; the old `null = global` reading is retired and would be the wrong answer to
+  "who can see this?"). A datasource registered elsewhere and not granted to you is ABSENT,
+  and asking for it by name gets not-found, the same answer a name that exists nowhere gets.
+  So: **never guess a datasource name.** A guess cannot succeed, and it cannot tell you
+  whether the thing exists. If the one you need is missing, ask a super admin to grant it to
+  your workspace.
+
 - **What you CAN do with a datasource:** `datasources_list` / `datasources_get` to find one,
-  `datasources_test` to confirm it connects, `datasources_get_schemas` / `_get_tables` /
+  `datasources_get_schemas` / `_get_tables` /
   `_get_columns` to read its shape, `datasources_preview_rows` for up to 50 rows of a table.
   That is everything authoring a pipeline needs. `datasources_get` also reports the connection
   POOL's effective settings (`pool`: each value with its unit and which layer supplied it), which

@@ -606,7 +606,7 @@ class PipelineExplorerRenderTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 
     private fun engine(): SpringTemplateEngine =
         SpringTemplateEngine().apply {

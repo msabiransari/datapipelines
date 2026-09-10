@@ -57,7 +57,7 @@
               hx-target="#ds-dialog-result"
               hx-swap="innerHTML">
           <div id="ds-dialog-result" class="u-mb-md"></div>
-          <button type="submit" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+          <button type="submit" data-verb="datasource-delete-confirm" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
                   th:text="'Delete ' + ${datasource.name}">Delete pg-prod</button>
         </form>
       </th:block>

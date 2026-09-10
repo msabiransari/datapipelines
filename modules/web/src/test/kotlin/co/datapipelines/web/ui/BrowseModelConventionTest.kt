@@ -116,6 +116,10 @@ class BrowseModelConventionTest {
                 "ApiKeysPartialController" to
                     "its page twin is ApiConsoleController (§4.18), and the projection they share " +
                     "is ApiKeyRows — the same rule under the name 091 gave it",
+                "DatasourceGrantsPartialController" to
+                    "a DIALOG over one datasource (§4.5a, 114 §C.2), like the edit and delete dialogs " +
+                    "DatasourcePartialController already owns — it has no page twin because there is no " +
+                    "grants PAGE, and its list is one datasource's grants, not a browsable collection",
             )
     }
 }

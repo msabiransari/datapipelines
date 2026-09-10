@@ -300,13 +300,22 @@ class MutatingHandlerScopeFloorTest {
                 "WorkspacesUiController#create" to
                     "SHELL: a new workspace joins the switcher in the header, which is outside any fragment " +
                     "this screen swaps; the redirect re-renders it",
-                "WorkspacesUiController#join" to
-                    "SHELL: joining changes the caller's own membership set — the switcher again",
                 "WorkspacesUiController#addMember" to
                     "NO-JS: workspace administration is the recovery surface an operator reaches when the " +
                     "app is misbehaving, and it is a plain form POST end to end",
                 "WorkspacesUiController#removeMember" to
                     "NO-JS: the sibling of addMember, same form, same banner",
+                "WorkspacesUiController#setMemberFlags" to
+                    "NO-JS: the third member verb, same form and same banner as addMember/removeMember — " +
+                    "the three role checkboxes and a Save, posted plainly (114 §C.1)",
+                "WorkspacesUiController#renameDisplay" to
+                    "NO-JS: the workspace's display name, edited on the same administration surface and by " +
+                    "the same plain form POST as its members",
+                "WorkspacesUiController#deactivate" to
+                    "SHELL: a deactivated workspace leaves the switcher, and the ACTIVE one leaving changes " +
+                    "what the rail and every workspace-scoped surface can show (D-R10)",
+                "WorkspacesUiController#reactivate" to
+                    "SHELL: the other half of deactivate — the workspace rejoins the switcher",
                 "WorkspacesUiController#delete" to
                     "SHELL: deleting the ACTIVE workspace changes what the switcher and the rail can show",
                 "PromotionUiController#promote" to

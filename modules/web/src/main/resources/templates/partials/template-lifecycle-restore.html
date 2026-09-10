@@ -18,7 +18,7 @@
     <form class="u-mt-md"
           th:attr="hx-post=@{'/partials/templates/lifecycle/restore'(name=${dlg.id}, version=${dlg.version})},
                    hx-target='#template-detail', hx-swap='innerHTML'">
-      <button type="submit" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+      <button type="submit" data-verb="template-restore-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
               th:text="'Restore v' + ${dlg.version}">Restore v1</button>
     </form>
   </div>

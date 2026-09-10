@@ -93,6 +93,12 @@
         </p>
       </div>
 
+      <!-- 114 §B — `canPromote` in the SOURCE workspace. PromotionUiController reads
+           `principal.requireWorkspace()` (the ACTIVE workspace) and the interceptor judges
+           `PROMOTE_VERSION` against that same context; the target is only a base URL and no
+           target-side role is consulted here. The PLAN stays readable for everyone — it is a
+           read, and hiding it would leave an author unable to see what is waiting — but the
+           button that SENDS it is the promoter's alone, which is the whole of D-R2. -->
       <form th:unless="${#lists.isEmpty(plan.promotable)}"
             th:action="@{/promotion/promote}" method="post">
         <table class="ds-table">
@@ -129,8 +135,12 @@
           </tbody>
         </table>
         <div class="u-row-md u-mt-lg">
-          <button type="submit" class="ds-button ds-button-primary"
+          <button th:if="${canPromote == true}" type="submit" data-verb="promote" class="ds-button ds-button-primary"
                   th:disabled="${plan.targetAuthoringEnabled}">Promote</button>
+          <p th:unless="${canPromote == true}" class="app-note" data-role-note="promote">
+            Promotion is a promoter's verb here — ask someone with the promoter or admin role in
+            <span th:text="${activeWorkspace}">workspace</span> to send this batch.
+          </p>
           <span class="u-secondary u-text-xs">
             The templates each pipeline pins and the child pipelines it runs are sent with it,
             in dependency order. The target applies the whole batch or none of it.

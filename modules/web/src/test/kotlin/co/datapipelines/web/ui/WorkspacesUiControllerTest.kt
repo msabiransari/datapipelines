@@ -86,12 +86,9 @@ class WorkspacesUiControllerTest {
                 "workspaces/index",
                 webContext().apply {
                     fillLayoutChrome()
-                    setVariable("own", listOf(membership))
-                    setVariable("joinable", emptyList<Any>())
-                    setVariable("openJoin", false)
+                    setVariable("own", listOf(WorkspaceRowView.of(membership, "acme", superAdmin = false)))
                     setVariable("canCreate", false)
-                    setVariable("provisioningMode", "self-serve")
-                    setVariable("managed", mapOf("acme" to listOf(memberRow())))
+                    setVariable("managed", mapOf("acme" to listOf(MemberRowView.of(memberRow()))))
                 },
             )
 
@@ -109,10 +106,7 @@ class WorkspacesUiControllerTest {
                 webContext().apply {
                     fillLayoutChrome()
                     setVariable("own", emptyList<Any>())
-                    setVariable("joinable", emptyList<Any>())
-                    setVariable("openJoin", false)
                     setVariable("canCreate", false)
-                    setVariable("provisioningMode", "self-serve")
                     setVariable("managed", emptyMap<String, Any>())
                 },
             )
@@ -161,10 +155,7 @@ class WorkspacesUiControllerTest {
     private fun WebContext.fillPageModel() {
         fillLayoutChrome()
         setVariable("own", emptyList<Any>())
-        setVariable("joinable", emptyList<Any>())
-        setVariable("openJoin", false)
         setVariable("canCreate", false)
-        setVariable("provisioningMode", "self-serve")
         setVariable("managed", emptyMap<String, Any>())
     }
 
@@ -204,7 +195,7 @@ class WorkspacesUiControllerTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 
     @Test
     fun `create redirects with ok=created - and a duplicate name is the banner, not an error page`() {
@@ -217,28 +208,21 @@ class WorkspacesUiControllerTest {
     }
 
     @Test
-    fun `join adds the caller's own email and redirects ok=joined`() {
-        authenticate()
-        every { workspaceService.addMember(principal, "globex", "alice@acme.test") } returns memberRow("alice@acme.test")
-
-        controller.join("globex") shouldBe "redirect:/workspaces?ok=joined"
-    }
-
-    @Test
     fun `addMember redirects ok=member_added`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "bob@acme.test") } returns memberRow()
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test", MembershipFlags.VIEWER) } returns memberRow()
 
-        controller.addMember("acme", "bob@acme.test") shouldBe "redirect:/workspaces?ok=member_added"
+        controller.addMember("acme", "bob@acme.test", null, null, null) shouldBe "redirect:/workspaces?ok=member_added"
     }
 
     @Test
     fun `addMember with an unknown email is the user_not_found banner - never a 500`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "ghost@nowhere.test") } throws
+        every { workspaceService.addMember(principal, "acme", "ghost@nowhere.test", MembershipFlags.VIEWER) } throws
             WorkspaceService.UnknownMemberEmailException("ghost@nowhere.test")
 
-        controller.addMember("acme", "ghost@nowhere.test") shouldBe "redirect:/workspaces?error=user_not_found"
+        controller.addMember("acme", "ghost@nowhere.test", null, null, null) shouldBe
+            "redirect:/workspaces?error=user_not_found"
     }
 
     @Test
@@ -341,20 +325,27 @@ class WorkspacesUiControllerTest {
      * and a `read` key driving a workspace delete violates that outright.
      */
     @Test
-    fun `an API-key principal cannot create, join, add, remove or delete`() {
+    fun `an API-key principal cannot create, add, change flags, remove, deactivate or delete`() {
         authenticateWithApiKey()
         val refusal = "redirect:/workspaces?error=session_required"
 
         controller.create("globex", "Globex") shouldBe refusal
-        controller.join("globex") shouldBe refusal
-        controller.addMember("globex", "bob@acme.test") shouldBe refusal
+        controller.addMember("globex", "bob@acme.test", true, null, null) shouldBe refusal
+        controller.setMemberFlags("globex", UUID.randomUUID(), true, null, null) shouldBe refusal
         controller.removeMember("globex", UUID.randomUUID()) shouldBe refusal
+        controller.renameDisplay("globex", "Globex") shouldBe refusal
+        controller.deactivate("globex") shouldBe refusal
+        controller.reactivate("globex") shouldBe refusal
         controller.delete("globex") shouldBe refusal
 
         // The gate is in FRONT of the service, not behind it.
         verify(exactly = 0) { workspaceService.create(any(), any(), any()) }
-        verify(exactly = 0) { workspaceService.addMember(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.addMember(any(), any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.setMemberFlags(any(), any(), any(), any()) }
         verify(exactly = 0) { workspaceService.removeMember(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.updateDisplayName(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.deactivate(any(), any()) }
+        verify(exactly = 0) { workspaceService.reactivate(any(), any()) }
         verify(exactly = 0) { workspaceService.delete(any(), any()) }
     }
 

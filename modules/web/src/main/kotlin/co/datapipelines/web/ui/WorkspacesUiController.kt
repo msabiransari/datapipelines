@@ -7,6 +7,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Capability
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LoginMethod
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
@@ -24,15 +25,17 @@ import org.springframework.web.bind.annotation.RequestParam
 import java.util.UUID
 
 /**
- * The workspace screens' actions (ui-screens.md §4.13): create per provisioning mode,
- * open-join self-service, owner member management, delete, and the shell switcher's
- * re-stamp.
+ * The workspace screens' actions (ui-screens.md §4.13): create, members and their three role
+ * flags, display name, deactivate/reactivate, delete, and the shell switcher's re-stamp.
  *
- * Every action delegates to [WorkspaceService] — the same rules the REST surface
- * (§17) enforces; the UI owns only binding and the fragment/redirect choreography.
- * Expected refusals (duplicate name, closed mode, not an owner…) render as an inline
- * error banner on the same screen, via `?error=` query params — the login screen's
- * idiom — instead of the generic error page.
+ * Every action delegates to [WorkspaceService] — the same methods the REST surface (§17) calls,
+ * so the last-admin rule, the `admin -> author` normalisation and the membership checks are
+ * enforced ONCE. The UI owns only binding and the redirect choreography; expected refusals
+ * bounce back as `?error=<code suffix>`, which the layout renders into the §5.1 toast stack.
+ *
+ * The `open-join` handler is gone with the provisioning modes it served (D-R11): workspaces are
+ * created by super admins, there is no joinable list, and the route had been unreachable from
+ * any screen since 112 while still declaring a capability it should never have had.
  */
 @Controller
 class WorkspacesUiController(
@@ -49,28 +52,45 @@ class WorkspacesUiController(
         request: HttpServletRequest,
     ): String {
         val principal = requirePrincipal()
+        val activeWorkspace = principal.workspace?.name
         model.addAttribute("activeTheme", themeResolver.resolve(request))
-        model.addAttribute("own", workspaceService.listOwn(principal))
-        // D-R11: workspaces are created by super admins, and `open-join` is gone with the
-        // provisioning modes. The model attributes stay so the template keeps compiling
-        // against one shape; the ANSWERS are now the role's, not a config key's. The screen
-        // itself (checkbox members, deactivation) is round 2 — 113.
-        model.addAttribute("joinable", emptyList<Any>())
-        model.addAttribute("openJoin", false)
+        RoleModel.stamp(model, principal)
+        val memberships = workspaceService.listOwn(principal)
+        model.addAttribute(
+            "own",
+            memberships.map { WorkspaceRowView.of(it, activeWorkspace, principal.isSuperAdmin) },
+        )
+        // D-R11: workspaces are created by super admins. `canCreate` stays a distinct
+        // attribute from `isSuperAdmin` because the CREATE FORM is the one thing on this
+        // screen a super admin sees on an instance with nothing else to show.
         model.addAttribute("canCreate", principal.isSuperAdmin)
-        model.addAttribute("isAdmin", principal.isSuperAdmin)
         // The member listing a workspace ADMIN manages (the screen's second half); viewers and
-        // authors see their own role via the switcher's badge instead.
+        // authors see their own role via the switcher's badge instead. Deactivated workspaces
+        // are not administered from here — reactivate first (auth.md 11A.2).
         model.addAttribute(
             "managed",
-            workspaceService
-                .listOwn(principal)
+            memberships
+                .filter { it.workspaceActive }
                 .filter { Capability.WS_ADMIN.satisfiedBy(it.flags) || principal.isSuperAdmin }
                 .associate { membership ->
                     membership.workspaceName to
-                        runCatching { workspaceService.members(principal, membership.workspaceName) }.getOrDefault(emptyList())
+                        runCatching { workspaceService.members(principal, membership.workspaceName) }
+                            .getOrDefault(emptyList())
+                            .map(MemberRowView::of)
                 },
         )
+        // Section C.3(a) — zero ACTIVE memberships is the no-workspace state. Decided HERE
+        // rather than by a redirect so there is one answer and one place to change it.
+        //
+        // KNOWN GAP, stated out loud rather than pretended away: this branch cannot be
+        // reached through HTTP today. `ScopeInterceptor` judges every governed route through
+        // `ScopeMatrix.allowed`, whose null-context arm refuses BEFORE any handler runs — so a
+        // principal with no reachable workspace gets `404 workspace.not_found` on `/workspaces`
+        // itself, as JSON, in the browser. Making the page reachable needs ONE change outside
+        // this round's fence: `WORKSPACES_READ` must survive a null context, because "list the
+        // workspaces you belong to" is the one operation that is meaningful with none. The
+        // branch, the template and their unit tests are here so that change is a one-liner.
+        if (memberships.none { it.workspaceActive }) return "workspaces/none"
         return "workspaces/index"
     }
 
@@ -89,36 +109,101 @@ class WorkspacesUiController(
             )
         }
 
-    /** The `open-join` self-service join — adding your own email. */
-    @PostMapping("/workspaces/{name}/join")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
-    fun join(
-        @PathVariable name: String,
-    ): String =
-        action("joined") {
-            val principal = requireSessionPrincipal()
-            workspaceService.addMember(principal, name, principal.email)
-        }
-
-    /** An owner (or admin) adds a member by email. */
+    /**
+     * A workspace admin adds a member by email, WITH the three role flags.
+     *
+     * `MANAGE_WORKSPACE_MEMBERS`, not `MANAGE_WORKSPACE`: the two carry the same capability
+     * today ([Capability.WS_ADMIN]) but they are not the same OPERATION, and the annotation is
+     * how a handler says which section-7.6 row it implements. A display-name editor is not a
+     * member manager, and the REST twin has declared the members operation since 112 — the
+     * UI's coarser one was drift, not a decision.
+     *
+     * The flags go through the SAME [WorkspaceService.addMember] the REST surface calls, so the
+     * `admin -> author` normalisation and the membership checks are enforced once; a client
+     * that posts `admin=true` with no `author` still gets a row satisfying the V23 constraint.
+     */
     @PostMapping("/workspaces/{name}/members")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
     fun addMember(
         @PathVariable name: String,
         @RequestParam email: String,
-    ): String = action("member_added") { workspaceService.addMember(requireSessionPrincipal(), name, email) }
+        @RequestParam(required = false) author: Boolean?,
+        @RequestParam(required = false) promoter: Boolean?,
+        @RequestParam(required = false) admin: Boolean?,
+    ): String =
+        action("member_added") {
+            workspaceService.addMember(requireSessionPrincipal(), name, email, flagsOf(author, promoter, admin))
+        }
 
-    /** An owner (or admin) removes a member; an owner target is the `in_use` refusal. */
+    /**
+     * Replaces a member's flags — the same [WorkspaceService.setMemberFlags] the REST
+     * `PUT .../members/{userId}` calls, so the last-admin rule (`workspace.last_admin`, 409)
+     * and the `admin -> author` normalisation live in ONE place. A second code path is exactly
+     * the drift this round exists to remove.
+     *
+     * A REPLACE, not a merge: an unticked box is a flag being taken away, and a form that posts
+     * only what is ticked cannot express that any other way.
+     */
+    @PostMapping("/workspaces/{name}/members/{userId}/flags")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    fun setMemberFlags(
+        @PathVariable name: String,
+        @PathVariable userId: UUID,
+        @RequestParam(required = false) author: Boolean?,
+        @RequestParam(required = false) promoter: Boolean?,
+        @RequestParam(required = false) admin: Boolean?,
+    ): String =
+        action("member_flags") {
+            workspaceService.setMemberFlags(requireSessionPrincipal(), name, userId, flagsOf(author, promoter, admin))
+        }
+
+    /** A workspace admin removes a member; the last admin is the `workspace.last_admin` refusal. */
     @PostMapping("/workspaces/{name}/members/{userId}/remove")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
     fun removeMember(
         @PathVariable name: String,
         @PathVariable userId: UUID,
     ): String = action("member_removed") { workspaceService.removeMember(requireSessionPrincipal(), name, userId) }
 
-    /** Workspace delete; `in_use` bounces back with the counts of what blocks. */
-    @PostMapping("/workspaces/{name}/delete")
+    /** The workspace's display name — a workspace admin's verb (section 7.6, `MANAGE_WORKSPACE`). */
+    @PostMapping("/workspaces/{name}/display-name")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    fun renameDisplay(
+        @PathVariable name: String,
+        @RequestParam displayName: String,
+    ): String =
+        action("display_name") {
+            workspaceService.updateDisplayName(requireSessionPrincipal(), name, displayName.trim())
+        }
+
+    /**
+     * Deactivate (D-R10 — deactivate, never delete). A super admin's instance verb, and the
+     * annotation says so: `MANAGE_INSTANCE_WORKSPACES`, the same operation the REST twin
+     * declares. Nothing is purged; the workspace stops being selectable and its keys, endpoints
+     * and schedules stop answering.
+     */
+    @PostMapping("/workspaces/{name}/deactivate")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    fun deactivate(
+        @PathVariable name: String,
+    ): String = action("deactivated") { workspaceService.deactivate(requireSessionPrincipal(), name) }
+
+    /** Reactivate — the audited, reversible other half of [deactivate]. */
+    @PostMapping("/workspaces/{name}/reactivate")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    fun reactivate(
+        @PathVariable name: String,
+    ): String = action("reactivated") { workspaceService.reactivate(requireSessionPrincipal(), name) }
+
+    /**
+     * Workspace delete; `in_use` bounces back with the counts of what blocks.
+     *
+     * `MANAGE_INSTANCE_WORKSPACES`, matching the REST twin 112 corrected: D-R10 makes deletion
+     * an instance verb and the service already required a super admin — the UI annotation was
+     * the last place still claiming a workspace admin could do it.
+     */
+    @PostMapping("/workspaces/{name}/delete")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
     fun delete(
         @PathVariable name: String,
     ): String = action("deleted") { workspaceService.delete(requireSessionPrincipal(), name) }
@@ -152,6 +237,21 @@ class WorkspacesUiController(
             "redirect:/workspaces?error=switch_refused"
         }
     }
+
+    /**
+     * The three checkboxes as a [MembershipFlags]. An absent box is `false` — an HTML checkbox
+     * sends nothing when unticked, which is exactly "this flag is off" for a REPLACE.
+     *
+     * `admin` is NOT expanded to `author` here: [WorkspaceService] normalises it and the
+     * database constrains it (`chk_workspace_member_admin_authors`), and a third copy of the
+     * invariant in a form binder is a third place for it to go wrong.
+     */
+    private fun flagsOf(
+        author: Boolean?,
+        promoter: Boolean?,
+        admin: Boolean?,
+    ): MembershipFlags =
+        MembershipFlags(author = author == true, promoter = promoter == true, admin = admin == true)
 
     /** One shared outcome wrapper: run the action, bounce back with ok/error, never a raw error page. */
     private fun action(

@@ -156,6 +156,29 @@ data class AuthenticatedPrincipal(
                 )
 
     /**
+     * "May this principal RELEASE and PROMOTE here" — [Capability.PROMOTE], the third rung of
+     * the same question [isWorkspaceAdmin] and [isAuthor] answer, spelled here for the same
+     * reason: the screens ask it, and a screen that re-derives a capability predicate is one
+     * more place the matrix can drift away from (114 — the round that made the UI stop
+     * offering verbs the server refuses).
+     *
+     * Deliberately NOT implied by [isAuthor] and not implying it: an author may not release and
+     * a promoter may not author (D-R2 — "the DevOps guys who can only release"), which is the
+     * whole reason [Capability] is a set of predicates rather than a chain.
+     *
+     * The API-key conjunct is [isAuthor]'s, and for the same reason: the credential axis has no
+     * promoter (design §1), so `author` is the scope the release/promote rows carry in §7.6 and
+     * a `read` key must not acquire an author's reach because its issuer holds the role.
+     */
+    val isPromoter: Boolean
+        get() =
+            superAdmin ||
+                (
+                    Capability.PROMOTE.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER) &&
+                        (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
+                )
+
+    /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)
      * when the principal has none — the "zero memberships" refusal every workspace-scoped
      * operation shares. This is the one place [WorkspaceErrorCodes.MEMBERSHIP_REQUIRED]

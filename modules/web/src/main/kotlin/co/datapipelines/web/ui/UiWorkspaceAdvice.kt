@@ -50,6 +50,17 @@ class UiWorkspaceAdvice(
     @ModelAttribute("activeWorkspace")
     fun activeWorkspace(): String? = principal()?.workspace?.name
 
+    /**
+     * 114 §C.4 — the role badge beside the switcher's workspace name.
+     *
+     * Shell chrome, so it lives here with `activeWorkspace` and not in a controller: the badge
+     * is on EVERY page, and a per-controller stamp would be a rule sixteen screens have to
+     * remember (and the seventeenth would not). The verb booleans stay per-controller —
+     * [RoleModel.stamp] — because the direct-invocation controller tests must see them.
+     */
+    @ModelAttribute("roleLabel")
+    fun roleLabel(): String = RoleModel.roles(principal()).roleLabel
+
     @ModelAttribute("activeTheme")
     fun activeTheme(request: HttpServletRequest): String = themeResolver.resolve(request)
 

@@ -410,7 +410,7 @@ class ExecutionControllerTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 
     private companion object {
         val FAILURE_JSON =

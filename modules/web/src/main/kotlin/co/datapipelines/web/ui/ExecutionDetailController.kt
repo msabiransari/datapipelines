@@ -60,6 +60,9 @@ class ExecutionDetailController(
         // RBAC (112 merge review): a session holds capability, never scopes — the scope form
         // rendered no Cancel button for any human.
         val canExecute = principal.workspace?.flags?.let { Capability.EXECUTE.satisfiedBy(it) } == true
+        RoleModel.stamp(model, principal)
+        // State AND role: the verb needs a RUNNING execution as well as the capability, and
+        // `canExecute` on the model is the role half alone (§B's Execution detail row).
         model.addAttribute("canCancel", record.status == ExecutionStatus.RUNNING && canExecute)
         model.addAttribute("isAdmin", principal.isWorkspaceAdmin)
 

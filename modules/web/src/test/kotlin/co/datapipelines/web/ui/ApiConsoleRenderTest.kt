@@ -49,7 +49,7 @@ class ApiConsoleRenderTest {
                 JakartaServletWebApplication
                     .buildApplication(MockServletContext())
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            )
+            ).withRoles()
         context.setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
         context.setVariable("workspaceHeaderFragment", "")
         context.setVariable("workspaceOptions", emptyList<Any>())

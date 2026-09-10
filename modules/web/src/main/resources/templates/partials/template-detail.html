@@ -37,26 +37,29 @@
       <div class="tplx-detail-actions">
         <span class="htmx-indicator ds-spinner" id="template-detail-spinner" aria-hidden="true"></span>
 
+        <!-- 114 §B — state AND role, as on the pipeline twin: Release is `canPromote`
+             (D-R2 — an author who is not a promoter sees none), the three destructive verbs
+             are `canAuthor` (D-R4), and a role that holds neither renders none of them. -->
         <!-- 102 §B.1 — the §4.3d template twins in #tx-dialog, ONE destructive per view:
              Purge template (the {D} shape) / Discard of the resolved release / Purge draft.
              No Switch: templates are pinned by version; there is no served pointer to switch. -->
-        <button th:if="${canDelete}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+        <button th:if="${canDelete == true and canAuthor}" data-verb="template-purge-entity" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/templates/lifecycle/purge-entity'(name=${templateId})},
                          hx-target='#tx-dialog', hx-swap='innerHTML'">Purge template…</button>
 
-        <button th:if="${!canDelete and canDiscardCurrent}" type="button"
+        <button th:if="${canDelete != true and canDiscardCurrent == true and canAuthor}" data-verb="template-discard" type="button"
                 class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/templates/lifecycle/discard'(name=${templateId}, version=${currentReleaseVersion})},
                          hx-target='#tx-dialog', hx-swap='innerHTML'"
                 th:text="'Discard v' + ${currentReleaseVersion} + '…'">Discard v1…</button>
 
-        <button th:if="${canPurgeDraftInHeader}" type="button"
+        <button th:if="${canPurgeDraftInHeader == true and canAuthor}" data-verb="template-purge" type="button"
                 class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/templates/lifecycle/purge'(name=${templateId}, version=${draftVersion})},
                          hx-target='#tx-dialog', hx-swap='innerHTML'"
                 th:text="'Purge v' + ${draftVersion} + '…'">Purge v2…</button>
 
-        <button th:if="${releasableVersion != null}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${releasableVersion != null and canPromote}" data-verb="template-release" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{'/partials/templates/lifecycle/release'(name=${templateId})},
                          hx-target='#tx-dialog', hx-swap='innerHTML'"
                 th:text="'Release v' + ${releasableVersion} + '…'">Release v1…</button>

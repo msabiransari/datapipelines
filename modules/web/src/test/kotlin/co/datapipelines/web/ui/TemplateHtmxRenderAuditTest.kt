@@ -404,7 +404,7 @@ class TemplateHtmxRenderAuditTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 
     private fun templateEngine(): SpringTemplateEngine =
         SpringTemplateEngine().apply {

@@ -203,7 +203,7 @@ class AdminUsersPartialControllerTest {
                 JakartaServletWebApplication
                     .buildApplication(MockServletContext())
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            )
+            ).withRoles()
         model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
         return engine.process(view, context)
     }

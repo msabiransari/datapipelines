@@ -69,7 +69,7 @@ class TemplatePartialController(
         TemplateFilters.fill(model, dialect, type)
         model.addAttribute("q", q ?: "")
         model.addAttribute("scopes", scopes())
-        model.addAttribute("canAuthor", canAuthor())
+        RoleModel.stamp(model)
         return if (prefix != null) {
             browse.fillLevel(model, workspaceId, prefix, dialectFilter, typeFilter, offset ?: 0)
         } else {
@@ -106,7 +106,10 @@ class TemplatePartialController(
     fun versions(
         model: Model,
         @RequestParam name: String,
-    ): String = browse.fillDetail(model, currentPrincipal().requireWorkspace().id, name)
+    ): String {
+        RoleModel.stamp(model)
+        return browse.fillDetail(model, currentPrincipal().requireWorkspace().id, name)
+    }
 
     /**
      * The acting column's **Runs** tab — recent executions of the pipelines pinning this
@@ -185,7 +188,7 @@ class TemplatePartialController(
             TemplateFilters.fill(model, dialect = null, type = null)
             model.addAttribute("q", "")
             model.addAttribute("scopes", scopes())
-            model.addAttribute("canAuthor", canAuthor())
+            RoleModel.stamp(model)
             browse.fillWrapper(model, workspaceId, q = null, dialect = null, type = null, offset = 0)
             model.addAttribute("createdName", trimmedName)
             model.addAttribute("oob", true)
@@ -213,5 +216,4 @@ class TemplatePartialController(
     private fun scopes(): Set<String> = principal()?.scopes?.map { it.name }?.toSet() ?: emptySet()
 
     /** The Create Template affordance — the capability, not the scope (`isAuthor`). */
-    private fun canAuthor(): Boolean = principal()?.isAuthor == true
 }

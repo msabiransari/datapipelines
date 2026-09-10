@@ -31,7 +31,7 @@
 
       <form th:attr="hx-post=@{'/partials/templates/lifecycle/discard'(name=${dlg.id}, version=${dlg.version})},
                        hx-target='#template-detail', hx-swap='innerHTML'">
-        <button type="submit" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+        <button type="submit" data-verb="template-discard-confirm" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
                 th:text="'Discard v' + ${dlg.version}">Discard v1</button>
       </form>
     </th:block>

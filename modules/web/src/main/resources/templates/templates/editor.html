@@ -62,16 +62,21 @@
       </p>
     </div>
     <div class="u-row">
+      <!-- 114 §A — the viewer's read-only line, and the same rule as the pipeline editor:
+           Release is `canPromote`, Purge draft is `canAuthor`, and neither is greyed. -->
+      <p th:if="${canAuthor != true and canPromote != true}" class="app-note" data-role-note="read-only">
+        Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.
+      </p>
       <!-- versioning §6/§7, since 102 through the §4.3d dialogs (never a native confirm):
            Release opens the release dialog and Discard draft opens the PURGE dialog (§5.4)
            with its typed confirm; the POST answers HX-Redirect and the page reloads. The name
            travels in the query (§9.6), never in a path segment. -->
       <span th:if="${hasDraft}" class="ds-badge ds-badge-warning"
             th:text="'Draft v' + ${draftVersion} + ' — pending release'"></span>
-      <button th:if="${hasDraft}" class="ds-button ds-button-primary ds-button-sm" id="tpl-release-draft"
+      <button th:if="${hasDraft == true and canPromote}" data-verb="template-release" class="ds-button ds-button-primary ds-button-sm" id="tpl-release-draft"
               th:attr="hx-get=@{/partials/templates/lifecycle/release(name=${template?.id}, from='editor')},
                        hx-target='#te-dialog', hx-swap='innerHTML'">Release…</button>
-      <button th:if="${hasDraft}" class="ds-button ds-button-secondary ds-button-sm" id="tpl-discard-draft"
+      <button th:if="${hasDraft == true and canAuthor}" data-verb="template-purge" class="ds-button ds-button-secondary ds-button-sm" id="tpl-discard-draft"
               th:attr="hx-get=@{/partials/templates/lifecycle/purge(name=${template?.id}, version=${draftVersion}, from='editor')},
                        hx-target='#te-dialog', hx-swap='innerHTML'">Purge draft…</button>
       <!-- R5 (054): selecting a version LOADS it. The request swaps the source column

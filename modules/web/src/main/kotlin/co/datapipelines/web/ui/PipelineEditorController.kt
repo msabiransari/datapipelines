@@ -86,6 +86,7 @@ class PipelineEditorController(
             ),
         )
         model.addAttribute("activeTheme", themeResolver.resolve(request))
+        RoleModel.stamp(model)
         return "pipelines/editor"
     }
 }

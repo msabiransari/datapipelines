@@ -51,7 +51,7 @@
                404s — the cancel endpoint is never reached and the execution
                keeps running (027b E). @{...} also prepends the context path,
                which a hand-built string would miss. -->
-          <button id="cancel-button" class="ds-button ds-button-danger"
+          <button id="cancel-button" data-verb="execution-cancel" class="ds-button ds-button-danger"
                   th:attr="hx-delete=@{/partials/executions/{id}/cancel(id=${record.executionId})}"
                   hx-swap="outerHTML">Cancel</button>
         </th:block>

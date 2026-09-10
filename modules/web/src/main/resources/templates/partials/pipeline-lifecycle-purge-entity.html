@@ -43,7 +43,7 @@
         </label>
         <input class="ds-input u-mono" data-confirm-input name="confirm" autocomplete="off" spellcheck="false"
                th:attr="data-confirm-expect=${dlg.expected}">
-        <button type="submit" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+        <button type="submit" data-verb="pipeline-purge-entity-confirm" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
                 disabled hx-disabled-elt="this"
                 th:text="'Purge ' + ${dlg.leafName}">Purge my_pipeline</button>
       </form>

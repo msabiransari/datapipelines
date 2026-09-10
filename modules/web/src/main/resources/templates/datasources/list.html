@@ -8,8 +8,14 @@
       <p class="app-page-sub">The databases this workspace can query. Credentials are stored encrypted and are
         never rendered back.</p>
     </div>
-    <div class="app-page-actions" th:if="${canRegister}">
-      <button class="ds-button ds-button-primary" onclick="showRegisterModal()">Register Datasource</button>
+    <!-- 114 §B — TWO gates, not one. `canRegister` is the DEPLOYMENT's gate
+         (`member-datasources-enabled`, workspaces D8); `canAdminWorkspace` is the ROLE's
+         (§7.6 puts `MUTATE_WORKSPACE_DATASOURCES` on `ws_admin`, not on `author` — a
+         datasource is a live credential, which is why registering one is not an authoring
+         verb). The modal below is rendered under the same pair: markup nobody can submit is
+         still markup a reader has to reason about. -->
+    <div class="app-page-actions" th:if="${canRegister == true and canAdminWorkspace == true}">
+      <button data-verb="datasource-register" class="ds-button ds-button-primary" onclick="showRegisterModal()">Register Datasource</button>
     </div>
   </div>
 
@@ -53,7 +59,7 @@
        also what the success path does. -->
   <div id="ds-dialog"></div>
 
-  <div id="register-modal" class="u-backdrop u-backdrop-hidden">
+  <div th:if="${canRegister == true and canAdminWorkspace == true}" id="register-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-md">
       <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideRegisterModal()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
       <h2 class="ds-title u-m0 u-mb-md">Register Datasource</h2>
@@ -135,7 +141,7 @@
           </div>
         </details>
         <div id="register-result" class="u-mb-md"></div>
-        <button type="submit" class="ds-button ds-button-primary u-full">Register</button>
+        <button type="submit" data-verb="datasource-register-submit" class="ds-button ds-button-primary u-full">Register</button>
       </form>
     </div>
   </div>
@@ -159,7 +165,9 @@
     // 076 §D: arm immediately when this fragment arrives in a boosted swap
     // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
     var initRegisterModal = function() {
+      // 114: a role below `ws_admin` gets no register modal at all — nothing to arm.
       var result = document.getElementById('register-result');
+      if (!result) return;
 
       // Refusals arrive as 4xx and htmx does not swap those. The layout now carries
       // toast.js's bridgeErrors, which admits a 4xx retargeted at #toast by header —

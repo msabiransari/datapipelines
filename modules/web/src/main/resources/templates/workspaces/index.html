@@ -13,29 +13,16 @@
   <!-- The ?ok=/?error= redirect flashes render as toasts in the layout's #toast stack
        (§5.1) — the redirect contract is unchanged; there is no banner here any more. -->
 
+  <!-- D-R11: workspaces are created by SUPER ADMINS. The provisioning modes, the joinable
+       list and the `workspace.creation_forbidden` refusal went with them at 112; the stale
+       "provisioning mode on this server" footnote and the dead join section go here (114). -->
   <section th:if="${canCreate}" class="app-reading u-mb-xl">
     <h2 class="ds-title u-mb-md">Create a workspace</h2>
     <form th:action="@{/workspaces/create}" method="post" class="u-row-md u-wrap">
       <input type="text" name="name" class="ds-input app-input-raised app-input-fixed-sm" placeholder="team-etl" required>
       <input type="text" name="displayName" class="ds-input app-input-raised app-input-fixed-md" placeholder="Display name (optional)">
-      <button type="submit" class="ds-button ds-button-primary">Create</button>
+      <button type="submit" data-verb="workspace-create" class="ds-button ds-button-primary">Create</button>
     </form>
-    <p class="u-secondary u-text-xs u-mt-xs">
-      Provisioning mode on this server: <code th:text="${provisioningMode}">self-serve</code>
-    </p>
-  </section>
-
-  <section th:if="${openJoin and !#lists.isEmpty(joinable)}" class="app-reading u-mb-xl">
-    <h2 class="ds-title u-mb-md">Joinable workspaces</h2>
-    <div class="u-flex u-wrap u-gap-md">
-      <div class="ds-card u-p-md u-row-md" th:each="ws : ${joinable}">
-        <span class="u-medium" th:text="${ws.displayName}">Team</span>
-        <span class="u-secondary u-text-sm" th:text="${ws.name}">team</span>
-        <form th:action="@{/workspaces/{name}/join(name=${ws.name})}" method="post">
-          <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Join</button>
-        </form>
-      </div>
-    </div>
   </section>
 
   <section class="u-mb-xl">
@@ -54,28 +41,43 @@
         </tr>
       </thead>
       <tbody>
-        <tr th:each="membership : ${own}">
+        <tr th:each="ws : ${own}">
           <td>
             <!-- §3.3/§4.13: the workspace name is a machine name (it travels in URLs and
                  in the switch form) — mono. -->
-            <span class="u-mono" th:text="${membership.workspaceName}">team</span>
-            <span th:if="${membership.workspaceName == activeWorkspace}"
-                  class="ds-badge ds-badge-primary">active</span>
+            <span class="u-mono" th:text="${ws.name}">team</span>
+            <span th:if="${ws.current}" class="ds-badge ds-badge-primary">active</span>
+            <!-- D-R10 — a deactivated workspace is listed only to a super admin, and this is
+                 the screen that brings it back. To a MEMBER it does not exist at all. -->
+            <span th:unless="${ws.active}" class="ds-badge ds-badge-warning">inactive</span>
           </td>
-          <!-- D-R2: roles are ADDITIVE flags, so no single label names a row — an author who
-               also releases and a DevOps person who only releases are both memberships. The
-               checkbox UI that EDITS them is round 2 (113); this renders what is there. -->
-          <td th:text="${membership.flags.author ? (membership.flags.admin ? 'admin' : 'author') : (membership.flags.promoter ? 'promoter' : 'viewer')}
-                       + (${membership.flags.promoter and membership.flags.author} ? ' + promoter' : '')">author</td>
+          <!-- D-R2: roles are ADDITIVE flags, so no single label names a row. The word is
+               derived by RoleModel.labelOf — the same one the shell's badge and the members
+               table print, rather than a third inline ternary (114). -->
+          <td th:text="${ws.roleLabel}">author</td>
           <td class="num">
-            <form th:action="@{/workspace/switch}" method="post" class="u-inline">
-              <input type="hidden" name="name" th:value="${membership.workspaceName}">
-              <button type="submit" class="ds-button ds-button-secondary ds-button-sm"
-                      th:disabled="${membership.workspaceName == activeWorkspace}">Switch</button>
+            <form th:action="@{/workspace/switch}" method="post" class="u-inline" th:if="${ws.active}">
+              <input type="hidden" name="name" th:value="${ws.name}">
+              <button type="submit" data-verb="workspace-switch" class="ds-button ds-button-secondary ds-button-sm"
+                      th:disabled="${ws.current}">Switch</button>
             </form>
-            <form th:action="@{/workspaces/{name}/delete(name=${membership.workspaceName})}" method="post" class="u-inline"
-                  th:if="${managed.containsKey(membership.workspaceName)}">
-              <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Delete</button>
+            <!-- §C.3(b) — deactivate/reactivate are INSTANCE verbs (`MANAGE_INSTANCE_WORKSPACES`,
+                 super admin), never a workspace admin's. Deactivation purges nothing, ever. -->
+            <form th:action="@{/workspaces/{name}/deactivate(name=${ws.name})}" method="post" class="u-inline"
+                  th:if="${isSuperAdmin == true and ws.active}">
+              <!-- No native confirm (ui-screens §4.3d — the app never blocks on one, and the
+                   existing screen carried none). Deactivation purges nothing and Reactivate is
+                   the sibling verb one row away; the irreversible one, Delete, is refused by
+                   the server while the workspace still owns content. -->
+              <button type="submit" data-verb="workspace-deactivate" class="ds-button ds-button-ghost ds-button-sm">Deactivate</button>
+            </form>
+            <form th:action="@{/workspaces/{name}/reactivate(name=${ws.name})}" method="post" class="u-inline"
+                  th:if="${isSuperAdmin == true and !ws.active}">
+              <button type="submit" data-verb="workspace-reactivate" class="ds-button ds-button-secondary ds-button-sm">Reactivate</button>
+            </form>
+            <form th:action="@{/workspaces/{name}/delete(name=${ws.name})}" method="post" class="u-inline"
+                  th:if="${isSuperAdmin == true}">
+              <button type="submit" data-verb="workspace-delete" class="ds-button ds-button-ghost ds-button-sm">Delete</button>
             </form>
           </td>
         </tr>
@@ -87,12 +89,22 @@
     <h2 class="ds-title u-mb-md">
       Members — <span th:text="${entry.key}">team</span>
     </h2>
+
+    <!-- §C.1 — the display name is a workspace admin's verb (`MANAGE_WORKSPACE`), sitting
+         with the members it shares a screen with rather than on a page of its own. -->
+    <form th:action="@{/workspaces/{name}/display-name(name=${entry.key})}" method="post" class="u-row-md u-mb-md">
+      <input type="text" name="displayName" class="ds-input app-input-raised app-input-fixed-md"
+             placeholder="Display name" required>
+      <button type="submit" data-verb="workspace-display-name" class="ds-button ds-button-secondary ds-button-sm">Rename</button>
+    </form>
+
     <!-- .ds-table supplies its own box (app.css) — the old wrapper div double-framed it. -->
     <table class="ds-table u-mb-md">
       <thead>
         <tr>
           <th>Member</th>
           <th>Role</th>
+          <th>Flags</th>
           <th class="num">Actions</th>
         </tr>
       </thead>
@@ -102,23 +114,66 @@
             <span th:text="${member.displayName}">Alice</span>
             <span class="u-secondary u-text-xs" th:text="' ' + ${member.email}">alice@example.com</span>
           </td>
-          <td th:text="${member.flags.author ? (member.flags.admin ? 'admin' : 'author') : (member.flags.promoter ? 'promoter' : 'viewer')}
-                       + (${member.flags.promoter and member.flags.author} ? ' + promoter' : '')">author</td>
+          <td th:text="${member.roleLabel}">author</td>
+          <!-- The three flags as ONE form: a REPLACE, so an unticked box is a role being taken
+               away and Save posts all three every time. `workspace.last_admin` (409) is the
+               SERVER's refusal — untick admin on the last one and the redirect carries
+               `?error=last_admin`, which the layout renders as a toast naming the rule. -->
+          <td>
+            <form th:action="@{/workspaces/{name}/members/{userId}/flags(name=${entry.key}, userId=${member.userId})}"
+                  method="post" class="u-row-md app-member-flags">
+              <label class="u-row u-gap-xs u-text-sm">
+                <input type="checkbox" name="author" value="true" data-flag="author" th:checked="${member.flags.author}"> author
+              </label>
+              <label class="u-row u-gap-xs u-text-sm">
+                <input type="checkbox" name="promoter" value="true" data-flag="promoter" th:checked="${member.flags.promoter}"> promoter
+              </label>
+              <label class="u-row u-gap-xs u-text-sm">
+                <input type="checkbox" name="admin" value="true" data-flag="admin" th:checked="${member.flags.admin}"> admin
+              </label>
+              <button type="submit" data-verb="member-flags" class="ds-button ds-button-secondary ds-button-sm">Save</button>
+            </form>
+          </td>
           <td class="num">
             <!-- The last-admin rule is the SERVER's (workspace.last_admin, 409); hiding the
                  button for every admin would also hide it for the ones who can be removed. -->
-            <form th:if="${!member.flags.admin}"
-                  th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
-              <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
+            <form th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
+              <button type="submit" data-verb="member-remove" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
             </form>
           </td>
         </tr>
+        <!-- 113: pending invitations render here -->
       </tbody>
     </table>
-    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" class="u-row-md">
+
+    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" class="u-row-md app-member-flags">
       <input type="email" name="email" class="ds-input app-input-raised app-input-fixed-lg" placeholder="member@example.com" required>
-      <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Add member</button>
+      <label class="u-row u-gap-xs u-text-sm">
+        <input type="checkbox" name="author" value="true" data-flag="author"> author
+      </label>
+      <label class="u-row u-gap-xs u-text-sm">
+        <input type="checkbox" name="promoter" value="true" data-flag="promoter"> promoter
+      </label>
+      <label class="u-row u-gap-xs u-text-sm">
+        <input type="checkbox" name="admin" value="true" data-flag="admin"> admin
+      </label>
+      <button type="submit" data-verb="member-add" class="ds-button ds-button-secondary ds-button-sm">Add member</button>
     </form>
   </section>
+
+  <script>
+    /* admin implies author (design §1, and the database's own
+       chk_workspace_member_admin_authors). Ticking admin ticks author so the form SHOWS the
+       row it is about to write; the server normalises it regardless, so this is a courtesy
+       and never the rule — posting admin=true&author=false still stores an author. */
+    document.addEventListener('change', function (event) {
+      var box = event.target;
+      if (!box || box.getAttribute('data-flag') !== 'admin' || !box.checked) return;
+      var form = box.closest('form');
+      if (!form) return;
+      var author = form.querySelector('input[data-flag="author"]');
+      if (author) author.checked = true;
+    });
+  </script>
 </th:block>
 </html>
