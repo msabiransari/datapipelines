@@ -85,7 +85,20 @@
     </table>
   </section>
 
-  <section th:each="entry : ${managed}" class="u-mb-xl">
+  <!-- The member sections follow the ACTIVE workspace, because that is the one the server
+       will accept member verbs for (see WorkspacesUiController.screen). The others are named
+       here with the switch that reaches them, rather than shown with forms that 403. -->
+  <p th:if="${!#lists.isEmpty(manageableElsewhere)}" class="app-note" data-role-note="manage-elsewhere">
+    You also administer
+    <span th:each="w, i : ${manageableElsewhere}"><span class="u-mono" th:text="${w}">team</span><span
+      th:if="${!i.last}">, </span></span>.
+    Switch to one above to manage its members.
+  </p>
+
+  <!-- `data-workspace` is the stable hook a test (and a future partial swap) addresses this
+       section by: the heading carries the name inside a span, which is a fragile thing to
+       select on and says nothing about which workspace the FORMS beneath it post to. -->
+  <section th:each="entry : ${managed}" class="u-mb-xl" th:attr="data-workspace=${entry.key}">
     <h2 class="ds-title u-mb-md">
       Members — <span th:text="${entry.key}">team</span>
     </h2>

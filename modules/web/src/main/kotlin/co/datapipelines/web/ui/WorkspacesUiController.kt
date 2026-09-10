@@ -64,20 +64,41 @@ class WorkspacesUiController(
         // attribute from `isSuperAdmin` because the CREATE FORM is the one thing on this
         // screen a super admin sees on an instance with nothing else to show.
         model.addAttribute("canCreate", principal.isSuperAdmin)
-        // The member listing a workspace ADMIN manages (the screen's second half); viewers and
-        // authors see their own role via the switcher's badge instead. Deactivated workspaces
-        // are not administered from here — reactivate first (auth.md 11A.2).
+        // The member table — for the ACTIVE workspace only, and 114 narrowed it to that on
+        // evidence rather than taste.
+        //
+        // `ScopeInterceptor` judges `MANAGE_WORKSPACE_MEMBERS` against `principal.workspace`,
+        // the ACTIVE context, never against the workspace named in the path. So a workspace
+        // admin of X who is currently working in Y had every member form for X rendered and
+        // every one of them refused with `auth.role_required` — a 403 the screen could not
+        // even explain, because the interceptor answers before the handler and htmx does not
+        // swap a 4xx (the click simply did nothing). Found by the browser suite in this round;
+        // it has been true since 112 put the member verbs on the capability axis.
+        //
+        // Rendering only what the server will accept is this round's whole rule, so the
+        // sections follow the active workspace and the others get a Switch, one row up in
+        // "Your workspaces". Deactivated workspaces are not administered from here at all —
+        // reactivate first (auth.md 11A.2).
+        val administered =
+            memberships.filter {
+                it.workspaceActive && (Capability.WS_ADMIN.satisfiedBy(it.flags) || principal.isSuperAdmin)
+            }
         model.addAttribute(
             "managed",
-            memberships
-                .filter { it.workspaceActive }
-                .filter { Capability.WS_ADMIN.satisfiedBy(it.flags) || principal.isSuperAdmin }
+            administered
+                .filter { it.workspaceName == activeWorkspace }
                 .associate { membership ->
                     membership.workspaceName to
                         runCatching { workspaceService.members(principal, membership.workspaceName) }
                             .getOrDefault(emptyList())
                             .map(MemberRowView::of)
                 },
+        )
+        // The ones this caller administers but is not IN — named so the screen can say "switch
+        // to manage" instead of silently showing nothing where a section used to be.
+        model.addAttribute(
+            "manageableElsewhere",
+            administered.filter { it.workspaceName != activeWorkspace }.map { it.workspaceName },
         )
         // Section C.3(a) — zero ACTIVE memberships is the no-workspace state. Decided HERE
         // rather than by a redirect so there is one answer and one place to change it.
