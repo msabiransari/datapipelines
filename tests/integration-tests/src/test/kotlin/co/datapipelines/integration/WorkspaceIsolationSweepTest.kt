@@ -521,17 +521,6 @@ class WorkspaceIsolationSweepTest {
             )
 
         /**
-         * The route families that carry no principal and no workspace, so a foreign id has
-         * nothing to reach through them: the marketing site, the packaged docs, the login
-         * surface, static assets and the probes.
-         *
-         * Written here as PREFIXES rather than read from `auth`'s `PublicPaths`, because
-         * module-structure §4.2 gives this suite `:modules:app` and nothing else. The
-         * approximation is deliberately BROAD — over-excluding shrinks the sweep, which the
-         * non-vacuity floor and the three-family assertion above are what catch.
-         */
-
-        /**
          * Well-formed identifiers that exist NOWHERE — the differential's control. Same SHAPE
          * as the foreign ones (a UUID where a UUID goes, a legal name where a name goes), so
          * what differs between the two calls is existence and nothing else: a control that
@@ -548,6 +537,16 @@ class WorkspaceIsolationSweepTest {
                 "workspace" to "no-such-workspace",
             )
 
+        /**
+         * The route families that carry no principal and no workspace, so a foreign id has
+         * nothing to reach through them: the marketing site, the packaged docs, the login
+         * surface, static assets and the probes.
+         *
+         * Written here as PREFIXES rather than read from `auth`'s `PublicPaths`, because
+         * module-structure §4.2 gives this suite `:modules:app` and nothing else. The
+         * approximation is deliberately BROAD — over-excluding shrinks the sweep, which the
+         * non-vacuity floor and the three-family assertion above are what catch.
+         */
         val PUBLIC_PREFIXES =
             listOf("/login", "/oauth2", "/docs", "/skill", "/site", "/compare", "/assets", "/actuator", "/health", "/error", "/sitemap")
     }

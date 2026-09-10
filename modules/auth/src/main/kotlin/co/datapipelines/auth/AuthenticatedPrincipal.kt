@@ -119,6 +119,23 @@ data class AuthenticatedPrincipal(
     val isSuperAdmin: Boolean get() = superAdmin
 
     /**
+     * True when this principal administers the ACTIVE workspace — its `admin` flag, or super
+     * admin (D-R8, who administers every workspace).
+     *
+     * The successor to `Scope.satisfies(scopes, ADMIN)`, which a dozen surfaces used as "is
+     * this an administrator" and which round 1 made permanently FALSE: a session carries no
+     * scopes (D-R1) and no key may hold `admin` (O-2). Every one of those sites had silently
+     * become "nobody", and the two that were load-bearing — the admin user screens and
+     * execution visibility — were found by E2Es rather than by the compiler, because a scope
+     * test still compiles perfectly after the scope stops being reachable.
+     *
+     * Spelled ONCE here for that reason: the next person to ask "is this an administrator"
+     * should find one answer, not re-derive a tenth.
+     */
+    val isWorkspaceAdmin: Boolean
+        get() = superAdmin || Capability.WS_ADMIN.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER)
+
+    /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)
      * when the principal has none — the "zero memberships" refusal every workspace-scoped
      * operation shares. This is the one place [WorkspaceErrorCodes.MEMBERSHIP_REQUIRED]

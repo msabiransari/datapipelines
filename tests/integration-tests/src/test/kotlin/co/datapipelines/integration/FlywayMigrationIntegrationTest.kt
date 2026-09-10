@@ -429,6 +429,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    @Suppress("LongMethod") // the inventory IS the assertion; splitting it hides what is asserted
     fun `creates exactly the indexes of metadata-db §5 and no others`() {
         // The negative half matters most: §5 deliberately does NOT create
         // idx_events_execution (duplicate of the uq_events_execution_event

@@ -82,10 +82,11 @@ class WorkspaceSurfacesFixRoundE2eTest {
     }
 
     @Test
-    fun `F5 - a global datasource referenced only by ANOTHER workspace's pipeline is still in_use - 409 naming the reference`() {
+    fun `F5 - a SHARED datasource referenced only by ANOTHER workspace's pipeline is still in_use - 409 naming the reference`() {
         ensureSeeded()
         ensureDatasourcesRegistered()
-        // Bob (globex) authors a pipeline reading the GLOBAL datasource; the acme-pinned
+        // Bob (globex) authors a pipeline reading the SHARED datasource — shared by GRANT since
+        // D-R7, which is what makes the reference cross-workspace; the acme-pinned
         // admin's DELETE must still refuse — the guard counts every workspace now.
         given()
             .port(port)
@@ -263,7 +264,48 @@ class WorkspaceSurfacesFixRoundE2eTest {
         datasourcesRegistered = true
         register(ALICE_KEY.plaintext, DS_ACME, H2_ACME_URL)
         register(BOB_KEY.plaintext, DS_GLOBEX, H2_GLOBEX_URL)
-        register(ADMIN_KEY.plaintext, DS_GLOBAL, H2_GLOBAL_URL, global = true)
+        registerInstanceDatasource(DS_GLOBAL, H2_GLOBAL_URL)
+        // D-R7: "global" is gone. What made this datasource shared is now an explicit GRANT
+        // per workspace — so F5's premise ("referenced by ANOTHER workspace's pipeline") needs
+        // globex to have been granted it, exactly as a super admin would have done.
+        grant(DS_GLOBAL, "acme")
+        grant(DS_GLOBAL, "globex")
+    }
+
+    /** Registers a datasource no workspace owns — session-only since O-2 (it needs `admin` scope). */
+    private fun registerInstanceDatasource(
+        name: String,
+        jdbcUrl: String,
+    ) {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, FIX_ROUND_CSRF)
+            .header(CSRF_HEADER, FIX_ROUND_CSRF)
+            .body(
+                """{"name": "$name", "display_name": "Fix $name", "dialect": "H2",
+                   "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD","global":true}""",
+            ).`when`()
+            .post("/api/v1/datasources")
+            .then()
+            .statusCode(201)
+    }
+
+    /** Grants [datasource] to [workspace] as the super admin — the D-R7 verb, session-only. */
+    private fun grant(
+        datasource: String,
+        workspace: String,
+    ) {
+        given()
+            .port(port)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, FIX_ROUND_CSRF)
+            .header(CSRF_HEADER, FIX_ROUND_CSRF)
+            .`when`()
+            .post("/api/v1/datasources/$datasource/grants/$workspace")
+            .then()
+            .statusCode(200)
     }
 
     private fun register(
@@ -291,6 +333,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SESSION_COOKIE = "dp_session"
+        private const val FIX_ROUND_CSRF = "fix-round-csrf"
         private const val CSRF_COOKIE = "dp_csrf"
         private const val CSRF_HEADER = "DP-CSRF-Token"
         private const val SECRET_BYTES = 32

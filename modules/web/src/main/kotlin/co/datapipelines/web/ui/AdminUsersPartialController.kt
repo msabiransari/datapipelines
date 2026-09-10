@@ -211,16 +211,23 @@ class AdminUsersPartialController(
             .header("HX-Reswap", "beforeend")
             .body(ToastHtml.oob("danger", title, ToastHtml.esc(message)))
 
+    /**
+     * The instance-administration gate.
+     *
+     * It tested `Scope.satisfies(scopes, ADMIN)` until RBAC round 1, and that stopped meaning
+     * anything: a session carries no scopes (D-R1) and no key may hold `admin` (O-2), so the
+     * check refused EVERY caller — including the signed-in super admin these screens exist
+     * for. Found by `LocalAdminSeedE2eTest`, whose subject is a zero-setup deployment's first
+     * admin creating the second user.
+     *
+     * The authority is `users.is_admin`, read live off the principal (§11A.2).
+     */
     private fun requireAdmin() {
         val principal = currentPrincipal()
-        if (!Scope.satisfies(principal.scopes, Scope.ADMIN)) {
-            log.info(
-                "Scope denied: user {} accessing admin partial with scopes {}",
-                principal.userId,
-                principal.scopes,
-            )
+        if (!principal.isSuperAdmin) {
+            log.info("Role denied: user {} reached an admin partial without super admin", principal.userId)
             throw org.springframework.security.access
-                .AccessDeniedException("Admin scope required")
+                .AccessDeniedException("Super admin required")
         }
     }
 
@@ -228,13 +235,16 @@ class AdminUsersPartialController(
      * Admin scope PLUS an interactive session, for the operations that mint or rotate a
      * usable credential: `createLocalUser`, `reset-password`, `disable-local`, `unlock`.
      *
-     * [requireAdmin] alone cannot gate these. `AuthenticatedPrincipal.isSuperAdmin` is *defined
-     * as* holding [Scope.ADMIN], so a scope test sees a `dpk_` key and a browser session as
-     * the same principal — and `ApiKeyFilter` has no path test while `ApiKeyCredentialMatcher`
-     * makes key requests CSRF-exempt, so an admin-scoped key reaches these partials with one
+     * [requireAdmin] alone cannot gate these. It asks WHO the caller is, not what credential
+     * they hold, so it sees a `dpk_` key and a browser session as the same principal — and
+     * `ApiKeyFilter` has no path test while `ApiKeyCredentialMatcher` makes key requests
+     * CSRF-exempt, so a key whose owner is a super admin reaches these partials with one
      * header. It could then create a local admin, read the one-time password out of the
      * response body ([oneTimeNotice]), sign in, and hold a `dp_session` that is not workspace-
      * pinned and survives revocation of the key that made it.
+     *
+     * Round 1 narrowed the credential half — no key holds `admin` SCOPE any more — but not
+     * this one: the escalation rides on the OWNER's `is_admin`, which a key still carries.
      *
      * Deliberately NOT applied to `activate`/`deactivate`/`promote`/`demote`: those are
      * pre-026 behaviour, already ratified for keys through the documented

@@ -26,7 +26,7 @@ class DashboardPartialController(
     fun stats(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
+        val isAdmin = principal.isWorkspaceAdmin
 
         val totalPipelines = pipelines.countAll(workspaceId)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
@@ -53,7 +53,7 @@ class DashboardPartialController(
     fun recentExecutions(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
+        val isAdmin = principal.isWorkspaceAdmin
 
         val executions =
             if (isAdmin) {

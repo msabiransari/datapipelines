@@ -78,7 +78,9 @@ import kotlin.io.path.relativeTo
  *
  * The content is imported by the REAL `ExampleContentSeeder`: the context boots with
  * `datapipelines.bootstrap.examples-file` pointing at the shipped file and
- * the four datasources are registered as INSTANCE datasources under the
+ * the four datasources are registered OWNED BY the demo's workspace (and therefore granted
+ * to it — D-R7 replaced "global" with a grant, and an instance datasource is granted to
+ * nobody until a super admin says otherwise) under the
  * exact names the file's `requires_datasources` gate declares, and the gate is exercised
  * POSITIVELY — the first login's provisioning imports the five templates and the pipeline
  * into the fresh personal workspace (the `workspace.examples_seeded` line, no
@@ -113,7 +115,7 @@ class TaxiVsRideshareFourEngineE2eTest {
 
     @Test
     @Order(1)
-    fun `the four demo datasources register global under the content's exact names`() {
+    fun `the four demo datasources register under the content's exact names, owned by the workspace`() {
         seedAuthRows()
         seedTripsEngine()
         seedWeatherEngine()
@@ -149,21 +151,21 @@ class TaxiVsRideshareFourEngineE2eTest {
         createDatasource(
             """
             {"name": "sample-trips", "display_name": "NYC Taxi Trips (sample)", "dialect": "POSTGRES",
-             "jdbc_url": "${trips.jdbcUrl.substringBefore('?')}", "readonly": true, "global": true,
+             "jdbc_url": "${trips.jdbcUrl.substringBefore('?')}", "readonly": true,
              "credential": {"kind": "password", "username": "${trips.username}", "secret": "${trips.password}"}}
             """.trimIndent(),
         )
         createDatasource(
             """
             {"name": "sample-weather", "display_name": "NYC Weather (sample)", "dialect": "MYSQL",
-             "jdbc_url": "${weather.jdbcUrl.substringBefore('?')}", "readonly": true, "global": true,
+             "jdbc_url": "${weather.jdbcUrl.substringBefore('?')}", "readonly": true,
              "credential": {"kind": "password", "username": "${weather.username}", "secret": "${weather.password}"}}
             """.trimIndent(),
         )
         createDatasource(
             """
             {"name": "sample-reference", "display_name": "NYC Reference Data (sample)", "dialect": "SQLITE",
-             "jdbc_url": "jdbc:sqlite:${sqliteFile.absolutePathString()}", "readonly": true, "global": true,
+             "jdbc_url": "jdbc:sqlite:${sqliteFile.absolutePathString()}", "readonly": true,
              "credential": {"kind": "none"},
              "properties": {"jdbc": {"open_mode": "1"}}}
             """.trimIndent(),
@@ -171,7 +173,7 @@ class TaxiVsRideshareFourEngineE2eTest {
         createDatasource(
             """
             {"name": "sample-lake", "display_name": "NYC Rideshare Lake (sample)", "dialect": "LAKE",
-             "jdbc_url": "jdbc:duckdb::memory:", "readonly": true, "global": true,
+             "jdbc_url": "jdbc:duckdb::memory:", "readonly": true,
              "credential": {"kind": "password", "username": "$MINIO_USER", "secret": "$MINIO_PASSWORD"},
              "properties": {"dialect": {"catalog.kind": "s3", "region": "us-east-1",
                "endpoint": "localhost:${minio.getMappedPort(MINIO_PORT)}", "url_style": "path"}}}

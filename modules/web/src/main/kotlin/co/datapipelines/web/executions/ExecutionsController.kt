@@ -79,7 +79,7 @@ class ExecutionsController(
         val size = Pagination.clampLimit(limit)
         val wanted = status?.let { parseStatus(it) }
         val raw =
-            if (Scope.satisfies(principal.scopes, Scope.ADMIN)) {
+            if (principal.isWorkspaceAdmin) {
                 executions.findAll(workspaceId, pipelineId, wanted, startedAfter, startedBefore, limit = size + 1, offset = page)
             } else {
                 executions.findByUser(

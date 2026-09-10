@@ -44,8 +44,7 @@ internal fun requireReadScope(ctx: McpToolContext) {
  * "not yours" code. The distinction is invisible to a legitimate caller and mirrors the
  * `result.execution_not_found` row of §6.2.15's error table.
  */
-internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean =
-    triggeredBy == ctx.principal.userId || Scope.satisfies(ctx.principal.scopes, Scope.ADMIN)
+internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean = triggeredBy == ctx.principal.userId || ctx.principal.isWorkspaceAdmin
 
 /** The §6.2.14 execution projection — metadata only, never rows. */
 internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =

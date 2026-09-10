@@ -57,7 +57,7 @@ class ExecutionDetailController(
         model.addAttribute("resultView", resultView)
         model.addAttribute("correlationId", record.correlationId?.toString() ?: CorrelationId.current())
         model.addAttribute("canCancel", record.status == ExecutionStatus.RUNNING && Scope.satisfies(principal.scopes, Scope.EXECUTE))
-        model.addAttribute("isAdmin", Scope.satisfies(principal.scopes, Scope.ADMIN))
+        model.addAttribute("isAdmin", principal.isWorkspaceAdmin)
 
         val nodeStats = record.nodeStatsJson?.let { ExecutorJson.mapper.readTree(it) }
         model.addAttribute("nodeStats", nodeStats)

@@ -2,6 +2,8 @@ package co.datapipelines.web.api
 
 import co.datapipelines.auth.ApiKeyMissingException
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Capability
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.executor.ExecutionRecord
 import org.springframework.security.core.context.SecurityContextHolder
@@ -36,5 +38,14 @@ fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
         // needs a repository and therefore cannot live in this pure extension.
         principal.isEndpointKey -> false
 
-        else -> triggeredBy == principal.userId || Scope.satisfies(principal.scopes, Scope.ADMIN)
+        // RBAC round 1: the bypass was `Scope.satisfies(scopes, ADMIN)` — a scope no key may
+        // hold any more (O-2) and no session ever has (D-R1), so it had become dead code and
+        // "an admin sees the workspace's runs" quietly stopped being true. The authority moved
+        // to the capability axis, where it now lives: a WORKSPACE ADMIN sees every run in
+        // their workspace, a super admin sees any. Everyone else sees their own.
+        //
+        // Deliberately NOT widened to every member, though the design's §1 table would allow
+        // it ("read … executions ✓" for a viewer): that is a behaviour change this round was
+        // not asked to make, and the conservative reading keeps the rule the deployment has.
+        else -> triggeredBy == principal.userId || principal.isWorkspaceAdmin
     }

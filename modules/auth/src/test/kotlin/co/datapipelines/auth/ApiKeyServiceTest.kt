@@ -39,12 +39,6 @@ class ApiKeyServiceTest {
     private val ownerId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
 
-    /**
-     * The ISSUER, as RBAC round 1 requires issuance to name it (D-R12/O-2): a key is minted by
-     * a person with a role in the pinned workspace, not by a bare user id. An AUTHOR here,
-     * which is the minimum O-2 allows.
-     */
-
     /** A key-borne issuer holding only `read` — the escalation guard's other side (§7.4). */
     private fun readKeyIssuer() =
         issuer.copy(
@@ -54,6 +48,11 @@ class ApiKeyServiceTest {
             workspaceName = "acme",
         )
 
+    /**
+     * The ISSUER, as RBAC round 1 requires issuance to name it (D-R12/O-2): a key is minted by
+     * a person with a role in the pinned workspace, not by a bare user id. An AUTHOR here,
+     * which is the minimum O-2 allows.
+     */
     private val issuer =
         AuthenticatedPrincipal(
             userId = ownerId,

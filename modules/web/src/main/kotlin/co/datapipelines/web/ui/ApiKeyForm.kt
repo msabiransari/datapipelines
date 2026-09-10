@@ -62,7 +62,9 @@ object ApiKeyForm {
             Scope.READ to "list and inspect — runs nothing",
             Scope.EXECUTE to "run released pipelines (includes read)",
             Scope.AUTHOR to "create and change templates, pipelines, datasources (includes execute)",
-            Scope.ADMIN to "everything, including users and workspaces (includes author)",
+            // `admin` is deliberately ABSENT (O-2): a key may not hold it, issuance refuses it
+            // with `auth.key_scope_unavailable`, and a form that offers a choice the server
+            // rejects is a form that teaches people the wrong model.
         )
 
     /** The presets, in the order the select renders them. */

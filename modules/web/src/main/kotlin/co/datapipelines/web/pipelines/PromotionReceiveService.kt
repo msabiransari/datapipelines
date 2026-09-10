@@ -138,7 +138,11 @@ class PromotionReceiveService(
             userId = actor.id,
             email = actor.email,
             displayName = actor.displayName,
-            scopes = setOf(Scope.ADMIN),
+            // No scopes. A promotion principal's authority is its ROUTE FAMILY, enforced by
+            // `PromotionServerKeyFilter` upstream and exempted in `ScopeMatrix.allowed` — it
+            // used to carry `Scope.ADMIN`, which nothing reads any more and which would now
+            // claim an authority no credential can hold (O-2).
+            scopes = emptySet(),
             authMethod = AuthMethod.PROMOTION,
             workspaceName = workspace.name,
             workspace = workspace,

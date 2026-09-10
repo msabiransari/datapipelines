@@ -183,44 +183,46 @@ class SampleDataBootstrapE2eTest {
     }
 
     @Test
-    fun `an examples fixture that does not import fails the DEMO SEEDING loudly`() {
+    fun `an examples fixture that does not import refuses the BOOT, loudly and findably`() {
         // Structurally fine, so it passes the startup read — and semantically broken, so it
-        // fails §12 validation at import. The failure must reach the boot rather than hand the
-        // deployment a `demo` workspace that is quietly missing its examples.
+        // fails §12 validation at import.
+        //
+        // WHERE it fails moved with D-R11. Seeding used to run on an `auto-per-user` first
+        // login, so the refusal reached a person trying to sign in; it now runs once, when
+        // `DemoWorkspaceSeeder` creates `demo` at boot. That is strictly better — a broken
+        // examples file is an operator's problem and now surfaces at deploy time rather than
+        // at the first user's login — and it is why this case asserts a refused CONTEXT.
+        //
+        // The fail-LOUD contract is what is really under test either way: a `demo` workspace
+        // that silently lacks the examples the deployment configured is indistinguishable from
+        // one that was seeded, so the seeder must throw rather than shrug.
         val broken =
             writeFile(
                 "broken-examples.json",
                 examplesJson().replace("\"source\": \"$BOOT_RO\"", "\"source\": \"no-such-datasource\""),
             )
 
-        bootAppAnd(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())) { context ->
-            val email = "broken-${UUID.randomUUID().toString().take(8)}@example.com"
+        lateinit var error: Throwable
+        val lines =
+            capturingLogs {
+                error =
+                    assertThrows<Exception> {
+                        bootApp(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())).close()
+                    }
+            }
 
-            lateinit var error: Throwable
-            val lines = capturingLogs { error = assertThrows<Exception> { firstLogin(email, context) } }
+        // §13.2 `pipeline.import.missing_datasource` — the missing name travels in `details`,
+        // so the message is what a caller of this suite can assert on.
+        rootCauseMessage(error).shouldContain("has unmet dependencies in this environment")
+        rootCauseMessage(error).shouldContain(EXAMPLE_PIPELINE)
 
-            // §13.2 `pipeline.import.missing_datasource` — the missing name travels in `details`,
-            // so the message is what a caller of this suite can assert on.
-            rootCauseMessage(error).shouldContain("has unmet dependencies in this environment")
-            rootCauseMessage(error).shouldContain(EXAMPLE_PIPELINE)
-
-            // 048/§A — and the operator can find it. The refusal is deliberate; what it lacked
-            // was an event: "I can't log in" against a 500 with nothing structured behind it was
-            // an unanswerable support report (reported by 042 as T63). The line names the
-            // fixture that failed and the catalogued code, beside the workspace and the user.
-            val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
-            failure.shouldContain("fixture_kind=pipeline")
-            failure.shouldContain("fixture=$EXAMPLE_PIPELINE")
-            failure.shouldContain("error_code=pipeline.import.missing_datasource")
-            failure.shouldContain("user_id=")
-            lines.none { it.contains("event=workspace.examples_seeded") } shouldBe true
-            // And the workspace it was seeding is not left behind as a usable empty one: the
-            // login failed, so nothing downstream of provisioning ran.
-            scalar<Long>(
-                "SELECT COUNT(*) FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name LIKE 'broken-%'",
-            ) shouldBe
-                0L
-        }
+        // 048/§A — and the operator can find it. The refusal is deliberate; what it lacked was
+        // an event. The line names the fixture that failed and the catalogued code.
+        val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
+        failure.shouldContain("fixture_kind=pipeline")
+        failure.shouldContain("fixture=$EXAMPLE_PIPELINE")
+        failure.shouldContain("error_code=pipeline.import.missing_datasource")
+        lines.none { it.contains("event=workspace.examples_seeded") } shouldBe true
     }
 
     @Test
@@ -350,21 +352,6 @@ class SampleDataBootstrapE2eTest {
             .run(*args)
     }
 
-    /** Boots, runs [block] against that context, and always closes it. */
-    private fun bootAppAnd(
-        overrides: Map<String, String>,
-        block: (ApplicationContext) -> Unit,
-    ) = bootApp(overrides).use(block)
-
-    private fun rootCauseMessage(error: Throwable): String {
-        var current: Throwable = error
-        val seen = StringBuilder(current.message.orEmpty())
-        while (current.cause != null && current.cause !== current) {
-            current = current.cause!!
-            seen.append('\n').append(current.message.orEmpty())
-        }
-        return seen.toString()
-    }
 
     private fun capturingLogs(block: () -> Unit): List<String> {
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
@@ -430,7 +417,18 @@ class SampleDataBootstrapE2eTest {
         private val datasourcesFile: Path = writeFile("bootstrap-datasources.yml", bootstrapYaml())
         private val examplesFile: Path = writeFile("examples.json", examplesJson())
 
-        private fun writeFile(
+        /** Every message in the cause chain, joined — a §13 code can surface at any depth. */
+    private fun rootCauseMessage(error: Throwable): String {
+        var current: Throwable = error
+        val seen = StringBuilder(current.message.orEmpty())
+        while (current.cause != null && current.cause !== current) {
+            current = current.cause!!
+            seen.append('\n').append(current.message.orEmpty())
+        }
+        return seen.toString()
+    }
+
+    private fun writeFile(
             name: String,
             content: String,
         ): Path = fixtures.resolve(name).also { it.writeText(content) }

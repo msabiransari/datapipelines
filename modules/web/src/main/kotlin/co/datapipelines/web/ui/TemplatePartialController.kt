@@ -126,7 +126,7 @@ class TemplatePartialController(
             principal.requireWorkspace().id,
             name,
             principal.userId,
-            Scope.satisfies(principal.scopes, Scope.ADMIN),
+            principal.isWorkspaceAdmin,
         )
     }
 
