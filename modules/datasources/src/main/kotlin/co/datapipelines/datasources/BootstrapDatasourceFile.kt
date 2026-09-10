@@ -338,7 +338,7 @@ class BootstrapDatasourceFileReader(
  * `global: true` is the only admitted value in v1. The file shape carries the flag because
  * spec 1 defines both scopes, but registration runs **before any workspace exists**, so there is
  * no answer to "which workspace does a non-global bootstrap entry bind to". `global: true` means
- * `workspace_id NULL`, which the INSERT achieves by not naming the column at all
+ * `owner_workspace_id NULL` — an INSTANCE datasource (D-R7) — which the INSERT achieves by not naming the column at all
  * (metadata-db §4.10: NULL = global).
  *
  * `ThrowsCount` is suppressed for the same reason as [BootstrapDatasourceFileReader.read]: three

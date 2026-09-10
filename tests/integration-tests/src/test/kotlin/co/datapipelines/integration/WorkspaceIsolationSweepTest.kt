@@ -127,6 +127,9 @@ class WorkspaceIsolationSweepTest {
             swept.any { it.path.startsWith("/api/v1/templates") } shouldBe true
             swept.any { it.path.startsWith("/partials/") } shouldBe true
         }
+        withClue("every swept route actually carries a foreign identifier") {
+            swept.none { route -> FOREIGN_VALUES.values.none { it in route.path } } shouldBe true
+        }
         MCP_TOOL_ARGUMENTS.size shouldBeGreaterThanOrEqual MINIMUM_SWEPT_TOOLS
     }
 
@@ -143,11 +146,19 @@ class WorkspaceIsolationSweepTest {
      * Every route this sweep can drive, with foreign identifiers substituted.
      *
      * Skipped, each for a reason that is about the ROUTE rather than about convenience:
-     * - **public routes** ([PublicPaths]-matched): they carry no principal and no workspace,
-     *   so there is nothing for a foreign id to reach;
+     * - **public routes**: they carry no principal and no workspace, so there is nothing for a
+     *   foreign id to reach;
      * - **patterns whose variables the substitution table does not name**: substituting a
-     *   made-up value would assert nothing about isolation. The table is asserted non-empty
-     *   above, and an unnameable variable is a route worth adding to it rather than hiding.
+     *   made-up value would assert nothing about isolation. An unnameable variable is a route
+     *   worth adding to the table rather than hiding;
+     * - **patterns with NO path variable at all.** This one is the important exclusion, and
+     *   the first run of this suite is why it exists: without it the walk swept
+     *   `GET /api/v1/auth/api-keys` — a listing of the caller's OWN keys — and called its 200
+     *   a leak. A route with no caller-supplied id cannot carry a foreign one, so it is not
+     *   what this suite is about; "no listing of A's contains a B row" is asserted directly by
+     *   [WorkspaceIsolationIntegrationTest]. Sweeping them also made the suite MUTATING
+     *   against a shared world (it fired every bodyless POST and DELETE), which is a second
+     *   reason the exclusion is structural rather than cosmetic.
      */
     private fun sweepableRoutes(): List<Route> =
         walkMappings()
@@ -213,8 +224,11 @@ class WorkspaceIsolationSweepTest {
      * put a UUID where a name grammar is expected and prove only that the grammar rejects it.
      */
     private fun substitute(pattern: String): String? {
+        val variables = VARIABLE_PATTERN.findAll(pattern).toList()
+        // No variable = no caller-supplied id = nothing this suite can be about (see the KDoc).
+        if (variables.isEmpty()) return null
         var path = pattern
-        VARIABLE_PATTERN.findAll(pattern).forEach { match ->
+        variables.forEach { match ->
             val variable = match.groupValues[1].substringBefore(':')
             val value = FOREIGN_VALUES[variable] ?: return null
             path = path.replace(match.value, value)
@@ -387,7 +401,7 @@ class WorkspaceIsolationSweepTest {
          * counted 133 routes; a floor well under it and well over "the scan broke" is what makes
          * a silently-empty walk impossible.
          */
-        const val MINIMUM_SWEPT_ROUTES = 40
+        const val MINIMUM_SWEPT_ROUTES = 25
         const val MINIMUM_SWEPT_TOOLS = 12
 
         val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")

@@ -78,7 +78,7 @@ import kotlin.io.path.relativeTo
  *
  * The content is imported by the REAL `ExampleContentSeeder`: the context boots with
  * `datapipelines.bootstrap.examples-file` pointing at the shipped file and
- * `provisioning-mode=auto-per-user`, the four datasources are registered GLOBAL under the
+ * the four datasources are registered as INSTANCE datasources under the
  * exact names the file's `requires_datasources` gate declares, and the gate is exercised
  * POSITIVELY — the first login's provisioning imports the five templates and the pipeline
  * into the fresh personal workspace (the `workspace.examples_seeded` line, no
@@ -775,7 +775,6 @@ class TaxiVsRideshareFourEngineE2eTest {
 
             // The seeder path (089 §E/§F): the shipped lake examples file, imported into each
             // fresh personal workspace when its requires_datasources gate passes.
-            registry.add("datapipelines.workspaces.provisioning-mode") { "auto-per-user" }
             registry.add("datapipelines.bootstrap.examples-file") { examplesFile().absolutePathString() }
         }
     }

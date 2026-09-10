@@ -49,7 +49,7 @@ class RbacCoreMigrationTest {
 
     @Test
     fun `owner becomes a workspace ADMIN, and therefore an author`() {
-        flagsOf(wsAcme, alice) shouldBe "t|f|t"
+        flagsOf(wsAcme, alice) shouldBe "true|false|true"
     }
 
     @Test
@@ -57,7 +57,7 @@ class RbacCoreMigrationTest {
         // The pre-V23 world gave every non-admin session `author` GLOBALLY, so `member →
         // author` preserves exactly what worked the day before. Anything less would be a
         // silent capability removal on upgrade, which is the one thing a migration must not do.
-        flagsOf(wsGlobex, bob) shouldBe "t|f|f"
+        flagsOf(wsGlobex, bob) shouldBe "true|false|false"
     }
 
     @Test

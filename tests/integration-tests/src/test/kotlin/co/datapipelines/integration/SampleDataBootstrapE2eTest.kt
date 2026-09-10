@@ -382,7 +382,7 @@ class SampleDataBootstrapE2eTest {
     private fun datasourceSnapshot(): List<Map<String, Any?>> =
         rows(
             "SELECT name, display_name, dialect, jdbc_url, username, encode(credential_encrypted, 'hex') AS pw," +
-                " properties_json::text AS props, is_readonly, is_deleted, workspace_id, created_by, created_at, updated_at" +
+                " properties_json::text AS props, is_readonly, is_deleted, owner_workspace_id, created_by, created_at, updated_at" +
                 " FROM datasources ORDER BY name",
         )
 
