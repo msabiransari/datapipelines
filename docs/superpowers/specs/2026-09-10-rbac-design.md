@@ -1,7 +1,6 @@
 # Design: RBAC — capability moves into the workspace membership; five roles, one matrix, one sweep
 
-**Status:** DRAFT v0.1 for owner ratification (2026-09-10). The framing decisions were ruled in
-conversation the same day (D-R1–D-R14 below); §10 lists what is still open. Implementation is
+**Status:** RATIFIED v1.0 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
 two rounds (§9) and lands **before the release tag** — the owner: "We are entering serious
 territory and I would like to tighten the security now rather than later."
 
@@ -187,17 +186,18 @@ switcher lists active memberships; super admins see every active workspace.
   `ui-screens.md`, the skill (`error-codes.md`: the new refusals and what an agent does —
   "your key's issuer lost the role; ask an admin").
 
-## 10. Open items
+## 10. Rulings on the open items (owner, 2026-09-10)
 
-| # | Question | Recommendation |
-|---|---|---|
-| O-1 | May a promoter `switch` the served version (the rollback lever) on a non-dev server? It is not release, but it is the promotion receiver's verb. | Yes — promoter and workspace admin; it is the operational half of promotion. |
-| O-2 | May a viewer issue a `read`/`execute` key for their own agent? | No in v1 — keys are author+ (D-R12); a viewer's agent uses the viewer's session… which MCP cannot. Revisit if viewers with agents appear. |
-| O-3 | `demo` workspace lifecycle: can it be deactivated? | Yes, by a super admin, like any other; the seed does not recreate it. |
-| O-4 | The promotion peer (server key) on the receiver: which workspace does an import land in? | The workspace named in the payload, created on the receiver by a super admin beforehand; a missing workspace refuses the batch (`workspace.not_found`) — never auto-created. |
+| # | Ruling |
+|---|---|
+| O-1 | **Yes** — a promoter (and a workspace admin) may `switch` the served version on any server; it is the operational half of promotion. |
+| O-2 | **Viewers never mint keys.** Keys are author and above, full stop. |
+| O-3 | **Yes** — `demo` is deactivated like any workspace; the seed does not recreate it. |
+| O-4 | **Correct** — a promotion import lands only in a workspace that already exists on the receiver, created by its super admin to MATCH the lower environment, exactly as datasources are registered manually there as part of setup. A missing workspace refuses the batch (`workspace.not_found`); nothing is auto-created. |
 
 ## Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-10 | v1.0 | owner ratification | O-1–O-4 ruled (§10); status RATIFIED; prompt 112 is round 1. |
 | 2026-09-10 | v0.1 | orchestrator, after the owner's rulings | Initial record: fourteen decisions from the conversation, the role table, the two-axis matrix, the 404 sweep, datasource grants, provisioning + demo, deactivation, rounds, open items. |
