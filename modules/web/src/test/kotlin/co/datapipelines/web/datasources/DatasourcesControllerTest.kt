@@ -4,6 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
@@ -73,7 +74,10 @@ class DatasourcesControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(scopes: Set<Scope> = setOf(Scope.ADMIN)) {
+    private fun authenticate(
+        scopes: Set<Scope> = setOf(Scope.AUTHOR),
+        superAdmin: Boolean = true,
+    ) {
         val principal =
             AuthenticatedPrincipal(
                 userId,
@@ -81,7 +85,8 @@ class DatasourcesControllerTest {
                 "A",
                 scopes,
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true, promoter = true, admin = true)),
+                superAdmin = superAdmin,
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())

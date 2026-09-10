@@ -62,7 +62,11 @@
             <span th:if="${membership.workspaceName == activeWorkspace}"
                   class="ds-badge ds-badge-primary">active</span>
           </td>
-          <td th:text="${membership.role.wire}">owner</td>
+          <!-- D-R2: roles are ADDITIVE flags, so no single label names a row — an author who
+               also releases and a DevOps person who only releases are both memberships. The
+               checkbox UI that EDITS them is round 2 (113); this renders what is there. -->
+          <td th:text="${membership.flags.author ? (membership.flags.admin ? 'admin' : 'author') : (membership.flags.promoter ? 'promoter' : 'viewer')}
+                       + (${membership.flags.promoter and membership.flags.author} ? ' + promoter' : '')">author</td>
           <td class="num">
             <form th:action="@{/workspace/switch}" method="post" class="u-inline">
               <input type="hidden" name="name" th:value="${membership.workspaceName}">
@@ -98,9 +102,12 @@
             <span th:text="${member.displayName}">Alice</span>
             <span class="u-secondary u-text-xs" th:text="' ' + ${member.email}">alice@example.com</span>
           </td>
-          <td th:text="${member.role.wire}">member</td>
+          <td th:text="${member.flags.author ? (member.flags.admin ? 'admin' : 'author') : (member.flags.promoter ? 'promoter' : 'viewer')}
+                       + (${member.flags.promoter and member.flags.author} ? ' + promoter' : '')">author</td>
           <td class="num">
-            <form th:if="${member.role.wire != 'owner'}"
+            <!-- The last-admin rule is the SERVER's (workspace.last_admin, 409); hiding the
+                 button for every admin would also hide it for the ones who can be removed. -->
+            <form th:if="${!member.flags.admin}"
                   th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
               <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
             </form>

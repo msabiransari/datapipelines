@@ -4,6 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
@@ -85,9 +86,13 @@ class DatasourceD8MatrixTest {
                     userId,
                     "a@b.c",
                     "A",
-                    if (admin) Scope.ADMIN.expand() else Scope.AUTHOR.expand(),
+                    // D-R1: the session's capability is its MEMBERSHIP, not a scope set. An
+                    // "admin" here is a SUPER admin (instance datasources are theirs); the
+                    // non-admin is a workspace admin, which is what the D8 gate reads.
+                    emptySet(),
                     AuthMethod.OIDC,
-                    workspace = WorkspaceContext(workspaceId, "acme"),
+                    workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true, promoter = true, admin = true)),
+                    superAdmin = admin,
                 ),
                 null,
                 emptyList(),

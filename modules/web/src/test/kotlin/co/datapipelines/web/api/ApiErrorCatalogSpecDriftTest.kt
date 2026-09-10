@@ -159,7 +159,11 @@ class ApiErrorCatalogSpecDriftTest {
          * `datasource.validation.property_empty` (400), landed in the SAME commit as its
          * constants and catalog row.
          */
-        const val SECTION_13_ROW_COUNT = 156
+        // 156 at 2515eb36; RBAC round 1 added six §13 rows — four `auth.*` (role_required,
+        // key_issuer_role_lost, key_scope_unavailable, key_workspace_inactive), one §13.8
+        // (datasource.grant_required) and two §13.12 (workspace.last_admin, workspace.inactive),
+        // less one retired (workspace.creation_forbidden, gone with the provisioning modes).
+        const val SECTION_13_ROW_COUNT = 162
 
         /**
          * §12's distinct validation codes.

@@ -80,7 +80,8 @@ class BootstrapDatasourceRegistrarIntegrationTest {
         readonly.isReadonly shouldBe true
         readonly.createdBy shouldBe actor
         readonly.displayName shouldBe "Read-only sample"
-        // `global: true` is `workspace_id NULL` (metadata-db §4.10). The column is not in the
+        // `global: true` is `owner_workspace_id NULL` (V23): no workspace OWNS it. Visibility
+        // is the grant table now (D-R7). The column is not in the
         // repository's projection, so it is read straight out of the table.
         workspaceIdOf("bootstrap-readonly").shouldBeNull()
 
@@ -311,7 +312,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
     private fun row(name: String): DatasourceRow = checkNotNull(repository.findByName(name)) { "no live row named '$name'" }
 
     private fun workspaceIdOf(name: String): UUID? =
-        jdbc.queryForObject("SELECT workspace_id FROM datasources WHERE name = :n", mapOf("n" to name), UUID::class.java)
+        jdbc.queryForObject("SELECT owner_workspace_id FROM datasources WHERE name = :n", mapOf("n" to name), UUID::class.java)
 
     private fun isDeletedOf(name: String): Boolean =
         checkNotNull(
@@ -332,7 +333,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
         jdbc.queryForList(
             "SELECT name, display_name, description, dialect, jdbc_url, username," +
                 " encode(credential_encrypted, 'hex') AS pw, properties_json::text AS props," +
-                " query_timeout_seconds, is_readonly, is_deleted, workspace_id, created_by," +
+                " query_timeout_seconds, is_readonly, is_deleted, owner_workspace_id, created_by," +
                 " created_at, updated_at" +
                 " FROM datasources ORDER BY name",
             emptyMap<String, Any>(),

@@ -42,7 +42,10 @@ internal object ConfigSnapshots {
             resultTtlMinSeconds = 60,
             resultTtlDefaultSeconds = 300,
             resultTtlMaxSeconds = 3600,
-            workspacesProvisioningMode = "self-serve",
+            // RBAC round 1 removed `provisioning-mode` and `open-join` (D-R11), and the
+            // validator refuses either BY NAME — so a snapshot that still sets one is not a
+            // valid configuration, and this fixture must not pretend otherwise.
+            workspacesProvisioningMode = null,
             bootstrapDatasourcesFile = null,
             bootstrapExamplesFile = null,
             bootstrapAdminEmail = null,

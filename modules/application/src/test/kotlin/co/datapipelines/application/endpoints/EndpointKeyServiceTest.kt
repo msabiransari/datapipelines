@@ -67,7 +67,7 @@ class EndpointKeyServiceTest {
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
-            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any(), any(), any()) } },
             { verify(exactly = 0) { bindings.insert(any()) } },
         )
     }
@@ -186,7 +186,7 @@ class EndpointKeyServiceTest {
     }
 
     private fun stubIssue() {
-        every { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } returns
+        every { apiKeys.issue(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             IssuedApiKey(
                 record =
                     ApiKey(

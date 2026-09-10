@@ -32,6 +32,13 @@ import java.util.UUID
  * REAL [WorkspacesController] handler methods with `DP-API-Key` principals, so a floor
  * regression on any of the five turns red here.
  *
+ * **RBAC round 1 raised the floors again, and this suite raised with them.** Creating and
+ * deactivating a workspace are `super_admin` on the role axis and `admin` on the scope axis —
+ * and `admin` is no longer a scope a key may hold (O-2) — so a key CANNOT reach them at all,
+ * by either axis. Membership management is `ws_admin`. The suite therefore now asserts the
+ * stronger property: the credential axis alone stops a key on the two instance verbs, and the
+ * ROLE axis is what admits or refuses it on the rest.
+ *
  * The handler-annotation layer is what this class proves; the pinned-workspace rule for
  * key principals (the same finding's second half) is proven where the rule lives, in
  * auth's `WorkspaceKeyPinTest`. `WorkspacesControllerTest` covers the payloads; this
@@ -51,23 +58,44 @@ class WorkspacesControllerApiKeyTest {
                 UUID.randomUUID(),
                 "agent@company.com",
                 "Agent",
-                scope.expand(),
+                scope.expand().filterTo(mutableSetOf()) { it in co.datapipelines.auth.KEY_SCOPES },
                 AuthMethod.API_KEY,
                 keyId = "dpk_TESTKEY",
                 workspaceName = "acme",
+                // Both axes are judged now, so the key needs a resolved workspace or every
+                // call is `workspace.not_found` before any floor is read. Its ISSUER is a
+                // workspace admin here — the highest role a key's issuer can be short of super
+                // admin — so what refuses below is a floor, never a missing membership.
+                workspace =
+                    co.datapipelines.auth.WorkspaceContext(
+                        UUID.randomUUID(),
+                        "acme",
+                        co.datapipelines.auth.MembershipFlags(author = true, promoter = true, admin = true),
+                    ),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
 
     /** The five mutations the finding named, each with its HTTP verb and path. */
+    /** The verbs a workspace admin's key may drive: `ws_admin` on the role axis, `author` on the scope one. */
     private fun mutations(): List<Triple<String, HandlerMethod, String>> =
         listOf(
-            Triple("POST", handler("create", JsonNode::class.java), "/api/v1/workspaces"),
             Triple("PUT", handler("update", String::class.java, JsonNode::class.java), "/api/v1/workspaces/acme"),
-            Triple("DELETE", handler("delete", String::class.java), "/api/v1/workspaces/acme"),
             Triple("POST", handler("addMember", String::class.java, JsonNode::class.java), "/api/v1/workspaces/acme/members"),
             Triple("DELETE", handler("removeMember", String::class.java, UUID::class.java), "/api/v1/workspaces/acme/members/$USER_ID"),
+        )
+
+    /**
+     * The INSTANCE verbs (D-R11/D-R10): `super_admin` on the role axis and `admin` on the scope
+     * axis — and no key holds `admin` any more (O-2), so a key is stopped twice over.
+     */
+    private fun instanceVerbs(): List<Triple<String, HandlerMethod, String>> =
+        listOf(
+            Triple("POST", handler("create", JsonNode::class.java), "/api/v1/workspaces"),
+            Triple("DELETE", handler("delete", String::class.java), "/api/v1/workspaces/acme"),
+            Triple("POST", handler("deactivate", String::class.java), "/api/v1/workspaces/acme/deactivate"),
+            Triple("POST", handler("reactivate", String::class.java), "/api/v1/workspaces/acme/reactivate"),
         )
 
     private fun handler(
@@ -100,13 +128,25 @@ class WorkspacesControllerApiKeyTest {
     }
 
     @Test
-    fun `an author-scoped api key passes the floor on all five workspace mutations`() {
-        // The floor is the interceptor's whole say: ownership and the key's workspace pin
-        // are the service's gates (WorkspaceKeyPinTest), reached only past this point.
+    fun `an author-scoped key whose issuer is a workspace admin passes the membership floors`() {
+        // The floors are the interceptor's whole say: the key's workspace pin is the service's
+        // gate (WorkspaceKeyPinTest), reached only past this point.
         authenticateKey(Scope.AUTHOR)
 
         mutations().forEach { (method, handler, path) ->
             invoke(method, handler, path).first.shouldBeTrue()
+        }
+    }
+
+    @Test
+    fun `NO key reaches the instance verbs - the scope axis alone stops it (O-2)`() {
+        // The strongest form of the 025 finding's fix: it is not that a key needs a higher
+        // scope, it is that the scope it would need cannot be issued to a key at all. Even a
+        // key whose issuer is a super admin is refused, because the refusal is the CREDENTIAL's.
+        authenticateKey(Scope.AUTHOR)
+
+        instanceVerbs().forEach { (method, handler, path) ->
+            invoke(method, handler, path).first.shouldBeFalse()
         }
     }
 

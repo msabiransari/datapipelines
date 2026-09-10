@@ -4,6 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
@@ -72,9 +73,10 @@ class DatasourceCreatePathTest {
             userId,
             "a@b.c",
             "A",
-            if (admin) setOf(Scope.ADMIN) else setOf(Scope.AUTHOR),
+            setOf(Scope.AUTHOR),
             AuthMethod.API_KEY,
-            workspace = workspace,
+            workspace = workspace.copy(flags = MembershipFlags(author = true, promoter = true, admin = true)),
+            superAdmin = admin,
         )
 
     private fun authenticate(admin: Boolean) {

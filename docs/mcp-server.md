@@ -212,7 +212,7 @@ A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_
 
 ### 6.2 Tool definitions
 
-Every tool definition below carries a **Scope** row: the minimum scope the calling API key must hold. Those values are sourced from the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative), which is authoritative — if this doc and the matrix ever disagree, the matrix wins. Scopes are hierarchical (`author` ⊃ `execute` ⊃ `read`; `admin` ⊃ all), so a listed scope is a floor, not an exact match. No v1 MCP tool requires `admin` (§4.1).
+Every tool definition below carries a **Scope** row: the minimum scope the calling API key must hold. Those values are sourced from the [Auth §7.6 operation matrix](auth.md#76-operation-matrix--two-axes-authoritative), which is authoritative — if this doc and the matrix ever disagree, the matrix wins. Scopes are hierarchical (`author` ⊃ `execute` ⊃ `read`; `admin` ⊃ all), so a listed scope is a floor, not an exact match. No v1 MCP tool requires `admin` (§4.1).
 
 Every tool's result envelope, including its error shape, is §6.3.
 
@@ -989,7 +989,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 
 Returns `{path, deleted: true}`, or `endpoint.not_found`.
 
-**Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+**Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 
 **Mutating.** Declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3). The audit row carries the datasource NAME and never the credential.
 
@@ -1101,7 +1101,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
 }
 ```
 
-**Scope:** `author` — the datasource-mutation floor ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
+**Scope:** `author` — the datasource-mutation floor ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
 
 **Mutating.** Declared `mutating` in the tool catalog: every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -1572,7 +1572,7 @@ The error payload inside the tool result matches the [REST API `error` object](r
 ### 9.3 Transport errors
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
-- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
+- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -1650,7 +1650,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - [ ] API key validated on every request, not just session establishment — via `DP-API-Key` **and** `Authorization: Bearer dpk_...`, both through the single [Auth §7.3](auth.md#73-validation-flow) path. No second, laxer code path for the Bearer form.
 - [ ] Session JWTs (`dp_session` cookie, non-`dpk_` Bearer tokens) are **rejected** on `/mcp` — verify with a test that a valid browser session cannot call a tool.
 - [ ] Key revocation and owner deactivation take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
-- [ ] Scope enforced per tool against the [Auth §7.6 matrix](auth.md#76-scope--operation-matrix-authoritative) — one test per tool asserting the next-lower scope is refused with `auth.scope.insufficient`.
+- [ ] Scope enforced per tool against the [Auth §7.6 matrix](auth.md#76-operation-matrix--two-axes-authoritative) — one test per tool asserting the next-lower scope is refused with `auth.scope.insufficient`.
 - [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a valid `read` key cannot read another user's results.
 - [ ] `resources/list` filtered by the caller's scope and ownership (§7.3), not just paginated.
 - [ ] Datasource passwords never included in tool results or resources; `datasources_test` failures do not echo credentials or JDBC URLs.

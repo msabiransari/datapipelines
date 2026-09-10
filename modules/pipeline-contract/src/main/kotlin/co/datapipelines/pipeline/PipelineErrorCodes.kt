@@ -483,6 +483,22 @@ object PipelineErrorCodes {
          * response from distinguishing a wrong key from a disabled receiver.
          */
         const val PROMOTION_KEY_INVALID = "auth.promotion.key_invalid"
+
+        /**
+         * §13.7 — the principal's ROLE in the active workspace is below the operation's
+         * (RBAC design §2, D-R1). Two segments, not three: the role axis has no ENTITY
+         * dimension — it is a property of the caller's membership, not of a thing they named.
+         */
+        const val ROLE_REQUIRED = "auth.role_required"
+
+        /** §13.7 — the key was valid; its issuer no longer holds the capability (D-R12). */
+        const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
+
+        /** §13.7 — issuance asked for a scope keys may no longer hold; today that is `admin` (O-2). */
+        const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
+
+        /** §13.7 — the workspace this key is pinned to has been deactivated (D-R10). */
+        const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */
@@ -540,6 +556,14 @@ object PipelineErrorCodes {
 
         /** §13.8 (089 §A) — unregister named a lake table that is not registered (404). */
         const val LAKE_TABLE_NOT_FOUND = "datasource.lake_table_not_found"
+
+        /**
+         * §13.8 — the datasource exists on the instance but is not GRANTED to the caller's
+         * workspace (D-R7). A 404, because an ungranted datasource is INVISIBLE: "this exists,
+         * you may not see it" turns the flat, global datasource namespace into an enumeration
+         * oracle one request at a time.
+         */
+        const val GRANT_REQUIRED = "datasource.grant_required"
 
         /**
          * §13.8 (109 §A) — a pipeline node referenced a registered lake table whose connect-time

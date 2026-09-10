@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
@@ -36,7 +37,15 @@ object McpFixtures {
     val EXECUTION_ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
     val CORRELATION_ID: UUID = UUID.fromString("33333333-3333-3333-3333-333333333333")
     val WORKSPACE_ID: UUID = UUID.fromString("44444444-4444-4444-4444-444444444444")
-    val WORKSPACE: WorkspaceContext = WorkspaceContext(WORKSPACE_ID, "acme")
+    /**
+     * The workspace every fixture principal operates in. Its flags are a WORKSPACE ADMIN's
+     * since RBAC round 1: `ScopeMatrix.allowedTool` judges both axes now, and these suites are
+     * about the TOOLS and the credential axis — so the role axis has to be satisfied or every
+     * one of them would fail on a refusal that is not what it is testing. The role axis has its
+     * own suite (`RoleMatrixTest`) and its own doc guard.
+     */
+    val WORKSPACE: WorkspaceContext =
+        WorkspaceContext(WORKSPACE_ID, "acme", MembershipFlags(author = true, promoter = true, admin = true))
 
     /** The default key id principals carry (the dispatcher tests assert it verbatim). */
     const val KEY_ID: String = "dpk_ABCDEFGHIJKL"

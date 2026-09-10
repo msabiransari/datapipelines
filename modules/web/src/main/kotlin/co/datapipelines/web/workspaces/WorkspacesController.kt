@@ -85,9 +85,13 @@ class WorkspacesController(
     }
 
     /** §17.5 — soft delete; `409 workspace.in_use` while content remains (each kind counts). Owner or admin. */
+    // D-R10 — an INSTANCE verb, like create/deactivate/reactivate: deleting a workspace is a
+    // super admin's, and the annotation says so rather than leaving the service to be the only
+    // one who knows. Deactivation is what operators actually want; delete stays for the empty
+    // case, and `workspace.in_use` refuses it otherwise.
     @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
     fun delete(
         @PathVariable name: String,
     ) {

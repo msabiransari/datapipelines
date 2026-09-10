@@ -322,7 +322,7 @@ class DatasourceRepositoryIntegrationTest {
             .queryForList(
                 "SELECT name, display_name, description, dialect, jdbc_url, username," +
                     " encode(credential_encrypted, 'hex') AS pw, properties_json::text AS props, query_timeout_seconds," +
-                    " introspection_include_schemas_json::text AS incl, is_readonly, workspace_id, is_deleted," +
+                    " introspection_include_schemas_json::text AS incl, is_readonly, owner_workspace_id, is_deleted," +
                     " created_at, updated_at, created_by" +
                     " FROM datasources WHERE name = :n",
                 mapOf("n" to name),

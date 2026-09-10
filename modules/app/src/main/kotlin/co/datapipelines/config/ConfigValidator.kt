@@ -51,10 +51,11 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        // 24 until RBAC round 1, which removed two workspace checks (the provisioning-mode
-        // value check and the open-join/mode agreement check) and added one that refuses both
-        // removed keys by name.
-        internal const val CHECK_COUNT = 23
+        // 24 until RBAC round 1, which removed THREE checks with the behaviour they read —
+        // the provisioning-mode value check, the open-join/mode agreement check, and the
+        // examples-file/mode cross-key rule — and added one that refuses both removed keys by
+        // name. Pinned by `ConfigValidatorCheckCountTest`, which counts the `check*` functions.
+        internal const val CHECK_COUNT = 22
 
 
         /** How an absent mode reads in a violation: application.yml always supplies the default. */

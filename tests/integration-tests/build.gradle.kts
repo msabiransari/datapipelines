@@ -15,6 +15,14 @@ dependencies {
     testImplementation(libs.argon2.jvm)
 
     testImplementation(libs.spring.boot.starter.test)
+
+    // 112 — `WorkspaceIsolationSweepTest` reflects the application's OWN registered route
+    // table (`RequestMappingHandlerMapping`) so a route added tomorrow is swept without
+    // anybody remembering to add it. That needs the MVC types on the test compile classpath;
+    // `:modules:app` declares them `implementation`, so they do not travel transitively.
+    // This is a LIBRARY, not a module dependency — `verifyModuleDependencies` still holds the
+    // module rule (module-structure §4.2: integration-tests may depend on `:modules:app` alone).
+    testImplementation(libs.spring.boot.starter.web)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit.jupiter)
     // One container module per supported dialect that needs a real server.

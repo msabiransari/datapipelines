@@ -746,7 +746,7 @@ The table-type vocabulary and the system-schema exclusion are **per-dialect prop
 
 Rules:
 
-- **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-apiv1datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+- **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-apiv1datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 - **Read-only by construction**: these three operations issue only `DatabaseMetaData` calls, no statements. The statement-executing siblings landed later and are non-writing by their own construction: §7C's table statistics run bounded catalog queries, and §7D's probe runs one classified SELECT — neither writes, and neither relaxes anything said here.
 - **`table`, `schema` and `namespace` filters are exact-match identifiers, not LIKE patterns** — `_` and `%` in a name are escaped with the driver's `getSearchStringEscape()`, so a filter for `order_items` cannot match a sibling table like `order1items`. The escape applies only to the true pattern arguments (`schemaPattern`, `tableNamePattern`); the JDBC **catalog argument is a literal** ("must match the catalog name as it is stored") and is never escaped — an escaped catalog would match nothing for a MySQL database whose stored name carries `_`/`%`.
 - **An unknown table, schema or namespace filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
@@ -785,7 +785,7 @@ Rules:
 - **An unknown TABLE is empty stats, not an error** — the §7A filter philosophy: the stat fields are null/absent, `indexes`/`columns` empty, and `stats_source` carries the dialect's own label (`none` when even the catalog is absent). An unknown DATASOURCE is `datasource.not_found`.
 - **The statement timeout is clamped to 10 s** — the datasource's own `query_timeout_seconds` applies only when TIGHTER. Catalog reads never scan a table — that is the whole point of the section — so they must not wait on a table scan's budget. The one exception is the lake's footer read, clamped to **60 s**: it is still metadata (no data pages are read), but a day-partitioned table is hundreds of Parquet footers over object storage — the demo's two-year `hvfhv_trips` (~700 files, unsigned S3) does not answer inside the catalog bound (measured live, 107). Footer rows are bounded at 65,536 so a million-file glob cannot stream its catalog through the wire.
 - **Namespace routing is §7A's**: the caller's `namespace` filter, else the connection's current namespace — and a datasource reporting no current schema fails with `pipeline.execution.parameter_required` exactly like the columns read. A filter deeper than the dialect's namespace names no real place and answers empty stats. A lake's unfiltered read resolves only when exactly one namespace is registered; several refuse the same way.
-- **Scope: `read`** on the MCP surface — the engine's own stored ESTIMATES about shape, never customer row data (the `templates_used_by` reasoning, [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)) — which is why it sits below the §7A tools' `author` floor.
+- **Scope: `read`** on the MCP surface — the engine's own stored ESTIMATES about shape, never customer row data (the `templates_used_by` reasoning, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) — which is why it sits below the §7A tools' `author` floor.
 - The LAKE location reaches `parquet_metadata(...)` only after the registry's location grammar is re-checked at the SQL-emission boundary (`s3://`/`file://`, no quotes/whitespace/control characters — the same total grammar the view generation enforces); JDBC-path identifiers are prepared-statement binds, never interpolated.
 
 ## 7D. The SQL probe
@@ -1386,7 +1386,7 @@ At datasource create/update time, validation calls `isAvailable(dialect)` and re
 
 ## 11. CRUD Operations
 
-Wire contracts (envelopes, status codes, examples) live in [REST API §9](rest-api.md#9-datasource-endpoints); required scopes live in the [Auth §7.6 scope matrix](auth.md#76-scope--operation-matrix-authoritative) (read = `read`, test = `author`, create/update/delete = `admin`). This table is the operation inventory.
+Wire contracts (envelopes, status codes, examples) live in [REST API §9](rest-api.md#9-datasource-endpoints); required scopes live in the [Auth §7.6 scope matrix](auth.md#76-operation-matrix--two-axes-authoritative) (read = `read`, test = `author`, create/update/delete = `admin`). This table is the operation inventory.
 
 | Operation | Method & Path | Notes |
 |---|---|---|

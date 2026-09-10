@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.datasources.DatasourceAuditEvents
 import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrant
 import co.datapipelines.datasources.DatasourceGrantRepository
@@ -71,7 +72,7 @@ class DatasourceGrantsController(
         val principal = currentPrincipal()
         val target = workspaces.read(principal, workspace)
         val created = grants.grant(name, target.id, principal.userId)
-        audit(principal, "datasource.granted", name, workspace, mapOf("already_granted" to !created))
+        audit(principal, DatasourceAuditEvents.GRANTED, name, workspace, mapOf("already_granted" to !created))
         return ApiResponse.of(mapOf("datasource" to name, "workspace" to workspace, "granted" to true))
     }
 
@@ -92,7 +93,7 @@ class DatasourceGrantsController(
         val principal = currentPrincipal()
         val target = workspaces.read(principal, workspace)
         val removed = grants.revoke(name, target.id)
-        audit(principal, "datasource.revoked", name, workspace, mapOf("had_grant" to removed))
+        audit(principal, DatasourceAuditEvents.REVOKED, name, workspace, mapOf("had_grant" to removed))
     }
 
     /**

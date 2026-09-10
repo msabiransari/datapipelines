@@ -261,16 +261,18 @@ class WorkspaceIsolationIntegrationTest {
         private const val SECRET_BYTES = 32
 
         private const val ALICE = "aaa00000-0000-0000-0000-000000000001"
-        private const val BOB = "bbb00000-0000-0000-0000-000000000002"
+
+        /** Exposed for [WorkspaceIsolationSweepTest], which drives this suite's world. */
+        const val BOB = "bbb00000-0000-0000-0000-000000000002"
         private const val CAROL = "ccc00000-0000-0000-0000-000000000003"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
         private const val PIPE_ACME = "a1b00000-0000-0000-0000-000000000001"
-        private const val PIPE_GLOBEX = "b2b00000-0000-0000-0000-000000000002"
+        const val PIPE_GLOBEX = "b2b00000-0000-0000-0000-000000000002"
         private const val TPL_ACME_ID = "a3b00000-0000-0000-0000-000000000001"
         private const val TPL_GLOBEX_ID = "b4b00000-0000-0000-0000-000000000002"
         private const val EXEC_ACME = "a5b00000-0000-0000-0000-000000000001"
-        private const val EXEC_GLOBEX = "b6b00000-0000-0000-0000-000000000002"
+        const val EXEC_GLOBEX = "b6b00000-0000-0000-0000-000000000002"
 
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"report","display_name":"Report","description":"",""" +
@@ -314,6 +316,16 @@ class WorkspaceIsolationIntegrationTest {
 
         private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
+        /**
+         * An `acme` AUTHOR's session and key, for [WorkspaceIsolationSweepTest] — which walks
+         * every route with them rather than re-seeding a second world. One fixture, one set of
+         * identifiers: a sweep against a DIFFERENT seed would prove isolation between two
+         * things this suite never showed were isolated.
+         */
+        fun acmeSession(): String = sessionJwt(ALICE, "alice@acme.test", "acme")
+
+        fun acmeKey(): String = ALICE_KEY.plaintext
+
         private var seeded = false
 
         /**
@@ -332,6 +344,7 @@ class WorkspaceIsolationIntegrationTest {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 seedRows(connection)
                 seedContent(connection)
+                seedGlobexOnlyDatasource(connection)
                 seedKeys(connection)
             }
         }
@@ -405,6 +418,33 @@ class WorkspaceIsolationIntegrationTest {
                     VALUES
                         ('$EXEC_ACME', '$PIPE_ACME', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', 'REST', '$EXEC_ACME'),
                         ('$EXEC_GLOBEX', '$PIPE_GLOBEX', 1, 'SUCCESS', '{}'::jsonb, '$BOB', 'REST', '$EXEC_GLOBEX')
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        /**
+         * A datasource granted to `globex` and to NOBODY else (D-R7) — the fixture the sweep
+         * points every `datasources_*` tool at. Under the grant model an ungranted datasource
+         * is invisible, so this is the row that makes "a foreign datasource is not-found" a
+         * claim about isolation rather than about a name nobody registered.
+         */
+        private fun seedGlobexOnlyDatasource(connection: java.sql.Connection) {
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    INSERT INTO datasources (name, display_name, dialect, jdbc_url, username,
+                                             credential_encrypted, created_by, owner_workspace_id)
+                    VALUES ('globex-only-db', 'Globex only', 'H2', 'jdbc:h2:mem:globex_only', 'sa',
+                            'x'::bytea, '$BOB', '$WS_GLOBEX')
+                    ON CONFLICT (name) DO NOTHING
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    VALUES ('globex-only-db', '$WS_GLOBEX', '$BOB')
+                    ON CONFLICT DO NOTHING
                     """.trimIndent(),
                 )
             }

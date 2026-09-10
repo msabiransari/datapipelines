@@ -148,6 +148,14 @@ class PipelineErrorCodesSpecDriftTest {
                 // 089 §A — the dp-lake registry's duplicate/not-found, same two-segment shape.
                 PipelineErrorCodes.Datasource.LAKE_TABLE_DUPLICATE,
                 PipelineErrorCodes.Datasource.LAKE_TABLE_NOT_FOUND,
+                // 112 — the grant refusal, same two-segment shape as its datasource siblings.
+                PipelineErrorCodes.Datasource.GRANT_REQUIRED,
+                // 112 — the ROLE axis has no entity dimension: these are properties of the
+                // caller's membership, not of a thing they named (RBAC design §2).
+                PipelineErrorCodes.Auth.ROLE_REQUIRED,
+                PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST,
+                PipelineErrorCodes.Auth.KEY_SCOPE_UNAVAILABLE,
+                PipelineErrorCodes.Auth.KEY_WORKSPACE_INACTIVE,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,

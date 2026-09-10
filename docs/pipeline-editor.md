@@ -142,7 +142,7 @@ GET /pipelines/{id}/editor
 GET /pipelines/{id}/versions/{version}/editor    (specific version)
 ```
 
-Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative): `read` to view, `execute` to run, `execute` to cancel.
+Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative): `read` to view, `execute` to run, `execute` to cancel.
 
 ### 4.2 Server-rendered HTML structure
 
