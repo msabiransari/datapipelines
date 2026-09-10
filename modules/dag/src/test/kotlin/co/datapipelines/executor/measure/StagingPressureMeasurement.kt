@@ -81,27 +81,40 @@ class StagingPressureMeasurement {
     fun `a lake scan alone, and with two executions staging beside it`() {
         val cores = Runtime.getRuntime().availableProcessors()
         val proposed = maxOf(2, cores / 2)
-        // Two levels of executor load, because the hypothesis is ABOUT saturation: two drains on a
-        // ten-core box leaves most of the machine idle and would refute a cap that only matters
-        // when the box is full. `cores - 2` is the executor genuinely competing.
         val loads = listOf(2, maxOf(2, cores - 2))
         println("### DuckDB / executor CPU contention (cores reported to the JVM: $cores)")
-        println("| threads setting | staging drains | scan alone | scan under load | slowdown |")
+        println()
+        println("Median of $REPEATS PAIRED runs: each pair measures the scan alone and then immediately")
+        println("under load, so a box that drifts between arms moves BOTH numbers and the ratio holds.")
+        println("An earlier shape measured one baseline per setting and reused it, and produced a")
+        println("0.68x 'slowdown' — a scan faster under load than alone, which is not a result, it is")
+        println("a drifting baseline. Ratios are reported per pair and then medianed, never as a ratio")
+        println("of two medians.")
+        println()
+        println("| threads setting | staging drains | median alone | median under load | median slowdown |")
         println("|---|---|---|---|---|")
         listOf(null, proposed).forEach { threads ->
             val label = threads?.let { "SET threads = $it (hypothesis)" } ?: "unset — DuckDB takes all $cores"
-            val alone = lakeScanMs(threads, staging = 0)
             loads.forEach { load ->
-                val contended = lakeScanMs(threads, staging = load)
-                println("| $label | $load | ${alone}ms | ${contended}ms | ${"%.2f".format(contended.toDouble() / alone)}× |")
+                val pairs = (1..REPEATS).map { pairedScan(threads, load) }
+                val alone = median(pairs.map { it.first })
+                val under = median(pairs.map { it.second })
+                val ratio = median(pairs.map { (it.second.toDouble() / it.first * RATIO_SCALE).toLong() }) / RATIO_SCALE
+                println("| $label | $load | ${alone}ms | ${under}ms | ${"%.2f".format(ratio)}× |")
             }
         }
         println()
         println("A LOWER slowdown means the lake read degrades less when the executor is busy.")
-        println("Capping trades solo speed for that — IF it buys anything. Read both load levels")
-        println("before believing either.")
         println()
     }
+
+    /** One paired sample: the scan alone, then the same scan under [staging] drains. */
+    private fun pairedScan(
+        threads: Int?,
+        staging: Int,
+    ): Pair<Long, Long> = lakeScanMs(threads, staging = 0) to lakeScanMs(threads, staging = staging)
+
+    private fun median(values: List<Long>): Long = values.sorted()[values.size / 2]
 
     /** One DuckDB aggregation, optionally with [staging] H2 drains running against the same CPUs. */
     private fun lakeScanMs(
@@ -114,24 +127,28 @@ class StagingPressureMeasurement {
         // Let the drains reach steady state, or the scan measures an idle box for its first half.
         if (staging > 0) Thread.sleep(WARMUP_MS)
         return try {
-            DriverManager.getConnection("jdbc:duckdb:").use { conn ->
-                conn.createStatement().use { st ->
-                    threads?.let { st.execute("SET threads = $it") }
-                    // Warm the engine so the number is the scan, not class loading.
-                    st.executeQuery("SELECT count(*) FROM range(1000)").close()
-                    val started = System.nanoTime()
-                    st.executeQuery(LAKE_SCAN_SQL).use { rs ->
-                        var n = 0
-                        while (rs.next()) n++
-                    }
-                    (System.nanoTime() - started) / 1_000_000
-                }
-            }
+            DriverManager.getConnection("jdbc:duckdb:").use { conn -> scanOnce(conn, threads) }
         } finally {
             running.set(false)
             noise.shutdownNow()
         }
     }
+
+    /** The scan itself, warmed so the number is the query and not DuckDB's class loading. */
+    private fun scanOnce(
+        conn: java.sql.Connection,
+        threads: Int?,
+    ): Long =
+        conn.createStatement().use { st ->
+            threads?.let { st.execute("SET threads = $it") }
+            st.executeQuery("SELECT count(*) FROM range(1000)").close()
+            val started = System.nanoTime()
+            st.executeQuery(LAKE_SCAN_SQL).use { rs ->
+                var n = 0
+                while (rs.next()) n++
+            }
+            (System.nanoTime() - started) / NANOS_PER_MILLI
+        }
 
     /** An H2 staging drain on a loop — the executor-side load a lake scan competes with. */
     private fun stageUntilStopped(running: AtomicBoolean) {
@@ -144,7 +161,11 @@ class StagingPressureMeasurement {
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
-                return // the pool is shutting down; the scan already has its number
+                // The measurement is over and the pool is shutting down. Printed rather than
+                // swallowed: a drain that stopped for any OTHER reason is a staging fault, and a
+                // measurement that hides one reports a contention number it did not measure.
+                println("  (noise drain stopped: ${e.javaClass.simpleName}: ${e.message})")
+                return
             } finally {
                 staging.close()
             }
@@ -193,5 +214,13 @@ class StagingPressureMeasurement {
         const val NOISE_ROWS = 300_000L
 
         const val WARMUP_MS = 400L
+
+        const val NANOS_PER_MILLI = 1_000_000L
+
+        /** Odd, so the median is a measured sample and not an average of two. */
+        const val REPEATS = 5
+
+        /** Ratios are medianed as scaled integers — a median of doubles is the same thing, uglier. */
+        const val RATIO_SCALE = 1000.0
     }
 }

@@ -363,21 +363,28 @@ A `LAKE` datasource runs its queries **on the app's own box** — DuckDB is embe
 | `properties.dialect.threads` | (engine default — no statement emitted) | The engine's worker threads — a positive integer, e.g. `4`. Unset means DuckDB chooses (its own default tracks the box's cores) |
 | `properties.dialect.temp_directory` | (engine default — no statement emitted) | Where oversized operators spill, e.g. `/data/spill`. Must be an absolute path **under the app's data volume** — inside the container the path means nothing unless the volume backs it — with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement, and a value that would need escaping is refused, matching the lake-table location grammar) |
 
-**`threads` is deliberately left unset, and that is a measured decision (108 §C).** In-process
-DuckDB shares the JVM's CPUs with the executor, so the obvious guard is to cap the engine's worker
-threads — `max(2, cores/2)` was the hypothesis. Measured on a 10-core box, a DuckDB aggregation
-against concurrent staging drains:
+**`threads` is deliberately left unset, and the measurement is why — though not the way the
+hypothesis expected (108 §C).** In-process DuckDB shares the JVM's CPUs with the executor, so the
+obvious guard is to cap the engine's worker threads; `max(2, cores/2)` was the proposal. Measured on
+a 10-core box as the median of 5 PAIRED runs (each pair times the scan alone and then immediately
+under load, so a drifting box moves both numbers):
 
-| `threads` | 2 drains | 8 drains | solo |
-|---|---|---|---|
-| unset (all 10) | 1.22× slower | 1.50× slower | 417 ms |
-| `SET threads = 5` | 1.17× slower | 1.48× slower | 435 ms |
+| `threads` | 2 staging drains | 8 staging drains |
+|---|---|---|
+| unset (all 10) | 1.07× slower | 1.11× slower |
+| `SET threads = 5` | 0.92× | 1.13× |
 
-The cap buys 0.05× at light load and 0.02× at saturation — inside the noise — and costs ~4 % of the
-solo scan. DuckDB's own scheduler handles oversubscription better than a static cap does, so the
-default stays unset and an operator who needs the engine bounded sets `threads` explicitly. The
-number an operator should watch is the 1.5× at saturation: a lake read on a busy box is half again
-as slow, and no thread setting changes that. Re-runnable: `scripts/measure/03-pressure.sh`.
+**A 0.92× is a scan that ran FASTER under load than alone, which is not a result — it is the noise
+floor.** On a box shared with other work the contention effect is smaller than the measurement's own
+variance, and an earlier single-run shape produced swings from 1.13× to 1.82× for the same cell. So
+the honest reading is: **no evidence for a thread cap, and none against one either** — the effect
+this knob would manage is not resolvable here. The default therefore stays unset (DuckDB's own
+scheduler handles oversubscription), an operator who needs the engine bounded sets `threads`
+explicitly, and anyone who wants to settle it should re-run
+`scripts/measure/03-pressure.sh` on a dedicated box.
+
+What the runs DO agree on: a lake read on a busy box loses on the order of 10 % or more, and no
+`threads` value observed changed that.
 
 Two statements are emitted on every lake connection regardless of these keys: `SET memory_limit = '<explicit-or-default>'` (there is always a budget) and `SET preserve_insertion_order = false` — insertion order costs memory and temp-file discipline the engine would otherwise spend on a guarantee a read-only lake never asks for. It is not a knob: a lake is a read connector, and making the trade configurable would only let an operator buy back a guarantee no query path uses.
 
