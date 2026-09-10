@@ -30,6 +30,18 @@ import org.springframework.beans.factory.SmartInitializingSingleton
 class DemoWorkspaceStartup(
     private val seeder: DemoWorkspaceSeeder,
 ) : SmartInitializingSingleton {
+    /*
+     * ORDERING (found by TaxiVsRideshareFourEngineE2eTest): the example content this seeds may
+     * declare `requires_datasources`, and that gate SKIPS — silently, with a log line and an
+     * empty workspace — when the named datasources are not yet registered. Bootstrap datasource
+     * registration is another SmartInitializingSingleton, and the relative order of two of them
+     * is bean-creation order, which is not a guarantee.
+     *
+     * `DomainConfiguration` therefore declares this bean @DependsOn the bootstrap registrar, so
+     * the datasources the examples reference exist before the examples are imported. Before
+     * round 1 the question could not arise: seeding ran at a user's first LOGIN, long after
+     * startup had finished.
+     */
     private val log = LoggerFactory.getLogger(DemoWorkspaceStartup::class.java)
 
     override fun afterSingletonsInstantiated() {

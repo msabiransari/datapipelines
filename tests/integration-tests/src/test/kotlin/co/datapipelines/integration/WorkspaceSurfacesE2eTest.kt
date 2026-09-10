@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import io.restassured.RestAssured.given
@@ -62,14 +63,14 @@ class WorkspaceSurfacesE2eTest {
         // D-R7: "global" is gone. An INSTANCE datasource (no owning workspace) is visible to
         // nobody until a super admin GRANTS it — which is the whole change, so this asserts
         // both sides of it rather than only the end state.
-        datasources(aliceKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_ACME)
-        datasources(bobKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX)
-
-        grant(DS_GLOBAL, "acme")
-
         datasources(aliceKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_ACME, DS_GLOBAL)
-        // …and granting it to acme does NOT hand it to globex. A grant is per workspace.
-        datasources(bobKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX)
+        datasources(bobKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX, DS_GLOBAL)
+
+        // …and a datasource granted to NEITHER is invisible to both, which is the half that
+        // makes the two above a statement about grants rather than about registration.
+        registerInstanceDatasource(DS_UNGRANTED, H2_GLOBAL_URL)
+        datasources(aliceKey).map { it["name"] } shouldNotContain DS_UNGRANTED
+        datasources(bobKey).map { it["name"] } shouldNotContain DS_UNGRANTED
     }
 
     /** Grants [datasource] to [workspace] as the super admin — the D-R7 verb, session-only. */
@@ -99,11 +100,12 @@ class WorkspaceSurfacesE2eTest {
             .get("/api/v1/datasources?offset=0&limit=1")
             .then()
             .statusCode(200)
-            // One: acme's own. The instance datasource is ungranted here, and the point of
-            // this case is that the TOTAL knows it — a post-filter would have said two.
-            .body("data.pagination.total", Matchers.equalTo(1))
+            // Two: acme's own plus the granted instance one — and NOT the ungranted third.
+            // The point of this case is that the TOTAL knows it; a post-filter would count
+            // rows it then hides.
+            .body("data.pagination.total", Matchers.equalTo(2))
             .body("data.items.size()", Matchers.equalTo(1))
-            .body("data.pagination.has_more", Matchers.equalTo(false))
+            .body("data.pagination.has_more", Matchers.equalTo(true))
     }
 
     @Test
@@ -262,13 +264,16 @@ class WorkspaceSurfacesE2eTest {
                 .`when`()
                 .get("/api/v1/workspaces/$name")
                 .then()
-                .statusCode(403)
+                .statusCode(404)
                 .body("error.code", Matchers.equalTo("workspace.not_found"))
         }
 
+        // …and the SUPER ADMIN gets the identical answer. Before D-R5 this was the one split
+        // that existed: members got 403 and only an admin got a real 404. One answer now, so
+        // the status itself stops being a signal about who is asking.
         given()
             .port(port)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
             .`when`()
             .get("/api/v1/workspaces/ghost")
             .then()
@@ -296,10 +301,13 @@ class WorkspaceSurfacesE2eTest {
             .body("error.details.counts.templates", Matchers.equalTo(1))
             .body("error.details.counts.datasources", Matchers.equalTo(1))
 
-        // globex owns ONLY a bound datasource — the count names exactly that kind.
+        // globex owns ONLY a bound datasource — the count names exactly that kind. Same
+        // credential class as above: delete is an instance verb (D-R10), so no key reaches it.
         given()
             .port(port)
-            .header(API_KEY_HEADER, bobKey)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
             .`when`()
             .delete("/api/v1/workspaces/globex")
             .then()
@@ -583,6 +591,11 @@ class WorkspaceSurfacesE2eTest {
         register(ALICE_KEY.plaintext, DS_ACME, H2_ACME_URL)
         register(BOB_KEY.plaintext, DS_GLOBEX, H2_GLOBEX_URL)
         registerInstanceDatasource(DS_GLOBAL, H2_GLOBAL_URL)
+        // Granted HERE, once, rather than inside the visibility case: a test that grants makes
+        // every later test's answer depend on execution order, and the paging total is exactly
+        // the assertion that would then pass or fail by accident.
+        grant(DS_GLOBAL, "acme")
+        grant(DS_GLOBAL, "globex")
     }
 
     /**
@@ -652,6 +665,9 @@ class WorkspaceSurfacesE2eTest {
         private const val DS_ACME = "ds-acme"
         private const val DS_GLOBEX = "ds-globex"
         private const val DS_GLOBAL = "ds-global"
+
+        /** Registered and granted to NOBODY — the D-R7 control (see the visibility case). */
+        private const val DS_UNGRANTED = "ds-ungranted"
         private const val FRESH_WS = "fresh-team"
 
         private const val H2_USER = "sa"

@@ -107,7 +107,15 @@ class AuthConfiguration {
         auditLogger: AuditLogger,
         userService: UserService,
         contentSeeder: ObjectProvider<WorkspaceContentSeeder>,
-    ): DemoWorkspaceSeeder = DemoWorkspaceSeeder(workspaceRepository, auditLogger, userService, contentSeeder.getIfAvailable())
+        instanceDatasourceGrants: ObjectProvider<InstanceDatasourceGrants>,
+    ): DemoWorkspaceSeeder =
+        DemoWorkspaceSeeder(
+            workspaceRepository,
+            auditLogger,
+            userService,
+            contentSeeder.getIfAvailable(),
+            instanceDatasourceGrants.getIfAvailable() ?: InstanceDatasourceGrants.NONE,
+        )
 
     @Bean
     fun apiKeyService(

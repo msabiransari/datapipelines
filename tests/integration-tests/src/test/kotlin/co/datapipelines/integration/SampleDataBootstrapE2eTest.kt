@@ -201,14 +201,11 @@ class SampleDataBootstrapE2eTest {
                 "broken-examples.json",
                 examplesJson().replace("\"source\": \"$BOOT_RO\"", "\"source\": \"no-such-datasource\""),
             )
+        resetDemoWorkspace()
 
-        lateinit var error: Throwable
-        val lines =
-            capturingLogs {
-                error =
-                    assertThrows<Exception> {
-                        bootApp(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())).close()
-                    }
+        val error =
+            assertThrows<Exception> {
+                bootApp(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())).close()
             }
 
         // §13.2 `pipeline.import.missing_datasource` — the missing name travels in `details`,
@@ -216,13 +213,42 @@ class SampleDataBootstrapE2eTest {
         rootCauseMessage(error).shouldContain("has unmet dependencies in this environment")
         rootCauseMessage(error).shouldContain(EXAMPLE_PIPELINE)
 
-        // 048/§A — and the operator can find it. The refusal is deliberate; what it lacked was
-        // an event. The line names the fixture that failed and the catalogued code.
-        val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
-        failure.shouldContain("fixture_kind=pipeline")
-        failure.shouldContain("fixture=$EXAMPLE_PIPELINE")
-        failure.shouldContain("error_code=pipeline.import.missing_datasource")
-        lines.none { it.contains("event=workspace.examples_seeded") } shouldBe true
+        // …and nothing was left behind: a refused boot must not hand the deployment a `demo`
+        // workspace holding half an import.
+        scalar<Long>(
+            "SELECT COUNT(*) FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name = 'demo'",
+        ) shouldBe 0L
+
+        // 048/§A's log contract (`event=workspace.examples_seed_failed`, naming the fixture and
+        // the catalogued code) is NOT asserted here, and deliberately: `SpringApplication`
+        // re-initialises the logging system on startup, so an appender attached before the boot
+        // is discarded before the seeder ever writes. Asserting it would be asserting an empty
+        // list. It is asserted in `running the startup step again …`, which logs inside an
+        // already-running context — the only place the capture is real.
+    }
+
+    @Test
+    fun `a good examples file seeds DEMO at boot, once, and says so`() {
+        // The positive half of the seeding contract, asserted where a boot can be captured.
+        // `TaxiVsRideshareFourEngineE2eTest` asserts the resulting STATE; this asserts the act.
+        resetDemoWorkspace()
+
+        val good = writeFile("good-examples.json", examplesJson()).toString()
+        bootApp(mapOf("datapipelines.bootstrap.examples-file" to good)).close()
+
+        // The OUTCOME, not the log line: `SpringApplication` re-initialises logging on startup,
+        // so a boot-time event cannot be captured by an appender attached beforehand.
+        rows("SELECT p.name FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name = 'demo'")
+            .map { it["name"] } shouldContainExactly listOf(EXAMPLE_PIPELINE)
+        val seededAt = scalar<Any>("SELECT created_at FROM workspaces WHERE name = 'demo'")
+
+        // …and a SECOND boot seeds nothing: `demo` exists, so the seeder does not create it and
+        // therefore does not import. Once per deployment, which is what O-3 rests on.
+        bootApp(mapOf("datapipelines.bootstrap.examples-file" to good)).close()
+
+        rows("SELECT p.name FROM pipelines p JOIN workspaces w ON w.id = p.workspace_id WHERE w.name = 'demo'")
+            .map { it["name"] } shouldContainExactly listOf(EXAMPLE_PIPELINE)
+        scalar<Any>("SELECT created_at FROM workspaces WHERE name = 'demo'") shouldBe seededAt
     }
 
     @Test
@@ -345,13 +371,52 @@ class SampleDataBootstrapE2eTest {
      * exists in a servlet web application; `server.port=0` never binds, because the bootstrap step
      * runs inside `refresh()` and throws before the connector starts.
      */
+
+    /**
+     * Removes the `demo` workspace so the next boot CREATES it — and therefore seeds.
+     *
+     * Example seeding is a once-per-deployment act since D-R11: `DemoWorkspaceSeeder` imports
+     * the content only when it creates the workspace, and never re-creates one that exists
+     * (O-3). This module's suites share one database, which is one deployment, so a test that
+     * wants to observe seeding has to put the deployment back in the state where seeding
+     * happens. Without this the boot below succeeds silently and the assertion about a broken
+     * fixture asserts nothing — which is exactly how it first failed.
+     */
+    private fun resetDemoWorkspace() {
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    DELETE FROM pipeline_versions WHERE pipeline_id IN
+                        (SELECT id FROM pipelines WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo'));
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    "DELETE FROM pipelines WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                statement.execute(
+                    """
+                    DELETE FROM template_versions WHERE template_id IN
+                        (SELECT id FROM templates WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo'));
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    "DELETE FROM templates WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                statement.execute(
+                    "DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
+                statement.execute("DELETE FROM workspaces WHERE name = 'demo'")
+            }
+        }
+    }
+
     private fun bootApp(overrides: Map<String, String>): ConfigurableApplicationContext {
         val args = (baseProperties() + overrides).map { (key, value) -> "--$key=$value" }.toTypedArray()
         return SpringApplicationBuilder(DatapipelinesApplication::class.java)
             .web(WebApplicationType.SERVLET)
             .run(*args)
     }
-
 
     private fun capturingLogs(block: () -> Unit): List<String> {
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
@@ -418,17 +483,17 @@ class SampleDataBootstrapE2eTest {
         private val examplesFile: Path = writeFile("examples.json", examplesJson())
 
         /** Every message in the cause chain, joined — a §13 code can surface at any depth. */
-    private fun rootCauseMessage(error: Throwable): String {
-        var current: Throwable = error
-        val seen = StringBuilder(current.message.orEmpty())
-        while (current.cause != null && current.cause !== current) {
-            current = current.cause!!
-            seen.append('\n').append(current.message.orEmpty())
+        private fun rootCauseMessage(error: Throwable): String {
+            var current: Throwable = error
+            val seen = StringBuilder(current.message.orEmpty())
+            while (current.cause != null && current.cause !== current) {
+                current = current.cause!!
+                seen.append('\n').append(current.message.orEmpty())
+            }
+            return seen.toString()
         }
-        return seen.toString()
-    }
 
-    private fun writeFile(
+        private fun writeFile(
             name: String,
             content: String,
         ): Path = fixtures.resolve(name).also { it.writeText(content) }

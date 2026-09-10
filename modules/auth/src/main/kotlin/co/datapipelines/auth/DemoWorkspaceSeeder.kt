@@ -26,6 +26,7 @@ class DemoWorkspaceSeeder(
     private val auditLogger: AuditLogger,
     private val userService: UserService,
     private val contentSeeder: WorkspaceContentSeeder? = null,
+    private val instanceDatasourceGrants: InstanceDatasourceGrants = InstanceDatasourceGrants.NONE,
 ) {
     private val log = LoggerFactory.getLogger(DemoWorkspaceSeeder::class.java)
 
@@ -84,12 +85,24 @@ class DemoWorkspaceSeeder(
             workspaceRepository.createSystemWorkspace(DEMO_WORKSPACE_ID, DEMO_WORKSPACE, DEMO_DISPLAY_NAME).also { created ->
                 auditLogger.log(event = "auth.workspace.created", details = mapOf("workspace" to DEMO_WORKSPACE, "actor" to "system"))
                 log.info("Seeded the '{}' workspace", DEMO_WORKSPACE)
+                // BEFORE the content, and that order is the point: the examples declare
+                // `requires_datasources`, and the gate skips — silently, into an empty
+                // workspace — when the datasources they name are not visible HERE. Instance
+                // datasources are granted to nobody by default (D-R7), so without this the
+                // shipped demo comes up empty on every deployment. See [InstanceDatasourceGrants].
+                val actor = userService.systemActor().id
+                val granted = instanceDatasourceGrants.grantAllTo(created.id, actor)
+                log.info(
+                    "event=auth.workspace.demo_datasources_granted workspace={} grants={}",
+                    DEMO_WORKSPACE,
+                    granted,
+                )
                 // Only on CREATION, and deliberately not guarded: a demo workspace that
                 // silently lacks the examples the deployment configured is indistinguishable
                 // from one that was seeded, so a seeding failure must fail startup loudly
                 // (the [WorkspaceContentSeeder] contract). The actor is the system account
                 // (auth.md §4.5) — no human created what the product ships.
-                contentSeeder?.seed(created.id, userService.systemActor().id)
+                contentSeeder?.seed(created.id, actor)
             }
         } catch (_: org.springframework.dao.DuplicateKeyException) {
             // Two replicas racing a fresh database: the loser re-reads the winner's row, the

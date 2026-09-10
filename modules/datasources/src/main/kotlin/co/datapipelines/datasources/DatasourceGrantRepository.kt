@@ -103,6 +103,29 @@ class DatasourceGrantRepository(
         }
     }
 
+    /**
+     * Grants every INSTANCE datasource — one no workspace owns — to [workspaceId]. Returns how
+     * many grants were created; existing ones are left with their original actor.
+     *
+     * Its only caller is the `demo` seeder (see `InstanceDatasourceGrants` for why that is the
+     * one workspace this is right for). Done in ONE statement rather than a read-then-loop so
+     * a datasource registered between the two cannot be missed.
+     */
+    fun grantAllInstanceDatasourcesTo(
+        workspaceId: UUID,
+        grantedBy: UUID,
+    ): Int =
+        jdbc.update(
+            """
+            INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+            SELECT d.name, :ws, :by
+              FROM datasources d
+             WHERE d.owner_workspace_id IS NULL AND d.is_deleted = FALSE
+            ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("ws", workspaceId).addValue("by", grantedBy),
+        )
+
     /** Revokes the grant; false when there was none. Nothing about the datasource itself changes. */
     fun revoke(
         datasourceName: String,

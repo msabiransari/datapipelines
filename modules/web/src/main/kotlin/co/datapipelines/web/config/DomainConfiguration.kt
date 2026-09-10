@@ -171,7 +171,20 @@ class DomainConfiguration {
      * D-R11 — the `demo` workspace at first boot, and the example content into it. See
      * [DemoWorkspaceStartup] for the O-3 rule that a DEACTIVATED `demo` is never recreated.
      */
+    /**
+     * D-R7's one narrow exception, wired: the workspace the PRODUCT ships gets the instance
+     * datasources its shipped examples reference. See `InstanceDatasourceGrants`.
+     */
     @Bean
+    fun instanceDatasourceGrants(
+        grants: co.datapipelines.datasources.DatasourceGrantRepository,
+    ): co.datapipelines.auth.InstanceDatasourceGrants =
+        co.datapipelines.auth.InstanceDatasourceGrants { workspaceId, grantedBy ->
+            grants.grantAllInstanceDatasourcesTo(workspaceId, grantedBy)
+        }
+
+    @Bean
+    @org.springframework.context.annotation.DependsOn("bootstrapDatasourceStartup")
     fun demoWorkspaceStartup(seeder: co.datapipelines.auth.DemoWorkspaceSeeder): DemoWorkspaceStartup = DemoWorkspaceStartup(seeder)
 
     /**

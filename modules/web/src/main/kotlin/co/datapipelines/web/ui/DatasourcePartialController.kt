@@ -6,6 +6,7 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
@@ -39,6 +40,14 @@ class DatasourcePartialController(
      * (097 §A) — this surface supplies the FORM's input shape, and nothing else.
      */
     private val updates: DatasourceUpdateService,
+    /**
+     * D-R7: visibility is the GRANT, not the ownership — so a registration that skips it
+     * produces a datasource its own author cannot see (F6 caught exactly that: the form
+     * registered `partial-reg`, and the REST twin then answered 404 on it). The REST create
+     * grants in `DatasourceCreateService`; this surface builds its own datasource rather than
+     * going through that service, so it owes the same grant, on the same rule.
+     */
+    private val grants: DatasourceGrantRepository,
     /**
      * The SAME any-version reverse scan the REST delete's `409 datasource.in_use` reports
      * (061/T79). The delete dialog asks it FIRST and renders its rows, so "where is this used"
@@ -156,6 +165,12 @@ class DatasourcePartialController(
                 return refused("A datasource named '${datasource.name}' already exists.")
             }
             datasources.save(datasource, principal.userId)
+            // The registration grant (see the constructor KDoc). Read off the row we BUILT, not
+            // the one save returned: the owner and the name are this method's own decisions, and
+            // a grant that depended on the round trip would be a second place they could differ.
+            // An INSTANCE datasource (no owner) is granted to nothing — a super admin grants it
+            // explicitly, which is the decision D-R7 wants made out loud.
+            datasource.ownerWorkspaceId?.let { owner -> grants.grantOnRegistration(datasource.name, owner, principal.userId) }
             // No HX-Redirect: a full-page navigation would discard the toast. The success
             // node lands in #register-result (its arrival closes the modal, 022/F9); the
             // refreshed list and the toast ride along out-of-band (Shape A, §5.1).

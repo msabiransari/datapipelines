@@ -94,6 +94,7 @@ class DatasourceUpdatePathTest {
             registry,
             rules,
             DatasourceUpdateService(registry, rules),
+            grants,
             DatasourceReferences.NONE,
         )
 

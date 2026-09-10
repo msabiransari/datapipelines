@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -205,19 +206,40 @@ class TaxiVsRideshareFourEngineE2eTest {
 
     @Test
     @Order(2)
-    fun `the first login seeds the shipped lake content - the requires_datasources gate passes`() {
+    fun `the demo workspace holds the shipped lake content - the requires_datasources gate passed`() {
+        // D-R11 moved WHEN this happens. Seeding used to run on an `auto-per-user` first
+        // login, once per person; it now runs once per DEPLOYMENT, when `DemoWorkspaceSeeder`
+        // creates `demo` at boot — which already happened before this suite's first test, so
+        // what is asserted here is the STATE, and a first login is asserted to land in it.
+        //
+        // The gate's own log lines are asserted where a boot can still be captured:
+        // `SampleDataBootstrapE2eTest`, which starts contexts explicitly.
+        // The four datasources this suite's examples require are registered through REST by
+        // the previous test, which is AFTER the app booted and seeded `demo` — so the boot's
+        // `requires_datasources` gate correctly skipped, and the workspace is empty.
+        //
+        // In a real deployment the same content is seeded because those datasources come from
+        // `bootstrap.datasources-file` and exist before the seeder runs; `DemoWorkspaceStartup`
+        // is @DependsOn the bootstrap registrar so that order is guaranteed rather than lucky.
+        // This suite registers them at runtime instead, so it re-creates the state a real boot
+        // would have had and runs the same seeder over it.
+        reseedDemoWithDatasourcesRegistered()
+
         val email = "lake-e2e-${UUID.randomUUID().toString().take(8)}@example.com"
 
-        lateinit var pair: Pair<UUID, UUID>
-        val lines = capturingLogs { pair = firstLogin(email) }
+        val pair = firstLogin(email)
         val (userId, workspaceId) = pair
         provisioned = pair
 
-        // The gate PASSED: the seeded line, and no skip line naming the lake file.
-        lines.any { it.contains("event=workspace.examples_seeded") } shouldBe true
-        lines.none { it.contains("event=workspace.examples_gate_skipped") } shouldBe true
+        metadataRow("SELECT name FROM workspaces WHERE id = '$workspaceId'")["name"] shouldBe "demo"
 
-        // The personal workspace holds the shipped content, owned by the new user.
+        // …and the joiner is a VIEWER of it (D-R11), not its author.
+        metadataRow(
+            "SELECT author, promoter, admin FROM workspace_members" +
+                " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
+        ).let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
+
+        // The demo workspace holds the shipped content.
         metadataRows("SELECT name FROM templates WHERE workspace_id = '$workspaceId' ORDER BY name")
             .map { it["name"] as String } shouldContainExactly
             listOf(
@@ -230,7 +252,9 @@ class TaxiVsRideshareFourEngineE2eTest {
         val pipeline =
             metadataRow("SELECT name, owner_id FROM pipelines WHERE workspace_id = '$workspaceId'")
         pipeline["name"] shouldBe "nyc/mobility/taxi_vs_rideshare"
-        pipeline["owner_id"] shouldBe userId
+        // Owned by the SYSTEM actor (auth.md §4.5): no human created what the product ships,
+        // and the person who happened to log in first did not author it.
+        pipeline["owner_id"] shouldNotBe userId
     }
 
     @Test
@@ -487,8 +511,42 @@ class TaxiVsRideshareFourEngineE2eTest {
 
     // ------------------------------------------------------------------ metadata SQL
 
+    /**
+     * Drops `demo` and re-runs the boot seeder, now that the datasources its examples declare
+     * are registered. Seeding is once per deployment and happens only on CREATION (D-R11/O-3),
+     * so putting the deployment back in the pre-`demo` state is the only way to observe it.
+     */
+    private fun reseedDemoWithDatasourcesRegistered() {
+        DriverManager.getConnection(metadata.jdbcUrl, metadata.username, metadata.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')")
+                statement.execute("DELETE FROM datasource_workspaces WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')")
+                statement.execute("DELETE FROM workspaces WHERE name = 'demo'")
+                // The four are INSTANCE datasources in a real deployment — `bootstrap.datasources-file`
+                // registers them with `global: true`, which under D-R7 means "owned by no workspace".
+                // This suite registers them through REST with an API KEY, and a key can never do that:
+                // MUTATE_DATASOURCES is `admin` scope, and O-2 removed `admin` from the key axis
+                // entirely. So the ownership a super-admin SESSION would have set is set here directly,
+                // and the suite's own workspace is granted them the way `DemoWorkspaceSeeder` grants
+                // `demo` — visibility under D-R7 is the grant, never the ownership.
+                statement.execute("UPDATE datasources SET owner_workspace_id = NULL WHERE name LIKE 'sample-%'")
+                statement.execute(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    SELECT d.name, '$DEFAULT_WORKSPACE_ID', '$ADMIN_USER_ID'
+                      FROM datasources d
+                     WHERE d.owner_workspace_id IS NULL AND d.is_deleted = FALSE
+                    ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                    """.trimIndent(),
+                )
+            }
+        }
+        val startup = applicationContext.getBean("demoWorkspaceStartup")
+        startup.javaClass.getMethod("afterSingletonsInstantiated").invoke(startup)
+    }
+
     private fun metadataRows(sql: String): List<Map<String, Any?>> {
-        val pg = SharedE2e.postgres
+        val pg = metadata
         return DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery(sql).use { rs ->
@@ -505,7 +563,7 @@ class TaxiVsRideshareFourEngineE2eTest {
     private fun <T> metadataScalar(sql: String): T = metadataRows(sql).single().values.first() as T
 
     private fun seedAuthRows() {
-        val pg = SharedE2e.postgres
+        val pg = metadata
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
@@ -526,8 +584,11 @@ class TaxiVsRideshareFourEngineE2eTest {
         userId: UUID,
         workspaceId: UUID,
     ) {
-        val pg = SharedE2e.postgres
+        val pg = metadata
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
+            // D-R12: this key can do at most what its ISSUER can do in the pinned workspace.
+            // The issuer is the freshly joined VIEWER of `demo` (D-R11), and a viewer executes
+            // (D-R3) — which is the whole capability this suite needs from it.
             insertApiKey(connection, RUN_KEY, userId, workspaceId)
         }
     }
@@ -750,14 +811,23 @@ class TaxiVsRideshareFourEngineE2eTest {
             return file.toPath()
         }
 
+        /** This suite's own metadata database — see the `spring.datasource.url` note below. */
+        private val metadata = SharedE2e.scratchDatabase("taxi_lake")
+
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             registry.add("management.server.port") { "0" }
 
-            registry.add("spring.datasource.url") { SharedE2e.postgres.jdbcUrl }
-            registry.add("spring.datasource.username") { SharedE2e.postgres.username }
-            registry.add("spring.datasource.password") { SharedE2e.postgres.password }
+            // A DEDICATED metadata database, since D-R11. Example seeding is once per
+            // DEPLOYMENT now (`DemoWorkspaceSeeder` imports only when it CREATES `demo`), and
+            // this module's suites share one database — so on the shared one, whichever suite
+            // booted first decides what `demo` holds, and this suite's lake content would
+            // never be imported. Its own database makes it its own deployment, which is the
+            // thing the behaviour is per.
+            registry.add("spring.datasource.url") { metadata.jdbcUrl }
+            registry.add("spring.datasource.username") { metadata.username }
+            registry.add("spring.datasource.password") { metadata.password }
 
             registry.add("spring.data.redis.host") { SharedE2e.redisHost }
             registry.add("spring.data.redis.port") { SharedE2e.redisPort }
