@@ -205,7 +205,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 ## 8B. `Capability` — what a membership may do
 
-**Source:** [Auth §12](auth.md#12-roles) (the role table), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) (the per-operation minimums)
+**Source:** [Auth §11A](auth.md#11a-roles) (the role table), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) (the per-operation minimums)
 **Used by:** auth (`ScopeMatrix.allowed`), every REST handler and MCP tool.
 
 The ROLE axis. It travels with a **membership**, not with a credential (RBAC design D-R1): the same person is a viewer in one workspace and an author in another, which is why it cannot live on the user.
@@ -511,7 +511,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
 | `Scope` | auth | every endpoint (API keys only since RBAC round 1) |
-| `Capability` | [auth.md §12](auth.md#12-roles) | auth, every endpoint and MCP tool |
+| `Capability` | [auth.md §11A](auth.md#11a-roles) | auth, every endpoint and MCP tool |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |
 | `ExecutionStatus` | rest-api | dag-executor, mcp-server, persistence |
 | `SseEventType` | rest-api | dag-executor, mcp-server |

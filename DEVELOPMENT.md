@@ -158,7 +158,7 @@ The provider list itself (names, issuer URIs, display names) is configured in `a
 
 **Workspaces:** everything you author (pipelines, templates, executions) lives in exactly one
 workspace, and what you may DO there is your membership's role, not a global grant
-([auth.md §12](docs/auth.md#12-roles)). Workspaces are created by super admins; the one that
+([auth.md §11A](docs/auth.md#11a-roles)). Workspaces are created by super admins; the one that
 ships is `demo`, and a user with no membership joins it as a **viewer** on first login. The
 provisioning modes (`auto-per-user`, `self-serve`, `closed`) and `open-join` were removed in
 RBAC round 1 and are refused by name at startup — if your `.env` still sets either, delete the

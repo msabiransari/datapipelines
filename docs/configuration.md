@@ -228,11 +228,11 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 
 ### 3.17 Workspaces
 
-Workspaces are created by **super admins** ([auth.md §4.2/§5.6](auth.md#56-workspace-resolution--the-dp-workspace-header), [§12](auth.md#12-roles)). The one workspace the product ships is `demo`, and a user with no membership becomes a **viewer** of it on first login.
+Workspaces are created by **super admins** ([auth.md §4.2/§5.6](auth.md#56-workspace-resolution--the-dp-workspace-header), [§12](auth.md#11a-roles)). The one workspace the product ships is `demo`, and a user with no membership becomes a **viewer** of it on first login.
 
 | YAML path | Default | Description |
 |---|---|---|
-| `datapipelines.workspaces.member-datasources-enabled` | `true` | May a workspace ADMIN register a datasource bound to their own workspace? `false` makes datasource registration a super-admin-only act instance-wide. Visibility is still the grant either way ([auth.md §12](auth.md#12-roles)) |
+| `datapipelines.workspaces.member-datasources-enabled` | `true` | May a workspace ADMIN register a datasource bound to their own workspace? `false` makes datasource registration a super-admin-only act instance-wide. Visibility is still the grant either way ([auth.md §11A](auth.md#11a-roles)) |
 
 **Removed in RBAC round 1** (`provisioning-mode`, `open-join`). Capability moved onto the workspace membership, and with it went the modes that decided who could create a workspace: `auto-per-user` (a personal workspace per login), `self-serve` (anyone creates) and `closed` (admin only), plus `open-join` (anyone self-joins). **Both keys are refused BY NAME at startup** (§7) rather than ignored — a deployment that still says `auto-per-user` is a deployment expecting a personal workspace per user, and silently giving it something else is how an operator finds out from a user. Delete the key; there is no replacement to set, because the behaviour is no longer a knob.
 

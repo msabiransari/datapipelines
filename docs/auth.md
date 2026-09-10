@@ -106,14 +106,24 @@ The `provider` field stores the **OIDC registration name** as configured by the 
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
 3. Checks the email domain allowlist (if configured — see §4.3).
    - Domain not allowlisted: reject login with `auth.login.domain_not_allowed`.
-4. **Workspace resolution (design §5.1/§7):** determines the active workspace the JWT stamps
-   — the user's **last-used** workspace when it is still a live membership, else their
-   **first membership**, else — under `auto-per-user` provisioning only — the **freshly
-   provisioned personal workspace** created at this step (`is_personal = TRUE`, name from the
-   lowercased email local-part sanitized to `[a-z0-9_-]+`, collision-suffixed, creator enters
-   as `owner`). A user with zero memberships (possible under `self-serve` before first
-   creation, and under `closed`) stamps nothing: they authenticate fine and every
-   workspace-scoped operation answers `403 workspace.membership_required` (§5.6).
+4. **Workspace resolution (§5.1, §12):** determines the active workspace the JWT stamps
+   — the user's **last-used** workspace when it still resolves to a live, ACTIVE membership,
+   else their **first active membership**, else — this is the D-R11 rule — a fresh **viewer
+   membership of `demo`**, the one workspace the product ships. The demo join fires only for a
+   user with NO membership at all, so somebody removed from `demo` on purpose is not re-added
+   by their next login. It lives in `WorkspaceService.workspaceForLogin`, shared by both
+   credential paths: the owner's rule is about logging in, not about which provider did it.
+
+   A user still with nothing selectable — `demo` deactivated, or never seeded — stamps
+   nothing. They authenticate fine and every workspace-scoped operation is refused; round 2
+   draws the "no workspace" page.
+
+   **The provisioning modes are gone** (D-R11). `auto-per-user` (a personal workspace per
+   first login), `self-serve` (anyone creates) and `closed` (admin only) were removed with
+   `open-join` in RBAC round 1, and both config keys are refused BY NAME at startup
+   ([Configuration §3.17](configuration.md#317-workspaces)). Workspaces are created by super
+   admins. Existing personal workspaces stay as ordinary workspaces, with their sole member as
+   the workspace admin (D-R14).
 5. Issues internal JWT (stamping `active_workspace` when step 4 resolved one), sets cookie, redirects to `/`.
 
 **Subsequent logins:** Same flow — user record updated, JWT reissued.
@@ -686,7 +696,7 @@ A key's scopes MUST be a subset of its creator's scopes at issue time — a `rea
 
 ### 7.5 Scopes
 
-The hierarchical scope system — **the credential axis, and since RBAC round 1 an API-KEY property only**. A session JWT carries no `scopes` claim: what a signed-in person may do is their membership in the active workspace (§12), not a global grant.
+The hierarchical scope system — **the credential axis, and since RBAC round 1 an API-KEY property only**. A session JWT carries no `scopes` claim: what a signed-in person may do is their membership in the active workspace (§11A), not a global grant.
 
 | Scope | Includes | Description | Available to keys? |
 |---|---|---|---|
@@ -705,7 +715,7 @@ A key's scope is a CEILING, never a grant on its own: every request also checks 
 
 This matrix is the ONLY place operation-level requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally.
 
-Every operation carries **two** minimums, and both must be met ([§12 Roles](#12-roles)):
+Every operation carries **two** minimums, and both must be met ([§11A Roles](#11a-roles)):
 
 - **Min scope** — what the CREDENTIAL must carry. Hierarchical (§7.5), and since RBAC round 1 it applies to **API keys only**: a session carries no scopes at all, because capability moved onto the membership.
 - **Min role** — what the caller must hold in the ACTIVE WORKSPACE. For a session that is its own membership row; for an API key it is **the key issuer's CURRENT membership**, re-read on every request (§7.4), so a demoted issuer's key stops working inside one validation-cache TTL.
@@ -804,7 +814,7 @@ An endpoint key may read the cursor of executions it started. Ownership is prove
 
 #### Issuance
 
-`POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its owner's budget (§12).
+`POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its owner's budget (§11A).
 
 Binding and unbinding are audited (`endpoint.key_bound` / `endpoint.key_unbound`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), as is every serve (`endpoint.served`).
 
@@ -1027,11 +1037,11 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.api_key.missing` | 401 | No `DP-API-Key` header, no Bearer `dpk_` token, no `dp_session` cookie |
 | `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or owner deactivated |
 | `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
-| `auth.scope.insufficient` | 403 | Principal lacks the required SCOPE — the credential axis of the §7.6 matrix. Since RBAC round 1 only an API key can fail this way: a session carries no scopes (§12) |
-| `auth.role_required` | 403 | Principal lacks the required CAPABILITY in the active workspace — the role axis of the §7.6 matrix (§12). `details.required` / `details.held` |
+| `auth.scope.insufficient` | 403 | Principal lacks the required SCOPE — the credential axis of the §7.6 matrix. Since RBAC round 1 only an API key can fail this way: a session carries no scopes (§11A) |
+| `auth.role_required` | 403 | Principal lacks the required CAPABILITY in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` / `details.held` |
 | `auth.key_issuer_role_lost` | 403 | The key was valid; its issuer no longer holds the capability (§7.4). Retrying with this key will never work — a new key from somebody who still holds the role is the fix |
 | `auth.key_scope_unavailable` | 400 | Issuance requested `admin`, which keys may no longer hold (§7.5) |
-| `auth.key_workspace_inactive` | 403 | The key's pinned workspace is deactivated (§12); reactivating it restores the key |
+| `auth.key_workspace_inactive` | 403 | The key's pinned workspace is deactivated (§11A); reactivating it restores the key |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
 | `auth.promotion.key_invalid` | 401 | The promotion peer's pre-shared server key was absent, malformed, or did not match — and the same code when the receiver has no key configured, so promotion-disabled is indistinguishable from wrong-key ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
@@ -1049,6 +1059,14 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 |---|---|
 | `auth.login.success` | Login succeeded, JWT issued (OIDC or local — the details' `provider` names the method) |
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
+| `auth.super_admin_acting` | A super admin acted in a workspace they hold no explicit membership in (§11A). Emitted by `ScopeInterceptor` at the one choke point every governed handler passes — **reads included**: the 404 rule's promise is that a workspace is invisible from outside, and the one principal exempt from that promise is the one whose reads most need to be on the record. `details`: the operation, workspace, path, method, and `acting_via: super_admin` |
+| `workspace.member_added` | A member was added, with their capability flags (`details.flags`). The first-login demo join (§4.2) carries `reason: first_login_demo_viewer` |
+| `workspace.member_removed` | A member was removed |
+| `workspace.member_flags_changed` | A member's flags were replaced — `details.from` and `details.to` carry both sets, because a membership row keeps no history of its own |
+| `workspace.deactivated` | A workspace was deactivated (§11A). Nothing it owns is purged |
+| `workspace.reactivated` | A deactivated workspace was restored |
+| `datasource.granted` | A datasource was granted to a workspace — the verb that decides who can reach a live database's data. `details.already_granted` separates a new grant from an idempotent re-grant |
+| `datasource.revoked` | A datasource's grant to a workspace was removed; the datasource itself is untouched |
 | `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
 | `auth.login.oidc_error` | OIDC provider returned an error |
 | `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable (§5A.5) |
@@ -1069,7 +1087,6 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `auth.user.activated` | Admin reactivated a user |
 | `auth.user.admin_granted` | Admin granted admin scope to user |
 | `auth.user.admin_revoked` | Admin revoked admin scope from user |
-| `auth.workspace.provisioned` | Personal workspace auto-created on first login (`auto-per-user` mode) |
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request (§5.6) |
 
@@ -1213,6 +1230,63 @@ owner's posture and it is unchanged; what 096 added is that each such admission 
 so saturation is a rate to alert on rather than a WARN line lost inside the flood that caused
 it. The per-user API/MCP limiter ([Configuration §3.7](configuration.md#37-rate-limiting)) is
 a different budget with a different key and fails CLOSED — the two are not interchangeable.
+
+---
+
+## 11A. Roles
+
+**Capability lives in the workspace membership, not on the user** (RBAC design D-R1, ratified 2026-09-10). A person is a viewer in one workspace and an author in another; there is no global "author" any more. The one global capability left is `users.is_admin`, which means **super admin** — the instance.
+
+A membership row (`workspace_members`, [metadata-db §4.12](metadata-db.md#412-workspace_members)) carries three **additive flags**: `author`, `promoter`, `admin`. A row with all three false is a **viewer**. The flags are additive rather than a single role column because the roles genuinely are: "an author who also releases" and "a DevOps person who only releases" are both one row, and no single label names both (D-R2).
+
+| Capability (operation class) | viewer | author | promoter | ws admin | super admin |
+|---|---|---|---|---|---|
+| Read pipelines / templates / datasources (no credentials) / executions / results / endpoints / own keys | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Execute pipelines (any version), read results, cancel OWN runs | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `sql_probe`, `datasources_preview_rows` (row data) | ✓ (read-only SELECT, capped) | ✓ | ✓ | ✓ | ✓ |
+| Create/edit drafts, register lake tables, publish/unpublish endpoints over released versions, bind keys to endpoint paths | | ✓ | | ✓ | ✓ |
+| discard / restore / purge (versions and entities) | | ✓ | | ✓ | ✓ |
+| **switch** the served version (the rollback lever) | | ✓ | ✓ | ✓ | ✓ |
+| **release** | | | ✓ | ✓ | ✓ |
+| **promote** to the higher environment | | | ✓ | ✓ | ✓ |
+| Issue/revoke keys (scope ≤ own capability); revoke any key in the workspace | | ✓ (own) | | ✓ (all) | ✓ |
+| Register a datasource bound to THIS workspace; test it | | | | ✓ | ✓ |
+| Grant/revoke a datasource to workspaces; register an instance datasource | | | | | ✓ |
+| Members and roles (add, remove, change flags); cannot remove the last admin | | | | ✓ | ✓ |
+| Read the workspace's audit trail | | | | ✓ | ✓ |
+| Create/deactivate workspaces; users; instance config; the instance audit log | | | | | ✓ |
+
+`admin → author` is enforced by the database (`chk_workspace_member_admin_authors`): a workspace admin can author, and stating it once as a constraint is what lets every check read `author` straight off the row.
+
+### 11A.1 The 404 rule
+
+**A workspace you cannot reach does not exist.** Non-member, unknown name, and deactivated are ONE answer — `404 workspace.not_found`, the same body a genuinely missing row produces — on every surface: REST, MCP, UI pages and htmx partials. **Never 403 for a foreign id.** The same rule covers every entity inside a workspace: an id or name from another workspace is not-found, not forbidden, because a 403 would turn a flat namespace into an enumeration oracle one request at a time.
+
+The rule is mechanical, not a convention: every repository read that a caller-supplied id or name can reach carries the workspace predicate IN ITS SQL, and `WorkspaceIsolationSweepTest` walks every REST route and every MCP tool with a foreign workspace's identifiers and asserts the not-found answer on every one.
+
+`workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect.
+
+### 11A.2 Super admins
+
+A super admin is an **implicit member of every workspace** (D-R8) and resolves any workspace through the SAME path everyone else does — no bypass branch, so there is no second code path to keep correct. Every action they take in a workspace where they hold no explicit membership is audited as `auth.super_admin_acting` with `acting_via=super_admin`, reads included (§10.1 says why).
+
+A deactivated workspace is not selectable by a super admin either: [§11A.3](#11a3-deactivation)'s first effect has no exception, and a super admin who needs to act inside one reactivates it first — an audited, reversible step.
+
+### 11A.3 Deactivation
+
+**Deactivate, never delete** (D-R10). A deactivated workspace has five effects and purges nothing, ever:
+
+1. it cannot be selected — the switcher hides it, and `DP-Workspace` naming it answers 404 like a non-membership;
+2. its published endpoints answer 404;
+3. API keys pinned to it are refused with `auth.key_workspace_inactive` (403 — the pin already proves the workspace exists, so there is nothing left to hide and an operator needs the truth);
+4. its schedules do not fire (the scheduler consults `WorkspaceLiveness`);
+5. a super admin's listing shows it greyed with the date.
+
+To a MEMBER a deactivated workspace is indistinguishable from one that never existed, so deactivation is not a signal anybody can read. Reactivation is a super-admin verb and is audited.
+
+### 11A.4 Keys
+
+A key is issued by an **author or above** in the workspace it is pinned to (O-2 — viewers never mint keys), with scope ≤ the issuer's capability, and **no `admin` scope at all** (§7.5). On every request four things are re-read inside the validation-cache TTL (60s by default): the key is active, its owner is active, **its issuer still holds the operation's capability in the pinned workspace**, and the workspace is active. So a demoted or removed issuer's keys stop working within one window rather than at expiry, and the refusal says which (`auth.key_issuer_role_lost`), because retrying with that key will never work and the caller cannot guess that from `auth.role_required`.
 
 ---
 
