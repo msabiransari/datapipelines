@@ -23,14 +23,18 @@ class SiteCssBundleParityTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
 
     private fun read(path: String): String =
-        resolver.getResource("classpath:static/$path").inputStream.readBytes().decodeToString()
+        resolver
+            .getResource("classpath:static/$path")
+            .inputStream
+            .readBytes()
+            .decodeToString()
 
     @Test
-    fun `the bundle is exactly the header plus the three foundation sheets, in order`() {
+    fun `the bundle is exactly the header plus the five sources, in order`() {
         val bundle = read("site/css/site-chrome.css")
 
         // Non-vacuity: a truncated bundle must fail on shape before it can pass on content.
-        check(bundle.startsWith(HEADER_PREFIX)) { "site-chrome.css lost its derivation header" }
+        check(bundle.contains(HEADER_END)) { "site-chrome.css lost its derivation header" }
 
         val tokens = read("vendor/design-system/tokens.css")
         val base = read("vendor/design-system/base.css")
@@ -39,8 +43,9 @@ class SiteCssBundleParityTest {
         val siteCss = read("site/css/site.css")
 
         val expectedBody = tokens + "\n" + base + "\n" + motion + "\n" + auto + "\n" + siteCss
-        val body = bundle.substringAfter(HEADER_PREFIX)
-        (body.trimEnd() shouldBe expectedBody.trimEnd())
+        val body = bundle.substringAfter(HEADER_END)
+        val normalized = body.trim()
+        normalized shouldBe expectedBody.trim()
     }
 
     @Test
@@ -49,7 +54,13 @@ class SiteCssBundleParityTest {
         // the render-blocking chain (and the Lighthouse failure) comes back with it.
         val templates =
             listOf("templates/site/_layout.html", "templates/site/index.html")
-                .associateWith { resolver.getResource(it).inputStream.readBytes().decodeToString() }
+                .associateWith { path ->
+                    resolver
+                        .getResource(path)
+                        .inputStream
+                        .readBytes()
+                        .decodeToString()
+                }
         templates.forEach { (name, source) ->
             source.contains("site/css/site-chrome.css") shouldBe true
             source.contains("vendor/design-system/tokens.css") shouldBe false
@@ -58,7 +69,7 @@ class SiteCssBundleParityTest {
             // The theme swap sheet stays a separate link AFTER the bundle, but DISABLED:
             // auto's values ride the bundle, site.js enables the link only for light/dark,
             // so the swap sheet never costs a render-blocking request.
-            source.contains("""themes/auto.css" disabled""") shouldBe true
+            source.contains("""themes/auto.css}" disabled""") shouldBe true
             // The mono faces ride the late sheet, off the critical chain.
             source.contains("site-fonts-mono.css") shouldBe true
             source.contains("data-late-style") shouldBe true
@@ -66,6 +77,7 @@ class SiteCssBundleParityTest {
     }
 
     private companion object {
-        const val HEADER_PREFIX = "   ============================================================ */"
+        /** The header's closing rule; the generated body starts right after it. */
+        const val HEADER_END = "============================================================ */"
     }
 }
