@@ -62,9 +62,9 @@
   --site-accent: #e39b1a;
   --site-accent-hover: #f2b13a;
   --site-accent-ink: #14110a;
-  --site-accent-soft: rgba(227, 155, 26, 0.14);
+  --site-accent-soft: rgba(227, 155, 26, 0.16);
   --site-accent-line: rgba(227, 155, 26, 0.38);
-  --site-glow: radial-gradient(60% 55% at 50% 0%, var(--site-accent-soft), transparent 70%);
+  --site-glow: radial-gradient(70% 60% at 50% 0%, rgba(227, 155, 26, 0.22), transparent 72%);
   --site-tracking-display: -0.03em;
   --site-measure: 62ch;
 }
@@ -473,13 +473,21 @@ code {
 }
 
 .btn-primary {
-  background: var(--accent-primary);
-  color: var(--accent-primary-text);
+  background: var(--site-accent);
+  color: var(--site-accent-ink);
+  font-weight: var(--weight-bold);
 }
 
 .btn-primary:hover {
-  background: var(--accent-primary-hover);
-  color: var(--accent-primary-text);
+  background: var(--site-accent-hover);
+  color: var(--site-accent-ink);
+}
+
+.btn-primary code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
 }
 
 .btn-secondary {
