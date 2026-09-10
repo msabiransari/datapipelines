@@ -47,6 +47,7 @@ class ApiKeyService(
      */
     @Suppress("LongParameterList") // the issuance contract; every argument is a distinct decision
     fun issue(
+        issuer: AuthenticatedPrincipal,
         ownerId: UUID,
         name: String,
         scopes: Set<Scope>,
@@ -60,6 +61,11 @@ class ApiKeyService(
         // the whole API and make "its authority is its bindings / its route family" false. Caught
         // by the 074 E2E, which asserted the minted key's scope set was empty and found `[read]`.
         val requested = if (kind in ApiKeyKind.SCOPELESS) emptySet() else scopes.ifEmpty { defaultScopes() }
+        // D-R12 / O-2 — `admin` left the key wire in RBAC round 1: release, promote and
+        // membership are human verbs, and `admin` was the only scope that ever bought a key an
+        // INSTANCE verb. Refused by name so a caller learns which scopes exist rather than
+        // silently receiving a weaker key than it asked for.
+        requested.firstOrNull { it !in KEY_SCOPES }?.let { throw KeyScopeUnavailableException(it) }
         if (!ScopeMatrix.keyScopesWithinCreator(requested, creatorScopes)) {
             val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
             throw ScopeInsufficientException(required = overreach, held = creatorScopes)
@@ -70,10 +76,14 @@ class ApiKeyService(
         // caller — REST, the partial, a future CLI — inherits it. It is not a scope subset check
         // (a server key HAS no scopes, so the guard above is vacuous for it) but a floor on the
         // CREATOR, which is a different question and needs its own answer.
-        if (kind == ApiKeyKind.SERVER && !Scope.satisfies(creatorScopes, Scope.ADMIN)) {
-            throw ScopeInsufficientException(required = Scope.ADMIN, held = creatorScopes)
+        if (kind == ApiKeyKind.SERVER && !issuer.isSuperAdmin) {
+            throw RoleRequiredException(Capability.SUPER_ADMIN, emptySet())
         }
-        workspaceService.requireAccess(ownerId, Scope.satisfies(creatorScopes, Scope.ADMIN), workspaceId)
+        // O-2: viewers never mint keys. The issuance gate is the ISSUER's capability in the
+        // pinned workspace — `author` — and the workspace must be one they can reach at all
+        // (D-R5's 404 otherwise). Both answers come from ONE resolution, so "can they see it"
+        // and "may they act in it" cannot disagree.
+        workspaceService.requireIssuanceCapability(issuer, workspaceId)
 
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
         val secret = randomBase32(SECRET_LEN)
@@ -135,17 +145,46 @@ class ApiKeyService(
             userId = owner.id,
             email = owner.email,
             displayName = owner.displayName,
-            scopes = record.scopes,
+            // D-R12 — capped at what a key MAY hold, not at what its row says. A key minted
+            // before round 1 can carry `admin` in `api_keys.scopes`; trusting the row would let
+            // exactly the credential the rule removes keep working until it expires. The
+            // migration strips the value too; this is the belt that does not depend on it.
+            scopes = record.scopes.filterTo(mutableSetOf()) { it in KEY_SCOPES },
             authMethod = AuthMethod.API_KEY,
             keyId = record.id,
             // D3: the key's pinned workspace IS the context — resolved at validation,
             // no per-request switch exists (design §5.2).
             workspaceName = record.workspaceName,
-            workspace = WorkspaceContext(record.workspaceId, record.workspaceName),
+            workspace = pinnedContext(record, owner),
             // §7.7 — what the credential IS travels with it, so every downstream gate reads one
             // answer rather than re-deriving it.
             keyKind = record.kind,
+            superAdmin = owner.isAdmin,
         )
+    }
+
+    /**
+     * The pinned workspace as this key's ISSUER can currently act in it (D-R12) — the fourth
+     * of the four per-request re-reads (key active, issuer active, issuer still holds the role,
+     * workspace active), all inside the same `AuthCache` TTL.
+     *
+     * A removed issuer resolves to no flags, which becomes VIEWER rather than a refusal: the
+     * key still authenticates and every capability above viewer then refuses with
+     * `auth.key_issuer_role_lost`, which is the answer the caller can act on. Refusing the
+     * credential outright would report "your key is invalid" for a key that is entirely valid.
+     *
+     * A DEACTIVATED workspace is different and does refuse here: design §6 says its keys are
+     * refused, full stop, and there is no operation left to scope.
+     */
+    private fun pinnedContext(
+        record: ApiKey,
+        owner: User,
+    ): WorkspaceContext {
+        if (!workspaceService.isActive(record.workspaceId)) {
+            throw KeyWorkspaceInactiveException(record.workspaceName)
+        }
+        val flags = workspaceService.issuerFlags(owner.id, owner.isAdmin, record.workspaceId) ?: MembershipFlags.VIEWER
+        return WorkspaceContext(record.workspaceId, record.workspaceName, flags)
     }
 
     /**

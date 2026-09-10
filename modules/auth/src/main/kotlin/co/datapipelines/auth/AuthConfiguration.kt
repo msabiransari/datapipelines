@@ -67,10 +67,6 @@ class AuthConfiguration {
      * slices) legitimately have none — last-used then degrades to first-membership, by
      * design (see the port's KDoc).
      *
-     * [personalWorkspaceSeeder] (D9) is optional for the same layering reason — its
-     * implementation drives `web`'s import services — but for a different operational one:
-     * absent means "this deployment configured no examples file", not "degrade quietly".
-     *
      * [contentCheck] (the `workspace.in_use` port) is optional the same way: `web` wires the
      * real one over the pipeline/template/datasource repositories; auth-only test slices
      * default to "no content", which is true of every workspace they create.
@@ -81,22 +77,29 @@ class AuthConfiguration {
         workspaceRepository: WorkspaceRepository,
         userRepository: UserRepository,
         authCache: AuthCache,
-        workspacesProperties: WorkspacesProperties,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         auditLogger: AuditLogger,
-        personalWorkspaceSeeder: ObjectProvider<PersonalWorkspaceSeeder>,
         contentCheck: ObjectProvider<WorkspaceContentCheck>,
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
             userRepository,
             authCache,
-            workspacesProperties,
             lastUsedWorkspaceStore.getIfAvailable(),
             auditLogger,
-            personalWorkspaceSeeder.getIfAvailable(),
             contentCheck.getIfAvailable() ?: WorkspaceContentCheck.NONE,
         )
+
+    /**
+     * D-R11's `demo` seeder. A plain bean rather than an `ObjectProvider` dance: the workspace
+     * the product ships is not optional, and the seeder's own O-3 check is what makes running
+     * it on every boot safe.
+     */
+    @Bean
+    fun demoWorkspaceSeeder(
+        workspaceRepository: WorkspaceRepository,
+        auditLogger: AuditLogger,
+    ): DemoWorkspaceSeeder = DemoWorkspaceSeeder(workspaceRepository, auditLogger)
 
     @Bean
     fun apiKeyService(

@@ -71,6 +71,21 @@ data class AuthenticatedPrincipal(
      * across the test suites must keep compiling.
      */
     val loginMethod: LoginMethod? = null,
+    /**
+     * `users.is_admin` — the INSTANCE super admin (D-R1). Read from the live user snapshot on
+     * every request, never from a JWT claim, so a revoked super admin loses it within one
+     * `AuthCache` TTL instead of at token expiry.
+     *
+     * It replaced the derived `isAdmin` (which read `Scope.ADMIN` out of the principal's
+     * scopes) when round 1 emptied session scope sets: capability is the membership now, and
+     * the ONE thing that is still global is this flag. Named `superAdmin` because that is what
+     * it means — the old name read as "workspace owner" at half its call sites.
+     *
+     * LAST and defaulting FALSE, for the same two reasons `loginMethod` is: positional
+     * constructions across the suites keep compiling, and a caller that forgets it gets the
+     * unprivileged answer.
+     */
+    val superAdmin: Boolean = false,
 ) {
     /**
      * True when this principal's authority is endpoint bindings rather than scopes (§7.7).
@@ -91,13 +106,24 @@ data class AuthenticatedPrincipal(
      */
     val isServerKey: Boolean get() = keyKind == ApiKeyKind.SERVER
 
-    /** Global admin (D4): bypasses workspace membership checks. Same rule as `ExecutionRecord.visibleTo`. */
-    val isAdmin: Boolean get() = Scope.satisfies(scopes, Scope.ADMIN)
+    /**
+     * Instance super admin (D-R1/D-R8): an implicit member of every workspace, with every
+     * capability, and every action taken outside an explicit membership is audited with
+     * `acting_via=super_admin`.
+     *
+     * Reads [superAdmin] rather than the scope set. Before round 1 this was
+     * `Scope.satisfies(scopes, ADMIN)`, which was the same question only because
+     * `JwtService.scopesFor` derived the scope set FROM `is_admin`; with session scopes gone
+     * (D-R1) the derivation would answer false for every session, so the flag is carried.
+     */
+    val isSuperAdmin: Boolean get() = superAdmin
 
     /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)
-     * when the principal has none — the design §7 "zero memberships" refusal every
-     * workspace-scoped operation shares.
+     * when the principal has none — the "zero memberships" refusal every workspace-scoped
+     * operation shares. This is the one place [WorkspaceErrorCodes.MEMBERSHIP_REQUIRED]
+     * survived D-R5's 404 rule, and deliberately: no workspace was ADDRESSED here, so there
+     * is no name whose existence a 403 could leak.
      */
     fun requireWorkspace(): WorkspaceContext =
         workspace ?: throw WorkspaceMembershipRequiredException("Principal has no active workspace (zero memberships)")

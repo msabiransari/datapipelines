@@ -56,4 +56,26 @@ class AuditLogger(
             )
         }
     }
+
+    companion object {
+        /**
+         * D-R8's audit flag: the value `details.acting_via` carries when a SUPER ADMIN acted in
+         * a workspace they hold no explicit membership in. Spelled once here because three
+         * emitters write it — the workspace service, the scope interceptor and the MCP
+         * dispatcher — and a trail you can only query by exact string is a trail whose spelling
+         * has to be shared.
+         */
+        const val ACTING_VIA_SUPER_ADMIN = "super_admin"
+
+        /** The `details` key [ACTING_VIA_SUPER_ADMIN] is written under. */
+        const val ACTING_VIA = "acting_via"
+
+        /**
+         * `acting_via=super_admin` when [context] says the actor holds no explicit membership
+         * here (D-R8), otherwise nothing. Merged into a details map by the caller, so an
+         * ordinary action carries no key at all rather than a null one.
+         */
+        fun actingVia(context: WorkspaceContext?): Map<String, Any?> =
+            if (context?.actingViaSuperAdmin == true) mapOf(ACTING_VIA to ACTING_VIA_SUPER_ADMIN) else emptyMap()
+    }
 }

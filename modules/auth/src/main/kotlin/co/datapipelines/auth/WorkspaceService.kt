@@ -4,11 +4,10 @@ import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
- * Supplies the "does this workspace still own content" answer for delete (design §8
- * `workspace.in_use`). The counts live in `pipeline-contract`'s and `datasources`' tables,
+ * Supplies the "does this workspace still own content" answer for delete
+ * (`workspace.in_use`). The counts live in `pipeline-contract`'s and `datasources`' tables,
  * which auth cannot see (module-structure §4.2) — so auth declares the port and the
- * aggregation layer wires it, exactly like [PersonalWorkspaceSeeder] and
- * `datasources`' `DatasourceReferences`.
+ * aggregation layer wires it, exactly like `datasources`' `DatasourceReferences`.
  */
 fun interface WorkspaceContentCheck {
     /**
@@ -23,204 +22,132 @@ fun interface WorkspaceContentCheck {
 }
 
 /**
- * Workspace membership resolution and provisioning (design §5/§7), plus the CRUD and
- * member-management service paths the REST surface (design §9) calls.
+ * Is a workspace live enough to act in? The seam D-R10's fifth effect needs: the scheduler
+ * (092, not merged) consults this before firing anything, so a deactivated workspace's
+ * schedules do not run — and it consults ONE answer, the same one the request path uses,
+ * rather than re-deriving "deactivated" from a column it happens to be able to read.
+ *
+ * Declared as an interface with the service as its only implementation so a scheduler in
+ * another module can depend on the QUESTION without depending on `WorkspaceService` (which
+ * would drag the whole auth surface into a job runner).
+ */
+fun interface WorkspaceLiveness {
+    /** True when [workspaceId] is neither soft-deleted nor deactivated (design §6). */
+    fun isActive(workspaceId: UUID): Boolean
+}
+
+/**
+ * Workspace membership resolution and the CRUD / member-management service paths the REST
+ * surface calls (RBAC design §5, §6; the role model is §1).
  *
  * Every read goes through [AuthCache]'s 60s liveness discipline — the identical window
- * `users.is_active` already accepts (design §4), so workspace revocation takes effect
- * within ~1 minute, immediately on the instance that performed the mutation.
+ * `users.is_active` already accepts — so a demotion, a removal or a deactivation takes
+ * effect within ~1 minute, immediately on the instance that performed the mutation. That
+ * window is also what D-R12 promises for a key whose issuer lost the role.
  *
- * ## Provisioning modes (design §7, configuration.md §3.17)
- * [create] is the service path all three modes share:
- * - `auto-per-user` / `self-serve`: any authenticated user creates; `auto-per-user`
- *   additionally provisions a personal workspace on first login ([ensurePersonalWorkspace]).
- * - `closed`: only a global `admin` creates — anything else is
- *   [WorkspaceCreationForbiddenException].
+ * ## Provisioning is gone (D-R11)
+ * Workspaces are created by super admins. `auto-per-user`, `self-serve` and `open-join` went
+ * with round 1, along with `PersonalWorkspaceSeeder` and `ensurePersonalWorkspace`: the
+ * out-of-the-box workspace is `demo` ([DemoWorkspaceSeeder]) and a user with no membership
+ * becomes a VIEWER of it on first login.
  *
- * ## The no-oracle rule (design §8, the 019 precedent)
- * Unknown-workspace and not-a-member are the SAME 403 [WorkspaceMembershipRequiredException]
- * for every principal except a global admin, who could otherwise see any workspace and so
- * gets a real 404 [WorkspaceNotFoundException]. Management refusals (a member who is not
- * the owner) reuse the 403 so a workspace's existence stays unprobeable.
+ * ## The 404 rule (D-R5)
+ * A workspace the caller cannot reach — unknown, non-member, or deactivated — is
+ * [WorkspaceNotFoundException], the same 404 body a genuinely missing row produces. Never a
+ * 403. The old `workspace.membership_required` survives in exactly one place: a principal
+ * with ZERO memberships that addressed no workspace at all
+ * ([AuthenticatedPrincipal.requireWorkspace]), where there is no name to protect.
  *
- * ## The pinned-workspace rule (auth.md §5.6, design D3)
- * The four management paths ([updateDisplayName], [delete], [addMember], [removeMember])
- * refuse an API-key principal whose pinned workspace differs from the path-name target —
- * the same no-oracle 403, so "pinned elsewhere" and "not a member" stay indistinguishable.
- * Exempt (no EXISTING workspace is overreached): [create] (no target exists yet; the
- * caller gains ownership of a NEW workspace only) and the `open-join` self-join in
- * [addMember] (only the caller's OWN membership, in a workspace the deployment declared
- * open). Sessions are untouched (their active workspace is switchable by design).
- *
- * ## Personal-workspace names (design §7)
- * Derived from the lowercased email local-part, sanitized to the `[a-z0-9_-]+` (1–63)
- * name rule, and collision-suffixed (`alice`, `alice-2`, `alice-3`, …) because the
- * namespace is global and two `alice@` accounts must not race for one name.
+ * ## Super admins (D-R8)
+ * They resolve ANY workspace, through the SAME path, with [MembershipFlags.implicit] set
+ * when they hold no explicit membership — which is what the `acting_via=super_admin` audit
+ * flag reads. Being a super admin does not make a DEACTIVATED workspace selectable; it makes
+ * it visible.
  */
 class WorkspaceService(
     private val workspaceRepository: WorkspaceRepository,
     private val userRepository: UserRepository,
     private val authCache: AuthCache,
-    private val workspacesProperties: WorkspacesProperties,
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
     private val auditLogger: AuditLogger,
-    private val personalWorkspaceSeeder: PersonalWorkspaceSeeder? = null,
     private val contentCheck: WorkspaceContentCheck = WorkspaceContentCheck.NONE,
-) {
+) : WorkspaceLiveness {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
-    /** [userId]'s memberships through the liveness cache (D13 window, design §4). */
+    /** [userId]'s memberships through the liveness cache (the D13 window). */
     fun memberships(userId: UUID): List<WorkspaceMembership> = authCache.memberships(userId) { workspaceRepository.membershipsOf(it) }
 
+    /** [userId]'s memberships in SELECTABLE workspaces — what the switcher lists (design §6). */
+    fun activeMemberships(userId: UUID): List<WorkspaceMembership> = memberships(userId).filter { it.workspaceActive }
+
+    override fun isActive(workspaceId: UUID): Boolean = workspaceRepository.findById(workspaceId)?.isActive == true
+
     /**
-     * Resolves a `DP-Workspace` switch (design §5.1): the workspace named [name], when it
-     * exists and [principal] may see it — a member, or a global `admin` (D4 bypass).
-     * Anything else is [WorkspaceMembershipRequiredException], indistinguishable between
-     * "no such workspace" and "not a member" so the header cannot probe existence.
+     * Resolves a `DP-Workspace` switch (design §5.1) to the context the request runs in,
+     * flags included. Unknown, non-member and deactivated are one [WorkspaceNotFoundException]
+     * (D-R5), so the header can probe nothing.
      */
     fun resolveSwitch(
         principal: AuthenticatedPrincipal,
         name: String,
-    ): WorkspaceContext {
-        val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) }
-        val allowed =
-            workspace != null &&
-                (principal.isAdmin || memberships(principal.userId).any { it.workspaceId == workspace.id })
-        if (!allowed) throw WorkspaceMembershipRequiredException()
-        return WorkspaceContext(workspace.id, workspace.name)
-    }
+    ): WorkspaceContext = contextFor(principal, name) ?: throw WorkspaceNotFoundException(name)
 
     /**
-     * The active workspace for a session request that sent no `DP-Workspace` header
-     * (design §5.1): the JWT's stamped [claimName] when the membership is still live
-     * (revocation within the D13 window), else the principal's first membership, else
-     * null — a user with zero memberships (`closed` mode) authenticates fine and every
-     * workspace-scoped operation then 403s at [AuthenticatedPrincipal.requireWorkspace].
+     * The active workspace for a session request that sent no `DP-Workspace` header: the JWT's
+     * stamped [claimName] when it still resolves to a live, active membership, else the first
+     * active membership, else null — a principal with nothing to select authenticates fine and
+     * every workspace-scoped operation then refuses at [ScopeMatrix.allowed]'s null-context
+     * branch.
+     *
+     * A stamped claim that no longer resolves falls through rather than failing: the claim is a
+     * convenience, not an entitlement, and a workspace deactivated since login must not lock a
+     * user out of the ones they can still reach.
      */
     fun resolveForSession(
         principal: AuthenticatedPrincipal,
         claimName: String?,
     ): WorkspaceContext? {
-        val memberships = memberships(principal.userId)
-        claimName?.let { claimed ->
-            memberships.firstOrNull { it.workspaceName == claimed }?.let { return WorkspaceContext(it.workspaceId, it.workspaceName) }
-            // A stamped membership that no longer exists falls through to first-membership:
-            // the claim is a convenience, not an entitlement.
+        claimName?.let { claimed -> contextFor(principal, claimed)?.let { return it } }
+        activeMemberships(principal.userId).firstOrNull()?.let { return context(it) }
+        // D-R8: a super admin with no membership at all still has somewhere to be — the first
+        // active workspace on the instance. Without it the one principal who can fix an empty
+        // deployment is the one principal who cannot act in it.
+        if (principal.isSuperAdmin) {
+            workspaceRepository.findAllActive().firstOrNull()?.let {
+                return WorkspaceContext(it.id, it.name, MembershipFlags.IMPLICIT_SUPER_ADMIN)
+            }
         }
-        return memberships.firstOrNull()?.let { WorkspaceContext(it.workspaceId, it.workspaceName) }
+        return null
     }
 
     /**
-     * What login stamps as `active_workspace` (design §5.1): last-used when it still
-     * resolves to a live membership, else first membership, else — `auto-per-user` only —
-     * the freshly provisioned personal workspace. Null when there is nothing to stamp
-     * (zero memberships under `self-serve`/`closed`).
+     * What login stamps as `active_workspace`: last-used when it still resolves, else the
+     * first active membership. Null when the user belongs to nothing selectable — round 2
+     * draws the "no workspace" page; round 1 returns the state (design §5).
      */
     fun workspaceForLogin(
         user: User,
-        email: String,
+        @Suppress("UNUSED_PARAMETER") email: String,
     ): WorkspaceContext? {
-        val memberships = memberships(user.id)
+        val memberships = activeMemberships(user.id)
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
-            memberships.firstOrNull { it.workspaceName == last }?.let { return WorkspaceContext(it.workspaceId, it.workspaceName) }
+            memberships.firstOrNull { it.workspaceName == last }?.let { return context(it) }
         }
-        memberships.firstOrNull()?.let { return WorkspaceContext(it.workspaceId, it.workspaceName) }
-        if (workspacesProperties.provisioningMode != WorkspaceProvisioningMode.AUTO_PER_USER) return null
-        val provisioned = ensurePersonalWorkspace(user, email)
-        return WorkspaceContext(provisioned.id, provisioned.name)
+        return memberships.firstOrNull()?.let { context(it) }
     }
 
     /**
-     * The `auto-per-user` first-login provisioning hook (design §7, auth.md §4.2):
-     * creates the user's `is_personal` workspace, or returns the existing personal one
-     * when a previous login already did (a crashed login must not mint a second).
-     * Creator enters as `owner`.
-     *
-     * On a freshly created workspace the D9 [PersonalWorkspaceSeeder] fires last (see its
-     * KDoc); it is not re-run for a workspace that already existed.
-     *
-     * ## The name race (048/§C, the check-then-act 036's M5/M6 did not reach)
-     * [availablePersonalName] asks `nameExists` and then inserts, and `workspaces.name` is
-     * globally unique — so two logins racing on one fresh database used to hand the loser a
-     * raw `DuplicateKeyException` out of a login. Both interleavings are now tolerated in the
-     * house catch-and-re-read shape:
-     *
-     *  - **The same user twice** (two pods, two tabs): the loser re-reads its memberships and
-     *    returns the winner's workspace rather than minting a second personal one.
-     *  - **Two different users whose emails share a local-part** (`alice@a.com`,
-     *    `alice@b.com`): the loser has no membership to find — the name belongs to somebody
-     *    else — so it allocates the next free name and inserts again.
-     *
-     * One narrow window stays open and is deliberately not closed here: the same-user loser
-     * can return a workspace whose seeding is still in flight on the winner's thread, so its
-     * first screen may be a moment early. Closing it needs a lock spanning two processes,
-     * which the D9 hook has no place to take, and the loser must not seed a second copy — a
-     * re-import of the same examples collides on `uq_pipelines_workspace_name` and refuses
-     * with `pipeline.validation.duplicate_name`, which would turn a cosmetic race into a
-     * failed login.
+     * Creates a workspace (D-R11: super admins only — the capability gate is
+     * [ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES] at the interceptor, and this
+     * re-asserts it because a service must not depend on having been called from a governed
+     * route). The creator enters as the workspace ADMIN.
      */
-    fun ensurePersonalWorkspace(
-        user: User,
-        email: String,
-    ): Workspace {
-        existingWorkspace(user.id)?.let { return it }
-        repeat(PERSONAL_NAME_ATTEMPTS) {
-            try {
-                return provisionPersonalWorkspace(user, availablePersonalName(email))
-            } catch (_: org.springframework.dao.DuplicateKeyException) {
-                // The atomic authority spoke: somebody took the name between the check and the
-                // insert. If it was this user's own concurrent login, its workspace is now
-                // ours to return; otherwise fall through and allocate the next free name.
-                authCache.invalidateMemberships(user.id)
-                existingWorkspace(user.id)?.let { return it }
-            }
-        }
-        error("Could not provision a personal workspace for ${user.id} in $PERSONAL_NAME_ATTEMPTS attempts")
-    }
-
-    /** [userId]'s first membership resolved to its workspace row, or null when it has none. */
-    private fun existingWorkspace(userId: UUID): Workspace? =
-        memberships(userId).firstOrNull()?.let { existing ->
-            checkNotNull(workspaceRepository.findById(existing.workspaceId)) {
-                "Membership ${existing.workspaceId} resolved to no workspace row"
-            }
-        }
-
-    /** The insert, its audit row and the D9 seeding — the part that must not run twice. */
-    private fun provisionPersonalWorkspace(
-        user: User,
-        name: String,
-    ): Workspace {
-        val created = workspaceRepository.create(name, displayName = name, isPersonal = true, createdBy = user.id)
-        authCache.invalidateMemberships(user.id)
-        auditLogger.log(
-            event = "auth.workspace.provisioned",
-            userId = user.id,
-            details = mapOf("workspace" to created.name, "mode" to WorkspaceProvisioningMode.AUTO_PER_USER.wire),
-        )
-        // D9 (sample-data design §6.1): seed the configured examples into the workspace that
-        // now exists. Deliberately AFTER the audit row — the workspace was provisioned either
-        // way — and deliberately NOT guarded: a seeding failure must fail the login loudly
-        // rather than hand the user a workspace that is quietly missing its examples.
-        personalWorkspaceSeeder?.seed(created.id, user.id)
-        return created
-    }
-
-    /**
-     * The workspace-creation service path every mode shares (design §7; the REST CRUD
-     * surface is design §9). `closed` refuses non-admins; the other modes allow any
-     * authenticated user. The creator enters as `owner`. Name failures are catalogued:
-     * [WorkspaceNameInvalidException] / [WorkspaceDuplicateNameException].
-     */
-    @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
     fun create(
         principal: AuthenticatedPrincipal,
         name: String,
         displayName: String,
     ): Workspace {
-        if (workspacesProperties.provisioningMode == WorkspaceProvisioningMode.CLOSED && !principal.isAdmin) {
-            throw WorkspaceCreationForbiddenException(workspacesProperties.provisioningMode)
-        }
+        requireSuperAdmin(principal)
         if (!NAME_REGEX.matches(name)) throw WorkspaceNameInvalidException(name)
         if (workspaceRepository.nameExists(name)) throw WorkspaceDuplicateNameException(name)
         val created =
@@ -232,114 +159,128 @@ class WorkspaceService(
                 throw WorkspaceDuplicateNameException(name)
             }
         authCache.invalidateMemberships(principal.userId)
-        auditLogger.log(
-            event = "auth.workspace.created",
-            userId = principal.userId,
-            details = mapOf("workspace" to created.name),
-        )
+        audit(principal, "auth.workspace.created", created.name, mapOf("workspace" to created.name))
         return created
     }
 
     /**
-     * The caller's own workspaces (design §9 "list-own"): membership rows joined to their
-     * workspaces, oldest first. A global admin gets exactly the same shape — no implicit
-     * merged view (the ratified 019 ruling: admin addresses other workspaces per-request
-     * via `DP-Workspace`, not through this listing).
+     * The caller's own workspaces. A super admin gets every workspace on the instance
+     * (D-R8), deactivated ones included and marked — design §6 puts them in the listing
+     * greyed with their date, and hiding them would hide the only screen that can reactivate.
      */
-    fun listOwn(principal: AuthenticatedPrincipal): List<WorkspaceMembership> = memberships(principal.userId)
-
-    /** The `open-join` joinable listing (design §7): every live workspace the principal does NOT belong to. */
-    fun joinable(principal: AuthenticatedPrincipal): List<Workspace> =
-        if (!workspacesProperties.openJoin) {
-            emptyList()
+    fun listOwn(principal: AuthenticatedPrincipal): List<WorkspaceMembership> =
+        if (principal.isSuperAdmin) {
+            workspaceRepository.findAll().map {
+                WorkspaceMembership(
+                    workspaceId = it.id,
+                    workspaceName = it.name,
+                    flags = MembershipFlags.superAdminOver(flagsIn(it.id, principal.userId)),
+                    joinedAt = it.createdAt,
+                    workspaceActive = it.isActive,
+                )
+            }
         } else {
-            workspaceRepository.findAll().filter { ws -> memberships(principal.userId).none { it.workspaceId == ws.id } }
+            memberships(principal.userId)
         }
 
     /**
-     * One workspace by name, when the principal may see it (design §9 "read"): a member, or
-     * a global admin. Members share the 019 no-oracle 403 for unknown names; only an admin
-     * gets the 404 (they could otherwise see any workspace). Read through the liveness cache,
-     * like [resolveSwitch].
+     * One workspace by name when the principal may see it, else the 404 (D-R5). Super admins
+     * see any workspace, deactivated included.
      */
     fun read(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
-        val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) }
-        if (principal.isAdmin) {
-            if (workspace == null) throw WorkspaceNotFoundException(name)
-            return workspace
-        }
-        if (workspace == null || memberships(principal.userId).none { it.workspaceId == workspace.id }) {
-            throw WorkspaceMembershipRequiredException()
-        }
+        val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) } ?: throw WorkspaceNotFoundException(name)
+        val visible = principal.isSuperAdmin || (workspace.isActive && isMember(principal.userId, workspace.id))
+        if (!visible) throw WorkspaceNotFoundException(name)
         return workspace
     }
 
-    /** Renames the display name (design §9; `name` is immutable v1). Owner-or-admin. */
+    /** Renames the display name (`name` is immutable v1). Workspace admin or super admin. */
     fun updateDisplayName(
         principal: AuthenticatedPrincipal,
         name: String,
         displayName: String,
     ): Workspace {
-        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
-        requireOwnerOrAdmin(principal, workspace)
+        requireCapability(principal, workspace, Capability.WS_ADMIN)
         val updated =
             workspaceRepository.updateDisplayName(workspace.id, displayName)
-                // The row vanished between read() and the write. The no-oracle line holds
-                // even on the race (022 review, below-cap): a member must not learn from a
-                // 404-vs-403 split that the workspace existed a moment ago.
-                ?: throw if (principal.isAdmin) WorkspaceNotFoundException(name) else WorkspaceMembershipRequiredException()
+                // The row vanished between read() and the write: the 404 rule answers the race
+                // the same way it answers everything else.
+                ?: throw WorkspaceNotFoundException(name)
         authCache.invalidateWorkspace(name)
-        auditLogger.log(
-            event = "auth.workspace.updated",
-            userId = principal.userId,
-            details = mapOf("workspace" to name),
-        )
+        audit(principal, "auth.workspace.updated", name, mapOf("workspace" to name))
         return updated
     }
 
     /**
-     * Soft-deletes the workspace (design §9): refused with [WorkspaceInUseException] while it
-     * still owns non-deleted pipelines/templates/datasources ([WorkspaceContentCheck]).
-     * Owner-or-admin. Every member's membership cache is invalidated so the disappearance is
-     * immediate, not a 60s surprise.
+     * Deactivates a workspace (D-R10, super admin). Nothing is purged — ever. The five effects
+     * (design §6) fall out of readers consulting [Workspace.isActive]: it stops being
+     * selectable ([resolveForSession]/[resolveSwitch]), its endpoints and keys are refused, the
+     * scheduler skips it through [WorkspaceLiveness], and a super admin's listing greys it.
      *
-     * ## The accepted check-then-act race (022/F10, 025 A3 — design §11 documents the decision)
+     * Every member's membership snapshot is invalidated so the disappearance is immediate on
+     * this instance rather than a 60s surprise.
+     */
+    fun deactivate(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ): Workspace {
+        requireSuperAdmin(principal)
+        val workspace = read(principal, name)
+        if (!workspaceRepository.deactivate(workspace.id, principal.userId)) {
+            throw WorkspaceInactiveException(name)
+        }
+        invalidateEveryone(workspace)
+        audit(principal, "workspace.deactivated", name, mapOf("workspace" to name))
+        return workspaceRepository.findById(workspace.id) ?: error("workspace ${workspace.id} vanished after deactivate")
+    }
+
+    /** Reactivates a workspace (design §6, super admin, audited). */
+    fun reactivate(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ): Workspace {
+        requireSuperAdmin(principal)
+        val workspace = read(principal, name)
+        if (!workspaceRepository.reactivate(workspace.id)) {
+            // Already active: the same 404 body, because "it was not deactivated" is not a
+            // fact this surface owes a caller who could not have addressed it wrongly.
+            throw WorkspaceNotFoundException(name)
+        }
+        invalidateEveryone(workspace)
+        audit(principal, "workspace.reactivated", name, mapOf("workspace" to name))
+        return workspaceRepository.findById(workspace.id) ?: error("workspace ${workspace.id} vanished after reactivate")
+    }
+
+    /**
+     * Soft-deletes the workspace: refused with [WorkspaceInUseException] while it still owns
+     * non-deleted content. Super admin only since D-R10 — deactivation is the operation
+     * operators want, and delete stays for the empty-workspace case.
      *
-     * The content count and the soft delete are not one transaction, and cannot be: the
-     * counted tables belong to three other modules (module-structure §4.2), reached through
-     * the [WorkspaceContentCheck] port. A content-creating request that resolved this
-     * workspace before the soft delete and commits after the count strands its rows —
-     * invisible to every listing (memberships join `is_deleted = FALSE`), with the name
-     * permanently taken. Closing it requires either a cross-module locking protocol every
-     * content-save path joins, or content-table triggers whose refusals map to no catalogued
-     * code — both rejected for v1 in the design note. What v1 DOES do is detect: a
-     * post-delete recount that finds content emits `auth.workspace.stranded_content`
-     * (audit + ERROR log) instead of leaving the strand silent. The detector is
-     * best-effort — a commit landing after the recount still strands silently.
+     * ## The accepted check-then-act race (022/F10, 025 A3)
+     * The content count and the soft delete are not one transaction and cannot be: the counted
+     * tables belong to three other modules (module-structure §4.2), reached through
+     * [WorkspaceContentCheck]. A content-creating request that resolved this workspace before
+     * the delete and commits after the count strands its rows. v1 DETECTS rather than prevents:
+     * a post-delete recount emits `auth.workspace.stranded_content` instead of leaving the
+     * strand silent. Best-effort — a commit landing after the recount still strands silently.
      */
     fun delete(
         principal: AuthenticatedPrincipal,
         name: String,
     ) {
-        requirePinnedWorkspace(principal, name)
+        requireSuperAdmin(principal)
         val workspace = read(principal, name)
-        requireOwnerOrAdmin(principal, workspace)
         val counts = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
         if (counts.isNotEmpty()) throw WorkspaceInUseException(name, counts)
         val members = workspaceRepository.findMembersOf(workspace.id)
         workspaceRepository.softDelete(workspace.id)
         members.forEach { authCache.invalidateMemberships(it.userId) }
         authCache.invalidateWorkspace(name)
-        auditLogger.log(
-            event = "auth.workspace.deleted",
-            userId = principal.userId,
-            details = mapOf("workspace" to name),
-        )
-        // The race detector (see KDoc): best-effort, never a refusal — the deletion stands.
+        audit(principal, "auth.workspace.deleted", name, mapOf("workspace" to name))
         val stranded = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
         if (stranded.isNotEmpty()) {
             log.error(
@@ -357,7 +298,7 @@ class WorkspaceService(
         }
     }
 
-    /** The member listing (design §9): any member of the workspace, or a global admin. */
+    /** The member listing: any member of the workspace, or a super admin. */
     fun members(
         principal: AuthenticatedPrincipal,
         name: String,
@@ -367,69 +308,96 @@ class WorkspaceService(
     }
 
     /**
-     * Adds a member (design §9). Owner-or-admin — except the `open-join` self-service
-     * path: when `open-join` is on and [email] is the caller's own, any authenticated
-     * principal joins (design §7). The email is resolved here so the caller's 404 mapping
-     * (the house unknown-user stand-in — §13.7 has no `auth.user.not_found`) and the
-     * membership write are one transaction of intent; unknown emails surface as
-     * [UnknownMemberEmailException] with the email, which the web layer maps.
+     * Adds a member with [flags] (design §1; workspace admin or super admin). A member added
+     * with no flags is a VIEWER — the D-R11 default and the one the demo path uses.
+     *
+     * The email is resolved here so the unknown-user mapping and the membership write are one
+     * transaction of intent; unknown emails surface as [UnknownMemberEmailException], which the
+     * web layer maps to the house §16.3 stand-in.
+     *
+     * Idempotent by the repository's `ON CONFLICT DO NOTHING`: re-adding an existing member
+     * returns them unchanged rather than silently resetting their flags to the request's —
+     * changing an existing member's role is [setMemberFlags], which the last-admin rule guards.
      */
-    @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
     fun addMember(
         principal: AuthenticatedPrincipal,
         name: String,
         email: String,
+        flags: MembershipFlags = MembershipFlags.VIEWER,
     ): WorkspaceMemberRow {
         val normalized = email.trim().lowercase()
-        val selfJoin = normalized == principal.email
-        // SESSION principals only. The exemption exists so a human can use the shipped
-        // self-service join, and that UI is session-gated already
-        // (`WorkspacesUiController.requireSessionPrincipal`) — so no key needs it.
-        //
-        // Extending it to API keys was a real hole, caught in review before merge: the
-        // open-join branch below resolves the target by NAME with read()'s membership
-        // check deliberately skipped, so a key pinned to G could write a
-        // `workspace_members` row into any live workspace A. That row then outlives
-        // revocation of the key, and membership alone passes the checks in `read` and
-        // `members` — neither of which consults the pin — so the joined workspace's full
-        // roster (emails, display names, user ids) is readable at scope `read`, for every
-        // workspace in the deployment. The KDoc's "it touches only the caller's OWN
-        // membership" was true; "no existing workspace is overreached" was not.
-        val openSelfJoin = selfJoin && workspacesProperties.openJoin && principal.authMethod != AuthMethod.API_KEY
-        if (!openSelfJoin) {
-            requirePinnedWorkspace(principal, name)
-        }
-        val workspace =
-            if (openSelfJoin) {
-                // design §7 self-service: resolve the target WITHOUT read()'s membership
-                // pre-check — it would 403 every non-member before the self-join branch
-                // ever ran (022 review F4: open-join was unreachable). Under open-join
-                // joinable() already lists every live workspace to everyone, so a plain
-                // not-found here opens no existence oracle.
-                authCache.workspaceByName(name) { workspaceRepository.findByName(it) }
-                    ?: throw WorkspaceNotFoundException(name)
-            } else {
-                read(principal, name)
-            }
-        if (!selfJoin) {
-            requireOwnerOrAdmin(principal, workspace)
-        } else if (!workspacesProperties.openJoin && !isOwnerOrAdmin(principal, workspace)) {
-            // Joining your own email without open-join is still just an add: the caller
-            // must be owner/admin. A non-owner self-add is the membership 403, same as
-            // any other non-owner management act — no oracle created.
-            throw WorkspaceMembershipRequiredException()
-        }
-        val user =
-            userRepository.findByEmail(normalized)
-                ?: throw UnknownMemberEmailException(normalized)
-        val row = workspaceRepository.addMember(workspace.id, user.id)
+        val workspace = read(principal, name)
+        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        val user = userRepository.findByEmail(normalized) ?: throw UnknownMemberEmailException(normalized)
+        val row = workspaceRepository.addMember(workspace.id, user.id, normalize(flags))
         authCache.invalidateMemberships(user.id)
-        auditLogger.log(
-            event = "auth.workspace.member_added",
-            userId = principal.userId,
-            details = mapOf("workspace" to name, "member" to normalized),
+        audit(
+            principal,
+            "workspace.member_added",
+            name,
+            mapOf("workspace" to name, "member" to normalized, "flags" to wire(flags)),
         )
         return row ?: error("membership for $normalized in $name vanished after insert")
+    }
+
+    /**
+     * Replaces a member's capability flags (design §1). Refuses to demote the LAST admin with
+     * [WorkspaceLastAdminException] — a workspace with no admin is unmanageable, and the
+     * refusal names the fix ("give someone else the admin role first") rather than the rule.
+     */
+    fun setMemberFlags(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        userId: UUID,
+        flags: MembershipFlags,
+    ): WorkspaceMemberRow {
+        val workspace = read(principal, name)
+        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
+        val normalized = normalize(flags)
+        if (target.flags.admin && !normalized.admin) requireAnotherAdmin(workspace, userId)
+        workspaceRepository.setFlags(workspace.id, userId, normalized)
+        authCache.invalidateMemberships(userId)
+        audit(
+            principal,
+            "workspace.member_flags_changed",
+            name,
+            mapOf(
+                "workspace" to name,
+                "member_user_id" to userId.toString(),
+                "from" to wire(target.flags),
+                "to" to wire(normalized),
+            ),
+        )
+        return workspaceRepository.findMemberRow(workspace.id, userId)
+            ?: error("membership for $userId in $name vanished after update")
+    }
+
+    /**
+     * Removes a membership. Workspace admin or super admin; refuses the LAST admin
+     * ([WorkspaceLastAdminException]) for the same reason [setMemberFlags] does.
+     *
+     * A user id that names no member of this workspace answers with the workspace's own 404
+     * (D-R5): "there is no such member here" and "there is no such workspace for you" must not
+     * be distinguishable, or the member list becomes probeable one id at a time.
+     */
+    fun removeMember(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        userId: UUID,
+    ) {
+        val workspace = read(principal, name)
+        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
+        if (target.flags.admin) requireAnotherAdmin(workspace, userId)
+        workspaceRepository.removeMember(workspace.id, userId)
+        authCache.invalidateMemberships(userId)
+        audit(
+            principal,
+            "workspace.member_removed",
+            name,
+            mapOf("workspace" to name, "member_user_id" to userId.toString()),
+        )
     }
 
     /** Unknown member email at [addMember] — mapped by the web layer to the §16.3 unknown-user stand-in. */
@@ -438,147 +406,169 @@ class WorkspaceService(
     ) : IllegalStateException("No user with email '$email'.")
 
     /**
-     * Removes a membership (design §9). Owner-or-admin. Removing an OWNER is refused with
-     * [WorkspaceInUseException] (`blocked_by: owner_membership`): ownership transfer is not
-     * a v1 operation, and a workspace left without its owner would be unmanageable — the
-     * delete-blocked shape is the honest 409 the catalog has for "this removal would orphan
-     * the workspace".
-     */
-    fun removeMember(
-        principal: AuthenticatedPrincipal,
-        name: String,
-        userId: UUID,
-    ) {
-        requirePinnedWorkspace(principal, name)
-        val workspace = read(principal, name)
-        requireOwnerOrAdmin(principal, workspace)
-        val target =
-            workspaceRepository.findMemberRow(workspace.id, userId)
-                ?: throw WorkspaceMembershipRequiredException()
-        if (target.role == WorkspaceRole.OWNER) {
-            throw WorkspaceInUseException(name, emptyMap(), blockedBy = "owner_membership")
-        }
-        workspaceRepository.removeMember(workspace.id, userId)
-        authCache.invalidateMemberships(userId)
-        auditLogger.log(
-            event = "auth.workspace.member_removed",
-            userId = principal.userId,
-            details = mapOf("workspace" to name, "member_user_id" to userId.toString()),
-        )
-    }
-
-    private fun isOwnerOrAdmin(
-        principal: AuthenticatedPrincipal,
-        workspace: Workspace,
-    ): Boolean {
-        if (principal.isAdmin) return true
-        return memberships(principal.userId).any { it.workspaceId == workspace.id && it.role == WorkspaceRole.OWNER }
-    }
-
-    /**
-     * The pinned-workspace rule for key principals (auth.md §5.6, design D3): an API key's
-     * workspace is fixed at issuance, so a key may manage ONLY the workspace it is pinned
-     * to. Authorizing against the user's whole membership set instead — as these handlers
-     * address their target by path name — would let a key pinned to A manage B whenever its
-     * owner belongs to both, defeating the pin `WorkspaceResolutionFilter` hard-refuses
-     * `DP-Workspace` to protect (025 review, blocking). Sessions are untouched: their
-     * active workspace is switchable by design, so no pin exists to honor.
+     * The context [principal] would run in inside [name] — flags resolved — or null when the
+     * workspace does not exist FOR THEM (D-R5: unknown, non-member, or deactivated).
      *
-     * The refusal is the SAME no-oracle 403 [requireOwnerOrAdmin] raises — "pinned
-     * elsewhere" and "not a member" must stay indistinguishable, or the pin itself becomes
-     * an existence oracle. Two exemptions, both because there is no EXISTING workspace the
-     * key could overreach into: [create] (there is no target workspace yet; creation grants
-     * the caller ownership of a NEW workspace only, and the §7.6 `author` floor plus the
-     * per-mode refusal are its gates) and the `open-join` self-join in [addMember] (it
-     * touches only the caller's OWN membership in a workspace the deployment declared open;
-     * the joiner enters as `member`, and the key's active workspace stays pinned).
+     * The one resolution path (D-R8: "super admins resolve any workspace THROUGH THE SAME
+     * PATH, with the audit flag"). A deactivated workspace is not selectable by anyone,
+     * super admin included: design §6's first effect has no exception, and a super admin who
+     * needs to act inside one reactivates it first — an audited, reversible step.
      */
-    private fun requirePinnedWorkspace(
+    fun contextFor(
         principal: AuthenticatedPrincipal,
         name: String,
-    ) {
-        if (principal.authMethod == AuthMethod.API_KEY && principal.workspaceName != name) {
-            throw WorkspaceMembershipRequiredException()
+    ): WorkspaceContext? {
+        val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) } ?: return null
+        if (!workspace.isActive) return null
+        val explicit = memberships(principal.userId).firstOrNull { it.workspaceId == workspace.id }
+        return when {
+            principal.isSuperAdmin ->
+                WorkspaceContext(workspace.id, workspace.name, MembershipFlags.superAdminOver(explicit?.flags))
+            explicit != null -> WorkspaceContext(workspace.id, workspace.name, explicit.flags)
+            else -> null
         }
     }
 
     /**
-     * The owner-or-admin gate (design §5.4): a member who is not the owner gets the same
-     * 403 as a non-member — role probing is an oracle too ("this workspace exists, I am in
-     * it, someone else owns it" is a disclosure the no-oracle rule exists to prevent).
+     * The membership guard API-key issuance extends (auth.md §7.4): a key may only be pinned to
+     * a workspace its creator can reach, and — since D-R12/O-2 — only by an AUTHOR there.
+     * Throws [WorkspaceNotFoundException] for the unreachable case (D-R5) and
+     * [RoleRequiredException] for the viewer.
      */
-    private fun requireOwnerOrAdmin(
+    fun requireIssuanceCapability(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+    ): WorkspaceContext {
+        val workspace = workspaceRepository.findById(workspaceId) ?: throw WorkspaceNotFoundException(workspaceId.toString())
+        val context = contextFor(principal, workspace.name) ?: throw WorkspaceNotFoundException(workspace.name)
+        if (!Capability.AUTHOR.satisfiedBy(context.flags)) {
+            throw RoleRequiredException(Capability.AUTHOR, context.flags.held(), workspace.name)
+        }
+        return context
+    }
+
+    /**
+     * The flags a KEY's issuer currently holds in the key's pinned workspace, or null when the
+     * workspace is unreachable for them now (D-R12: removed issuer, deactivated workspace).
+     * Read per request through the cache, which is what bounds the demotion window at one TTL.
+     */
+    fun issuerFlags(
+        issuerId: UUID,
+        issuerIsSuperAdmin: Boolean,
+        workspaceId: UUID,
+    ): MembershipFlags? {
+        val explicit = memberships(issuerId).firstOrNull { it.workspaceId == workspaceId && it.workspaceActive }
+        return when {
+            issuerIsSuperAdmin -> MembershipFlags.superAdminOver(explicit?.flags)
+            else -> explicit?.flags
+        }
+    }
+
+    /** True when [principal] may operate in [workspaceId] — member or super admin (D-R8). */
+    fun canAccess(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+    ): Boolean = canAccess(principal.userId, principal.isSuperAdmin, workspaceId)
+
+    /** As [canAccess], for callers holding the identity as data. */
+    fun canAccess(
+        userId: UUID,
+        isSuperAdmin: Boolean,
+        workspaceId: UUID,
+    ): Boolean = isSuperAdmin || isMember(userId, workspaceId)
+
+    private fun isMember(
+        userId: UUID,
+        workspaceId: UUID,
+    ): Boolean = memberships(userId).any { it.workspaceId == workspaceId }
+
+    private fun flagsIn(
+        workspaceId: UUID,
+        userId: UUID,
+    ): MembershipFlags? = memberships(userId).firstOrNull { it.workspaceId == workspaceId }?.flags
+
+    private fun context(membership: WorkspaceMembership): WorkspaceContext =
+        WorkspaceContext(membership.workspaceId, membership.workspaceName, membership.flags)
+
+    /**
+     * The `admin → author` invariant (design §1), applied before every write. The database's
+     * `chk_workspace_member_admin_authors` is the authority; normalising here means a caller
+     * that ticks "admin" alone gets the workspace admin it asked for rather than a constraint
+     * violation with no catalogued code.
+     */
+    private fun normalize(flags: MembershipFlags): MembershipFlags =
+        if (flags.admin) flags.copy(author = true) else flags
+
+    private fun requireSuperAdmin(principal: AuthenticatedPrincipal) {
+        if (!principal.isSuperAdmin) {
+            throw RoleRequiredException(Capability.SUPER_ADMIN, emptySet())
+        }
+    }
+
+    private fun requireCapability(
         principal: AuthenticatedPrincipal,
         workspace: Workspace,
+        capability: Capability,
     ) {
-        if (!isOwnerOrAdmin(principal, workspace)) throw WorkspaceMembershipRequiredException()
+        val flags =
+            if (principal.isSuperAdmin) {
+                MembershipFlags.superAdminOver(flagsIn(workspace.id, principal.userId))
+            } else {
+                flagsIn(workspace.id, principal.userId) ?: throw WorkspaceNotFoundException(workspace.name)
+            }
+        if (!capability.satisfiedBy(flags)) throw RoleRequiredException(capability, flags.held(), workspace.name)
     }
 
-    /** True when [principal] may operate in [workspaceId] — member or global `admin` (D4). Read-through the liveness cache. */
-    fun canAccess(
-        principal: AuthenticatedPrincipal,
-        workspaceId: UUID,
-    ): Boolean = canAccess(principal.userId, principal.isAdmin, workspaceId)
+    /** The last-admin rule: [excluding] is the member about to lose admin (design §1). */
+    private fun requireAnotherAdmin(
+        workspace: Workspace,
+        excluding: UUID,
+    ) {
+        val remaining = workspaceRepository.findMembersOf(workspace.id).count { it.flags.admin && it.userId != excluding }
+        if (remaining == 0) throw WorkspaceLastAdminException(workspace.name)
+    }
 
-    /** As [canAccess], for callers holding the identity as data (API-key issuance, §7.4). */
-    fun canAccess(
-        userId: UUID,
-        isAdmin: Boolean,
-        workspaceId: UUID,
-    ): Boolean = isAdmin || memberships(userId).any { it.workspaceId == workspaceId }
+    private fun invalidateEveryone(workspace: Workspace) {
+        workspaceRepository.findMembersOf(workspace.id).forEach { authCache.invalidateMemberships(it.userId) }
+        authCache.invalidateWorkspace(workspace.name)
+    }
 
     /**
-     * The membership guard API-key issuance extends (auth.md §7.4): a key may only be
-     * pinned to a workspace its creator can access. Throws [WorkspaceMembershipRequiredException].
+     * Every workspace mutation's audit row, with D-R8's `acting_via` when the actor is a super
+     * admin operating outside their own memberships. One helper so no verb can forget the flag
+     * — the failure mode the design calls out by name.
      */
-    fun requireAccess(
-        userId: UUID,
-        isAdmin: Boolean,
-        workspaceId: UUID,
+    private fun audit(
+        principal: AuthenticatedPrincipal,
+        event: String,
+        workspaceName: String,
+        details: Map<String, Any?>,
     ) {
-        if (!canAccess(userId, isAdmin, workspaceId)) throw WorkspaceMembershipRequiredException()
+        val actingVia =
+            if (principal.isSuperAdmin && flagsIn(workspaceIdOf(workspaceName), principal.userId) == null) {
+                mapOf(AuditLogger.ACTING_VIA to AuditLogger.ACTING_VIA_SUPER_ADMIN)
+            } else {
+                emptyMap<String, Any?>()
+            }
+        auditLogger.log(event = event, userId = principal.userId, details = details + actingVia)
     }
 
-    /** First free collision-suffixed name for [email]'s sanitized local-part. */
-    private fun availablePersonalName(email: String): String {
-        val base = sanitizeName(email.substringBefore('@'))
-        var candidate = base
-        var suffix = 2
-        while (workspaceRepository.nameExists(candidate)) {
-            candidate = "$base-${suffix++}"
+    /** The id behind an already-resolved name; a vanished row audits without the membership probe. */
+    private fun workspaceIdOf(name: String): UUID =
+        authCache.workspaceByName(name) { workspaceRepository.findByName(it) }?.id ?: NIL_WORKSPACE
+
+    private fun wire(flags: MembershipFlags): List<String> =
+        buildList {
+            if (flags.author) add("author")
+            if (flags.promoter) add("promoter")
+            if (flags.admin) add("admin")
         }
-        return candidate
-    }
 
     private companion object {
         /** metadata-db §4.11 — `[a-z0-9_-]+`, 1–63, immutable. */
         val NAME_REGEX = Regex("[a-z0-9_-]{1,63}")
 
-        /**
-         * Lowercased email local-part → a valid workspace name: invalid character runs
-         * collapse to one `-`, edge dashes/underscores trim away, and an empty result
-         * (a local-part of pure punctuation) falls back to `personal` rather than
-         * failing a login over a name.
-         */
-        fun sanitizeName(localPart: String): String {
-            val sanitized =
-                localPart
-                    .lowercase()
-                    .replace(Regex("[^a-z0-9_-]+"), "-")
-                    .trim('-', '_')
-                    .take(MAX_NAME_LENGTH)
-            return sanitized.ifEmpty { "personal" }
-        }
-
-        /** metadata-db §4.11 — workspace names are 1–63 chars. */
-        private const val MAX_NAME_LENGTH = 63
-
-        /**
-         * How many times a lost name race is re-allocated before the login gives up. A retry
-         * re-scans from the base name, so two attempts already cover a concurrent pair; the
-         * third exists so an unlucky burst does not surface as a 500, and the bound exists so
-         * a pathological repository can never spin.
-         */
-        private const val PERSONAL_NAME_ATTEMPTS = 3
+        /** Stands in for "the workspace is already gone" in the audit path; never persisted. */
+        val NIL_WORKSPACE: UUID = UUID(0, 0)
     }
 }

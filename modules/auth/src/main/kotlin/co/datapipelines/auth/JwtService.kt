@@ -13,7 +13,12 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * Issues and validates the internal session JWT (auth.md §6). HS256, 8h default TTL,
- * `iss: datapipelines`. The `scopes` claim is derived at issue time per D14 / §6.1.
+ * `iss: datapipelines`.
+ *
+ * RBAC round 1 removed the `scopes` claim (D-R1): a session's capability is its MEMBERSHIP in
+ * the active workspace, resolved per request, and the claim's old value — a global `author` for
+ * everyone who was not an admin — is exactly the global capability the round removes. Tokens
+ * minted before this still carry the claim; `JwtAuthenticationFilter` ignores it.
  *
  * ## Security posture
  * - **Secret fail-fast:** the signing secret must be **valid base64** decoding to
@@ -60,8 +65,6 @@ class JwtService(
             doFinal(label.toByteArray(Charsets.UTF_8))
         }
 
-    /** Derives the session scopes from the user record (auth.md §6.1, D14). */
-    fun scopesFor(user: User): Set<Scope> = if (user.isAdmin) Scope.ADMIN.expand() else Scope.AUTHOR.expand()
 
     /**
      * Issues the session JWT (auth.md §6.1). [activeWorkspace], when non-null, is stamped
@@ -82,7 +85,6 @@ class JwtService(
             .subject(user.id.toString())
             .claim("email", user.email)
             .claim("name", user.displayName)
-            .claim("scopes", scopesFor(user).map { it.wire })
             .apply { if (activeWorkspace != null) claim(ACTIVE_WORKSPACE_CLAIM, activeWorkspace) }
             // RFC 8176 `amr`: which credential opened this session. The forced password
             // change gate (§5A.4) reads it — a session Google opened owes no password change.

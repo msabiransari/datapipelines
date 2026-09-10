@@ -48,6 +48,43 @@ object AuthErrorCodes {
     const val SESSION_REQUIRED = "auth.session.required"
 
     /**
+     * 403 — the principal holds the right CREDENTIAL and the wrong ROLE (RBAC design §2,
+     * D-R1). `details.required` names the capability the operation needs and `details.held`
+     * what the membership carries, because "ask a workspace admin for the author flag" is
+     * the only useful next step and it needs both halves to be stated.
+     *
+     * Distinct from [SCOPE_INSUFFICIENT], which is the credential axis: a `read` key on an
+     * authoring route gets that one, an author-scoped key held by a demoted issuer gets
+     * [KEY_ISSUER_ROLE_LOST], and a viewer's session gets this.
+     */
+    const val ROLE_REQUIRED = "auth.role_required"
+
+    /**
+     * 403 — the KEY was valid; its issuer no longer holds the capability the operation needs
+     * (D-R12). Its own code rather than [ROLE_REQUIRED] because the recovery differs and a
+     * caller cannot guess it: retrying with this key will never work, and the fix is a new
+     * key from somebody who still holds the role. A demotion takes effect within one
+     * `AuthCache` TTL (60 s by default), so a key can start refusing mid-session.
+     */
+    const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
+
+    /**
+     * 400 — issuance asked for a scope this surface no longer grants to keys. Round 1 removed
+     * `admin` from the key wire entirely (D-R12/O-2: release, promote and membership are human
+     * verbs), so a key can hold at most `author`. A 400 and not a 403: the credential issuing
+     * the request is fine, the requested scope is not a scope keys have.
+     */
+    const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
+
+    /**
+     * 403 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
+     * A 403 rather than the members' 404: a key's workspace is pinned at issuance, so the
+     * holder already knows the workspace exists and there is no oracle to protect — telling
+     * them the truth is what lets an operator act.
+     */
+    const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
+
+    /**
      * 091 — an issuance whose EXPIRY is not a usable one: an unknown preset, a custom date
      * that is not a date, or an expiry already in the past. A 400, unlike every other code
      * here: nothing is wrong with the caller's credential, the request body is wrong.
@@ -87,6 +124,10 @@ object AuthErrorCodes {
             API_KEY_EXPIRY_INVALID,
             SESSION_REQUIRED,
             PROMOTION_KEY_INVALID,
+            ROLE_REQUIRED,
+            KEY_ISSUER_ROLE_LOST,
+            KEY_SCOPE_UNAVAILABLE,
+            KEY_WORKSPACE_INACTIVE,
         )
 
     /**
@@ -307,3 +348,63 @@ class DeactivatedUserException(
         "Account deactivated",
         "This account has been deactivated. Contact an administrator.",
     )
+
+/**
+ * The principal's ROLE in the active workspace is below what the operation needs (RBAC
+ * design §2). Raised by boundaries that authorize outside the interceptor — services and
+ * partials — so they answer with the SAME code the interceptor writes rather than a
+ * hand-rolled 403; the interceptor itself renders [ScopeMatrix.Decision.Refused] directly.
+ */
+class RoleRequiredException(
+    required: Capability,
+    held: Set<Capability>,
+    workspace: String? = null,
+) : AuthException(
+        AuthErrorCodes.ROLE_REQUIRED,
+        HTTP_FORBIDDEN,
+        "Principal lacks the '${required.wire}' role for this operation",
+        "You do not have the role needed for this action in this workspace.",
+        details =
+            buildMap {
+                put("required", required.wire)
+                put("held", held.map { it.wire }.sorted())
+                workspace?.let { put("workspace", it) }
+            },
+    )
+
+/**
+ * Issuance asked for a scope keys may no longer hold (D-R12/O-2). Today that is exactly
+ * `admin`: release, promote and membership are human verbs, so no key expresses them.
+ */
+class KeyScopeUnavailableException(
+    requested: Scope,
+) : AuthException(
+        AuthErrorCodes.KEY_SCOPE_UNAVAILABLE,
+        HTTP_BAD_REQUEST,
+        "Scope '${requested.wire}' is not available to API keys",
+        "API keys can be granted read, execute or author. Administrative actions need a signed-in person.",
+        details = mapOf("requested" to requested.wire, "available" to KEY_SCOPES.map { it.wire }),
+    )
+
+/**
+ * The key's pinned workspace is deactivated (D-R10). The key is otherwise valid and stays
+ * valid — reactivating the workspace restores it, which is the whole point of "deactivate,
+ * never delete".
+ */
+class KeyWorkspaceInactiveException(
+    workspace: String,
+) : AuthException(
+        AuthErrorCodes.KEY_WORKSPACE_INACTIVE,
+        HTTP_FORBIDDEN,
+        "The workspace '$workspace' this key is pinned to is deactivated",
+        "This API key's workspace has been deactivated. Contact an administrator.",
+        details = mapOf("workspace" to workspace),
+    )
+
+/**
+ * The scopes an API key may hold since RBAC round 1 (D-R12, O-2). `admin` is deliberately
+ * absent: it is the only scope that ever bought a key an INSTANCE verb, and instance verbs
+ * are human. Read at issuance ([KeyScopeUnavailableException]) and again at validation, where
+ * a key minted before this rule is capped rather than trusted.
+ */
+val KEY_SCOPES: Set<Scope> = setOf(Scope.READ, Scope.EXECUTE, Scope.AUTHOR)

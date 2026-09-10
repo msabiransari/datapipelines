@@ -19,13 +19,18 @@ import org.springframework.web.filter.OncePerRequestFilter
  *   skeleton key across the user's workspaces (D3), and a quietly dropped header would
  *   train agents on a lie.
  * - **Session (JWT):** `DP-Workspace: <name>` switches per request, membership-checked
- *   through the 60s liveness cache (design §4) — a value the principal isn't a member of
- *   is `403 workspace.membership_required`, chain stopped, indistinguishable from an
- *   unknown name so the header cannot probe workspace existence. Without the header the
- *   JWT's stamped `active_workspace` claim is re-checked (revocation within the D13
- *   window), falling back to the first membership, then to none — a zero-membership
- *   principal (`closed` mode) proceeds without a workspace and every workspace-scoped
- *   operation 403s downstream at [AuthenticatedPrincipal.requireWorkspace].
+ *   through the 60s liveness cache — a value the principal cannot reach is
+ *   `404 workspace.not_found` (D-R5), chain stopped, indistinguishable from an unknown name
+ *   or a deactivated one, so the header can probe nothing. Without the header the JWT's
+ *   stamped `active_workspace` claim is re-checked (revocation within the D13 window),
+ *   falling back to the first active membership, then to none — a principal with nothing
+ *   selectable proceeds without a workspace and every workspace-scoped operation is refused
+ *   downstream by [ScopeMatrix.allowed]'s null-context branch.
+ *
+ * The resolved [WorkspaceContext] carries the caller's CAPABILITY FLAGS for that workspace
+ * (RBAC design §2). Resolving them here, once, is what lets `ScopeInterceptor` and the MCP
+ * dispatcher answer authorization without a second membership read that could see a
+ * different answer mid-request.
  *
  * Unlike the credential filters, the hard refusals here WRITE the response and stop the
  * chain: the request IS authenticated, so stashing an error for the entry point would
@@ -77,7 +82,7 @@ class WorkspaceResolutionFilter(
                         val context =
                             try {
                                 workspaceService.resolveSwitch(principal, switch)
-                            } catch (e: WorkspaceMembershipRequiredException) {
+                            } catch (e: WorkspaceNotFoundException) {
                                 log.info(
                                     "DP-Workspace switch refused user_id={} path={} client={}",
                                     principal.userId,

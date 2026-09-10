@@ -52,7 +52,8 @@ class WorkspaceRepository(
     fun membershipsOf(userId: UUID): List<WorkspaceMembership> =
         jdbc.query(
             """
-            SELECT m.workspace_id, w.name AS workspace_name, m.role, m.joined_at
+            SELECT m.workspace_id, w.name AS workspace_name, m.author, m.promoter, m.admin,
+                   m.joined_at, w.deactivated_at
               FROM workspace_members m
               JOIN workspaces w ON w.id = m.workspace_id
              WHERE m.user_id = :uid AND w.is_deleted = FALSE
@@ -70,14 +71,50 @@ class WorkspaceRepository(
             Boolean::class.java,
         ) == true
 
-    /** Every live workspace, name order — the `open-join` joinable listing (design §7). */
+    /**
+     * Every non-soft-deleted workspace, name order — DEACTIVATED ONES INCLUDED. Only the super
+     * admin's listing calls this: design §6 says a deactivated workspace is shown greyed with
+     * its date, so filtering it out here would delete the very row that screen exists to show.
+     * Every other caller wants [findAllActive].
+     */
     fun findAll(): List<Workspace> = jdbc.query("$SELECT_COLUMNS WHERE is_deleted = FALSE ORDER BY name", MAPPER)
+
+    /** Every SELECTABLE workspace (design §6): not soft-deleted and not deactivated. */
+    fun findAllActive(): List<Workspace> =
+        jdbc.query("$SELECT_COLUMNS WHERE is_deleted = FALSE AND deactivated_at IS NULL ORDER BY name", MAPPER)
+
+    /**
+     * Deactivates [workspaceId] (D-R10); false when it was already deactivated or gone. The
+     * five effects (design §6) are enforced by the readers of [Workspace.isActive] — nothing
+     * is purged here, or ever.
+     */
+    fun deactivate(
+        workspaceId: UUID,
+        by: UUID,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE workspaces SET deactivated_at = NOW(), deactivated_by = :by, updated_at = NOW()
+             WHERE id = :ws AND is_deleted = FALSE AND deactivated_at IS NULL
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("ws", workspaceId).addValue("by", by),
+        ) > 0
+
+    /** Reactivates [workspaceId] (design §6); false when it was not deactivated. */
+    fun reactivate(workspaceId: UUID): Boolean =
+        jdbc.update(
+            """
+            UPDATE workspaces SET deactivated_at = NULL, deactivated_by = NULL, updated_at = NOW()
+             WHERE id = :ws AND is_deleted = FALSE AND deactivated_at IS NOT NULL
+            """.trimIndent(),
+            MapSqlParameterSource("ws", workspaceId),
+        ) > 0
 
     /** Every member of [workspaceId] with identity columns, oldest membership first (the member listing). */
     fun findMembersOf(workspaceId: UUID): List<WorkspaceMemberRow> =
         jdbc.query(
             """
-            SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
+            SELECT m.user_id, u.email, u.display_name, m.author, m.promoter, m.admin, m.joined_at
               FROM workspace_members m
               JOIN users u ON u.id = m.user_id
              WHERE m.workspace_id = :ws
@@ -87,17 +124,25 @@ class WorkspaceRepository(
             MEMBER_MAPPER,
         )
 
-    /** [userId]'s role in [workspaceId], or null when not a member. */
-    fun roleOf(
+    /** [userId]'s capability flags in [workspaceId], or null when not a member. */
+    fun flagsOf(
         workspaceId: UUID,
         userId: UUID,
-    ): WorkspaceRole? =
+    ): MembershipFlags? =
         jdbc
             .query(
-                "SELECT role FROM workspace_members WHERE workspace_id = :ws AND user_id = :uid",
+                "SELECT author, promoter, admin FROM workspace_members WHERE workspace_id = :ws AND user_id = :uid",
                 MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
-            ) { rs, _ -> WorkspaceRole.fromWire(rs.getString("role")) }
+            ) { rs, _ -> rs.flags() }
             .firstOrNull()
+
+    /** How many members of [workspaceId] carry `admin` — the last-admin rule's counter (design §1). */
+    fun adminCount(workspaceId: UUID): Int =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = :ws AND admin",
+            MapSqlParameterSource("ws", workspaceId),
+            Int::class.java,
+        ) ?: 0
 
     /**
      * Adds [userId] to [workspaceId] as `member` (roles are assigned at creation; owner
@@ -109,17 +154,37 @@ class WorkspaceRepository(
     fun addMember(
         workspaceId: UUID,
         userId: UUID,
+        flags: MembershipFlags = MembershipFlags.VIEWER,
     ): WorkspaceMemberRow? {
         jdbc.update(
             """
-            INSERT INTO workspace_members (workspace_id, user_id, role)
-            VALUES (:ws, :uid, 'member')
+            INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
+            VALUES (:ws, :uid, :author, :promoter, :admin)
             ON CONFLICT (workspace_id, user_id) DO NOTHING
             """.trimIndent(),
-            MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
+            flags.asParams().addValue("ws", workspaceId).addValue("uid", userId),
         )
         return findMemberRow(workspaceId, userId)
     }
+
+    /**
+     * Replaces [userId]'s capability flags in [workspaceId]; false when there is no such
+     * membership. The `admin → author` invariant is the database's
+     * (`chk_workspace_member_admin_authors`) — the service normalises before calling, and the
+     * constraint is what makes "normalised everywhere" true rather than hoped for.
+     */
+    fun setFlags(
+        workspaceId: UUID,
+        userId: UUID,
+        flags: MembershipFlags,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE workspace_members SET author = :author, promoter = :promoter, admin = :admin
+             WHERE workspace_id = :ws AND user_id = :uid
+            """.trimIndent(),
+            flags.asParams().addValue("ws", workspaceId).addValue("uid", userId),
+        ) > 0
 
     /** One membership row with identity columns, or null when [userId] is not a member. */
     fun findMemberRow(
@@ -129,7 +194,7 @@ class WorkspaceRepository(
         jdbc
             .query(
                 """
-                SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
+                SELECT m.user_id, u.email, u.display_name, m.author, m.promoter, m.admin, m.joined_at
                   FROM workspace_members m
                   JOIN users u ON u.id = m.user_id
                  WHERE m.workspace_id = :ws AND m.user_id = :uid
@@ -158,7 +223,7 @@ class WorkspaceRepository(
                 """
                 UPDATE workspaces SET display_name = :displayName, updated_at = NOW()
                  WHERE id = :ws AND is_deleted = FALSE
-                RETURNING id, name, display_name, is_personal, created_by, is_deleted, created_at
+                RETURNING $COLUMNS
                 """.trimIndent(),
                 MapSqlParameterSource().addValue("ws", workspaceId).addValue("displayName", displayName),
                 MAPPER,
@@ -190,13 +255,15 @@ class WorkspaceRepository(
                 WITH new_workspace AS (
                     INSERT INTO workspaces (name, display_name, is_personal, created_by)
                     VALUES (:name, :displayName, :isPersonal, :createdBy)
-                    RETURNING id, name, display_name, is_personal, created_by, is_deleted, created_at
+                    RETURNING $COLUMNS
                 ), owner AS (
-                    INSERT INTO workspace_members (workspace_id, user_id, role)
-                    SELECT id, :createdBy, 'owner' FROM new_workspace
+                    -- D-R14: the creator enters as the workspace ADMIN (and therefore author,
+                    -- per chk_workspace_member_admin_authors) — the old 'owner' role's successor.
+                    INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
+                    SELECT id, :createdBy, TRUE, FALSE, TRUE FROM new_workspace
                     RETURNING workspace_id
                 )
-                SELECT w.id, w.name, w.display_name, w.is_personal, w.created_by, w.is_deleted, w.created_at
+                SELECT $QUALIFIED_COLUMNS
                   FROM new_workspace w
                   JOIN owner o ON o.workspace_id = w.id
                 """.trimIndent(),
@@ -208,9 +275,52 @@ class WorkspaceRepository(
                 MAPPER,
             ).single()
 
+    /**
+     * Inserts a workspace with NO creator and NO member — the shape a system-provisioned
+     * workspace has (`demo`, D-R11). Separate from [create] because that one inserts the
+     * caller's admin membership in the same CTE, and there is no caller here: putting a real
+     * user in the row would grant them a role nobody decided to give them.
+     */
+    fun createSystemWorkspace(
+        name: String,
+        displayName: String,
+    ): Workspace =
+        jdbc
+            .query(
+                """
+                INSERT INTO workspaces (name, display_name, is_personal, created_by)
+                VALUES (:name, :displayName, FALSE, NULL)
+                RETURNING $COLUMNS
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("name", name).addValue("displayName", displayName),
+                MAPPER,
+            ).single()
+
     private companion object {
-        const val SELECT_COLUMNS =
-            "SELECT id, name, display_name, is_personal, created_by, is_deleted, created_at FROM workspaces"
+        /** The three flag columns off one row — every mapper reads them the same way, once. */
+        fun ResultSet.flags(): MembershipFlags =
+            MembershipFlags(
+                author = getBoolean("author"),
+                promoter = getBoolean("promoter"),
+                admin = getBoolean("admin"),
+            )
+
+        /** The three flag columns as bind parameters — the insert/update twin of [flags]. */
+        fun MembershipFlags.asParams(): MapSqlParameterSource =
+            MapSqlParameterSource()
+                .addValue("author", author)
+                .addValue("promoter", promoter)
+                .addValue("admin", admin)
+
+        const val COLUMNS =
+            "id, name, display_name, is_personal, created_by, is_deleted, created_at, deactivated_at, deactivated_by"
+
+        const val SELECT_COLUMNS = "SELECT $COLUMNS FROM workspaces"
+
+        /** [COLUMNS] qualified for the `create` CTE, whose final SELECT joins two relations. */
+        const val QUALIFIED_COLUMNS =
+            "w.id, w.name, w.display_name, w.is_personal, w.created_by, w.is_deleted, w.created_at, " +
+                "w.deactivated_at, w.deactivated_by"
 
         val MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
@@ -222,6 +332,8 @@ class WorkspaceRepository(
                     createdBy = rs.getObject("created_by", UUID::class.java),
                     isDeleted = rs.getBoolean("is_deleted"),
                     createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
+                    deactivatedAt = rs.getObject("deactivated_at", OffsetDateTime::class.java)?.toInstant(),
+                    deactivatedBy = rs.getObject("deactivated_by", UUID::class.java),
                 )
             }
 
@@ -230,8 +342,9 @@ class WorkspaceRepository(
                 WorkspaceMembership(
                     workspaceId = rs.getObject("workspace_id", UUID::class.java),
                     workspaceName = rs.getString("workspace_name"),
-                    role = WorkspaceRole.fromWire(rs.getString("role")),
+                    flags = rs.flags(),
                     joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
+                    workspaceActive = rs.getObject("deactivated_at", OffsetDateTime::class.java) == null,
                 )
             }
 
@@ -241,7 +354,7 @@ class WorkspaceRepository(
                     userId = rs.getObject("user_id", UUID::class.java),
                     email = rs.getString("email"),
                     displayName = rs.getString("display_name"),
-                    role = WorkspaceRole.fromWire(rs.getString("role")),
+                    flags = rs.flags(),
                     joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
                 )
             }
