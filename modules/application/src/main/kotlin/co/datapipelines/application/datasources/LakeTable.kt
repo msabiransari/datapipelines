@@ -25,6 +25,17 @@ data class LakeTable(
     val partitionColumn: String?,
     val registeredBy: UUID,
     val registeredAt: Instant,
+    /**
+     * 109 §A / V20 — the connect-time view creation's last recorded failure (the engine's or
+     * the SQL-emission boundary's message, bounded), NULL when the view last built cleanly.
+     * A table whose `lastError` is set has NO view on any newly built connection: a node
+     * referencing it fails `datasource.lake.table_unavailable`, and the detail page and the
+     * lake-tables listing show this text. Cleared — with [lastErrorAt] — by the next
+     * successful view creation (the pool rebuild after the operator fixes the location).
+     */
+    val lastError: String? = null,
+    /** When [lastError] was newly recorded (recording is transition-only — "broken since"). */
+    val lastErrorAt: Instant? = null,
 ) {
     /** The dotted shorthand of the fully-qualified name — `nyc.mobility.hvfhv_zone_day`. */
     val qualifiedName: String get() = (namespace + name).joinToString(".")
@@ -75,4 +86,8 @@ fun LakeTable.toWireMap(): Map<String, Any?> =
         "location" to location,
         "partition_column" to partitionColumn,
         "registered_at" to registeredAt.toString(),
+        // 109 §A: the connect-time view failure, when the table is broken — both surfaces
+        // (REST listing, MCP) show the same recorded reason the detail page's badge does.
+        "last_error" to lastError,
+        "last_error_at" to lastErrorAt?.toString(),
     )

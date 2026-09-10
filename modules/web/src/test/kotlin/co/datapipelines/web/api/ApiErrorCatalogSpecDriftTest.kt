@@ -135,8 +135,14 @@ class ApiErrorCatalogSpecDriftTest {
          * (`template.version.not_released` / `not_discarded` / `last_release` / `not_eligible`),
          * landed in the SAME commit as their constants and catalog rows. Re-derived from the
          * document's own parse.
+         *
+         * 150 → 152 with 109 §A (the lake per-table view isolation): §13.8 gains
+         * `datasource.lake.table_unavailable` (502 — the gateway partition test classifies it
+         * caller-downstream in the same commit) and `datasource.validation.lake_table_unreadable`
+         * (400, the registration pre-flight refusal), landed in the SAME commit as their
+         * constants and catalog rows. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 150
+        const val SECTION_13_ROW_COUNT = 152
 
         /**
          * §12's distinct validation codes.

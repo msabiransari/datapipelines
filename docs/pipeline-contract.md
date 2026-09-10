@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.13 (revised — see Change Log)
+**Status:** v1.14 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-06
+**Last updated:** 2026-09-09
 
 ---
 
@@ -929,6 +929,8 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.lake_manifest_url_forbidden` | 400 | A lake-table import's manifest URL is not under the datasource's own endpoint/bucket — no arbitrary URL fetch (SSRF boundary, 089 §A) |
 | `datasource.lake_table_duplicate` | 409 | The (datasource, namespace, name) triple is already registered (mapped from `uq_lake_tables_datasource_namespace_name`, metadata-db §4.15) |
 | `datasource.lake_table_not_found` | 404 | Unregister named a lake table that is not registered |
+| `datasource.validation.lake_table_unreadable` | 400 | A lake-table registration/import named a table the pre-flight could not read — the view did not create or a one-row scan through it failed (109 §A, datasources.md §8C.1). Refused before storing; the message carries the bounded engine error |
+| `datasource.lake.table_unavailable` | 502 | A pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20) — the table's view is skipped on every connection (109 §A, datasources.md §8C.2). `details` carry `table` and the recorded `last_error` |
 | `pipeline.execution.datasource_unreachable` | 502 | Pre-execution reachability check failed for a referenced datasource |
 
 ### 13.9 Template
@@ -1300,6 +1302,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v1.14 | 109 §A lake view isolation | §13.8 gains two rows: `datasource.lake.table_unavailable` (502) — a pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20); `details` carry `table` and the recorded `last_error` — and `datasource.validation.lake_table_unreadable` (400) — the registration/import pre-flight refusal: the candidate table's view did not create or a one-row scan through it failed, refused BEFORE storing with the bounded engine error as the message. Additive per §15.2. |
 | 2026-09-09 | v1.13 | T202 node query timeout | §13.4 gains `pipeline.node.query_timeout` (504): a statement cancelled by its own JDBC query timeout reports the timeout, not `query_execution_failed` + driver text. |
 | 2026-09-08 | v1.12 | 099 draft-first (D55/D56) | §14's operation table: `POST /pipelines` lands v1 **DRAFT** with a null pointer, `GET /pipelines/{id}` is the working version, `POST …/execute` defaults to the working version, and `GET …/export` refuses a never-released pipeline with `pipeline.promotion.not_released`. No new error code and no §13 row: every refusal reuses a catalogued one. |
 | 2026-09-06 | v1.12 | 078 composition mapping | The parent→child mapping half of the calculator input ruling (v1.11): a PIPELINE node's `parameters` may now map onto a child CALCULATOR `context_key` as well as a declared parameter (supplied → the child's node is skipped, §4.10's rule composed), and a `"${ref}"` value resolves against all three parent Context tiers — a declared parameter, a parent calculator `context_key` (typed by its kind's output), an org/platform key (org STRING, platform canonical) — type-checked against the target with the unchanged codes, messages naming the tiers; an ANY-output key on either side skips the check (typed only by the run, A6's convention). **No auto-passthrough:** identically spelled parent/child calculator keys are not implicitly mapped — only explicit entries cross. The read surfaces list calculator keys under `parameters` as `{"type", "required": false, "derived": true}` (`"ANY"` for ANY-output kinds), derived on read, never stored. Additive per §15.2. |

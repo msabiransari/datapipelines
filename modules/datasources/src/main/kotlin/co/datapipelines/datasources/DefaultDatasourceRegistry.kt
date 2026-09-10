@@ -4,6 +4,7 @@ import co.datapipelines.datasources.crypto.CredentialDecryptionException
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
+import co.datapipelines.datasources.pooling.LakeViewInit
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
@@ -50,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap
  * `updated_at` its live pools were built from against the rows and retires the stale ones. That
  * is a QUERY, not a queue — no Redis key, no TTL, nothing to expire wrong (094 ruling 3).
  */
+@Suppress("TooManyFunctions") // the registry IS the surface; 109 §A's preflight + broken-tables reads pushed it past the ceiling
 class DefaultDatasourceRegistry(
     private val repository: DatasourceRepository,
     private val encryptor: CredentialEncryptor,
@@ -59,6 +61,13 @@ class DefaultDatasourceRegistry(
     private val cache: DatasourceMetadataCache = DatasourceMetadataCache(),
     private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
     private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
+    /**
+     * 109 §A — the write seam for per-table view-creation outcomes, recorded from inside the
+     * pool build on TRANSITIONS only (the applier in `LakeViewApplyingDataSource` compares
+     * against the state the pool was built with). The assembling layer implements it over
+     * `LakeTableRepository.recordViewOutcome`.
+     */
+    private val lakeViewRecorder: LakeViewOutcomeRecorder = LakeViewOutcomeRecorder.NONE,
     /**
      * The deployment's bundled DuckDB extension directory (089 §D, configuration.md §3.25),
      * bound once from `datapipelines.duckdb.extension-directory` at wiring. Forwarded to every
@@ -88,12 +97,14 @@ class DefaultDatasourceRegistry(
      * and the `pool_build` audit event is emitted exactly there, on the same at-most-once path.
      *
      * For a LAKE datasource the factory also reads the dp-lake registry ([lakeTables]) and
-     * appends phase B's per-table view statements (089 §B) — captured into the pool's
-     * `connectionInitSql` HERE, at pool build, which is exactly why a registry mutation must
-     * evict the pool for a new table to become visible: [evictPool] drops the cached pool and
-     * the next [poolFor] re-runs this factory against the fresh rows. Nothing else caches the
-     * init SQL — this method bypasses the metadata cache by design (the credential reason
-     * above), so eviction alone is the whole rebuild mechanism.
+     * builds 109 §A's per-table-isolated view init ([LakeViewStatements.planForTables] applied
+     * by `LakeViewApplyingDataSource` per physical connection, a failing view recorded on its
+     * registry row through [lakeViewRecorder] and skipped) — captured into the pool HERE, at
+     * pool build, which is exactly why a registry mutation must retire the pool for a new table
+     * to become visible: [retirePool] drops the cached pool and the next [poolFor] re-runs this
+     * factory against the fresh rows. Nothing else caches the init plan — this method bypasses
+     * the metadata cache by design (the credential reason above), so retirement alone is the
+     * whole rebuild mechanism.
      */
     private val poolManager =
         ConnectionPoolManager(
@@ -105,35 +116,70 @@ class DefaultDatasourceRegistry(
                 poolRowVersions[datasource.name] = row.updatedAt
                 audit(DatasourceAuditEvents.POOL_BUILD, datasource.name, DatasourceAuditEvent.SYSTEM_ACTOR)
                 val withCredential = row.toDatasource(decryptOrNull(row))
-                // 089 phase B: a LAKE datasource's per-table views ride the same connectionInitSql
-                // slot, appended after the adapter's own statements; 089 §D's bundled extension
-                // directory keeps a hardened deployment INSTALL-free. Both are no-ops for every
-                // other dialect. 094: the row version recorded above is what reconcile-on-subscribe
-                // compares, so a table registered on another instance rebuilds this pool too.
-                ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential), duckdbExtensionDirectory)
+                // 089 phase B, re-shaped by 109 §A: a LAKE datasource's per-table views ride a
+                // per-table-isolated init (each view applied independently, a failure recorded
+                // on the table's registry row and skipped) instead of the joined
+                // connectionInitSql, where one bad view failed the whole pool. 089 §D's bundled
+                // extension directory keeps a hardened deployment INSTALL-free. Both are no-ops
+                // for every other dialect. 094: the row version recorded above is what
+                // reconcile-on-subscribe compares, so a table registered on another instance
+                // rebuilds this pool too.
+                ConnectionPoolManager.buildHikariPool(
+                    withCredential,
+                    duckdbExtensionDirectory = duckdbExtensionDirectory,
+                    lakeViews = lakeViewInit(withCredential),
+                )
             },
             retireCeiling = retireCeiling,
             metrics = poolMetrics,
         )
 
-    /** Phase B's view statements for a LAKE datasource; nothing for every other dialect. */
-    private fun lakeViewStatements(datasource: Datasource): List<String> =
-        when (datasource.dialect) {
-            Dialect.LAKE -> {
-                LakeViewStatements.forTables(
-                    lakeTables.registeredTables(datasource.name),
+    /**
+     * 109 §A — the pool build's per-table-isolated view init for a LAKE datasource; null for
+     * every other dialect and for a tableless registry, where the pool stays byte-identical to
+     * the pre-109 build. The recorder callback keys the outcome by the registry's
+     * (datasource, namespace, table) triple.
+     */
+    private fun lakeViewInit(datasource: Datasource): LakeViewInit? {
+        if (datasource.dialect != Dialect.LAKE) return null
+        val tables = lakeTables.registeredTables(datasource.name)
+        if (tables.isEmpty()) return null
+        return LakeViewInit(
+            datasourceName = datasource.name,
+            plan =
+                LakeViewStatements.planForTables(
+                    tables,
                     DialectAdapters.forDialect(datasource.dialect),
                     // 089 §F: a registered Iceberg table prepends the iceberg extension loads,
                     // honoring §D's bundled-directory mode — the adapter's catalog.kind-keyed
                     // list cannot see the registry; this seam can.
                     duckdbExtensionDirectory,
-                )
-            }
+                ),
+            recorder = { name, namespace, table, error -> lakeViewRecorder.record(name, namespace, table, error) },
+        )
+    }
 
-            else -> {
-                emptyList()
-            }
-        }
+    /**
+     * 109 §A — the registration pre-flight: on a SCRATCH connection built exactly like the
+     * pool's (the same adapter init, the same bundled-extension posture), create the candidate
+     * table's view and read one row through it. Returns null when the table is readable, else
+     * the bounded engine/emission error text the caller surfaces in its refusal — the table is
+     * refused BEFORE storing rather than failing every connect after it.
+     */
+    override fun preflightLakeTable(
+        datasource: Datasource,
+        table: LakeRegisteredTable,
+    ): String? {
+        if (datasource.dialect != Dialect.LAKE) return null
+        return LakeTablePreflight.check(datasource, table, duckdbExtensionDirectory)
+    }
+
+    /** 109 §A — the executor's pre-execution read: the datasource's registered tables whose view creation last FAILED. */
+    override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> =
+        lakeTables
+            .registeredTables(datasourceName)
+            .filter { it.lastError != null }
+            .map { LakeBrokenTable(it.namespace, it.name, requireNotNull(it.lastError)) }
 
     override fun list(dialect: Dialect?): List<Datasource> = repository.findAll(dialect).map { it.toDatasource() }
 

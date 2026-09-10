@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.LakeBrokenTable
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -15,6 +16,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coVerify
 import io.mockk.every
@@ -23,6 +25,7 @@ import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
@@ -281,6 +284,71 @@ class NodeRunnerTest {
             runner
                 .run(ExecutableNode.from(Fixtures.node("read", source = "roq")), context())
                 .rowsOut shouldBe 1
+        }
+
+    // ------------------------------- lake table availability (109 §A, datasources.md §8C.2)
+
+    /** An in-memory LAKE datasource — the refusal under test fires at CONNECT, before any lease. */
+    private fun lakeDatasource(name: String) = Datasource(name, name, Dialect.LAKE, "jdbc:duckdb:")
+
+    @Test
+    fun `a node referencing a broken lake table fails lake_table_unavailable before connecting`() =
+        runBlocking<Unit> {
+            val broken =
+                LakeBrokenTable(
+                    listOf("nyc", "mobility"),
+                    "hvfhv_trips",
+                    "IO Error: No files found that match the pattern 's3://b/t/pickup_date=*/part-*.parquet'",
+                )
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lakeds" to lakeDatasource("lakeds")),
+                    brokenLakeTables = mapOf("lakeds" to listOf(broken)),
+                )
+            val runner = runner(sql = "SELECT count(*) FROM nyc.mobility.hvfhv_trips", registry = registry)
+
+            val error = failureOf(runner, Fixtures.node("read", source = "lakeds"))
+
+            assertAll(
+                { error.code shouldBe PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE },
+                { error.details["table"] shouldBe "nyc.mobility.hvfhv_trips" },
+                { error.details["last_error"].toString().contains("No files found") shouldBe true },
+                // The refusal leases no connection — the check is a registry read, not a probe.
+                { registry.leased.get() shouldBe 0 },
+            )
+        }
+
+    @Test
+    fun `a bare reference under the single-namespace search-path rule resolves to the broken table`() =
+        runBlocking<Unit> {
+            val broken = LakeBrokenTable(listOf("nyc"), "zones", "the file is not Parquet")
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lakeds2" to lakeDatasource("lakeds2")),
+                    brokenLakeTables = mapOf("lakeds2" to listOf(broken)),
+                )
+            val runner = runner(sql = "SELECT count(*) FROM zones", registry = registry)
+
+            failureOf(runner, Fixtures.node("read", source = "lakeds2")).code shouldBe
+                PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE
+        }
+
+    @Test
+    fun `a similarly-named healthy table is not refused - the match is token-bounded, not substring`() =
+        runBlocking<Unit> {
+            val broken = LakeBrokenTable(listOf("nyc", "mobility"), "trips", "boom")
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lakeds3" to lakeDatasource("lakeds3")),
+                    brokenLakeTables = mapOf("lakeds3" to listOf(broken)),
+                )
+            // `trips_2024` is NOT `trips`: the node passes the availability check and proceeds
+            // to the real (in-memory DuckDB) connect, whose catalog error is the ENGINE's —
+            // the honest diagnosis, not this round's refusal.
+            val runner = runner(sql = "SELECT count(*) FROM trips_2024", registry = registry)
+
+            failureOf(runner, Fixtures.node("read", source = "lakeds3")).code shouldNotBe
+                PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE
         }
 
     // ------------ fail-closed semantics (044 F2/F3): the backstop's null/throw cases are REFUSALS

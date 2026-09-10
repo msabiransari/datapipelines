@@ -92,6 +92,37 @@ class LakeTableRepository(
         }
 
     /**
+     * 109 §A — records one table's connect-time view-creation outcome: [error] null clears
+     * `last_error`/`last_error_at` (the healthy spelling), non-null stores the bounded message
+     * and stamps `last_error_at`. Callers invoke this on TRANSITIONS only (the pool's view
+     * applier compares against the state the pool was built with), so this stays a rare write
+     * rather than one per physical connection. Silent when the row vanished mid-pool — an
+     * unregistered table has no outcome to carry. Returns whether a row was updated.
+     */
+    fun recordViewOutcome(
+        datasourceId: String,
+        namespace: List<String>,
+        name: String,
+        error: String?,
+    ): Boolean =
+        withTextArray(namespace) { namespaceArray ->
+            jdbc.update(
+                """
+                UPDATE lake_tables
+                   SET last_error = :error,
+                       last_error_at = CASE WHEN CAST(:error AS text) IS NULL THEN NULL ELSE NOW() END
+                 WHERE datasource_id = :datasourceId AND namespace = :namespace AND name = :name
+                """.trimIndent(),
+                mapOf(
+                    "datasourceId" to datasourceId,
+                    "namespace" to namespaceArray,
+                    "name" to name,
+                    "error" to error,
+                ),
+            ) > 0
+        }
+
+    /**
      * Runs [block] with a live `text[]` binding for [segments]. The array is built on a
      * connection held for the whole call: a `java.sql.Array` is only valid while its connection
      * is, so the create-and-use must share one borrow from the pool.
@@ -125,13 +156,15 @@ class LakeTableRepository(
     private companion object {
         const val SELECT_COLUMNS =
             """
-            SELECT id, datasource_id, namespace, name, format, location, partition_column, registered_by, registered_at
+            SELECT id, datasource_id, namespace, name, format, location, partition_column, registered_by, registered_at,
+                   last_error, last_error_at
               FROM lake_tables
             """
 
         const val RETURNING =
             """
-            RETURNING id, datasource_id, namespace, name, format, location, partition_column, registered_by, registered_at
+            RETURNING id, datasource_id, namespace, name, format, location, partition_column, registered_by, registered_at,
+                      last_error, last_error_at
             """
 
         val MAPPER =
@@ -150,6 +183,8 @@ class LakeTableRepository(
                     partitionColumn = rs.getString("partition_column"),
                     registeredBy = rs.getObject("registered_by", UUID::class.java),
                     registeredAt = rs.getTimestamp("registered_at").toInstant(),
+                    lastError = rs.getString("last_error"),
+                    lastErrorAt = rs.getTimestamp("last_error_at")?.toInstant(),
                 )
             }
     }

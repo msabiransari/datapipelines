@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.21 (frozen contract — additive-only changes after this point)
+**Status:** v2.22 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-08-09
+**Last updated:** 2026-09-09
 
 ---
 
@@ -1007,8 +1007,8 @@ A LAKE datasource's tables are exactly the rows of `lake_tables` (V15; [metadata
 
 - **`namespace`** — 1–9 segments, each following the pipeline/template segment grammar
   **without `.`** (the dotted shorthand on the wire must round-trip). The view mapping
-  (§8C.2) supports one or two segments today; deeper namespaces are registered but fail the
-  pool build loudly rather than being silently flattened.
+  (§8C.2) supports one or two segments today; deeper namespaces are registered, recorded
+  with a `last_error` and skipped at connect rather than being silently flattened.
 - **`name`** — one segment of the same grammar. **`format`** — `parquet` | `iceberg`
   (CHECK-constrained: a third value would generate bad view SQL later).
 - **`location`** — `s3://bucket/prefix[/glob]` or a `file://` path; **no other schemes**, and
@@ -1017,6 +1017,20 @@ A LAKE datasource's tables are exactly the rows of `lake_tables` (V15; [metadata
   need escaping is refused, never escaped). Iceberg tables are registered by their current
   metadata FILE — the measured rule is §8C.7.
 - **`partition_column`** — optional; the column the engine's partition pruning keys on.
+- **`last_error` / `last_error_at`** (V20) — the connect-time view creation's recorded
+  failure and when it was newly recorded (109 §A). NULL/NULL is the healthy spelling;
+  recording is transition-only, so `last_error_at` reads as "broken since". Maintained by
+  the pool's view application alone; cleared by the next successful view creation.
+
+**Registration pre-flight (109 §A).** `register` and `importTables` prove a candidate table
+READABLE before its row is stored: on a scratch connection built exactly like the
+datasource's pool (same adapter init, same bundled-extension posture), the table's view is
+created and one row is scanned through it. A failure refuses the write with
+`datasource.validation.lake_table_unreadable` (400) carrying the engine's error text,
+bounded to 2000 characters — a table that cannot be read is never stored to fail every
+connect after. Import pre-flights only the triples not already registered: an idempotent
+re-import (bootstrap re-runs it on every boot) neither re-reads nor fails on tables that
+are already registered.
 
 The surface:
 
@@ -1039,14 +1053,36 @@ Every successful registry write **evicts the datasource's connection pool and pu
 pool on the next lease — so a table registered on instance A is visible on instance B's next
 execution — and registry-backed introspection (§8C.3) catches up within its 60 s cache TTL.
 
-### 8C.2 A view per registered table, built at connect
+### 8C.2 A view per registered table, built at connect — and isolated per table
 
 A pooled connection on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB
 instance (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection
-are invisible to a second, while both are open). HikariCP runs the adapter's `connectionInit`
-(§4.2A) on every new physical connection, and the dp-lake seam appends, after the extension,
-secret and limit statements, the statements that turn the registry into queryable objects —
-which is also why nothing here can leak across datasources.
+are invisible to a second, while both are open). Every new physical connection therefore
+builds its own catalog/schema/view set — which is also why nothing here can leak across
+datasources.
+
+**Per-table isolation (109 §A).** The views do NOT ride HikariCP's `connectionInitSql` — one
+string, no try/catch, so a single failing `CREATE VIEW` (a bad prefix, a wrong format, a
+file that is not Parquet) used to fail the whole pool build and make EVERY registered table
+unreachable. Instead the pool's driver DataSource is wrapped (`LakeViewApplyingDataSource`):
+on each new physical connection the adapter's own `connectionInit` statements (§4.2A) and
+the shared prelude (extension loads, ATTACHes, schema creations) run STRICTLY — a failure
+there is a datasource fault and fails the connect as before — and then each table's view
+runs **independently**: a failing view is caught, recorded on the table's registry row
+(`last_error` / `last_error_at`, bounded to 2000 characters) and **skipped**, and the
+connect succeeds with the surviving views. The same isolation covers the SQL-emission
+boundary's own refusals (an unmappable 3+-segment namespace, a location that fails the
+grammar, an unknown format): the refusal is captured per table and recorded, never thrown
+into the pool build. Recording is **transition-only** — the applier compares against the
+state the pool was built with, so an unchanged outcome writes nothing and the hot path
+carries no per-connection write; a success after a failure CLEARS the row's `last_error`.
+
+**The broken table at query time.** A node whose rendered SQL references a table with a
+recorded `last_error` fails at the CONNECT phase with the catalogued
+`datasource.lake.table_unavailable` (502), `details` carrying `table` and `last_error` —
+the recorded reason — instead of the engine's raw "table not found". The detail page's
+registry tree and `GET …/lake-tables` show the broken table with its recorded error (a
+`view failed` badge carrying the text on hover).
 
 The **namespace mapping** follows DuckDB's exact three-level object space
 (`catalog.schema.object`; its parser refuses a deeper `CREATE SCHEMA` outright):
@@ -1055,9 +1091,10 @@ The **namespace mapping** follows DuckDB's exact three-level object space
   (`ATTACH IF NOT EXISTS ':memory:' AS "nyc"`, the one writable catalog a view needs to live
   in) and the rest a schema inside it.
 - **one segment** `["nyc"]` — a schema in the connection's default catalog; no ATTACH.
-- **three or more** — refused at pool build with
-  `datasource.validation.lake_namespace_invalid`: the engine cannot name the place, and
-  flattening would alias two different registry namespaces onto one schema.
+- **three or more** — recorded as the table's `last_error` (the
+  `datasource.validation.lake_namespace_invalid` message) and its view skipped: the engine
+  cannot name the place, and flattening would alias two different registry namespaces onto
+  one schema.
 
 Then one view per registered row:
 
@@ -1139,7 +1176,7 @@ Independently of the declared `catalog.kind`, the view seam (§8C.2) loads the `
 extension **whenever the registry holds an iceberg-format table**, in either mode — a bare
 `LOAD avro` then `LOAD iceberg` against the bundled directory, or `INSTALL iceberg` (which
 pulls `avro` in as a dependency over the network) without one. `catalog.kind: s3` loads only
-`httpfs`+`aws` on its own, and an Iceberg view would otherwise fail the pool build at
+`httpfs`+`aws` on its own, and an Iceberg view would otherwise be the table that fails at
 connect. Parquet-only registries load nothing extra: an extension nothing will call is
 surface for nothing.
 
@@ -1396,5 +1433,6 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-09-02 | v2.16 | 020 fix-cycle (044) — the backstop goes fail-closed | §5.7: the executor backstop's **null semantics made normative** — no live row refuses as `pipeline.node.datasource_not_found` (the D10 soft-delete channel), a metadata-DB failure during the live read refuses as `pipeline.execution.aborted` naming the METADATA database (never the healthy target), both replacing 020's "null = no signal" fail-open. **Layer 1 reads live** (`getVisibleLive`/`getLive`, past the §6.3 cache — 020 F4's both-directions stale-save window closed); **layer 2's read is flag-only** (`isReadonlyLive`, one indexed `SELECT is_readonly` — no ciphertext, no properties parse; 020 F7) and a readonly write-back target is refused at CONNECT, before the source query (020 F9); **layer 3's pool-staleness window documented** (no TTL; row-level flips leave the pre-flip pool — M3's within-one-JVM twin, fix deferred to M3's owner decision; 020 F5). §6.1: the interface sketch gains the three live reads; `getLive`/`isReadonlyLive` are abstract (020 F6 — a cached default was the hole). §6.1's registry KDoc wiring example corrected to the `describe`/`DatasourceFacts` SAM (020 F10 — the old `dialectOf` example no longer compiled, verified). |
 | 2026-09-03 | v2.17 | 061 — datasource credentials and references | **§8A.3 gains rule 3** (T84): a bootstrap entry whose FILE credential differs from the STORED one is reconciled by connection-testing both — stored-works keeps the row byte-untouched (rule 1 intact), stored-fails-and-file-works replaces the credential ALONE with a WARN, neither-works and undecryptable both leave the row and log ERROR naming the env key / the encryption key, and a soft-deleted row is never touched. Startup never fails on it. **New §8.1B** (T84): the last connection test's outcome is stored (`last_test_at`/`last_test_ok`/`last_test_message`, V9) and surfaced as the additive `last_test` field (§3.2) and a datasources-screen column — because listing never connects, and on 2026-09-02 the screen said "fine" while every execution failed at CONNECT. That write touches the three columns only and does NOT move `updated_at` (the one documented exception to metadata-db §2), which is what keeps rule 1's byte-untouched guarantee checkable. **§6.2 rewritten** (T79): the delete guard reads the ANY-VERSION reference scan, not the current-version one — a released v1 pinning a datasource that v2 dropped is a live reference (immutable, executable by explicit version) and used to be invisible, so the delete succeeded and v1's next execution failed at connect; the 409 now carries the referencing nodes with their pipeline versions, the way `template.in_use` does. |
 | 2026-09-07 | v2.18 | 087 connector seams | **New §3.4 credential kinds** — `credential: {kind, username?, secret?}` with `kind ∈ password \| token \| private_key \| service_account_json \| none`; the legacy top-level `username`/`password` pair stays accepted and means `kind: password` (§12.1), and a payload carrying both is refused. Which kinds a dialect accepts is its adapter's declaration (`supportedCredentialKinds`), enforced fail-closed; `private_key`/`service_account_json` are catalogued for the reference targets and refused by every shipped adapter. §3.1/§3.2/§3.3 updated; `password_set` is now DERIVED from the kind (V13's CHECK makes `kind = 'none'` ⟺ no stored ciphertext); §8A.1's dummy SQLite password is gone. **§4.2 gains `NamespaceShape`** (`labels`, `levels`, `innermostArrivesInCatalog`) replacing the boolean `schemaArrivesInCatalog`, with the four reference targets' shapes written in as the contract; §7A's listings and filters speak NAMESPACES — `entries: [{namespace, label}]` beside the legacy `schemas`, `namespace` beside `schema` on every table row and filter, dotted `introspection_include_schemas` entries. The catalog argument reaching `getTables`/`getColumns` closes a MEASURED merge (two ATTACHed DuckDB catalogs' same-named schemas listed as one, and an unqualified `getColumns` returned both tables' columns). **New §4.2A**: `connectionInit` wired to HikariCP's previously-unreferenced `connectionInitSql`, and a third reserved `properties` namespace `dialect.*` — TYPED and adapter-validated, refused wholesale by default. `connectionInitSql` joins the §5.6 server-managed set (DS-SEC-22); §5.6 also gains named secret-valued keys the suffix predicate cannot catch (`OAuthPvtKey`, `Auth_AccessToken`, …) and the one-line credential-carrier rule. **New `LAKE` dialect** (§4.1): object storage read in place, DuckDB underneath, without the embedded adapter's `enable_external_access` lock — a distinct dialect, not a mode, because a mode would make the §5.6 refusal set a function of row data. §7B: write-back identifiers quote in the TARGET dialect's vocabulary. |
+| 2026-09-09 | v2.22 | 109 §A lake view isolation | **§8C.2 rewritten for per-table isolation**: a LAKE pool's views no longer ride one joined `connectionInitSql` — the driver DataSource is wrapped (`LakeViewApplyingDataSource`), the adapter init and shared prelude stay strict, and each table's view is applied independently: a failing view is recorded on its registry row (`lake_tables.last_error` / `last_error_at`, V20) and skipped, so one broken table no longer takes every table down; emission-boundary refusals (3+-segment namespaces, bad locations) are captured per table instead of failing the pool build. Recording is transition-only; a success clears the row. A node referencing a broken table fails at CONNECT with `datasource.lake.table_unavailable` (502, `details.table` + `details.last_error`); the detail tree and `GET …/lake-tables` show the recorded error. **§8C.1 gains the registration pre-flight**: `register` and `importTables` prove a candidate table readable on a scratch connection (view + one-row scan) before storing, refusing with `datasource.validation.lake_table_unreadable` (400, bounded engine text); import pre-flights only not-yet-registered triples, keeping bootstrap re-runs free. |
 | 2026-09-08 | v2.21 | 094 pool settings, delete, retirement | **§5 gains the eight tunable pool keys** with units, effective defaults, the layer each default comes from (`dialect` → `server` → HikariCP's own, read from a fresh `HikariConfig` rather than transcribed) and their FLOORS — refused at save with `datasource.validation.properties_invalid`, because `HikariConfig.validateNumerics()` enforces almost all of them by logging a WARN and OVERWRITING, so the row and the screen would otherwise show numbers the pool never uses. Passthrough is unchanged: the eight are what a PERSON is offered, not an allowlist. A field left at its default is not persisted. `GET /datasources/{name}` and `datasources_get` gain a `pool` object (value + unit + source per key). **§5.2 replaces close-at-once with RETIRE-then-close**: a save or delete removes the pool from the map and soft-evicts it (`minimumIdle = 0`, then `softEvictConnections()` — idle close now, in-use close on return, never mid-statement), and a per-instance reaper closes it once drained or at `datapipelines.datasources.retire-ceiling-seconds` ([Configuration §3.26](configuration.md#326-datasource-pools), default = the node query timeout + 30 s) with one WARN and `datapipelines.datasource.pool.hard_closed`. Retiring pools live in a queue, not a name-keyed map. **Reconcile on (re)subscribe** replaces any notion of a retry queue for missed §5.7 invalidation messages: each instance compares its live pools' row versions against the rows whenever the channel (re)subscribes. **§6.2**: the delete guard's scan is now what the UI's Delete dialog ASKS FIRST — in-use renders the referencing nodes and offers no button; unused gets a confirm that names the datasource; the POST re-runs the guard regardless. |
 | 2026-09-08 | v2.20 | 089 dp-lake (§G docs) | **New §8C dp-lake** — the shipped lake, documented to the tree: **§8C.1 dp-catalog** (the `lake_tables` registry; `datasource_id` holds the datasource NAME; the 1–9-segment namespace grammar, the `s3://`/`file://`-only total location refusal, the REST surface of rest-api §9.8 and the three `lake_tables_*` MCP tools, the read-only detail tree, pool eviction + the §5.7 invalidation on every write), **§8C.2 the per-table views on connect** (the catalog/schema mapping for one- and two-segment namespaces, the refusal of deeper ones, unconditional `hive_partitioning = true` for Parquet, and the **search-path rule**: `SET search_path` only when ALL tables share exactly ONE namespace — the demo's bare-name choice, documented here and in the SKILL), **§8C.3 registry-backed introspection** (namespaces as schemas, registry rows reported as VIEW with format in remarks, columns as a zero-row select over the view through the DuckDB mapper, nested → STRING + warning, 60 s cache), **§8C.4 the engine limits** (`dialect.memory_limit` defaulting to 25 % of container memory clamped to 64 MiB – 4 GiB, `dialect.threads`, `dialect.temp_directory`, always-on `preserve_insertion_order = false`), **§8C.5 the image-bundled extensions** (`httpfs`/`aws`/`iceberg`/`avro` at `/opt/duckdb/extensions`; LOAD-only with the directory present — no egress — INSTALL+LOAD without it; the iceberg extension loads whenever the registry holds an iceberg table, under any catalog kind), **§8C.6 credentials and addressing** (`none` = `credential_chain`, `password` = KEY_ID/SECRET; `region`/`endpoint`/`url_style`), **§8C.7 the measured Iceberg location rule** (DuckDB 1.5.5.1 cannot `iceberg_scan` a pyiceberg table by its ROOT — register the current metadata FILE; this contradicts the design record, and the tree won), and **§8C.8 the not-in-this-round list** (external catalogs as a registry source, writes, scheduler, dashboards, nested types, Athena). §8A.1 documents the LAKE bootstrap seed (`tables:` / `import_manifest:` / `namespace:` / `only_tables:` and the four parse-time refusals); §4.1's LAKE row gains the §8C pointer and its typed-config reference corrected to §4.2A; §4.2's adapter list gains `LakeDialectAdapter`; §14's LAKE bullet rewritten as shipped. |

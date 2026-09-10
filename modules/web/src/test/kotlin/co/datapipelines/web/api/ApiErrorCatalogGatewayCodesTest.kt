@@ -18,7 +18,7 @@ import org.junit.jupiter.api.assertAll
  */
 class ApiErrorCatalogGatewayCodesTest {
     @Test
-    fun `gateway codes are exactly the deliberate four`() {
+    fun `gateway codes are exactly the deliberate five`() {
         ApiErrorCatalog.GATEWAY_CODES shouldContainExactly
             setOf(
                 PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
@@ -27,6 +27,10 @@ class ApiErrorCatalogGatewayCodesTest {
                 // 055: the promotion target did not answer. WARN without a stack — the
                 // operator's own peer deployment being down is not a defect in this one.
                 PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
+                // 109 §A: a registered lake table's view creation is recorded as failed — the
+                // caller's own object store served unreadable content, which is not a defect
+                // in this process either. WARN without a stack.
+                PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE,
             )
     }
 
@@ -39,6 +43,7 @@ class ApiErrorCatalogGatewayCodesTest {
                         PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                         PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
                         PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
+                        PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE,
                     )
             },
             { ApiErrorCatalog.CALLER_DOWNSTREAM_DOWN.all { it in ApiErrorCatalog.GATEWAY_CODES } shouldBe true },

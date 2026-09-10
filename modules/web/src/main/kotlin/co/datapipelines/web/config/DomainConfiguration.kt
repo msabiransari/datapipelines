@@ -16,6 +16,7 @@ import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeTableCatalog
+import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
@@ -222,9 +223,9 @@ class DomainConfiguration {
         }
 
     @Bean
-    // Nine collaborators: 089's registry + extension directory met 094's pool metrics + ceiling
-    // at the merge. Each is a distinct seam the registry owns; splitting the bean would hide the
-    // wiring this class exists to make explicit (§8.4).
+    // Ten collaborators: 089's registry + extension directory met 094's pool metrics + ceiling
+    // and 109's view-outcome recorder at the merge. Each is a distinct seam the registry owns;
+    // splitting the bean would hide the wiring this class exists to make explicit (§8.4).
     @Suppress("LongParameterList")
     fun datasourceRegistry(
         repository: DatasourceRepository,
@@ -232,6 +233,7 @@ class DomainConfiguration {
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
         lakeTables: LakeTableCatalog,
+        lakeViewRecorder: LakeViewOutcomeRecorder,
         environment: Environment,
         poolMetrics: PoolLifecycleMetrics,
         datasourcesProperties: DatasourcesProperties,
@@ -246,6 +248,7 @@ class DomainConfiguration {
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
             lakeTables = lakeTables,
+            lakeViewRecorder = lakeViewRecorder,
             // configuration.md §3.25 (089 §D): the bundled DuckDB extension directory. Empty =
             // unset — the LAKE adapter keeps its explicit INSTALL+LOAD pairs (a bare `java -jar`
             // has nothing bundled); the shipped image sets it via the Dockerfile's ENV.

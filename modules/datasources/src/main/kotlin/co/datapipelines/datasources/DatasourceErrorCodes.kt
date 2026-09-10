@@ -114,4 +114,20 @@ object DatasourceErrorCodes {
 
     /** Unregister named a lake table that is not registered — 404. */
     const val LAKE_TABLE_NOT_FOUND = "datasource.lake_table_not_found"
+
+    /**
+     * A pipeline node referenced a registered lake table whose connect-time view creation is
+     * recorded as failed (`lake_tables.last_error`, V20, 109 §A) — its view is skipped on every
+     * connection, so the engine could only answer "table not found". 502; `details` carry
+     * `table` and the recorded `last_error`. Raised by the executor (dag) at the CONNECT phase;
+     * mirrored here so the §13.8 drift guard stays complete.
+     */
+    const val LAKE_TABLE_UNAVAILABLE = "datasource.lake.table_unavailable"
+
+    /**
+     * A lake-table registration/import named a table the pre-flight could not read (109 §A) —
+     * refused BEFORE storing, with the bounded engine error as the message. 400: the fix is the
+     * caller's (the location, the format, the file).
+     */
+    const val LAKE_TABLE_UNREADABLE = "datasource.validation.lake_table_unreadable"
 }

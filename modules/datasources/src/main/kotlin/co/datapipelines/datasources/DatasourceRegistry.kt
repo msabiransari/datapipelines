@@ -234,6 +234,31 @@ interface DatasourceRegistry {
      * never passed here (it is not a datasource).
      */
     fun dialectOf(name: String): Dialect? = get(name)?.dialect
+
+    /**
+     * 109 §A — the registration pre-flight for one CANDIDATE lake table: on a scratch
+     * connection built exactly like the datasource's pool, create the table's view and read one
+     * row through it. Returns null when the table reads, else the bounded engine/emission error
+     * text the caller (`LakeTableRegistryService`) surfaces in its refusal — the table is
+     * refused BEFORE storing rather than stored to fail every connect after.
+     *
+     * Default returns null (no pre-flight): a registry with no engine access cannot prove a
+     * table readable, and fakes stay source-compatible — but the production wiring is the only
+     * path REST/MCP registration crosses, so the default never serves a real registration.
+     */
+    fun preflightLakeTable(
+        datasource: Datasource,
+        table: LakeRegisteredTable,
+    ): String? = null
+
+    /**
+     * 109 §A — the executor's pre-execution read: [datasourceName]'s registered lake tables
+     * whose connect-time view creation last FAILED (the registry rows carrying a `last_error`).
+     * A node whose SQL references one fails `datasource.lake.table_unavailable` with the
+     * recorded reason instead of the engine's raw "table not found". Default empty — a
+     * registry with no lake catalog has no broken tables to report.
+     */
+    fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = emptyList()
 }
 
 /**
