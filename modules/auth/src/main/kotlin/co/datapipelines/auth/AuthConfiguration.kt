@@ -80,6 +80,7 @@ class AuthConfiguration {
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         auditLogger: AuditLogger,
         contentCheck: ObjectProvider<WorkspaceContentCheck>,
+        demoWorkspaceSeeder: ObjectProvider<DemoWorkspaceSeeder>,
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
@@ -88,6 +89,10 @@ class AuthConfiguration {
             lastUsedWorkspaceStore.getIfAvailable(),
             auditLogger,
             contentCheck.getIfAvailable() ?: WorkspaceContentCheck.NONE,
+            // An ObjectProvider so auth-only test slices — which have no user service and no
+            // examples file — construct a WorkspaceService without one. In the application it
+            // is always present; the D-R11 demo join is not optional there.
+            demoWorkspaceSeeder.getIfAvailable(),
         )
 
     /**

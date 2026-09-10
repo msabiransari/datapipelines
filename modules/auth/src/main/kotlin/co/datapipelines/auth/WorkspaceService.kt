@@ -71,6 +71,7 @@ class WorkspaceService(
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
     private val auditLogger: AuditLogger,
     private val contentCheck: WorkspaceContentCheck = WorkspaceContentCheck.NONE,
+    private val demoWorkspaceSeeder: DemoWorkspaceSeeder? = null,
 ) : WorkspaceLiveness {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
@@ -121,9 +122,17 @@ class WorkspaceService(
     }
 
     /**
-     * What login stamps as `active_workspace`: last-used when it still resolves, else the
-     * first active membership. Null when the user belongs to nothing selectable — round 2
-     * draws the "no workspace" page; round 1 returns the state (design §5).
+     * What login stamps as `active_workspace` (design §5.1): last-used when it still resolves,
+     * else the first active membership, else — D-R11 — a fresh VIEWER membership of `demo`.
+     *
+     * The demo join lives here rather than in the two login handlers so both credential paths
+     * (OIDC and local) get one answer; the owner's rule is about LOGGING IN, not about which
+     * provider did it. It fires only for a user with NO membership at all, so somebody removed
+     * from `demo` on purpose is not re-added by their next login — the same rule O-3 states for
+     * the workspace itself.
+     *
+     * Null when there is nothing to stamp: no membership and no active `demo` (deactivated, or
+     * never seeded). Round 1 returns that state; round 2 draws the "no workspace" page.
      */
     fun workspaceForLogin(
         user: User,
@@ -133,7 +142,8 @@ class WorkspaceService(
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
             memberships.firstOrNull { it.workspaceName == last }?.let { return context(it) }
         }
-        return memberships.firstOrNull()?.let { context(it) }
+        memberships.firstOrNull()?.let { return context(it) }
+        return demoWorkspaceSeeder?.joinDemoIfUnaffiliated(user.id)?.also { authCache.invalidateMemberships(user.id) }
     }
 
     /**

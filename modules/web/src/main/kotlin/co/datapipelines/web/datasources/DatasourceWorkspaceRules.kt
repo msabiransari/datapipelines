@@ -30,7 +30,10 @@ class DatasourceWorkspaceRules(
     private val workspaceService: WorkspaceService,
     private val workspacesProperties: WorkspacesProperties,
 ) : DatasourceUpdateRules {
-    /** The D8 member gate: when off, every non-admin write on this surface is refused. */
+    /**
+     * The member gate (RBAC design §4): when off, every write on this surface below super
+     * admin is refused — datasource registration becomes a super-admin-only act instance-wide.
+     */
     override fun requireMemberDatasourcesGate(principal: AuthenticatedPrincipal) {
         if (!principal.isSuperAdmin && !workspacesProperties.memberDatasourcesEnabled) {
             throw workspaceForbidden(
@@ -41,7 +44,14 @@ class DatasourceWorkspaceRules(
     }
 
     /**
-     * A member mutating a GLOBAL datasource is the 400 — global CUD is admin-only (D8).
+     * A workspace admin mutating an INSTANCE datasource is the 400 — instance datasources are
+     * the super admin's (D-R7).
+     *
+     * "Global" is the WIRE spelling that survived round 1; the concept did not. The `global`
+     * payload flag now means "owned by no workspace", and it no longer decides who can SEE the
+     * datasource — that is the grant (`datasource_workspaces`). Renaming the field is a
+     * rest-api change round 2 owns; the meaning is stated here so nobody reads the old one off
+     * the name.
      *
      * This gate fully subsumes the design-§6 rule "only `admin` flips `readonly` on a
      * GLOBAL datasource": anyone reaching a readonly write on a global row has already
@@ -54,8 +64,8 @@ class DatasourceWorkspaceRules(
         existing: Datasource,
         name: String,
     ) {
-        if (existing.workspaceId == null && !principal.isSuperAdmin) {
-            throw workspaceForbidden("mutating the global datasource '$name' requires admin")
+        if (existing.ownerWorkspaceId == null && !principal.isSuperAdmin) {
+            throw workspaceForbidden("mutating the instance datasource '$name' requires super admin")
         }
     }
 
@@ -65,7 +75,7 @@ class DatasourceWorkspaceRules(
         globalRequested: Boolean?,
     ) {
         if (globalRequested != null && !principal.isSuperAdmin) {
-            throw workspaceForbidden("the global flag requires admin")
+            throw workspaceForbidden("the global flag requires super admin")
         }
     }
 
@@ -84,7 +94,7 @@ class DatasourceWorkspaceRules(
             throw workspaceForbidden("a datasource is either global or bound to one workspace, not both")
         }
         if (isGlobal) {
-            if (!principal.isSuperAdmin) throw workspaceForbidden("creating a global datasource requires admin")
+            if (!principal.isSuperAdmin) throw workspaceForbidden("creating an instance datasource requires super admin")
             return null
         }
         if (workspaceName != null) return resolveAccessibleWorkspace(principal, workspaceName).id
@@ -112,7 +122,7 @@ class DatasourceWorkspaceRules(
             return workspaceName?.let { resolveAccessibleWorkspace(principal, it).id } ?: principal.requireWorkspace().id
         }
         if (workspaceName != null) return resolveAccessibleWorkspace(principal, workspaceName).id
-        return existing.workspaceId
+        return existing.ownerWorkspaceId
     }
 
     /**

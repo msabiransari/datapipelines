@@ -1,5 +1,6 @@
 package co.datapipelines.web.workspaces
 
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.Workspace
@@ -101,12 +102,13 @@ class WorkspacesController(
     ): ApiResponse<List<Map<String, Any?>>> = ApiResponse.of(workspaces.members(currentPrincipal(), name).map { it.toResponse() })
 
     /**
-     * §17.7 — add a member by email. Owner or admin — except `open-join`, where adding
-     * your own email is the self-service join. An unknown email is the §16.3
-     * unknown-user stand-in (§13.7 has no `auth.user.not_found`).
+     * §17.7 — add a member by email, with their capability flags (RBAC design §1). Workspace
+     * admin or super admin; `open-join` went with the provisioning modes (D-R11). Absent flags
+     * mean a VIEWER, which is the D-R11 default and the one the demo path uses. An unknown
+     * email is the §16.3 unknown-user stand-in (§13.7 has no `auth.user.not_found`).
      */
     @PostMapping("/{name}/members")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
     fun addMember(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
@@ -125,23 +127,76 @@ class WorkspacesController(
                 )
         val added =
             try {
-                workspaces.addMember(currentPrincipal(), name, email)
+                workspaces.addMember(currentPrincipal(), name, email, flagsOf(body))
             } catch (e: WorkspaceService.UnknownMemberEmailException) {
                 throw unknownUser(e.email, e) // the §16.3 stand-in mapping IS the handler
             }
         return ApiResponse.of(added.toResponse())
     }
 
-    /** §17.8 — remove a member. Owner or admin; removing an owner is the `in_use` 409 (`blocked_by: owner_membership`). */
+    /**
+     * §17.8 — remove a member. Workspace admin or super admin; removing the LAST admin is
+     * `workspace.last_admin` (409), because a workspace with no admin is unmanageable.
+     */
     @DeleteMapping("/{name}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
     fun removeMember(
         @PathVariable name: String,
         @PathVariable userId: UUID,
     ) {
         workspaces.removeMember(currentPrincipal(), name, userId)
     }
+
+    /**
+     * §17.9 — set an existing member's capability flags (RBAC design §1). Workspace admin or
+     * super admin; demoting the LAST admin is `workspace.last_admin` (409).
+     *
+     * A PUT rather than a PATCH: the three flags are REPLACED wholesale, so a caller that
+     * sends `{"author": true}` gets exactly an author — not an author with whatever promoter
+     * flag happened to be there. Roles are additive, which makes a partial update ambiguous in
+     * precisely the way this surface must not be.
+     */
+    @PutMapping("/{name}/members/{userId}")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    fun setMemberFlags(
+        @PathVariable name: String,
+        @PathVariable userId: UUID,
+        @RequestBody body: JsonNode,
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.setMemberFlags(currentPrincipal(), name, userId, flagsOf(body)).toResponse())
+
+    /**
+     * D-R10 — deactivate a workspace. Super admin. Nothing is purged, ever: it stops being
+     * selectable, its endpoints 404, its keys are refused, its schedules are skipped and a
+     * super admin's listing greys it. Reversible by [reactivate].
+     */
+    @PostMapping("/{name}/deactivate")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    fun deactivate(
+        @PathVariable name: String,
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.deactivate(currentPrincipal(), name).toResponse())
+
+    /** D-R10 — reactivate a deactivated workspace. Super admin, audited. */
+    @PostMapping("/{name}/reactivate")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    fun reactivate(
+        @PathVariable name: String,
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.reactivate(currentPrincipal(), name).toResponse())
+
+    /**
+     * The three capability flags off a request body (RBAC design §1). Absent means FALSE:
+     * a body that says nothing asks for a viewer, which is the least a membership can be and
+     * the only safe reading of silence on a permission grant.
+     *
+     * `admin` normalisation (admin → author) is the service's, not this surface's — one place,
+     * beside the database constraint that makes it true.
+     */
+    private fun flagsOf(body: JsonNode): MembershipFlags =
+        MembershipFlags(
+            author = body.get("author")?.asBoolean() == true,
+            promoter = body.get("promoter")?.asBoolean() == true,
+            admin = body.get("admin")?.asBoolean() == true,
+        )
 
     private fun unknownUser(
         email: String,
@@ -161,6 +216,11 @@ class WorkspacesController(
             "display_name" to displayName,
             "is_personal" to isPersonal,
             "created_at" to createdAt.toString(),
+            // D-R10: deactivation is a state a caller must be able to see, not infer from a
+            // 404 somewhere else. `active` is the answer; `deactivated_at` is the evidence the
+            // super admin's listing renders greyed beside it (design §6).
+            "active" to isActive,
+            "deactivated_at" to deactivatedAt?.toString(),
         )
 
     /**

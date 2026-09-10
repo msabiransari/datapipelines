@@ -97,7 +97,7 @@ class DatasourceUpdateService(
         rules.requireGlobalMutationAllowed(principal, existing, name)
         rules.requireMemberDatasourcesGate(principal)
         rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
-        val bound = bind().copy(workspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, workspaceName))
+        val bound = bind().copy(ownerWorkspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, workspaceName))
         return datasources.save(bound, principal.userId)
     }
 }

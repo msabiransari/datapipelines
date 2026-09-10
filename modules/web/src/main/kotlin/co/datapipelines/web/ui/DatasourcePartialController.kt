@@ -146,7 +146,7 @@ class DatasourcePartialController(
                     credentialKind = kind,
                     secret = password?.takeIf { it.isNotEmpty() },
                     isReadonly = readonly,
-                    workspaceId = workspaceId,
+                    ownerWorkspaceId = workspaceId,
                     // 094 §A: only the pool fields the operator CHANGED. A field left at the
                     // prefilled default is not persisted, so a later change to a product default
                     // still reaches datasources created through this form.
@@ -311,7 +311,7 @@ class DatasourcePartialController(
         // confirm button whose POST would refuse. Same rule as update (admin for global).
         val forbidden =
             when {
-                datasource.workspaceId == null && !principal.isSuperAdmin -> {
+                datasource.ownerWorkspaceId == null && !principal.isSuperAdmin -> {
                     "Deleting the global datasource '$name' requires admin."
                 }
 

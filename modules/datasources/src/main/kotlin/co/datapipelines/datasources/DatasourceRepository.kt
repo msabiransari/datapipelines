@@ -46,9 +46,9 @@ class DatasourceRow(
     val queryTimeoutSeconds: Int?,
     val introspectionIncludeSchemas: List<String>,
     val isReadonly: Boolean,
-    /** The bound workspace (V4), or null = global (D9). */
-    val workspaceId: UUID?,
-    /** The bound workspace's name, joined at read time; null exactly when [workspaceId] is null. */
+    /** The OWNING workspace (V23 `owner_workspace_id`), or null for an instance datasource (D-R7). */
+    val ownerWorkspaceId: UUID?,
+    /** The owning workspace's name, joined at read time; null exactly when [ownerWorkspaceId] is null. */
     val workspaceName: String?,
     /**
      * The V9 last-connection-test outcome (§8.1B), or null when never probed — which is what
@@ -86,7 +86,7 @@ class DatasourceRow(
             properties = properties.copy(hikari = properties.hikari.filterKeys { it.lowercase() !in RefusedPropertyKeys.SERVER_MANAGED }),
             introspectionIncludeSchemas = introspectionIncludeSchemas,
             isReadonly = isReadonly,
-            workspaceId = workspaceId,
+            ownerWorkspaceId = ownerWorkspaceId,
             workspaceName = workspaceName,
             lastTest = lastTest,
         )

@@ -47,7 +47,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
     fun releaseDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -60,7 +60,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
     fun release(
         model: Model,
         response: HttpServletResponse,
@@ -315,7 +315,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ switch
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/switch")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
     fun switchDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -329,7 +329,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/switch")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
     fun switchCurrent(
         model: Model,
         response: HttpServletResponse,
