@@ -1,6 +1,6 @@
 # Design: RBAC — capability moves into the workspace membership; five roles, one matrix, one sweep
 
-**Status:** RATIFIED v1.0 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
+**Status:** RATIFIED v1.1 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
 two rounds (§9) and lands **before the release tag** — the owner: "We are entering serious
 territory and I would like to tighten the security now rather than later."
 
@@ -102,10 +102,19 @@ it becomes the rule everywhere.
 `WorkspaceIsolationSweepTest` (integration): seeds workspaces A and B with one of every
 entity (pipeline with two versions, template, execution + result, endpoint + binding, key,
 datasource granted to B only, lake table), then as a member of A walks EVERY REST route and
-EVERY MCP tool with B's ids and names, and asserts 404 (REST) / the not-found envelope
-(MCP) for reads, executes and mutations alike — and that A's listings never contain a B row.
-The route list comes from the same reflective enumeration `PublicRouteWalkerTest` uses, so
-a new route is swept automatically. **This test is the guard the whole design rests on.**
+EVERY MCP tool with B's ids and names — and that A's listings never contain a B row. The
+route list comes from the same reflective enumeration `PublicRouteWalkerTest` uses, so a new
+route is swept automatically. **This test is the guard the whole design rests on.**
+
+**The invariant, stated the way 112 found it had to be** (its first two cuts — "never 2xx,
+never 403" and "any 2xx is a leak" — each mis-flagged a legitimate surface): *the response
+must not depend on whether the foreign row exists.* Every route is called twice — once with
+B's id or name, once with a well-formed id that exists nowhere — and the status AND a body
+fingerprint must match. That is the form that survives the fix this guard most needs to
+survive: patching an isolation hole with a permission check yields 403-for-existing against
+404-for-missing, a differing pair, red. User ids are not in the substitution table: users are
+a global entity managed by super admins (D-R8), so another user's id is not a cross-workspace
+probe — the 404 rule is about what a workspace CONTAINS.
 
 ## 4. Datasources: registration and grants
 
@@ -200,5 +209,6 @@ switcher lists active memberships; super admins see every active workspace.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-10 | v1.1 | 112 (in flight) | §3: the sweep's invariant restated as "the response must not depend on whether the foreign row exists" (two calls, matching status + body fingerprint); user ids excluded from the substitution table. |
 | 2026-09-10 | v1.0 | owner ratification | O-1–O-4 ruled (§10); status RATIFIED; prompt 112 is round 1. |
 | 2026-09-10 | v0.1 | orchestrator, after the owner's rulings | Initial record: fourteen decisions from the conversation, the role table, the two-axis matrix, the 404 sweep, datasource grants, provisioning + demo, deactivation, rounds, open items. |
