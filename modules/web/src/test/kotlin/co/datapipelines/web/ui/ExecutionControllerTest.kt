@@ -348,8 +348,16 @@ class ExecutionControllerTest {
     }
 
     @Test
-    fun `cancel requires execute scope`() {
-        authenticate(owner, setOf(Scope.READ))
+    fun `cancel requires an active workspace - a session holds capability, not scope`() {
+        // 112 (merge review): sessions carry no scopes (D-R1) and EXECUTE is viewer-level (D-R3),
+        // so "read scope only" is not a state a human can be in; what a session can lack is a
+        // workspace, and without one there is no capability to satisfy.
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(owner, "a@b.c", "A", emptySet(), AuthMethod.OIDC, workspace = null),
+                null,
+                emptyList(),
+            )
 
         shouldThrow<ResponseStatusException> {
             detailPartialController.cancel(executionId, ExtendedModelMap())

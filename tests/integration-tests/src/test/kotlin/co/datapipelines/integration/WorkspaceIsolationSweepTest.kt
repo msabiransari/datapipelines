@@ -488,14 +488,13 @@ class WorkspaceIsolationSweepTest {
 
         val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")
 
+        // Route patterns whose `{id}` is an EXECUTION id, not a pipeline's (112 merge review).
+        val EXECUTION_PATH_MARKERS: List<String> = listOf("/api/v1/executions/", "/executions/", "/partials/executions/")
+
         /**
          * `globex`'s identifiers, by the variable NAME a route uses for them. Every value here
          * exists in `globex` and in no other workspace, so a 200 can only mean a leak.
          */
-
-        /** Route patterns whose `{id}` is an EXECUTION id, not a pipeline's. */
-        val EXECUTION_PATH_MARKERS: List<String> = listOf("/api/v1/executions/", "/executions/", "/partials/executions/")
-
         val FOREIGN_VALUES: Map<String, String> =
             mapOf(
                 "id" to WorkspaceIsolationIntegrationTest.PIPE_GLOBEX,
