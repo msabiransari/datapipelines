@@ -62,9 +62,10 @@ class SiteV2GuardsTest {
         val html = rendered.getValue(SitePages.ROADMAP)
         val updated = Regex("""data-roadmap-updated="([0-9-]+)"""").find(html)!!.groupValues[1]
         val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())
-        withClue(
-            "/roadmap says 'Last updated $updated' — $age days ago; the page names months, so it is revisited at least every $ROADMAP_MAX_AGE_DAYS days",
-        ) {
+        val clue =
+            "/roadmap says 'Last updated $updated' — $age days ago; the page names months, " +
+                "so it is revisited at least every $ROADMAP_MAX_AGE_DAYS days"
+        withClue(clue) {
             (age <= ROADMAP_MAX_AGE_DAYS) shouldBe true
         }
         // The JSON-LD's dateModified is the same date — one value, two places.
@@ -92,34 +93,38 @@ class SiteV2GuardsTest {
         val inbound = mutableMapOf<String, MutableSet<String>>()
         val dead = mutableListOf<String>()
 
-        rendered.forEach { (page, html) ->
-            HREF.findAll(html).map { it.groupValues[1] }.forEach { href ->
-                val target = href.substringBefore('#').substringBefore('?')
-                val external = href.startsWith("http") || href.startsWith("mailto:")
-                val anchorOnly = target.isEmpty()
-                if (!external && !anchorOnly && target !in knownAppRoutes) {
-                    val resolves =
-                        when {
-                            target in registryPaths -> {
-                                if (target != page.path) inbound.getOrPut(target) { mutableSetOf() }.add(page.path)
-                                true
-                            }
+        fun resolves(
+            page: SitePage,
+            target: String,
+        ): Boolean =
+            when {
+                target in registryPaths -> {
+                    if (target != page.path) inbound.getOrPut(target) { mutableSetOf() }.add(page.path)
+                    true
+                }
 
-                            target.startsWith("/docs/") -> {
-                                target.removePrefix("/docs/") in docSlugs
-                            }
+                target.startsWith("/docs/") -> {
+                    target.removePrefix("/docs/") in docSlugs
+                }
 
-                            target.startsWith("/mcp-server/") -> {
-                                SitePages.engine(target.removePrefix("/mcp-server/")) != null
-                            }
+                target.startsWith("/mcp-server/") -> {
+                    SitePages.engine(target.removePrefix("/mcp-server/")) != null
+                }
 
-                            else -> {
-                                false
-                            }
-                        }
-                    if (!resolves) dead += "${page.path} -> $href"
+                else -> {
+                    false
                 }
             }
+
+        rendered.forEach { (page, html) ->
+            HREF
+                .findAll(html)
+                .map { it.groupValues[1] }
+                .filterNot { it.startsWith("http") || it.startsWith("mailto:") }
+                .map { it.substringBefore('#').substringBefore('?') }
+                .filter { it.isNotEmpty() && it !in knownAppRoutes }
+                .filterNot { resolves(page, it) }
+                .forEach { dead += "${page.path} -> $it" }
         }
         withClue("dead internal links") { dead.shouldBeEmpty() }
         val orphans = registryPaths.filter { it != SitePages.HOME.path && inbound[it].isNullOrEmpty() }
