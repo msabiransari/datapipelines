@@ -1,6 +1,6 @@
 # Design: RBAC — capability moves into the workspace membership; five roles, one matrix, one sweep
 
-**Status:** RATIFIED v1.2 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
+**Status:** RATIFIED v1.3 (owner rulings D-R1–D-R14 and O-1–O-4, 2026-09-10); implementation prompt 112 (round 1). Implementation is
 two rounds (§9) and lands **before the release tag** — the owner: "We are entering serious
 territory and I would like to tighten the security now rather than later."
 
@@ -160,6 +160,16 @@ is a super-admin verb, audited. Nothing is purged by deactivation — ever.
 
 ## 7. UI
 
+**Shipped in round 2 (114).** 63 verb controls over 50 distinct `data-verb` names, each ANDed
+with the flag §7.6 puts its operation on, through one helper (`web/ui/RoleModel`); the inventory
+is `ui-screens.md §4.3e`. Three of this section's assumptions were corrected against §7.6 on the
+way: the datasource register/edit/delete/**test** verbs are `ws_admin` rather than `author`, key
+REVOKE is `view` rather than `author` (only ISSUANCE carries the author gate, and hiding revoke
+would strand a demoted author with a live key), and the grants screen is `super_admin` rather than
+a workspace admin's (the grant LIST names every workspace on the instance holding one). The
+no-workspace page is built but not yet reachable — `WORKSPACES_READ` does not survive a null
+workspace context, so a principal with zero memberships is refused before any handler runs.
+
 The role decides what is rendered; the server decides what is allowed. Explorer verbs
 (102's dialogs), the editor's Release button, the datasource register/edit/delete actions,
 the keys screen, the members screen: each is rendered only when the ACTIVE membership's
@@ -210,6 +220,7 @@ switcher lists active memberships; super admins see every active workspace.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-10 | v1.3 | 114 handback | §7 records what round 2 shipped, the three §7.6 corrections it made on the way, and the one gap it could not close inside its fence. |
 | 2026-09-10 | v1.2 | 112 handback | Two record errors corrected from the code: there is no `users.scopes` column (capability was Kotlin-derived); `datasources` is keyed by `name`, so the grant table is `datasource_name`; `granted_by` backfills from `created_by`. |
 | 2026-09-10 | v1.1 | 112 (in flight) | §3: the sweep's invariant restated as "the response must not depend on whether the foreign row exists" (two calls, matching status + body fingerprint); user ids excluded from the substitution table. |
 | 2026-09-10 | v1.0 | owner ratification | O-1–O-4 ruled (§10); status RATIFIED; prompt 112 is round 1. |
