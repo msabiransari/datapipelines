@@ -218,7 +218,7 @@ class LakeRegistryTwoInstanceE2eTest {
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000090"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-lake-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-lake-key", arrayOf("read", "execute", "author"))
 
         /** Instance B — the second application context this suite boots beside its own. */
         private var instanceB: ConfigurableApplicationContext? = null

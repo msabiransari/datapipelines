@@ -393,7 +393,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the fifteen tables of metadata-db §4`() {
+    fun `creates exactly the sixteen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -406,6 +406,7 @@ class FlywayMigrationIntegrationTest {
         tables shouldContainExactly
             listOf(
                 "api_keys",
+                "datasource_workspaces",
                 "audit_log",
                 "datasources",
                 // 074 (V11) — the published-endpoint registry and its key bindings.
@@ -456,6 +457,8 @@ class FlywayMigrationIntegrationTest {
                 "audit_log.idx_audit_user",
                 "datasources.datasources_pkey",
                 "datasources.idx_datasources_active",
+                "datasource_workspaces.datasource_workspaces_pkey",
+                "datasource_workspaces.idx_datasource_workspaces_workspace",
                 "endpoint_key_bindings.endpoint_key_bindings_pkey",
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",
@@ -487,7 +490,9 @@ class FlywayMigrationIntegrationTest {
                 "users.uq_users_provider_subject",
                 "users.users_email_key",
                 "users.users_pkey",
+                "workspace_members.idx_workspace_members_admins",
                 "workspace_members.workspace_members_pkey",
+                "workspaces.idx_workspaces_active",
                 "workspaces.workspaces_name_key",
                 "workspaces.workspaces_pkey",
             )
@@ -552,7 +557,9 @@ class FlywayMigrationIntegrationTest {
                 "chk_template_versions_via",
                 "chk_triggered_via",
                 "chk_type_dialect",
-                "chk_workspace_member_role",
+                // V23 replaced the role CHECK with the invariant that outlived it: a workspace
+                // admin can author, stated once in the database (RBAC design §1).
+                "chk_workspace_member_admin_authors",
             )
     }
 
@@ -852,16 +859,19 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `V4 adds the datasource scoping columns - nullable workspace, readonly defaulting false`() {
-        // metadata-db §4.10: NULL workspace_id = global (existing rows backfill NULL, D9);
-        // columns only — the datasources module does not change in this slice.
+    fun `V23 leaves the datasource OWNER column and the readonly flag, workspace_id gone`() {
+        // metadata-db §4.10: V4's `workspace_id` (NULL = global) was replaced in V23 by
+        // `owner_workspace_id` (NULL = an instance datasource) plus the `datasource_workspaces`
+        // grant table (§4.16). Ownership and visibility were one column and are now two
+        // concepts, so the column this test used to assert must be ABSENT — its presence would
+        // mean the drop did not run.
         val columns =
             query(
                 """
                 SELECT column_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
                   FROM information_schema.columns
                  WHERE table_schema = 'public' AND table_name = 'datasources'
-                   AND column_name IN ('workspace_id', 'is_readonly')
+                   AND column_name IN ('workspace_id', 'owner_workspace_id', 'is_readonly')
                  ORDER BY 1
                 """.trimIndent(),
             ) { it.getString(1) }
@@ -869,7 +879,7 @@ class FlywayMigrationIntegrationTest {
         columns shouldContainExactly
             listOf(
                 "is_readonly|NO|false",
-                "workspace_id|YES|NONE",
+                "owner_workspace_id|YES|NONE",
             )
     }
 

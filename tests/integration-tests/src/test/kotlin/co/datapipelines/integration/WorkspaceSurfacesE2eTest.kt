@@ -588,7 +588,7 @@ class WorkspaceSurfacesE2eTest {
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
         private val CAROL_KEY = E2eAuth.generateKey("carol-key", arrayOf("read", "execute", "author"), ownerId = CAROL)
-        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author", "admin"), ownerId = ROOT)
+        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
 
         private fun sessionJwt(
             userId: String,

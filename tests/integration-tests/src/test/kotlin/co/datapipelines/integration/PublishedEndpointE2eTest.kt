@@ -653,7 +653,7 @@ class PublishedEndpointE2eTest {
         private const val OTHER_WORKSPACE = "defa0000-0000-0000-0000-0000000000ee"
         private val ADMIN_USER: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("ep-admin-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("ep-admin-key", arrayOf("read", "execute", "author"))
         private val FOREIGN_KEY = E2eAuth.generateKey("ep-foreign-key", arrayOf("execute"))
 
         private val postgres get() = SharedE2e.postgres

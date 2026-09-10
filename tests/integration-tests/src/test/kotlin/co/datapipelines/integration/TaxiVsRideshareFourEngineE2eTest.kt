@@ -574,8 +574,8 @@ class TaxiVsRideshareFourEngineE2eTest {
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-4eng-key", arrayOf("admin"))
-        private val RUN_KEY = E2eAuth.generateKey("e2e-lake-4eng-run", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-4eng-key", arrayOf("read", "execute", "author"))
+        private val RUN_KEY = E2eAuth.generateKey("e2e-lake-4eng-run", arrayOf("read", "execute", "author"))
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
 
         @Container

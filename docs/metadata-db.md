@@ -715,6 +715,10 @@ CREATE INDEX idx_datasource_workspaces_workspace ON datasource_workspaces(worksp
 | `workspaces` | `workspaces_pkey` | via PK | Lookup by id |
 | `workspaces` | `workspaces_name_key` | via UNIQUE | Workspace lookup by name (config/UX references) |
 | `workspace_members` | `workspace_members_pkey` | via PK | Membership check `(workspace_id, user_id)` |
+| `workspace_members` | `idx_workspace_members_admins` | explicit, partial (`WHERE admin`) | The last-admin count (§4.12) — enforced in the service, so the count runs on every membership change |
+| `workspaces` | `idx_workspaces_active` | explicit, partial | Selectable workspaces (`is_deleted = FALSE AND deactivated_at IS NULL`) — every workspace selection reads it |
+| `datasource_workspaces` | `datasource_workspaces_pkey` | via PK | The visibility check `(datasource_name, workspace_id)` — the hot per-read predicate (§4.16) |
+| `datasource_workspaces` | `idx_datasource_workspaces_workspace` | explicit | "Everything this workspace can see", the listing's access path |
 | `published_endpoints` | `published_endpoints_pkey` | via PK | Lookup by id |
 | `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
 | `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
@@ -759,7 +763,8 @@ table and the test's expected-table list in the same commit.
 | `users` | environment-local | User | — | `email` | Identities are per-deployment; imported rows' `created_by` names the importing actor (versioning §10.6's service principal, when promotion ships) |
 | `api_keys` | environment-local | ApiKey | — | — | Credentials are per-deployment by definition |
 | `workspaces` | environment-local | Workspace | — | `name` | Isolation topology is per-deployment |
-| `workspace_members` | environment-local | Membership | — | — | Follows `users` and `workspaces`, both local |
+| `workspace_members` | environment-local | Membership | — | — | Follows `users` and `workspaces`, both local. It is also where CAPABILITY lives since V23 (§4.12), which makes it doubly local: a role granted in one environment must not travel to another — that is the whole point of having a promoter who can release on staging and not in production |
+| `datasource_workspaces` | environment-local | DatasourceGrant | — | — | A grant joins two environment-local rows — a [`datasources`](#410-datasources) row whose credential never leaves the deployment, and a [`workspaces`](#411-workspaces) row whose isolation topology is per-deployment. The receiving environment's super admin grants there, as part of the same setup that registers the datasource (RBAC design D-R7, O-4) |
 | `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
 | `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |

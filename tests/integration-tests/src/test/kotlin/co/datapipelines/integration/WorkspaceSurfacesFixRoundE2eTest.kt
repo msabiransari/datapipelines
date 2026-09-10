@@ -343,7 +343,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
-        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author", "admin"), ownerId = ROOT)
+        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
         private val READONLY_KEY = E2eAuth.generateKey("readonly-key", arrayOf("read"), ownerId = ALICE)
 
         private fun sessionJwt(

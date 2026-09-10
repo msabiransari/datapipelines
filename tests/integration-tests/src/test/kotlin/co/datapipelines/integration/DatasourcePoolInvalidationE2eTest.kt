@@ -534,7 +534,7 @@ class DatasourcePoolInvalidationE2eTest {
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000002"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-key", arrayOf("read", "execute", "author"))
 
         /** The module's shared Postgres — migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres

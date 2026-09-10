@@ -15,7 +15,6 @@ import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceService
-import co.datapipelines.auth.WorkspacesProperties
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -53,7 +52,6 @@ class WorkspacesUiControllerTest {
             userService,
             jwtService,
             AuthProperties(),
-            WorkspacesProperties(),
             mockk<ThemeResolver>(),
         )
 

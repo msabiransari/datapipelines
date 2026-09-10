@@ -933,7 +933,7 @@ class PipelineCompositionE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-composition-key", arrayOf("admin"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-composition-key", arrayOf("read", "execute", "author"))
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres

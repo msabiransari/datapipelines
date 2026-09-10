@@ -156,6 +156,10 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST,
                 PipelineErrorCodes.Auth.KEY_SCOPE_UNAVAILABLE,
                 PipelineErrorCodes.Auth.KEY_WORKSPACE_INACTIVE,
+                // 112 — the workspace domain's two: "the last admin" and "deactivated" are
+                // states of the WORKSPACE, with no entity dimension under it.
+                PipelineErrorCodes.Workspace.LAST_ADMIN,
+                PipelineErrorCodes.Workspace.INACTIVE,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,

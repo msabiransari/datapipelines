@@ -7,6 +7,7 @@ import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -128,13 +129,15 @@ class SampleDataBootstrapE2eTest {
     // ------------------------------------------------------------------ D9
 
     @Test
-    fun `an auto-per-user first login gets a personal workspace holding the imported examples`() {
+    fun `a first login with no membership joins demo, and demo holds the imported examples`() {
+        // D-R11 moved this: the examples are seeded ONCE, into `demo`, when the boot seeder
+        // creates it — not per user, per login. What a first login does now is JOIN that
+        // workspace as a viewer, so the user sees content somebody else's boot imported.
         val email = "demo-${UUID.randomUUID().toString().take(8)}@example.com"
 
         val (userId, workspaceId) = firstLogin(email)
 
-        // The workspace is the personal one provisioning just created...
-        row("SELECT * FROM workspaces WHERE id = '$workspaceId'")["is_personal"] shouldBe true
+        row("SELECT * FROM workspaces WHERE id = '$workspaceId'")["name"] shouldBe "demo"
 
         // ...and it holds the examples, read back through the same tables the REST API reads.
         rows("SELECT name FROM pipelines WHERE workspace_id = '$workspaceId' ORDER BY name")
@@ -142,8 +145,14 @@ class SampleDataBootstrapE2eTest {
         rows("SELECT name FROM templates WHERE workspace_id = '$workspaceId' ORDER BY name")
             .map { it["name"] } shouldContainExactly listOf(EXAMPLE_TEMPLATE)
 
-        // Imported as the new user, into their own workspace — not as the bootstrap admin.
-        scalar<UUID>("SELECT owner_id FROM pipelines WHERE workspace_id = '$workspaceId'") shouldBe userId
+        // Imported as the SYSTEM actor (auth.md §4.5): no human created what the product
+        // ships, and the user who happens to log in first did not author it.
+        scalar<UUID>("SELECT owner_id FROM pipelines WHERE workspace_id = '$workspaceId'") shouldNotBe userId
+
+        // …and the joiner is a VIEWER of it, which is the D-R11 rule in one row.
+        row("SELECT author, promoter, admin FROM workspace_members" +
+            " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'")
+            .let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
 
         // The example pipeline reads the bootstrap-registered readonly datasource: §12 validation
         // resolved that reference at import time, which is the two halves of this slice meeting.
@@ -173,10 +182,10 @@ class SampleDataBootstrapE2eTest {
     }
 
     @Test
-    fun `an examples fixture that does not import fails the provisioning login loudly`() {
-        // Structurally fine, so it passes the startup read — and semantically broken, so it fails
-        // §12 validation at import. The failure must reach the login rather than hand the user a
-        // personal workspace that is quietly missing its examples.
+    fun `an examples fixture that does not import fails the DEMO SEEDING loudly`() {
+        // Structurally fine, so it passes the startup read — and semantically broken, so it
+        // fails §12 validation at import. The failure must reach the boot rather than hand the
+        // deployment a `demo` workspace that is quietly missing its examples.
         val broken =
             writeFile(
                 "broken-examples.json",
@@ -292,7 +301,8 @@ class SampleDataBootstrapE2eTest {
     }
 
     /**
-     * The `auto-per-user` first login, at the two calls `OidcSuccessHandler` makes.
+     * A first login, at the two calls `OidcSuccessHandler` makes. Since D-R11 the second one
+     * joins `demo` when the user has no membership at all.
      * @return the new user's id and the id of the workspace login stamped.
      */
     private fun firstLogin(
@@ -457,7 +467,7 @@ class SampleDataBootstrapE2eTest {
                   "id": "$EXAMPLE_TEMPLATE",
                   "dialect": "H2",
                   "display_name": "Bootstrap example",
-                  "description": "Seeded into every personal workspace",
+                  "description": "Seeded into the demo workspace",
                   "imports": [],
                   "body": "SELECT 1 AS n"
                 }
@@ -526,7 +536,6 @@ class SampleDataBootstrapE2eTest {
                 "datapipelines.auth.oidc.providers[0].display-name" to "Test Google",
                 "datapipelines.auth.base-url" to "http://localhost:8080",
                 "datapipelines.auth.bootstrap-admin-email" to ADMIN_EMAIL,
-                "datapipelines.workspaces.provisioning-mode" to "auto-per-user",
             )
 
         @DynamicPropertySource
