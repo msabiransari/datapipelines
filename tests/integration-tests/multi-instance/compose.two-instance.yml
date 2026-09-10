@@ -55,16 +55,14 @@ x-app-common: &app-common
     DATAPIPELINES_POSTURE: "development"
     DATAPIPELINES_DEMO: ""
 
-    DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: "auto-per-user"
-
     # 036: the crash sweep flips RUNNING rows older than this to ABORTED
     # (pipeline.execution.instance_lost). 1 minute keeps the sweep test under
     # ~2.5 min: 1 min staleness + 60s sweep cadence + margin.
     DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES: "1"
 
     # Inert without the demo profile — mirrored from the base service so the
-    # two app services bind the same configuration surface.
-    DATAPIPELINES_WORKSPACES_OPEN_JOIN: "false"
+    # two app services bind the same configuration surface. PROVISIONING_MODE and
+    # OPEN_JOIN are gone (D-R11) and would refuse startup if set.
     DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: "true"
     DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: ""
     DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: ""

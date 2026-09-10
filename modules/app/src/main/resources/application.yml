@@ -251,12 +251,12 @@ datapipelines:
         base-url: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:}
         server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:}
 
-  # §3.17 — workspace provisioning (design 2026-08-16-workspaces §7). `auto-per-user`
-  # mints a personal workspace on first OIDC login; `self-serve` lets any authenticated
-  # user create workspaces; `closed` is admin-only creation.
+  # §3.17 — workspaces. `provisioning-mode` and `open-join` were REMOVED in RBAC round 1
+  # (D-R11): workspaces are created by super admins, and the workspace that ships is `demo`,
+  # which every user with no membership joins as a viewer on first login. Both keys are
+  # refused BY NAME at startup — so they must not appear here either, defaults included: a
+  # placeholder with a default IS a set key to Spring, and this file would refuse its own boot.
   workspaces:
-    provisioning-mode: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}
-    open-join: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:false}
     member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}
 
   staging:

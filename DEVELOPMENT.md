@@ -157,11 +157,12 @@ DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=dev@example.com
 The provider list itself (names, issuer URIs, display names) is configured in `application.yml` — see [Auth spec §11.1](docs/auth.md#111-oidc-provider-configuration). Only secrets go in env vars.
 
 **Workspaces:** everything you author (pipelines, templates, executions) lives in exactly one
-workspace. The default provisioning mode is `self-serve` — your first login has no workspace
-until one is created (workspace CRUD lands in the next slice); existing installs already have
-every user in the seeded `default` workspace. For the datapipelines.co demo shape, set
-`DATAPIPELINES_WORKSPACES_PROVISIONING_MODE=auto-per-user` and every first login mints a
-personal workspace. See [configuration.md §3.17](docs/configuration.md#317-workspaces) and
+workspace, and what you may DO there is your membership's role, not a global grant
+([auth.md §12](docs/auth.md#12-roles)). Workspaces are created by super admins; the one that
+ships is `demo`, and a user with no membership joins it as a **viewer** on first login. The
+provisioning modes (`auto-per-user`, `self-serve`, `closed`) and `open-join` were removed in
+RBAC round 1 and are refused by name at startup — if your `.env` still sets either, delete the
+line. See [configuration.md §3.17](docs/configuration.md#317-workspaces) and
 [auth.md §5.6](docs/auth.md#56-workspace-resolution--the-dp-workspace-header).
 
 Generate secrets:
