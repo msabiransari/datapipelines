@@ -66,16 +66,21 @@ data class Datasource(
      */
     val isReadonly: Boolean = false,
     /**
-     * The V4 `workspace_id` column (metadata-db §4.10; workspaces design §3/D8): the
-     * workspace this datasource is bound to, or **null = global** (visible to every
-     * workspace — D9's backfill choice, preserving pre-workspaces shared behavior).
-     * Binding is visibility/ownership only; the NAME namespace stays global and flat.
+     * The V23 `owner_workspace_id` column (metadata-db §4.10; RBAC design §4): the workspace
+     * that OWNS this datasource — set when a workspace admin registered it, so it is granted
+     * to that workspace and they cannot grant it elsewhere; **null = an instance datasource**,
+     * registered by a super admin.
+     *
+     * Ownership is not visibility. Visibility is the GRANT (`datasource_workspaces`), and
+     * "global" is gone (D-R7): a datasource that used to be visible everywhere by virtue of a
+     * NULL binding now holds an explicit grant row per workspace, which the V23 backfill
+     * created for every workspace that existed. Null here no longer means "everyone can see
+     * it" — it means "no single workspace owns it". The NAME namespace stays global and flat.
      */
-    val workspaceId: UUID? = null,
+    val ownerWorkspaceId: UUID? = null,
     /**
-     * The bound workspace's NAME (joined at read time), surfaced as the additive `workspace`
-     * payload field (workspaces design §9) — null exactly when [workspaceId] is null, i.e.
-     * global. Derived, never stored on `datasources`.
+     * The owning workspace's NAME (joined at read time), surfaced as the additive `workspace`
+     * payload field — null exactly when [ownerWorkspaceId] is null. Derived, never stored.
      */
     val workspaceName: String? = null,
     /**

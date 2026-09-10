@@ -194,12 +194,29 @@ object ApiErrorCatalog {
             // §13.7 — 403 like the auth family default, wired explicitly so the code owns a
             // row rather than being absorbed by the default (the 025 A2 convention).
             PipelineErrorCodes.Auth.SESSION_REQUIRED to HttpStatus.FORBIDDEN,
+            // RBAC round 1 §13.7. The two 403s are wired explicitly rather than absorbed by an
+            // `auth.` family default, because there is no such default: `auth.role_required`
+            // and `auth.key_issuer_role_lost` are bare `auth.` codes with no dotted family, so
+            // a missing row here would resolve to the catalog's 500 for an unknown code.
+            co.datapipelines.auth.AuthErrorCodes.ROLE_REQUIRED to HttpStatus.FORBIDDEN,
+            co.datapipelines.auth.AuthErrorCodes.KEY_ISSUER_ROLE_LOST to HttpStatus.FORBIDDEN,
+            co.datapipelines.auth.AuthErrorCodes.KEY_WORKSPACE_INACTIVE to HttpStatus.FORBIDDEN,
+            // The credential making the request is fine; the requested scope is not one keys
+            // have (O-2) — a 400, like `auth.api_key.expiry_invalid` and for the same reason.
+            co.datapipelines.auth.AuthErrorCodes.KEY_SCOPE_UNAVAILABLE to HttpStatus.BAD_REQUEST,
+            // D-R7: an ungranted datasource is INVISIBLE, so its refusal is the not-found
+            // status, not the datasource family's default.
+            co.datapipelines.datasources.DatasourceErrorCodes.GRANT_REQUIRED to HttpStatus.NOT_FOUND,
             // §13.12's CRUD codes break the workspace.* family default (403, the resolution
             // codes) — the surfaces slice's rows each carry their own status.
             // SESSION_REQUIRED is 403 like the family default, but wired explicitly so the
             // code has a row here, not an absorption (025 A2).
             PipelineErrorCodes.Workspace.SESSION_REQUIRED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Workspace.NOT_FOUND to HttpStatus.NOT_FOUND,
+            // D-R5: a deactivated workspace is a 404 for the same reason an unreachable one is
+            // — deactivation must not be a signal a caller can read off a status code.
+            PipelineErrorCodes.Workspace.INACTIVE to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Workspace.LAST_ADMIN to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.NAME_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Workspace.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.IN_USE to HttpStatus.CONFLICT,
@@ -285,7 +302,7 @@ object ApiErrorCatalog {
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",
             "result." to "The results for this run aren't available.",
-            "workspace." to "That workspace isn't available to you. Check the name, or ask a workspace owner for access.",
+            "workspace." to "That workspace isn't available to you. Check the name, or ask a workspace admin for access.",
             // 074 — the request family is the one a caller of a published endpoint sees, so the
             // family message is written for THEM (a machine client's developer), not for an
             // author. The publish-time refusals carry their own overrides below.

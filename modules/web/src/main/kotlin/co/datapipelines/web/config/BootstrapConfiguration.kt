@@ -1,7 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.LakeTableRegistryService
-import co.datapipelines.auth.PersonalWorkspaceSeeder
+import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.UserService
 import co.datapipelines.datasources.BootstrapDatasourceRegistrar
@@ -55,10 +55,10 @@ class BootstrapConfiguration {
      * the examples file, so a broken file fails startup here rather than at someone's first login.
      */
     @Bean
-    fun personalWorkspaceSeeder(
+    fun workspaceContentSeeder(
         properties: BootstrapProperties,
         pipelineImportService: PipelineImportService,
         templateImportService: TemplateImportService,
         datasources: DatasourceRegistry,
-    ): PersonalWorkspaceSeeder = ExampleContentSeeder(properties, pipelineImportService, templateImportService, datasources)
+    ): WorkspaceContentSeeder = ExampleContentSeeder(properties, pipelineImportService, templateImportService, datasources)
 }

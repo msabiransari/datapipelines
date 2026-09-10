@@ -163,11 +163,22 @@ class WorkspacesController(
             "created_at" to createdAt.toString(),
         )
 
-    /** §17.1's list-own row — a membership: the workspace's name plus the caller's role and join date. */
+    /**
+     * §17.1's list-own row — a membership: the workspace's name, the caller's capability flags
+     * and the join date.
+     *
+     * `role` is GONE from the wire with the column (D-R1/D-R2). It is replaced by the three
+     * booleans, not by a computed "highest role" string: additive flags are the whole point
+     * ("author who also releases" and "DevOps who only releases" are both one row), and any
+     * single label would have to lie about one of them. `active` carries D-R10's state.
+     */
     private fun WorkspaceMembership.toResponse(): Map<String, Any?> =
         mapOf(
             "name" to workspaceName,
-            "role" to role.wire,
+            "author" to flags.author,
+            "promoter" to flags.promoter,
+            "admin" to flags.admin,
+            "active" to workspaceActive,
             "joined_at" to joinedAt.toString(),
         )
 
@@ -176,7 +187,9 @@ class WorkspacesController(
             "user_id" to userId.toString(),
             "email" to email,
             "display_name" to displayName,
-            "role" to role.wire,
+            "author" to flags.author,
+            "promoter" to flags.promoter,
+            "admin" to flags.admin,
             "joined_at" to joinedAt.toString(),
         )
 }

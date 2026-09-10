@@ -228,7 +228,7 @@ class AdminUsersPartialController(
      * Admin scope PLUS an interactive session, for the operations that mint or rotate a
      * usable credential: `createLocalUser`, `reset-password`, `disable-local`, `unlock`.
      *
-     * [requireAdmin] alone cannot gate these. `AuthenticatedPrincipal.isAdmin` is *defined
+     * [requireAdmin] alone cannot gate these. `AuthenticatedPrincipal.isSuperAdmin` is *defined
      * as* holding [Scope.ADMIN], so a scope test sees a `dpk_` key and a browser session as
      * the same principal — and `ApiKeyFilter` has no path test while `ApiKeyCredentialMatcher`
      * makes key requests CSRF-exempt, so an admin-scoped key reaches these partials with one

@@ -77,6 +77,7 @@ class EndpointKeyService(
 
         val issued =
             apiKeys.issue(
+                issuer = principal,
                 ownerId = principal.userId,
                 name = name,
                 scopes = scopes,

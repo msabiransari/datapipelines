@@ -32,7 +32,7 @@ class DatasourceWorkspaceRules(
 ) : DatasourceUpdateRules {
     /** The D8 member gate: when off, every non-admin write on this surface is refused. */
     override fun requireMemberDatasourcesGate(principal: AuthenticatedPrincipal) {
-        if (!principal.isAdmin && !workspacesProperties.memberDatasourcesEnabled) {
+        if (!principal.isSuperAdmin && !workspacesProperties.memberDatasourcesEnabled) {
             throw workspaceForbidden(
                 "member datasource management is disabled on this server (member-datasources-enabled=false)",
                 extraDetails = mapOf("member_datasources_enabled" to false),
@@ -54,7 +54,7 @@ class DatasourceWorkspaceRules(
         existing: Datasource,
         name: String,
     ) {
-        if (existing.workspaceId == null && !principal.isAdmin) {
+        if (existing.workspaceId == null && !principal.isSuperAdmin) {
             throw workspaceForbidden("mutating the global datasource '$name' requires admin")
         }
     }
@@ -64,7 +64,7 @@ class DatasourceWorkspaceRules(
         principal: AuthenticatedPrincipal,
         globalRequested: Boolean?,
     ) {
-        if (globalRequested != null && !principal.isAdmin) {
+        if (globalRequested != null && !principal.isSuperAdmin) {
             throw workspaceForbidden("the global flag requires admin")
         }
     }
@@ -84,7 +84,7 @@ class DatasourceWorkspaceRules(
             throw workspaceForbidden("a datasource is either global or bound to one workspace, not both")
         }
         if (isGlobal) {
-            if (!principal.isAdmin) throw workspaceForbidden("creating a global datasource requires admin")
+            if (!principal.isSuperAdmin) throw workspaceForbidden("creating a global datasource requires admin")
             return null
         }
         if (workspaceName != null) return resolveAccessibleWorkspace(principal, workspaceName).id

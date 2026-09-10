@@ -707,26 +707,37 @@ object PipelineErrorCodes {
      * pattern as [Auth] vs §13.7.
      */
     object Workspace {
-        /** §13.12 — the principal is not a member of the addressed workspace (or has zero memberships). */
+        /**
+         * §13.12 — the principal has NO active workspace at all (zero memberships). Not the
+         * answer for an ADDRESSED workspace: since D-R5 that is [NOT_FOUND], and this code
+         * survives only where no name was supplied and so none can leak.
+         */
         const val MEMBERSHIP_REQUIRED = "workspace.membership_required"
-
-        /** §13.12 — the provisioning mode forbids this caller creating a workspace. */
-        const val CREATION_FORBIDDEN = "workspace.creation_forbidden"
 
         /** §13.12 — `DP-Workspace` on an API-key request; a key's workspace is pinned at issuance (D3). */
         const val HEADER_FORBIDDEN = "workspace.header_forbidden"
 
         /**
          * §13.12 — an API-key principal reached a session-only workspace action (the UI's
-         * create/join/members/delete/switch). A key cannot hold — let alone mint — a
+         * create/members/delete/switch). A key cannot hold — let alone mint — a
          * `dp_session`, and `switch` mints one from the USER's scopes, so the class of
          * action is refused for the credential outright (025 A2; the 96240ed hotfix
          * carried `workspace.header_forbidden` as the interim code).
          */
         const val SESSION_REQUIRED = "workspace.session_required"
 
-        /** §13.12 — unknown workspace name, for a principal who could otherwise see any workspace (an admin). */
+        /**
+         * §13.12 — the addressed workspace does not exist FOR THIS CALLER (D-R5): unknown name,
+         * non-member, or deactivated, all one answer so nothing about a workspace is probeable.
+         * Also refuses a promotion batch naming a workspace the receiver does not have (O-4).
+         */
         const val NOT_FOUND = "workspace.not_found"
+
+        /** §13.12 — the membership change would leave the workspace with no admin. */
+        const val LAST_ADMIN = "workspace.last_admin"
+
+        /** §13.12 — a super admin addressed a DEACTIVATED workspace on a path that must refuse it. */
+        const val INACTIVE = "workspace.inactive"
 
         /** §13.12 — workspace name fails `[a-z0-9_-]+`, 1–63. */
         const val NAME_INVALID = "workspace.validation.name_invalid"
@@ -736,7 +747,8 @@ object PipelineErrorCodes {
 
         /**
          * §13.12 — delete blocked: workspace still owns non-deleted
-         * pipelines/templates/datasources (or a removal would orphan its owner).
+         * pipelines/templates/datasources. Deactivation (D-R10) needs no such check: it
+         * purges nothing.
          */
         const val IN_USE = "workspace.in_use"
     }

@@ -686,61 +686,82 @@ A key's scopes MUST be a subset of its creator's scopes at issue time — a `rea
 
 ### 7.5 Scopes
 
-Same hierarchical scope system:
+The hierarchical scope system — **the credential axis, and since RBAC round 1 an API-KEY property only**. A session JWT carries no `scopes` claim: what a signed-in person may do is their membership in the active workspace (§12), not a global grant.
 
-| Scope | Includes | Description |
-|---|---|---|
-| `read` | — | Read pipelines, templates, datasources, executions |
-| `execute` | `read` | Execute pipelines; retrieve results |
-| `author` | `execute`, `read` | Create/modify pipelines and templates |
-| `admin` | all | Manage datasources, users, system config |
+| Scope | Includes | Description | Available to keys? |
+|---|---|---|---|
+| `read` | — | Read pipelines, templates, datasources, executions | yes |
+| `execute` | `read` | Execute pipelines; retrieve results | yes |
+| `author` | `execute`, `read` | Create/modify pipelines and templates | yes |
+| `admin` | all | Manage datasources, users, system config | **no** |
 
 Default scope on key creation: `read`. Higher scopes require explicit selection.
 
-### 7.6 Scope ↔ Operation Matrix (authoritative)
+**`admin` left the key wire in round 1** (D-R12, O-2). It was the only scope that ever bought a key an INSTANCE verb, and instance verbs — creating workspaces, managing members, releasing, promoting — are human. Requesting it at issuance is `auth.key_scope_unavailable` (400), and a key minted before the rule is **capped at validation**, not trusted: the migration strips the value from `api_keys.scopes`, and the validation path filters it again, so neither the row nor the code alone is what the rule rests on.
 
-This matrix is the ONLY place operation-level scope requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert scopes locally. Scopes are hierarchical (§7.5) — the listed scope is the minimum.
+A key's scope is a CEILING, never a grant on its own: every request also checks the key ISSUER's current role in the pinned workspace (§7.4), so a key can do at most what its issuer can do *now*.
+
+### 7.6 Operation Matrix — two axes (authoritative)
+
+This matrix is the ONLY place operation-level requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally.
+
+Every operation carries **two** minimums, and both must be met ([§12 Roles](#12-roles)):
+
+- **Min scope** — what the CREDENTIAL must carry. Hierarchical (§7.5), and since RBAC round 1 it applies to **API keys only**: a session carries no scopes at all, because capability moved onto the membership.
+- **Min role** — what the caller must hold in the ACTIVE WORKSPACE. For a session that is its own membership row; for an API key it is **the key issuer's CURRENT membership**, re-read on every request (§7.4), so a demoted issuer's key stops working inside one validation-cache TTL.
+
+The two axes are not the same ordering and neither is redundant. `execute` is the second SCOPE but the **viewer-level** ROLE (D-R3, "viewers execute"), so a `read`-scoped key may not execute while a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but `view` role (the design's §1 table grants a viewer capped read-only SELECT).
+
+`ScopeMatrix.allowed(principal, operation, workspace)` answers both axes and is the only function `ScopeInterceptor` and the MCP dispatcher call.
 
 **REST endpoints:**
 
-| Operation | Endpoints | Min scope |
-|---|---|---|
-| Read pipelines / templates / datasources (metadata) / executions | all `GET` under `/api/v1/pipelines`, `/api/v1/templates`, `/api/v1/datasources`, `/api/v1/executions` (incl. `/export`, `/versions`) | `read` |
-| Retrieve execution results (cursor) | `GET /api/v1/executions/{id}/result` (+ ownership check) | `read` |
-| Execute a pipeline | `POST /api/v1/pipelines/{id}/execute` | `execute` |
-| Cancel an execution | `DELETE /api/v1/executions/{id}` (+ ownership check; `admin` may cancel any) | `execute` |
-| Create / update / delete pipelines & templates, import | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import` | `author` |
-| Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` |
-| Introspect a datasource schema | `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{t}/columns` | `author` |
-| Create / update / delete workspace-bound datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` (workspaces D8: author is the floor; the `member-datasources-enabled` gate, membership and binding checks are enforced in-handler) | `author` |
-| Create / update / delete global datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for `global` datasources and the `global`/`readonly`-on-global flag writes (workspaces D8) | `admin` |
-| Manage own API keys | `/api/v1/auth/api-keys` (key scopes ⊆ own scopes, §7.4) | any authenticated |
-| Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | any authenticated |
-| Set own theme preference | `PATCH /partials/profile/theme` (writes the caller's own user row only — no payload-chosen target) | any authenticated |
-| User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
-| List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` |
-| Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | `author` |
-| Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
-| Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
-| Serve a published endpoint | `GET /api/x/**` ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses the floor because it carries no scopes at all | `read` |
-| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler — binding hands a credential authority over a subtree | `author` |
-| Register / import / unregister lake tables of a datasource (the dp-lake catalog) | `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{ns}/{t}` (089 §A; mutating a GLOBAL datasource's registry is admin-only via workspaces D8, enforced in the shared service — the listing `GET /api/v1/datasources/{name}/lake-tables` is covered by the metadata-read row above) | `author` |
+| Operation | Endpoints | Min scope | Min role |
+|---|---|---|---|
+| Read pipelines / templates / datasources (metadata) / executions | all `GET` under `/api/v1/pipelines`, `/api/v1/templates`, `/api/v1/datasources`, `/api/v1/executions` (incl. `/export`, `/versions`) | `read` | `view` |
+| Retrieve execution results (cursor) | `GET /api/v1/executions/{id}/result` (+ ownership check) | `read` | `view` |
+| Execute a pipeline | `POST /api/v1/pipelines/{id}/execute` | `execute` | `execute` |
+| Cancel an execution | `DELETE /api/v1/executions/{id}` (+ ownership check; a super admin may cancel any) | `execute` | `execute` |
+| Create / update / delete pipelines & templates, import | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import` | `author` | `author` |
+| Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` | `ws_admin` |
+| Introspect a datasource schema | `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{t}/columns` | `author` | `author` |
+| Register / update / delete a datasource bound to THIS workspace | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for a workspace-owned datasource (RBAC design §4; `member-datasources-enabled` gates whether workspace admins may do it at all) | `author` | `ws_admin` |
+| Register / update / delete an INSTANCE datasource | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for a datasource no workspace owns | `admin` | `super_admin` |
+| Manage own API keys | `/api/v1/auth/api-keys` (issuance additionally requires `author` in the pinned workspace and scope ≤ the issuer's capability, §7.4) | `read` | `view` |
+| Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | `read` | `view` |
+| Set own theme preference | `PATCH /partials/profile/theme` (writes the caller's own user row only — no payload-chosen target) | `read` | `view` |
+| User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke super admin) | `admin` | `super_admin` |
+| List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` | `view` |
+| Create a workspace | `POST /api/v1/workspaces` — workspaces are created by super admins (D-R11); the provisioning modes were retired with round 1 | `admin` | `super_admin` |
+| Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `DELETE /api/v1/workspaces/{name}` | `author` | `ws_admin` |
+| Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | `read` | `view` |
+| Serve a published endpoint | `GET /api/x/**` ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses both axes because it carries neither scopes nor a membership | `read` | `view` |
+| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler | `author` | `author` |
+| Register / import / unregister lake tables of a datasource (the dp-lake catalog) | `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{ns}/{t}` | `author` | `author` |
+| Release a version | `POST /api/v1/pipelines/{id}/release`, `POST /api/v1/templates/release` — withheld from authors on purpose: the promoter exists so "can edit" and "can release" are two answers (D-R2) | `author` | `promote` |
+| Switch the served version | `POST /api/v1/pipelines/{id}/current`, `POST /api/v1/templates/current` — the rollback lever; author, promoter and workspace admin all hold it (O-1) | `author` | `switch` |
+| Promote to the higher environment | `POST /promotion/promote` ([Versioning §10](versioning.md)). The RECEIVING side is not this row — a promotion arrives on the server-key route family (§7.7) | `author` | `promote` |
+| Create / deactivate / reactivate a workspace | `POST /api/v1/workspaces/{name}/deactivate`, `.../reactivate` (D-R10 — deactivate, never delete) | `admin` | `super_admin` |
+| Add / remove members, set their flags | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}/members/{user_id}` — the last admin cannot be removed or demoted (`workspace.last_admin`) | `author` | `ws_admin` |
+| Grant / revoke a datasource to a workspace | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | `admin` | `super_admin` |
 
 **MCP tools** (all 34 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
-| Tool | Min scope |
-|---|---|
-| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats` | `read` |
-| `pipelines_execute`, `executions_cancel` | `execute` |
-| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render`, `templates_purge_draft` | `author` |
-| `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `pipelines_execute_node`, `sql_probe` | `author` |
-| `endpoints_list`, `endpoints_get` | `read` |
-| `endpoints_create`, `endpoints_delete` | `author` |
-| `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` |
+| Tool | Min scope | Min role |
+|---|---|---|
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats` | `read` | `view` |
+| `endpoints_list`, `endpoints_get` | `read` | `view` |
+| `pipelines_execute`, `executions_cancel` | `execute` | `execute` |
+| `pipelines_execute_node` | `author` | `execute` |
+| `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe` | `author` | `view` |
+| `datasources_test` | `author` | `ws_admin` |
+| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render`, `templates_purge_draft` | `author` | `author` |
+| `endpoints_create`, `endpoints_delete` | `author` | `author` |
+| `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` | `author` |
 
-(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. 068's `datasources_create` sat on the `author` row with that hazard written into its own description; 094 decided the hazard is not documentable away and removed the tool (31 → 30; 107's four probes take the surface to 34). 32 of the 34 tools operate inside the API key's pinned workspace (design §9); `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
+(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 32 of the 34 tools operate inside the API key's pinned workspace; `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
 
-**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
+**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes.
 
 ### 7.7 Key kinds and published-endpoint bindings
 
@@ -1006,13 +1027,17 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.api_key.missing` | 401 | No `DP-API-Key` header, no Bearer `dpk_` token, no `dp_session` cookie |
 | `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or owner deactivated |
 | `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
-| `auth.scope.insufficient` | 403 | Principal lacks required scope (§7.6 matrix) |
+| `auth.scope.insufficient` | 403 | Principal lacks the required SCOPE — the credential axis of the §7.6 matrix. Since RBAC round 1 only an API key can fail this way: a session carries no scopes (§12) |
+| `auth.role_required` | 403 | Principal lacks the required CAPABILITY in the active workspace — the role axis of the §7.6 matrix (§12). `details.required` / `details.held` |
+| `auth.key_issuer_role_lost` | 403 | The key was valid; its issuer no longer holds the capability (§7.4). Retrying with this key will never work — a new key from somebody who still holds the role is the fix |
+| `auth.key_scope_unavailable` | 400 | Issuance requested `admin`, which keys may no longer hold (§7.5) |
+| `auth.key_workspace_inactive` | 403 | The key's pinned workspace is deactivated (§12); reactivating it restores the key |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
 | `auth.promotion.key_invalid` | 401 | The promotion peer's pre-shared server key was absent, malformed, or did not match — and the same code when the receiver has no key configured, so promotion-disabled is indistinguishable from wrong-key ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
 Rate limiting uses the single system-wide `rate_limit.exceeded` code ([Pipeline Contract §13.11](pipeline-contract.md#1311-rate-limiting--idempotency)) — there is no separate auth-layer rate-limit code. The login damper is **in-process** (per instance, no Redis), so it never raises the companion `rate_limit.unavailable`: that code belongs to the shared per-user limiter, whose counters live in Redis and which fails closed when they cannot be read ([REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). The login rate limit is `datapipelines.auth.rate-limit.login-per-minute` ([Configuration §3.4](configuration.md#34-auth)), and **the address it buckets by — like every audit `source_ip` — is resolved through `datapipelines.auth.trusted-proxies`** ([Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production)): behind a load balancer, without that list every request shares the LB's address and the per-IP limiter becomes a global one. Empty (the default) means `X-Forwarded-For` is ignored entirely and the direct peer is the client, so a bare deployment is unaffected.
 
-Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace.membership_required` (403), `workspace.header_forbidden` (400), `workspace.creation_forbidden` (403) — catalogued in [Pipeline Contract §13.12](pipeline-contract.md#1312-workspace-resolution).
+Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued in [Pipeline Contract §13.12](pipeline-contract.md#1312-workspace-resolution). **The 404 rule governs them**: an addressed workspace the caller cannot reach — unknown, non-member, or deactivated — is one answer, `workspace.not_found` (404), never a 403. `workspace.membership_required` (403) survives only where NO workspace was addressed (a principal with zero memberships), because there is no name there whose existence a 403 could leak. `workspace.creation_forbidden` was retired with the provisioning modes (§4.2).
 
 ---
 

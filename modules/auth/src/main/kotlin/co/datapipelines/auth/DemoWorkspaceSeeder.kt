@@ -24,6 +24,8 @@ import java.util.UUID
 class DemoWorkspaceSeeder(
     private val workspaceRepository: WorkspaceRepository,
     private val auditLogger: AuditLogger,
+    private val userService: UserService,
+    private val contentSeeder: WorkspaceContentSeeder? = null,
 ) {
     private val log = LoggerFactory.getLogger(DemoWorkspaceSeeder::class.java)
 
@@ -79,9 +81,15 @@ class DemoWorkspaceSeeder(
      */
     private fun create(): Workspace? =
         try {
-            workspaceRepository.createSystemWorkspace(DEMO_WORKSPACE, DEMO_DISPLAY_NAME).also {
+            workspaceRepository.createSystemWorkspace(DEMO_WORKSPACE, DEMO_DISPLAY_NAME).also { created ->
                 auditLogger.log(event = "auth.workspace.created", details = mapOf("workspace" to DEMO_WORKSPACE, "actor" to "system"))
                 log.info("Seeded the '{}' workspace", DEMO_WORKSPACE)
+                // Only on CREATION, and deliberately not guarded: a demo workspace that
+                // silently lacks the examples the deployment configured is indistinguishable
+                // from one that was seeded, so a seeding failure must fail startup loudly
+                // (the [WorkspaceContentSeeder] contract). The actor is the system account
+                // (auth.md §4.5) — no human created what the product ships.
+                contentSeeder?.seed(created.id, userService.systemActor().id)
             }
         } catch (_: org.springframework.dao.DuplicateKeyException) {
             // Two replicas racing a fresh database: the loser re-reads the winner's row, the

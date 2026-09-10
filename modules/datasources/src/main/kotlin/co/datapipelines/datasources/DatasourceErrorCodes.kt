@@ -81,6 +81,21 @@ object DatasourceErrorCodes {
      */
     const val NOT_FOUND = "datasource.not_found"
 
+    /**
+     * 404 — the datasource exists on the instance but is NOT GRANTED to the caller's workspace
+     * (D-R7). It is a 404 and not a 403 because D-R5's rule has no exception for datasources:
+     * an ungranted datasource is INVISIBLE, and telling a caller "this exists, you may not see
+     * it" turns the flat, global datasource NAMESPACE into an enumeration oracle — every name
+     * on the instance probeable one request at a time.
+     *
+     * The code exists separately from [NOT_FOUND] for the AGENT's benefit, not the caller's:
+     * the two are indistinguishable on the wire in status and body shape, and the skill tells
+     * an agent the same thing for both — `datasources_list` is the truth, do not guess names.
+     * Where it is emitted, it names in the audit trail which of the two happened, which is the
+     * half an operator needs.
+     */
+    const val GRANT_REQUIRED = "datasource.grant_required"
+
     /** The JDBC driver class for `dialect` is not on the classpath (§10.3) — a packaging state. */
     const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 

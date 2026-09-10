@@ -121,7 +121,7 @@ class ApiConsoleController(
         // 091 — the form's options. Rendered from the SAME source the partial validates against
         // (`ApiKeyForm`), so a select can never offer a value the server refuses. Order is the
         // owner's ruling: Kind → Scope → Name → Expiry → Bindings, scope and bindings conditional.
-        model.addAttribute("kindChoices", ApiKeyForm.kindChoices(principal.isAdmin))
+        model.addAttribute("kindChoices", ApiKeyForm.kindChoices(principal.isSuperAdmin))
         model.addAttribute("scopeChoices", ApiKeyForm.scopeChoices(principal.scopes))
         model.addAttribute("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
         model.addAttribute("expiryCustomWire", ApiKeyForm.CUSTOM)

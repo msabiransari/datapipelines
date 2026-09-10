@@ -216,7 +216,7 @@ class DatasourcePartialController(
         model.addAttribute("credentialKinds", CredentialKind.entries.map { it.wire })
         model.addAttribute("poolFields", DatasourcePoolForm.fields(datasource))
         model.addAttribute("poolReadonly", datasource.isReadonly)
-        model.addAttribute("isAdmin", principal()?.isAdmin == true)
+        model.addAttribute("isAdmin", principal()?.isSuperAdmin == true)
         return "partials/datasource-edit"
     }
 
@@ -311,7 +311,7 @@ class DatasourcePartialController(
         // confirm button whose POST would refuse. Same rule as update (admin for global).
         val forbidden =
             when {
-                datasource.workspaceId == null && !principal.isAdmin -> {
+                datasource.workspaceId == null && !principal.isSuperAdmin -> {
                     "Deleting the global datasource '$name' requires admin."
                 }
 
