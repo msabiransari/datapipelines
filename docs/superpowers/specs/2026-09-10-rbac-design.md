@@ -56,7 +56,8 @@ the row; the migration and the UI keep the invariant `admin → author`.
 | Execute pipelines (any version), read results, cancel OWN runs | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `sql_probe`, `datasources_preview_rows` (row data) | ✓ (read-only SELECT, capped) | ✓ | ✓ | ✓ | ✓ |
 | Create/edit drafts (pipelines, templates), register lake tables, publish/unpublish endpoints over released versions, bind keys to endpoint paths | | ✓ | | ✓ | ✓ |
-| discard / restore / switch / purge (versions and entities) | | ✓ | | ✓ | ✓ |
+| discard / restore / purge (versions and entities) | | ✓ | | ✓ | ✓ |
+| **switch** the served version (the rollback lever, O-1) | | ✓ | ✓ | ✓ | ✓ |
 | **release** | | | ✓ | ✓ | ✓ |
 | **promote** to the higher environment | | | ✓ | ✓ | ✓ |
 | Issue/revoke keys (scope ≤ own capability); revoke any key in the workspace | | ✓ (own) | | ✓ (all) | ✓ |
