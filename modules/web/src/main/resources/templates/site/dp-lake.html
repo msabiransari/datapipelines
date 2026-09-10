@@ -132,8 +132,9 @@
       <p>
         The seeded showcase pipeline <code>nyc/mobility/taxi_vs_rideshare</code> asks one question
         across four engines: rideshare zone-days from the lake, yellow-taxi trips from Postgres,
-        the borough lookup from SQLite and the day's rainfall from MySQL — taxi share versus
-        rideshare share, dry days against rainy ones. It ships with
+        the borough lookup from SQLite and the day's rainfall from MySQL — the per-mode rain
+        lift, rainy days against dry ones, for yellow taxi and for rideshare in each borough (the
+        taxi side is a hash sample, so within-mode ratios are what stay honest). It ships with
         <code>./app.sh --start --demo nyc,trade,lake</code>, which needs egress to S3 (or a mirror
         you configure) whenever a lake query runs. The demo's registry is seeded from the published
         manifest and holds four tables; the Iceberg copy is published but not registered.
