@@ -26,12 +26,14 @@ class WorkspaceSwitcherBrowserTest : BrowserSuite() {
         createWorkspace(first)
         createWorkspace(second)
 
-        // Both are options in the header's switcher; the ACTIVE default is the first
-        // membership (workspaceForLogin's fallback), not the latest creation.
+        // Both are options in the header's switcher; the ACTIVE default is still the FIRST
+        // membership (workspaceForLogin's fallback), not the latest creation — and since
+        // D-R11 that is the `default` workspace the fixture grants, not either new one.
+        // Creating a workspace does not switch you into it; that is a round-2 (113) question.
         page.navigate("$baseUrl/workspaces")
         page.waitForSelector("form[action*='/workspace/switch'] select")
         val switcher = page.locator("form[action*='/workspace/switch'] select")
-        switcher.inputValue() shouldBe first
+        switcher.inputValue() shouldBe "default"
         // The form's source carries no CSRF field: Spring Security's request-data
         // processor injects the hidden `_csrf` input into every `th:action` form at
         // render time (CookieCsrfTokenRepository is active — SecurityConfig). Assert the

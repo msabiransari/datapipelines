@@ -172,6 +172,21 @@ abstract class BrowserSuite {
                         ON CONFLICT (email) DO NOTHING
                         """.trimIndent(),
                     )
+                    // D-R11: a user with NO membership joins `demo` as a VIEWER on first
+                    // login, and `demo` then becomes their first membership — the workspace
+                    // every suite would land in, holding the shipped example content. That is
+                    // the product's behaviour for a brand-new person and exactly wrong for
+                    // these fixtures, which mean "somebody who already works here". So the
+                    // membership is seeded, as a real deployment's super admin would have
+                    // granted it: workspace ADMIN of `default`.
+                    statement.execute(
+                        """
+                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
+                        SELECT 'defa0000-0000-0000-0000-000000000001', id, TRUE, FALSE, TRUE
+                          FROM users WHERE email = '$email'
+                        ON CONFLICT (workspace_id, user_id) DO NOTHING
+                        """.trimIndent(),
+                    )
                 }
             }
         return LocalUser(email, password, generatedPassword("chosen"))
