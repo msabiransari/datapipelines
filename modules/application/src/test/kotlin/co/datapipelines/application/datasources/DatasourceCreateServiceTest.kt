@@ -43,6 +43,14 @@ class DatasourceCreateServiceTest {
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
+
+    /**
+     * The grant repository (D-R7). Relaxed rather than strict, and asserted on rather than
+     * verified-absent, because the contract is "you MUST be called": a strict mock would be
+     * green precisely when the registration forgot its grant, and the datasource would then be
+     * registered into a workspace that cannot see it.
+     */
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
     private val otherWorkspaceId = UUID.randomUUID()
 
     private val principal =
@@ -73,7 +81,7 @@ class DatasourceCreateServiceTest {
     private fun service(exists: Boolean = false): DatasourceCreateService {
         every { registry.exists(any()) } returns exists
         every { registry.save(any(), userId) } answers { firstArg<Datasource>().also { saved += it } }
-        return DatasourceCreateService(registry, binding)
+        return DatasourceCreateService(registry, binding, grants)
     }
 
     private fun body(extra: String = ""): JsonNode =
@@ -97,7 +105,7 @@ class DatasourceCreateServiceTest {
             { created.displayName shouldBe "pg_prod" },
             { created.description.shouldBeNull() },
             { created.isReadonly shouldBe false },
-            { created.workspaceId shouldBe workspaceId },
+            { created.ownerWorkspaceId shouldBe workspaceId },
             { created.introspectionIncludeSchemas.shouldBeEmpty() },
             { bindingCalls.single() shouldBe Triple(null, null, workspaceId) },
         )
@@ -136,7 +144,7 @@ class DatasourceCreateServiceTest {
         val created = service().create(body(""","global":true"""), principal)
 
         assertAll(
-            { created.workspaceId.shouldBeNull() },
+            { created.ownerWorkspaceId.shouldBeNull() },
             { bindingCalls.single() shouldBe Triple(true, null, null) },
         )
     }
@@ -146,7 +154,7 @@ class DatasourceCreateServiceTest {
         val created = service().create(body(""","workspace":" team-etl """"), principal)
 
         assertAll(
-            { created.workspaceId shouldBe otherWorkspaceId },
+            { created.ownerWorkspaceId shouldBe otherWorkspaceId },
             // Trimmed on the way through, so " team-etl " and "team-etl" cannot resolve differently.
             { bindingCalls.single() shouldBe Triple(null, "team-etl", otherWorkspaceId) },
         )
@@ -167,9 +175,11 @@ class DatasourceCreateServiceTest {
     fun `a refusal from the D8 port propagates unchanged, and nothing is written`() {
         every { registry.exists(any()) } returns false
         val refusing =
-            DatasourceCreateService(registry) { _, _, _ ->
-                throw DatapipelinesException(PipelineErrorCodes.Datasource.WORKSPACE_FORBIDDEN, "nope")
-            }
+            DatasourceCreateService(
+                registry,
+                { _, _, _ -> throw DatapipelinesException(PipelineErrorCodes.Datasource.WORKSPACE_FORBIDDEN, "nope") },
+                grants,
+            )
 
         val thrown = shouldThrow<DatapipelinesException> { refusing.create(body(), principal) }
 

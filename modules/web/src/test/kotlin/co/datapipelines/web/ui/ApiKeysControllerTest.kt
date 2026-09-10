@@ -200,7 +200,7 @@ class ApiKeysPartialControllerTest {
         authenticate()
         val expires = slot<Instant>()
         every {
-            apiKeyService.issue(any(), any(), any(), any(), any(), capture(expires), any())
+            apiKeyService.issue(any(), any(), any(), any(), any(), any(), capture(expires), any())
         } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 
@@ -224,7 +224,7 @@ class ApiKeysPartialControllerTest {
         authenticate()
         val scopes = slot<Set<Scope>>()
         every {
-            apiKeyService.issue(any(), any(), capture(scopes), any(), any(), any(), ApiKeyKind.SERVER)
+            apiKeyService.issue(any(), any(), any(), capture(scopes), any(), any(), any(), ApiKeyKind.SERVER)
         } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 
@@ -253,7 +253,7 @@ class ApiKeysPartialControllerTest {
     @Test
     fun `bindings arrive as repeated checkboxes and reach the service as paths`() {
         authenticate()
-        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 
         partialController.create("endpoint", null, "serve", null, null, listOf("/nyc", "/lending"), ExtendedModelMap())

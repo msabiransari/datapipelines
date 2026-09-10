@@ -168,7 +168,7 @@ class ConfigValidatorTest {
     @Test
     fun `open-join true under closed provisioning is refused, and the other three combinations are clean`() {
         val refused =
-            ConfigValidator.validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "closed"))
+            ConfigValidator.validate(validSnapshot().copy(workspacesOpenJoinSet = true, workspacesProvisioningMode = "closed"))
 
         refused.violations.shouldHaveSize(1)
         refused.violations.single().shouldContain("datapipelines.workspaces.open-join")
@@ -176,20 +176,20 @@ class ConfigValidatorTest {
         refused.violations.single().shouldContain("closed")
 
         ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "self-serve"))
+            .validate(validSnapshot().copy(workspacesOpenJoinSet = true, workspacesProvisioningMode = "self-serve"))
             .violations
             .shouldBeEmpty()
         ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "auto-per-user"))
+            .validate(validSnapshot().copy(workspacesOpenJoinSet = true, workspacesProvisioningMode = "auto-per-user"))
             .violations
             .shouldBeEmpty()
         ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = false, workspacesProvisioningMode = "closed"))
+            .validate(validSnapshot().copy(workspacesOpenJoinSet = false, workspacesProvisioningMode = "closed"))
             .violations
             .shouldBeEmpty()
         // An unset mode is the shipped default (self-serve) — open-join stays meaningful.
         ConfigValidator
-            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = null))
+            .validate(validSnapshot().copy(workspacesOpenJoinSet = true, workspacesProvisioningMode = null))
             .violations
             .shouldBeEmpty()
     }

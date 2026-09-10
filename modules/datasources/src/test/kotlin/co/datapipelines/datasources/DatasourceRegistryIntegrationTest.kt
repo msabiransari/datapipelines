@@ -174,7 +174,7 @@ class DatasourceRegistryIntegrationTest {
     fun `getVisibleLive sees a row-level flip immediately while getVisible serves the cache (044 F4)`() {
         val registry = registry()
         val workspace = insertWorkspace("live_ws")
-        registry.save(Fixtures.h2(name = "bound_live", secret = "pw").copy(workspaceId = workspace), owner)
+        registry.save(Fixtures.h2(name = "bound_live", secret = "pw").copy(ownerWorkspaceId = workspace), owner)
         // Warm the visibility cache with the writable entry — what a save validated against.
         registry.getVisible("bound_live", workspace).shouldNotBeNull().isReadonly shouldBe false
 

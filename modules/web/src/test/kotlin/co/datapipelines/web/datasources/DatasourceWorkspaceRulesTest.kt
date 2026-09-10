@@ -47,7 +47,7 @@ class DatasourceWorkspaceRulesTest {
                 dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
                 jdbcUrl = "jdbc:postgresql://db:5432/app",
                 username = "app",
-                workspaceId = activeWorkspace.id,
+                ownerWorkspaceId = activeWorkspace.id,
             )
 
     @Test
@@ -74,7 +74,7 @@ class DatasourceWorkspaceRulesTest {
 
     @Test
     fun `absent flags keep the stored binding`() {
-        rules.resolveUpdateBinding(principal, existing, global = null, workspaceName = null) shouldBe existing.workspaceId
+        rules.resolveUpdateBinding(principal, existing, global = null, workspaceName = null) shouldBe existing.ownerWorkspaceId
     }
 
     @Test

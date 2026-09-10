@@ -13,7 +13,7 @@ import co.datapipelines.auth.WorkspaceInUseException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
-import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspacesProperties
 import io.kotest.matchers.shouldBe
@@ -77,12 +77,12 @@ class WorkspacesUiControllerTest {
     }
 
     private fun memberRow(email: String = "bob@acme.test") =
-        WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", WorkspaceRole.MEMBER, Instant.EPOCH)
+        WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", MembershipFlags(author = true), Instant.EPOCH)
 
     @Test
     fun `workspaces page renders the design-system tables and the active badge`() {
         val membership =
-            WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.OWNER, Instant.EPOCH)
+            WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH)
         val html =
             engine().process(
                 "workspaces/index",

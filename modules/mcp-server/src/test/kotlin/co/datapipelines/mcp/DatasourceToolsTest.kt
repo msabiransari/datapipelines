@@ -169,7 +169,7 @@ class DatasourceToolsTest {
         // datasource, and an existence oracle. Through a REAL visibility lookup (never a
         // stubbed testConnection) the bound row must resolve as not-found BEFORE any probe.
         val boundElsewhere =
-            McpFixtures.datasource().copy(workspaceId = UUID.randomUUID(), workspaceName = "other")
+            McpFixtures.datasource().copy(ownerWorkspaceId = UUID.randomUUID(), workspaceName = "other")
         val registry = FakeDatasourceRegistry(listOf(boundElsewhere))
 
         shouldThrow<DatapipelinesException> {
@@ -186,7 +186,7 @@ class DatasourceToolsTest {
                     McpFixtures.datasource(name = "global-pg"),
                     McpFixtures
                         .datasource(name = "own-pg")
-                        .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
+                        .copy(ownerWorkspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
                 ),
             )
 

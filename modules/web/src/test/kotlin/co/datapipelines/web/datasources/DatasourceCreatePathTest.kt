@@ -43,6 +43,9 @@ import java.util.UUID
  * implementation of registration to fall back on — every case below goes red.
  */
 class DatasourceCreatePathTest {
+    /** D-R7: registration grants the datasource to its own workspace in the same breath. */
+    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+
     private val registry = mockk<DatasourceRegistry>()
     private val workspaceService = mockk<WorkspaceService>(relaxed = true)
     private val mapper = JsonMapper.builder().build()
@@ -59,7 +62,7 @@ class DatasourceCreatePathTest {
         return DatasourcesController(
             registry,
             rules,
-            DatasourceCreateService(registry, rules::resolveCreateBinding),
+            DatasourceCreateService(registry, rules::resolveCreateBinding, grants),
             DatasourceUpdateService(registry, rules),
         )
     }
@@ -106,7 +109,7 @@ class DatasourceCreatePathTest {
         saved shouldHaveSize 1
         val rest = saved.single()
         assertAll(
-            { rest.workspaceId shouldBe workspaceId },
+            { rest.ownerWorkspaceId shouldBe workspaceId },
             { rest.isReadonly shouldBe true },
             // §3.3 allowlist normalization happens on the way in, once, at the save boundary.
             { rest.introspectionIncludeSchemas shouldBe listOf("apex_reporting") },
@@ -133,7 +136,7 @@ class DatasourceCreatePathTest {
 
         controller().create(restBody(""","global":true"""))
 
-        saved.map { it.workspaceId } shouldBe listOf(null)
+        saved.map { it.ownerWorkspaceId } shouldBe listOf(null)
     }
 
     @Test

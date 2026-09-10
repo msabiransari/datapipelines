@@ -102,7 +102,7 @@ class DatasourcePartialControllerTest {
      * the D8 rules read, so a fixture that sets only the name is a GLOBAL row wearing a label,
      * and every bound-row test written against it would silently exercise the global branch.
      */
-    private fun bound(name: String) = ds(name, workspaceName = "acme").copy(workspaceId = workspaceId)
+    private fun bound(name: String) = ds(name, workspaceName = "acme").copy(ownerWorkspaceId = workspaceId)
 
     // ------------------------------------------------------------ list
 
@@ -220,7 +220,7 @@ class DatasourcePartialControllerTest {
                     it.name shouldBe "warehouse"
                     it.username shouldBe "u"
                     it.isReadonly shouldBe true
-                    it.workspaceId shouldBe workspaceId
+                    it.ownerWorkspaceId shouldBe workspaceId
                 },
                 userId,
             )

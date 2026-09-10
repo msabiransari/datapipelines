@@ -55,7 +55,7 @@ class DatasourceUpdateServiceTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://db:5432/app",
             username = "readonly",
-            workspaceId = workspaceId,
+            ownerWorkspaceId = workspaceId,
             workspaceName = "acme",
         )
 
@@ -88,7 +88,7 @@ class DatasourceUpdateServiceTest {
             return when {
                 global == true -> null
                 workspaceName != null -> otherWorkspaceId
-                else -> existing.workspaceId
+                else -> existing.ownerWorkspaceId
             }
         }
 
@@ -127,7 +127,7 @@ class DatasourceUpdateServiceTest {
             { result.jdbcUrl shouldBe "jdbc:postgresql://db:5432/other" },
             { result.isReadonly shouldBe true },
             // Absent flags keep the stored binding.
-            { result.workspaceId shouldBe workspaceId },
+            { result.ownerWorkspaceId shouldBe workspaceId },
         )
     }
 
@@ -136,10 +136,10 @@ class DatasourceUpdateServiceTest {
         val result =
             service().update("pg_prod", existing, principal, globalRequested = true, workspaceName = null) {
                 // A surface that tried to bind around the rules — the service replaces it.
-                existing.copy(workspaceId = otherWorkspaceId)
+                existing.copy(ownerWorkspaceId = otherWorkspaceId)
             }
 
-        result.workspaceId shouldBe null
+        result.ownerWorkspaceId shouldBe null
     }
 
     @Test
@@ -147,7 +147,7 @@ class DatasourceUpdateServiceTest {
         val result =
             service().update("pg_prod", existing, principal, globalRequested = false, workspaceName = "other") { existing }
 
-        result.workspaceId shouldBe otherWorkspaceId
+        result.ownerWorkspaceId shouldBe otherWorkspaceId
     }
 
     @Test

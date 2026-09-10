@@ -10,7 +10,7 @@ import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceNameInvalidException
 import co.datapipelines.auth.WorkspaceNotFoundException
-import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException
@@ -124,7 +124,7 @@ class WorkspacesControllerTest {
     fun `the member listing projects identity, role and join date`() {
         authenticate()
         every { service.members(any(), "acme") } returns
-            listOf(WorkspaceMemberRow(userId, "alice@company.com", "Alice", WorkspaceRole.OWNER, Instant.EPOCH))
+            listOf(WorkspaceMemberRow(userId, "alice@company.com", "Alice", MembershipFlags(author = true, admin = true), Instant.EPOCH))
 
         val row = controller.members("acme").data.single()
 
@@ -136,7 +136,7 @@ class WorkspacesControllerTest {
     fun `list-own rows carry the caller's role`() {
         authenticate()
         every { service.listOwn(any()) } returns
-            listOf(co.datapipelines.auth.WorkspaceMembership(ws.id, "acme", WorkspaceRole.OWNER, Instant.EPOCH))
+            listOf(co.datapipelines.auth.WorkspaceMembership(ws.id, "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH))
 
         controller.list().data.single()["role"] shouldBe "owner"
     }

@@ -163,7 +163,6 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.TypeMapping.SQL_VARIANT,
                 PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED,
                 PipelineErrorCodes.Workspace.MEMBERSHIP_REQUIRED,
-                PipelineErrorCodes.Workspace.CREATION_FORBIDDEN,
                 PipelineErrorCodes.Workspace.HEADER_FORBIDDEN,
                 PipelineErrorCodes.Workspace.SESSION_REQUIRED,
                 PipelineErrorCodes.Workspace.NOT_FOUND,

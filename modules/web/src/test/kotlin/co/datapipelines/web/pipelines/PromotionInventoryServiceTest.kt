@@ -172,6 +172,6 @@ class PromotionInventoryServiceTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://h/$name",
             username = "u",
-            workspaceId = workspaceId,
+            ownerWorkspaceId = workspaceId,
         )
 }

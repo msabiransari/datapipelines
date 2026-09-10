@@ -409,7 +409,7 @@ class DatasourceSchemaToolsTest {
         // introspector mock makes any delegation throw — the gate must fire first.
         val registry =
             FakeDatasourceRegistry(
-                listOf(McpFixtures.datasource().copy(workspaceId = UUID.randomUUID(), workspaceName = "other")),
+                listOf(McpFixtures.datasource().copy(ownerWorkspaceId = UUID.randomUUID(), workspaceName = "other")),
             )
 
         assertAll(
@@ -441,7 +441,7 @@ class DatasourceSchemaToolsTest {
                     McpFixtures.datasource(name = "global-pg"),
                     McpFixtures
                         .datasource(name = "own-pg")
-                        .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
+                        .copy(ownerWorkspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
                 ),
             )
         every { introspector.schemas(any<Datasource>()) } returns
