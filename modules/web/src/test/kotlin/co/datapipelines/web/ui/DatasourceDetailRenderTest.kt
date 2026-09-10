@@ -3,10 +3,13 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.datasources.LakeTable
 import co.datapipelines.application.datasources.LakeTableFormat
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceProperties
+import co.datapipelines.datasources.visibleDialectProperties
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -50,6 +53,14 @@ class DatasourceDetailRenderTest {
             dialect = dialect,
             jdbcUrl = "jdbc:duckdb:",
         )
+
+    /**
+     * 109 §B — the dialect a detail row RUNS with, through the REAL §5.6 projection the
+     * controller puts in the model (`visibleDialectProperties`): what this render asserts is
+     * what the operator sees, not a hand-built map.
+     */
+    private fun dialectPropertiesFor(datasource: Datasource): Map<String, Any?> =
+        visibleDialectProperties(datasource.dialect, datasource.properties.dialect)
 
     private val tables =
         listOf(
@@ -137,5 +148,87 @@ class DatasourceDetailRenderTest {
     @Test
     fun `the headline is the display name`() {
         render(Dialect.LAKE) shouldContain ">Sample lake</h1>"
+    }
+
+    // ------------------------------- dialect properties section (109 §B)
+
+    private fun lakeWithDialectProperties(entries: Map<String, Any?>): Datasource =
+        Datasource(
+            name = "sample-lake",
+            displayName = "Sample lake",
+            description = description,
+            dialect = Dialect.LAKE,
+            jdbcUrl = "jdbc:duckdb:",
+            properties = DatasourceProperties(dialect = entries),
+        )
+
+    private fun render(datasource: Datasource): String {
+        val model = ExtendedModelMap()
+        model.addAttribute("datasource", datasource)
+        model.addAttribute("dialectProperties", dialectPropertiesFor(datasource))
+        model.addAttribute("activeTheme", "saas")
+        model.addAttribute("authenticated", true)
+        model.addAttribute("currentPath", "/datasources/sample-lake")
+        model.addAttribute("_csrf", mapOf("token" to "t"))
+        model.addAttribute("workspaceHeaderFragment", "")
+        model.addAttribute("workspaceOptions", emptyList<Any>())
+        model.addAttribute("activeWorkspace", "acme")
+        LakeTableBrowseModel().fillLevel(model, tables, prefix = null, offset = 0)
+
+        val context =
+            WebContext(
+                JakartaServletWebApplication
+                    .buildApplication(MockServletContext())
+                    .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+            )
+        model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
+        val engine =
+            SpringTemplateEngine().apply {
+                setTemplateResolver(
+                    ClassLoaderTemplateResolver().apply {
+                        this.prefix = "templates/"
+                        suffix = ".html"
+                        characterEncoding = "UTF-8"
+                    },
+                )
+            }
+        return engine.process("datasources/detail", context)
+    }
+
+    @Test
+    fun `the dialect section shows region and unsigned as key-value badges`() {
+        val html = render(lakeWithDialectProperties(mapOf("region" to "us-east-1", "unsigned" to "true")))
+
+        html shouldContain ">region</dt>"
+        html shouldContain ">us-east-1</dd>"
+        html shouldContain ">unsigned</dt>"
+        html shouldContain ">true</dd>"
+    }
+
+    @Test
+    fun `a secret-valued key's VALUE is absent from the HTML - the projection drops it before the render`() {
+        // The §F assertion that matters: not "the key is absent" but THE VALUE — a leaked
+        // key's value is the incident. `auth_clientKey` rides the §5.6 secret suffix, so the
+        // real projection (dialectPropertiesFor) drops it; had it survived, the badge would
+        // echo the secret into the page.
+        val html =
+            render(
+                lakeWithDialectProperties(
+                    mapOf(
+                        "region" to "us-east-1",
+                        "auth_clientKey" to "sk-prod-do-not-echo",
+                    ),
+                ),
+            )
+
+        html shouldNotContain "sk-prod-do-not-echo"
+        html shouldNotContain "auth_clientKey"
+    }
+
+    @Test
+    fun `a datasource with no dialect properties renders no empty section`() {
+        val html = render(datasource(Dialect.LAKE))
+
+        html shouldNotContain ">region</dt>"
     }
 }

@@ -253,6 +253,15 @@ class BootstrapDatasourceFileReader(
      * Returns [node] with every `${VAR}` in every string expanded — a rebuilt tree, not a mutated
      * one. It walks the WHOLE tree rather than the two fields one expects to be secret: the
      * passthrough `properties.jdbc` map is exactly where an SSL passphrase would live.
+     *
+     * 109 §B — one deliberate exception, at the FIELD level: a field whose ENTIRE value is one
+     * `${VAR}` and the variable is SET BUT EMPTY is OMITTED, not resolved to `""`. That is the
+     * operator's off-switch — the shipped lake file's `catalog.ref: ${SAMPLE_LAKE_CATALOG_REF}`
+     * stays EMPTY in production (compose defaults the var to empty), and "not declared" is the
+     * honest spelling of that, not an empty string the validator must now refuse. A LITERAL
+     * empty value in the file is untouched by this rule and fails validation with the key named
+     * — the fail-fast the round exists for. Omission is key-level: a field that cannot be
+     * absent (a name, a URL) fails binding loudly rather than silently vanishing.
      */
     private fun resolvePlaceholders(
         node: JsonNode,
@@ -265,7 +274,10 @@ class BootstrapDatasourceFileReader(
 
             is ObjectNode -> {
                 val resolved = mapper.createObjectNode()
-                node.properties().forEach { (field, value) -> resolved.set<JsonNode>(field, resolvePlaceholders(value, path)) }
+                node.properties().forEach { (field, value) ->
+                    if (omitsWhenPlaceholderEmpty(value)) return@forEach
+                    resolved.set<JsonNode>(field, resolvePlaceholders(value, path))
+                }
                 resolved
             }
 
@@ -279,6 +291,20 @@ class BootstrapDatasourceFileReader(
                 node
             }
         }
+
+    /**
+     * Whether [value] is a field the 109 §B omission rule drops: a TextNode whose ENTIRE value
+     * is one `${VAR}` and the variable is SET BUT EMPTY. UNSET still refuses (expand's rule,
+     * §8A.2 — the omission is the off-switch, not a bypass of the fail-fast); a literal `""`
+     * never matches a placeholder and survives to validation.
+     */
+    private fun omitsWhenPlaceholderEmpty(value: JsonNode): Boolean {
+        if (value !is TextNode) return false
+        val text = value.textValue()
+        if (!PLACEHOLDER.matches(text)) return false
+        val resolved = environment(PLACEHOLDER.find(text)!!.groupValues[1]) ?: return false
+        return resolved.isEmpty()
+    }
 
     private fun expand(
         value: String,

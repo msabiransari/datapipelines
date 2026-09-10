@@ -38,6 +38,14 @@ object DatasourceErrorCodes {
     /** The test pool build (§5.4) rejected a `hikari`/`jdbc` property; `details` names the key. */
     const val PROPERTIES_INVALID = "datasource.validation.properties_invalid"
 
+    /**
+     * 109 §B — a DECLARED dialect property carries an empty, whitespace-only or null value.
+     * Refused at register/update (and so at bootstrap, which saves through the same validator):
+     * an empty string is never a configuration, and `catalog.ref: ""` used to be stored as
+     * exactly that. The field names the key.
+     */
+    const val PROPERTY_EMPTY = "datasource.validation.property_empty"
+
     /** `query_timeout_seconds`, when present, is not an integer ≥ 1. */
     const val QUERY_TIMEOUT_INVALID = "datasource.validation.query_timeout_invalid"
 

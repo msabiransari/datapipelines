@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.22 (frozen contract — additive-only changes after this point)
+**Status:** v2.23 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-09-09
@@ -94,6 +94,30 @@ Identical to request, except:
   `{"tested_at": "2026-08-30T09:15:00Z", "ok": false, "message": "FATAL: password authentication failed …"}`.
   `null` means never tested, which is what every datasource registered before this field existed
   is. Never supplied on write: it is an observation, recorded by the probe.
+- `properties.dialect` (additive, 109 §B): the row's dialect configuration, **non-secret keys
+  only**, filtered through the SAME §5.6 classification that validates `properties.jdbc` (the
+  union + the secret-valued suffix predicate — a secret-named key can never be stored under one
+  carrier and shown under another). The filtering is over KEYS; values pass through untouched,
+  because a value that is itself a secret belongs under `credential`, which never reaches
+  properties at all. The shown/hidden contract, per dialect:
+
+  | Dialect | Key | Shown? | Why |
+  |---|---|---|---|
+  | LAKE | `catalog.kind` | shown | which object-store catalog backs Iceberg tables — an operator debugging a REST-catalog refusal needs to see it |
+  | LAKE | `catalog.ref` | shown | the SSRF allowed-root marker (a `file://` mirror root or a REST catalog URL); never a credential — its grammar admits no secret |
+  | LAKE | `region`, `endpoint`, `url_style` | shown | addressing; an operator debugging signature/region mismatches needs all three |
+  | LAKE | `unsigned` | shown | whether reads skip the credential chain — the demo bucket's public-read posture |
+  | LAKE | `memory_limit`, `threads`, `temp_directory` | shown | the §8C.4 engine limits the row actually runs with |
+  | LAKE | `attach` | shown | extra catalogs to attach at connect |
+  | any | a key the §5.6 classification refuses (`password`-suffixed, `access_key`-shaped, the `SECRET_VALUED_KEYS` set, `CREDENTIALS`, `SERVER_MANAGED`) | **hidden** | defense in depth: no such key is accepted under `dialect` today, and the filter exists so a future key cannot reopen the hole |
+  | JDBC dialects | `properties.hikari.*` (the §5 pool tunables) | shown via the existing `pool` object | the pool's EFFECTIVE settings (value + unit + source layer), which is what an operator reads; the raw stored `properties.hikari` map has been on the wire since 094 |
+
+  A declared dialect property whose value is empty, whitespace-only or null is REFUSED at
+  register/update with `datasource.validation.property_empty` (§13.8) — an empty string is never
+  a configuration. At bootstrap a field whose whole value is one `${VAR}` that resolves
+  SET-BUT-EMPTY is OMITTED (the operator's off-switch — the shipped `catalog.ref:` placeholder
+  stays empty in production and means "not declared"); a literal `""` in a file fails the boot
+  with the key named.
 
 ### 3.3 Field reference
 
@@ -109,7 +133,7 @@ Identical to request, except:
 | `password` | string | legacy, never returned | The legacy spelling of `credential.secret`, meaning `kind: password`. |
 | `query_timeout_seconds` | integer | optional | `Statement.setQueryTimeout` for every node executing against this datasource. When set, it **overrides** `datapipelines.executor.node-query-timeout-seconds` — see §5.5. |
 | `introspection_include_schemas` | array of strings | optional | §7A escape hatch for the dialect's system-schema exclusion: a schema named here is exempt from the exclusion in **all three** introspection operations. Exact names over the **legal-identifier alphabet of the supported dialects** — letters, digits, `_`, `$`, `#` (`_` is an ordinary name character, not SQL-LIKE's wildcard here; an entry outside the alphabet is rejected at save with `datasource.validation.properties_invalid`, because wildcards, quoted identifiers, and qualified `db.schema` names can never match a real schema as exact entries) — and normalized by the ONE rule — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — at the **registry's save boundary** (the single place every write path crosses) and again on read, so a row whose allowlist landed by restore or a manual JSONB edit cannot sit silently inert AND what a GET projects always survives an unmodified PUT round-trip; absent/empty = the exclusion floors apply unchanged. See §7A. |
-| `properties` | object | optional | Two namespaced passthrough maps: `properties.hikari.*` and `properties.jdbc.*`. See §5. |
+| `properties` | object | optional | Three namespaced maps: `properties.hikari.*` and `properties.jdbc.*` are passthrough (§5); `properties.dialect.*` is TYPED and adapter-validated (§4.2A). On reads, `properties.dialect` carries the non-secret keys only (§3.2's shown/hidden table). |
 | `global` | boolean | optional (write) | Workspaces D8: `true` binds the datasource to NO workspace (global, visible to everyone) — **admin-only** to set, either direction. Mutually exclusive with `workspace`. |
 | `workspace` | string | optional (write) | Workspaces D8: the workspace to bind to — must be one the caller can access (member or admin); `datasource.validation.workspace_forbidden` otherwise. Default: the caller's ACTIVE workspace. |
 | `readonly` | boolean | optional | The §5.7 flag. Editable by whoever may edit the datasource, except on a GLOBAL datasource where only admin may flip it. On update, absent keeps the stored value. |
@@ -1400,6 +1424,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-09 | v2.23 | 109 §B dialect properties on the wire, the empty refusal, the LISTING probe | **§3.2 gains `properties.dialect` on reads** — non-secret keys only, filtered through the same §5.6 classification that validates `properties.jdbc` — with the per-dialect shown/hidden contract TABLE (the written contract the MCP twin shapes against). **The empty rule**: a declared dialect property with an empty/whitespace/null value is refused at register/update with `datasource.validation.property_empty` (§13.8 of the pipeline contract), never stored as `""`; bootstrap omits a field whose whole value is one `${VAR}` resolving set-but-empty (the shipped `catalog.ref:` placeholder's production posture), so the shipped defaults boot, while a literal `""` fails the boot with the key named. **§8.1's probe LISTS for LAKE**: a metadata version read proves nothing about object storage — the probe now runs one `glob()` LIST over the datasource's registered root (the declared `file://` catalog.ref, else the common directory prefix of the registered tables) through the probe's own connection, so a bucket policy allowing GET but denying `s3:ListBucket` (the T176 shape) FAILS with the engine text plus the one-line grant-ListBucket hint; with no globbable root the metadata read stays the whole proof. §3.3's `properties` row names all three namespaces. |
 | 2026-09-04 | v2.19 | 068 key-provider seam | **§7.1 — the stored credential gains a leading KEY-VERSION byte** (`version ‖ nonce ‖ ciphertext ‖ tag`); the pre-versioning layout is refused, never guessed, and a one-off migration prefixed `0x01` onto every shipped row. New **§7.1.1 the key provider seam**: `KeyProvider`/`DataKey`, the three invariants, the shipped `env` provider and a pointer to the new [key-providers.md](key-providers.md) implementation guide. **§7.3 rewritten** — rotation is now lazy-safe (add a version, flip `encryption-key-current`, rows migrate on their next password write) with the one `get_byte` query that says when an old key can be retired, and an explicit statement that no rotation endpoint or CLI ships. §7.2's `password_encrypted` bullet records the layout. |
 | 2026-09-04 | v2.18 | two-family demo split | **§8A.5 new** — the DuckDB read-only open mode, probed against the pinned duckdb_jdbc 1.5.5.1: the URL-param form is silently ignored, the connection-Properties form (`properties.jdbc.access_mode: READ_ONLY`) is honored (writes refused, and a read-only open of a missing file fails at connect — so loaders place the file before registration). `access_mode` is not in the DUCKDB §5.6 refusal set. Used by the trade family's `sample-trade-us` bootstrap entry. |
 | 2026-09-02 | v2.17 | multi-instance round 2 (050) | **§5.7 gains the cross-instance pool-invalidation mechanism** (R1/M3): registry save/delete publishes the datasource name on Redis channel `dp:datasource-invalidated` after the row commit; every instance subscribes (reconnect-surviving container, subscribed before serving) and evicts, so the next use rebuilds from the row; the 044-F5 known window narrows to out-of-band row writes only. §5.7 also gains the replication sizing sentence (`maximumPoolSize × replicas ≤ the customer DB's connection limit`, echoed by §5.1's pointer). **§3.3 gains the normalize-on-read sentence** (R3, 011 D7/F2 + 020 F1 closed): SERVER_MANAGED keys stripped from `properties.hikari` in `DatasourceRow.toDatasource` — the second instance of the normalize-at-both-boundaries rule. |

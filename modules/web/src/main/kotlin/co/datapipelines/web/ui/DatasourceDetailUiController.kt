@@ -6,6 +6,7 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.visibleDialectProperties
 import co.datapipelines.typesystem.Dialect
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
@@ -48,6 +49,10 @@ class DatasourceDetailUiController(
         val datasource = visibleLake(name) ?: return "redirect:/datasources"
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("datasource", datasource)
+        // 109 §B — the non-secret dialect properties, the same §5.6-classified projection the
+        // REST detail returns: the operator sees region/unsigned/catalog.kind the row actually
+        // runs with, and never a secret-valued key, on either surface.
+        model.addAttribute("dialectProperties", visibleDialectProperties(datasource.dialect, datasource.properties.dialect))
         browse.fillLevel(model, lakeTables.list(datasource), prefix = null, offset = 0)
         return "datasources/detail"
     }

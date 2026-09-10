@@ -530,3 +530,24 @@ internal object RefusedPropertyKeys {
         adapter: DialectAdapter? = null,
     ): Set<String> = DialectRefusalSets.forDialect(dialect) + adapter?.refusedPropertyKeys.orEmpty() + SERVER_MANAGED + CREDENTIALS
 }
+
+/**
+ * 109 §B — the dialect properties a DETAIL surface may show: every declared key EXCEPT those the
+ * §5.6 secret classification refuses ([RefusedPropertyKeys.isRefused] over the dialect's union —
+ * the same predicate `properties.jdbc` is validated with, so a secret-named key can never be
+ * stored under one carrier and shown under another).
+ *
+ * Today every LAKE `DIALECT_KEYS` entry is non-secret configuration and survives (the §4.x
+ * shown/hidden table is the contract); the filter exists because the dialect namespace is
+ * GROWN per adapter, and "nothing secret is in there yet" is a fact about this build, not a
+ * rule. Values pass through untouched — the classification is over KEYS; a value that is itself
+ * a secret belongs under `credential`, which never reaches properties at all (the one-line
+ * §5.6 carrier rule).
+ */
+fun visibleDialectProperties(
+    dialect: Dialect,
+    properties: Map<String, Any?>,
+): Map<String, Any?> {
+    val refused = RefusedPropertyKeys.forDialect(dialect)
+    return properties.filterKeys { !RefusedPropertyKeys.isRefused(it, refused) }
+}

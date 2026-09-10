@@ -141,8 +141,12 @@ class ApiErrorCatalogSpecDriftTest {
          * caller-downstream in the same commit) and `datasource.validation.lake_table_unreadable`
          * (400, the registration pre-flight refusal), landed in the SAME commit as their
          * constants and catalog rows. Re-derived from the document's own parse.
+         *
+         * 152 → 153 with 109 §B (the empty-dialect-property refusal): §13.8 gains
+         * `datasource.validation.property_empty` (400), landed in the SAME commit as its
+         * constants and catalog row.
          */
-        const val SECTION_13_ROW_COUNT = 152
+        const val SECTION_13_ROW_COUNT = 153
 
         /**
          * §12's distinct validation codes.

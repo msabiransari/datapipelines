@@ -246,6 +246,38 @@ class DatasourcesControllerTest {
     }
 
     @Test
+    fun `get returns the non-secret dialect properties - a secret-suffixed key never reaches the wire`() {
+        // 109 §B — `properties.dialect` joins the §3.2 shape, filtered through the §5.6
+        // classification: an operator sees region/unsigned, and a secret-VALUED key — even one
+        // validation would refuse anyway — is dropped before the wire, never echoed. The value
+        // absence is the assertion that matters: a leaked key's VALUE is the incident.
+        authenticate()
+        every { registry.getVisible("sample-lake", workspaceId) } returns
+            datasource()
+                .copy(
+                    name = "sample-lake",
+                    dialect = Dialect.LAKE,
+                    jdbcUrl = "jdbc:duckdb:",
+                    properties =
+                        DatasourceProperties(
+                            dialect =
+                                mapOf(
+                                    "region" to "us-east-1",
+                                    "unsigned" to "true",
+                                    "auth_clientKey" to "must-not-appear-on-the-wire",
+                                ),
+                        ),
+                )
+
+        val json = mapper.writeValueAsString(controller.get("sample-lake").data)
+        val dialect = mapper.readTree(json).get("properties").get("dialect")
+        dialect.get("region").asText() shouldBe "us-east-1"
+        dialect.get("unsigned").asText() shouldBe "true"
+        dialect.has("auth_clientKey") shouldBe false
+        json shouldNotContain "must-not-appear-on-the-wire"
+    }
+
+    @Test
     fun `update without a password keeps the stored credential, and an unknown name 404s`() {
         authenticate()
         val bound = datasource().copy(workspaceId = workspaceId, workspaceName = "acme")

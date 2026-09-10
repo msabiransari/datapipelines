@@ -35,6 +35,18 @@
     or the <code>lake_tables_*</code> MCP tools.
   </p>
 
+  <!-- 109 §B — the non-secret dialect configuration this row RUNS with (region, unsigned,
+       catalog.kind…), the same §5.6-classified projection the REST detail returns: an operator
+       debugging a lake needs to see the dialect the row actually carries, and never a
+       secret-valued key. Rendered as a dl of badges so it stays one visual line per key and
+       needs no new CSS. -->
+  <dl class="u-row u-wrap u-mb-md" th:if="${not #maps.isEmpty(dialectProperties)}">
+    <div class="u-row u-mr-md u-mb-xs" th:each="entry : ${dialectProperties}">
+      <dt class="u-mono u-text-sm u-secondary" th:text="${entry.key}">region</dt>
+      <dd class="ds-badge ds-badge-default u-mb-0" th:text="${entry.value}">us-east-1</dd>
+    </div>
+  </dl>
+
   <div class="tplx-body">
     <div class="tplx-tree" id="lake-table-tree-pane" data-explorer-pane>
       <!-- The fragment's own root carries id="lake-table-tree", so the swap target survives

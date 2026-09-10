@@ -144,6 +144,9 @@ object ApiErrorCatalog {
             // 109 §A — the registration pre-flight refusal: 400 like the family default, wired
             // explicitly so the code owns a row rather than being absorbed (the 025 A2 convention).
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE to HttpStatus.BAD_REQUEST,
+            // 109 §B — a declared dialect property with an empty/blank/null value: 400 like the
+            // family default, wired explicitly to own a row (the 025 A2 convention).
+            PipelineErrorCodes.Datasource.PROPERTY_EMPTY to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.NOT_FOUND to HttpStatus.NOT_FOUND,
             // §13.9 (040 D4) — the in-use delete refusal, against any template-family default:
             // it is a conflict with live references, not a validation failure.

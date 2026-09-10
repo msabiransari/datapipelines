@@ -554,6 +554,11 @@ class DefaultDatasourceRegistry(
                 val startedAt = System.nanoTime()
                 pool.connection.use { connection ->
                     val version = connection.metaData.databaseProductVersion
+                    // 109 §B — for LAKE, the metadata read is not proof: an in-memory DuckDB
+                    // reports its version with no S3 round-trip at all, so a bucket policy that
+                    // allows object GETs but denies LIST (the T176 shape) probed `connected`.
+                    // The lake probe must LIST the registered root — see [assertLakeListing].
+                    assertLakeProbeListing(datasource, connection)
                     val latencyMs = (System.nanoTime() - startedAt) / NANOS_PER_MILLI
                     TestResult(connected = true, testedAt = Instant.now(), latencyMs = latencyMs, serverVersion = version)
                 }
@@ -564,15 +569,106 @@ class DefaultDatasourceRegistry(
             failedProbe(e, datasource)
         }
 
+    /** 109 §B — the LAKE-only half of the probe: LIST the registered root, when there is one. */
+    private fun assertLakeProbeListing(
+        datasource: Datasource,
+        connection: java.sql.Connection,
+    ) {
+        if (datasource.dialect != Dialect.LAKE) return
+        val root = lakeListingRoot(datasource) ?: return
+        assertLakeListing(connection, root)
+    }
+
+    /**
+     * 109 §B — the root the LAKE probe LISTS, or null when there is nothing globbable to list.
+     * Declared `file://` catalog.ref wins (the mirror deployment's declared root); otherwise the
+     * longest common DIRECTORY prefix of the registered tables' locations (the demo's tables all
+     * sit under `…/lake/v1/`, and that shared root is what `s3:ListBucket` must be granted on);
+     * an http(s) catalog.ref is a REST catalog, not a globbable store, and a registry with no
+     * tables and no file root leaves the metadata read as the whole proof. A root containing a
+     * quote or backslash cannot be embedded in the glob literal and is refused UPSTREAM by the
+     * location grammar — [null] here rather than an escape attempt (the §5.6 no-escaping rule).
+     */
+    private fun lakeListingRoot(datasource: Datasource): String? {
+        val declared = datasource.properties.dialect["catalog.ref"]?.toString()
+        if (declared != null && isGlobbableFileRoot(declared)) return declared.trimEnd('/') + "/"
+        val directories =
+            lakeTables
+                .registeredTables(datasource.name)
+                .mapNotNull { table -> table.location.substringBeforeLast('/', "") }
+                .filter { it.isNotEmpty() }
+        if (directories.isEmpty()) return null
+        var root = directories.first()
+        directories.forEach { dir -> root = commonDirectoryPrefix(root, dir) }
+        return root.ifEmpty { null }
+    }
+
+    /** The longest prefix of [a] and [b] that ends at a `/` boundary — a DIRECTORY, never a partial segment. */
+    private fun commonDirectoryPrefix(
+        a: String,
+        b: String,
+    ): String {
+        val limit = minOf(a.length, b.length)
+        var index = 0
+        while (index < limit && a[index] == b[index]) index++
+        return a.substring(0, a.lastIndexOf('/', index - 1) + 1)
+    }
+
+    /** A `file://` root the glob literal can carry safely — no quote, no backslash (the §5.6 no-escaping rule). */
+    private fun isGlobbableFileRoot(declared: String): Boolean =
+        declared.startsWith("file://") && declared.none { it == '\'' || it == '\\' || it == '"' }
+
+    /**
+     * One LIST of [root], through the probe's own connection (the adapter init has already
+     * loaded httpfs and created the secret, so the glob exercises EXACTLY the path a query
+     * would). A failure is wrapped in [LakeListingFailure] so the refusal's message can carry
+     * the one-line IAM hint — the difference between "probe failed" and "grant s3:ListBucket
+     * on the prefix". Both exception families are caught on purpose (the probe's DS-SEC-6 rule:
+     * DuckDB surfaces some internal faults as RuntimeExceptions).
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun assertLakeListing(
+        connection: java.sql.Connection,
+        root: String,
+    ) {
+        try {
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT count(*) FROM glob('$root*')").use { it.next() }
+            }
+        } catch (e: SQLException) {
+            throw LakeListingFailure(root, e)
+        } catch (e: RuntimeException) {
+            throw LakeListingFailure(root, e)
+        }
+    }
+
+    /** Marks a listing refusal so [failedProbe] appends the IAM hint; the cause keeps the engine text. */
+    private class LakeListingFailure(
+        val root: String,
+        cause: Throwable,
+    ) : RuntimeException("the lake probe could not list '$root'", cause)
+
     private fun failedProbe(
         e: Exception,
         datasource: Datasource,
-    ) = TestResult(
-        connected = false,
-        testedAt = Instant.now(),
-        error = rootMessage(e)?.scrubbedForError(datasource.secret),
-        errorClass = e.javaClass.name,
-    )
+    ): TestResult {
+        var message = rootMessage(e)?.scrubbedForError(datasource.secret)
+        // 109 §B — the one-line hint the T176 operator needed: the probe LISTED, so the remedy
+        // is the bucket policy, not the credential. Only for s3 roots — a file:// glob failure
+        // means the directory is missing, and an S3 sentence would misdirect.
+        val listingFailure = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<LakeListingFailure>().firstOrNull()
+        if (listingFailure != null && message != null && listingFailure.root.startsWith("s3://")) {
+            message +=
+                " — the lake probe lists '${listingFailure.root}'; grant s3:ListBucket on that prefix " +
+                "(and s3:GetObject under it), not object reads alone"
+        }
+        return TestResult(
+            connected = false,
+            testedAt = Instant.now(),
+            error = message,
+            errorClass = e.javaClass.name,
+        )
+    }
 
     /**
      * The DEEPEST message in the cause chain, not the outermost one.

@@ -9,6 +9,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.pooling.PoolSettings
+import co.datapipelines.datasources.visibleDialectProperties
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
@@ -268,7 +269,18 @@ class DatasourcesController(
             // The envelope convention: absent (not null) when the allowlist is empty — which
             // is also today's default behavior for every pre-existing datasource.
             if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
-            put("properties", mapOf("hikari" to properties.hikari, "jdbc" to properties.jdbc))
+            // 109 §B — `properties.dialect` joins the wire: the non-secret keys only, through
+            // the §5.6 classification (datasources.md §3.2's shown/hidden table is the
+            // contract). The MCP twin reads the same table; the two surfaces do not share this
+            // code, so the TABLE is what keeps them honest.
+            put(
+                "properties",
+                mapOf(
+                    "hikari" to properties.hikari,
+                    "jdbc" to properties.jdbc,
+                    "dialect" to visibleDialectProperties(dialect, properties.dialect),
+                ),
+            )
             // §5 (094) — additive, and NOT a duplicate of `properties.hikari`: that map is what
             // this row STORES (empty for almost every datasource), while `pool` is what the pool
             // actually RUNS with — each catalogued setting's effective value, its unit, and the
