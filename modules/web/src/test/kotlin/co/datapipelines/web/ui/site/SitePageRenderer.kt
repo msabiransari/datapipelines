@@ -3,6 +3,7 @@ package co.datapipelines.web.ui.site
 import co.datapipelines.web.ui.DocsCatalog
 import co.datapipelines.web.ui.DocsController
 import co.datapipelines.web.ui.SiteController
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
@@ -106,32 +107,42 @@ object SitePageRenderer {
         return process(view, model)
     }
 
-    /** Site v2's seven intent pages — split out so the registry dispatcher stays readable. */
+    /**
+     * Site v2's intent pages — one lookup, arm for arm with the two controllers. A map keeps
+     * the dispatch O(1) in complexity (detekt) and makes the rendered-through-the-real-handler
+     * rule visible: the value IS the controller method.
+     */
+    private val siteV2Handlers: Map<String, (Model, HttpServletResponse) -> String> by lazy {
+        buildMap {
+            put(SitePages.FAQ.path, pagesController::faq)
+            put(SitePages.ROADMAP.path, pagesController::roadmap)
+            put(SitePages.SECURITY.path, pagesController::security)
+            put(SitePages.PUBLISHED_API.path, pagesController::publishedApi)
+            put(SitePages.MCP_TOOLS.path, pagesController::mcpTools)
+            put(SitePages.TABLEAU.path, pagesController::tableau)
+            put(SitePages.TABLEAU_GOVERNED_DATASET.path, pagesController::tableauGovernedDataset)
+            put(SitePages.COMPARE_FIVETRAN.path, batch2Controller::compareFivetranAirbyte)
+            put(SitePages.COMPARE_POSTGRES_ONLY.path, batch2Controller::comparePostgresOnly)
+            put(SitePages.TABLEAU_PREP.path, batch2Controller::tableauPrep)
+            put(SitePages.TABLEAU_ROADMAP.path, batch2Controller::tableauRoadmap)
+            put(SitePages.FOR_AGENCIES.path, batch2Controller::forAgencies)
+            put(SitePages.FOR_SAAS_TEAMS.path, batch2Controller::forSaasTeams)
+            put(SitePages.FOR_ANALYSTS.path, batch2Controller::forAnalysts)
+        }
+    }
+
+    private val batch2Controller = SiteV2Batch2Controller()
+
+    /** The paths the v2 dispatch knows — the set the main [render] when matches against. */
+    private val SITE_V2: Set<String> get() = siteV2Handlers.keys
+
     private fun renderSiteV2(
         page: SitePage,
         model: ExtendedModelMap,
         response: MockHttpServletResponse,
     ): String =
-        when (page.path) {
-            SitePages.FAQ.path -> pagesController.faq(model, response)
-            SitePages.ROADMAP.path -> pagesController.roadmap(model, response)
-            SitePages.SECURITY.path -> pagesController.security(model, response)
-            SitePages.PUBLISHED_API.path -> pagesController.publishedApi(model, response)
-            SitePages.MCP_TOOLS.path -> pagesController.mcpTools(model, response)
-            SitePages.TABLEAU.path -> pagesController.tableau(model, response)
-            else -> pagesController.tableauGovernedDataset(model, response)
-        }
-
-    private val SITE_V2: Set<String> =
-        setOf(
-            SitePages.FAQ.path,
-            SitePages.ROADMAP.path,
-            SitePages.SECURITY.path,
-            SitePages.PUBLISHED_API.path,
-            SitePages.MCP_TOOLS.path,
-            SitePages.TABLEAU.path,
-            SitePages.TABLEAU_GOVERNED_DATASET.path,
-        )
+        checkNotNull(siteV2Handlers[page.path]) { "renderSiteV2 has no handler for ${page.path}" }
+            .invoke(model, response)
 
     /** The anonymous docs index, through [DocsController]. */
     fun renderDocsIndex(): String {

@@ -47,9 +47,8 @@ class SitemapControllerTest {
     @Test
     fun `every route the site controller serves appears in the sitemap`() {
         val routes =
-            SitePagesController::class
-                .java
-                .declaredMethods
+            listOf(SitePagesController::class, SiteV2Batch2Controller::class)
+                .flatMap { controller -> controller.java.declaredMethods.toList() }
                 .mapNotNull { it.getAnnotation(GetMapping::class.java)?.value?.firstOrNull() }
                 .flatMap { path ->
                     if (path.contains("{")) SitePages.ENGINES.map { SitePages.ENGINE_PREFIX + it.slug } else listOf(path)

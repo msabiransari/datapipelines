@@ -35,7 +35,7 @@ class SitePagesController {
         // catalog's own split, so adding a tool cannot leave the sentence wrong.
         model.addAttribute("mutatingCount", McpToolCatalog.MUTATING.size)
         model.addAttribute("readCount", McpToolCatalog.NAMES.size - McpToolCatalog.MUTATING.size)
-        return PublicPage.render(model, response, SitePages.PILLAR, toolCount())
+        return PublicPage.render(model, response, SitePages.PILLAR, toolCount(), SiteFaqsCluster.PILLAR)
     }
 
     /**
@@ -51,7 +51,7 @@ class SitePagesController {
     ): ModelAndView {
         val facts = SitePages.engine(engine.lowercase()) ?: return ModelAndView("error/404", HttpStatus.NOT_FOUND)
         model.addAttribute("engine", facts)
-        val view = PublicPage.render(model, response, SitePages.enginePage(facts), toolCount())
+        val view = PublicPage.render(model, response, SitePages.enginePage(facts), toolCount(), SiteFaqsCluster.ENGINES)
         return ModelAndView(view, model.asMap())
     }
 
@@ -59,37 +59,37 @@ class SitePagesController {
     fun addToClaudeCode(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.ADD_TO_CLAUDE_CODE, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.ADD_TO_CLAUDE_CODE, toolCount(), SiteFaqsCluster.ADD_TO_CLIENT)
 
     @GetMapping("/ai-data-pipeline")
     fun aiDataPipeline(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.AI_DATA_PIPELINE, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.AI_DATA_PIPELINE, toolCount(), SiteFaqsCluster.AI_DATA_PIPELINE)
 
     @GetMapping("/text-to-sql-agent")
     fun textToSqlAgent(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.TEXT_TO_SQL_AGENT, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.TEXT_TO_SQL_AGENT, toolCount(), SiteFaqsCluster.TEXT_TO_SQL)
 
     @GetMapping("/compare/airflow")
     fun compareAirflow(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.COMPARE_AIRFLOW, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.COMPARE_AIRFLOW, toolCount(), SiteFaqsCluster.COMPARE_AIRFLOW)
 
     @GetMapping("/compare/dbt")
     fun compareDbt(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.COMPARE_DBT, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.COMPARE_DBT, toolCount(), SiteFaqsCluster.COMPARE_DBT)
 
     @GetMapping("/federated-query")
     fun federatedQuery(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.FEDERATED_QUERY, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.FEDERATED_QUERY, toolCount(), SiteFaqsCluster.FEDERATED_QUERY)
 
     @GetMapping("/dp-lake")
     fun dpLake(

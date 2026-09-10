@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/compare/dbt}">Compare</a></li>
+      <li aria-current="page">Postgres alone</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2 batch 2: the "just use Postgres" page. The thesis is the honest one: for a
+       team with one database, Postgres alone is right — and this page says so first. The
+       page is about the four things that arrive with the second source, the agent, the
+       partner and the release step nobody wrote. */-->
+  <!-- claim: docs/staging.md §3 — the cross-engine join in a per-run scratch database -->
+  <!-- claim: docs/datasources.md §7 — credentials encrypted, the agent holds only a key -->
+  <!-- claim: docs/datasources.md §3 — read-only where you say so -->
+  <!-- claim: docs/pipeline-contract.md §9 — write-back lands in Postgres if you like -->
+  <!-- claim: docs/versioning.md §3 — the release step, by a person -->
+  <!-- claim: docs/rest-api.md §19 — the API partners ask for -->
+
+  <section class="section page-hero" aria-labelledby="po-title">
+    <div class="container">
+      <p class="kicker">Just use Postgres — until one of these arrives</p>
+      <h1 id="po-title" class="ds-display">Do I need a data warehouse? When Postgres alone is enough, and what comes next</h1>
+      <p class="section-lede">
+        The honest answer to the question in the search bar: probably not yet. If one database holds the data and
+        the people asking can query it, Postgres alone is the right architecture, and adding a warehouse would be
+        adding a system to run for nothing. This page is about the four arrivals that change the answer — the
+        second database, the agent that needs read-only access, the partner who wants an API, and the release step
+        nobody wrote — and what each one actually needs, which is less than a warehouse.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/federated-query}">The cross-database join, worked</a>
+        <a class="btn btn-secondary" th:href="@{/docs/deployment}">Run the demo first</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="po-enough">
+    <div class="container">
+      <p class="kicker">Said plainly</p>
+      <h2 id="po-enough" class="ds-headline">When Postgres alone is enough</h2>
+      <div class="prose">
+        <p>
+          One database, one team, questions the database itself can answer: that is Postgres doing its job, and it
+          does it superbly. Materialized views, read replicas and a good schema cover most of what a first dashboard
+          needs. A warehouse earns its keep when data is spread across systems that cannot see each other, or when
+          the volume forces a columnar engine — and a team that is not there yet should not pretend otherwise.
+          Buying the warehouse early buys a second deployment, a second security perimeter and a sync to keep
+          honest, in exchange for nothing the database had not already answered.
+        </p>
+        <p>
+          This page does not try to sell you out of that position. datapipelines does not replace Postgres here —
+          there is nothing for it to do yet. What the page maps is the boundary: the four arrivals that make
+          "just use Postgres" stop being the whole answer, and the smallest thing that meets each one.
+        </p>
+        <p>
+          How do you know you are close to the boundary? The tells are cheap to watch for. The spreadsheet that
+          joins an export to a lookup table by hand, weekly. The second database that appeared for a feature and
+          now holds data someone asks about. The script someone wrote to "just copy one table" between systems,
+          which nobody owns and everybody runs. None of these is a warehouse-sized problem — that is exactly the
+          point. They are join-shaped, access-shaped and version-shaped problems, and reaching for a warehouse to
+          solve them is how a small team ends up running a platform.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="po-four">
+    <div class="container">
+      <p class="kicker">The four arrivals</p>
+      <h2 id="po-four" class="ds-headline">What shows up with the second source — and the agent, and the partner</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/staging.md §3 -->
+          <h3>The second database</h3>
+          <p>The question crosses engines now — orders in Postgres, events in MySQL, a lookup in SQLite — and no engine can see two. What is needed is a place for the join: a scratch database created for that one run, sources staged into it, dropped after. Not a warehouse; a per-run workbench.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §7 -->
+          <h3>The agent that needs access</h3>
+          <p>An AI coding agent is the newest member of the team and the one you least want holding a superuser password. The server-side shape: credentials encrypted at rest on the server, the agent holding a scoped, revocable key, read-only flags where writes are out of bounds — and every call audited.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>The partner who wants an API</h3>
+          <p>A partner, a customer or another team asks for their slice of the data on a URL. Handing out database credentials is not that answer. A released pipeline published as a <code>GET</code> endpoint — parameters bound, keys scoped to its path — is, and it is one release away, not a service to write.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/versioning.md §3 -->
+          <h3>The release step nobody wrote</h3>
+          <p>Once more than one person can change a query, the question "which version produced this number?" needs an answer that is not archaeology. Draft, review, release — by a person, immutable once released — is the missing control, and it is structural here rather than a convention in a README.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="po-adds">
+    <div class="container">
+      <p class="kicker">What this adds</p>
+      <h2 id="po-adds" class="ds-headline">datapipelines adds the four without taking Postgres away</h2>
+      <div class="prose">
+        <!-- claim: docs/datasources.md §3 -->
+        <p>
+          Postgres stays exactly where it is, serving your application. It becomes a datasource: a named, governed
+          connection the agent reads through and a pipeline can query — marked read-only wherever nothing should
+          ever write. The agent's SQL runs against your real schema with a key you issued and can revoke; the
+          database password itself never leaves the deployment.
+        </p>
+        <!-- claim: docs/pipeline-contract.md §9 -->
+        <p>
+          The scratch engine is per run, so there is nothing new to operate when the second source arrives — the
+          join happens in an H2 workbench that exists for exactly that execution. And when the result of a pipeline
+          belongs back in Postgres — a rollup table a dashboard reads, say — a write-back node lands it in a
+          database you already run. You only meet a second deployment if you decide the data volume, not the
+          question count, has earned one.
+        </p>
+        <p>
+          The order of operations matters, and it is the order this page is written in: the datasources register in
+          minutes, the agent's first draft is a review artefact rather than a commitment, and the release step only
+          appears when a second person cares what ran. Postgres was never demoted; it gained a governed front door
+          for the questions that stopped fitting inside one engine. If and when a warehouse genuinely arrives —
+          volume, retention, a modelling practice — the pipelines you built in the meantime speak the same endpoint
+          contract into it, which is a migration path, not a cliff. And nothing here is a rewrite of how your team
+          works: the database stays the database, and the new arrivals plug into it rather than around it.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="po-split">
+    <div class="container">
+      <p class="kicker">The decision, short</p>
+      <h2 id="po-split" class="ds-headline">Stay alone, or add the four</h2>
+      <div class="split">
+        <div>
+          <h3>Stay Postgres-only when…</h3>
+          <ul>
+            <li>one database answers every question anyone is asking;</li>
+            <li>the readers can be given read roles and nothing more is asked of access;</li>
+            <li>nobody outside the team needs a served endpoint;</li>
+            <li>"which query made this number?" still has a one-person answer.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Add datapipelines when…</h3>
+          <ul>
+            <li>a second engine arrives and the question crosses them — <a th:href="@{/federated-query}">the join runs in a per-run scratch database</a>;</li>
+            <li>an agent needs governed read access without a password on a laptop;</li>
+            <li>a partner needs an API scoped to exactly their slice;</li>
+            <li>the release of a query needs to be a person's decision, with a version number on it.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="po-shot">
+    <div class="container">
+      <p class="kicker">What it looks like</p>
+      <h2 id="po-shot" class="ds-headline">Postgres as a datasource, the agent as a reader</h2>
+      <figure class="shot">
+        <figcaption>The datasources screen: Postgres registered read-only, credentials encrypted, the agent's view of it bounded by the key it holds.</figcaption>
+        <div class="shot-placeholder" data-shot="datasources" style="--shot-ratio: 16 / 10"><b>[shot: datasources]</b>datasources list · read-only flag set · 1440×900</div>
+      </figure>
+      <div class="prose">
+        <!-- claim: docs/deployment.md §Appendix B -->
+        <p>
+          The demo is the small case made real: <code>./app.sh --start --demo nyc</code> seeds Postgres trips,
+          MySQL weather and SQLite zones, and <code>nyc/mobility/revenue_by_borough</code> joins two of them in one
+          pipeline — the first arrival, answered without a warehouse in sight.
+        </p>
+        <p>
+          Then register your own Postgres beside the demo sources and ask the agent the question your team answered
+          by hand last week. If the honest verdict is "Postgres alone still covers this", the page has done its
+          job: you have tested the boundary instead of assuming it, and the demo stack uninstalls with the same
+          one command it arrived by.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/staging.md §3 — when is Postgres alone the right call -->
+      <!-- claim: docs/datasources.md §7 — what arrives with the second source -->
+      <!-- claim: docs/pipeline-contract.md §9 — does datapipelines take Postgres away -->
+      <!-- claim: docs/versioning.md §3 — who changes what runs -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Postgres-only questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="po-next">
+    <div class="container">
+      <h2 id="po-next" class="ds-headline">Meet the arrivals on the demo, not in production</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        Bring up the stack, register your own Postgres alongside the demo sources, and watch the agent draft the
+        first cross-source pipeline. The warehouse decision can wait until the data, not the workflow, demands it.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
+        <a class="btn btn-secondary" th:href="@{/security}">How agent access stays safe</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

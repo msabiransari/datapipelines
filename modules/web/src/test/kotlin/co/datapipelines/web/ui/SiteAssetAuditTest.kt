@@ -111,8 +111,9 @@ class SiteAssetAuditTest {
             .toList()
 
     private companion object {
-        /** index + 8 cluster templates (089 added dp-lake) + 7 site-v2 intent pages + _layout, and the two docs public views. */
-        const val PUBLIC_TEMPLATES = 20
+        // index + 8 cluster templates (089) + 7 site-v2 intent pages + _layout + 7 batch-2
+        // pages (111), and the two public docs views.
+        const val PUBLIC_TEMPLATES = 27
 
         val ASSET_TAG = Regex("""<(?:link|script|img)\b[^>]*>""")
         val ATTR = Regex("""\b(?:th:)?(?:href|src)="([^"]*)"""")

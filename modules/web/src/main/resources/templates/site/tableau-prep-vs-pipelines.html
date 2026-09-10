@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/tableau}">Tableau</a></li>
+      <li aria-current="page">Prep, or pipelines as code</li>
+    </ol>
+  </nav>
+
+  <!--/* Site v2 batch 2: Tableau Prep vs pipelines as code. The artefact is the difference:
+       a flow is a file one tool opens; a pipeline is a JSON document of SQL nodes that is
+       diffable, versioned, runnable by an agent and released by a person. The page stays
+       honest about what Prep does better. Never claims to be a Tableau replacement. */-->
+  <!-- claim: docs/pipeline-contract.md §3 — the pipeline as a JSON document of SQL nodes -->
+  <!-- claim: docs/versioning.md §3 — draft, review, immutable release -->
+  <!-- claim: docs/rest-api.md §19 — publish the result as an endpoint -->
+  <!-- claim: docs/dag-executor.md §5 — query timeout and the probe's plan per node -->
+  <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource -->
+  <!-- claim: docs/mcp-server.md §6.2 — the agent authors the draft -->
+  <!-- claim: docs/datasources.md §3 — register sources read-only -->
+  <!-- claim: docs/staging.md §3 — the cross-source join in the per-run scratch database -->
+
+  <section class="section page-hero" aria-labelledby="tp-title">
+    <div class="container">
+      <p class="kicker">Same job, different artefact</p>
+      <h1 id="tp-title" class="ds-display">Tableau Prep alternative: a flow is a file, a pipeline is code you can release</h1>
+      <p class="section-lede">
+        Tableau Prep and a datapipelines pipeline do the same first job — pull several sources together, shape
+        them, hand the result to the next step. The difference is the artefact that job produces. Prep produces a
+        flow: a document one tool opens, edits and runs. A pipeline here is a JSON document of SQL nodes: diffable
+        in a pull request, versioned, runnable by an AI agent, releasable only by a person, and publishable as an
+        API. This page compares them honestly, including the part Prep does better.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/tableau/governed-dataset}">The worked how-to</a>
+        <a class="btn btn-secondary" th:href="@{/federated-query}">How the join runs without a warehouse</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tp-artefact">
+    <div class="container">
+      <p class="kicker">The artefact</p>
+      <h2 id="tp-artefact" class="ds-headline">Same job, different artefact — and the artefact decides the second week</h2>
+      <div class="prose">
+        <!-- claim: docs/pipeline-contract.md §3 -->
+        <p>
+          A Prep flow is a diagram you edit. A pipeline here is a JSON document of SQL nodes with explicit
+          dependencies, which happens to <em>render</em> as a diagram. The distinction sounds academic until the
+          second week, when the questions change from "can I build it?" to "can I review it, diff it, hand it to
+          someone else, and say which version of it produced the number on the board?". The flow answers those in
+          person and from memory. The pipeline answers them structurally: the diff is a pull request, the review is
+          a draft a person can run before releasing, and the version is immutable once released.
+        </p>
+        <!-- claim: docs/staging.md §3 -->
+        <p>
+          Both join across sources without a warehouse. Prep joins in memory on the machine running the flow; a
+          pipeline stages each source's rows into a scratch database created for the run and joins them there, with
+          ordinary SQL any reviewer can read. When a source is slow, the difference gets loud: the pipeline's node
+          carries a query timeout, and the SQL probe returns the plan, so the agent fixes the shape from evidence
+          rather than from a spinner.
+        </p>
+        <p>
+          There is a quieter difference underneath, and it decides who can help you. The flow's knowledge lives in
+          the person who built it and in the file only that tool opens; hand the work to a colleague, a contractor
+          or an agent, and the first week is archaeology. The pipeline's knowledge lives in the document: the nodes
+          are named for what they do, the SQL is in the file, the dependencies are declared — so the second person
+          (or the second agent) starts from reading, not from reverse-engineering. Teams do not adopt pipelines
+          because the first build is faster; often it is not. They adopt them because the second week, the second
+          person and the second year are all cheaper.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tp-six">
+    <div class="container">
+      <p class="kicker">The list</p>
+      <h2 id="tp-six" class="ds-headline">Six things a flow cannot do</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/pipeline-contract.md §3 -->
+          <h3>Diff in a pull request</h3>
+          <p>The pipeline is JSON referencing named SQL templates; a change is a line-level diff a reviewer reads before it merges. A flow file changes wholesale and invisibly.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/versioning.md §3 -->
+          <h3>Carry a draft a reviewer runs</h3>
+          <p>The agent's work lands as a draft. A person runs it, reads the rows, and releases it or not. The released version is immutable; the next edit becomes a new draft.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6.2 -->
+          <h3>Be written by an agent</h3>
+          <p>The whole authoring surface is MCP tools: schemas in, catalogue statistics and indexes read, the draft created and iterated, the run inspected. A flow has no interface an agent can work through.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dag-executor.md §5 -->
+          <h3>Show why a node is slow</h3>
+          <p>Every statement carries a query timeout, and the SQL probe captures the plan before the query runs — so a slow node names itself, with a plan, instead of being a spinner in someone else's UI.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/pipeline-contract.md §9 -->
+          <h3>Write its result back</h3>
+          <p>A node can land its result in a datasource — the Postgres table a BI tool live-connects to. The flow's output stays where the flow puts it.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §19 -->
+          <h3>Publish as an API</h3>
+          <p>Release the pipeline, publish the endpoint: a versioned <code>GET</code> with bound parameters and a key scoped to its path. That is the step a flow has no answer for.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tp-better">
+    <div class="container">
+      <p class="kicker">The honest column</p>
+      <h2 id="tp-better" class="ds-headline">What Prep does better</h2>
+      <div class="prose">
+        <p>
+          Visual profiling — the distributions, the nulls, the value counts a flow shows while you drag — is a real
+          strength, and this server does not ship an equivalent: the agent reads catalogue statistics and the probe's
+          rows instead, which is evidence, not a histogram. The click-to-pivot is faster than writing the SQL by
+          hand if you do not have an agent to write it. And Tableau-native output — the flow that lands directly
+          where a Tableau author expects — is friction this does not attempt to match; the honest path here is the
+          write-back node or the endpoint.
+        </p>
+        <p>
+          If the preparation is a one-off reshape by a person who lives in Prep, none of the six above pays for the
+          move. The pipeline earns its keep when the preparation is repeated, reviewed, handed between people and
+          machines, or served — which is the moment a file one tool opens stops being enough.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tp-migrate">
+    <div class="container">
+      <p class="kicker">The move</p>
+      <h2 id="tp-migrate" class="ds-headline">Migrating a flow, step by step</h2>
+      <div class="prose">
+        <p>
+          Pick the flow you would least like to rebuild from scratch next quarter — the weekly one, with the joins
+          someone has memorised. That flow pays for the migration twice: once in the move, and once every week it
+          no longer depends on the person who built it. The five steps below are each a shipped feature; the whole
+          sequence is an afternoon for a flow of ordinary size.
+        </p>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Inventory the flow's sources</h3>
+          <p>List every input the flow touches — databases, files, the join keys between them. This list is the migration's scope; most flows are smaller than they look once the inputs are named.</p>
+        </li>
+        <li>
+          <h3>Register them as datasources</h3>
+          <!-- claim: docs/datasources.md §3 -->
+          <p>Each source becomes a datasource: name, dialect, connection, credentials the server encrypts and never returns. Mark read-only every source the pipeline must never write to — the refusal is enforced at save time and again at run time.</p>
+        </li>
+        <li>
+          <h3>Describe the transformation to the agent</h3>
+          <!-- claim: docs/mcp-server.md §6.2 -->
+          <p>The flow's steps are a spec: describe the shape in business terms. The agent reads the real schemas and catalogue statistics, drafts one node per source plus a join in the scratch database, runs it, and reads the failure when there is one.</p>
+        </li>
+        <li>
+          <h3>Run it and compare against the flow's output</h3>
+          <!-- claim: docs/staging.md §3 -->
+          <p>Run the flow once more and the pipeline once, and compare row counts and spot totals. The pipeline's result is paged rows you can read in the results dock — the comparison is a morning, not a project.</p>
+        </li>
+        <li>
+          <h3>Release it</h3>
+          <!-- claim: docs/versioning.md §3 -->
+          <p>When the numbers match, a person releases. The flow on the shared drive can retire; the pipeline is versioned, diffable, and — the step Prep never had — <a th:href="@{/published-api}">publishable as an endpoint</a>.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tp-shot">
+    <div class="container">
+      <p class="kicker">What it looks like</p>
+      <h2 id="tp-shot" class="ds-headline">The pipeline a flow became</h2>
+      <div class="shots">
+        <figure class="shot">
+          <figcaption>The editor: the flow's reshape as a graph of SQL nodes, each one readable, the result dock open.</figcaption>
+          <div class="shot-placeholder" data-shot="editor-hero" style="--shot-ratio: 16 / 10"><b>[shot: editor-hero]</b>pipeline editor · the migrated graph · Results dock · 1600×1000</div>
+        </figure>
+        <figure class="shot">
+          <figcaption>The agent's session: schemas read, the draft iterated, the run verified — the authoring a flow file cannot accept.</figcaption>
+          <div class="shot-placeholder" data-shot="mcp-session" style="--shot-ratio: 16 / 10"><b>[shot: mcp-session]</b>Claude Code session · tool calls against the demo · 1440×900</div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/pipeline-contract.md §3 — is a pipeline really code -->
+      <!-- claim: docs/mcp-server.md §6.2 — what Prep still does better / can an agent build it -->
+      <!-- claim: docs/datasources.md §3 — how do I migrate an existing flow -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Prep questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tp-next">
+    <div class="container">
+      <h2 id="tp-next" class="ds-headline">Bring one flow over and compare</h2>
+      <!-- claim: docs/deployment.md §Appendix B -->
+      <p class="section-lede">
+        The demo stack gives you the four sources to practise on. Migrate the smallest flow you run weekly — the
+        comparison against its output is the whole argument, whichever way it lands.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/tableau/governed-dataset}">The step-by-step how-to</a>
+        <a class="btn btn-secondary" th:href="@{/docs/deployment}">Run the demo</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

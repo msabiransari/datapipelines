@@ -150,6 +150,9 @@ object PublicPaths {
                 "Site v2 intent pages under the Tableau hub: GET-only constant content, no datastore and no principal on the request.",
                 "site-v2",
             ),
+            // 111: the persona pages — one glob for the family, same shape and reasoning as
+            // the rows above. The pages under it are enumerated by the page registry.
+            PublicPath("/for/*", "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.", "111"),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.
