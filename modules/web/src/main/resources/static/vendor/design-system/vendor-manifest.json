@@ -63,7 +63,7 @@
     "package": "lucide-static",
     "version": "1.39.0",
     "file": "vendor/icons/lucide-sprite.svg",
-    "sha256": "87def3f92b8d1b9c0808625f88a4001da737dabca16472244054b22af0a741da",
+    "sha256": "32f090a0b4bc5c5f23561ca3a5fbad7e897553302f3f02651f720c3457910949",
     "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
     "license": "ISC",
     "subset": [
@@ -106,9 +106,10 @@
       "folder",
       "folder-open",
       "file-code",
-      "file"
+      "file",
+      "menu"
     ],
-    "note": "059 \u2014 subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 \u00a7B: the sprite now covers EVERY icon the app references \u2014 the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
+    "note": "059 \u2014 subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 \u00a7B: the sprite now covers EVERY icon the app references \u2014 the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix). 110 added `menu` for the phone shell's rail opener (same pinned 1.39.0 source).",
     "license_file": "vendor/icons/LICENSE.lucide",
     "subset_sha256": {
       "db": "ba411fddd776d3937bb0afb44a17e08561cf00483b48922033697233a41c320c",
@@ -150,7 +151,8 @@
       "folder": "c4d98d1daabf94e60d6d597a46b4a6cbf7baad77075926e8ce737676980e4c13",
       "folder-open": "c011afb630321d63649bb2d7ff510cb5a4e2979c1f6e86a6f1c6d28ff62856e3",
       "file-code": "23703e1c1fcf4000354bb9bd1852344a5dc76bf87747238c1e1bb2d932f6844e",
-      "file": "fe93aa65c1fbfc2d00b3c1d59ce3da94fd2245716e694128688d6c50adc0768e"
+      "file": "fe93aa65c1fbfc2d00b3c1d59ce3da94fd2245716e694128688d6c50adc0768e",
+      "menu": "8a1841a0766152e1165ce5c401e29e15c170e71df3a9d9c8ad5e96322052e1c9"
     }
   },
   "htmx": {
