@@ -121,6 +121,23 @@
  *     applyBoostSwap and carried on a one-shot: htmx's swap events carry the
  *     SWAP's eventInfo, not the response's, and have no `boosted` flag.
  *
+ * 110 §A added the PHONE DRAWER, the shell's third state:
+ *
+ * 12. THE DRAWER. Below 768px the SAME <aside class="app-rail"> becomes an
+ *     off-canvas drawer — app.css takes it out of the grid, translates it
+ *     off-screen and lights it under `rail-open`, a class on <html> like the
+ *     collapse but NEVER persisted: a drawer is closed on every load. Opened by
+ *     the topbar's #rail-open (display:none above the breakpoint, so the control
+ *     cannot exist where the drawer cannot); closed by #rail-close, Escape, the
+ *     scrim, or any BOOSTED navigation — the close hangs off the same one-shot
+ *     applyBoostSwap arms for the entrance, so a background partial settling
+ *     while the drawer is open cannot slam it shut, and setRailOpen's no-change
+ *     early return keeps desktop swaps focus-neutral. Opening moves focus to the
+ *     first nav link; closing returns it to the opener. From 768 to 1099px the
+ *     rail's default flips to collapsed by pure CSS; the user's explicit choice
+ *     travels the same dp-rail key (`rail-expanded` = a stored "0", stamped
+ *     pre-paint by the layout's inline script).
+ *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
  * every listener on document.body (plus one keydown on document, for the menu),
@@ -486,21 +503,32 @@
 
   var RAIL_KEY = "dp-rail";
   var COLLAPSED_CLASS = "rail-collapsed";
+  /* 110 §A: the mirror of the opposite choice. From 768 to 1099px the rail's DEFAULT
+     is collapsed by a CSS media rule; a user who explicitly expanded it there (a
+     stored "0") carries this class so the default cannot re-collapse their choice.
+     The layout's inline script stamps it before the first paint; this file toggles
+     it only on a REAL user click (storage provided), never on the init sync. */
+  var EXPANDED_CLASS = "rail-expanded";
+  /* 110 §A: the phone drawer's open state — a class on <html>, like the collapse.
+     NEVER persisted: a drawer is closed on every load. */
+  var RAIL_OPEN_CLASS = "rail-open";
   var THEME_HREF = /\/themes\/([a-z0-9-]+)\.css/;
 
   /* The rail's collapsed state lives on <html>, because the layout's one inline
      script has to set it before <body> exists (a flash of the wrong rail width
      on every navigation is exactly what the boosted shell exists to avoid).
-     This toggles the SAME element and class, so there is one source of truth. */
+     This toggles the SAME element and class, so there is one source of truth.
+
+     `storage` doubles as the "this was a real user choice" flag: the init sync
+     passes null and must not stamp rail-expanded (the default has to stay free
+     to collapse at drawer-adjacent widths); a click passes localStorage and the
+     expanded choice is recorded on <html> for the 768–1099 default to honour. */
   function setRailCollapsed(doc, collapsed, storage) {
     var root = doc.documentElement;
     if (!root) return collapsed;
     root.classList.toggle(COLLAPSED_CLASS, collapsed);
-    var button = doc.getElementById("rail-collapse");
-    if (button) {
-      button.setAttribute("aria-expanded", String(!collapsed));
-      button.setAttribute("title", collapsed ? "Expand sidebar" : "Collapse sidebar");
-    }
+    if (storage) root.classList.toggle(EXPANDED_CLASS, !collapsed);
+    syncCollapseButton(doc, collapsed);
     try {
       if (storage) storage.setItem(RAIL_KEY, collapsed ? "1" : "0");
     } catch (e) {
@@ -512,6 +540,64 @@
 
   function railCollapsed(doc) {
     return !!(doc.documentElement && doc.documentElement.classList.contains(COLLAPSED_CLASS));
+  }
+
+  /* The width band where the rail's DEFAULT is collapsed without any class on
+     <html> (110 §A). One string, shared by the state machine and its tests. */
+  var DEFAULT_COLLAPSED_QUERY = "(min-width: 768px) and (max-width: 1099.98px)";
+
+  /* What the READER sees, as opposed to what the class says: below 1100px the
+     CSS default collapses an undecided rail, so the collapse button must offer
+     EXPAND there even though `rail-collapsed` is absent — and the init sync must
+     stamp aria-expanded accordingly. Pure over the injected window so `node
+     --test` can drive both sides of the media query. */
+  function railVisuallyCollapsed(doc, win) {
+    if (railCollapsed(doc)) return true;
+    if (!doc.documentElement.classList.contains(EXPANDED_CLASS) && win && win.matchMedia) {
+      var mq = win.matchMedia(DEFAULT_COLLAPSED_QUERY);
+      return !!(mq && mq.matches);
+    }
+    return false;
+  }
+
+  /* The button half of the collapse state, split out so the init sync can stamp
+     aria-expanded/title from the VISUAL state without writing the class (the
+     classless default must stay classless — the browser, not the document, owns
+     that state). */
+  function syncCollapseButton(doc, collapsed) {
+    var button = doc.getElementById("rail-collapse");
+    if (button) {
+      button.setAttribute("aria-expanded", String(!collapsed));
+      button.setAttribute("title", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    }
+  }
+
+  /* ---- 110 §A: the phone drawer ---- */
+
+  function railOpen(doc) {
+    return !!(doc.documentElement && doc.documentElement.classList.contains(RAIL_OPEN_CLASS));
+  }
+
+  function firstRailLink(doc) {
+    return doc.querySelector ? doc.querySelector(".app-nav-link") : null;
+  }
+
+  /* Opens or closes the drawer, mirrors aria-expanded onto the opener, and does
+     the focus choreography ONLY when the state actually changed: opening puts
+     focus on the first nav link, closing returns it to the opener. The no-change
+     early return is what makes this safe to call from htmx:afterSettle for every
+     boosted navigation — a desktop swap (drawer closed) must not move focus. */
+  function setRailOpen(doc, open) {
+    var root = doc.documentElement;
+    if (!root) return open;
+    var wasOpen = railOpen(doc);
+    root.classList.toggle(RAIL_OPEN_CLASS, open);
+    var opener = doc.getElementById("rail-open");
+    if (opener) opener.setAttribute("aria-expanded", String(open));
+    if (open === wasOpen) return open;
+    var target = open ? firstRailLink(doc) : opener;
+    if (target && target.focus) target.focus();
+    return open;
   }
 
   /* The breadcrumb, re-derived from the rail itself: the active link carries its
@@ -539,7 +625,13 @@
       groupEl.hidden = !group;
     }
     if (sepEl) sepEl.hidden = !group;
-    if (pageEl) pageEl.textContent = label;
+    if (pageEl) {
+      pageEl.textContent = label;
+      // 110 §A: below 1100px the group is hidden and the leaf truncates, so the
+      // element carries the full path as its title — the same thing the server
+      // rendered at first paint (ShellRenderTest keeps the two tables agreeing).
+      pageEl.setAttribute("title", group ? group + " / " + label : label);
+    }
     return { group: group, label: label };
   }
 
@@ -655,6 +747,11 @@
       if (!entranceDue) return;
       entranceDue = false;
       markEntrance(window, doc.getElementById(MAIN_ID));
+      /* 110 §A: a BOOSTED navigation closes the drawer — the same one-shot that
+         decides the entrance decides the close, so a background partial settling
+         while the drawer is open cannot slam it shut. setRailOpen's no-change
+         early return keeps this a no-op at desktop widths. */
+      setRailOpen(doc, false);
     });
 
     /* 085 §D — every request shows the bar; the originating button goes busy;
@@ -726,11 +823,32 @@
 
     /* 079 §A — the rail toggle. One listener on body, so it survives every swap
        (the rail itself is outside #app-main and is never replaced, but a
-       document-level listener is the contract this file already keeps). */
+       document-level listener is the contract this file already keeps). 110 §A:
+       the toggle targets the VISUAL state — in the classless default band the
+       rail already reads collapsed, so the first click must EXPAND (writing the
+       user's rail-expanded/"0" choice), not collapse an already-collapsed rail. */
     doc.body.addEventListener("click", function (evt) {
       var toggle = evt.target.closest && evt.target.closest("#rail-collapse");
       if (!toggle) return;
-      setRailCollapsed(doc, !railCollapsed(doc), window.localStorage);
+      setRailCollapsed(doc, !railVisuallyCollapsed(doc, window), window.localStorage);
+    });
+
+    /* 110 §A — the phone drawer. Open on the topbar's opener, close on the close
+       button, on the scrim, on Escape, and on any boosted navigation (the
+       afterSettle wiring above). The opener is display:none above 768px by CSS,
+       so these listeners are inert at desktop widths by construction. */
+    doc.body.addEventListener("click", function (evt) {
+      if (evt.target.closest && evt.target.closest("#rail-open")) {
+        setRailOpen(doc, true);
+        return;
+      }
+      if (evt.target.closest && evt.target.closest("#rail-close")) {
+        setRailOpen(doc, false);
+        return;
+      }
+      if (evt.target.closest && evt.target.closest(".app-rail-backdrop")) {
+        setRailOpen(doc, false);
+      }
     });
 
     /* 079 §B — the avatar menu. Opening is a click on the avatar; closing is
@@ -748,6 +866,11 @@
       }
     });
     doc.addEventListener("keydown", function (evt) {
+      /* 110 §A: Escape closes the drawer first — it is the top layer when open. */
+      if (evt.key === "Escape" && railOpen(doc)) {
+        setRailOpen(doc, false);
+        return;
+      }
       if (!menuIsOpen(doc)) return;
       if (evt.key === "Escape") {
         setMenuOpen(doc, false);
@@ -786,8 +909,14 @@
     syncNavActive(doc, window.location.pathname);
     syncCrumbs(doc, window.location.pathname);
     // The rail's class is already on <html> (the layout's pre-paint script); this
-    // brings the button's aria-expanded into line with it on the first paint.
-    setRailCollapsed(doc, railCollapsed(doc), null);
+    // brings the button's aria-expanded into line with the VISUAL state on the
+    // first paint — and, deliberately, writes NO class: in the 768–1099 default
+    // band the absence of a class IS the state, and the document must not
+    // overwrite a decision the browser owns. (110 §A.)
+    syncCollapseButton(doc, railVisuallyCollapsed(doc, window));
+    // Same one-line sync for the drawer: closed on every load, opener aria-expanded
+    // matching. (No state change, so setRailOpen's focus choreography cannot fire.)
+    setRailOpen(doc, railOpen(doc));
   }
 
   var api = {
@@ -827,6 +956,13 @@
     SWAP_SPEC: SWAP_SPEC,
     RAIL_KEY: RAIL_KEY,
     COLLAPSED_CLASS: COLLAPSED_CLASS,
+    EXPANDED_CLASS: EXPANDED_CLASS,
+    RAIL_OPEN_CLASS: RAIL_OPEN_CLASS,
+    setRailOpen: setRailOpen,
+    railOpen: railOpen,
+    railVisuallyCollapsed: railVisuallyCollapsed,
+    syncCollapseButton: syncCollapseButton,
+    DEFAULT_COLLAPSED_QUERY: DEFAULT_COLLAPSED_QUERY,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window !== "undefined") {

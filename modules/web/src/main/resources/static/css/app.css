@@ -552,7 +552,12 @@ button.app-busy::after {
    type size below resolves through a design-system token.
    --------------------------------------------------------------------------- */
 :root {
-  --app-rail-width: 232px;
+  /* 110: --app-rail-width keeps meaning "how wide the rail is right now" (the shell
+     overrides it to --app-rail-collapsed when the collapse class is on); the expanded
+     value is its own token so the phone drawer can always be full-size without
+     re-declaring the geometry literal. */
+  --app-rail-expanded: 232px;
+  --app-rail-width: var(--app-rail-expanded);
   --app-rail-collapsed: 60px;
 }
 
@@ -599,9 +604,14 @@ button.app-busy::after {
 
 /* Everything that is TEXT in the rail disappears when it collapses; the icons,
    the brand tile and the workspace avatar stay. One class does it, so a row
-   added later collapses correctly by carrying `.app-rail-label` on its label. */
-:root.rail-collapsed .app-rail-label {
-  display: none;
+   added later collapses correctly by carrying `.app-rail-label` on its label.
+   110: the collapse is a DESKTOP-and-tablet state — below 768px the rail is the
+   drawer and always shows its full content, so every visual collapse rule is
+   scoped to the widths where the drawer cannot exist. */
+@media (min-width: 768px) {
+  :root.rail-collapsed .app-rail-label {
+    display: none;
+  }
 }
 
 .app-brand {
@@ -620,9 +630,11 @@ button.app-busy::after {
   flex: none;
 }
 
-:root.rail-collapsed .app-brand {
-  justify-content: center;
-  padding-inline: 0;
+@media (min-width: 768px) {
+  :root.rail-collapsed .app-brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
 }
 
 /* The mark ("the join", 2026-09-04) sits on a brand tile now: the strokes are
@@ -670,9 +682,11 @@ button.app-busy::after {
   border-color: var(--border-hover);
 }
 
-:root.rail-collapsed .app-ws {
-  justify-content: center;
-  padding-inline: 0;
+@media (min-width: 768px) {
+  :root.rail-collapsed .app-ws {
+    justify-content: center;
+    padding-inline: 0;
+  }
 }
 
 .app-ws-avatar {
@@ -803,9 +817,11 @@ button.app-busy::after {
   font-variant-numeric: tabular-nums;
 }
 
-:root.rail-collapsed .app-nav-link {
-  justify-content: center;
-  padding-inline: 0;
+@media (min-width: 768px) {
+  :root.rail-collapsed .app-nav-link {
+    justify-content: center;
+    padding-inline: 0;
+  }
 }
 
 .app-rail-foot {
@@ -835,12 +851,14 @@ button.app-busy::after {
   color: var(--text-primary);
 }
 
-:root.rail-collapsed .app-rail-collapse {
-  justify-content: center;
-}
+@media (min-width: 768px) {
+  :root.rail-collapsed .app-rail-collapse {
+    justify-content: center;
+  }
 
-:root.rail-collapsed .app-rail-chevron {
-  transform: rotate(180deg);
+  :root.rail-collapsed .app-rail-chevron {
+    transform: rotate(180deg);
+  }
 }
 
 /* ---- top bar ---- */
@@ -907,13 +925,23 @@ button.app-busy::after {
   background: var(--surface-inset);
 }
 
-@media (max-width: 900px) {
-  .app-search {
+/* 110 §A — was `max-width: 900px`; the search hides from the topbar's 1100px down,
+   because from 768 to 1099 the rail packs to icons and the bar must fit beside it.
+   (Below 768 the search is not hidden — it MOVES into the drawer's head:
+   .app-rail-search in the layout.) The crumbs take over the bar's free space and,
+   at both narrow bands, collapse to the leaf with the full path on title. */
+@media (max-width: 1099.98px) {
+  .app-topbar .app-search {
     display: none;
   }
 
   .app-crumbs {
     margin-right: auto;
+  }
+
+  .app-crumbs .app-crumb-group,
+  .app-crumbs .app-crumb-sep {
+    display: none;
   }
 }
 
@@ -933,6 +961,74 @@ button.app-busy::after {
 .app-icon-button:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
+}
+
+/* ---- 110 §A — the phone shell's chrome: opener, drawer close, scrim. ----
+   All three are inert at desktop widths by their BASE rules; only the <768px
+   media section at the foot of this file lights them. The opener is hidden by
+   CSS rather than JS so the drawer simply cannot exist above the breakpoint. */
+
+/* The topbar hamburger, first control in the bar below 768px. */
+.app-rail-open {
+  display: none;
+  width: var(--field-height-lg);
+  height: var(--field-height-lg);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-secondary);
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+}
+
+.app-rail-open:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* The close control inside the open drawer, over the brand row's trailing edge
+   (the rail is position: fixed below 768px, which is what this anchors to). */
+.app-rail-close {
+  display: none;
+  position: absolute;
+  top: var(--gap-sm);
+  right: var(--gap-sm);
+  width: var(--field-height-lg);
+  height: var(--field-height-lg);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-secondary);
+  place-items: center;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.app-rail-close:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* The search's second seat, inside the rail: hidden everywhere except the drawer
+   widths, where the topbar copy is the one hidden (the 1099.98px rule above). */
+.app-search.app-rail-search {
+  display: none;
+}
+
+/* The drawer's scrim. Same color-mix idiom as the modals' .u-backdrop; invisible
+   and non-interactive until `html.rail-open` lights it below 768px. */
+.app-rail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-drawer) - 1);
+  background: color-mix(in srgb, var(--text-primary) 55%, transparent);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-base) var(--ease-out),
+    visibility 0s linear var(--duration-base);
 }
 
 /* ---- avatar + menu ---- */
@@ -2754,5 +2850,255 @@ button.app-busy::after {
   .app-main .ds-card:has(.ds-button-primary):hover,
   .app-main .ds-button:active {
     transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   110 — THE SHELL FITS A PHONE. ONE breakpoint table (ui-screens.md §3), and
+   every rule below is a line of it:
+
+   | Width     | Rail                                            | Topbar                                          | Main gutter |
+   |-----------|-------------------------------------------------|-------------------------------------------------|-------------|
+   | ≥ 1100 px | as today (expanded; `rail-collapsed` on         | as today                                        | --gap-lg    |
+   |           | user choice, remembered)                        |                                                 |             |
+   | 768–1099  | starts collapsed (icons only) unless the user   | search hidden (the old 900px rule moved to      | --gap-lg    |
+   |           | expanded it — same class, same localStorage     | this breakpoint); crumbs truncate to the LEAF   |             |
+   |           | key — the DEFAULT flips at this width           | with the full path in title                     |             |
+   | < 768 px  | off-canvas drawer: not in the grid, position    | brand tile → hamburger, crumbs (leaf only),     | --gap-md    |
+   |           | fixed, --z-drawer, translated off-screen;       | mode toggle, user menu; nothing wraps; the      |             |
+   |           | opened by #rail-open, closed by Escape, the     | search moves INTO the drawer's head             |             |
+   |           | backdrop or any boosted navigation              |                                                 |             |
+
+   The drawer is the SAME <aside class="app-rail"> element — no second nav. Its open
+   state is the `rail-open` class on <html>, set and cleared by shell.js and NEVER
+   persisted: a drawer is closed on every load. The 768–1099 default is pure CSS (so
+   it survives a live resize), and a user's explicit choice rides the SAME class and
+   storage key as before: `rail-collapsed` = a stored "1", `rail-expanded` (110's one
+   new class, stamped pre-paint by the layout's inline script) = a stored "0". Breakpoint
+   values use .98 ceilings so a viewport reported at exactly 768 or 1100 always gets
+   the wider band's layout.
+   --------------------------------------------------------------------------- */
+
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  /* The default flips: icons-only, unless the user explicitly expanded. A stored
+     "1" reaches the same visual through the unscoped rail-collapsed rules; a
+     stored "0" carries `rail-expanded` and opts out of this default. */
+  :root:not(.rail-expanded) .app-shell {
+    --app-rail-width: var(--app-rail-collapsed);
+  }
+
+  :root:not(.rail-expanded) .app-rail-label {
+    display: none;
+  }
+
+  /* The status pill is a fixed SIBLING of the shell and reads the rail width off
+     the same classes the shell does (see 103 §A); the classless default has to be
+     spelled out for it too, or it would clear a rail that is only 60px wide. */
+  :root:not(.rail-expanded) .app-status-pill {
+    left: calc(var(--app-rail-collapsed) + var(--gap-lg));
+  }
+
+  /* The collapse chevron points the way the rail will GO: in the classless
+     default the rail already sits collapsed, so the chevron rotates as it does
+     under the class. */
+  :root:not(.rail-expanded) .app-rail-chevron {
+    transform: rotate(180deg);
+  }
+}
+
+/* §C — the editors' phone band (pipelines/editor.html, templates/editor.html):
+   desktop-first by decision, not omission. Hidden everywhere, shown below 768. */
+.app-wide-screen-note {
+  display: none;
+}
+
+/* §B — every table scrolls INSIDE its own box instead of widening the document —
+   the .app-card-table treatment (overflow-x: auto), one rule for all of them, at
+   every width (a wide table is a document-widener at 768 exactly as at 390; the
+   walk proved it on /admin/users). `display: block` turns each table into its own
+   scroll container, which is what lets wrapper-less tables (admin, workspaces,
+   promotion, the execution fragments) get it without new markup — and what keeps
+   the oob-swapped keys table (api/console.html) safe: its fragment root must stay
+   a bare <table> (ui-screens.md §4.5 — a wrapped table partial is silently
+   discarded by the fragment parser). */
+.app-main .ds-table {
+  display: block;
+  overflow-x: auto;
+}
+
+/* §B — the shell's own shared rule. `.app-shell` lays its content column out as
+   a bare `1fr`, whose automatic minimum is the item's min-content — so ANY page
+   whose content has a wide intrinsic minimum (a 7-column table, a nowrap form
+   row) widened the whole track and dragged the topbar with it: /admin/users at
+   768px measured 376px over with the table already scrolling internally, because
+   `main` itself refused to shrink. `min-width: 0` lets the column be the width
+   the viewport gives it; the table/pre/form scroll-and-wrap rules above then do
+   their jobs. This is the same lesson as the `minmax(0, 1fr)` note on
+   .app-grid-stack, one level up. */
+.app-main {
+  min-width: 0;
+}
+
+/* §B — below 1100 the shell's content column is narrow enough that a nowrap
+   control row IS a document-widener: /admin/users' create-user form (two inputs,
+   a button and a note in one .u-row) pushed the page 374px past a 768px viewport
+   with the rail packed away. The rows wrap, as .app-filters always has. */
+@media (max-width: 1099.98px) {
+  .app-main .u-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* One content column; the rail leaves the grid entirely. minmax(0, 1fr), never a
+     bare 1fr — a grid item's default min-width:auto is how documents get widened
+     by their content (the .app-grid-stack precedent). */
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-container,
+  .app-topbar {
+    padding-inline: var(--gap-md);
+  }
+
+  /* --- the drawer --- */
+
+  .app-rail {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    /* Always the FULL rail here: a collapse chosen on a desktop must not make a
+       60px-wide drawer on a phone, so this reads the expanded token directly
+       rather than the shell's overridable --app-rail-width. */
+    width: var(--app-rail-expanded);
+    height: auto;
+    z-index: var(--z-drawer);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform var(--duration-base) var(--ease-out),
+      visibility 0s linear var(--duration-base);
+  }
+
+  :root.rail-open .app-rail {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--duration-base) var(--ease-out);
+  }
+
+  /* Body scroll lock, on the same class — no inline style anywhere. */
+  :root.rail-open {
+    overflow: hidden;
+  }
+
+  :root.rail-open .app-rail-backdrop {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity var(--duration-base) var(--ease-out);
+  }
+
+  /* The chrome lights up: opener first in the bar, close in the drawer's head,
+     and the search's second seat under the brand. */
+  .app-rail-open {
+    display: grid;
+  }
+
+  .app-rail-close {
+    display: grid;
+  }
+
+  .app-search.app-rail-search {
+    display: flex;
+    margin: 0 var(--gap-md) var(--gap-sm);
+    width: auto;
+  }
+
+  /* Nothing in the bar wraps: the crumbs absorb the squeeze (min-width: 0 +
+     ellipsis) so the controls keep their boxes. */
+  .app-topbar {
+    flex-wrap: nowrap;
+  }
+
+  /* Touch targets: everything operable in the drawer and the bar is at least
+     --field-height-lg tall at this width. */
+  .app-nav-link {
+    min-height: var(--field-height-lg);
+  }
+
+  .app-rail-collapse {
+    min-height: var(--field-height-lg);
+  }
+
+  .app-topbar .app-icon-button,
+  .app-topbar .app-avatar {
+    width: var(--field-height-lg);
+    height: var(--field-height-lg);
+  }
+
+  /* --- §B: every screen fits --- */
+
+  /* The page header: actions wrap UNDER the title, never off-screen. */
+  .app-page-h {
+    flex-wrap: wrap;
+  }
+
+  .app-page-h .app-page-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  /* Modals: full width, the tighter gutter, the full viewport — one rule that the
+     -sm/-md/-lg max-widths lose to (this block is later in the file). The close
+     button rides the scroll instead of being clipped by it. */
+  .app-modal {
+    max-width: none;
+    max-height: 100dvh;
+    padding: var(--gap-md);
+  }
+
+  .app-modal-close {
+    position: sticky;
+    top: 0;
+    display: flex;
+    width: fit-content;
+    margin-left: auto;
+    /* The modal's own surface, so scrolled content does not show through. */
+    background: inherit;
+    z-index: 1;
+  }
+
+  /* Toasts: the stack sits at the BOTTOM, full width minus the gutter — it can
+     never cover the opener in the topbar. */
+  .app-toast-stack {
+    top: auto;
+    bottom: var(--gap-md);
+    left: var(--gap-md);
+    right: var(--gap-md);
+    max-width: none;
+    padding: 0;
+  }
+
+  /* §C: the editor band shows; the editor stays rendered underneath it. */
+  .app-wide-screen-note {
+    display: flex;
+    margin-bottom: var(--gap-md);
+  }
+}
+
+/* Motion only, silenced the house way — the drawer and its scrim keep their
+   states (visibility is information here) and lose their transitions. The
+   `!important` is forced, not stylistic: motion.css's reduced-motion block clamps
+   `* { transition-duration: 0.01ms !important }`, and without matching weight a
+   plain `transition: none` here would lose to the vendored sheet and compute as
+   1e-05s — measurably (MobileShellBrowserTest reads the computed duration). */
+@media (prefers-reduced-motion: reduce) and (max-width: 767.98px) {
+  .app-rail,
+  :root.rail-open .app-rail,
+  .app-rail-backdrop,
+  :root.rail-open .app-rail-backdrop {
+    transition: none !important;
   }
 }
