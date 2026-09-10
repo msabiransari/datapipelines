@@ -58,8 +58,9 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   starts refusing with `auth.key_issuer_role_lost` within about a minute. That one is not
   retryable at any scope — the fix is a new key from somebody who still holds the role.
 
-- **A viewer's key can read and run; it cannot author.** `auth.role_required` means the ROLE
-  is short, not the scope, so asking for a broader key will not help — ask a workspace admin.
+- **A key whose issuer is now only a viewer can still read and run; it cannot author**
+  (viewers never mint keys — this is the demoted-issuer case). `auth.role_required` means the
+  ROLE is short, not the scope, so asking for a broader key will not help — ask a workspace admin.
 
 - **You cannot register a datasource, and there is no tool that lets you.** **No credential
   travels through an agent.** A secret passed through you transits your context, your transcript
