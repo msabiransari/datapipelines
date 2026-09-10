@@ -58,18 +58,22 @@ class SiteV2GuardsTest {
     }
 
     @Test
-    fun `the roadmap page is younger than the promise it makes`() {
-        val html = rendered.getValue(SitePages.ROADMAP)
-        val updated = Regex("""data-roadmap-updated="([0-9-]+)"""").find(html)!!.groupValues[1]
-        val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())
-        val clue =
-            "/roadmap says 'Last updated $updated' — $age days ago; the page names months, " +
-                "so it is revisited at least every $ROADMAP_MAX_AGE_DAYS days"
-        withClue(clue) {
-            (age <= ROADMAP_MAX_AGE_DAYS) shouldBe true
+    fun `the roadmap pages are younger than the promises they make`() {
+        // Both roadmap pages — /roadmap and the Tableau roadmap page (111) — promise months,
+        // so both are revisited on the same clock and carry the same dateline discipline.
+        listOf(SitePages.ROADMAP, SitePages.TABLEAU_ROADMAP).forEach { page ->
+            val html = rendered.getValue(page)
+            val updated = Regex("""data-roadmap-updated="([0-9-]+)"""").find(html)!!.groupValues[1]
+            val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())
+            val clue =
+                "${page.path} says 'Last updated $updated' — $age days ago; the page names months, " +
+                    "so it is revisited at least every $ROADMAP_MAX_AGE_DAYS days"
+            withClue(clue) {
+                (age <= ROADMAP_MAX_AGE_DAYS) shouldBe true
+            }
+            // The JSON-LD's dateModified is the same date — one value, two places.
+            html shouldContain "\"dateModified\": \"$updated\""
         }
-        // The JSON-LD's dateModified is the same date — one value, two places.
-        html shouldContain "\"dateModified\": \"$updated\""
     }
 
     @Test
