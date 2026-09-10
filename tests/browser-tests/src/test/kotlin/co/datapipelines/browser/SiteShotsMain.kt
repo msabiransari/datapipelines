@@ -521,9 +521,10 @@ object SiteShotsMain {
             page.navigate("$baseUrl/templates")
             waitFor("#template-list-wrapper")
             selectLeaf(SHARED_TEMPLATE)
-            // The detail pane's versions table carries the per-version in-use count — the
-            // used-by surface on this screen (templates.md §5.4, ui-screens.md §4.6).
-            waitFor("#template-detail .ds-table")
+            // The detail pane's versions list carries the per-version in-use count — the
+            // used-by surface on this screen (templates.md §5.4, ui-screens.md §4.6). The vlist
+            // is 106's reshaped markup (see selectLeaf's note).
+            waitFor("#template-detail .tplx-vlist")
             shoot("template-used-by.png")
         }
 
@@ -539,6 +540,10 @@ object SiteShotsMain {
             // the selectors transfer; only the partial URL differs (detail.html).
             expandFolder(LAKE_NAMESPACE_ROOT, LAKE_PARTIAL)
             expandFolder("$LAKE_NAMESPACE_ROOT/mobility", LAKE_PARTIAL)
+            // waitForResponse fires on the RESPONSE; htmx swaps on a later tick — a bare count
+            // here can read the pre-swap DOM and lose the race (109's gate run did). Wait for
+            // a leaf first, then count.
+            waitFor("#lake-table-tree .tpl-leaf-static")
             val leaves = page.locator("#lake-table-tree .tpl-leaf-static").count()
             check(leaves > 0) {
                 "the $LAKE_DATASOURCE registry shows no tables — is the lake family loaded (--demo lake)?"
@@ -1115,7 +1120,9 @@ object SiteShotsMain {
             val leaf = page.locator("button.tpl-leaf:has(.tpl-label[title='$name'])").first()
             leaf.waitFor()
             page.waitForResponse({ it.url().contains("/partials/templates/versions") }) { leaf.click() }
-            waitFor("#template-detail .ds-table")
+            // 106 reshaped the detail pane to the explorer's vlist markup — the versions list
+            // is .tplx-vrow rows now, not a .ds-table (109's gate run caught the stale pin).
+            waitFor("#template-detail .tplx-vlist")
         }
 
         private fun dismissSecretReveal() {
