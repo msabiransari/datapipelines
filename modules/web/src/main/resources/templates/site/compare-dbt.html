@@ -12,6 +12,8 @@
 
   <section class="section page-hero" aria-labelledby="cmp-title">
     <div class="container">
+      <!-- claim: docs/staging.md §1 -->
+      <p class="eyebrow">No warehouse required · sources read in place · agent as author</p>
       <p class="kicker">Honest comparison</p>
       <h1 id="cmp-title" class="ds-display">datapipelines.co vs dbt</h1>
       <p class="section-lede">
@@ -76,6 +78,32 @@
       <p><a th:href="@{/compare/airflow}">The Airflow comparison &rarr;</a> &middot;
          <a th:href="@{/federated-query}">The cross-database join &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Supported dialects &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/staging.md §1 — do I need a warehouse for this -->
+      <!-- claim: docs/datasources.md §4.1 — which sources can it read -->
+      <!-- claim: docs/mcp-server.md §6.1 — is an agent the author here -->
+      <!-- claim: docs/datasources.md §5.7 — what is the credential story -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The dbt comparison, in questions')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">See the no-warehouse join on real data</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        The demo joins Postgres, MySQL, SQLite and Parquet on S3 in one pipeline — the workload dbt would need a
+        warehouse in front of, run without one.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
+        <a class="btn btn-secondary" th:href="@{/federated-query}">The join, with its SQL</a>
+      </div>
     </div>
   </section>
 

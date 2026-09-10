@@ -12,6 +12,8 @@
 
   <section class="section page-hero" aria-labelledby="ai-title">
     <div class="container">
+      <!-- claim: docs/mcp-server.md §6.1 -->
+      <p class="eyebrow">Agent-authored · person-released · every call audited</p>
       <p class="kicker">Agentic data engineering</p>
       <h1 id="ai-title" class="ds-display">An AI data pipeline you would let someone else run</h1>
       <p class="section-lede">
@@ -128,6 +130,32 @@
       <p><a th:href="@{/text-to-sql-agent}">How this compares with a text-to-SQL tool &rarr;</a> &middot;
          <a th:href="@{/compare/airflow}">vs Airflow &rarr;</a> &middot;
          <a th:href="@{/compare/dbt}">vs dbt &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/mcp-server.md §6.1 — what the agent reads before it writes SQL -->
+      <!-- claim: docs/templates.md §8.4 — how parameter values reach the SQL -->
+      <!-- claim: docs/versioning.md §3.1 — can an agent change a released pipeline -->
+      <!-- claim: docs/auth.md §10.1 — what the audit log records for agent runs -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'AI data pipeline questions, answered plainly')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Watch an agent build one on the demo</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        Bring up the demo sources, describe a question in your own words, and read what the agent drafts — then
+        release it, or don't. The artefact either way is a pipeline you can read.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
+        <a class="btn btn-secondary" th:href="@{/add-mcp-server-to-claude-code}">Connect your agent</a>
+      </div>
     </div>
   </section>
 

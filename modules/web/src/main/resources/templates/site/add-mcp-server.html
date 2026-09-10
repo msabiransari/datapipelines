@@ -13,6 +13,8 @@
 
   <section class="section page-hero" aria-labelledby="add-title">
     <div class="container">
+      <!-- claim: docs/mcp-server.md §6.1 -->
+      <p class="eyebrow">One endpoint · <span th:text="${toolCount}">34</span> tools · API keys only</p>
       <p class="kicker">Client setup</p>
       <h1 id="add-title" class="ds-display">Add an MCP server to Claude Code, Cursor or Copilot</h1>
       <p class="section-lede">
@@ -158,6 +160,32 @@
       </ul>
       <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
          <a th:href="@{/docs/auth}">Authentication and scopes &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/mcp-server.md §3.2 — which MCP client should I use -->
+      <!-- claim: docs/auth.md §7.5 — what scope should the key carry -->
+      <!-- claim: docs/deployment.md §3.5 — which drivers ship in the image -->
+      <!-- claim: docs/mcp-server.md §4.2 — the tools did not come back -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Client setup, in questions')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Do the whole loop on the demo</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        The demo stack is one command, and every step on this page works against it: mint the key, paste the config,
+        list the tools, run a pipeline. Connecting to your own databases is the same ritual with real stakes.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
+        <a class="btn btn-secondary" th:href="@{/mcp-tools}">The tools your agent will list</a>
+      </div>
     </div>
   </section>
 

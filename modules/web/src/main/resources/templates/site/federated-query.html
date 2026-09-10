@@ -12,6 +12,8 @@
 
   <section class="section page-hero" aria-labelledby="fq-title">
     <div class="container">
+      <!-- claim: docs/staging.md §1 -->
+      <p class="eyebrow">Per-run scratch database · nothing landed · no warehouse</p>
       <p class="kicker">Data virtualization, minus the platform</p>
       <h1 id="fq-title" class="ds-display">Federated query across databases, without a warehouse</h1>
       <p class="section-lede">
@@ -135,6 +137,32 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
       <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
          <a th:href="@{/docs/staging}">Staging specification &rarr;</a> &middot;
          <a th:href="@{/docs/pipeline-contract}">Pipeline contract &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <!-- claim: docs/staging.md §3.1 — where the cross-engine join actually runs -->
+      <!-- claim: docs/staging.md §1 — is anything copied between the engines -->
+      <!-- claim: docs/deployment.md Appendix B — can I try it without my own data -->
+      <!-- claim: docs/ROADMAP.md §2 — will staging always be in-memory H2 -->
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Federated query, in questions')}"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cta-title">
+    <div class="container">
+      <h2 id="cta-title" class="ds-headline">Run the join on the demo, then on your databases</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        <code>./app.sh --start --demo nyc</code> seeds every source the worked example uses. The step from there to
+        your own sources is registering a datasource and asking the agent the same question.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
+        <a class="btn btn-secondary" th:href="@{/add-mcp-server-to-claude-code}">Connect your agent</a>
+      </div>
     </div>
   </section>
 
