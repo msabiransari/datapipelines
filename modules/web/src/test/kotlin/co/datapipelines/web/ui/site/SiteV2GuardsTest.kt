@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -20,7 +21,8 @@ import java.time.temporal.ChronoUnit
  *     question for question, answer for answer. The snippet a search engine shows must be a
  *     sentence on the page.
  *  2. **Roadmap freshness** — a public roadmap older than [ROADMAP_MAX_AGE_DAYS] fails the
- *     build: the page promises months, so it has to be revisited.
+ *     build: the page promises months, so it has to be revisited. 115 extended the same clock
+ *     to the home page's dated promise (its `data-roadmap-updated` status line).
  *  3. **Tool-page completeness** — `/mcp-tools` lists every name the catalogue ships, and no
  *     other; the page is generated, and this is the proof it stayed so.
  *  4. **Link graph** — every internal link on every registry page resolves to a registry page,
@@ -73,6 +75,29 @@ class SiteV2GuardsTest {
             }
             // The JSON-LD's dateModified is the same date — one value, two places.
             html shouldContain "\"dateModified\": \"$updated\""
+        }
+    }
+
+    @Test
+    fun `the home page's roadmap promise carries a fresh dateline`() {
+        // 115 §A.2: the before/after section promises next month's scheduler and dashboard in
+        // the roadmap page's own dated `status` markup, so the SAME freshness clock covers the
+        // home page's promise — a stale promise on the busiest page is worse than a stale one
+        // on the roadmap page nobody re-reads. (The SoftwareApplication block has no
+        // dateModified to pair with, so unlike the roadmap pages there is nothing to mirror.)
+        val html = rendered.getValue(SitePages.HOME)
+        val updated =
+            Regex("""data-roadmap-updated="([0-9-]+)"""")
+                .find(html)
+                ?.groupValues
+                ?.get(1)
+        withClue("/: the roadmap promise carries no data-roadmap-updated dateline") { updated.shouldNotBeNull() }
+        val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())
+        withClue(
+            "/ promises next month with a dateline of $updated — $age days ago; the promise is " +
+                "revisited whenever the roadmap pages are (at least every $ROADMAP_MAX_AGE_DAYS days)",
+        ) {
+            (age <= ROADMAP_MAX_AGE_DAYS) shouldBe true
         }
     }
 

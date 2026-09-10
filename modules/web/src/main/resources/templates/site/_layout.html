@@ -78,6 +78,9 @@
     </a>
     <button type="button" class="theme-toggle" data-theme-toggle hidden>Theme: Auto</button>
     <nav class="nav-wide" aria-label="Primary">
+      <!-- 115: "How it works" leads the nav; the MCP-server pillar keeps its footer column
+           and its own page — the buyer lands on the home page, the engineer one hop away. -->
+      <a th:href="@{/how-it-works}">How it works</a>
       <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
       <a th:href="@{/published-api}">API</a>
       <a th:href="@{/tableau}">Tableau</a>
@@ -94,6 +97,7 @@
         </svg>
       </summary>
       <nav class="menu" aria-label="Primary mobile">
+        <a th:href="@{/how-it-works}">How it works</a>
         <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
         <a th:href="@{/published-api}">API</a>
         <a th:href="@{/tableau}">Tableau</a>

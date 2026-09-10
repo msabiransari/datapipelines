@@ -23,40 +23,25 @@ import org.springframework.ui.ExtendedModelMap
  * registry — while serving a page with an empty `<title>`.
  */
 class SiteRenderTest {
-    private val templateSource: String =
-        PathMatchingResourcePatternResolver(javaClass.classLoader)
-            .getResource("classpath:templates/site/index.html")
-            .inputStream
-            .readBytes()
-            .decodeToString()
-
     @Test
     fun `the marketing home renders anonymously with the catalog tool count and no unresolved expressions`() {
-        val count = McpToolCatalog.NAMES.size
         val html = SitePageRenderer.render(SitePages.HOME)
 
-        // The H1 is unchanged by 073 — the poster's line is the pitch; only the <title> had
-        // to start speaking the searcher's words.
-        // Site v2: the H1 says the searcher's words, not the category name (073's research).
-        html shouldContain "Your AI agent builds the data pipelines. You press release."
+        // 115: the H1 speaks to the buyer — "no data team required"; the old poster line and
+        // every engineering noun moved to /how-it-works (SiteBuyerLanguageTest holds the fold).
+        html shouldContain "Show your customers their data. No data team required."
         html shouldContain "<title>${SitePages.HOME.title}</title>"
-        // The three former hardcoded "18"s now render from the model (033/C4).
-        html shouldContain "<span>$count</span> tools cover the full lifecycle"
-        html shouldContain "/mcp — $count MCP tools"
-        html shouldContain "($count tools)"
         // Assets resolve through the app's own static surface, never the retired website/ copy.
         // 111 §C: the foundation sheets ride the generated site-chrome.css bundle (one
         // render-blocking request, parity-guarded by SiteCssBundleParityTest); the swap sheet
         // loads disabled and the site sheet rides inside the bundle.
         html shouldContain "href=\"/site/css/site-chrome.css\""
         html shouldContain "href=\"/vendor/design-system/themes/auto.css\""
-        // 098 §G: the hero is the EDITOR now — the shot 093 could not take, because the canvas
-        // painted every node in --brand and the driver refuses a broken canvas rather than
-        // photographing it. `execution-result.png` did not go away; it moved to the executions
-        // card, and both are asserted so a later round cannot silently drop either.
-        // Site v2: the hero is a placeholder slot until the owner's capture lands (T213).
-        html shouldContain "data-shot=\"editor-hero\""
-        html shouldContain "src=\"/site/img/execution-result.png\""
+        // 115: the hero shows the ARTIFACT — the sentence and its result — as placeholder slots
+        // until the owner's captures land. No mocked dashboard, ever: none exists until next
+        // month, and a stale or invented product shot is a false claim.
+        html shouldContain "data-shot=\"sentence-to-result\""
+        html shouldContain "data-shot=\"artifact-result\""
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.
         html shouldContain "href=\"/login\""
@@ -64,6 +49,24 @@ class SiteRenderTest {
         html shouldNotContain "assets/"
         // " th:" with the leading space — an unprocessed th:* attribute. The root
         // element's xmlns:th namespace declaration survives every render legitimately.
+        html shouldNotContain " th:"
+        html shouldNotContain ("\${")
+    }
+
+    @Test
+    fun `the engineering page renders the moved sections with the catalog tool count`() {
+        // 115 §A.3: the homepage's engineering sections moved here verbatim — the agent loop
+        // with its live tool count, and the execution screenshot the homepage used to carry.
+        val count = McpToolCatalog.NAMES.size
+        val html = SitePageRenderer.render(SitePages.HOW_IT_WORKS)
+
+        html shouldContain "How it works, for the engineer who has to run it"
+        html shouldContain "<title>${SitePages.HOW_IT_WORKS.title}</title>"
+        // The moved facts, still derived from the catalog rather than transcribed (033/C4).
+        html shouldContain "<span>$count</span> tools cover the full lifecycle"
+        html shouldContain "/mcp — $count MCP tools"
+        html shouldContain "($count tools)"
+        html shouldContain "src=\"/site/img/execution-result.png\""
         html shouldNotContain " th:"
         html shouldNotContain ("\${")
     }
@@ -94,6 +97,9 @@ class SiteRenderTest {
      * Scoped to cards (`<article class="card">`) rather than to every `<h3>`: the section's
      * four group labels (Author / Run / Operate / Govern) are headings too and cite nothing,
      * because they assert nothing.
+     *
+     * 115 §A.3: the section moved from the homepage to `/how-it-works`, so this guard reads
+     * that template now — the move must not have moved the claims away from the cards.
      */
     @Test
     fun `every feature card cites a claim, and every cited doc exists`() {
@@ -120,30 +126,38 @@ class SiteRenderTest {
         // docs/rest-api.md §4.2") — sweep every path in every comment, not the first of each.
         val cited =
             CLAIM_COMMENT
-                .findAll(templateSource)
+                .findAll(howItWorksSource)
                 .flatMap { comment -> DOC_PATH.findAll(comment.value).map { it.value } }
                 .distinct()
                 .toList()
         // Non-vacuity, on both axes: the page carries dozens of claim comments, and they name a
         // dozen-plus distinct specs. A changed comment shape empties one or both and would
         // otherwise pass by checking nothing.
-        val comments = CLAIM_COMMENT.findAll(templateSource).count()
+        val comments = CLAIM_COMMENT.findAll(howItWorksSource).count()
         check(comments >= 40) { "the claim sweep found only $comments claim comments — has the comment shape changed?" }
         check(cited.size >= 12) { "the claim sweep found only ${cited.size} distinct cited docs" }
 
         val root = repoRoot()
         val missing = cited.filterNot { java.io.File(root, it).isFile }
         missing shouldBe emptyList()
-        check(resolver.getResource("classpath:templates/site/index.html").exists())
+        check(resolver.getResource("classpath:templates/site/how-it-works.html").exists())
     }
 
     /** The "What's in the box" section body — between its own h2 and the next section comment. */
     private fun featuresSection(): String {
-        val from = templateSource.indexOf("id=\"cap-title\"")
-        val to = templateSource.indexOf("<!-- ============================ DEMO DATA", from)
+        val from = howItWorksSource.indexOf("id=\"cap-title\"")
+        val to = howItWorksSource.indexOf("<!-- ============================ SECURITY", from)
         check(from > 0 && to > from) { "the features section markers moved — fix this guard, do not delete it" }
-        return templateSource.substring(from, to)
+        return howItWorksSource.substring(from, to)
     }
+
+    /** The engineering page's template source — where 115 moved the "What's in the box" section. */
+    private val howItWorksSource: String =
+        PathMatchingResourcePatternResolver(javaClass.classLoader)
+            .getResource("classpath:templates/site/how-it-works.html")
+            .inputStream
+            .readBytes()
+            .decodeToString()
 
     /**
      * The repo root: walk up from the test JVM's working directory until the `docs` tree the

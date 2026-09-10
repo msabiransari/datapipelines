@@ -153,4 +153,16 @@ class SitePagesController {
         model: Model,
         response: HttpServletResponse,
     ): String = PublicPage.render(model, response, SitePages.TABLEAU_GOVERNED_DATASET, toolCount())
+
+    /**
+     * 115 §A.3 — the engineering page the buyer-facing home page handed its vocabulary to.
+     * The moved sections render the engine strip from the registry (the `engines` model
+     * attribute [PublicPage] fills) and the agent loop from the compile-time tool count, so
+     * nothing here is page-specific beyond the row and its FAQ.
+     */
+    @GetMapping("/how-it-works")
+    fun howItWorks(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, toolCount(), SiteFaqs.APIS_AND_OPERATIONS)
 }

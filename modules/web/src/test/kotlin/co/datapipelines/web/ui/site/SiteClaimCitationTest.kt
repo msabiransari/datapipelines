@@ -48,6 +48,7 @@ class SiteClaimCitationTest {
                 "for-agencies.html",
                 "for-analysts.html",
                 "for-saas-teams.html",
+                "how-it-works.html",
                 "index.html",
                 "mcp-tools.html",
                 "pillar.html",

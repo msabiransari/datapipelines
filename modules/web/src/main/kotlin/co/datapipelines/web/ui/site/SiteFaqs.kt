@@ -6,9 +6,9 @@ package co.datapipelines.web.ui.site
  *
  * Each answer names the doc it rests on, in the text the reader sees: the sentence Google may
  * quote as a snippet is a sentence a reader can verify one click away. Groups are the
- * page-sized slices; [HOME] is the ten the home page carries, [ALL] is the `/faq` page in
- * reading order. Every answer is a fact about what SHIPS today — the roadmap has its own page
- * and the two answers that touch it say "roadmap" in as many words.
+ * page-sized slices; [HOME] is the eight buyer questions the home page carries (115), [ALL] is
+ * the `/faq` page in reading order, buyer first. Every answer is a fact about what SHIPS today
+ * — the roadmap has its own page and the answers that touch it say "roadmap" in as many words.
  */
 object SiteFaqs {
     val WHAT_IT_IS: List<FaqEntry> =
@@ -201,24 +201,74 @@ object SiteFaqs {
             ),
         )
 
-    /** The ten the home page carries — the introduction, in the order a first visit asks. */
+    /**
+     * The eight the home page carries (115): the buyer's questions, in the order a first
+     * visit asks them — cost, data location, what ships when, trust, tenancy — with the
+     * engineer's "which databases" deliberately LAST. Every answer above the fold speaks the
+     * buyer's language; the vocabulary an engineer wants lives on /how-it-works.
+     */
     val HOME: List<FaqEntry> =
         listOf(
-            WHAT_IT_IS[0],
-            AGENTS_AND_SECURITY[0],
-            AGENTS_AND_SECURITY[1],
-            WHAT_IT_IS[3],
-            AGENTS_AND_SECURITY[4],
-            APIS_AND_OPERATIONS[0],
-            APIS_AND_OPERATIONS[1],
-            WHAT_IT_IS[4],
-            APIS_AND_OPERATIONS[3],
-            APIS_AND_OPERATIONS[4],
+            FaqEntry(
+                "Do I need a data engineer?",
+                "No. You describe the dataset; an AI agent builds and runs it against your databases and shows you every " +
+                    "step. Someone who can read a table of numbers and press Release is the whole team. If you have " +
+                    "engineers, they review SQL instead of writing a service — the release step is docs/versioning.md §3.",
+                "docs/versioning.md §3",
+            ),
+            FaqEntry(
+                "Where does my data go?",
+                "Nowhere. The software runs on your servers, reads each database in place, does the joining in memory " +
+                    "for the duration of a run, and returns the result. Your database passwords stay on the server; the " +
+                    "AI agent never sees them. The details: docs/datasources.md §7 and docs/staging.md §3.",
+                "docs/datasources.md §7, docs/staging.md §3",
+            ),
+            FaqEntry(
+                "What do I get on day one, and what comes next month?",
+                "Day one: datasets built from a sentence, an API for each one your product can call, and governed " +
+                    "Tableau access. Next month: datasets that refresh on a schedule and a dashboard you embed in your " +
+                    "own app. The roadmap page carries the dates — docs/ROADMAP.md §2.",
+                "docs/ROADMAP.md §2",
+            ),
+            FaqEntry(
+                "How do I know the numbers are right?",
+                "You look. Every step shows the rows it produced, the logic is readable SQL, and every run is recorded " +
+                    "with its inputs so a number can be reproduced. Nothing goes live until you press Release. The " +
+                    "record a run leaves is docs/rest-api.md §10.",
+                "docs/rest-api.md §10",
+            ),
+            FaqEntry(
+                "Can each customer see only their own rows?",
+                "Yes, through your app: a published API takes parameters your app supplies (the customer's id, the " +
+                    "month), and a partner's key is bound to that one API path. Per-customer rules on embedded " +
+                    "dashboards ship with the dashboards. The mechanics: docs/rest-api.md §19.3 and docs/auth.md §7.7.",
+                "docs/rest-api.md §19.3, docs/auth.md §7.7",
+            ),
+            FaqEntry(
+                "Do I have to use an AI agent?",
+                "No. The same datasets can be built by hand in the app's editor. The agent is the fast path, not the " +
+                    "only one — the editor is the deliberate second path, documented in docs/ui-screens.md §4.4.",
+                "docs/ui-screens.md §4.4",
+            ),
+            FaqEntry(
+                "What does it cost?",
+                "Nothing to run: it is open source under AGPL-3.0 and you host it. There is no hosted plan today; " +
+                    "when there is, the roadmap page will say so first. The licence and packaging: docs/deployment.md §10.",
+                "docs/deployment.md §10",
+            ),
+            FaqEntry(
+                "Which databases?",
+                "The eight engines are PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, " +
+                    "CSV and Iceberg on S3 read in place — and one dataset can read several of them in the same run " +
+                    "(docs/datasources.md §4).",
+                "docs/datasources.md §4",
+            ),
         )
 
-    /** Every group, in reading order — the `/faq` page. */
+    /** Every group, in reading order — the `/faq` page opens with the buyer's questions (115). */
     val ALL: List<Pair<String, List<FaqEntry>>> =
         listOf(
+            "For the buyer" to HOME,
             "What it is" to WHAT_IT_IS,
             "Agents and security" to AGENTS_AND_SECURITY,
             "APIs and operations" to APIS_AND_OPERATIONS,

@@ -50,11 +50,21 @@ class SiteDocsE2eTest {
                 .get("/")
 
         response.statusCode shouldBe 200
-        response.asString() shouldContain "Your AI agent builds the data pipelines. You press release."
-        // The fact is derived, not transcribed: 18 tools as of 033 — asserted against the
-        // catalog in WebsiteFactsGuardTest; here we only prove the number made it to the wire.
-        response.asString() shouldContain "tools cover the full lifecycle"
+        // 115: the H1 speaks to the buyer; the engineering story lives on /how-it-works.
+        response.asString() shouldContain "Show your customers their data. No data team required."
         response.header("Cache-Control") shouldContain "public"
+
+        // The fact is derived, not transcribed: asserted against the catalog in
+        // WebsiteFactsGuardTest — here we only prove the number made it to the wire, on the
+        // page 115 moved that sentence to.
+        val engineering =
+            given()
+                .port(port)
+                .accept("text/html")
+                .`when`()
+                .get("/how-it-works")
+        engineering.statusCode shouldBe 200
+        engineering.asString() shouldContain "tools cover the full lifecycle"
     }
 
     @Test
