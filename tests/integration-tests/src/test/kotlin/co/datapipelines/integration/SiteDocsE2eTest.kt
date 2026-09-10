@@ -50,7 +50,7 @@ class SiteDocsE2eTest {
                 .get("/")
 
         response.statusCode shouldBe 200
-        response.asString() shouldContain "Agent-native Data Pipelines"
+        response.asString() shouldContain "Your AI agent builds the data pipelines. You press release."
         // The fact is derived, not transcribed: 18 tools as of 033 — asserted against the
         // catalog in WebsiteFactsGuardTest; here we only prove the number made it to the wire.
         response.asString() shouldContain "tools cover the full lifecycle"

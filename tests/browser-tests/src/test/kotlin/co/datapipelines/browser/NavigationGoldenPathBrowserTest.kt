@@ -17,7 +17,7 @@ class NavigationGoldenPathBrowserTest : BrowserSuite() {
         startTrace()
         page.navigate("$baseUrl/")
 
-        page.locator("#hero-title").innerText() shouldContain "Agent-native Data Pipelines"
+        page.locator("#hero-title").innerText() shouldContain "Your AI agent builds the data pipelines. You press release."
     }
 
     @Test
