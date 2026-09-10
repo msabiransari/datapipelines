@@ -97,6 +97,68 @@ object LakeViewStatements {
     }
 
     /**
+     * 109 §A — the per-table-isolation twin of [forTables]: the same statements, but split into
+     * a STRICT prelude (extension loads, ATTACHes, schema creations — shared infrastructure whose
+     * failure is a datasource fault and must still fail the connect), one [LakeViewPlan.View] per
+     * registered table (applied one at a time by the pool's view applier, each failure recorded
+     * on the table's registry row and skipped), and the search-path postlude.
+     *
+     * The emission-boundary refusals ([requireMappable], the location grammar, an unknown format)
+     * are CAPTURED per table here rather than thrown: an unmappable namespace or an unutterable
+     * location becomes that table's recorded error — its view is never emitted — instead of
+     * failing the pool build and taking every healthy table down with it. Two consequences fall
+     * out of that:
+     *
+     * - Only an emission-healthy table shapes the prelude. A 3+-segment namespace's
+     *   `CREATE SCHEMA` would be invalid SQL the engine refuses; keeping it in the shared
+     *   statements would re-create the all-tables-down failure inside the strict half.
+     * - The search-path rule reads ALL registered namespaces, healthy or not — the documented
+     *   rule is a fact about the REGISTRY ("the tables span exactly one namespace"), and a
+     *   broken table's namespace disappearing from the derivation would silently change what
+     *   bare names mean.
+     *
+     * The Iceberg extension decision likewise reads all tables: a broken Iceberg table stays
+     * Iceberg, and the operator's fix needs the extension loaded to succeed.
+     */
+    fun planForTables(
+        tables: List<LakeRegisteredTable>,
+        adapter: DialectAdapter,
+        duckdbExtensionDirectory: String? = null,
+    ): LakeViewPlan {
+        if (tables.isEmpty()) return LakeViewPlan(emptyList(), emptyList(), emptyList())
+        val views =
+            tables.map { table ->
+                try {
+                    requireMappable(table)
+                    LakeViewPlan.View(table, sql = viewStatement(table, adapter), emissionError = null)
+                } catch (e: DatapipelinesException) {
+                    LakeViewPlan.View(table, sql = null, emissionError = e.message ?: e.code)
+                }
+            }
+        val healthyNamespaces = views.filter { it.sql != null }.map { it.table.namespace }.distinct()
+        val prelude =
+            buildList {
+                addAll(icebergExtensionStatements(tables, duckdbExtensionDirectory))
+                healthyNamespaces
+                    .filter { it.size >= CATALOG_SEGMENTS }
+                    .map { it.first() }
+                    .distinct()
+                    .forEach { head -> add("ATTACH IF NOT EXISTS ':memory:' AS ${adapter.quoteIdentifier(head)}") }
+                healthyNamespaces.forEach { namespace ->
+                    add("CREATE SCHEMA IF NOT EXISTS ${namespace.joinToString(".") { adapter.quoteIdentifier(it) }}")
+                }
+            }
+        val namespaces = tables.map { it.namespace }.distinct()
+        val postlude =
+            if (namespaces.size == 1) {
+                listOf("SET search_path = '${namespaces.single().joinToString(".")}'")
+            } else {
+                emptyList()
+            }
+        return LakeViewPlan(prelude, views, postlude)
+    }
+
+    /**
      * One table's view: `read_parquet` for `format=parquet`, `iceberg_scan` for
      * `format=iceberg`, anything else refused — the registry's CHECK makes the else unreachable,
      * and a corrupt row fails loudly rather than generating SQL from a guess.
@@ -231,3 +293,42 @@ internal fun isSafeLakeLocation(location: String): Boolean =
     location.isNotEmpty() &&
         (location.startsWith("s3://") || location.startsWith("file://")) &&
         location.none { ch -> ch in "'\"\\" || ch <= ' ' || ch == '\u007F' }
+
+/**
+ * 109 §A — one LAKE datasource's connect-time view creation, split by failure ISOLATION
+ * ([LakeViewStatements.planForTables] is the generator): [prelude] statements must succeed or
+ * the connect fails as before (shared infrastructure, never one table's fault); each [views]
+ * entry is applied independently — its failure is recorded on the table's registry row
+ * (`last_error`, V22) and skipped, so one broken table never takes the healthy ones down;
+ * [postlude] (the search-path rule) runs last regardless.
+ */
+data class LakeViewPlan(
+    /** Extension loads, ATTACHes, schema creations — strict, in order. */
+    val prelude: List<String>,
+    /** One entry per registered table, in registry order. */
+    val views: List<View>,
+    /** The search-path `SET` when the registry spans exactly one namespace, else empty. */
+    val postlude: List<String>,
+) {
+    init {
+        views.forEach { view ->
+            require((view.sql == null) != (view.emissionError == null)) {
+                "a lake view carries exactly one of a statement or the emission refusal that replaced it"
+            }
+        }
+    }
+
+    /**
+     * One registered table's view: [sql] to apply, or [emissionError] when the SQL-emission
+     * boundary refused the row (an unmappable namespace, an unutterable location, an unknown
+     * format) — recorded as the table's error without touching the engine.
+     */
+    data class View(
+        val table: LakeRegisteredTable,
+        val sql: String?,
+        val emissionError: String?,
+    ) {
+        /** The dotted qualified name — the recording key and the error-detail `table`. */
+        val qualifiedName: String get() = (table.namespace + table.name).joinToString(".")
+    }
+}

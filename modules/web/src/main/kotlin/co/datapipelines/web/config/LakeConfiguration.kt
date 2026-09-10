@@ -7,6 +7,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeRegisteredTable
 import co.datapipelines.datasources.LakeTableCatalog
+import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -29,6 +30,8 @@ class LakeConfiguration {
      * readers: the pool factory's per-table view generation and the introspector's
      * registry-backed listings. The mapping is a dumb projection — validation already happened
      * at registration, and the view generator re-refuses a bad location at the SQL boundary.
+     * `lastError` (109 §A, V22) crosses the port so the pool build can record TRANSITIONS only
+     * and the executor can refuse a node that references a broken table.
      */
     @Bean
     fun lakeTableCatalog(tables: LakeTableRepository): LakeTableCatalog =
@@ -40,8 +43,20 @@ class LakeConfiguration {
                     format = row.format.wire,
                     location = row.location,
                     partitionColumn = row.partitionColumn,
+                    lastError = row.lastError,
                 )
             }
+        }
+
+    /**
+     * 109 §A — the pool build's outcome write, over the same repository: the per-connection
+     * view applier calls it on transitions only, so this stays a rare UPDATE, never one per
+     * physical connection.
+     */
+    @Bean
+    fun lakeViewOutcomeRecorder(tables: LakeTableRepository): LakeViewOutcomeRecorder =
+        LakeViewOutcomeRecorder { datasourceName, namespace, table, error ->
+            tables.recordViewOutcome(datasourceName, namespace, table, error)
         }
 
     /**

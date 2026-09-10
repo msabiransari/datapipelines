@@ -91,8 +91,10 @@ import kotlin.io.path.relativeTo
  * (dry), 12-02 averages 6.0 (rainy). Every engine also carries one noise row — an
  * out-of-window day (12-05) in Postgres/MySQL/the lake, a 200-mile trip and a
  * non-PRCP element — so a missing predicate changes an expected number. Expected caller
- * rows: Brooklyn/dry 60.0%, Manhattan/dry 66.7%, Manhattan/rainy 75.0%, Queens/rainy
- * 80.0% rideshare share.
+ * rows (109 §D's per-mode rain-lift shape — no share column, the taxi side being a
+ * 1-in-16 sample): Brooklyn dry-only 1.0/1.5 per day with NULL lifts; Manhattan
+ * taxi lift 1.0/1.5 = 0.67 and rideshare lift 3.0/3.0 = 1.00; Queens rainy-only
+ * 0.5/2.0 per day with NULL lifts.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -264,7 +266,8 @@ class TaxiVsRideshareFourEngineE2eTest {
         stats.forEach { it["status"].asText() shouldBe "SUCCESS" }
         stats.single { it["node_id"].asText() == "window_span" }["context_value"].asText() shouldBe "1"
 
-        // The answer: borough x weather, exact arithmetic against the seeded fixtures.
+        // The answer: one row per borough (per-mode rain lift), exact arithmetic against the
+        // seeded fixtures.
         val result =
             given()
                 .port(port)
@@ -274,26 +277,40 @@ class TaxiVsRideshareFourEngineE2eTest {
                 .then()
                 .statusCode(200)
                 .extract()
-        result.jsonPath().getLong("data.total_rows") shouldBe 4L
+        result.jsonPath().getLong("data.total_rows") shouldBe 3L
         val rows: List<List<Any?>> = result.jsonPath().get("data.rows")
-        rows.map { it[0].toString() to it[1].toString() } shouldContainExactly
+        assertRainLiftAnswer(rows)
+    }
+
+    /**
+     * The 109 §D answer: one row per borough — (taxi/day dry, taxi/day rainy, rideshare/day
+     * dry, rideshare/day rainy, taxi rain lift, rideshare rain lift). No share column: the
+     * taxi side is a 1-in-16 sample, so a share would be a number about the sampling. A
+     * borough with only one weather in the window carries NULLs for the other — Brooklyn saw
+     * no rainy day, Queens no dry one — and both lifts are NULL there (a lift needs both
+     * sides). Manhattan: taxi 1.0/1.5 = 0.67, rideshare 3.0/3.0 = 1.00.
+     */
+    private fun assertRainLiftAnswer(rows: List<List<Any?>>) {
+        rows.map { it[0].toString() } shouldContainExactly
             listOf(
-                "Brooklyn" to "dry",
-                "Manhattan" to "dry",
-                "Manhattan" to "rainy",
-                "Queens" to "rainy",
+                "Brooklyn",
+                "Manhattan",
+                "Queens",
             )
-        // (taxi, rideshare, share %, taxi/day, rideshare/day) per row, scale-tolerant.
         val expected =
             listOf(
-                listOf("2", "3", "60.0", "1.0", "1.5"),
-                listOf("3", "6", "66.7", "1.5", "3.0"),
-                listOf("2", "6", "75.0", "1.0", "3.0"),
-                listOf("1", "4", "80.0", "0.5", "2.0"),
+                listOf("1.0", null, "1.5", null, null, null),
+                listOf("1.5", "1.0", "3.0", "3.0", "0.67", "1.00"),
+                listOf(null, "0.5", null, "2.0", null, null),
             )
         rows.forEachIndexed { index, row ->
-            (2..6).forEach { column ->
-                BigDecimal(row[column].toString()).compareTo(BigDecimal(expected[index][column - 2])) shouldBe 0
+            (1..6).forEach { column ->
+                val want = expected[index][column - 1]
+                if (want == null) {
+                    row[column] shouldBe null
+                } else {
+                    BigDecimal(row[column].toString()).compareTo(BigDecimal(want)) shouldBe 0
+                }
             }
         }
     }

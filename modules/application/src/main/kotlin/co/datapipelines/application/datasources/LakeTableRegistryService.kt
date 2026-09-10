@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeIntrospectionCache
+import co.datapipelines.datasources.LakeRegisteredTable
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -45,7 +46,8 @@ fun interface LakeTableMutationGate {
  * predicate (`getVisible` / `requireVisible`), so an invisible datasource is not-found before
  * this service ever runs — the same split [DatasourceCreateService] keeps. What lives here is
  * everything the two surfaces must share: the D8 mutation gate, the LAKE-only refusal, the
- * grammar/location/SSRF validation, the duplicate/not-found mappings and the invalidation seam.
+ * grammar/location/SSRF validation, the 109 §A pre-flight (a candidate table must READ on the
+ * datasource before it is stored), the duplicate/not-found mappings and the invalidation seam.
  *
  * ## The LAKE-only rule
  *
@@ -101,6 +103,7 @@ class LakeTableRegistryService(
                 location = LakeTableValidator.locationOf(requiredText(body, "location")),
                 partitionColumn = LakeTableValidator.partitionColumnOf(optionalText(body, "partition_column")),
             )
+        preflightOrThrow(datasource, registration)
         val inserted =
             try {
                 tables.insert(datasource.name, registration, principal.userId)
@@ -195,6 +198,16 @@ class LakeTableRegistryService(
         val base = basePrefixOf(source)
         // Validate EVERY entry first — all-or-nothing (see the KDoc).
         val registrations = entries.map { entry -> registrationOf(entry, sharedNamespace, base) }
+        // 109 §A — pre-flight the NEW triples before the first insert (all-or-nothing, the same
+        // rule the shape validation above keeps). Already-registered triples are SKIPPED: an
+        // idempotent re-import (bootstrap re-runs it on every boot) must not re-read — or fail
+        // on — tables that are already registered, whatever their current health.
+        val existing = tables.findByDatasource(datasource.name).map { it.namespace to it.name }.toSet()
+        registrations.forEach { registration ->
+            if ((registration.namespace to registration.name) !in existing) {
+                preflightOrThrow(datasource, registration)
+            }
+        }
         val registered = mutableListOf<LakeTable>()
         val alreadyRegistered = mutableListOf<String>()
         registrations.forEach { registration ->
@@ -254,6 +267,33 @@ class LakeTableRegistryService(
         introspectionCache.invalidate(datasourceName)
         datasources.retirePool(datasourceName)
         invalidation.publish(datasourceName)
+    }
+
+    /**
+     * 109 §A — the registration pre-flight: prove the candidate table READABLE on the
+     * datasource (the registry's scratch-connection check: create its view, scan one row)
+     * BEFORE it is stored. A table that fails is refused with the catalogued
+     * `datasource.validation.lake_table_unreadable` carrying the bounded engine error — the
+     * alternative was storing a row whose every connect then fails and whose pool-build outage
+     * takes the healthy tables down with it.
+     */
+    private fun preflightOrThrow(
+        datasource: Datasource,
+        registration: LakeTableRegistration,
+    ) {
+        val candidate =
+            LakeRegisteredTable(
+                namespace = registration.namespace,
+                name = registration.name,
+                format = registration.format.wire,
+                location = registration.location,
+            )
+        val error = datasources.preflightLakeTable(datasource, candidate) ?: return
+        throw DatapipelinesException(
+            PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE,
+            "Lake table '${registration.qualified()}' could not be read on datasource '${datasource.name}': $error",
+            mapOf("datasource_name" to datasource.name, "table" to registration.qualified(), "last_error" to error),
+        )
     }
 
     private fun requireLake(datasource: Datasource) {

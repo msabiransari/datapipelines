@@ -58,3 +58,12 @@ CREATE TABLE trips_monthly (
 
 CREATE INDEX idx_trips_pickup_date ON trips (pickup_date);
 CREATE INDEX idx_trips_pu_location ON trips (pu_location_id);
+
+-- 109 §E (T200): the composite the airport-shape queries actually want. Measured on the
+-- 804 MB v6 restore: `pu_location_id IN (1, 132, 138)` over 2024 ran 8.1 s warm with the
+-- sized server (seq scan chosen over the single-column bitmap), 0.09 s as an INDEX-ONLY
+-- scan over this composite (196 buffer hits) — ~90x, past the round's ~10x bar, so the
+-- index ships in the artifact itself: the demo datasource is readonly to agents, which
+-- makes the artifact the only place an index can come from. Added in v7; v6 and earlier
+-- restore without it.
+CREATE INDEX idx_trips_pu_location_pickup_date ON trips (pu_location_id, pickup_date);

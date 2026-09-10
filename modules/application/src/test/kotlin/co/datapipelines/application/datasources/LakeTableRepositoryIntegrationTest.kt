@@ -3,6 +3,7 @@ package co.datapipelines.application.datasources
 import co.datapipelines.application.SharedPostgres
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -138,5 +139,33 @@ class LakeTableRepositoryIntegrationTest {
                 mapOf("actor" to userId),
             )
         }
+    }
+
+    @Test
+    fun `recordViewOutcome stores the error and its stamp - then clears both on the healthy transition`() {
+        repository.insert("sample-lake", registration(), userId)
+
+        // The failing transition: text lands, last_error_at is stamped (NULL when healthy is
+        // the V22 spelling — a healthy row added later needs no backfill).
+        repository.recordViewOutcome("sample-lake", listOf("nyc", "mobility"), "hvfhv_zone_day", "IO Error: not parquet") shouldBe
+            true
+        val broken = repository.findByDatasource("sample-lake").single()
+        assertAll(
+            { broken.lastError shouldBe "IO Error: not parquet" },
+            { broken.lastErrorAt.shouldNotBeNull() },
+        )
+
+        // The healing transition: success after error clears BOTH columns — the recorded state
+        // is "healthy", not "healthy since it last failed".
+        repository.recordViewOutcome("sample-lake", listOf("nyc", "mobility"), "hvfhv_zone_day", null) shouldBe true
+        val healed = repository.findByDatasource("sample-lake").single()
+        assertAll(
+            { healed.lastError shouldBe null },
+            { healed.lastErrorAt shouldBe null },
+        )
+
+        // An unregistered triple updates nothing — silently, by design (the row vanished
+        // mid-pool; an unregistered table has no outcome to carry).
+        repository.recordViewOutcome("sample-lake", listOf("nope"), "gone", "x") shouldBe false
     }
 }

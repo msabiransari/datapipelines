@@ -36,6 +36,15 @@ data class LakeRegisteredTable(
      * partition pseudo-index.
      */
     val partitionColumn: String? = null,
+
+    /**
+     * 109 §A (V22) — the connect-time view creation's last recorded failure, NULL when the
+     * view last built cleanly. The pool factory's per-table view application reads this to
+     * record TRANSITIONS only (an unchanged outcome writes nothing), and the executor reads
+     * it to fail a node that references a broken table with `datasource.lake.table_unavailable`
+     * instead of the engine's raw "table not found".
+     */
+    val lastError: String? = null,
 )
 
 /**
@@ -52,4 +61,47 @@ fun interface LakeTableCatalog {
         /** No registry behind this module — tests, and any deployment without the wiring. */
         val NONE = LakeTableCatalog { emptyList() }
     }
+}
+
+/**
+ * The write half of 109 §A's view-outcome recording — a SEPARATE port from [LakeTableCatalog]
+ * on purpose: the catalog is a `fun interface` with lambda implementations in callers and test
+ * fixtures this module cannot all see, so growing it would break them; a new seam keeps every
+ * existing implementation source-compatible. The assembling layer implements it over
+ * `LakeTableRepository.recordViewOutcome`.
+ *
+ * Callers (the pool factory's per-connection view application) invoke [record] on TRANSITIONS
+ * only — error text changed, or success after an error — never per connection, so the hot
+ * path stays write-free. [error] is the bounded engine/emission message; `null` is the healthy
+ * outcome and CLEARS the row's recorded error.
+ */
+fun interface LakeViewOutcomeRecorder {
+    /** Records [error] (null = healthy) as the outcome for the (datasource, namespace, table) triple. */
+    fun record(
+        datasourceName: String,
+        namespace: List<String>,
+        table: String,
+        error: String?,
+    )
+
+    companion object {
+        /** Records nothing — tests, and any deployment without the wiring. */
+        val NONE = LakeViewOutcomeRecorder { _, _, _, _ -> }
+    }
+}
+
+/**
+ * 109 §A — one registered lake table whose connect-time view creation last FAILED, as the
+ * executor's pre-execution check needs it: a node whose SQL references this table fails with
+ * `datasource.lake.table_unavailable` (details `table` + `last_error`) instead of the engine's
+ * raw "table not found".
+ */
+data class LakeBrokenTable(
+    val namespace: List<String>,
+    val name: String,
+    /** The recorded engine/emission error — non-null by construction of the read. */
+    val lastError: String,
+) {
+    /** The dotted qualified name — `nyc.mobility.hvfhv_zone_day`. */
+    val qualifiedName: String get() = (namespace + name).joinToString(".")
 }

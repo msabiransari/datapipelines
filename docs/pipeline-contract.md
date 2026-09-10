@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.13 (revised — see Change Log)
+**Status:** v1.16 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-06
+**Last updated:** 2026-09-09
 
 ---
 
@@ -953,6 +953,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.jdbc_url_scheme_invalid` | 400 | URL scheme doesn't match the dialect |
 | `datasource.validation.password_missing` | 400 | `password` required on create |
 | `datasource.validation.properties_invalid` | 400 | Test pool build rejected a `hikari`/`jdbc` property |
+| `datasource.validation.property_empty` | 400 | A DECLARED dialect property carries an empty, whitespace-only or null value — refused at register/update (and bootstrap) rather than stored as `""` (109 §B); the field names the key |
 | `datasource.validation.query_timeout_invalid` | 400 | `query_timeout_seconds` present but < 1 |
 | `datasource.validation.duplicate_name` | 409 | Name already exists — the namespace is global across workspaces too (workspaces design §3: `name` stays the PK/AAD anchor) |
 | `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
@@ -968,6 +969,8 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.lake_manifest_url_forbidden` | 400 | A lake-table import's manifest URL is not under the datasource's own endpoint/bucket — no arbitrary URL fetch (SSRF boundary, 089 §A) |
 | `datasource.lake_table_duplicate` | 409 | The (datasource, namespace, name) triple is already registered (mapped from `uq_lake_tables_datasource_namespace_name`, metadata-db §4.15) |
 | `datasource.lake_table_not_found` | 404 | Unregister named a lake table that is not registered |
+| `datasource.validation.lake_table_unreadable` | 400 | A lake-table registration/import named a table the pre-flight could not read — the view did not create or a one-row scan through it failed (109 §A, datasources.md §8C.1). Refused before storing; the message carries the bounded engine error |
+| `datasource.lake.table_unavailable` | 502 | A pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20) — the table's view is skipped on every connection (109 §A, datasources.md §8C.2). `details` carry `table` and the recorded `last_error` |
 | `pipeline.execution.datasource_unreachable` | 502 | Pre-execution reachability check failed for a referenced datasource |
 
 ### 13.9 Template
@@ -1341,6 +1344,8 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-10 | v1.16 | 109 §B empty dialect properties | §13.8 gains `datasource.validation.property_empty` (400): a DECLARED dialect property carrying an empty, whitespace-only or null value is refused at register/update — and so at bootstrap, which saves through the same validator — instead of being stored as `""` (the `catalog.ref: ""` incident). The field names the key; a bootstrap field whose whole value is one `${VAR}` that resolves set-but-empty is OMITTED (the operator's off-switch), so the shipped defaults still boot. Additive per §15.2. |
+| 2026-09-10 | v1.15 | 109 §A lake view isolation | §13.8 gains two rows: `datasource.lake.table_unavailable` (502) — a pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20); `details` carry `table` and the recorded `last_error` — and `datasource.validation.lake_table_unreadable` (400) — the registration/import pre-flight refusal: the candidate table's view did not create or a one-row scan through it failed, refused BEFORE storing with the bounded engine error as the message. Additive per §15.2. |
 | 2026-09-09 | v1.14 | 108 executor hardening | New §4.11: a node may declare its own WALL-CLOCK deadline, `settings.timeout_seconds` — the middle of three budgets whose precedence §4.11 now states as one table (execution ≥ node ≥ statement). §4.6 gains the `settings` row and states that `depends_on` is data flow only, never an edge added to avoid contention. §12.8 gains `pipeline.validation.node_timeout_invalid` (the ceiling is `datapipelines.executor.node-timeout-max-seconds`, refused rather than clamped) and §13.4 gains `pipeline.node.timeout` (504) — the executor's own bound, which fires whatever the driver does. Body-hash neutral: `settings` is absent on every stored node and serializes back absent. Additive per §15.2. |
 | 2026-09-09 | v1.13 | T202 node query timeout | §13.4 gains `pipeline.node.query_timeout` (504): a statement cancelled by its own JDBC query timeout reports the timeout, not `query_execution_failed` + driver text. |
 | 2026-09-08 | v1.12 | 099 draft-first (D55/D56) | §14's operation table: `POST /pipelines` lands v1 **DRAFT** with a null pointer, `GET /pipelines/{id}` is the working version, `POST …/execute` defaults to the working version, and `GET …/export` refuses a never-released pipeline with `pipeline.promotion.not_released`. No new error code and no §13 row: every refusal reuses a catalogued one. |

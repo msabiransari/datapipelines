@@ -4,6 +4,7 @@ import co.datapipelines.datasources.crypto.CredentialDecryptionException
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
+import co.datapipelines.datasources.pooling.LakeViewInit
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
@@ -50,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap
  * `updated_at` its live pools were built from against the rows and retires the stale ones. That
  * is a QUERY, not a queue — no Redis key, no TTL, nothing to expire wrong (094 ruling 3).
  */
+@Suppress("TooManyFunctions") // the registry IS the surface; 109 §A's preflight + broken-tables reads pushed it past the ceiling
 class DefaultDatasourceRegistry(
     private val repository: DatasourceRepository,
     private val encryptor: CredentialEncryptor,
@@ -59,6 +61,13 @@ class DefaultDatasourceRegistry(
     private val cache: DatasourceMetadataCache = DatasourceMetadataCache(),
     private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
     private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
+    /**
+     * 109 §A — the write seam for per-table view-creation outcomes, recorded from inside the
+     * pool build on TRANSITIONS only (the applier in `LakeViewApplyingDataSource` compares
+     * against the state the pool was built with). The assembling layer implements it over
+     * `LakeTableRepository.recordViewOutcome`.
+     */
+    private val lakeViewRecorder: LakeViewOutcomeRecorder = LakeViewOutcomeRecorder.NONE,
     /**
      * The deployment's bundled DuckDB extension directory (089 §D, configuration.md §3.25),
      * bound once from `datapipelines.duckdb.extension-directory` at wiring. Forwarded to every
@@ -88,12 +97,14 @@ class DefaultDatasourceRegistry(
      * and the `pool_build` audit event is emitted exactly there, on the same at-most-once path.
      *
      * For a LAKE datasource the factory also reads the dp-lake registry ([lakeTables]) and
-     * appends phase B's per-table view statements (089 §B) — captured into the pool's
-     * `connectionInitSql` HERE, at pool build, which is exactly why a registry mutation must
-     * evict the pool for a new table to become visible: [evictPool] drops the cached pool and
-     * the next [poolFor] re-runs this factory against the fresh rows. Nothing else caches the
-     * init SQL — this method bypasses the metadata cache by design (the credential reason
-     * above), so eviction alone is the whole rebuild mechanism.
+     * builds 109 §A's per-table-isolated view init ([LakeViewStatements.planForTables] applied
+     * by `LakeViewApplyingDataSource` per physical connection, a failing view recorded on its
+     * registry row through [lakeViewRecorder] and skipped) — captured into the pool HERE, at
+     * pool build, which is exactly why a registry mutation must retire the pool for a new table
+     * to become visible: [retirePool] drops the cached pool and the next [poolFor] re-runs this
+     * factory against the fresh rows. Nothing else caches the init plan — this method bypasses
+     * the metadata cache by design (the credential reason above), so retirement alone is the
+     * whole rebuild mechanism.
      */
     private val poolManager =
         ConnectionPoolManager(
@@ -105,35 +116,79 @@ class DefaultDatasourceRegistry(
                 poolRowVersions[datasource.name] = row.updatedAt
                 audit(DatasourceAuditEvents.POOL_BUILD, datasource.name, DatasourceAuditEvent.SYSTEM_ACTOR)
                 val withCredential = row.toDatasource(decryptOrNull(row))
-                // 089 phase B: a LAKE datasource's per-table views ride the same connectionInitSql
-                // slot, appended after the adapter's own statements; 089 §D's bundled extension
-                // directory keeps a hardened deployment INSTALL-free. Both are no-ops for every
-                // other dialect. 094: the row version recorded above is what reconcile-on-subscribe
-                // compares, so a table registered on another instance rebuilds this pool too.
-                ConnectionPoolManager.buildHikariPool(withCredential, lakeViewStatements(withCredential), duckdbExtensionDirectory)
+                // 089 phase B, re-shaped by 109 §A: a LAKE datasource's per-table views ride a
+                // per-table-isolated init (each view applied independently, a failure recorded
+                // on the table's registry row and skipped) instead of the joined
+                // connectionInitSql, where one bad view failed the whole pool. 089 §D's bundled
+                // extension directory keeps a hardened deployment INSTALL-free. Both are no-ops
+                // for every other dialect. 094: the row version recorded above is what
+                // reconcile-on-subscribe compares, so a table registered on another instance
+                // rebuilds this pool too.
+                ConnectionPoolManager.buildHikariPool(
+                    withCredential,
+                    duckdbExtensionDirectory = duckdbExtensionDirectory,
+                    lakeViews = lakeViewInit(withCredential),
+                )
             },
             retireCeiling = retireCeiling,
             metrics = poolMetrics,
         )
 
-    /** Phase B's view statements for a LAKE datasource; nothing for every other dialect. */
-    private fun lakeViewStatements(datasource: Datasource): List<String> =
-        when (datasource.dialect) {
-            Dialect.LAKE -> {
-                LakeViewStatements.forTables(
-                    lakeTables.registeredTables(datasource.name),
+    /**
+     * 109 §A — the pool build's per-table-isolated view init for a LAKE datasource; null for
+     * every other dialect and for a tableless registry, where the pool stays byte-identical to
+     * the pre-109 build. The recorder callback keys the outcome by the registry's
+     * (datasource, namespace, table) triple.
+     */
+    private fun lakeViewInit(datasource: Datasource): LakeViewInit? {
+        if (datasource.dialect != Dialect.LAKE) return null
+        val tables = lakeTables.registeredTables(datasource.name)
+        if (tables.isEmpty()) return null
+        return LakeViewInit(
+            datasourceName = datasource.name,
+            plan =
+                LakeViewStatements.planForTables(
+                    tables,
                     DialectAdapters.forDialect(datasource.dialect),
                     // 089 §F: a registered Iceberg table prepends the iceberg extension loads,
                     // honoring §D's bundled-directory mode — the adapter's catalog.kind-keyed
                     // list cannot see the registry; this seam can.
                     duckdbExtensionDirectory,
-                )
-            }
+                ),
+            recorder = { name, namespace, table, error -> lakeViewRecorder.record(name, namespace, table, error) },
+        )
+    }
 
-            else -> {
-                emptyList()
-            }
-        }
+    /**
+     * 109 §A — the registration pre-flight: on a SCRATCH connection built exactly like the
+     * pool's (the same adapter init, the same bundled-extension posture), create the candidate
+     * table's view and read one row through it. Returns null when the table is readable, else
+     * the bounded engine/emission error text the caller surfaces in its refusal — the table is
+     * refused BEFORE storing rather than failing every connect after it.
+     */
+    override fun preflightLakeTable(
+        datasource: Datasource,
+        table: LakeRegisteredTable,
+    ): String? {
+        if (datasource.dialect != Dialect.LAKE) return null
+        // The caller (the REST/MCP register surface) holds the REDACTED entity — getVisible
+        // strips the secret — while the scratch pool must carry exactly the credential the
+        // real pool builds with. Re-read the row and decrypt it here, the pool factory's own
+        // path; a row that vanished mid-request falls back to the passed entity (NONE-kind
+        // lakes have no credential to re-attach, and the engine refusal is the answer either
+        // way).
+        val withCredential =
+            repository.findByName(datasource.name)?.let { it.toDatasource(decryptOrNull(it)) }
+                ?: datasource
+        return LakeTablePreflight.check(withCredential, table, duckdbExtensionDirectory)
+    }
+
+    /** 109 §A — the executor's pre-execution read: the datasource's registered tables whose view creation last FAILED. */
+    override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> =
+        lakeTables
+            .registeredTables(datasourceName)
+            .filter { it.lastError != null }
+            .map { LakeBrokenTable(it.namespace, it.name, requireNotNull(it.lastError)) }
 
     override fun list(dialect: Dialect?): List<Datasource> = repository.findAll(dialect).map { it.toDatasource() }
 
@@ -508,6 +563,11 @@ class DefaultDatasourceRegistry(
                 val startedAt = System.nanoTime()
                 pool.connection.use { connection ->
                     val version = connection.metaData.databaseProductVersion
+                    // 109 §B — for LAKE, the metadata read is not proof: an in-memory DuckDB
+                    // reports its version with no S3 round-trip at all, so a bucket policy that
+                    // allows object GETs but denies LIST (the T176 shape) probed `connected`.
+                    // The lake probe must LIST the registered root — see [assertLakeListing].
+                    assertLakeProbeListing(datasource, connection)
                     val latencyMs = (System.nanoTime() - startedAt) / NANOS_PER_MILLI
                     TestResult(connected = true, testedAt = Instant.now(), latencyMs = latencyMs, serverVersion = version)
                 }
@@ -518,15 +578,106 @@ class DefaultDatasourceRegistry(
             failedProbe(e, datasource)
         }
 
+    /** 109 §B — the LAKE-only half of the probe: LIST the registered root, when there is one. */
+    private fun assertLakeProbeListing(
+        datasource: Datasource,
+        connection: java.sql.Connection,
+    ) {
+        if (datasource.dialect != Dialect.LAKE) return
+        val root = lakeListingRoot(datasource) ?: return
+        assertLakeListing(connection, root)
+    }
+
+    /**
+     * 109 §B — the root the LAKE probe LISTS, or null when there is nothing globbable to list.
+     * Declared `file://` catalog.ref wins (the mirror deployment's declared root); otherwise the
+     * longest common DIRECTORY prefix of the registered tables' locations (the demo's tables all
+     * sit under `…/lake/v1/`, and that shared root is what `s3:ListBucket` must be granted on);
+     * an http(s) catalog.ref is a REST catalog, not a globbable store, and a registry with no
+     * tables and no file root leaves the metadata read as the whole proof. A root containing a
+     * quote or backslash cannot be embedded in the glob literal and is refused UPSTREAM by the
+     * location grammar — [null] here rather than an escape attempt (the §5.6 no-escaping rule).
+     */
+    private fun lakeListingRoot(datasource: Datasource): String? {
+        val declared = datasource.properties.dialect["catalog.ref"]?.toString()
+        if (declared != null && isGlobbableFileRoot(declared)) return declared.trimEnd('/') + "/"
+        val directories =
+            lakeTables
+                .registeredTables(datasource.name)
+                .mapNotNull { table -> table.location.substringBeforeLast('/', "") }
+                .filter { it.isNotEmpty() }
+        if (directories.isEmpty()) return null
+        var root = directories.first()
+        directories.forEach { dir -> root = commonDirectoryPrefix(root, dir) }
+        return root.ifEmpty { null }
+    }
+
+    /** The longest prefix of [a] and [b] that ends at a `/` boundary — a DIRECTORY, never a partial segment. */
+    private fun commonDirectoryPrefix(
+        a: String,
+        b: String,
+    ): String {
+        val limit = minOf(a.length, b.length)
+        var index = 0
+        while (index < limit && a[index] == b[index]) index++
+        return a.substring(0, a.lastIndexOf('/', index - 1) + 1)
+    }
+
+    /** A `file://` root the glob literal can carry safely — no quote, no backslash (the §5.6 no-escaping rule). */
+    private fun isGlobbableFileRoot(declared: String): Boolean =
+        declared.startsWith("file://") && declared.none { it == '\'' || it == '\\' || it == '"' }
+
+    /**
+     * One LIST of [root], through the probe's own connection (the adapter init has already
+     * loaded httpfs and created the secret, so the glob exercises EXACTLY the path a query
+     * would). A failure is wrapped in [LakeListingFailure] so the refusal's message can carry
+     * the one-line IAM hint — the difference between "probe failed" and "grant s3:ListBucket
+     * on the prefix". Both exception families are caught on purpose (the probe's DS-SEC-6 rule:
+     * DuckDB surfaces some internal faults as RuntimeExceptions).
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun assertLakeListing(
+        connection: java.sql.Connection,
+        root: String,
+    ) {
+        try {
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT count(*) FROM glob('$root*')").use { it.next() }
+            }
+        } catch (e: SQLException) {
+            throw LakeListingFailure(root, e)
+        } catch (e: RuntimeException) {
+            throw LakeListingFailure(root, e)
+        }
+    }
+
+    /** Marks a listing refusal so [failedProbe] appends the IAM hint; the cause keeps the engine text. */
+    private class LakeListingFailure(
+        val root: String,
+        cause: Throwable,
+    ) : RuntimeException("the lake probe could not list '$root'", cause)
+
     private fun failedProbe(
         e: Exception,
         datasource: Datasource,
-    ) = TestResult(
-        connected = false,
-        testedAt = Instant.now(),
-        error = rootMessage(e)?.scrubbedForError(datasource.secret),
-        errorClass = e.javaClass.name,
-    )
+    ): TestResult {
+        var message = rootMessage(e)?.scrubbedForError(datasource.secret)
+        // 109 §B — the one-line hint the T176 operator needed: the probe LISTED, so the remedy
+        // is the bucket policy, not the credential. Only for s3 roots — a file:// glob failure
+        // means the directory is missing, and an S3 sentence would misdirect.
+        val listingFailure = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<LakeListingFailure>().firstOrNull()
+        if (listingFailure != null && message != null && listingFailure.root.startsWith("s3://")) {
+            message +=
+                " — the lake probe lists '${listingFailure.root}'; grant s3:ListBucket on that prefix " +
+                "(and s3:GetObject under it), not object reads alone"
+        }
+        return TestResult(
+            connected = false,
+            testedAt = Instant.now(),
+            error = message,
+            errorClass = e.javaClass.name,
+        )
+    }
 
     /**
      * The DEEPEST message in the cause chain, not the outermost one.

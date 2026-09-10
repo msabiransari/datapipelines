@@ -493,6 +493,13 @@ object PipelineErrorCodes {
         const val JDBC_URL_SCHEME_INVALID = "datasource.validation.jdbc_url_scheme_invalid"
         const val PASSWORD_MISSING = "datasource.validation.password_missing"
         const val PROPERTIES_INVALID = "datasource.validation.properties_invalid"
+
+        /**
+         * §13.8 (109 §B) — a DECLARED dialect property carries an empty, whitespace-only or null
+         * value: refused at register/update (and bootstrap) rather than stored as `""`. 400 —
+         * the fix is the caller's; the field names the key.
+         */
+        const val PROPERTY_EMPTY = "datasource.validation.property_empty"
         const val QUERY_TIMEOUT_INVALID = "datasource.validation.query_timeout_invalid"
         const val DUPLICATE_NAME = "datasource.validation.duplicate_name"
 
@@ -533,6 +540,23 @@ object PipelineErrorCodes {
 
         /** §13.8 (089 §A) — unregister named a lake table that is not registered (404). */
         const val LAKE_TABLE_NOT_FOUND = "datasource.lake_table_not_found"
+
+        /**
+         * §13.8 (109 §A) — a pipeline node referenced a registered lake table whose connect-time
+         * view creation is recorded as failed (`lake_tables.last_error`, V20): the table's view
+         * is skipped on every connection, so the engine could only answer "table not found".
+         * 502 — a party behind us (the object store's content) failed; `details` carry `table`
+         * and the recorded `last_error`.
+         */
+        const val LAKE_TABLE_UNAVAILABLE = "datasource.lake.table_unavailable"
+
+        /**
+         * §13.8 (109 §A) — a lake-table registration/import named a table the pre-flight could
+         * not read (its view would not create, or a one-row scan through it failed). Refused
+         * BEFORE storing, with the bounded engine error as the message — 400: the fix is the
+         * caller's (the location, the format, the file).
+         */
+        const val LAKE_TABLE_UNREADABLE = "datasource.validation.lake_table_unreadable"
     }
 
     /** §13.9 — template. Defined in templates.md §7; cataloged here (D5). */

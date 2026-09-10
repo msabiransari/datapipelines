@@ -301,6 +301,7 @@ object SiteShotsMain {
             signIn(page, email, password)
             val shots = Shots(page)
             if (!shots.heroScreen("editor-hero-2400.png")) return@withBrowser
+            shots.settle()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
@@ -317,6 +318,7 @@ object SiteShotsMain {
             signIn(page, email, password)
             val shots = Shots(page)
             if (!shots.heroScreen("editor-hero-1200x630.png")) return@withBrowser
+            shots.settle()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
@@ -519,9 +521,10 @@ object SiteShotsMain {
             page.navigate("$baseUrl/templates")
             waitFor("#template-list-wrapper")
             selectLeaf(SHARED_TEMPLATE)
-            // The detail pane's versions table carries the per-version in-use count — the
-            // used-by surface on this screen (templates.md §5.4, ui-screens.md §4.6).
-            waitFor("#template-detail .ds-table")
+            // The detail pane's versions list carries the per-version in-use count — the
+            // used-by surface on this screen (templates.md §5.4, ui-screens.md §4.6). The vlist
+            // is 106's reshaped markup (see selectLeaf's note).
+            waitFor("#template-detail .tplx-vlist")
             shoot("template-used-by.png")
         }
 
@@ -537,6 +540,10 @@ object SiteShotsMain {
             // the selectors transfer; only the partial URL differs (detail.html).
             expandFolder(LAKE_NAMESPACE_ROOT, LAKE_PARTIAL)
             expandFolder("$LAKE_NAMESPACE_ROOT/mobility", LAKE_PARTIAL)
+            // waitForResponse fires on the RESPONSE; htmx swaps on a later tick — a bare count
+            // here can read the pre-swap DOM and lose the race (109's gate run did). Wait for
+            // a leaf first, then count.
+            waitFor("#lake-table-tree .tpl-leaf-static")
             val leaves = page.locator("#lake-table-tree .tpl-leaf-static").count()
             check(leaves > 0) {
                 "the $LAKE_DATASOURCE registry shows no tables — is the lake family loaded (--demo lake)?"
@@ -1113,7 +1120,9 @@ object SiteShotsMain {
             val leaf = page.locator("button.tpl-leaf:has(.tpl-label[title='$name'])").first()
             leaf.waitFor()
             page.waitForResponse({ it.url().contains("/partials/templates/versions") }) { leaf.click() }
-            waitFor("#template-detail .ds-table")
+            // 106 reshaped the detail pane to the explorer's vlist markup — the versions list
+            // is .tplx-vrow rows now, not a .ds-table (109's gate run caught the stale pin).
+            waitFor("#template-detail .tplx-vlist")
         }
 
         private fun dismissSecretReveal() {
@@ -1130,10 +1139,12 @@ object SiteShotsMain {
         /**
          * Everything that must be true before the shutter: fonts resolved (a fallback face
          * re-flows every label), animations and carets dead, and every clock blanked.
+         * A toast auto-hides on a timer, so its presence in frame is a function of how
+         * fast the machine ran — the definition of a non-deterministic pixel; it is removed.
+         * Internal rather than private because [heroExtras] takes its poster and OG
+         * screenshots directly (not through [shoot]) and must settle for itself.
          */
-        private fun settle() {
-            // A toast auto-hides on a timer, so its presence in frame is a function of how
-            // fast the machine ran — the definition of a non-deterministic pixel.
+        internal fun settle() {
             page.evaluate("() => document.querySelectorAll('#toast .ds-toast').forEach(t => t.remove())")
             page.addStyleTag(Page.AddStyleTagOptions().setContent(FREEZE_CSS))
             page.evaluate("() => document.fonts.ready")

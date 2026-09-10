@@ -148,8 +148,18 @@ class ApiErrorCatalogSpecDriftTest {
          * 152 → 153 with 108 (`pipeline.node.timeout`, §13.4 — the executor's own wall-clock
          * bound on a node, 504 like its statement-level sibling). Merged 2026-09-10; re-derived
          * from the merged document's own parse.
+         *
+         * 153 → 155 with 109 §A (the lake per-table view isolation): §13.8 gains
+         * `datasource.lake.table_unavailable` (502 — the gateway partition test classifies it
+         * caller-downstream in the same commit) and `datasource.validation.lake_table_unreadable`
+         * (400, the registration pre-flight refusal), landed in the SAME commit as their
+         * constants and catalog rows. Re-derived from the document's own parse.
+         *
+         * 155 → 156 with 109 §B (the empty-dialect-property refusal): §13.8 gains
+         * `datasource.validation.property_empty` (400), landed in the SAME commit as its
+         * constants and catalog row.
          */
-        const val SECTION_13_ROW_COUNT = 153
+        const val SECTION_13_ROW_COUNT = 156
 
         /**
          * §12's distinct validation codes.

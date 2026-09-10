@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.LakeBrokenTable
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.datasources.ValidationResult
@@ -358,6 +359,11 @@ class FakeDatasourceRegistry(
      * bounds and `node.statement_abandoned` logs, reproduced rather than papered over.
      */
     private val blockingDriver: BlockingDriver? = null,
+    /**
+     * 109 §A — the [DatasourceRegistry.lakeBrokenTables] answer, name → broken tables. Empty
+     * (the default) is the interface's own default, so every other suite is unchanged.
+     */
+    private val brokenLakeTables: Map<String, List<LakeBrokenTable>> = emptyMap(),
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -407,6 +413,8 @@ class FakeDatasourceRegistry(
 
     override fun poolFor(datasource: Datasource): ConnectionPool =
         TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, blockingDriver)
+
+    override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = brokenLakeTables[datasourceName].orEmpty()
 
     override fun testConnection(name: String): TestResult? = TestResult(true, Instant.now())
 

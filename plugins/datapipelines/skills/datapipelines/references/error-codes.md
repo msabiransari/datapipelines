@@ -25,3 +25,5 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 | `pipeline.node.sql_parameter_missing` | The rendered SQL references a `:name` no pipeline parameter declares | Name a declared parameter — or interpolate structure instead |
 | `template.validation.parameter_interpolated` | A declared parameter appears inside `${}` | Write `:name` for it — bound values are never parsed as SQL |
 | `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
+| `datasource.lake.table_unavailable` | A lake table's view failed to build at connect and was skipped; `details` carries `table` and the recorded `last_error` | Do not retry — the query is fine, the registration is broken. Report `last_error` to the user and let them fix or re-register the table |
+| `datasource.validation.property_empty` | A datasource property was `""`, whitespace, or null | Set the key to a real value or drop it entirely — empty is never stored |

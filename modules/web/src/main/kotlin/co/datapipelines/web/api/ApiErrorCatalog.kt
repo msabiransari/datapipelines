@@ -138,6 +138,16 @@ object ApiErrorCatalog {
             // absent table is a not-found. The validation family covers the five 400s.
             PipelineErrorCodes.Datasource.LAKE_TABLE_DUPLICATE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.LAKE_TABLE_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // 109 §A — a node referenced a lake table whose connect-time view creation is
+            // recorded as broken: the content a party behind us serves failed, like
+            // `datasource_connection_failed`, so 502 and the WARN demotion below.
+            PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to HttpStatus.BAD_GATEWAY,
+            // 109 §A — the registration pre-flight refusal: 400 like the family default, wired
+            // explicitly so the code owns a row rather than being absorbed (the 025 A2 convention).
+            PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE to HttpStatus.BAD_REQUEST,
+            // 109 §B — a declared dialect property with an empty/blank/null value: 400 like the
+            // family default, wired explicitly to own a row (the 025 A2 convention).
+            PipelineErrorCodes.Datasource.PROPERTY_EMPTY to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.NOT_FOUND to HttpStatus.NOT_FOUND,
             // §13.9 (040 D4) — the in-use delete refusal, against any template-family default:
             // it is a conflict with live references, not a validation failure.
@@ -251,6 +261,10 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
             PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
+            // 109 §A — the caller's own object store served content the registered table's view
+            // cannot read; the diagnosis is recorded on the registry row, so this is not an
+            // incident in THIS process either.
+            PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE,
         )
 
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
@@ -311,6 +325,8 @@ object ApiErrorCatalog {
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to
                 "We couldn't find that connection. It may have been deleted.",
+            PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to
+                "A registered table on this data lake couldn't be read. The recorded reason is in the error details.",
             PipelineErrorCodes.Template.NOT_FOUND to
                 "We couldn't find that template. It may have been deleted.",
             PipelineErrorCodes.Template.DUPLICATE_NAME to

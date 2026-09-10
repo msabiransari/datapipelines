@@ -115,6 +115,13 @@ class LakeTableRegistryServiceTest {
             partitionColumn = null,
         )
 
+    init {
+        // 109 §A — the pre-flight's DEFAULT answer is "readable" (null): without the stub a
+        // strict mock makes every happy-path register/import below an accidental refusal test.
+        // The refusal cases override this with their own `every`.
+        every { registry.preflightLakeTable(any(), any()) } returns null
+    }
+
     private fun body(json: String) = mapper.readTree(json)
 
     // ---------------------------------------------------------- LAKE-only
@@ -201,6 +208,67 @@ class LakeTableRegistryServiceTest {
     }
 
     @Test
+    fun `register refuses a table the pre-flight cannot read - nothing stored, nothing evicted`() {
+        val stored = mutableListOf<LakeTableRegistration>()
+        every { tables.insert(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>().also(stored::add)) }
+        // 109 §A: the pre-flight's engine text (a file that is not Parquet, say) is the refusal.
+        every { registry.preflightLakeTable(any(), any()) } returns "IO Error: No files found that match the pattern 's3://b/x.parquet'"
+
+        val e =
+            shouldThrow<DatapipelinesException> {
+                service.register(
+                    lake(),
+                    body("""{"namespace": "nyc", "name": "broken", "format": "parquet", "location": "s3://b/x.parquet"}"""),
+                    principal,
+                )
+            }
+        val recordedReason = e.details.getValue("last_error").toString()
+        assertAll(
+            { e.code shouldBe PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE },
+            { e.message!!.contains("No files found") shouldBe true },
+            { recordedReason.contains("No files found") shouldBe true },
+            // Refused at the door: no row reached the store, and a refused write invalidates
+            // nothing — the same rule the duplicate mapping keeps.
+            { stored shouldBe emptyList() },
+            { evicted shouldBe emptyList() },
+            { published shouldBe emptyList() },
+        )
+    }
+
+    @Test
+    fun `import skips the pre-flight for already-registered triples - the idempotent re-import does not re-read`() {
+        // EVERY pre-flight fails in this test — the already-registered triple must never reach
+        // one (a bootstrap re-run on every boot must not re-read — or fail on — registered
+        // tables whatever their current health); only the NEW triple's refusal may surface, and
+        // the body lists the existing table FIRST, so a wrong skip fails the name assertion.
+        every { registry.preflightLakeTable(any(), any()) } returns "unreachable"
+        every { tables.findByDatasource(any()) } returns listOf(row(registration))
+
+        val e =
+            shouldThrow<DatapipelinesException> {
+                service.importTables(
+                    lake(),
+                    body(
+                        """
+                        {"namespace": "nyc.mobility",
+                         "tables": [
+                           {"name": "hvfhv_zone_day", "format": "parquet", "location": "s3://b/z/part-0.parquet"},
+                           {"name": "brand_new", "format": "parquet", "location": "s3://b/n.parquet"}
+                         ]}
+                        """.trimIndent(),
+                    ),
+                    principal,
+                )
+            }
+        assertAll(
+            { e.code shouldBe PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE },
+            { e.message!!.contains("brand_new") shouldBe true },
+            { e.message!!.contains("hvfhv_zone_day") shouldBe false },
+            { evicted shouldBe emptyList() },
+        )
+    }
+
+    @Test
     fun `a successful mutation drops phase C's introspection cache beside the pool eviction`() {
         every { tables.insert(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>()) }
         every { registry.retirePool(any()) } returns true
@@ -266,6 +334,7 @@ class LakeTableRegistryServiceTest {
     @Test
     fun `import registers the inline tables block and reports duplicates idempotently`() {
         every { tables.insertIfAbsent(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>()) } andThenAnswer { null }
+        every { tables.findByDatasource(any()) } returns emptyList<LakeTable>()
         every { registry.retirePool(any()) } answers {
             evicted += firstArg<String>()
             true
@@ -312,6 +381,7 @@ class LakeTableRegistryServiceTest {
         fetched["https://datapipelines-co.s3.us-east-1.amazonaws.com/sample-data/lake/v1/manifest.json"] = manifest
         val inserted = mutableListOf<LakeTableRegistration>()
         every { tables.insertIfAbsent(any(), any(), any()) } answers { row(secondArg<LakeTableRegistration>().also(inserted::add)) }
+        every { tables.findByDatasource(any()) } returns emptyList<LakeTable>()
         every { registry.retirePool(any()) } answers {
             evicted += firstArg<String>()
             true

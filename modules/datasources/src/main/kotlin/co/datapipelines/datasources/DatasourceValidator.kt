@@ -341,7 +341,9 @@ class DatasourceValidator(
         // §12.1 (087): `dialect.*` is TYPED, so the adapter validates it key by key instead of a
         // pool build discovering the problem. Resolved from the dialect enum like the refusal
         // union, and refusing the whole namespace by default — a dialect gains keys by declaring
-        // them, never by an adapter forgetting to look.
+        // them, never by an adapter forgetting to look. The 109 §B EMPTY rule runs first and
+        // generically — see [emptyDialectPropertyErrors].
+        propertyErrors += emptyDialectPropertyErrors(props.dialect)
         propertyErrors += adapters(datasource.dialect).validateDialectProperties(props.dialect).errors
 
         // Name each hikari key HikariCP rejects (unknown name / un-parseable value).
@@ -373,6 +375,27 @@ class DatasourceValidator(
         }
         if (propertyErrors.isEmpty()) testPoolBuild(datasource, errors)
     }
+
+    /**
+     * 109 §B — the EMPTY rule, generic over every dialect and FIRST among the dialect checks:
+     * a declared dialect property carrying an empty, whitespace-only or null value is refused
+     * with its own catalogued code. An empty string is never a configuration — the incident was
+     * `catalog.ref: ""` stored and read back as "not declared" everywhere downstream. Generic
+     * on purpose: an adapter that forgets the check cannot reintroduce the hole, and a new
+     * dialect inherits the rule at the boundary.
+     */
+    private fun emptyDialectPropertyErrors(dialect: Map<String, Any?>): List<ValidationError> =
+        dialect
+            .filterValues { it == null || (it is String && it.isBlank()) }
+            .keys
+            .map { key ->
+                error(
+                    DatasourceErrorCodes.PROPERTY_EMPTY,
+                    "properties.dialect.${key.truncateForError()}",
+                    "dialect property '${key.truncateForError()}' is declared with an empty value — " +
+                        "remove the key to leave it unset; an empty string is never a configuration.",
+                )
+            }
 
     private fun serverManagedIn(
         namespace: String,

@@ -29,6 +29,44 @@ class DatasourceValidatorTest {
         validator.validate(Fixtures.h2(), isCreate = true).valid shouldBe true
     }
 
+    // ------------------------------- empty dialect properties (109 §B)
+
+    @Test
+    fun `an empty, blank or null value for a declared dialect property fails property_empty naming the key`() {
+        // The `catalog.ref: ""` incident: an empty string is never a configuration — it was
+        // stored, and every downstream reader re-interpreted it as "not declared". One red
+        // case per spelling (empty, whitespace-only, JSON null); the field names the key.
+        listOf(null, "", "   ").forEach { value ->
+            val result =
+                validator.validate(
+                    Fixtures.forDialect(
+                        Dialect.LAKE,
+                        properties = DatasourceProperties(dialect = mapOf("catalog.ref" to value)),
+                    ),
+                    isCreate = true,
+                )
+            withClue("catalog.ref=$value must be refused as property_empty") {
+                result.valid shouldBe false
+                val error = result.errors.single { it.code == DatasourceErrorCodes.PROPERTY_EMPTY }
+                (error.field ?: "") shouldContain "properties.dialect.catalog.ref"
+            }
+        }
+    }
+
+    @Test
+    fun `the empty rule is dialect-generic - it fires before the adapter's own unknown-key refusal`() {
+        // Generic at the boundary on purpose (109 §B): the check lives in validateProperties,
+        // not in one adapter, so a future dialect cannot forget it. Pinned over H2 — a dialect
+        // that declares NO keys — where the same entry also draws the unknown-key refusal;
+        // both errors are honest, and the empty one is the one this round owns.
+        val result =
+            validator.validate(
+                Fixtures.forDialect(Dialect.H2, properties = DatasourceProperties(dialect = mapOf("anything" to ""))),
+                isCreate = true,
+            )
+        result.errors.map { it.code } shouldContain DatasourceErrorCodes.PROPERTY_EMPTY
+    }
+
     @Test
     fun `introspection include-schemas entries are plain names - patterns and blanks are rejected`() {
         // §3.3/§7A: the allowlist is exact names, no patterns — an `apex_*` entry here would

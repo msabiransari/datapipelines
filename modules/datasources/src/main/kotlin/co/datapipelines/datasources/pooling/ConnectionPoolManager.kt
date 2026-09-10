@@ -1,8 +1,11 @@
 package co.datapipelines.datasources.pooling
 
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DialectAdapter
 import co.datapipelines.datasources.DialectAdapters
+import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import com.zaxxer.hikari.util.DriverDataSource
 import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.time.Duration
@@ -296,13 +299,21 @@ class ConnectionPoolManager(
         /**
          * The production pool factory: a real Hikari pool built through the dialect adapter.
          *
-         * [additionalConnectionInit] carries statements derived OUTSIDE the adapter — today
-         * exactly one producer: phase B's per-table lake views ([LakeViewStatements]), which
-         * need the registry rows only the registry's pool factory can reach. They are appended
-         * AFTER the adapter's own `connectionInit` statements (extensions → secret → attach →
-         * limits → views), inside the same `connectionInitSql` slot, so the save-time test pool
-         * build — which passes none — stays byte-identical to the pre-view config (§4.2's
-         * "built the same way" invariant covers the adapter's half; views are runtime-only).
+         * [additionalConnectionInit] carries statements derived OUTSIDE the adapter — the
+         * pre-109 shape of the per-table lake views ([LakeViewStatements.forTables]), kept for
+         * non-LAKE use and as the strict-composition reference. They are appended AFTER the
+         * adapter's own `connectionInit` statements (extensions → secret → attach → limits →
+         * views), inside the same `connectionInitSql` slot, so the save-time test pool build —
+         * which passes none — stays byte-identical to the pre-view config (§4.2's "built the
+         * same way" invariant covers the adapter's half; views are runtime-only).
+         *
+         * [lakeViews] is 109 §A's per-table-isolation path: when present, the pool's physical
+         * connections are created through a [LakeViewApplyingDataSource] wrapping the driver's
+         * own DataSource — the adapter init and the plan's prelude stay strict, each table's
+         * view is applied independently, and a failing view is recorded and skipped rather
+         * than failing the connect. Mutually exclusive with [additionalConnectionInit]: the two
+         * are strict-vs-isolated compositions of the SAME statements, and passing both would
+         * create every view twice.
          *
          * [duckdbExtensionDirectory] is the deployment's bundled DuckDB extension directory
          * (089 §D, configuration.md §3.25): forwarded to [DialectAdapters.forDialect], which
@@ -313,14 +324,62 @@ class ConnectionPoolManager(
             datasource: Datasource,
             additionalConnectionInit: List<String> = emptyList(),
             duckdbExtensionDirectory: String? = null,
+            lakeViews: LakeViewInit? = null,
         ): ConnectionPool {
-            val config = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory).buildHikariConfig(datasource)
-            if (additionalConnectionInit.isNotEmpty()) {
+            val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory)
+            val config = adapter.buildHikariConfig(datasource)
+            if (lakeViews != null) {
+                require(additionalConnectionInit.isEmpty()) {
+                    "lake view isolation and additionalConnectionInit compose the same statements — pass exactly one"
+                }
+                applyLakeViews(config, adapter, datasource, lakeViews)
+            } else if (additionalConnectionInit.isNotEmpty()) {
                 config.connectionInitSql =
                     listOfNotNull(config.connectionInitSql, additionalConnectionInit.joinToString("; "))
                         .joinToString("; ")
             }
             return HikariConnectionPool(datasource.name, HikariDataSource(config))
+        }
+
+        /**
+         * Rewires [config] from driver-URL pooling to a wrapped DataSource (109 §A). The adapter
+         * init statements come back OUT of the `connectionInitSql` slot — re-derived as the LIST
+         * from [DialectAdapter.connectionInit], never split back out of the joined string (a
+         * credential containing `; ` would survive the join but not a re-split) — and become the
+         * wrapper's strict half. `DriverDataSource` is HikariCP's own driver delegate, so the
+         * raw connection is opened exactly as the jdbcUrl path would open it.
+         *
+         * The captured `jdbcUrl`/`driverClassName` are deliberately LEFT on the config:
+         * `HikariConfig.validate()` skips every field check once `dataSource` is set with no
+         * `dataSourceClassName` (they are ignored, not mutually exclusive), while the
+         * `setDriverClassName(null)` that "clearing" would require loads a class whose name is
+         * null — an unconditional `NullPointerException` on HikariCP 6.3.x. Only
+         * `connectionInitSql` is nulled, so the pool cannot re-run the joined init on the
+         * wrapper's connections (the wrapper owns initialization now).
+         */
+        private fun applyLakeViews(
+            config: HikariConfig,
+            adapter: DialectAdapter,
+            datasource: Datasource,
+            lakeViews: LakeViewInit,
+        ) {
+            val delegate =
+                DriverDataSource(
+                    config.jdbcUrl,
+                    config.driverClassName,
+                    config.dataSourceProperties,
+                    config.username,
+                    config.password,
+                )
+            config.connectionInitSql = null
+            config.dataSource =
+                LakeViewApplyingDataSource(
+                    delegate = delegate,
+                    adapterInit = adapter.connectionInit(datasource),
+                    plan = lakeViews.plan,
+                    datasourceName = lakeViews.datasourceName,
+                    recorder = lakeViews.recorder,
+                )
         }
     }
 }

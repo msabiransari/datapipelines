@@ -91,6 +91,8 @@ class FlywayMigrationIntegrationTest {
                 "20|version write surface|true",
                 // 108 §D — the instance heartbeat the crash sweep reads (V20 was taken by 102 at merge).
                 "21|execution heartbeat|true",
+                // 109 §A — the per-table lake view-creation outcome columns (both NULL = healthy).
+                "22|lake table view errors|true",
             )
     }
 

@@ -2,12 +2,16 @@ package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.assertAll
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.junit.jupiter.Container
@@ -23,6 +27,7 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * The LAKE dialect's seat in the per-dialect connectivity suite (datasources.md §13.2, 089 §F):
@@ -92,6 +97,109 @@ class LakeConnectivityIntegrationTest {
         }
     }
 
+    // ------------------------------- the LISTING probe (109 §B)
+
+    /**
+     * The real registry's `testConnection` — the probe the Test button and `datasources_test`
+     * run — over a Postgres-backed repository (the module's SharedPostgres), so the §8.1B
+     * outcome write is exercised too. [tables] is what the registry's lake catalog answers.
+     * Truncates `datasources` and seeds the `created_by` user the insert's FK needs, the
+     * registry suite's own discipline. Returns the registry and the seeded owner.
+     */
+    private fun registryWithTables(vararg tables: LakeRegisteredTable): Pair<DefaultDatasourceRegistry, UUID> {
+        val template = JdbcTemplate(SharedPostgres.pooledDataSource())
+        template.execute("TRUNCATE datasources, users CASCADE")
+        val owner =
+            checkNotNull(
+                template.queryForObject(
+                    "INSERT INTO users (email, display_name, provider, provider_subject) " +
+                        "VALUES ('lake-it@example.com', 'Lake IT', 'google', 'sub-lake-it') RETURNING id",
+                    UUID::class.java,
+                ),
+            )
+        val registry =
+            DefaultDatasourceRegistry(
+                DatasourceRepository(NamedParameterJdbcTemplate(SharedPostgres.pooledDataSource())),
+                testEncryptor(),
+                lakeTables = LakeTableCatalog { tables.toList() },
+            )
+        return registry to owner
+    }
+
+    @Test
+    fun `the lake probe LISTS the registered root - a listing-capable credential connects`() {
+        val (registry, owner) =
+            registryWithTables(
+                LakeRegisteredTable(listOf("it"), "probe_trips", "parquet", "s3://$BUCKET/probe/trips.parquet"),
+            )
+        registry.save(lakeDatasource(), owner)
+
+        val result = registry.testConnection("lake_it").shouldNotBeNull()
+
+        // The glob LIST of s3://dp-lake-it/probe/ ran through the probe's own connection and
+        // succeeded — the minioadmin credential may list.
+        result.connected shouldBe true
+        result.serverVersion.shouldNotBeNull()
+    }
+
+    @Test
+    fun `a bucket that allows GET but refuses LIST fails the probe with the s3-ListBucket hint`() {
+        // The T176 shape, reproduced exactly: the bucket policy grants anonymous object reads
+        // (s3:GetObject) but not s3:ListBucket — the datasource is unsigned, a direct object
+        // GET would succeed, and the OLD probe (a metadata version read) reported connected.
+        // The 109 §B probe LISTS, so it must fail with the engine's 403 plus the one-line
+        // grant-ListBucket hint.
+        val client = checkNotNull(s3)
+        client.createBucket { it.bucket(PUBLIC_BUCKET) }
+        client.putObject(
+            { it.bucket(PUBLIC_BUCKET).key("probe/trips.parquet") },
+            RequestBody.fromString("placeholder bytes; the probe never GETs"),
+        )
+        client.putBucketPolicy(
+            software.amazon.awssdk.services.s3.model.PutBucketPolicyRequest
+                .builder()
+                .bucket(PUBLIC_BUCKET)
+                .policy(
+                    """
+                    {"Version":"2012-10-17","Statement":[
+                       {"Effect":"Allow","Principal":"*","Action":"s3:GetObject",
+                        "Resource":"arn:aws:s3:::$PUBLIC_BUCKET/*"}]}
+                    """.trimIndent(),
+                ).build(),
+        )
+        val (registry, owner) =
+            registryWithTables(
+                LakeRegisteredTable(listOf("it"), "probe_trips", "parquet", "s3://$PUBLIC_BUCKET/probe/trips.parquet"),
+            )
+        registry.save(
+            lakeDatasource().copy(
+                name = "lake_public",
+                username = null,
+                credentialKind = CredentialKind.NONE,
+                secret = null,
+                properties =
+                    DatasourceProperties(
+                        dialect =
+                            mapOf(
+                                "catalog.kind" to "s3",
+                                "region" to "us-east-1",
+                                "endpoint" to "localhost:${minio.getMappedPort(MINIO_PORT)}",
+                                "url_style" to "path",
+                                "unsigned" to "true",
+                            ),
+                    ),
+            ),
+            owner,
+        )
+
+        val result = registry.testConnection("lake_public").shouldNotBeNull()
+
+        assertAll(
+            { result.connected shouldBe false },
+            { result.error.shouldNotBeNull().shouldContain("s3:ListBucket") },
+        )
+    }
+
     private fun parquetViews(): List<String> =
         viewStatements(
             LakeRegisteredTable(
@@ -152,6 +260,7 @@ class LakeConnectivityIntegrationTest {
 
     private companion object {
         private const val BUCKET = "dp-lake-it"
+        private const val PUBLIC_BUCKET = "dp-lake-it-public"
         private const val MINIO_PORT = 9000
         private const val MINIO_USER = "minioadmin"
         private const val MINIO_PASSWORD = "minioadmin"

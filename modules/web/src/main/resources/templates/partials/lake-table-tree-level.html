@@ -69,6 +69,13 @@
         <span class="ds-badge ds-badge-default" th:text="${t.format.wire}">parquet</span>
         <span class="ds-badge ds-badge-default" th:if="${t.partitionColumn} != null"
               th:text="${t.partitionColumn}">pickup_date</span>
+        <!-- 109 §A (V20): the table's connect-time view creation is recorded as failed — the
+             row is registered but no connection serves a view for it, so a node referencing
+             it fails datasource.lake.table_unavailable. The recorded engine error rides on
+             the title, the last_test badge's pattern: the row stays narrow and explains
+             itself on hover. -->
+        <span class="ds-badge ds-badge-danger" th:if="${t.lastError} != null"
+              th:title="${t.lastError}">view failed</span>
       </div>
     </li>
   </ul>

@@ -38,6 +38,14 @@ object DatasourceErrorCodes {
     /** The test pool build (§5.4) rejected a `hikari`/`jdbc` property; `details` names the key. */
     const val PROPERTIES_INVALID = "datasource.validation.properties_invalid"
 
+    /**
+     * 109 §B — a DECLARED dialect property carries an empty, whitespace-only or null value.
+     * Refused at register/update (and so at bootstrap, which saves through the same validator):
+     * an empty string is never a configuration, and `catalog.ref: ""` used to be stored as
+     * exactly that. The field names the key.
+     */
+    const val PROPERTY_EMPTY = "datasource.validation.property_empty"
+
     /** `query_timeout_seconds`, when present, is not an integer ≥ 1. */
     const val QUERY_TIMEOUT_INVALID = "datasource.validation.query_timeout_invalid"
 
@@ -114,4 +122,20 @@ object DatasourceErrorCodes {
 
     /** Unregister named a lake table that is not registered — 404. */
     const val LAKE_TABLE_NOT_FOUND = "datasource.lake_table_not_found"
+
+    /**
+     * A pipeline node referenced a registered lake table whose connect-time view creation is
+     * recorded as failed (`lake_tables.last_error`, V22, 109 §A) — its view is skipped on every
+     * connection, so the engine could only answer "table not found". 502; `details` carry
+     * `table` and the recorded `last_error`. Raised by the executor (dag) at the CONNECT phase;
+     * mirrored here so the §13.8 drift guard stays complete.
+     */
+    const val LAKE_TABLE_UNAVAILABLE = "datasource.lake.table_unavailable"
+
+    /**
+     * A lake-table registration/import named a table the pre-flight could not read (109 §A) —
+     * refused BEFORE storing, with the bounded engine error as the message. 400: the fix is the
+     * caller's (the location, the format, the file).
+     */
+    const val LAKE_TABLE_UNREADABLE = "datasource.validation.lake_table_unreadable"
 }

@@ -146,6 +146,24 @@ class LakeTableTreeRenderTest {
         html shouldNotContain "hvfhv_zone_day"
     }
 
+    @Test
+    fun `a broken table carries the view-failed badge with its recorded reason on the title`() {
+        // 109 §A (V20): the row is registered but its view creation is recorded as failed —
+        // the level must SAY so, with the engine's text riding the title exactly the way the
+        // last_test badge's pattern does. A healthy sibling stays badge-free.
+        val broken =
+            table(listOf("nyc", "mobility"), "hvfhv_broken", LakeTableFormat.PARQUET)
+                .copy(lastError = "IO Error: No files found that match the pattern 's3://b/x.parquet'")
+        val healthy = table(listOf("nyc", "mobility"), "hvfhv_zone_day", LakeTableFormat.PARQUET)
+
+        val html = renderLevel(prefix = "nyc/mobility", levelTables = listOf(broken, healthy))
+
+        html shouldContain ">view failed</span>"
+        html shouldContain "title=\"IO Error: No files found"
+        // Exactly one badge: the healthy table carries none.
+        html.split("view failed", limit = 2).size shouldBe 2
+    }
+
     private companion object {
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     }

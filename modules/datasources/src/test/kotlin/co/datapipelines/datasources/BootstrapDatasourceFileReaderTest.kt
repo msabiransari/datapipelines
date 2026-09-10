@@ -4,6 +4,7 @@ import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -175,6 +176,65 @@ class BootstrapDatasourceFileReaderTest {
         // The failure is the whole point: nothing was returned, so nothing could be registered
         // with the literal placeholder as its credential.
         error.message!!.shouldNotContain("registered")
+    }
+
+    // ------------------------------- placeholder-empty omission (109 §B)
+
+    private val lakeYaml =
+        """
+        datasources:
+          - name: sample-lake
+            dialect: LAKE
+            jdbc_url: "jdbc:duckdb::memory:"
+            credential:
+              kind: none
+            properties:
+              dialect:
+                catalog.kind: s3
+                catalog.ref: ${'$'}{SAMPLE_LAKE_CATALOG_REF}
+                region: us-east-1
+                unsigned: "true"
+            readonly: true
+            global: true
+        """.trimIndent()
+
+    @Test
+    fun `a set-but-EMPTY placeholder omits the key - the shipped catalog ref's production posture`() {
+        // Compose defaults SAMPLE_LAKE_CATALOG_REF to empty; production runs exactly this
+        // shape. The key is OMITTED (not declared — the honest spelling), so the §9 empty
+        // rule does not refuse the boot and LakeManifestUrl reads plain-AWS-S3.
+        val entry = reader(mapOf("SAMPLE_LAKE_CATALOG_REF" to "")).read(file(lakeYaml)).single().datasource
+
+        entry.properties.dialect.containsKey("catalog.ref") shouldBe false
+        entry.properties.dialect["region"] shouldBe "us-east-1"
+    }
+
+    @Test
+    fun `a set placeholder resolves normally - the mirror deployment's file root`() {
+        val entry = reader(mapOf("SAMPLE_LAKE_CATALOG_REF" to "file:///srv/lake-mirror")).read(file(lakeYaml)).single().datasource
+
+        entry.properties.dialect["catalog.ref"] shouldBe "file:///srv/lake-mirror"
+    }
+
+    @Test
+    fun `an UNSET placeholder still refuses - omission is the off-switch, not a bypass of §8A-2`() {
+        val error = shouldThrow<BootstrapDatasourceFileException> { reader().read(file(lakeYaml)) }
+        error.message.shouldNotBeNull().shouldContain("SAMPLE_LAKE_CATALOG_REF")
+    }
+
+    @Test
+    fun `a LITERAL empty value survives the reader as an empty string - the validator refuses it`() {
+        // The distinction 109 §B draws: placeholder-empty is the operator's off-switch; a
+        // literal "" is DATA, and data that is an empty string must fail the boot with the key
+        // named (the reader stays pure — the refusal is the registrar's save-time validation).
+        val literal =
+            lakeYaml.replace(
+                "catalog.ref: ${'$'}{SAMPLE_LAKE_CATALOG_REF}",
+                "catalog.ref: \"\"",
+            )
+        val entry = reader(mapOf("SAMPLE_LAKE_CATALOG_REF" to "ignored")).read(file(literal)).single().datasource
+
+        entry.properties.dialect["catalog.ref"] shouldBe ""
     }
 
     @Test
