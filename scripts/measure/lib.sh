@@ -14,7 +14,18 @@ measure_header() {
   one=$(uptime | sed 's/.*load averages*: *//' | awk '{print $1}' | tr -d ',')
   # A number taken on a saturated box measures the box, not the change. The threshold is the
   # brief's: check load < 8 before measuring, DISCARD anything taken above 15.
-  awk -v l="$one" 'BEGIN { if (l+0 > 15) { print "REFUSED: 1-minute load " l " > 15 — this measurement would be noise. Re-run on a quiet box."; exit 1 } if (l+0 >= 8) { print "WARNING: 1-minute load " l " >= 8 — the numbers below are usable only as an upper bound." } }' || exit 1
+  # DP_MEASURE_ALLOW_LOAD=1 runs anyway and SAYS SO in the output. It exists for one case: a
+  # measurement whose own subject is a running stack, where the stack IS most of the load and
+  # waiting for a quiet box is waiting for the thing under test to stop. It never silences the
+  # number — the banner and the load line both stay, so a reader always knows what they are
+  # reading. Timing figures taken this way are upper bounds; a STRUCTURAL claim (did two windows
+  # intersect?) is unaffected by load and stays valid.
+  awk -v l="$one" -v allow="${DP_MEASURE_ALLOW_LOAD:-0}" 'BEGIN {
+    if (l+0 > 15) {
+      if (allow == "1") { print "!! OVERRIDDEN: 1-minute load " l " > 15, running anyway (DP_MEASURE_ALLOW_LOAD=1)."; print "!! TIMINGS BELOW ARE UPPER BOUNDS ONLY. Structural results are unaffected." }
+      else { print "REFUSED: 1-minute load " l " > 15 — this measurement would be noise. Re-run on a quiet box."; exit 1 }
+    } else if (l+0 >= 8) { print "WARNING: 1-minute load " l " >= 8 — the numbers below are usable only as an upper bound." }
+  }' || exit 1
 }
 
 # Runs a measurement class and prints the stdout it captured. The JUnit XML is the artifact,
