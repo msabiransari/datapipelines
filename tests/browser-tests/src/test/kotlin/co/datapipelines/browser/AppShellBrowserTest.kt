@@ -75,7 +75,7 @@ class AppShellBrowserTest : BrowserSuite() {
                 """
                 () => Array.from(document.querySelectorAll('*'))
                   .filter(e => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
-                  .slice(0, 6)
+                  .slice(0, 12)
                   .map(e => {
                     const id = n => n.tagName + (n.className && typeof n.className === 'string' && n.className.trim()
                       ? '.' + n.className.trim().split(/\s+/).join('.') : '');
@@ -89,19 +89,35 @@ class AppShellBrowserTest : BrowserSuite() {
                 """.trimIndent(),
             ).toString()
 
+    /**
+     * 110 §D — every screen at FOUR widths: the two review widths the shell was built
+     * for (a fixed explorer column overflows a NARROW window, a content-sized `1fr`
+     * overflows a WIDE one) plus the two the shell now has to fit — 390×844 (a phone)
+     * and 768×1024 (the shell's own breakpoint, where the rail starts collapsed).
+     *
+     * The EDITORS are deliberately not in [appPages]: they are entered from a leaf,
+     * not from the rail, and below 768 they render the §C wide-screen band BY DECISION
+     * ("Open on a wider screen to edit") — there is nothing to exclude here, and no
+     * silent skip of a page that was never in the list.
+     */
     @Test
-    fun `no app screen scrolls sideways at 1440 or 2560`() {
+    fun `no app screen scrolls sideways at 390, 768, 1440 or 2560`() {
         startTrace()
         signedIn("ovf")
 
         val offenders = mutableListOf<String>()
-        listOf(1440 to 900, 2560 to 1440).forEach { (w, h) ->
+        listOf(390 to 844, 768 to 1024, 1440 to 900, 2560 to 1440).forEach { (w, h) ->
             page.setViewportSize(w, h)
             appPages.forEach { route ->
                 page.navigate("$baseUrl$route")
                 page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
                 val extra = overflow(page)
-                if (extra > 0) offenders += "$route at ${w}x$h overflows by ${extra}px — ${culprits(page)}"
+                if (extra > 0) {
+                    // At the two narrow widths the failure must name the screen, the
+                    // overflow in px, and the culprit element — "/dashboard at 390:
+                    // 154px over — .app-topbar" is a report you can act on.
+                    offenders += "$route at $w: ${extra}px over — ${culprits(page)}"
+                }
             }
         }
         offenders shouldBe emptyList()
