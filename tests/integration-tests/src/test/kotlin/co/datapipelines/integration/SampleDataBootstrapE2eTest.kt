@@ -7,8 +7,8 @@ import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -150,9 +150,10 @@ class SampleDataBootstrapE2eTest {
         scalar<UUID>("SELECT owner_id FROM pipelines WHERE workspace_id = '$workspaceId'") shouldNotBe userId
 
         // …and the joiner is a VIEWER of it, which is the D-R11 rule in one row.
-        row("SELECT author, promoter, admin FROM workspace_members" +
-            " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'")
-            .let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
+        row(
+            "SELECT author, promoter, admin FROM workspace_members" +
+                " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
+        ).let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
 
         // The example pipeline reads the bootstrap-registered readonly datasource: §12 validation
         // resolved that reference at import time, which is the two halves of this slice meeting.

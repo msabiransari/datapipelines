@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.specification.RequestSpecification
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -23,20 +24,26 @@ import org.springframework.test.context.DynamicPropertySource
  * substituting `globex`'s identifiers into every slot, as a member of `acme` — first on a
  * session, then on an API key — and asserts the answer is always the not-found one.
  *
- * ## What it asserts, and why not simply "404"
- * A handler can refuse a request before it ever reaches a repository — a malformed body, a
- * missing parameter, an unparseable UUID. Demanding 404 everywhere would therefore assert
- * things about request binding rather than about isolation, and would go green or red for
- * reasons that have nothing to do with the rule.
+ ## What it asserts — a DIFFERENTIAL, not a fixed status
  *
- * So the invariant is stated as what must NEVER happen, which is exactly the leak:
- * - never `2xx` — a foreign row must not be read, executed or mutated;
- * - never `403` — "forbidden" tells the caller the thing EXISTS, which is the oracle D-R5
- *   removes. This is the assertion that fails when somebody "fixes" an isolation bug by
- *   adding a permission check instead of a workspace predicate.
+ * The first cut demanded "never 2xx, never 403, and 404 for bodyless routes", and that was
+ * wrong in both directions. A handler can legitimately refuse before it reaches a repository
+ * (a malformed body, an unparseable id), so a fixed status asserts request binding rather
+ * than isolation. And a blanket "never 403" flagged every SUPER-ADMIN route — where a 403 is
+ * returned for EVERY name, existing or not, and therefore leaks nothing at all.
  *
- * On top of that, every route that needs no request body — GET and DELETE — is held to the
- * stronger, exact `404`, because nothing else can legitimately refuse those first.
+ * What D-R5 actually promises is narrower and testable: **the answer must not depend on
+ * whether the foreign row exists.** So every route is called TWICE — once with `globex`'s
+ * identifier, once with a well-formed identifier that exists nowhere — and the two answers
+ * must be identical. That is the property, stated as the property:
+ *
+ * - **statuses differ** → an oracle. The caller can tell "someone else's" from "nobody's",
+ *   which is the whole thing the rule removes;
+ * - **the foreign call is 2xx** → a leak outright, whatever the control did.
+ *
+ * This is also what makes the assertion survive a "fix" that adds a permission check instead
+ * of a workspace predicate: a 403-for-existing against a 404-for-missing is a differing pair,
+ * and it fails here.
  *
  * ## Falsifying it
  * Remove the workspace predicate from ONE repository read and this suite names that route.
@@ -71,7 +78,10 @@ class WorkspaceIsolationSweepTest {
 
         val leaks = sweep { spec -> spec.cookie(SESSION_COOKIE, WorkspaceIsolationIntegrationTest.acmeSession()) }
 
-        withClue("routes that leaked globex to an acme SESSION") { leaks.shouldBeEmpty() }
+        // Joined into ONE string rather than asserted empty as a list: a collection assertion
+        // prints its first element and elides the rest, and the whole point of a sweep's
+        // failure is the LIST — one route tells you almost nothing about which rule broke.
+        leaks.joinToString("\n") shouldBe ""
     }
 
     @Test
@@ -80,7 +90,7 @@ class WorkspaceIsolationSweepTest {
 
         val leaks = sweep { spec -> spec.header(API_KEY_HEADER, WorkspaceIsolationIntegrationTest.acmeKey()) }
 
-        withClue("routes that leaked globex to an acme API KEY") { leaks.shouldBeEmpty() }
+        leaks.joinToString("\n") shouldBe ""
     }
 
     @Test
@@ -111,7 +121,7 @@ class WorkspaceIsolationSweepTest {
                 if (refused) null else "$tool -> $response".take(LEAK_EXCERPT)
             }
 
-        withClue("MCP tools that answered for globex to an acme key") { leaks.shouldBeEmpty() }
+        leaks.joinToString("\n") shouldBe ""
     }
 
     @Test
@@ -124,7 +134,7 @@ class WorkspaceIsolationSweepTest {
         swept.size shouldBeGreaterThanOrEqual MINIMUM_SWEPT_ROUTES
         withClue("the sweep reaches the three URL families a foreign id can travel in") {
             swept.any { it.path.startsWith("/api/v1/pipelines") } shouldBe true
-            swept.any { it.path.startsWith("/api/v1/templates") } shouldBe true
+            swept.any { it.path.startsWith("/api/v1/datasources") } shouldBe true
             swept.any { it.path.startsWith("/partials/") } shouldBe true
         }
         withClue("every swept route actually carries a foreign identifier") {
@@ -140,6 +150,8 @@ class WorkspaceIsolationSweepTest {
         val method: String,
         val path: String,
         val handler: String,
+        /** The same route with identifiers that exist NOWHERE — the differential's control. */
+        val controlPath: String = path,
     )
 
     /**
@@ -168,35 +180,50 @@ class WorkspaceIsolationSweepTest {
                 }
             }.filterNot { (_, pattern, _) -> isPublic(pattern) }
             .mapNotNull { (method, pattern, handler) ->
-                substitute(pattern)?.let { Route(method, it, handler) }
+                val foreign = substitute(pattern, FOREIGN_VALUES) ?: return@mapNotNull null
+                val control = substitute(pattern, ABSENT_VALUES) ?: return@mapNotNull null
+                Route(method, foreign, handler, control)
             }.distinct()
 
-    /** The leaked routes: `method path handler -> status`, empty when isolation holds. */
+    /** The leaking routes: `method path handler -> foreign vs control`, empty when D-R5 holds. */
     private fun sweep(authenticate: (RequestSpecification) -> RequestSpecification): List<String> =
         sweepableRoutes().mapNotNull { route ->
-            val status = call(route, authenticate)
-            val bodyless = route.method == "GET" || route.method == "DELETE"
-            val leaked =
-                when {
-                    // A foreign row was read, run or written. The leak this suite exists for.
-                    status in SUCCESS_RANGE -> true
-
-                    // "Forbidden" tells the caller the row EXISTS — the oracle D-R5 removes,
-                    // and the shape a permission-check "fix" leaves behind.
-                    status == HTTP_FORBIDDEN -> true
-
-                    // A route with no body cannot legitimately refuse before resolving its id.
-                    bodyless && status != HTTP_NOT_FOUND -> true
-
-                    else -> false
+            // The differential: the SAME route with identifiers that exist nowhere. Equal
+            // answers mean the caller cannot tell "someone else's" from "nobody's", which is
+            // exactly what D-R5 promises; different answers are the oracle.
+            val foreign = call(route, authenticate)
+            val control = call(route.copy(path = route.controlPath), authenticate)
+            when {
+                foreign.status != control.status -> {
+                    "${route.method} ${route.path} (${route.handler}) -> ${foreign.status}, " +
+                        "but a NONEXISTENT id gives ${control.status}"
                 }
-            if (leaked) "${route.method} ${route.path} (${route.handler}) -> $status" else null
+
+                // A 2xx with a DIFFERENT body is the leak itself: the page rendered something
+                // the foreign row supplied. A 2xx with the SAME body is a screen that draws its
+                // own empty state, which tells the caller nothing — and demanding 404 there
+                // would be asserting a UI convention, not the isolation rule.
+                foreign.status in SUCCESS_RANGE && foreign.fingerprint != control.fingerprint -> {
+                    "${route.method} ${route.path} (${route.handler}) -> ${foreign.status} " +
+                        "RENDERED FOREIGN CONTENT (its body differs from the nonexistent-id control)"
+                }
+
+                else -> {
+                    null
+                }
+            }
         }
+
+    /** One answer: its status, and a fingerprint of its body with the request's own ids removed. */
+    private data class Answer(
+        val status: Int,
+        val fingerprint: String,
+    )
 
     private fun call(
         route: Route,
         authenticate: (RequestSpecification) -> RequestSpecification,
-    ): Int {
+    ): Answer {
         val csrf = "sweep-csrf-token"
         val spec =
             authenticate(given().port(port))
@@ -205,14 +232,33 @@ class WorkspaceIsolationSweepTest {
                 .contentType(ContentType.JSON)
                 .body("{}")
         val request = spec.`when`()
-        return when (route.method) {
-            "GET" -> request.get(route.path)
-            "POST" -> request.post(route.path)
-            "PUT" -> request.put(route.path)
-            "PATCH" -> request.patch(route.path)
-            "DELETE" -> request.delete(route.path)
-            else -> request.get(route.path)
-        }.then().extract().statusCode()
+        val response =
+            when (route.method) {
+                "GET" -> request.get(route.path)
+                "POST" -> request.post(route.path)
+                "PUT" -> request.put(route.path)
+                "PATCH" -> request.patch(route.path)
+                "DELETE" -> request.delete(route.path)
+                else -> request.get(route.path)
+            }.then().extract()
+        return Answer(response.statusCode(), fingerprint(response.asString(), route.path))
+    }
+
+    /**
+     * The body, with everything that legitimately differs between the two calls removed: the
+     * identifiers the request itself carried (they are echoed back on error pages and in
+     * links) and correlation ids. What survives is the CONTENT — so two empty states
+     * fingerprint alike, and a page that rendered a foreign row does not.
+     */
+    private fun fingerprint(
+        body: String,
+        path: String,
+    ): String {
+        var text = body
+        (FOREIGN_VALUES.values + ABSENT_VALUES.values + path.split("/")).forEach { token ->
+            if (token.length > MIN_TOKEN) text = text.replace(token, "")
+        }
+        return text.replace(CORRELATION_ID, "").trim()
     }
 
     /**
@@ -223,14 +269,17 @@ class WorkspaceIsolationSweepTest {
      * `{name}` on a template route mean different things, and a positional substitution would
      * put a UUID where a name grammar is expected and prove only that the grammar rejects it.
      */
-    private fun substitute(pattern: String): String? {
+    private fun substitute(
+        pattern: String,
+        values: Map<String, String>,
+    ): String? {
         val variables = VARIABLE_PATTERN.findAll(pattern).toList()
         // No variable = no caller-supplied id = nothing this suite can be about (see the KDoc).
         if (variables.isEmpty()) return null
         var path = pattern
         variables.forEach { match ->
             val variable = match.groupValues[1].substringBefore(':')
-            val value = FOREIGN_VALUES[variable] ?: return null
+            val value = values[variable] ?: return null
             path = path.replace(match.value, value)
         }
         return path.takeUnless { "{" in it }
@@ -354,15 +403,31 @@ class WorkspaceIsolationSweepTest {
 
     companion object {
         /**
-         * The same containers, secrets and OIDC stub the sibling suite configures — called
-         * rather than copied, because this suite walks the world THAT suite seeds. Two
-         * independent property sets would mean two applications, and an isolation proof about
-         * a world nobody seeded proves nothing.
+         * This suite's OWN discovery stub. It cannot borrow the sibling's: that one is closed
+         * by the sibling's `@AfterAll`, and whichever suite runs second then boots against a
+         * dead issuer — which is exactly how this suite failed its first two runs, with a
+         * context that never started and four "failures" that had executed no assertion at all.
+         */
+        private val oidc = OidcDiscoveryStub()
+
+        /**
+         * The same containers and secrets the sibling suite configures — the WORLD is shared
+         * deliberately, because this suite walks what that suite seeds, and an isolation proof
+         * over a world nobody seeded proves nothing. Only the stub is this suite's own.
          */
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             WorkspaceIsolationIntegrationTest.properties(registry)
+            listOf("google", "microsoft").forEachIndexed { index, name ->
+                registry.add("datapipelines.auth.oidc.providers[$index].issuer-uri") { oidc.issuer }
+            }
+        }
+
+        @JvmStatic
+        @AfterAll
+        fun closeStub() {
+            oidc.close()
         }
 
         const val BASE_PACKAGE = "co.datapipelines.web"
@@ -396,6 +461,11 @@ class WorkspaceIsolationSweepTest {
         const val HTTP_NOT_FOUND = 404
         const val LEAK_EXCERPT = 300
 
+        /** Shorter tokens ("1", "GET") would blank out half the page and hide a real difference. */
+        const val MIN_TOKEN = 6
+
+        val CORRELATION_ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
         /**
          * Floors, not targets. The endpoint inventory taken for the 2026-09-08 security review
          * counted 133 routes; a floor well under it and well over "the scan broke" is what makes
@@ -419,7 +489,11 @@ class WorkspaceIsolationSweepTest {
                 "templateName" to "globex_tpl",
                 "version" to "1",
                 "workspace" to "globex",
-                "userId" to WorkspaceIsolationIntegrationTest.BOB,
+                // `userId` is deliberately ABSENT. Users are a GLOBAL entity managed by super
+                // admins (D-R8), not a workspace-scoped one, so substituting another user's id
+                // into `/api/v1/auth/users/{userId}/…` is not a cross-workspace probe — it is
+                // an instance verb, and a non-super-admin's 403 there is the same 403 every
+                // caller gets for every id. The 404 rule is about what a WORKSPACE contains.
             )
 
         /**
@@ -456,6 +530,24 @@ class WorkspaceIsolationSweepTest {
          * approximation is deliberately BROAD — over-excluding shrinks the sweep, which the
          * non-vacuity floor and the three-family assertion above are what catch.
          */
+
+        /**
+         * Well-formed identifiers that exist NOWHERE — the differential's control. Same SHAPE
+         * as the foreign ones (a UUID where a UUID goes, a legal name where a name goes), so
+         * what differs between the two calls is existence and nothing else: a control that
+         * failed request binding would make every route look like an oracle.
+         */
+        val ABSENT_VALUES: Map<String, String> =
+            mapOf(
+                "id" to "0d0e0000-0000-0000-0000-0000000000ff",
+                "pipelineId" to "0d0e0000-0000-0000-0000-0000000000ff",
+                "executionId" to "0d0e0000-0000-0000-0000-0000000000fe",
+                "name" to "nobody_owns_this",
+                "templateName" to "nobody_owns_this",
+                "version" to "1",
+                "workspace" to "no-such-workspace",
+            )
+
         val PUBLIC_PREFIXES =
             listOf("/login", "/oauth2", "/docs", "/skill", "/site", "/compare", "/assets", "/actuator", "/health", "/error", "/sitemap")
     }
