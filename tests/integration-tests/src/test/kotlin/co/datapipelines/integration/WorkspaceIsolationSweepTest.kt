@@ -11,6 +11,8 @@ import io.restassured.specification.RequestSpecification
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 
 /**
  * **The IDOR sweep — the guard the whole RBAC design rests on** (design §3/§8.2, D-R5).
@@ -336,7 +338,19 @@ class WorkspaceIsolationSweepTest {
             .sortedBy { it.name }
     }
 
-    private companion object {
+    companion object {
+        /**
+         * The same containers, secrets and OIDC stub the sibling suite configures — called
+         * rather than copied, because this suite walks the world THAT suite seeds. Two
+         * independent property sets would mean two applications, and an isolation proof about
+         * a world nobody seeded proves nothing.
+         */
+        @DynamicPropertySource
+        @JvmStatic
+        fun properties(registry: DynamicPropertyRegistry) {
+            WorkspaceIsolationIntegrationTest.properties(registry)
+        }
+
         const val BASE_PACKAGE = "co.datapipelines.web"
 
         /**

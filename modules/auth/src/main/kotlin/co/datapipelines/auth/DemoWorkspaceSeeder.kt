@@ -81,7 +81,7 @@ class DemoWorkspaceSeeder(
      */
     private fun create(): Workspace? =
         try {
-            workspaceRepository.createSystemWorkspace(DEMO_WORKSPACE, DEMO_DISPLAY_NAME).also { created ->
+            workspaceRepository.createSystemWorkspace(DEMO_WORKSPACE_ID, DEMO_WORKSPACE, DEMO_DISPLAY_NAME).also { created ->
                 auditLogger.log(event = "auth.workspace.created", details = mapOf("workspace" to DEMO_WORKSPACE, "actor" to "system"))
                 log.info("Seeded the '{}' workspace", DEMO_WORKSPACE)
                 // Only on CREATION, and deliberately not guarded: a demo workspace that
@@ -101,5 +101,13 @@ class DemoWorkspaceSeeder(
         /** D-R11 — the one workspace the product ships. Not configurable; the owner ruled the behaviour. */
         const val DEMO_WORKSPACE = "demo"
         const val DEMO_DISPLAY_NAME = "Demo"
+
+        /**
+         * The well-known id, following the `default` workspace's convention (metadata-db
+         * §4.11). Pinned rather than generated so it is deterministic across deployments and
+         * greppable — and because this seeder, not the migration, is the single authority for
+         * the row.
+         */
+        val DEMO_WORKSPACE_ID: UUID = UUID.fromString("de000000-0000-0000-0000-000000000001")
     }
 }

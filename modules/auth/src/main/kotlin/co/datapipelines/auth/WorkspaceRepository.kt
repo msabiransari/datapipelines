@@ -283,17 +283,21 @@ class WorkspaceRepository(
      * user in the row would grant them a role nobody decided to give them.
      */
     fun createSystemWorkspace(
+        id: UUID,
         name: String,
         displayName: String,
     ): Workspace =
         jdbc
             .query(
                 """
-                INSERT INTO workspaces (name, display_name, is_personal, created_by)
-                VALUES (:name, :displayName, FALSE, NULL)
+                INSERT INTO workspaces (id, name, display_name, is_personal, created_by)
+                VALUES (:id, :name, :displayName, FALSE, NULL)
                 RETURNING $COLUMNS
                 """.trimIndent(),
-                MapSqlParameterSource().addValue("name", name).addValue("displayName", displayName),
+                MapSqlParameterSource()
+                    .addValue("id", id)
+                    .addValue("name", name)
+                    .addValue("displayName", displayName),
                 MAPPER,
             ).single()
 

@@ -44,8 +44,10 @@ class WorkspaceMembershipIntegrationTest {
     fun setUp() {
         users = UserRepository(jdbc)
         workspaces = WorkspaceRepository(jdbc)
-        // The CASCADE also reaches workspaces (created_by), so both seeded workspaces are
-        // re-seeded after every truncate — `demo` included, because V23 ships it (D-R11).
+        // The CASCADE also reaches workspaces (created_by), so V4's `default` is re-seeded
+        // after every truncate. `demo` is re-seeded here too — not because a migration ships
+        // it (V23 deliberately does not; `DemoWorkspaceSeeder` owns it at boot) but because
+        // this suite asserts the world a BOOTED deployment has, and it never boots one.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
         jdbc.jdbcTemplate.execute(
             "INSERT INTO workspaces (id, name, display_name)" +
@@ -190,8 +192,10 @@ class WorkspaceMembershipIntegrationTest {
     }
 
     @Test
-    fun `V23 ships the demo workspace at its well-known id (D-R11)`() {
-        workspaces.findByName("demo").shouldNotBeNull().id shouldBe UUID.fromString("de000000-0000-0000-0000-000000000001")
+    fun `the demo workspace's well-known id is the one the seeder pins (D-R11)`() {
+        // The constant, not the migration: V23 does not seed `demo` — `DemoWorkspaceSeeder`
+        // does, at boot, because it is the only half that can also import the example content.
+        workspaces.findByName("demo").shouldNotBeNull().id shouldBe DemoWorkspaceSeeder.DEMO_WORKSPACE_ID
     }
 
     private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()

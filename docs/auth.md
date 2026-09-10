@@ -109,7 +109,8 @@ The `provider` field stores the **OIDC registration name** as configured by the 
 4. **Workspace resolution (§5.1, §12):** determines the active workspace the JWT stamps
    — the user's **last-used** workspace when it still resolves to a live, ACTIVE membership,
    else their **first active membership**, else — this is the D-R11 rule — a fresh **viewer
-   membership of `demo`**, the one workspace the product ships. The demo join fires only for a
+   membership of `demo`**, the one workspace the product ships (created by `DemoWorkspaceSeeder`
+   at first boot, with the example content, and never recreated once deactivated — O-3). The demo join fires only for a
    user with NO membership at all, so somebody removed from `demo` on purpose is not re-added
    by their next login. It lives in `WorkspaceService.workspaceForLogin`, shared by both
    credential paths: the owner's rule is about logging in, not about which provider did it.

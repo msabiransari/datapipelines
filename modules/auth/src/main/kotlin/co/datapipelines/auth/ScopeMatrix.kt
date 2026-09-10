@@ -428,6 +428,14 @@ object ScopeMatrix {
         capability: Capability,
         context: WorkspaceContext?,
     ): Decision {
+        // versioning §10.6 — a PROMOTION principal pins no workspace at all: the payload names
+        // its own target and the receiver resolves it there. Its authority is a route family,
+        // already enforced by `PromotionServerKeyFilter` upstream, so judging it here would
+        // refuse it everywhere on the null-context branch below. Found by
+        // `PromotionTwoDeploymentE2eTest`, which turned every promotion into a 404: this
+        // function's own KDoc described the branch and the code did not have it.
+        if (principal.authMethod == AuthMethod.PROMOTION) return Decision.Allowed
+
         // The credential axis, keys only (D-R12). A session's scope set is empty by design.
         if (principal.authMethod == AuthMethod.API_KEY && !Scope.satisfies(principal.scopes, minScope)) {
             return Decision.Refused(

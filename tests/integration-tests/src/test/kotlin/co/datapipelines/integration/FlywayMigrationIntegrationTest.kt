@@ -406,8 +406,8 @@ class FlywayMigrationIntegrationTest {
         tables shouldContainExactly
             listOf(
                 "api_keys",
-                "datasource_workspaces",
                 "audit_log",
+                "datasource_workspaces",
                 "datasources",
                 // 074 (V11) — the published-endpoint registry and its key bindings.
                 "endpoint_key_bindings",

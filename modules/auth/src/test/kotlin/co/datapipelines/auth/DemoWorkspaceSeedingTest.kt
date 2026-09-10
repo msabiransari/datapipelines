@@ -31,12 +31,13 @@ class DemoWorkspaceSeedingTest {
     private val seeder =
         DemoWorkspaceSeeder(workspaces, auditLogger, userService) { workspaceId, userId -> seeded += workspaceId to userId }
 
-    private val demoId = UUID.randomUUID()
+    /** The well-known id the seeder pins (metadata-db §4.11 convention). */
+    private val demoId = DemoWorkspaceSeeder.DEMO_WORKSPACE_ID
 
     @Test
     fun `a fresh deployment creates demo and seeds the example content once`() {
         every { workspaces.findByName("demo") } returns null
-        every { workspaces.createSystemWorkspace("demo", "Demo") } returns demo()
+        every { workspaces.createSystemWorkspace(demoId, "demo", "Demo") } returns demo()
 
         seeder.ensureDemoWorkspace()?.name shouldBe "demo"
 
@@ -50,7 +51,7 @@ class DemoWorkspaceSeedingTest {
         seeder.ensureDemoWorkspace()?.name shouldBe "demo"
 
         seeded shouldBe emptyList()
-        verify(exactly = 0) { workspaces.createSystemWorkspace(any(), any()) }
+        verify(exactly = 0) { workspaces.createSystemWorkspace(any(), any(), any()) }
     }
 
     @Test
@@ -63,14 +64,14 @@ class DemoWorkspaceSeedingTest {
         val found = seeder.ensureDemoWorkspace()
 
         found?.isActive shouldBe false
-        verify(exactly = 0) { workspaces.createSystemWorkspace(any(), any()) }
+        verify(exactly = 0) { workspaces.createSystemWorkspace(any(), any(), any()) }
         seeded shouldBe emptyList()
     }
 
     @Test
     fun `two replicas racing a fresh database settle on ONE demo`() {
         every { workspaces.findByName("demo") } returnsMany listOf(null, demo())
-        every { workspaces.createSystemWorkspace("demo", "Demo") } throws
+        every { workspaces.createSystemWorkspace(demoId, "demo", "Demo") } throws
             org.springframework.dao.DuplicateKeyException("workspaces_name_key")
 
         seeder.ensureDemoWorkspace()?.name shouldBe "demo"
@@ -83,7 +84,7 @@ class DemoWorkspaceSeedingTest {
     @Test
     fun `a content-seeding failure is NOT swallowed - it fails the boot loudly`() {
         every { workspaces.findByName("demo") } returns null
-        every { workspaces.createSystemWorkspace("demo", "Demo") } returns demo()
+        every { workspaces.createSystemWorkspace(demoId, "demo", "Demo") } returns demo()
         val failing =
             DemoWorkspaceSeeder(workspaces, auditLogger, userService) { _, _ -> error("examples file is broken") }
 

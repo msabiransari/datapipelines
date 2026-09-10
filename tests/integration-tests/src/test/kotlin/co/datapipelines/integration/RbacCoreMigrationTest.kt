@@ -80,10 +80,12 @@ class RbacCoreMigrationTest {
     }
 
     @Test
-    fun `demo is seeded at its well-known id (D-R11)`() {
-        query("SELECT id::TEXT || '|' || display_name FROM workspaces WHERE name = 'demo'") {
-            it.getString(1)
-        } shouldContainExactly listOf("de000000-0000-0000-0000-000000000001|Demo")
+    fun `the migration does NOT seed demo - the boot seeder owns it, because it can seed CONTENT`() {
+        // The first cut of V23 inserted the row, which made `DemoWorkspaceSeeder` dead code:
+        // it imports the example content only when it CREATES the workspace, so every
+        // deployment got an empty `demo` and nothing said why. One authority, and it is the
+        // half that can do both.
+        query("SELECT COUNT(*) FROM workspaces WHERE name = 'demo'") { it.getInt(1) } shouldContainExactly listOf(0)
     }
 
     // ---------------------------------------------------------------- datasource grants (D-R7)
@@ -99,7 +101,7 @@ class RbacCoreMigrationTest {
         // "Global" is gone (D-R7), and this is the whole reason the migration can be safe:
         // a datasource everybody could see becomes a datasource everybody has a grant to, so
         // nothing that worked yesterday stops today.
-        grantsOf("shared-db") shouldContainExactlyInAnyOrder listOf("default", "demo", "acme", "globex")
+        grantsOf("shared-db") shouldContainExactlyInAnyOrder listOf("default", "acme", "globex")
         ownerOf("shared-db") shouldBe null
     }
 

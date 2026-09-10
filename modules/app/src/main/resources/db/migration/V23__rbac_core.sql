@@ -54,14 +54,14 @@ ALTER TABLE workspaces
 
 CREATE INDEX idx_workspaces_active ON workspaces(name) WHERE is_deleted = FALSE AND deactivated_at IS NULL;
 
--- D-R11: `demo` is the workspace the product ships, like the bootstrap admin. Seeded
--- here rather than by a boot-time seeder ONLY for the fresh-database case; the runtime
--- seeder (DemoWorkspaceSeeder) is what keeps it idempotent across restarts and what
--- honours O-3 — a DEACTIVATED `demo` is never recreated. `created_by` is NULL: R1's
--- "system-provisioned" convention (V4 §4.11), and no user row is guaranteed to exist here.
-INSERT INTO workspaces (id, name, display_name, is_personal, created_by)
-VALUES ('de000000-0000-0000-0000-000000000001', 'demo', 'Demo', FALSE, NULL)
-ON CONFLICT (name) DO NOTHING;
+-- D-R11's `demo` workspace is NOT seeded here, deliberately. It was, in the first cut of
+-- this migration, and that made the boot seeder dead code: `DemoWorkspaceSeeder` seeds the
+-- example content only when it CREATES the workspace, so a row already inserted by SQL
+-- meant every deployment got an empty `demo` and nothing said why. SQL cannot do the
+-- content half — it goes through the pipeline and template import services — so the half
+-- that can owns both. One authority: `DemoWorkspaceSeeder`, at first boot, at the
+-- well-known id `de000000-0000-0000-0000-000000000001`, and never recreating a
+-- deactivated `demo` (O-3).
 
 -- ---------------------------------------------------------------------------
 -- 3. §4.16 datasource_workspaces — visibility is a grant (D-R7, D-R14)
