@@ -363,6 +363,22 @@ A `LAKE` datasource runs its queries **on the app's own box** — DuckDB is embe
 | `properties.dialect.threads` | (engine default — no statement emitted) | The engine's worker threads — a positive integer, e.g. `4`. Unset means DuckDB chooses (its own default tracks the box's cores) |
 | `properties.dialect.temp_directory` | (engine default — no statement emitted) | Where oversized operators spill, e.g. `/data/spill`. Must be an absolute path **under the app's data volume** — inside the container the path means nothing unless the volume backs it — with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement, and a value that would need escaping is refused, matching the lake-table location grammar) |
 
+**`threads` is deliberately left unset, and that is a measured decision (108 §C).** In-process
+DuckDB shares the JVM's CPUs with the executor, so the obvious guard is to cap the engine's worker
+threads — `max(2, cores/2)` was the hypothesis. Measured on a 10-core box, a DuckDB aggregation
+against concurrent staging drains:
+
+| `threads` | 2 drains | 8 drains | solo |
+|---|---|---|---|
+| unset (all 10) | 1.22× slower | 1.50× slower | 417 ms |
+| `SET threads = 5` | 1.17× slower | 1.48× slower | 435 ms |
+
+The cap buys 0.05× at light load and 0.02× at saturation — inside the noise — and costs ~4 % of the
+solo scan. DuckDB's own scheduler handles oversubscription better than a static cap does, so the
+default stays unset and an operator who needs the engine bounded sets `threads` explicitly. The
+number an operator should watch is the 1.5× at saturation: a lake read on a busy box is half again
+as slow, and no thread setting changes that. Re-runnable: `scripts/measure/03-pressure.sh`.
+
 Two statements are emitted on every lake connection regardless of these keys: `SET memory_limit = '<explicit-or-default>'` (there is always a budget) and `SET preserve_insertion_order = false` — insertion order costs memory and temp-file discipline the engine would otherwise spend on a guarantee a read-only lake never asks for. It is not a knob: a lake is a read connector, and making the trade configurable would only let an operator buy back a guarantee no query path uses.
 
 ### 3.25 DuckDB extension directory (dp-lake)

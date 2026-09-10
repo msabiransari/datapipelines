@@ -9,6 +9,8 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 108 §3 — **what does one execution's staging actually cost, against the budget it is given?**
@@ -62,28 +64,91 @@ class StagingPressureMeasurement {
     }
 
     /**
-     * The DuckDB half of §3 — the LAKE engine sharing the JVM's CPUs with the executor — is **not
-     * measured here, and deliberately not guessed at**.
+     * §3's other half — **in-process DuckDB shares the JVM's CPUs with the executor**, so what does
+     * a lake scan cost when executions are staging beside it?
      *
-     * A lake scan needs a DuckDB datasource with data on it; `dag`'s test classpath carries
-     * neither the driver nor the fixture (they live in `datasources`, which lane 107 owns this
-     * round). Reporting a number produced by anything less than a real lake read against real
-     * Parquet would be a number about a stand-in.
+     * DuckDB with `threads` unset takes ALL cores. The executor is on the same box competing for
+     * the same ones, so a lake node and two staging drains are three parallel consumers of one CPU
+     * budget, and nothing arbitrates. This measures the scan alone, then with two concurrent
+     * staging drains, at DuckDB's default thread count and at a capped one.
      *
-     * What the round hands 107 instead is the question, stated precisely, in the handback: measure
-     * the 33-date `hvfhv_trips` query alone against the same query with two executions staging
-     * concurrently, and set `properties.dialect.threads` from the answer — `max(2, cores/2)` is the
-     * hypothesis, not the finding.
+     * The workload is a real DuckDB aggregation over generated rows rather than Parquet on disk:
+     * the question is CPU contention between the embedded engine and the JVM, and a synthetic scan
+     * exercises exactly that without needing an object store. A real lake read adds I/O, which
+     * would make the contention LESS visible, not more — so this is the honest direction to err in.
      */
     @Test
-    fun `the lake contention measurement is not runnable from this module`() {
-        println("### DuckDB / executor CPU contention")
+    fun `a lake scan alone, and with two executions staging beside it`() {
+        val cores = Runtime.getRuntime().availableProcessors()
+        val proposed = maxOf(2, cores / 2)
+        // Two levels of executor load, because the hypothesis is ABOUT saturation: two drains on a
+        // ten-core box leaves most of the machine idle and would refute a cap that only matters
+        // when the box is full. `cores - 2` is the executor genuinely competing.
+        val loads = listOf(2, maxOf(2, cores - 2))
+        println("### DuckDB / executor CPU contention (cores reported to the JVM: $cores)")
+        println("| threads setting | staging drains | scan alone | scan under load | slowdown |")
+        println("|---|---|---|---|---|")
+        listOf(null, proposed).forEach { threads ->
+            val label = threads?.let { "SET threads = $it (hypothesis)" } ?: "unset — DuckDB takes all $cores"
+            val alone = lakeScanMs(threads, staging = 0)
+            loads.forEach { load ->
+                val contended = lakeScanMs(threads, staging = load)
+                println("| $label | $load | ${alone}ms | ${contended}ms | ${"%.2f".format(contended.toDouble() / alone)}× |")
+            }
+        }
         println()
-        println("NOT MEASURED in this lane — the DuckDB driver and the lake fixtures live in")
-        println("`modules/datasources`, which lane 107 owns this round. The measurement is stated")
-        println("in the handback as an interface handed to 107, with the hypothesis it should test")
-        println("(`threads` defaulting to `max(2, cores/2)`) marked as a hypothesis.")
+        println("A LOWER slowdown means the lake read degrades less when the executor is busy.")
+        println("Capping trades solo speed for that — IF it buys anything. Read both load levels")
+        println("before believing either.")
         println()
+    }
+
+    /** One DuckDB aggregation, optionally with [staging] H2 drains running against the same CPUs. */
+    private fun lakeScanMs(
+        threads: Int?,
+        staging: Int,
+    ): Long {
+        val noise = Executors.newFixedThreadPool(maxOf(1, staging))
+        val running = AtomicBoolean(true)
+        repeat(staging) { noise.submit { stageUntilStopped(running) } }
+        // Let the drains reach steady state, or the scan measures an idle box for its first half.
+        if (staging > 0) Thread.sleep(WARMUP_MS)
+        return try {
+            DriverManager.getConnection("jdbc:duckdb:").use { conn ->
+                conn.createStatement().use { st ->
+                    threads?.let { st.execute("SET threads = $it") }
+                    // Warm the engine so the number is the scan, not class loading.
+                    st.executeQuery("SELECT count(*) FROM range(1000)").close()
+                    val started = System.nanoTime()
+                    st.executeQuery(LAKE_SCAN_SQL).use { rs ->
+                        var n = 0
+                        while (rs.next()) n++
+                    }
+                    (System.nanoTime() - started) / 1_000_000
+                }
+            }
+        } finally {
+            running.set(false)
+            noise.shutdownNow()
+        }
+    }
+
+    /** An H2 staging drain on a loop — the executor-side load a lake scan competes with. */
+    private fun stageUntilStopped(running: AtomicBoolean) {
+        while (running.get()) {
+            val staging = H2StagingFactory(H2StagingProperties()).create(UUID.randomUUID())
+            try {
+                source(NOISE_ROWS).use { src ->
+                    runBlocking { staging.stage(src.cursor, "m_noise", Dialect.H2) }
+                }
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
+                return // the pool is shutting down; the scan already has its number
+            } finally {
+                staging.close()
+            }
+        }
     }
 
     private fun usedHeapMb(): Long {
@@ -114,5 +179,19 @@ class StagingPressureMeasurement {
 
         /** Up to 2M rows — the figure T188's pipeline scanned, and the one §C's warning is about. */
         val ROW_COUNTS = listOf(100_000L, 500_000L, 2_000_000L)
+
+        /**
+         * A DuckDB aggregation heavy enough to be several seconds of real CPU — a group-by over
+         * 40M generated rows with a hash on each, which is the shape a lake scan's aggregation has.
+         */
+        const val LAKE_SCAN_SQL =
+            "SELECT k, count(*) AS c, sum(v) AS s FROM (" +
+                "SELECT hash(i) % 1000 AS k, i AS v FROM range(40000000) t(i)" +
+                ") GROUP BY k ORDER BY c DESC LIMIT 10"
+
+        /** Rows per staging drain in the contention run — big enough to keep a core busy. */
+        const val NOISE_ROWS = 300_000L
+
+        const val WARMUP_MS = 400L
     }
 }

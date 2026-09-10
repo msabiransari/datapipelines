@@ -1,5 +1,13 @@
 package co.datapipelines.executor.measure
 
+import co.datapipelines.executor.BlockingDriver
+import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.executor.ExecutorHarness
+import co.datapipelines.executor.FakeDatasourceRegistry
+import co.datapipelines.executor.Fixtures
+import co.datapipelines.executor.PipelineExecutionFailed
+import co.datapipelines.executor.h2Datasource
+import co.datapipelines.pipeline.NodeType
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import kotlinx.coroutines.runBlocking
@@ -97,6 +105,92 @@ class DriverTimeoutMeasurement {
         report("The staging INSERT path", rows)
     }
 
+    /**
+     * The two columns the driver table cannot answer: **does the T202 conversion fire**, and **how
+     * long from the deadline to the node actually failing**.
+     *
+     * Both are properties of the executor, not of a driver, so they need a real node run rather
+     * than a raw JDBC call. Three rows, one per bound, measured through `PipelineExecutor`:
+     *
+     *  - a statement that blows its own `queryTimeout` — expect `pipeline.node.query_timeout`,
+     *    which is T202's conversion firing;
+     *  - a node that blows its WALL-CLOCK deadline while its driver drops every cancel — expect
+     *    `pipeline.node.timeout`, and an overshoot inside `cancel-grace-seconds`;
+     *  - the same with a node-level `settings.timeout_seconds`, to show the override reaches the
+     *    same machinery.
+     *
+     * The overshoot column is the one worth reading: it is the answer to "if a driver ignores us,
+     * how late is the node?", and before this round the answer was unbounded.
+     */
+    @Test
+    fun `the executor's own conversions and how late a node is when the driver will not stop`() {
+        val rows = mutableListOf<Row>()
+
+        rows += executorRow("statement blows queryTimeout (T202)", queryTimeoutSeconds = 1, nodeTimeoutSeconds = 300, dropCancel = false)
+        rows +=
+            executorRow(
+                "node blows its deadline, driver drops cancel",
+                queryTimeoutSeconds = 300,
+                nodeTimeoutSeconds = 1,
+                dropCancel = true,
+            )
+        rows +=
+            executorRow(
+                "same, via node.settings.timeout_seconds",
+                queryTimeoutSeconds = 300,
+                nodeTimeoutSeconds = 300,
+                dropCancel = true,
+                nodeOverride = 1,
+            )
+
+        println("### The executor's bounds: which code fires, and how late the node is")
+        println("| case | code the node reported | elapsed from node start | overshoot past the budget |")
+        println("|---|---|---|---|")
+        rows.forEach { println("| ${it.kind} | ${it.behaviour} | ${it.elapsed} |") }
+        println()
+        println("`cancel-grace-seconds` is 1s in these runs, so an overshoot at or under ~1s is the")
+        println("executor waiting out the grace and then abandoning the statement — by design.")
+        println()
+    }
+
+    @Suppress("LongParameterList")
+    private fun executorRow(
+        label: String,
+        queryTimeoutSeconds: Int,
+        nodeTimeoutSeconds: Long,
+        dropCancel: Boolean,
+        nodeOverride: Int? = null,
+    ): Row {
+        val budgetMs = (nodeOverride?.toLong() ?: minOf(nodeTimeoutSeconds, queryTimeoutSeconds.toLong())) * 1_000
+        val driver = if (dropCancel) BlockingDriver(prologueMs = DROPPED_CANCEL_PROLOGUE_MS) else null
+        val source = h2Datasource("m_exec", listOf("CREATE TABLE m_exec (n INT)"))
+        val sql = if (dropCancel) "DELETE FROM m_exec" else SLOW_SELECT
+        val type = if (dropCancel) NodeType.DML else NodeType.DQL
+        return ExecutorHarness(
+            templateEngine = Fixtures.templateEngine(mapOf("n" to sql)),
+            registry = FakeDatasourceRegistry(mapOf("m_exec" to source), blockingDriver = driver),
+            config =
+                ExecutorConfig(
+                    nodeQueryTimeoutSeconds = queryTimeoutSeconds,
+                    nodeTimeoutSeconds = nodeTimeoutSeconds,
+                    cancelGraceSeconds = 1,
+                    executionTimeoutSeconds = 300,
+                    cancelPollIntervalSeconds = 300,
+                ),
+        ).use { h ->
+            val node = Fixtures.node("n", type = type, source = "m_exec", timeoutSeconds = nodeOverride)
+            var code = "(no failure)"
+            val elapsed =
+                kotlin.system.measureTimeMillis {
+                    runBlocking {
+                        runCatching { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(node)))) }
+                            .onFailure { code = (it as? PipelineExecutionFailed)?.errorCode ?: it::class.simpleName.orEmpty() }
+                    }
+                }
+            Row(label, "`$code`", "${elapsed}ms | ${elapsed - budgetMs}ms")
+        }
+    }
+
     /** Runs [block], returning how long the driver took and what it raised. */
     private fun measure(
         kind: String,
@@ -147,6 +241,9 @@ class DriverTimeoutMeasurement {
         /** ~9·10⁸ row visits — minutes of work, so a 1 s budget that fires is unmistakable. */
         const val SLOW_SELECT =
             """SELECT COUNT(*) AS n FROM SYSTEM_RANGE(1, 30000) a, SYSTEM_RANGE(1, 30000) b WHERE MOD(a."X" + b."X", 7) = 0"""
+
+        /** Longer than any budget below, so every cancel lands in the prologue and is dropped. */
+        const val DROPPED_CANCEL_PROLOGUE_MS = 8_000L
 
         const val H2_VERSION_NOTE = "(the pinned driver — see gradle/libs.versions.toml)"
     }

@@ -90,24 +90,18 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
 
 ## 3a. Timeouts — three budgets, and which one to reach for
 
-- **Three bounds, outermost first.** The whole execution
-  (`datapipelines.executor.execution-timeout-seconds`, 600) ≥ one NODE, wall clock, all its
-  phases (`node.settings.timeout_seconds`, else `node-timeout-seconds`, 300) ≥ one STATEMENT
-  (the datasource's `query_timeout_seconds`, else `node-query-timeout-seconds`, 60).
-- **Two different failures.** `pipeline.node.query_timeout` (504) is the driver stopping one
-  statement. `pipeline.node.timeout` (504) is the executor stopping the whole node — render,
-  connect, execute, stage, materialize — and it fires whatever the driver does. Its detail
-  carries `phase`: read it. `execute` means make the QUERY cheaper; `stage` means ship FEWER
-  ROWS; `connect` is the pool or the network and no SQL rewrite will help.
-- **The node's own budget is the only one you may set,** and it is capped at
-  `node-timeout-max-seconds` (900) — over that the pipeline is refused at SAVE with
-  `pipeline.validation.node_timeout_invalid`. Reach for it LAST: pre-aggregate, push the
-  filter down, prune on the partition column first. A raised timeout that you cannot justify
-  in one sentence is a slow pipeline you have agreed to.
-- **Never slice a scan to fit a budget, and never add a `depends_on` edge to avoid
-  contention.** The executor drains source cursors in parallel and takes its staging lock per
-  batch, so two independent source nodes really do overlap — the contention that made slicing
-  look reasonable is gone (108 §B, measured). `depends_on` is data flow, nothing else.
+- **Three bounds, outermost first:** the whole execution (`execution-timeout-seconds`, 600) ≥ one
+  NODE, wall clock, all phases (`node.settings.timeout_seconds`, else `node-timeout-seconds`, 300)
+  ≥ one STATEMENT (the datasource's `query_timeout_seconds`, else `node-query-timeout-seconds`, 60).
+- **Two different failures.** `pipeline.node.query_timeout` is the driver stopping one statement;
+  `pipeline.node.timeout` is the executor stopping the whole node, whatever the driver does. Read
+  its `phase`: `execute` → cheaper QUERY; `stage` → FEWER ROWS; `connect` → the pool or network.
+- **Reach for the node's own budget LAST**, after pre-aggregating, pushing the filter down and
+  pruning on the partition column. Capped at `node-timeout-max-seconds` (900), refused at SAVE
+  above it. A raised timeout you cannot justify in one sentence is a slow pipeline you agreed to.
+- **Never slice a scan to fit a budget, and never add a `depends_on` edge to avoid contention.**
+  Source cursors drain in parallel and the staging lock is taken per batch, so independent source
+  nodes really do overlap (measured, 108 §B). `depends_on` is data flow, nothing else.
 
 ## 4. Get the numbers right
 

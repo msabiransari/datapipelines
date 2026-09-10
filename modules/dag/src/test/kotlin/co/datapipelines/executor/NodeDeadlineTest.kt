@@ -2,8 +2,10 @@ package co.datapipelines.executor
 
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
@@ -20,24 +22,32 @@ import org.junit.jupiter.api.Test
  */
 class NodeDeadlineTest {
     /**
-     * The falsifying case: the driver ignores `cancel()` **and** `queryTimeout`, so the executor's
-     * own deadline is the only thing in the system that can end this node.
+     * The falsifying case: the driver **drops the cancel**, so the executor's own deadline is the
+     * only thing in the system that can end this node.
+     *
+     * [DriverLikeStatement] is the fixture this module already uses for that behaviour — a
+     * `cancel()` arriving while the driver holds no registered command is silently dropped, as
+     * `StatementCancelDialectTest` measured on all five bundled drivers. Given a prologue longer
+     * than the node's entire budget it becomes a driver that ignores cancellation outright,
+     * without pretending to be one: the cancel is really issued, really delivered, and really
+     * dropped. Both halves are asserted below, and the second is what makes this a test of the
+     * DEADLINE rather than of the cancel.
      *
      * The budget is `deadline + cancel-grace + 1 s`. The grace is in it because the executor
-     * genuinely waits that long for a cancelled statement to return before abandoning it — and
-     * the +1 s is scheduling slack on a box that runs several lanes, not a hedge: the natural
-     * runtime of the query underneath is ~9 s, so anything anywhere near it fails this assertion.
+     * genuinely waits that long before abandoning the statement; the +1 s is scheduling slack on
+     * a loaded box, not a hedge — the driver call underneath runs ~8 s, so anything near it fails.
      *
      * Revert `runWithNodeDeadline` and this goes red on the elapsed-time assertion, not on the
-     * code — which is the right way round: the node WOULD eventually fail, ~9 s late.
+     * code — the right way round: the node WOULD fail eventually, about eight seconds late.
      */
     @Test
-    fun `a node whose driver ignores cancel still fails on schedule with node timeout`() =
+    fun `a node whose driver drops the cancel still fails on schedule with node timeout`() =
         runBlocking<Unit> {
+            val driver = BlockingDriver(prologueMs = IGNORED_CANCEL_PROLOGUE_MS)
             val source = h2Datasource("deaf", listOf("CREATE TABLE deaf (n INT)"))
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(mapOf("slow" to NINE_SECOND_SQL)),
-                registry = FakeDatasourceRegistry(mapOf("deaf" to source), deafToCancel = true),
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to "DELETE FROM deaf")),
+                registry = FakeDatasourceRegistry(mapOf("deaf" to source), blockingDriver = driver),
                 config =
                     ExecutorConfig(
                         // Far above both the node deadline and the budget: `queryTimeout` cannot be
@@ -49,7 +59,7 @@ class NodeDeadlineTest {
                         cancelPollIntervalSeconds = NO_RESCUE_EXECUTION_TIMEOUT_SECONDS,
                     ),
             ).use { h ->
-                val nodes = listOf(Fixtures.node("slow", source = "deaf"))
+                val nodes = listOf(Fixtures.node("slow", type = NodeType.DML, source = "deaf"))
 
                 val elapsed =
                     kotlin.system.measureTimeMillis {
@@ -66,6 +76,12 @@ class NodeDeadlineTest {
                     }
 
                 (elapsed < DEADLINE_SECONDS * MILLIS + GRACE_SECONDS * MILLIS + SLACK_MS).shouldBeTrue()
+                // The executor DID try to stop the driver, and the driver DID drop it. Without
+                // both, "the deadline fired on schedule" could be the cancel working after all.
+                (driver.statement.cancels.get() >= 1).shouldBeTrue()
+                driver.statement.interrupted
+                    .get()
+                    .shouldBeFalse()
                 // A deadline is a node FAILURE, not a cancellation (§5.3, the same split the
                 // execution timeout has): one `node_failed`, one terminal `pipeline_failed`,
                 // and no `execution_aborted` anywhere.
@@ -91,8 +107,12 @@ class NodeDeadlineTest {
         runBlocking<Unit> {
             val source = h2Datasource("own", listOf("CREATE TABLE own (n INT)"))
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(mapOf("slow" to NINE_SECOND_SQL)),
-                registry = FakeDatasourceRegistry(mapOf("own" to source), deafToCancel = true),
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to "DELETE FROM own")),
+                registry =
+                    FakeDatasourceRegistry(
+                        mapOf("own" to source),
+                        blockingDriver = BlockingDriver(prologueMs = IGNORED_CANCEL_PROLOGUE_MS),
+                    ),
                 config =
                     ExecutorConfig(
                         nodeQueryTimeoutSeconds = NO_RESCUE_QUERY_TIMEOUT_SECONDS,
@@ -102,7 +122,8 @@ class NodeDeadlineTest {
                         cancelPollIntervalSeconds = NO_RESCUE_EXECUTION_TIMEOUT_SECONDS,
                     ),
             ).use { h ->
-                val nodes = listOf(Fixtures.node("slow", source = "own", timeoutSeconds = DEADLINE_SECONDS.toInt()))
+                val nodes =
+                    listOf(Fixtures.node("slow", type = NodeType.DML, source = "own", timeoutSeconds = DEADLINE_SECONDS.toInt()))
 
                 val elapsed =
                     kotlin.system.measureTimeMillis {
@@ -138,17 +159,11 @@ class NodeDeadlineTest {
 
     private companion object {
         /**
-         * ~9 s of real H2 work, calibrated off `Fixtures.SLOW_SQL`'s measured ≈57 s for 9·10⁸ row
-         * visits: 12 000 × 12 000 ≈ 1.44·10⁸ visits. Deliberately NOT `SLOW_SQL` — a deaf
-         * statement is genuinely abandoned, so the query really does run to completion on a
-         * background thread, and 57 s of that outlives the test class for no gain.
-         *
-         * `a."X"` quoted for the reason `SLOW_SQL`'s KDoc records: `h2Datasource` sets
-         * `DATABASE_TO_LOWER=TRUE`, and an unquoted `a.X` fails in 9 ms — a slow query that is
-         * secretly instant makes every assertion here vacuous.
+         * Longer than the node's whole budget, so every cancel the executor issues lands in the
+         * driver's prologue and is dropped. Long enough to be unmistakable against a ~2 s budget,
+         * short enough that the abandoned thread does not outlive the test class.
          */
-        const val NINE_SECOND_SQL =
-            """SELECT COUNT(*) FROM SYSTEM_RANGE(1, 12000) a, SYSTEM_RANGE(1, 12000) b WHERE MOD(a."X" + b."X", 7) = 0"""
+        const val IGNORED_CANCEL_PROLOGUE_MS = 8_000L
 
         const val DEADLINE_SECONDS = 1L
         const val GRACE_SECONDS = 1L

@@ -344,20 +344,20 @@ class FakeDatasourceRegistry(
      */
     private val driverPrologueMs: (() -> Long)? = null,
     /**
-     * When true, every statement this registry hands out **swallows `cancel()` and refuses to
-     * carry a `queryTimeout`** — the driver the node wall-clock deadline exists for (108).
+     * A [DriverLikeStatement] to hand out instead of a real one, with the prologue and runtime its
+     * `blockingExecute` should use — the driver the node wall-clock deadline exists for (108 §A).
      *
-     * Not a caricature: `StatementCancelDialectTest` measured that a `cancel()` landing while a
-     * statement holds no registered command is dropped by every bundled driver, and a driver
-     * whose `queryTimeout` is unimplemented for the operator in play is an ordinary fact of JDBC
-     * life. This double makes both permanent, so a test can prove that the node still fails ON
-     * SCHEDULE with nothing but the executor's own deadline to do it — which is the only
-     * formulation of "no node runs past its budget" that is worth anything.
+     * `DriverLikeStatement` is the fixture this module already uses to model the one behaviour
+     * that matters here: a `cancel()` arriving while the driver holds no registered command is
+     * **silently dropped**, which `StatementCancelDialectTest` measured on all five bundled
+     * drivers. Give it a prologue longer than the node's whole budget and it becomes a driver
+     * that ignores cancellation outright, without pretending to be one — the cancel really is
+     * issued, really is delivered, and really is dropped, which is what the executor faces.
      *
-     * The query underneath is a REAL one and keeps running: that is the leak the grace bound and
-     * the `node.statement_abandoned` log line describe, reproduced rather than papered over.
+     * The blocking call keeps running after the node fails. That is the leak `cancel-grace-seconds`
+     * bounds and `node.statement_abandoned` logs, reproduced rather than papered over.
      */
-    private val deafToCancel: Boolean = false,
+    private val blockingDriver: BlockingDriver? = null,
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -406,7 +406,7 @@ class FakeDatasourceRegistry(
     override fun delete(name: String): DeleteResult = DeleteResult(true, name)
 
     override fun poolFor(datasource: Datasource): ConnectionPool =
-        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, deafToCancel)
+        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, blockingDriver)
 
     override fun testConnection(name: String): TestResult? = TestResult(true, Instant.now())
 
@@ -416,7 +416,7 @@ class FakeDatasourceRegistry(
         private val closed: AtomicInteger,
         private val prologueMs: (() -> Long)?,
         private val cancelsInPrologue: AtomicInteger,
-        private val deafToCancel: Boolean,
+        private val blockingDriver: BlockingDriver?,
     ) : ConnectionPool {
         override val name: String get() = datasource.name
 
@@ -425,7 +425,7 @@ class FakeDatasourceRegistry(
             // The password matters once a container-backed source is in play (C4); H2 fixtures
             // leave it null and get the empty string they had before.
             val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.secret ?: "")
-            return CountingConnection(delegate, closed, prologueMs, cancelsInPrologue, deafToCancel)
+            return CountingConnection(delegate, closed, prologueMs, cancelsInPrologue, blockingDriver)
         }
 
         override fun close() = Unit
@@ -438,7 +438,7 @@ private class CountingConnection(
     private val closed: AtomicInteger,
     private val prologueMs: (() -> Long)?,
     private val cancelsInPrologue: AtomicInteger,
-    private val deafToCancel: Boolean = false,
+    private val blockingDriver: BlockingDriver? = null,
 ) : Connection by delegate {
     override fun close() {
         closed.incrementAndGet()
@@ -462,15 +462,20 @@ private class CountingConnection(
 
     private fun decorate(statement: Statement): Statement =
         when {
-            deafToCancel -> DeafStatement(statement)
+            blockingDriver != null -> BlockingDriverStatement(blockingDriver)
             prologueMs != null -> DelayedRegistrationStatement(statement, prologueMs.invoke(), cancelsInPrologue)
             else -> statement
         }
 
     private fun decorate(statement: java.sql.PreparedStatement): java.sql.PreparedStatement =
         when {
-            deafToCancel -> DeafPreparedStatement(statement)
+            // A DML/DDL node PREPARES (`NodeRunner.datasourceUpdate`), so the blocking double has
+            // to cover this path too — decorating only `createStatement` left the node running a
+            // real H2 statement and succeeding, which is how a deadline test passes by not testing.
+            blockingDriver != null -> BlockingDriverPreparedStatement(statement, blockingDriver)
+
             prologueMs != null -> DelayedRegistrationPreparedStatement(statement, prologueMs.invoke(), cancelsInPrologue)
+
             else -> statement
         }
 }
@@ -875,31 +880,70 @@ class RecordingSink : DirectResultSink {
 }
 
 /**
- * A statement that hears no `cancel()` and keeps no `queryTimeout` — see
- * [FakeDatasourceRegistry.deafToCancel].
+ * How a [DriverLikeStatement] should behave when the executor enters it — see
+ * [FakeDatasourceRegistry.blockingDriver].
  *
- * `getQueryTimeout` returns 0 to stay honest with `setQueryTimeout`'s no-op: a double that
- * accepted the setter and reported the value back would let `whileExecuting`'s elapsed-time
- * classification fire and relabel the outcome as `query_timeout`, which is precisely the
- * rescue this double exists to remove.
+ * @param statement the fixture itself, so a test can assert on `cancels` (the executor DID issue
+ *   one) and on `interrupted` (the driver dropped it).
+ * @param prologueMs how long the driver spends unable to hear a cancel. Longer than the node's
+ *   whole budget makes it a driver that ignores cancellation.
+ * @param runtimeMs how long it stays cancellable afterwards.
  */
-private class DeafStatement(
-    private val delegate: java.sql.Statement,
-) : java.sql.Statement by delegate {
-    override fun cancel() = Unit
+class BlockingDriver(
+    val statement: DriverLikeStatement = DriverLikeStatement(),
+    val prologueMs: Long,
+    val runtimeMs: Long = 100,
+)
+
+/**
+ * The JDBC surface over a [BlockingDriver]: `executeUpdate` enters the blocking call, everything
+ * else delegates to the fixture.
+ *
+ * `executeUpdate` and not `executeQuery` deliberately — a DML node needs no `ResultSet`, so the
+ * double stays exactly as small as the behaviour under test, and `DriverLikeStatement` does not
+ * have to invent rows it has no opinion about.
+ *
+ * `queryTimeout` is accepted and reported back as 0: the fixture has no timeout of its own, and
+ * a double that claimed one would let `whileExecuting`'s elapsed-time classification relabel the
+ * outcome as `query_timeout` — the rescue this double exists to remove.
+ */
+private class BlockingDriverStatement(
+    private val driver: BlockingDriver,
+) : Statement by driver.statement {
+    override fun executeUpdate(sql: String): Int {
+        driver.statement.blockingExecute(driver.prologueMs, driver.runtimeMs)
+        return 0
+    }
 
     override fun setQueryTimeout(seconds: Int) = Unit
 
     override fun getQueryTimeout(): Int = 0
 }
 
-/** [DeafStatement] for the bound-parameter path (`SqlBindTranslator` prepares when `:name` is used). */
-private class DeafPreparedStatement(
+/**
+ * [BlockingDriverStatement] for the PREPARED path — a DML or DDL node's shape.
+ *
+ * Everything delegates to the real statement except the four methods the fixture owns: the
+ * blocking `executeUpdate`, `cancel` (so `DriverLikeStatement` can record it and drop it), and the
+ * timeout pair, which reports 0 so no elapsed-time classification can relabel the outcome.
+ */
+private class BlockingDriverPreparedStatement(
     private val delegate: java.sql.PreparedStatement,
+    private val driver: BlockingDriver,
 ) : java.sql.PreparedStatement by delegate {
-    override fun cancel() = Unit
+    override fun executeUpdate(): Int {
+        driver.statement.blockingExecute(driver.prologueMs, driver.runtimeMs)
+        return 0
+    }
+
+    override fun cancel() = driver.statement.cancel()
 
     override fun setQueryTimeout(seconds: Int) = Unit
 
     override fun getQueryTimeout(): Int = 0
+
+    override fun close() {
+        driver.statement.close()
+        delegate.close()
+    }
 }

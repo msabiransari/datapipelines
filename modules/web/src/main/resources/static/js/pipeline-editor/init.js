@@ -445,9 +445,30 @@
           rows.push(["Output", self.outputText(node)]);
           rows.push(["Parameters", self.paramKeys.length ? self.paramKeys.join(", ") : "—"]);
         }
+        // 108 §A — the node's own wall-clock deadline (pipeline-contract §4.11). Shown for EVERY
+        // node type, including the two above, because the deadline applies to all of them and a
+        // reader who cannot see it on a CALCULATOR would reasonably conclude it does not.
+        // "Default" names where the number comes from when the node declares none: an author
+        // debugging a `pipeline.node.timeout` needs to know whether THIS node set the budget.
+        rows.push(["Timeout", self.nodeTimeoutText(node)]);
         var state = self.nodeStates[node.id];
         if (state && state !== "idle") rows.push(["Last run", state]);
         return rows;
+      },
+
+      /**
+       * The Timeout row's value: the node's own `settings.timeout_seconds` when it declared one,
+       * otherwise the operator default named as a default.
+       *
+       * A PIPELINE node that declares none is exempt from the node deadline entirely — its work is
+       * a child execution bounded one level down — so it says so rather than quoting a number that
+       * will never apply to it.
+       */
+      nodeTimeoutText: function (node) {
+        var own = node && node.settings ? node.settings.timeout_seconds : null;
+        if (own) return own + "s (this node)";
+        if (String(node.type || "").toUpperCase() === "PIPELINE") return "child execution's own deadline";
+        return "default (datapipelines.executor.node-timeout-seconds)";
       },
 
       /** The sql-head's label: what the right-hand side of the pane is showing. */
