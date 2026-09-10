@@ -134,7 +134,7 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the template editor works with no script of its own — preview through htmx, discard asked in the page`() {
+    fun `the template editor works with no script of its own — preview through htmx, discard asked in the page by the 102 dialog`() {
         startTrace()
         loginReadyAdmin()
         val name = FIXTURE_TEMPLATE
@@ -181,18 +181,19 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
                 .setPath(shotDir().resolve("097-template-editor-page.png")),
         )
 
-        // Discard asks IN THE PAGE. A window.confirm would be auto-dismissed by Playwright
-        // and the draft would be gone by the next line; this dialog is markup.
+        // Discard asks IN THE PAGE. Since 102 the ask is the §4.3d purge dialog served into
+        // `#te-dialog` (a window.confirm would be auto-dismissed by Playwright and the draft
+        // would be gone by the next line); closing it leaves the draft untouched.
         page.click("#tpl-discard-draft")
-        page.waitForSelector("#tpl-discard-confirm .app-modal")
+        page.waitForSelector("#te-dialog [data-lifecycle-dialog='template-purge'] .app-modal")
         shot("template-editor-discard-confirm")
-        page.click("#tpl-discard-confirm button:has-text('Keep the draft')")
-        page.locator("#tpl-discard-confirm").waitFor(
+        page.click("#te-dialog [data-lifecycle-close]")
+        page.locator("#te-dialog [data-lifecycle-dialog='template-purge']").waitFor(
             com.microsoft.playwright.Locator
                 .WaitForOptions()
                 .setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN),
         )
-        // Nothing was discarded: the draft's own affordances are still there.
+        // Nothing was purged: the draft's own affordances are still there.
         page.locator("#tpl-release-draft").isVisible shouldBe true
     }
 

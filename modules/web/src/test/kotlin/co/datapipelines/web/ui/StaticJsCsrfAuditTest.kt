@@ -55,31 +55,32 @@ class StaticJsCsrfAuditTest {
     }
 
     /**
-     * 097 §D — the template editor's lifecycle calls join the sweep. They used to live in an
-     * inline `<script>` in `templates/templates/editor.html`, which this audit's static-js
-     * glob could not see: a guard hole, and the file it could not see was the one carrying a
-     * THIRD way of finding the CSRF token. (Kotlin nests block comments, so the glob is
-     * spelled in words here — the same trap InlineWidthAuditTest's KDoc records.)
-     *
-     * ONE mutating fetch, not two: release and discard are the same call with two URLs, and
-     * the render call left `fetch` altogether for `htmx.ajax` (§2.1 gives `/partials` to
-     * htmx, which supplies the header from the layout's inherited `hx-headers`).
+     * 097 §D — the template editor's script joined the sweep: it used to be an inline
+     * `<script>` in `templates/templates/editor.html`, which this audit's static-js glob could
+     * not see. Since 102 the release/discard verbs are §4.3d dialogs (`lifecycle-dialog.js`,
+     * htmx-driven partials whose POSTs carry the layout's inherited `hx-headers`), so what
+     * `template-editor/lifecycle.js` keeps is the render-context rail and the preview — and
+     * the grounding assertion is now the ABSENCE of a mutating fetch there: a release or
+     * discard fetch reappearing in this file would be a second, un-dialogued path to the
+     * verbs. The preview is htmx's, and the CSRF header rides on the layout for it.
      */
     @Test
-    fun `the audit is grounded - the template editor's release and discard are in scope`() {
+    fun `the audit is grounded - the template editor's script carries no mutating fetch since 102`() {
         val sources = staticJsSources().toMap()
         val lifecycle =
             sources["static/js/template-editor/lifecycle.js"]
                 ?: error("lifecycle.js not found on the test classpath — the audit ran vacuously")
 
-        STATE_CHANGING_METHOD_REGEX.findAll(lifecycle).count() shouldBe 1
-        (
-            "/api/v1/templates/release" in lifecycle &&
-                "/api/v1/templates/draft/discard" in lifecycle
-        ) shouldBe true
-        // The preview is htmx's, and the CSRF header rides on the layout for it.
+        STATE_CHANGING_METHOD_REGEX.findAll(lifecycle).count() shouldBe 0
+        ("/api/v1/templates/release" in lifecycle) shouldBe false
+        ("/api/v1/templates/draft/discard" in lifecycle) shouldBe false
         ("fetch(\"/partials" in lifecycle) shouldBe false
         ("htmx" in lifecycle) shouldBe true
+        // The verbs' one home: the dialog script is on the classpath and drives them by htmx.
+        val dialogs =
+            sources["static/js/lifecycle-dialog.js"]
+                ?: error("lifecycle-dialog.js not found on the test classpath — the audit ran vacuously")
+        ("htmx" in dialogs) shouldBe true
     }
 
     private fun staticJsSources(): List<Pair<String, String>> =
