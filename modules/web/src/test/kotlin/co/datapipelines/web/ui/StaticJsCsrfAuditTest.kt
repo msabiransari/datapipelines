@@ -55,30 +55,35 @@ class StaticJsCsrfAuditTest {
     }
 
     /**
-     * 097 §D — the template editor's lifecycle calls join the sweep. They used to live in an
+     * 097 §D — the template editor's lifecycle calls joined the sweep. They used to live in an
      * inline `<script>` in `templates/templates/editor.html`, which this audit's static-js
      * glob could not see: a guard hole, and the file it could not see was the one carrying a
-     * THIRD way of finding the CSRF token. (Kotlin nests block comments, so the glob is
-     * spelled in words here — the same trap InlineWidthAuditTest's KDoc records.)
+     * THIRD way of finding the CSRF token.
      *
-     * ONE mutating fetch, not two: release and discard are the same call with two URLs, and
-     * the render call left `fetch` altogether for `htmx.ajax` (§2.1 gives `/partials` to
-     * htmx, which supplies the header from the layout's inherited `hx-headers`).
+     * Amended 110, repairing a grounding 102 left stale: 102 moved Release / Purge draft
+     * out of `lifecycle.js` into the §4.3d dialogs (`partials/template-lifecycle-*.html` —
+     * `hx-post` forms whose CSRF header is the layout's inherited `hx-headers`,
+     * `LayoutHxHeadersTest`), leaving the file's only server call the render, through
+     * `htmx.ajax`. The grounding flips accordingly: the file must carry ZERO mutating
+     * fetches — the moment one appears it joins the sweep above, and if the regex can no
+     * longer see such calls this test goes red too.
+     * (Kotlin nests block comments, so the glob is spelled in words in the KDoc above —
+     * the same trap InlineWidthAuditTest records.)
      */
     @Test
-    fun `the audit is grounded - the template editor's release and discard are in scope`() {
+    fun `the audit is grounded - the template editor's js performs no state-changing fetch of its own`() {
         val sources = staticJsSources().toMap()
         val lifecycle =
             sources["static/js/template-editor/lifecycle.js"]
                 ?: error("lifecycle.js not found on the test classpath — the audit ran vacuously")
 
-        STATE_CHANGING_METHOD_REGEX.findAll(lifecycle).count() shouldBe 1
+        STATE_CHANGING_METHOD_REGEX.findAll(lifecycle).count() shouldBe 0
         (
-            "/api/v1/templates/release" in lifecycle &&
+            "/api/v1/templates/release" in lifecycle ||
                 "/api/v1/templates/draft/discard" in lifecycle
-        ) shouldBe true
-        // The preview is htmx's, and the CSRF header rides on the layout for it.
-        ("fetch(\"/partials" in lifecycle) shouldBe false
+        ) shouldBe false
+        // The render (and any future partial read) is htmx's, and the CSRF header
+        // rides on the layout for it.
         ("htmx" in lifecycle) shouldBe true
     }
 
