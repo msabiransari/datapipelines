@@ -134,6 +134,8 @@ class PipelineErrorCodesSpecDriftTest {
                 // codes are a separate table half and a truncated parse could drop just one.
                 "endpoint.",
                 "endpoint.request.",
+                // 118 — the learned semantic layer (§13.15).
+                "semantics.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -193,6 +195,15 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
                 PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
                 PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                // 118 §13.15 — the `semantics` domain has no entity dimension either: every
+                // code is about one fact.
+                PipelineErrorCodes.Semantics.KIND_INVALID,
+                PipelineErrorCodes.Semantics.FACT_INVALID,
+                PipelineErrorCodes.Semantics.REF_UNRESOLVED,
+                PipelineErrorCodes.Semantics.EVIDENCE_REFUSED,
+                PipelineErrorCodes.Semantics.EVIDENCE_FAILED,
+                PipelineErrorCodes.Semantics.DUPLICATE,
+                PipelineErrorCodes.Semantics.NOT_FOUND,
             )
 
         /** First cell of a markdown table row, when it is a backticked lowercase code. */

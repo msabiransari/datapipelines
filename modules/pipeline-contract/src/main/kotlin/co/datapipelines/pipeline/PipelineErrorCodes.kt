@@ -981,4 +981,37 @@ object PipelineErrorCodes {
         /** §5.3 — a single parameter value over 4 KB. */
         const val VALUE_TOO_LARGE = "endpoint.request.value_too_large"
     }
+
+    /**
+     * §13.15 — the learned semantic layer (118; the 2026-09-11 learned-semantic-layer design
+     * record). Two-segment like `datasource.not_found`: the domain has no entity dimension —
+     * every code is about ONE thing, a fact. Raised by `modules/datasources`'s recorder and
+     * `modules/application`'s service; mirrored in `SemanticsErrorCodes` beside the recorder
+     * (the same layering as [Datasource]), drift-tested from both sides.
+     */
+    object Semantics {
+        /** `kind` is not in the closed list, or not a kind of the requested `scope` (§4). */
+        const val KIND_INVALID = "semantics.kind_invalid"
+
+        /** `fact` is outside its 8–1000 character window, `refs` is empty, or `evidence_summary` is over 300 characters. */
+        const val FACT_INVALID = "semantics.fact_invalid"
+
+        /** A ref does not resolve against live introspection: the table or the column is not there (§3.1). */
+        const val REF_UNRESOLVED = "semantics.ref_unresolved"
+
+        /** `evidence_sql` is not a single read-only SELECT/WITH, or names a parameter — refused before any connection opens. */
+        const val EVIDENCE_REFUSED = "semantics.evidence_refused"
+
+        /** `evidence_sql` ran and the database refused it or it timed out; the fact is not recorded (§7.1). */
+        const val EVIDENCE_FAILED = "semantics.evidence_failed"
+
+        /**
+         * O-4 — an identical live fact `(scope, workspace, datasource, kind, refs, fact)` already
+         * exists; `details.existing_id` names it.
+         */
+        const val DUPLICATE = "semantics.duplicate"
+
+        /** The fact addressed by id does not exist or is not visible to the caller's workspace (D-R5). */
+        const val NOT_FOUND = "semantics.not_found"
+    }
 }

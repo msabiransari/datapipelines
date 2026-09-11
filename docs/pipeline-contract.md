@@ -1114,6 +1114,20 @@ response whose `details.errors[]` names every defect at once.
 | `endpoint.request.parameter_repeated` | 400 | The same query key appeared more than once; an endpoint takes one value per parameter |
 | `endpoint.request.value_too_large` | 400 | A single parameter value over 4 KB |
 
+### 13.15 Learned semantics
+
+The learned semantic layer ([design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §3.1, §7.1, O-4): what `semantics_record` / `semantics_retire` refuse. Two-segment codes, like `datasource.not_found` — the domain has no entity dimension; every code is about one fact. Landed with the constants (`PipelineErrorCodes.Semantics`, mirrored in `modules/datasources`'s `SemanticsErrorCodes` because the recorder lives below `pipeline-contract`) and their `ApiErrorCatalog` rows.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `semantics.kind_invalid` | 400 | `kind` is not in the closed list ([Enums §19](enums.md#19-learnedfactkind--what-a-learned-fact-is-about)), or is not a kind of the requested `scope` — the nine data kinds are `DATASOURCE`, the three business kinds `WORKSPACE`; `details.kind` and `details.scope` |
+| `semantics.fact_invalid` | 400 | `fact` is outside its 8–1000 character window, `refs` is empty, or `evidence_summary` exceeds 300 characters; `details.field` names which |
+| `semantics.ref_unresolved` | 400 | A ref does not resolve against the datasource's LIVE introspection — the table is not there, or the column is not one of its columns. The store never starts stale (§3.1); `details.ref` carries the offending `{schema, table, column}` |
+| `semantics.evidence_refused` | 400 | `evidence_sql` is not a single read-only `SELECT`/`WITH` (the `sql_probe` classifier's rule), or names a `:parameter` — evidence binds nothing. Refused before any connection opens |
+| `semantics.evidence_failed` | 400 | `evidence_sql` ran once through the probe path and the database refused it, or it exceeded the probe's timeout; the fact is NOT recorded — evidence that does not run is not evidence. `details.reason` is `execution_failed` or `timeout`; an unreachable datasource stays `pipeline.execution.datasource_unreachable` (502) |
+| `semantics.duplicate` | 409 | An identical LIVE fact — same `(scope, workspace, datasource, kind, refs, fact)` — already exists; `details.existing_id` names it. Refused rather than rate-limited (O-4): an agent looping on the same fact learns nothing from a second row. A retired fact is not a duplicate |
+| `semantics.not_found` | 404 | The fact addressed by `id` (or by `supersedes`) does not exist, or is a WORKSPACE fact of another workspace — the D-R5 answer, identical for both |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations
