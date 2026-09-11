@@ -97,6 +97,9 @@ class FlywayMigrationIntegrationTest {
                 // 112 — RBAC round 1: capability onto the membership, workspace deactivation,
                 // the `demo` seed, and the datasource grant table that replaced "global".
                 "23|rbac core|true",
+                // 113 — workspace invitations: the email-keyed membership-waiting-for-its-user
+                // (auth.md §4.6); the login path materialises it.
+                "24|workspace invitations|true",
             )
     }
 
@@ -136,6 +139,31 @@ class FlywayMigrationIntegrationTest {
             "SELECT column_name FROM information_schema.columns" +
                 " WHERE table_schema = 'public' AND table_name = '$table' ORDER BY 1",
         ) { it.getString(1) }
+
+    @Test
+    fun `V24 creates the invitation table keyed by workspace and normalized email`() {
+        // The column inventory, read from the SHIPPED database (113, auth.md §4.6): an
+        // invitation is a membership waiting for its user — the member's flags, the inviter,
+        // and the email in the one canonical form, keyed so one email holds one invitation
+        // per workspace and a re-invite REPLACES the flags (the latest admin decision wins).
+        columnsOf("workspace_invitations") shouldContainExactly
+            listOf("admin", "author", "email", "invited_at", "invited_by", "promoter", "workspace_id")
+
+        // The database keeps the two invariants the service normalises for: admin implies
+        // author (the membership's own CHECK, mirrored), and no row stores a mixed-case email.
+        query(
+            "SELECT conname FROM pg_constraint WHERE connamespace = 'public'::regnamespace" +
+                " AND conrelid = 'workspace_invitations'::regclass AND contype = 'c' ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("chk_workspace_invitation_admin_authors", "chk_workspace_invitation_email_lower")
+
+        // The materialise lookup walks by email; the listing walks the PK prefix.
+        query(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'" +
+                " AND tablename = 'workspace_invitations' ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("idx_workspace_invitations_email", "workspace_invitations_pkey")
+    }
 
     @Test
     fun `V20 stamps the write surface on both version tables, checked and defaulted`() {
@@ -394,7 +422,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the sixteen tables of metadata-db §4`() {
+    fun `creates exactly the seventeen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -423,6 +451,7 @@ class FlywayMigrationIntegrationTest {
                 "template_versions",
                 "templates",
                 "users",
+                "workspace_invitations",
                 "workspace_members",
                 "workspaces",
             )
@@ -499,6 +528,8 @@ class FlywayMigrationIntegrationTest {
                 "users.uq_users_provider_subject",
                 "users.users_email_key",
                 "users.users_pkey",
+                "workspace_invitations.idx_workspace_invitations_email",
+                "workspace_invitations.workspace_invitations_pkey",
                 "workspace_members.idx_workspace_members_admins",
                 "workspace_members.workspace_members_pkey",
                 "workspaces.idx_workspaces_active",
@@ -566,6 +597,12 @@ class FlywayMigrationIntegrationTest {
                 "chk_template_versions_via",
                 "chk_triggered_via",
                 "chk_type_dialect",
+                // V24 (113) — the invitation row carries the same invariant as the membership
+                // it becomes, and stores the email in the one canonical form §4.2 mandates.
+                // Sorted BEFORE the members' CHECK: pg_constraint's ORDER BY conname puts
+                // "workspace_invitation_*" ahead of "workspace_member_*".
+                "chk_workspace_invitation_admin_authors",
+                "chk_workspace_invitation_email_lower",
                 // V23 replaced the role CHECK with the invariant that outlived it: a workspace
                 // admin can author, stated once in the database (RBAC design §1).
                 "chk_workspace_member_admin_authors",
