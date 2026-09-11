@@ -823,7 +823,7 @@ The rules that touch this module:
 - **Refs are validated against live introspection at record time** (§3.1) — one `columns()` read per referenced table, whose result is also the table's fingerprint (§3.2); a ref that does not resolve is `semantics.ref_unresolved` and the store never starts stale.
 - **Evidence runs through the §7D probe path** — the same classifier, lease and timebox as `sql_probe`; a statement the classifier refuses or the database refuses does not record the fact.
 - **Drift is detected at read** (§6): `columns()` recomputes each fact's per-table fingerprint and a complete `tables()` listing checks each fact's tables; a demotion (`needs_review`, `stale`) is written back. Nothing re-maps — a rename and a "drop + unrelated add" are indistinguishable to a machine.
-- **Visibility follows the grant** (D-S1/D-R7): a DATASOURCE fact is visible wherever the datasource is; a WORKSPACE fact is one workspace's. The record verbs are the `semantics_*` MCP tools ([MCP §6.2.36–38](mcp-server.md#6236-semantics_record)); the refusal codes are [Pipeline Contract §13.15](pipeline-contract.md#1315-learned-semantics).
+- **Visibility follows the grant** (D-S1/D-R7): a DATASOURCE fact is visible wherever the datasource is; a WORKSPACE fact is one workspace's. The record verbs are the `semantics_*` MCP tools ([MCP §6.2.37–39](mcp-server.md#6237-semantics_record)); the refusal codes are [Pipeline Contract §13.15](pipeline-contract.md#1315-learned-semantics).
 
 ## 8. Connection Testing
 
