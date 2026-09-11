@@ -489,6 +489,13 @@ class CancellationTest {
      * statement registered-but-uncancelled and therefore uninterruptible. The recheck after the put
      * closes it. Either the body never runs, or it runs on a statement that really was cancelled —
      * `-1`, meaning the body completed with neither, must never be observed.
+     *
+     * The body holds the statement open until the canceller has RETURNED (`cancelled` latch), not
+     * for a fixed 2 ms: on a loaded box (the 2-vCPU CI runner, every run 2026-09-11; laptops at
+     * load 20+, T163) the canceller thread was scheduled later than the body finished, and a body
+     * that completed before any cancel was issued reported `-1` — a scheduling artefact, not the
+     * race under test. With the latch, `-1` can only mean the cancel ran and the registered
+     * statement was not cancelled: the defect, and nothing else.
      */
     @Test
     fun `a cancel racing statement registration never leaves an uninterrupted statement`() {
@@ -500,6 +507,7 @@ class CancellationTest {
                 val handle = registry.register(executionId)
                 val statement = RecordingStatement()
                 val startLine = CyclicBarrier(2)
+                val cancelled = CountDownLatch(1)
 
                 val registrar =
                     pool.submit<Int> {
@@ -507,7 +515,7 @@ class CancellationTest {
                         runCatching {
                             runBlocking {
                                 handle.withStatement("n", statement) {
-                                    Thread.sleep(RACE_HOLD_MS)
+                                    cancelled.await(RACE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                                     if (statement.cancels.get() > 0) 1 else -1
                                 }
                             }
@@ -516,6 +524,7 @@ class CancellationTest {
                 pool.submit {
                     startLine.await()
                     registry.cancel(executionId, AbortReason.CANCELLED)
+                    cancelled.countDown()
                 }
 
                 // 0 = refused by a guard, 1 = ran and was cancelled.
@@ -667,7 +676,6 @@ class CancellationTest {
         const val POLL_MS = 5L
         const val HARNESS_BUDGET_MS = 60_000L
         const val RACE_ROUNDS = 200
-        const val RACE_HOLD_MS = 2L
         const val RACE_TIMEOUT_SECONDS = 10L
 
         /**
