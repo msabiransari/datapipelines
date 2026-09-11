@@ -164,28 +164,25 @@ class RoleVisibilityRenderTest {
 
     /** §C.1 — three checkboxes per member row, plus the add form's three, all named for the binder. */
     @Test
-    fun `the members table renders the three role checkboxes and the 113 invitations anchor`() {
+    fun `the members table renders the three role checkboxes and the 113 pending-invitation rows`() {
         val html = render("workspaces/index") { workspacesModel() }
 
         html shouldContain "name=\"author\" value=\"true\" data-flag=\"author\""
         html shouldContain "name=\"promoter\" value=\"true\" data-flag=\"promoter\""
         html shouldContain "name=\"admin\" value=\"true\" data-flag=\"admin\""
         html shouldContain "/workspaces/acme/members/"
-        // 113 is not on origin at this branch's base; the anchor is what the orchestrator
-        // fills in once invitations merge (the comment survives — this render keeps them).
-        htmlWithComments("workspaces/index") { workspacesModel() } shouldContain
-            "113: pending invitations render here"
+        // 113 merged with this round: the anchor became the ghost rows, revoke included.
+        html shouldContain "data-invitation=\"pending@acme.test\""
+        html shouldContain "data-verb=\"invitation-revoke\""
+        html shouldContain "/workspaces/acme/invitations/revoke"
     }
 
     /**
      * §C.3(a) — the no-workspace page. It is NOT an error page: nothing failed, and `error/403`
      * would tell someone their credential is wrong when their membership is simply absent.
      *
-     * KNOWN GAP, and this test is the honest half of saying so: the page cannot be reached
-     * through HTTP today (see `WorkspacesUiController.screen`) because `ScopeInterceptor`
-     * refuses every governed route for a principal with no reachable workspace, `/workspaces`
-     * included, before any handler runs. The MARKUP and the controller branch are pinned here
-     * so the reachability fix outside this round's fence is a one-liner.
+     * Reachable since the 113/114 merge: `ScopeMatrix` lets a session through `WORKSPACES_READ`
+     * with no context (`RoleMatrixTest`, auth.md §11A.1). The MARKUP is pinned here.
      */
     @Test
     fun `the no-workspace page explains, points at an admin, and shows create only to a super admin`() {
@@ -395,6 +392,19 @@ class RoleVisibilityRenderTest {
                             displayName = "Alice",
                             flags = co.datapipelines.auth.MembershipFlags(author = true, admin = true),
                             roleLabel = "admin",
+                        ),
+                    ),
+            ),
+        )
+        setVariable(
+            "pending",
+            mapOf(
+                "acme" to
+                    listOf(
+                        InvitationRowView(
+                            email = "pending@acme.test",
+                            roleLabel = "author",
+                            invitedAt = java.time.Instant.parse("2026-09-10T00:00:00Z"),
                         ),
                     ),
             ),

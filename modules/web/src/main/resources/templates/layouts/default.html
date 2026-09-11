@@ -457,6 +457,8 @@
         <th:block th:if="${code == 'deactivated'}"><div th:replace="~{partials/toast :: toast('success', 'Deactivated', 'The workspace is no longer selectable. Nothing was deleted — Reactivate brings it back.')}"></div></th:block>
         <th:block th:if="${code == 'reactivated'}"><div th:replace="~{partials/toast :: toast('success', 'Reactivated', 'The workspace is selectable again.')}"></div></th:block>
         <th:block th:if="${code == 'member_added'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was added.')}"></div></th:block>
+        <th:block th:if="${code == 'member_invited'}"><div th:replace="~{partials/toast :: toast('success', 'Invited', 'No account with that email yet — they become a member with those roles at their first sign-in.')}"></div></th:block>
+        <th:block th:if="${code == 'invitation_revoked'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The invitation was revoked.')}"></div></th:block>
         <th:block th:if="${code == 'member_removed'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was removed.')}"></div></th:block>
         <th:block th:if="${code == 'deleted'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was deleted.')}"></div></th:block>
       

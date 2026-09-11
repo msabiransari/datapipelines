@@ -1334,7 +1334,7 @@ A membership row (`workspace_members`, [metadata-db §4.12](metadata-db.md#412-w
 
 The rule is mechanical, not a convention: every repository read that a caller-supplied id or name can reach carries the workspace predicate IN ITS SQL, and `WorkspaceIsolationSweepTest` walks every REST route and every MCP tool with a foreign workspace's identifiers and asserts the not-found answer on every one.
 
-`workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect.
+`workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect. One operation is judged WITHOUT a workspace context for a session: `WORKSPACES_READ` — "which workspaces do I belong to" is meaningful when the answer is none, and it is how a zero-membership person reaches the no-workspace page ([UI §4.13](ui-screens.md#413-workspaces-workspaces-design-9-members-and-deactivation-rewritten-by-114)) instead of a JSON 404. A key never gets that exception: a key with no context is a key whose workspace is gone, and it stays the 404.
 
 ### 11A.2 Super admins
 

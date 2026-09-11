@@ -152,13 +152,27 @@ class RoleMatrixTest {
     }
 
     @Test
-    fun `no reachable workspace is the 404, whatever the operation (D-R5)`() {
+    fun `no reachable workspace is the 404, whatever the operation (D-R5) - except listing your workspaces`() {
         val session = session(MembershipFlags(author = true))
 
-        Op.entries.forEach { op ->
+        Op.entries.filter { it != Op.WORKSPACES_READ }.forEach { op ->
             val decision = ScopeMatrix.allowed(session, op, context = null)
             (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
         }
+    }
+
+    /**
+     * 114 §C.3a — the no-workspace page. "Which workspaces do I belong to" is the one question
+     * that makes sense with the answer "none", so a SESSION may ask it with no context; a key
+     * cannot, because a key without a context is a key whose workspace is gone (D-R5).
+     */
+    @Test
+    fun `a session with no workspace may still list its workspaces - a key may not`() {
+        val session = session(MembershipFlags.VIEWER)
+        ScopeMatrix.allowed(session, Op.WORKSPACES_READ, context = null) shouldBe ScopeMatrix.Decision.Allowed
+
+        val decision = ScopeMatrix.allowed(key(setOf(Scope.READ), MembershipFlags.VIEWER), Op.WORKSPACES_READ, context = null)
+        (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
     }
 
     // ------------------------------------------------------------------ exhaustiveness

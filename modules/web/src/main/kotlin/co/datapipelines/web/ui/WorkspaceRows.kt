@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Capability
 import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import java.util.UUID
@@ -63,6 +64,26 @@ data class WorkspaceRowView(
                 active = membership.workspaceActive,
                 isCurrent = membership.workspaceName == activeWorkspace,
                 canAdmin = superAdmin || Capability.WS_ADMIN.satisfiedBy(membership.flags),
+            )
+    }
+}
+
+/**
+ * A pending invitation (113) as the members table shows it — a ghost row: the email that will
+ * become a member at first login, the role it will carry, and when it was invited. Never mixed
+ * into the member rows, so nothing that counts members counts a person who has not signed in.
+ */
+data class InvitationRowView(
+    val email: String,
+    val roleLabel: String,
+    val invitedAt: java.time.Instant,
+) {
+    companion object {
+        fun of(row: WorkspaceInvitation): InvitationRowView =
+            InvitationRowView(
+                email = row.email,
+                roleLabel = RoleModel.labelOf(row.flags),
+                invitedAt = row.invitedAt,
             )
     }
 }

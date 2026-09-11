@@ -160,7 +160,22 @@
             </form>
           </td>
         </tr>
-        <!-- 113: pending invitations render here -->
+        <!-- 113 — pending invitations: ghost rows, visibly not members. Revoke is the
+             member manager's verb (MANAGE_WORKSPACE_MEMBERS), same guard as the row above. -->
+        <tr th:each="inv : ${pending?.get(entry.key)}" class="app-row-pending" th:attr="data-invitation=${inv.email}">
+          <td>
+            <span th:text="${inv.email}">bob@example.com</span>
+            <span class="ds-badge u-ml-xs">invited</span>
+          </td>
+          <td th:text="${inv.roleLabel}">viewer</td>
+          <td class="u-secondary u-text-xs">Becomes a member at first sign-in</td>
+          <td class="num">
+            <form th:action="@{/workspaces/{name}/invitations/revoke(name=${entry.key})}" method="post">
+              <input type="hidden" name="email" th:value="${inv.email}">
+              <button type="submit" data-verb="invitation-revoke" class="ds-button ds-button-ghost ds-button-sm">Revoke</button>
+            </form>
+          </td>
+        </tr>
       </tbody>
     </table>
 

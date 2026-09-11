@@ -305,6 +305,9 @@ class MutatingHandlerScopeFloorTest {
                     "app is misbehaving, and it is a plain form POST end to end",
                 "WorkspacesUiController#removeMember" to
                     "NO-JS: the sibling of addMember, same form, same banner",
+                "WorkspacesUiController#revokeInvitation" to
+                    "NO-JS: the fourth member verb (113) — revoking a pending invitation, same form and " +
+                    "same toast stack as the member rows it sits beneath",
                 "WorkspacesUiController#setMemberFlags" to
                     "NO-JS: the third member verb, same form and same banner as addMember/removeMember — " +
                     "the three role checkboxes and a Save, posted plainly (114 §C.1)",

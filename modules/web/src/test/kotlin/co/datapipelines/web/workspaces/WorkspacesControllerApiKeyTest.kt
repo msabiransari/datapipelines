@@ -163,6 +163,34 @@ class WorkspacesControllerApiKeyTest {
         invoke("GET", handler("members", String::class.java), "/api/v1/workspaces/acme/members").first.shouldBeTrue()
     }
 
+    /**
+     * 114 §C.3a through the REAL interceptor: a session with no reachable workspace still
+     * passes `WORKSPACES_READ` (the no-workspace page's route), and nothing else. A key in the
+     * same state does not — `RoleMatrixTest` pins the matrix, this pins the wire.
+     */
+    @Test
+    fun `a session with no workspace passes WORKSPACES_READ and no other operation`() {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(
+                    UUID.randomUUID(),
+                    "nobody@company.com",
+                    "Nobody",
+                    emptySet(),
+                    AuthMethod.OIDC,
+                    workspace = null,
+                ),
+                null,
+                emptyList(),
+            )
+
+        invoke("GET", handler("list"), "/api/v1/workspaces").first.shouldBeTrue()
+        val (proceed, response) =
+            invoke("POST", handler("addMember", String::class.java, JsonNode::class.java), "/api/v1/workspaces/acme/members")
+        proceed shouldBe false
+        response.status shouldBe 404
+    }
+
     private companion object {
         val USER_ID: UUID = UUID.randomUUID()
     }

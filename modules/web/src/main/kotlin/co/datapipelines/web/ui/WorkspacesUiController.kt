@@ -83,17 +83,19 @@ class WorkspacesUiController(
             memberships.filter {
                 it.workspaceActive && (Capability.WS_ADMIN.satisfiedBy(it.flags) || principal.isSuperAdmin)
             }
-        model.addAttribute(
-            "managed",
+        val listings =
             administered
                 .filter { it.workspaceName == activeWorkspace }
                 .associate { membership ->
                     membership.workspaceName to
-                        runCatching { workspaceService.members(principal, membership.workspaceName) }
-                            .getOrDefault(emptyList())
-                            .map(MemberRowView::of)
-                },
-        )
+                        runCatching { workspaceService.membersWithInvitations(principal, membership.workspaceName) }
+                            .getOrNull()
+                }
+        model.addAttribute("managed", listings.mapValues { (_, l) -> l?.members?.map(MemberRowView::of) ?: emptyList() })
+        // 113 — invitations are ghost rows under the members, keyed the same way, never merged
+        // into `managed`: a template that counts members must not count people who have not
+        // signed in yet.
+        model.addAttribute("pending", listings.mapValues { (_, l) -> l?.invitations?.map(InvitationRowView::of) ?: emptyList() })
         // The ones this caller administers but is not IN — named so the screen can say "switch
         // to manage" instead of silently showing nothing where a section used to be.
         //
@@ -118,14 +120,10 @@ class WorkspacesUiController(
         // Section C.3(a) — zero ACTIVE memberships is the no-workspace state. Decided HERE
         // rather than by a redirect so there is one answer and one place to change it.
         //
-        // KNOWN GAP, stated out loud rather than pretended away: this branch cannot be
-        // reached through HTTP today. `ScopeInterceptor` judges every governed route through
-        // `ScopeMatrix.allowed`, whose null-context arm refuses BEFORE any handler runs — so a
-        // principal with no reachable workspace gets `404 workspace.not_found` on `/workspaces`
-        // itself, as JSON, in the browser. Making the page reachable needs ONE change outside
-        // this round's fence: `WORKSPACES_READ` must survive a null context, because "list the
-        // workspaces you belong to" is the one operation that is meaningful with none. The
-        // branch, the template and their unit tests are here so that change is a one-liner.
+        // Reachable because `ScopeMatrix.allowed` lets a SESSION through `WORKSPACES_READ`
+        // with no workspace context (auth.md §11A.1) — "list the workspaces you belong to" is
+        // the one operation that is meaningful with none. Every other governed route still
+        // answers such a principal `404 workspace.not_found` before any handler runs.
         if (memberships.none { it.workspaceActive }) return "workspaces/none"
         return "workspaces/index"
     }
@@ -167,9 +165,27 @@ class WorkspacesUiController(
         @RequestParam(required = false) promoter: Boolean?,
         @RequestParam(required = false) admin: Boolean?,
     ): String =
-        action("member_added") {
-            workspaceService.addMember(requireSessionPrincipal(), name, email, flagsOf(author, promoter, admin))
+        outcome {
+            // 113 — an email with no user row is an INVITATION, not a failure; the toast says
+            // which one happened, because "added" for a person who cannot sign in yet is a lie.
+            when (workspaceService.addMember(requireSessionPrincipal(), name, email, flagsOf(author, promoter, admin))) {
+                is WorkspaceService.AddMemberOutcome.Added -> "member_added"
+                is WorkspaceService.AddMemberOutcome.Invited -> "member_invited"
+            }
         }
+
+    /**
+     * Revokes a pending invitation (113) — the same [WorkspaceService.revokeInvitation] the REST
+     * `DELETE .../invitations/{email}` calls. The email travels as a form field, not a path
+     * segment: an address is dotted and case-folded on the way in, and a path variable would
+     * make both the router's business.
+     */
+    @PostMapping("/workspaces/{name}/invitations/revoke")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    fun revokeInvitation(
+        @PathVariable name: String,
+        @RequestParam email: String,
+    ): String = action("invitation_revoked") { workspaceService.revokeInvitation(requireSessionPrincipal(), name, email) }
 
     /**
      * Replaces a member's flags — the same [WorkspaceService.setMemberFlags] the REST
@@ -293,9 +309,15 @@ class WorkspacesUiController(
         ok: String,
         block: () -> Any?,
     ): String =
-        try {
+        outcome {
             block()
-            "redirect:/workspaces?ok=$ok"
+            ok
+        }
+
+    /** [action] for a verb whose `ok` code depends on what the service did (113's add-or-invite). */
+    private fun outcome(block: () -> String): String =
+        try {
+            "redirect:/workspaces?ok=${block()}"
         } catch (_: WorkspaceService.UnknownMemberEmailException) {
             // The template's `user_not_found` banner (022 review F8) — the exception is an
             // IllegalStateException, so the AuthException-only catch let it escape as a 500.

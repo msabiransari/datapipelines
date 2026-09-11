@@ -452,6 +452,15 @@ object ScopeMatrix {
         }
 
         // D-R5: no reachable workspace means the workspace does not exist, for this caller.
+        //
+        // ONE operation is meaningful with no workspace at all: listing the workspaces you
+        // belong to — which is also how a zero-membership person reaches the no-workspace page
+        // (ui-screens §4.13, 114 §C.3a) instead of a JSON 404 on the only screen that could
+        // explain their state. Sessions only: a key always pins a context, so a key never
+        // arrives here, and `WORKSPACES_READ` on a key stays the 404 the rule promises.
+        if (context == null && operationName == RestOperation.WORKSPACES_READ.name && principal.authMethod != AuthMethod.API_KEY) {
+            return Decision.Allowed
+        }
         if (context == null) {
             return Decision.Refused(
                 code = WorkspaceErrorCodes.NOT_FOUND,

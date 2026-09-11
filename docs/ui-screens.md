@@ -988,8 +988,12 @@ second code path, so the last-admin rule and the `admin → author` normalisatio
   so an admin of X working in Y had every member form for X rendered and every one of them refused
   — invisibly, because the interceptor answers before the handler and htmx does not swap a 4xx.
   The other administered workspaces are named in an `.app-note` with the Switch that reaches them.
-- **Pending invitations** (113) render as ghost rows under the members table when that round
-  lands; the anchor comment is in place.
+- **Pending invitations** (113, wired at the 113/114 merge): ghost rows under the members
+  table — email, an `invited` badge, the role the invitation carries, "Becomes a member at
+  first sign-in", and Revoke (`POST /workspaces/{name}/invitations/revoke`, email as a form
+  field, `MANAGE_WORKSPACE_MEMBERS` — the same guard as the member rows). Never mixed into the
+  member rows. The add form's outcome toast distinguishes `member_added` from `member_invited`
+  (no account with that email yet), so "added" is never said of someone who cannot sign in.
 
 The **switcher in the rail** (§3.4) drives the active workspace and carries the role badge; the
 screen's Switch buttons POST the same `/workspace/switch`. Expected refusals and successes alike
@@ -999,12 +1003,11 @@ render as §5.1 toasts; the generic error page is reserved for the unexpected (�
 the last one, or every workspace they belong to deactivated) gets `workspaces/none` instead of an
 empty list: what happened, who to ask, and — super admins only — the create form. It is
 deliberately not an error page: nothing failed, and `error/403` would name the wrong problem.
-**Known gap (114):** the page is not reachable over HTTP yet. `ScopeInterceptor` refuses every
-governed route for a principal with no resolved workspace — `/workspaces` included — before any
-handler runs, so such a user currently meets a raw `404 workspace.not_found` envelope. Making it
-reachable needs `WORKSPACES_READ` to survive a null context ("list the workspaces you belong to"
-being the one operation that is meaningful with none), which is a `ScopeMatrix` change 114's fence
-excluded; the page, the controller branch and their tests are in place for it.
+Reachable at the 113/114 merge: `ScopeMatrix.allowed` lets a SESSION through `WORKSPACES_READ`
+with no workspace context ([Auth §11A.1](auth.md#11a1-the-404-rule)) — "list the workspaces you
+belong to" is the one operation that is meaningful with none. Every other governed route still
+answers such a principal `404 workspace.not_found` before any handler runs, and a key never
+gets the exception.
 
 ### 4.14 Change password (local accounts)
 

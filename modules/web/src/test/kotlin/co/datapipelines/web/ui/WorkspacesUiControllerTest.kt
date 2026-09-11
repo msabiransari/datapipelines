@@ -173,10 +173,8 @@ class WorkspacesUiControllerTest {
      * list. A user whose only workspace was deactivated is in exactly this state, and to them
      * a deactivated workspace and one that never existed must look the same (§11A.3).
      *
-     * KNOWN GAP: this branch is not reachable over HTTP today — `ScopeInterceptor` refuses
-     * `/workspaces` itself for a principal with no resolved workspace, before the handler runs
-     * (see the KDoc on `screen`). The branch is pinned here so the one-line reachability fix,
-     * which is outside this round's fence, lands on tested code.
+     * Reachable: `ScopeMatrix` lets a session through `WORKSPACES_READ` with no context
+     * (`RoleMatrixTest`, auth.md §11A.1) — the branch is pinned here, the wire is pinned there.
      */
     @Test
     fun `a principal whose only memberships are deactivated gets the no-workspace page`() {
@@ -196,7 +194,8 @@ class WorkspacesUiControllerTest {
                 WorkspaceMembership(UUID.randomUUID(), "gone", MembershipFlags(), Instant.EPOCH, false),
                 WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH, true),
             )
-        every { workspaceService.members(principal, "acme") } returns listOf(memberRow())
+        every { workspaceService.membersWithInvitations(principal, "acme") } returns
+            WorkspaceService.MemberListing(members = listOf(memberRow()), invitations = emptyList())
         every { themeResolver.resolve(any()) } returns "saas"
 
         val model = ExtendedModelMap()
@@ -209,6 +208,25 @@ class WorkspacesUiControllerTest {
         rows.map { it.name to it.active } shouldBe listOf("gone" to false, "acme" to true)
         // Only ACTIVE administered workspaces get a members table: reactivate first (§11A.2).
         (model["managed"] as Map<*, *>).keys shouldBe setOf("acme")
+        (model["pending"] as Map<*, *>).keys shouldBe setOf("acme")
+    }
+
+    @Test
+    fun `addMember for an email with no account redirects ok=member_invited (113)`() {
+        authenticate()
+        every { workspaceService.addMember(principal, "acme", "new@acme.test", MembershipFlags.VIEWER) } returns
+            WorkspaceService.AddMemberOutcome.Invited(email = "new@acme.test", flags = MembershipFlags.VIEWER)
+
+        controller.addMember("acme", "new@acme.test", null, null, null) shouldBe "redirect:/workspaces?ok=member_invited"
+    }
+
+    @Test
+    fun `revokeInvitation goes through the service and redirects ok=invitation_revoked`() {
+        authenticate()
+        every { workspaceService.revokeInvitation(principal, "acme", "new@acme.test") } returns Unit
+
+        controller.revokeInvitation("acme", "new@acme.test") shouldBe "redirect:/workspaces?ok=invitation_revoked"
+        verify { workspaceService.revokeInvitation(principal, "acme", "new@acme.test") }
     }
 
     @Test
