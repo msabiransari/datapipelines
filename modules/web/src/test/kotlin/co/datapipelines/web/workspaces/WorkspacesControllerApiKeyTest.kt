@@ -117,7 +117,7 @@ class WorkspacesControllerApiKeyTest {
     }
 
     @Test
-    fun `a read-scoped api key is 403 on all five workspace mutations`() {
+    fun `a read-scoped api key is 403 on every workspace mutation - the full MANAGE_WORKSPACE_MEMBERS floor`() {
         authenticateKey(Scope.READ)
 
         mutations().forEach { (method, handler, path) ->
