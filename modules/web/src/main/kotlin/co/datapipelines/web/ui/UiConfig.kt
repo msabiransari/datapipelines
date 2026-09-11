@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.web.ui.site.SiteDemoData
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -29,6 +30,13 @@ class UiConfig {
     /** 033: the memoized in-product spec set (renders once at startup; see [DocsCatalog]). */
     @Bean
     fun docsCatalog(): DocsCatalog = DocsCatalog(javaClass.classLoader)
+
+    /**
+     * 116: the demo-data page's facts — the three vendored sample-data manifests, parsed
+     * once at startup and failing fast when one is missing or unparsable (see [SiteDemoData]).
+     */
+    @Bean
+    fun siteDemoData(): SiteDemoData = SiteDemoData(javaClass.classLoader)
 
     /**
      * 091: the API-key table's row model, shared by the page and BOTH partial responses —

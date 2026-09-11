@@ -90,10 +90,13 @@ class WebsiteFactsGuardTest {
         val leafNames = demoNames.map { it.substringAfterLast('/') }.toSet()
 
         // 115: the buyer's home page no longer quotes demo pipeline names at all, so its leg
-        // moved to the engineering page that inherited the homepage's sections.
+        // moved to the engineering page that inherited the homepage's sections. 116: the
+        // demo-data page names the showcase pipelines in its "what you can ask" section, so
+        // its sweep leg guards those names the same way.
         val howItWorksMentions = quotedPipelineMentions(SITE_HOW_IT_WORKS, leafNames)
         val federatedMentions = quotedPipelineMentions(SITE_FEDERATED_QUERY, leafNames)
         val dpLakeMentions = quotedPipelineMentions(SITE_DP_LAKE, leafNames)
+        val demoDataMentions = quotedPipelineMentions(SITE_DEMO_DATA, leafNames)
         val engineDemos = SitePages.ENGINES.mapNotNull { it.demo }
 
         assertAll(
@@ -102,9 +105,10 @@ class WebsiteFactsGuardTest {
             { howItWorksMentions.shouldNotBeEmpty() },
             { federatedMentions.shouldNotBeEmpty() },
             { dpLakeMentions.shouldNotBeEmpty() },
+            { demoDataMentions.shouldNotBeEmpty() },
             { engineDemos.shouldNotBeEmpty() },
             {
-                (howItWorksMentions + federatedMentions + dpLakeMentions + engineDemos).forEach { name ->
+                (howItWorksMentions + federatedMentions + dpLakeMentions + demoDataMentions + engineDemos).forEach { name ->
                     demoNames shouldContain name
                 }
             },
@@ -217,6 +221,7 @@ class WebsiteFactsGuardTest {
         const val SITE_HOW_IT_WORKS = "modules/web/src/main/resources/templates/site/how-it-works.html"
         const val SITE_FEDERATED_QUERY = "modules/web/src/main/resources/templates/site/federated-query.html"
         const val SITE_DP_LAKE = "modules/web/src/main/resources/templates/site/dp-lake.html"
+        const val SITE_DEMO_DATA = "modules/web/src/main/resources/templates/site/demo-data.html"
         const val DEMO_NYC = "scripts/sample-data/content/examples.json"
         const val DEMO_TRADE = "scripts/sample-data-trade/content/examples.json"
         const val DEMO_LAKE = "scripts/sample-data/content/examples-lake.json"

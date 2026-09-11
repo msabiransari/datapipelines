@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "dataset": "mobility",
+  "version": "v7",
+  "built_at": "2026-09-10T04:40:33Z",
+  "build": {
+    "window_start": "2023-01",
+    "window_end": "2024-12",
+    "trips_sample_modulus": 16,
+    "duckdb_version": "v1.5.5",
+    "postgres_image": "postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685",
+    "mysql_image": "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
+  },
+  "artifacts": [
+    {
+      "file": "pg-trips.dump",
+      "engine": "POSTGRES",
+      "sha256": "02627d08468caff7f46e67541529ad58008ef3fac70e2a468aed261a86227f8a",
+      "bytes": 117733060,
+      "restore_hint": "pg_restore --no-owner --no-privileges --dbname dp_sample_trips pg-trips.dump (server major 16 \u2014 the dump is pg_dump -Fc and is not forward-compatible)"
+    },
+    {
+      "file": "mysql-weather.sql.gz",
+      "engine": "MYSQL",
+      "sha256": "5a6e55eef6520bc1171b8d077c8d5920898d738d80042ddafeac62d9bd7ea28b",
+      "bytes": 77192,
+      "restore_hint": "gunzip -c mysql-weather.sql.gz | mysql (the dump carries CREATE DATABASE dp_sample_weather)"
+    },
+    {
+      "file": "nyc_reference.db",
+      "engine": "SQLITE",
+      "sha256": "1f54296ef080402875d7ecc5e9fbc3202d1daec1a8ac4a755d0d4a4cb47d7e3b",
+      "bytes": 69632,
+      "restore_hint": "copy onto a read-only volume the app container mounts, e.g. /srv/sample/nyc_reference.db"
+    },
+    {
+      "file": "examples.json",
+      "sha256": "fa2733c448eb01d0f6087501b370c399960c9789a6f29b3c952215e58315a596",
+      "bytes": 40670,
+      "restore_hint": "mount and point datapipelines.bootstrap.examples-file at it (configuration.md \u00a73.18)"
+    }
+  ],
+  "tables": [
+    {
+      "engine": "POSTGRES",
+      "table": "trips",
+      "row_count": 4897311,
+      "checksum": "sha256:931567fee6378f149204252744a590172bce484545fee01523291fbe55d8771d"
+    },
+    {
+      "engine": "POSTGRES",
+      "table": "trips_daily",
+      "row_count": 731,
+      "checksum": "sha256:1da7493314095f3db78fdf92fe32225b25a4adfed618c0c3c0d0a2765afa1a76"
+    },
+    {
+      "engine": "POSTGRES",
+      "table": "trips_monthly",
+      "row_count": 5700,
+      "checksum": "sha256:f2b46e9c6f34b6065fb41d2e6a1929cbacd14e422e36ef0161cc158097dd3b6e"
+    },
+    {
+      "engine": "MYSQL",
+      "table": "stations",
+      "row_count": 5,
+      "checksum": "sha256:0b64d6b690fd70de784f6b967281354aeca9662e6f41587a12710363117872b9"
+    },
+    {
+      "engine": "MYSQL",
+      "table": "observations",
+      "row_count": 17530,
+      "checksum": "sha256:a098ca169cd6d4185f5f39163cab269e891552219c57cfd85db4fb7979888615"
+    },
+    {
+      "engine": "SQLITE",
+      "table": "zones",
+      "row_count": 265,
+      "checksum": "sha256:025a21eb218cdea187a93d60d1b537f91ca378dec47e79a7824d5d50fdc634de"
+    },
+    {
+      "engine": "SQLITE",
+      "table": "rate_codes",
+      "row_count": 7,
+      "checksum": "sha256:b3d4403637faa85c7f964be3e97b0cc1684304ecdd7c7f435744b99941100099"
+    },
+    {
+      "engine": "SQLITE",
+      "table": "payment_types",
+      "row_count": 7,
+      "checksum": "sha256:090ee6bb7429ed86a2caa4f88e4b198299773618d911ceb05db1853e2d952088"
+    },
+    {
+      "engine": "SQLITE",
+      "table": "calendar",
+      "row_count": 731,
+      "checksum": "sha256:513eca8052ab5e8815a21561e9f29344c119f803b46356cadd559f4fefa12199"
+    }
+  ],
+  "provenance": [
+    {
+      "dataset": "nyc_tlc_yellow_trips",
+      "source_url": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{YYYY-MM}.parquet",
+      "source_files": 24,
+      "retrieved_at": "2026-09-05T22:29:52Z",
+      "transform": "filter to pickup dates 2023-01-01..2024-12-31 and to valid zone ids/non-negative amounts, hash-sample hash(natural key) % 16 = 0 (no RNG), normalize codes, emit trips + daily and monthly rollups",
+      "row_count": 4897311,
+      "license": "NYC Open Data / freely usable (nyc.gov terms of use)",
+      "license_verified": "2026-09-02"
+    },
+    {
+      "dataset": "noaa_ghcn_daily",
+      "source_url": "https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/access/{STATION}.csv",
+      "source_files": 5,
+      "retrieved_at": "2026-09-05T22:30:53Z",
+      "transform": "restrict to the five pinned NYC-area stations and to obs dates 2023-01-01..2024-12-31, melt the wide element columns to one row per station/day/element for PRCP, SNOW, TMAX, TMIN, AWND, convert GHCN native units to mm / degC / m per s",
+      "row_count": 17530,
+      "license": "US Government work, public domain (NOAA/NCEI)",
+      "license_verified": "2026-09-02"
+    },
+    {
+      "dataset": "noaa_ghcn_stations",
+      "source_url": "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-stations.txt",
+      "source_files": 1,
+      "retrieved_at": "2026-09-05T22:31:22Z",
+      "transform": "fixed-width slice of the five pinned station rows (id, name, lat, lon, elevation)",
+      "row_count": 5,
+      "license": "US Government work, public domain (NOAA/NCEI)",
+      "license_verified": "2026-09-02"
+    },
+    {
+      "dataset": "tlc_taxi_zones",
+      "source_url": "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv",
+      "source_files": 1,
+      "retrieved_at": "2026-09-05T22:30:40Z",
+      "transform": "pass-through, dropping rows with a null borough/zone/service zone",
+      "row_count": 265,
+      "license": "NYC Open Data / freely usable (nyc.gov terms of use)",
+      "license_verified": "2026-09-02"
+    },
+    {
+      "dataset": "tlc_reference_codes",
+      "source_url": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page (Data Dictionary - Yellow Taxi Trip Records, PDF)",
+      "source_files": 2,
+      "retrieved_at": null,
+      "transform": "transcribed by hand into scripts/sample-data/data/tlc-rate-codes.csv and tlc-payment-types.csv (the dictionary is a PDF); the build asserts every code present in the sample has a row",
+      "row_count": 14,
+      "license": "NYC Open Data / freely usable (nyc.gov terms of use)",
+      "license_verified": "2026-09-02"
+    },
+    {
+      "dataset": "us_federal_holidays",
+      "source_url": "https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/",
+      "source_files": 1,
+      "retrieved_at": null,
+      "transform": "one calendar row per day of the window with weekend and holiday flags; the holiday set is re-derived from the statutory rules (5 U.S.C. 6103) at build time and the build fails if it disagrees with the committed OPM transcription",
+      "row_count": 731,
+      "license": "Facts (statutory schedule); no licence claimed",
+      "license_verified": "2026-09-02"
+    }
+  ]
+}

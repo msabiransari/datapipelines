@@ -78,6 +78,7 @@ class PublicRouteWalkerTest {
                 "SitePagesController#aiDataPipeline",
                 "SitePagesController#compareAirflow",
                 "SitePagesController#compareDbt",
+                "SitePagesController#demoData",
                 "SitePagesController#dpLake",
                 "SitePagesController#engine",
                 "SitePagesController#faq",

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Demo data</li>
+    </ol>
+  </nav>
+
+  <!--/* 116: the demo-data page. The rule of the round: the family tables below are
+       GENERATED from the manifests vendored at resources/site/demo/ (pinned to the deploy
+       versions by SiteDemoDataGuardsTest) — engine, table, rows, sizes, object paths and
+       licence stamps are model fields, never typed rows. What the prose adds by hand is
+       only what no manifest carries: the grain and key columns (from the families' DDL
+       files, carried in SiteDemoData's fact table), the windows (the locks' param lines),
+       and the attribution sentences (quoted verbatim from the licence dossiers and carried
+       in the manifests' provenance rows). */-->
+  <!-- claim: docs/deployment.md Appendix B — the three families, the one command, the version pins -->
+  <!-- claim: scripts/sample-data/sources.lock — the nyc window, the 1-in-16 modulus, the licence stamp -->
+  <!-- claim: scripts/sample-data-trade/sources.lock — the trade window, the partner codes, the licence stamp -->
+  <!-- claim: scripts/sample-data-lake/sources.lock — the lake window, the bucket, the licence stamp -->
+  <!-- claim: scripts/sample-data/ddl/postgres-trips.sql — the trips table grain and columns -->
+  <!-- claim: scripts/sample-data/ddl/mysql-weather.sql — the weather tables -->
+  <!-- claim: scripts/sample-data/ddl/sqlite-reference.sql — the reference tables -->
+  <!-- claim: scripts/sample-data-trade/ddl/duckdb-us-trade.sql — the trade tables -->
+  <!-- claim: scripts/sample-data-trade/ddl/mysql-world-trade.sql — the Comtrade tables -->
+  <!-- claim: scripts/sample-data-trade/ddl/sqlite-fx.sql — the exchange-rate tables -->
+  <!-- claim: scripts/sample-data-lake/publish-layout.sh — the object layout the bucket serves -->
+  <!-- claim: scripts/sample-data/content/examples-lake.json — the rain-lift rationale for the 1-in-16 sample -->
+
+  <section class="section page-hero" aria-labelledby="dd-title">
+    <div class="container">
+      <p class="kicker">What <code>./app.sh --start --demo</code> loads</p>
+      <h1 id="dd-title" class="ds-display">The demo data, table by table</h1>
+      <p class="section-lede">
+        Three public datasets power every demo on this site: New York City taxi and weather, US trade and
+        exchange rates, and the city's high-volume rideshare trips. This page is the data's own documentation —
+        every table, its row count, where it came from, the questions it is shaped to answer, and the licence it
+        ships under. The tables render from the same published manifests the loader verifies, so what you read
+        here is what your deployment restores.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/how-it-works}">How the demo runs</a>
+        <a class="btn btn-secondary" th:href="@{/dp-lake}">The lake, in detail</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ WHAT SHIPS ============================ -->
+  <section class="section" aria-labelledby="dd-ships">
+    <div class="container">
+      <p class="kicker">What ships, and why it is real</p>
+      <h2 id="dd-ships" class="ds-headline">Published artifacts, not fixtures</h2>
+      <div class="prose">
+        <!-- claim: docs/deployment.md Appendix B — published versioned artifact sets; loading is a deployment step -->
+        <p>
+          Nothing here is generated test data. Each family is <strong>real public data</strong>, rebuilt
+          deterministically from pinned sources and published as a versioned, read-only artifact set on the
+          <code>datapipelines-co</code> S3 bucket. The application never downloads data on its own: loading a
+          family is a deployment step, one command —
+        </p>
+        <!-- claim: docs/deployment.md Appendix B "One command" -->
+        <p><code>./app.sh --start --demo nyc,trade,lake</code></p>
+        <p>
+          — after which the same version loads the same tables everywhere, byte-identical in content. An example
+          run on your laptop and a number on this page come from the same rows, because both come from the same
+          verified artifacts: the loader checks every file's checksum against the family's <code>manifest.json</code>
+          before it restores anything.
+        </p>
+        <!-- claim: scripts/sample-data/sources.lock param trips_sample_modulus 16 -->
+        <!-- claim: scripts/sample-data/content/examples-lake.json — the rain-lift rationale -->
+        <p>
+          One honest caveat about sampling: the taxi trips are a <strong>1-in-16 hash sample</strong> of the TLC's
+          24-month window (<code>trips_sample_modulus 16</code> — deterministic, so every deployment samples the
+          identical trips). That is why the showcase comparisons are built as within-mode ratios, like the
+          rain-lift question that compares each mode's rainy days against its own dry days, where the sampling
+          rate cancels — not as raw city-wide counts. The rideshare family carries the same sampling over the same
+          window, and its full untampled table is published too.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ FAMILY: NYC ============================ -->
+  <section class="section" aria-labelledby="dd-nyc">
+    <div class="container">
+      <p class="kicker">Family one — <code>nyc</code>, version <span th:text="${demoNyc.version}">v7</span></p>
+      <h2 id="dd-nyc" class="ds-headline">NYC mobility: one question, three engines</h2>
+      <div class="prose">
+        <!-- claim: docs/deployment.md Appendix B — the nyc family row -->
+        <p>
+          The mobility family is the demo's founding question — <em>how do taxi and rideshare respond to
+          weather?</em> — answered across three engines on purpose: yellow-taxi trips live on
+          <strong>Postgres</strong>, NOAA daily weather on <strong>MySQL</strong>, and the TLC zones and rate
+          reference tables on <strong>SQLite</strong>. A single pipeline joins all three, staging each source's
+          rows in memory for the run. The window is <strong>2023-01 through 2024-12</strong>.
+        </p>
+        <!-- claim: scripts/sample-data/sources.lock param ghcn_stations — the five station ids -->
+        <p>
+          The weather is NOAA's GHCN-Daily for five pinned NYC-area stations (among them Central Park,
+          <code>USW00094728</code>), melted into one row per station, day and element with units already
+          converted; the reference tables carry the TLC's own zone lookup, rate codes, payment types and a
+          holiday calendar. Every source URL is pinned in <code>scripts/sample-data/sources.lock</code>.
+        </p>
+      </div>
+      <!-- claim: modules/web/src/main/resources/site/demo/manifest-nyc.json — engine, table and row count cells render from this manifest -->
+      <!-- claim: scripts/sample-data/ddl/postgres-trips.sql, scripts/sample-data/ddl/mysql-weather.sql, scripts/sample-data/ddl/sqlite-reference.sql — the grain and key-column cells -->
+      <table class="facts-table">
+        <caption>
+          The <span th:text="${demoNyc.version}">v7</span> manifest's tables — engine, table, grain, rows and key
+          columns. Rows render from the manifest; grain and key columns come from the family's DDL files.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Engine</th><th scope="col">Table</th><th scope="col">Grain</th>
+            <th scope="col">Rows</th><th scope="col">Key columns</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${demoNyc.tables}">
+            <td th:text="${t.engine}">POSTGRES</td>
+            <td><code th:text="${t.table}">trips</code></td>
+            <td th:text="${t.grain}">one row per sampled trip</td>
+            <td class="demo-rows" th:text="${t.rowCountFormatted}">row count</td>
+            <td th:text="${t.keyColumns}">trip_id, pickup_ts</td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- claim: notes of the licence dossier are carried in the manifest provenance rows; scripts/sample-data/sources.lock licence header -->
+      <div class="prose">
+        <!-- The attribution below is a licence claim, so it renders only while the manifest
+             itself carries the verified stamp; unverified, the status above is all it says. -->
+        <th:block th:if="${demoNyc.licenseVerified != null}">
+          <p>
+            <span class="status" th:text="'Licence verified ' + ${demoNyc.licenseVerified}">Licence verified 2026-09-02</span>
+            Attribution: the trip records and zone lookup are published by the NYC Taxi &amp; Limousine Commission as
+            part of NYC Open Data, whose FAQ states: <em>“Open Data belongs to all New Yorkers. There are no
+            restrictions on the use of Open Data.”</em> The TLC's own accuracy disclaimer travels with the data:
+            <em>“The trip data was not created by the TLC, and TLC makes no representations as to the accuracy of
+            these data.”</em> The NOAA observations are US Government work, public domain.
+          </p>
+        </th:block>
+        <p th:if="${demoNyc.licenseVerified == null}">
+          <span class="status">not yet verified — no licence claim</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ FAMILY: TRADE ============================ -->
+  <section class="section" aria-labelledby="dd-trade">
+    <div class="container">
+      <p class="kicker">Family two — <code>trade</code>, version <span th:text="${demoTrade.version}">v4</span></p>
+      <h2 id="dd-trade" class="ds-headline">US trade: Census facts, mirrored and priced</h2>
+      <div class="prose">
+        <!-- claim: docs/deployment.md Appendix B — the trade family row -->
+        <p>
+          The trade family answers the second kind of question a demo should survive: do the
+          mirrors agree? The US
+          Census Bureau's monthly imports and exports at HS-6 commodity grain live on <strong>DuckDB</strong>
+          (2.4 million facts across the top 15 partners); the UN Comtrade mirror — what the partner countries
+          <em>report</em> trading with the USA — sits on <strong>MySQL</strong>; and the Federal Reserve's H.10
+          daily and G.5 monthly exchange rates for the five partner currencies are on <strong>SQLite</strong>, so
+          a pipeline can price the same trade flow in the partner's own money.
+        </p>
+        <!-- claim: scripts/sample-data-trade/sources.lock param census_partners / comtrade_reporters; scripts/sample-data-trade/data/partner_iso_crosswalk.csv — the code mapping -->
+        <p>
+          The window is <strong>2023-01 through 2024-12</strong> (the Comtrade mirror keeps 2022–2024 annual
+          totals). The fifteen Census partners are Canada, Mexico, China, Japan, Germany, South Korea, Taiwan,
+          Vietnam, India, the United Kingdom, Ireland, the Netherlands, France, Italy and Brazil — named by the
+          Census Bureau's four-digit partner codes in the data and crosswalked to their ISO codes for the
+          mirror join; the Comtrade reporters are China, Canada, Mexico, Japan and Germany. The partner list was
+          derived mechanically from the Census enduse endpoints, not picked by hand.
+        </p>
+      </div>
+      <!-- claim: modules/web/src/main/resources/site/demo/manifest-trade.json — engine, table and row count cells render from this manifest -->
+      <!-- claim: scripts/sample-data-trade/ddl/duckdb-us-trade.sql, scripts/sample-data-trade/ddl/mysql-world-trade.sql, scripts/sample-data-trade/ddl/sqlite-fx.sql — the grain and key-column cells -->
+      <table class="facts-table">
+        <caption>
+          The <span th:text="${demoTrade.version}">v4</span> manifest's tables — engine, table, grain, rows and key
+          columns. Rows render from the manifest; grain and key columns come from the family's DDL files.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Engine</th><th scope="col">Table</th><th scope="col">Grain</th>
+            <th scope="col">Rows</th><th scope="col">Key columns</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${demoTrade.tables}">
+            <td th:text="${t.engine}">duckdb</td>
+            <td><code th:text="${t.table}">trade_monthly</code></td>
+            <td th:text="${t.grain}">one row per flow × month × partner</td>
+            <td class="demo-rows" th:text="${t.rowCountFormatted}">row count</td>
+            <td th:text="${t.keyColumns}">flow, period, hs_code</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="prose">
+        <th:block th:if="${demoTrade.licenseVerified != null}">
+          <p>
+            <!-- claim: scripts/sample-data-trade/README.md — the verbatim, mandatory Census notice; the Comtrade re-dissemination line; the Fed's public-domain position -->
+            <span class="status" th:text="'Licence verified ' + ${demoTrade.licenseVerified}">Licence verified 2026-09-04</span>
+            Attribution: <em>“This product uses the Census Bureau Data API but is not endorsed or certified by the
+            Census Bureau.”</em> — verbatim and mandatory under the Census API terms of service, and it travels with
+            this data everywhere. The Comtrade slice is deliberately kept below the 100,000-record line that marks
+            Comtrade's fee-free re-dissemination limit. The Federal Reserve's H.10 and G.5 rates are a work of the
+            US Government: no copyright, the credit is courtesy.
+          </p>
+        </th:block>
+        <p th:if="${demoTrade.licenseVerified == null}">
+          <span class="status">not yet verified — no licence claim</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ FAMILY: LAKE ============================ -->
+  <section class="section" aria-labelledby="dd-lake">
+    <div class="container">
+      <p class="kicker">Family three — <code>lake</code>, version <span th:text="${demoLake.version}">v1</span></p>
+      <h2 id="dd-lake" class="ds-headline">dp-lake: the rideshare census, read in place</h2>
+      <div class="prose">
+        <!-- claim: docs/deployment.md Appendix B — the lake family row; scripts/sample-data-lake/README.md — read in place, no loader -->
+        <p>
+          The lake family is the demo's biggest dataset and its different shape: NYC TLC <strong>high-volume
+          for-hire</strong> trips — Uber, Lyft, Via and Juno — published as Parquet and Apache Iceberg on S3 and
+          <strong>read in place</strong>. Nothing downloads at start; there is no loader. The app's own engine
+          opens the objects over HTTPS and reads only what a query names, which is why the family's big table is
+          partitioned by <code>pickup_date</code>: filter on the partition column and the engine prunes to just
+          the days you asked about — a one-week question reads about seven objects, an unfiltered scan reads
+          seven gigabytes. The 1-in-16 sample over the same 2023-01 → 2024-12 window as the taxi data is what
+          lets one question compare taxi and rideshare fairly.
+        </p>
+        <!-- claim: scripts/sample-data-lake/README.md — the same TLC zone ids join the two families -->
+        <p>
+          The zone ids are the same TLC zone ids the mobility family's <code>zones</code> table holds, so one
+          borough lookup serves both trip sources. The licence number to company mapping — the four licensees
+          Uber, Lyft, Via and Juno named by the TLC's HVFHS data dictionary — ships as its own tiny table.
+        </p>
+      </div>
+      <!-- claim: modules/web/src/main/resources/site/demo/manifest-lake.json — every cell below renders from this manifest -->
+      <table class="facts-table">
+        <caption>
+          The <span th:text="${demoLake.version}">v1</span> manifest's tables — format, table, grain, rows,
+          objects and bytes, all from the manifest.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Format</th><th scope="col">Table</th><th scope="col">Grain</th>
+            <th scope="col">Rows</th><th scope="col">Objects</th><th scope="col">Bytes (exact)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${demoLake.tables}">
+            <td th:text="${t.format}">parquet</td>
+            <td><code th:text="${t.table}">hvfhv_trips</code></td>
+            <td th:text="${t.grain}">one row per trip</td>
+            <td class="demo-rows" th:text="${t.rowCountFormatted}">row count</td>
+            <td th:text="${t.objectCount}">objects</td>
+            <td th:text="${#numbers.formatInteger(t.bytes, 1, 'COMMA')}">bytes</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="prose">
+        <!-- claim: scripts/sample-data-lake/publish-layout.sh — the layout decided once; the bucket denies listing, so this listing renders the manifest's recorded locations -->
+        <h3>The objects, exactly</h3>
+        <p>
+          The bucket denies listing — you name an object, you get it; you cannot browse. So this page is the
+          listing, rendered from the manifest's recorded table locations under
+          <code>s3://datapipelines-co/sample-data/lake/v1/</code>:
+        </p>
+        <ul>
+          <li th:each="t : ${demoLake.tables}">
+            <code th:text="${t.location}">s3://datapipelines-co/sample-data/lake/v1/hvfhv_trips/pickup_date=*/part-*.parquet</code>
+          </li>
+          <li><code>s3://datapipelines-co/sample-data/lake/v1/manifest.json</code></li>
+        </ul>
+        <p th:each="t : ${demoLake.tables}" th:if="${t.metadataLocation != null}">
+          The Iceberg table is opened by its current metadata file —
+          <code th:text="${t.metadataLocation}">s3://…metadata.json</code> —
+          which the registry row names, because a published prefix has no catalog service.
+        </p>
+        <th:block th:if="${demoLake.licenseVerified != null}">
+          <p>
+            <!-- claim: scripts/sample-data-lake/README.md licence section; the FHV accuracy sentence is the manifest's publisher_notice -->
+            <span class="status" th:text="'Licence verified ' + ${demoLake.licenseVerified}">Licence verified 2026-09-07</span>
+            Attribution: published by the NYC Taxi &amp; Limousine Commission under the same NYC Open Data programme
+            as the yellow-taxi months — <em>“There are no restrictions on the use of Open Data.”</em> One
+            difference is quoted where it applies: HVFHV carries its <strong>own</strong> accuracy disclaimer, not
+            the yellow-taxi one — <em>“These records are generated from the FHV Trip Record submissions made by
+            bases, so we cannot guarantee or confirm their accuracy or completeness.”</em>
+          </p>
+        </th:block>
+        <p th:if="${demoLake.licenseVerified == null}">
+          <span class="status">not yet verified — no licence claim</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ WHAT TO ASK ============================ -->
+  <section class="section" aria-labelledby="dd-ask">
+    <div class="container">
+      <p class="kicker">What you can ask it</p>
+      <h2 id="dd-ask" class="ds-headline">Pipelines the demo ships, and the question each answers</h2>
+      <div class="prose">
+        <!-- claim: scripts/sample-data/content/examples.json — the six nyc pipelines and their questions -->
+        <p>
+          Every family seeds worked pipelines into your workspace at first login. The mobility six:
+          <code>nyc/mobility/revenue_by_borough</code> (which borough earns the most, and who tips best),
+          <code>nyc/mobility/rainy_vs_dry_ridership</code> (do New Yorkers take more taxis when it rains),
+          <code>nyc/mobility/borough_od_matrix</code> (where do each borough's trips end up),
+          <code>nyc/mobility/airport_access_by_borough</code> (who rides to JFK, LaGuardia and Newark, and at
+          what cost), <code>nyc/mobility/weather_sensitivity_by_borough</code> (which boroughs lose riders when
+          it rains), and <code>nyc/mobility/mobility_briefing</code> (one row per borough: trips, self-trips,
+          value).
+        </p>
+        <!-- claim: scripts/sample-data/content/examples-lake.json — the four-engine showcase pipeline -->
+        <p>
+          The showcase: <code>nyc/mobility/taxi_vs_rideshare</code> joins the Postgres taxi trips, the lake's
+          zone-day rideshare aggregate, the SQLite zones and the MySQL rain series in one four-engine run, and
+          ranks boroughs by how much ridership shifts in the rain — it is the sentence the home page shows, and
+          the reason the sampling note above matters.
+        </p>
+        <!-- claim: scripts/sample-data-trade/content/examples.json — the three trade pipelines -->
+        <p>
+          The trade three: <code>trade/balance_by_partner</code> (imports minus exports, per partner and month),
+          <code>trade/reconciliation</code> (US-reported Census facts against the partners' own Comtrade
+          returns), and <code>trade/fx/imports_in_partner_currency</code> (the same import bill priced in the
+          partner's currency from the Federal Reserve rates).
+        </p>
+        <p>
+          Any other question the data can answer, you can ask too — type it, or write the SQL yourself. The
+          mechanics of a cross-engine question are on <a th:href="@{/federated-query}">federated query</a>, and
+          the lake reads on <a th:href="@{/dp-lake}">dp-lake</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ LICENCE ============================ -->
+  <section class="section" aria-labelledby="dd-licence">
+    <div class="container">
+      <p class="kicker">Licence and attribution</p>
+      <h2 id="dd-licence" class="ds-headline">Every source, and the terms it ships under</h2>
+      <div class="prose">
+        <!-- claim: modules/web/src/main/resources/site/demo/manifest-*.json — the provenance rows below render from the manifests; a family with no licence stamp renders as unverified and makes no claim -->
+        <p>
+          Each manifest carries its sources as provenance rows — the URL, the transform, the licence string and
+          the date the licence was verified — and the lists below render from those rows, so the page cannot
+          claim a licence the artifact does not. Where a family has no verification stamp, its block says so and
+          makes no licence claim at all.
+        </p>
+      </div>
+      <th:block th:each="f : ${demoFamilies}">
+        <div class="feature-group">
+          <h3 class="group-title">
+            <span th:text="${f.dataset}">mobility</span>
+            <span th:text="'(' + ${f.version} + ')'">(v7)</span>
+          </h3>
+          <div class="status" th:if="${f.licenseVerified != null}" th:text="'Licence verified ' + ${f.licenseVerified}">verified</div>
+          <div class="status" th:if="${f.licenseVerified == null}">not yet verified — no licence claim</div>
+          <ul class="prose" th:if="${f.licenseVerified != null}">
+            <li th:each="p : ${f.provenance}">
+              <strong th:text="${p.source}">source</strong> —
+              <code th:text="${p.sourceUrl}">url</code>;
+              <span th:text="${p.license}">licence</span>
+              <a th:if="${p.sourcePage != null}" th:href="${p.sourcePage}">the publisher's page</a>
+              <a th:if="${p.openDataCollection != null}" th:href="${p.openDataCollection}">the NYC Open Data collection</a>
+              <em th:if="${p.citation != null}" th:text="${p.citation}">citation</em>
+              <em th:if="${p.notice != null}" th:text="${p.notice}">notice</em>
+            </li>
+          </ul>
+          <p class="prose" th:if="${f.artifacts.size() > 0}">
+            Combined size of the published files:
+            <span th:text="${#numbers.formatDecimal(f.artifactsBytes / 1048576.0, 1, 'COMMA', 0, 'POINT')}">118</span>
+            MB across <span th:text="${f.artifacts.size()}">4</span> files.
+          </p>
+        </div>
+      </th:block>
+    </div>
+  </section>
+
+  <!-- ============================ REPRODUCE ============================ -->
+  <section class="section" aria-labelledby="dd-reproduce">
+    <div class="container">
+      <p class="kicker">Reproduce it</p>
+      <h2 id="dd-reproduce" class="ds-headline">You do not have to trust the bucket</h2>
+      <div class="prose">
+        <!-- claim: scripts/sample-data/README.md, scripts/sample-data-trade/README.md, scripts/sample-data-lake/README.md — the build runbooks and check-published.sh -->
+        <p>
+          The artifacts are rebuildable from their pinned sources: each family's
+          <code>scripts/sample-data*/</code> directory carries a runbook, a <code>sources.lock</code> pinning
+          every source URL and its SHA-256 (the two living APIs are pinned at content level instead, so an
+          upstream revision is the event that fails the build), and the hash-sampled outputs re-derive to the
+          same row checksums on any machine. On the consuming side,
+          <code>check-published.sh</code> verifies a published version against its own manifest by hash — the
+          same check a deployment runs before restoring. The runbooks:
+          <a href="https://github.com/msabiransari/datapipelines/tree/main/scripts/sample-data">mobility</a>,
+          <a href="https://github.com/msabiransari/datapipelines/tree/main/scripts/sample-data-trade">trade</a>,
+          <a href="https://github.com/msabiransari/datapipelines/tree/main/scripts/sample-data-lake">lake</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ FAQ ============================ -->
+  <section class="section" id="faq" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Questions about the data</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'About the demo data')}"></div>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/published-api}">From data to an API</a>
+        <a class="btn btn-secondary" th:href="@{/how-it-works}">How it works, for the engineer</a>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

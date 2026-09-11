@@ -265,6 +265,60 @@ object SiteFaqs {
             ),
         )
 
+    /**
+     * The demo-data page's five questions (116 §B.8): is the data real, what the licences
+     * let you do with it, how big it is on disk, whether your own data can sit beside it,
+     * and whether the demo needs the internet. Sizes and dates the page's GENERATED tables
+     * carry from the manifests are not repeated as literals here on purpose — the answer
+     * names where the number lives so it cannot drift from the manifest on a repack.
+     */
+    val DEMO_DATA: List<FaqEntry> =
+        listOf(
+            FaqEntry(
+                "Is the demo data real?",
+                "Yes — all three families are real public data, not fixtures: NYC Taxi & Limousine Commission trip records " +
+                    "and NOAA weather for New York, US Census trade and Federal Reserve exchange rates, and the TLC " +
+                    "high-volume for-hire feed on S3. Every family is rebuilt deterministically from pinned sources, so the " +
+                    "same version loads the same numbers anywhere. What ships is documented table by table on the demo-data " +
+                    "page. (The build and its pins: docs/deployment.md Appendix B.)",
+                "docs/deployment.md §Appendix B",
+            ),
+            FaqEntry(
+                "Can I use the demo data in my own product?",
+                "That is what the licences are for. The NYC-derived families ship under NYC Open Data's no-restrictions " +
+                    "statement; NOAA and the Federal Reserve are US Government works with no copyright; the Census slice " +
+                    "carries the Bureau's API terms, including its not-endorsed notice; the Comtrade slice stays under the " +
+                    "fee-free re-dissemination line. Each family's section on the demo-data page quotes the operative " +
+                    "sentence and links the source. (The demo and its gates: docs/deployment.md Appendix B.)",
+                "docs/deployment.md §Appendix B",
+            ),
+            FaqEntry(
+                "How big is the demo on disk?",
+                "The nyc family's files are about 118 MB and the trade family's about 223 MB, restored into the demo " +
+                    "containers at start; the lake family is about 7.6 GB of Parquet and Iceberg objects that are never " +
+                    "downloaded — the engine reads only the partitions a query names. The exact per-file and per-table " +
+                    "figures render from the published manifests on the demo-data page, so they are always the published " +
+                    "numbers. (The artifacts the loader fetches: docs/deployment.md Appendix B.)",
+                "docs/deployment.md §Appendix B",
+            ),
+            FaqEntry(
+                "Can I add my own data next to it?",
+                "Yes. The demo families are ordinary datasources — register yours in the app (or in the bootstrap file the " +
+                    "demo profiles use) and any pipeline can join them to the demo tables, exactly as the shipped examples " +
+                    "join Postgres trips to SQLite zones and MySQL weather. Nothing about the demo is privileged; it is " +
+                    "seeded data with example pipelines. (Registration: docs/datasources.md §3.)",
+                "docs/datasources.md §3",
+            ),
+            FaqEntry(
+                "Does the demo need internet access?",
+                "At start, yes: the nyc and trade artifacts download from the published bucket and the lake datasource " +
+                    "points at S3. After that they differ — nyc and trade are local files restored into the demo engines, so " +
+                    "running them needs no network, while the lake family is read in place over HTTPS at query time and " +
+                    "always needs it. (The consuming side: docs/deployment.md Appendix B.)",
+                "docs/deployment.md §Appendix B",
+            ),
+        )
+
     /** Every group, in reading order — the `/faq` page opens with the buyer's questions (115). */
     val ALL: List<Pair<String, List<FaqEntry>>> =
         listOf(
@@ -272,6 +326,7 @@ object SiteFaqs {
             "What it is" to WHAT_IT_IS,
             "Agents and security" to AGENTS_AND_SECURITY,
             "APIs and operations" to APIS_AND_OPERATIONS,
+            "Demo data" to DEMO_DATA,
             "Tableau" to TABLEAU,
         )
 }

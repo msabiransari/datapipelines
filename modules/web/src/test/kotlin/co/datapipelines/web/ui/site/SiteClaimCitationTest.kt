@@ -41,6 +41,7 @@ class SiteClaimCitationTest {
                 "compare-dbt.html",
                 "compare-fivetran-airbyte.html",
                 "compare-postgres-only.html",
+                "demo-data.html",
                 "dp-lake.html",
                 "engine.html",
                 "faq.html",

@@ -39,7 +39,7 @@ object SitePageRenderer {
         }
 
     private val siteController = SiteController()
-    private val pagesController = SitePagesController()
+    private val pagesController = SitePagesController(SiteDemoData(javaClass.classLoader))
 
     /** The packaged docs, memoized once per JVM like the production bean. */
     val docs: DocsCatalog by lazy { DocsCatalog(javaClass.classLoader) }
@@ -129,6 +129,7 @@ object SitePageRenderer {
             put(SitePages.FOR_SAAS_TEAMS.path, batch2Controller::forSaasTeams)
             put(SitePages.FOR_ANALYSTS.path, batch2Controller::forAnalysts)
             put(SitePages.HOW_IT_WORKS.path, pagesController::howItWorks)
+            put(SitePages.DEMO_DATA.path, pagesController::demoData)
         }
     }
 
