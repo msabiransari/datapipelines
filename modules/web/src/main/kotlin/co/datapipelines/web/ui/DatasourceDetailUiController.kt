@@ -54,6 +54,7 @@ class DatasourceDetailUiController(
         // runs with, and never a secret-valued key, on either surface.
         model.addAttribute("dialectProperties", visibleDialectProperties(datasource.dialect, datasource.properties.dialect))
         browse.fillLevel(model, lakeTables.list(datasource), prefix = null, offset = 0)
+        RoleModel.stamp(model, principal())
         return "datasources/detail"
     }
 

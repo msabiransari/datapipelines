@@ -57,6 +57,7 @@ class TemplateEditorController(
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
+        RoleModel.stamp(model)
         return "templates/editor"
     }
 
@@ -74,6 +75,7 @@ class TemplateEditorController(
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
         fillSource(model, workspaceId, name, version)
+        RoleModel.stamp(model)
         return "partials/template-source"
     }
 

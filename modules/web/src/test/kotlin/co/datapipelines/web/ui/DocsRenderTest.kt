@@ -148,7 +148,7 @@ class DocsRenderTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        ).apply { fillLayoutChrome() }
+        ).withRoles().apply { fillLayoutChrome() }
 
     private companion object {
         /** The 23 filenames modules/web/build.gradle.kts names, one per deliberate publish. */

@@ -62,6 +62,7 @@ class PromotionUiController(
     ): String {
         val principal = requirePrincipal()
         model.addAttribute("activeTheme", themeResolver.resolve(request))
+        RoleModel.stamp(model, principal)
         model.addAttribute("hasTarget", client.hasTarget)
         model.addAttribute("targetBaseUrl", client.targetBaseUrl)
         if (!client.hasTarget) return VIEW

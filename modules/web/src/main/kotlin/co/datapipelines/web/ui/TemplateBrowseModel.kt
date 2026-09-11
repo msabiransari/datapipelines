@@ -186,6 +186,13 @@ class TemplateBrowseModel(
         workspaceId: UUID,
         id: String,
     ): String {
+        // 114 — the verbs this fragment renders are role-gated, so the ROLE arrives in the SAME
+        // model call the facts do. Stamped here rather than at each caller because there are
+        // three of them — the selection partial, the explorer page, and the lifecycle dialogs'
+        // Shape A re-render — and the third one forgot: after a Release the re-rendered detail
+        // came back with no role attributes at all, so every verb on it silently vanished until
+        // the next selection re-fetched the pane. One model call, one answer.
+        RoleModel.stamp(model)
         val template = templates.findWorking(workspaceId, id)
         model.addAttribute("templateId", id)
         model.addAttribute("template", template)

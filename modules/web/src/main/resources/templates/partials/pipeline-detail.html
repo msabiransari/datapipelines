@@ -47,32 +47,38 @@
       <div class="tplx-detail-actions">
         <span class="htmx-indicator ds-spinner" id="pipeline-detail-spinner" aria-hidden="true"></span>
 
+        <!-- 114 §B — each verb below is ANDed with the ACTIVE membership's role: state says
+             whether the server would accept it, role says whether this person may ask. A verb
+             the role cannot perform is not rendered at all (no greyed button with a tooltip).
+             Release is `canPromote` and NOT `canAuthor` — an author who is not a promoter sees
+             no Release anywhere (D-R2); Switch is `canAuthor or canPromote` (O-1's
+             Capability.SWITCH), the one lever both hold and neither implies. -->
         <!-- 102 §B.1 — the lifecycle verbs as §4.3d dialogs, ONE destructive per view (owner
              rule): Purge pipeline (the {D} shape) / Discard of a RELEASED current / Purge
              draft, in that priority, and never two of them. Each opens its partial into
              #px-dialog; the POST calls the service 101 wired and answers Shape A / Shape C. -->
-        <button th:if="${canDelete}" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+        <button th:if="${canDelete == true and canAuthor == true}" data-verb="pipeline-purge-entity" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'">Purge pipeline…</button>
 
-        <button th:if="${!canDelete and canDiscardCurrent}" type="button"
+        <button th:if="${canDelete != true and canDiscardCurrent == true and canAuthor == true}" data-verb="pipeline-discard" type="button"
                 class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${pipeline.currentVersion})},
                          hx-target='#px-dialog', hx-swap='innerHTML'"
                 th:text="'Discard v' + ${pipeline.currentVersion} + '…'">Discard v2…</button>
 
-        <button th:if="${canPurgeDraftInHeader}" type="button"
+        <button th:if="${canPurgeDraftInHeader == true and canAuthor == true}" data-verb="pipeline-purge" type="button"
                 class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${draftVersion})},
                          hx-target='#px-dialog', hx-swap='innerHTML'"
                 th:text="'Purge v' + ${draftVersion} + '…'">Purge v3…</button>
 
-        <button th:if="${releasableVersion != null}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${releasableVersion != null and canPromote == true}" data-verb="pipeline-release" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'"
                 th:text="'Release v' + ${releasableVersion} + '…'">Release v1…</button>
 
-        <button th:if="${canSwitchHeader}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${canSwitchHeader == true and (canAuthor == true or canPromote == true)}" data-verb="pipeline-switch" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'">Switch…</button>
 

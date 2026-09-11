@@ -227,5 +227,5 @@ class PipelineEditorRenderTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 }

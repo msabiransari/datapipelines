@@ -70,5 +70,5 @@ class ToastMarkupParityTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 }

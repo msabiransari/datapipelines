@@ -19,7 +19,7 @@
     <form class="u-mt-md"
           th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${dlg.id}, version=${dlg.version})},
                    hx-target='#pipeline-detail', hx-swap='innerHTML'">
-      <button type="submit" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+      <button type="submit" data-verb="pipeline-restore-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
               th:text="'Restore v' + ${dlg.version}">Restore v2</button>
     </form>
   </div>

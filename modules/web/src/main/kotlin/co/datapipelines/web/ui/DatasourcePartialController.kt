@@ -232,6 +232,7 @@ class DatasourcePartialController(
         model.addAttribute("poolFields", DatasourcePoolForm.fields(datasource))
         model.addAttribute("poolReadonly", datasource.isReadonly)
         model.addAttribute("isAdmin", principal()?.isSuperAdmin == true)
+        RoleModel.stamp(model, principal())
         return "partials/datasource-edit"
     }
 

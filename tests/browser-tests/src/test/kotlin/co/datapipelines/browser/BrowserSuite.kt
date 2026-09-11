@@ -185,11 +185,20 @@ abstract class BrowserSuite {
      * has migrated by then — the TracerBullet lesson; a static @BeforeAll races the
      * context boot).
      */
+    @Suppress("LongParameterList") // one row of `users` plus one of `workspace_members`; a fixture object would be both again
     protected fun seedLocalUser(
         email: String,
         password: String,
         mustChange: Boolean,
         isAdmin: Boolean = true,
+        // 114: the membership flags the seeded `default` row carries. Defaulted to the
+        // workspace ADMIN every golden path needs; a suite whose subject is what a VIEWER, an
+        // AUTHOR or a PROMOTER can see passes its own row. `admin` forces `author` here for the
+        // same reason the service does — V23's chk_workspace_member_admin_authors would refuse
+        // the insert outright, and a fixture that cannot be stored is not a fixture.
+        author: Boolean = true,
+        promoter: Boolean = false,
+        admin: Boolean = true,
     ): LocalUser {
         val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
         val hash = argon2.hash(2, 19_456, 1, password.toCharArray())
@@ -216,7 +225,7 @@ abstract class BrowserSuite {
                     statement.execute(
                         """
                         INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-                        SELECT 'defa0000-0000-0000-0000-000000000001', id, TRUE, FALSE, TRUE
+                        SELECT 'defa0000-0000-0000-0000-000000000001', id, ${author || admin}, $promoter, $admin
                           FROM users WHERE email = '$email'
                         ON CONFLICT (workspace_id, user_id) DO NOTHING
                         """.trimIndent(),

@@ -714,6 +714,17 @@ button.app-busy::after {
   text-overflow: ellipsis;
 }
 
+/* 114 §C.4 — the role badge under the workspace name. Its own line rather than beside
+   the name: a long workspace name already ellipses, and a badge competing for that row
+   would be the first thing to disappear. The size follows the label above it. */
+.app-ws-role {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  text-transform: lowercase;
+}
+
 .app-ws-caret {
   margin-left: auto;
   color: var(--text-muted);

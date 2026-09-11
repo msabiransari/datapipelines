@@ -313,5 +313,5 @@ class ListPartialsRenderTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 }

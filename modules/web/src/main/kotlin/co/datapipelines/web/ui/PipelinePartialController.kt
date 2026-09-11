@@ -80,7 +80,10 @@ class PipelinePartialController(
     fun detail(
         model: Model,
         @RequestParam id: UUID,
-    ): String = browse.fillDetail(model, currentPrincipal().requireWorkspace().id, id)
+    ): String {
+        RoleModel.stamp(model)
+        return browse.fillDetail(model, currentPrincipal().requireWorkspace().id, id)
+    }
 
     /**
      * The acting column's **Runs** tab — this pipeline's last 20 executions, loaded on the

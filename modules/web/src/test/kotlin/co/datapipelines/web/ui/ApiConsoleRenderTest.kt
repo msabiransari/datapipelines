@@ -43,13 +43,40 @@ class ApiConsoleRenderTest {
             )
         }
 
+    /**
+     * 114 §B — O-2, "viewers never mint keys". Minting is `canAuthor`; REVOKING is not.
+     *
+     * §7.6's `MANAGE_OWN_API_KEYS` row is `view`, and only ISSUANCE carries the extra author
+     * gate (§7.4). Hiding Revoke from a viewer would strand a DEMOTED author with a live key
+     * they are not allowed to withdraw — the opposite of what O-2 is for — so the two verbs
+     * sit on different rungs and this test is what keeps them there.
+     */
+    @Test
+    fun `114 - a viewer cannot mint a key and can still revoke one`() {
+        val viewer =
+            render {
+                setVariable("keys", listOf(row()))
+                withRoles(canAuthor = false, canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
+            }
+
+        viewer shouldNotContain "data-verb=\"key-create\""
+        // The whole modal goes with the button: no form nobody may submit.
+        viewer shouldNotContain "id=\"key-modal\""
+        viewer shouldContain "data-verb=\"key-revoke\""
+
+        val author = render { setVariable("keys", listOf(row())) }
+        author shouldContain "data-verb=\"key-create\""
+        author shouldContain "id=\"key-modal\""
+        author shouldContain "data-verb=\"key-revoke\""
+    }
+
     private fun render(fill: WebContext.() -> Unit): String {
         val context =
             WebContext(
                 JakartaServletWebApplication
                     .buildApplication(MockServletContext())
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            )
+            ).withRoles()
         context.setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
         context.setVariable("workspaceHeaderFragment", "")
         context.setVariable("workspaceOptions", emptyList<Any>())

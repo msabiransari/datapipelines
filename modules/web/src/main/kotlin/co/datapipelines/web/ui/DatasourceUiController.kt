@@ -49,6 +49,7 @@ class DatasourceUiController(
         model.addAttribute("poolFields", DatasourcePoolForm.fields(Dialect.entries.first()))
         // Nothing is registered yet, so the mirrored readonly flag is the form's own default.
         model.addAttribute("poolReadonly", false)
+        RoleModel.stamp(model)
         model.addAttribute("isAdmin", isAdmin())
         model.addAttribute("memberDatasourcesEnabled", workspacesProperties.memberDatasourcesEnabled)
         model.addAttribute("canRegister", isAdmin() || workspacesProperties.memberDatasourcesEnabled)

@@ -183,7 +183,7 @@ Hard-delete a template that has NEVER been released: the only version is a DRAFT
 
 Scope `read` · read-only
 
-List the datasource connections visible in the key's pinned workspace: its workspace-bound datasources plus every global one. Returns name, dialect, workspace and connection metadata — never passwords. Datasources bound to other workspaces are absent, not hidden.
+List the datasources GRANTED to the key's pinned workspace. Visibility is the grant: a datasource registered elsewhere and not granted to this workspace is ABSENT, not hidden, and there is no such thing as a global datasource. Returns name, dialect, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, and connection metadata — never passwords.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -193,7 +193,7 @@ List the datasource connections visible in the key's pinned workspace: its works
 
 Scope `read` · read-only
 
-Get metadata for a single datasource visible in the key's pinned workspace: name, dialect, JDBC URL, workspace, readonly flag, pool settings. Credentials are never returned. A datasource bound to another workspace resolves as not-found.
+Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, readonly flag, pool settings. Credentials are never returned. A datasource that is not granted to this workspace resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it can be probed.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

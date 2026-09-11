@@ -46,7 +46,7 @@
         <p class="u-secondary u-text-sm u-mb-md">
           Releasing makes v<span th:text="${dlg.version}">3</span> the current version and locks it.
         </p>
-        <button type="submit" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+        <button type="submit" data-verb="pipeline-release-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                 th:text="'Release v' + ${dlg.version}">Release v3</button>
       </form>
     </th:block>

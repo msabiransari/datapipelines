@@ -195,7 +195,12 @@
                 th:text="${#strings.toUpperCase(#strings.substring(activeWorkspace, 0, activeWorkspace.length() >= 2 ? 2 : 1))}">TS</span>
           <span class="app-ws-text app-rail-label">
             <small class="app-workspace-label">workspace</small>
+            <!-- 114 §C.4 — the role you hold HERE, next to the name of where "here" is. It
+                 is a property of the (workspace, person) pair, so it belongs beside the
+                 switcher and nowhere else; `data-role` is what the tests read. A super
+                 admin reads `super admin` in every workspace, membership or not (D-R8). -->
             <b th:text="${activeWorkspace}">workspace</b>
+            <span class="ds-badge app-ws-role" th:attr="data-role=${roleLabel}" th:text="${roleLabel}">viewer</span>
           </span>
           <svg class="app-ws-caret app-rail-label ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevrons-up-down"></use></svg>
         </label>
@@ -433,16 +438,24 @@
       <th:block th:if="${param.error}" th:with="code=${param.error[0]}">
         <th:block th:if="${code == 'duplicate_name'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace with that name already exists.')}"></div></th:block>
         <th:block th:if="${code == 'name_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.')}"></div></th:block>
-        <th:block th:if="${code == 'creation_forbidden'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Creating workspaces is not permitted on this server.')}"></div></th:block>
         <th:block th:if="${code == 'in_use'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'This workspace still owns content (pipelines, templates or datasources), or still needs its owner.')}"></div></th:block>
         <th:block th:if="${code == 'membership_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is not available to you.')}"></div></th:block>
         <th:block th:if="${code == 'session_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace actions from these screens need a signed-in session. Use the workspace REST API with an API key, or sign in.')}"></div></th:block>
         <th:block th:if="${code == 'switch_refused'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Switching workspaces was refused — you are not a member of that workspace.')}"></div></th:block>
         <th:block th:if="${code == 'user_not_found' or code == 'not_found'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'No user or workspace with that identity exists.')}"></div></th:block>
+        <!-- 114 §C.1 — the last-admin rule NAMES its remedy: a workspace nobody administers
+             cannot be repaired from inside it, so the instruction is "promote someone first",
+             not "try again". Matches WorkspaceLastAdminException's own userMessage. -->
+        <th:block th:if="${code == 'last_admin'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace needs at least one admin. Give another member admin first.')}"></div></th:block>
+        <th:block th:if="${code == 'role_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'You do not have the role needed for this action in this workspace.')}"></div></th:block>
+        <th:block th:if="${code == 'inactive'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is deactivated. Reactivate it first.')}"></div></th:block>
       </th:block>
       <th:block th:if="${param.ok}" th:with="code=${param.ok[0]}">
         <th:block th:if="${code == 'created'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was created.')}"></div></th:block>
-        <th:block th:if="${code == 'joined'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'You joined the workspace.')}"></div></th:block>
+        <th:block th:if="${code == 'member_flags'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The roles on that membership were saved.')}"></div></th:block>
+        <th:block th:if="${code == 'display_name'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The display name was saved.')}"></div></th:block>
+        <th:block th:if="${code == 'deactivated'}"><div th:replace="~{partials/toast :: toast('success', 'Deactivated', 'The workspace is no longer selectable. Nothing was deleted — Reactivate brings it back.')}"></div></th:block>
+        <th:block th:if="${code == 'reactivated'}"><div th:replace="~{partials/toast :: toast('success', 'Reactivated', 'The workspace is selectable again.')}"></div></th:block>
         <th:block th:if="${code == 'member_added'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was added.')}"></div></th:block>
         <th:block th:if="${code == 'member_removed'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was removed.')}"></div></th:block>
         <th:block th:if="${code == 'deleted'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was deleted.')}"></div></th:block>

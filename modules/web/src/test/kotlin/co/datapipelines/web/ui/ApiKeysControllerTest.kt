@@ -110,7 +110,7 @@ class ApiKeysControllerTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 }
 
 /**
@@ -332,5 +332,5 @@ class ApiKeysPartialControllerTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 }

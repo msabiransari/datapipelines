@@ -55,8 +55,11 @@ class DatasourceBrowseModel(
         model.addAttribute("scopes", principal?.scopes?.map { it.name }?.toSet() ?: emptySet<String>())
         // The row's action column. NOT `scopes`: a session carries none since D-R1, so the
         // scope test hid Test/Edit/Delete from every signed-in human — see
-        // `AuthenticatedPrincipal.isAuthor`.
-        model.addAttribute("canAuthor", principal?.isAuthor == true)
+        // `AuthenticatedPrincipal.isAuthor`. Since 114 the whole role vocabulary comes from
+        // ONE place ([RoleModel]) — Register/Edit/Delete/Test are `canAdminWorkspace` verbs
+        // (§7.6's `MUTATE_WORKSPACE_DATASOURCES` / `TEST_DATASOURCE` rows), not `canAuthor`,
+        // and re-deriving either here is what this round removed.
+        RoleModel.stamp(model, principal)
     }
 
     /** An unrecognised wire value filters nothing — the behaviour both surfaces already had. */

@@ -1,0 +1,80 @@
+<!-- The datasource GRANTS dialog (ui-screens.md §4.5a, 114 §C.2, RBAC design §4 / D-R7).
+
+     Visibility IS the grant: after 112 there is no "global" datasource, and a datasource a
+     workspace has not been granted does not exist for it — `datasource.not_found`, never a
+     403, so the name cannot be probed. This dialog is the only screen that decides that, and
+     it is a SUPER ADMIN's (auth.md §7.6 "Grant / revoke a datasource to a workspace"): the
+     list itself names every workspace on the instance holding a grant, which is exactly the
+     cross-workspace disclosure D-R5 withholds from everyone below.
+
+     Its swap contract is the Edit/Delete dialogs' (094 §A/§B): the whole backdrop is fetched
+     into the page's one empty #ds-dialog container, `.u-backdrop` is display:flex by default
+     so it is on screen the moment htmx swaps it, and closing is emptying the container. Each
+     mutation re-renders THIS fragment, so the table and the select stay in step with the rows
+     that were just written. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" id="ds-grants-modal">
+  <div class="ds-card app-modal app-modal-md">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" onclick="closeDsDialog()">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md">Grants — <span th:text="${datasource.name}">pg-prod</span></h2>
+
+    <p class="u-secondary u-text-sm u-mb-md">
+      The workspaces this datasource is visible in. A workspace with no grant cannot see it at
+      all — its pipelines resolve the name as not-found, which is the honest answer.
+    </p>
+
+    <div th:if="${#lists.isEmpty(grants)}" class="ds-empty u-mb-md">
+      <p class="ds-empty-title">Granted to nobody</p>
+      <p class="ds-empty-description">No workspace can see this datasource yet. Grant it below.</p>
+    </div>
+
+    <table class="ds-table u-mb-md" th:unless="${#lists.isEmpty(grants)}" id="ds-grants-table">
+      <thead>
+        <tr>
+          <th>Workspace</th>
+          <th>Granted by</th>
+          <th>When</th>
+          <th class="num">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="g : ${grants}">
+          <td>
+            <span class="u-mono" th:text="${g.workspace}">team-etl</span>
+            <!-- The workspace that REGISTERED it, marked rather than protected: the REST
+                 surface lets a super admin revoke this grant too, and a screen that refuses
+                 what the server allows is the same defect as one that offers what it
+                 refuses. -->
+            <span th:if="${g.owner}" class="ds-badge ds-badge-default">registering workspace</span>
+          </td>
+          <td th:text="${g.grantedBy}">Muhammad</td>
+          <td class="u-secondary u-text-sm" th:text="${g.grantedAt}">2026-09-10T09:00:00Z</td>
+          <td class="num">
+            <button type="button" data-verb="datasource-grant-remove" class="ds-button ds-button-ghost ds-button-sm"
+                    th:attr="hx-post=@{/partials/datasources/{name}/grants/{workspace}/remove(name=${datasource.name}, workspace=${g.workspace})},
+                             hx-target='#ds-dialog', hx-swap='innerHTML'"
+                    hx-disabled-elt="this">Revoke</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <form th:attr="hx-post=@{/partials/datasources/{name}/grants(name=${datasource.name})},
+                   hx-target='#ds-dialog', hx-swap='innerHTML'"
+          class="u-row-md">
+      <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-grant-workspace">Grant to</label>
+      <select id="ds-grant-workspace" name="workspace" class="ds-select" required
+              th:disabled="${#lists.isEmpty(grantableWorkspaces)}">
+        <option th:each="w : ${grantableWorkspaces}" th:value="${w}" th:text="${w}">team-etl</option>
+      </select>
+      <button type="submit" data-verb="datasource-grant-add" class="ds-button ds-button-primary ds-button-sm"
+              hx-disabled-elt="this"
+              th:disabled="${#lists.isEmpty(grantableWorkspaces)}">Grant</button>
+    </form>
+    <p th:if="${#lists.isEmpty(grantableWorkspaces)}" class="u-secondary u-text-xs u-mt-xs">
+      Every active workspace already has a grant.
+    </p>
+  </div>
+</div>

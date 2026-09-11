@@ -268,7 +268,7 @@ class UserSettingsControllerTest {
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
+        ).withRoles()
 
     @Test
     fun `change password with mismatched confirmation never reaches the service`() {

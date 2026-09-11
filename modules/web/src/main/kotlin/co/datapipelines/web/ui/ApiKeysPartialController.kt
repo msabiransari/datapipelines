@@ -116,6 +116,7 @@ class ApiKeysPartialController(
         model.addAttribute("keyBindings", bindingPaths)
         model.addAttribute("keyExpires", expiresAt?.let { RelativeTime.absolute(it) })
         model.addAttribute("keys", rows(principal))
+        RoleModel.stamp(model, principal)
         // The create response refreshes the whole table out-of-band (E2): this flag is
         // what puts hx-swap-oob on the keysTable fragment root for THIS render only.
         model.addAttribute("oob", true)
@@ -133,6 +134,7 @@ class ApiKeysPartialController(
         // answers 200, so the response discloses nothing about another user's key ids.
         apiKeyService.revoke(keyId, principal.userId)
         model.addAttribute("keys", rows(principal))
+        RoleModel.stamp(model, principal)
         return "partials/api-keys-rows"
     }
 

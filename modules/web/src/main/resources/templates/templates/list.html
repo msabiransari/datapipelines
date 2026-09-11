@@ -36,7 +36,7 @@
         <button type="button" class="ds-button ds-button-secondary tplx-browse"
                 data-explorer-drawer-open aria-expanded="false" aria-controls="template-tree-pane">Browse</button>
         <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()"
-                th:if="${canAuthor}">Create Template</button>
+                th:if="${canAuthor}" data-verb="template-create">Create Template</button>
       </div>
     </div>
 
@@ -118,7 +118,9 @@
        immutable after creation (§5.3), so the edit screen shows it as a read-only value.
        `name` is likewise create-time only — §4.5 offers no rename, anywhere, so this modal
        is the only place a template name is ever typed. -->
-  <div id="create-template-modal" class="u-backdrop u-backdrop-hidden">
+  <!-- 114 §A — the modal rides the same guard as its opener: a viewer's page carries no
+       create form at all, not a hidden one. -->
+  <div th:if="${canAuthor}" id="create-template-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-lg">
       <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateTemplateModal()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
       <h2 class="ds-title u-m0 u-mb-md">Create Template</h2>
@@ -179,7 +181,7 @@
                     placeholder="SELECT 1" required></textarea>
         </div>
         <div id="template-create-result" class="u-mb-md"></div>
-        <button type="submit" class="ds-button ds-button-primary u-full">Create</button>
+        <button type="submit" data-verb="template-create-submit" class="ds-button ds-button-primary u-full">Create</button>
       </form>
     </div>
   </div>
@@ -197,9 +199,13 @@
        is what keeps the field out of the submitted form data — a hidden-but-enabled select
        would still post a dialect for an html template. The server drops it either way. */
     function syncTemplateDialect() {
-      var isSql = document.getElementById('create-template-type').value === 'sql';
+      // 114: a viewer's page carries no create modal, so these three nodes are absent.
+      // Returning is the whole handling — there is no form to keep in sync.
+      var type = document.getElementById('create-template-type');
       var field = document.getElementById('create-template-dialect-field');
       var select = document.getElementById('create-template-dialect');
+      if (!type || !field || !select) return;
+      var isSql = type.value === 'sql';
       field.hidden = !isSql;
       select.disabled = !isSql;
       select.required = isSql;

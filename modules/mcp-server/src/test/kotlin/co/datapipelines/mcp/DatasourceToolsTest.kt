@@ -8,6 +8,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
@@ -42,6 +43,77 @@ class DatasourceToolsTest {
                 co.datapipelines.executor.ExecutorJson
                     .write(payload) shouldNotContain "super-secret-password"
             },
+        )
+    }
+
+    /**
+     * 114 §D — the shape 112 made false, corrected.
+     *
+     * The projection used to emit `workspace: <name> | null = global`, and "global" meant
+     * "visible everywhere". D-R7 deleted the concept: visibility is the GRANT, so a null
+     * `workspace` no longer says anything about who can see the row — and an agent that
+     * learned the old contract would read it as the retired meaning. The field now carries
+     * only what it can honestly carry (which workspace REGISTERED it) and is OMITTED, never
+     * null, when the answer is "none — a super admin registered it at the instance level".
+     */
+    @Test
+    fun `114 - a row states the registering workspace and granted, and never a null workspace`() {
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
+            listOf(McpFixtures.datasource().copy(ownerWorkspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"))
+
+        val row = (DatasourcesListTool(registry).call(McpArguments(emptyMap()), readCtx) as List<*>).first() as Map<*, *>
+
+        assertAll(
+            { row["workspace"] shouldBe "acme" },
+            // You are seeing this row BECAUSE your workspace holds a grant on it — implicit
+            // before D-R7, load-bearing after it.
+            { row["granted"] shouldBe true },
+        )
+    }
+
+    @Test
+    fun `114 - an instance datasource omits workspace rather than emitting the retired null`() {
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
+            listOf(McpFixtures.datasource().copy(ownerWorkspaceId = null, workspaceName = null))
+
+        val row = (DatasourcesListTool(registry).call(McpArguments(emptyMap()), readCtx) as List<*>).first() as Map<*, *>
+
+        assertAll(
+            // ABSENT, not null: a null is the one value the old contract gave a meaning to.
+            { row.containsKey("workspace") shouldBe false },
+            { row["granted"] shouldBe true },
+        )
+    }
+
+    /**
+     * There is deliberately no `granted_workspaces`. Listing every workspace a datasource is
+     * granted to names workspaces the caller may not know exist — the cross-workspace
+     * disclosure D-R5 withholds from everyone below super admin, and the reason
+     * `DatasourceGrantsController` is `MANAGE_DATASOURCE_GRANTS` on its READ as well as its
+     * writes. No key may hold `admin` scope (O-2), so the field would have no correct
+     * audience on this surface at all.
+     */
+    @Test
+    fun `114 - no tool leaks the grant list to a key`() {
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
+
+        val row = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), adminCtx) as Map<*, *>
+
+        row.containsKey("granted_workspaces") shouldBe false
+    }
+
+    /** The DESCRIPTIONS are the contract an agent reads before it calls anything. */
+    @Test
+    fun `114 - the descriptions say grant, and never global`() {
+        val list = DatasourcesListTool(registry).definition.description()
+        val get = DatasourcesGetTool(registry).definition.description()
+
+        assertAll(
+            { list shouldContain "GRANTED" },
+            { list shouldContain "no such thing as a global datasource" },
+            { get shouldContain "GRANTED" },
+            { list shouldNotContain "plus every global one" },
+            { get shouldNotContain "bound to another workspace" },
         )
     }
 

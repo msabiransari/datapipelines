@@ -14,10 +14,30 @@ import io.modelcontextprotocol.spec.McpSchema
  * `password` on the paths that need it, and "credentials are never returned" (§6.2.10, §13
  * checklist) must be a property of the code, not of whichever mapper happens to serialize it.
  *
- * `workspace` (the bound workspace's name, null = global) and `readonly` are the workspaces
- * design §9 additive fields — `readonly` is machine-readable feedback (D6) so an agent can
- * see BEFORE authoring that a DML/DDL/output-datasource use of this connection will be
- * refused.
+ * `readonly` is a workspaces design §9 additive field — machine-readable feedback (D6) so an
+ * agent can see BEFORE authoring that a DML/DDL/output-datasource use of this connection will
+ * be refused.
+ *
+ * ## `workspace` and `granted` (114 §D — the shape 112 made false)
+ * Until RBAC round 1 this projection emitted `workspace: <name> | null = global`, and "global"
+ * meant "visible everywhere". D-R7 deleted that concept: **visibility is the grant**
+ * (`datasource_workspaces`), so a datasource is visible in the key's workspace if and only if
+ * it has been granted there, and a null `workspace` no longer says anything about who can see
+ * it.
+ *
+ * So the field now means only what it can honestly mean — WHICH WORKSPACE REGISTERED IT — and
+ * it is **omitted entirely** when the answer is "none": a super admin registered it at the
+ * instance level. A null would be read as the old "global" by every agent that learned the old
+ * contract, and by every transcript of one. `granted: true` rides alongside, stating the thing
+ * that is now load-bearing and was previously implicit: you are seeing this row BECAUSE your
+ * workspace holds a grant on it.
+ *
+ * There is deliberately no `granted_workspaces` field. Listing every workspace a datasource is
+ * granted to names workspaces the caller may not know exist — the cross-workspace disclosure
+ * D-R5 withholds from everyone below super admin, and the reason `DatasourceGrantsController`
+ * is `MANAGE_DATASOURCE_GRANTS` (super admin) on its READ as well as its writes. No key may
+ * hold `admin` scope (O-2), so no MCP caller can be a super admin: the field would have no
+ * correct audience on this surface.
  */
 internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
     buildMap {
@@ -37,7 +57,13 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
         // that one is active — omitted when empty, the same envelope convention as REST §3.2.
         if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
         put("readonly", isReadonly)
-        put("workspace", workspaceName)
+        // Omitted, never null: see the KDoc. An absent key is a shape an agent has to look at;
+        // a null is one it will read as the retired "global".
+        workspaceName?.let { put("workspace", it) }
+        // The row is in this projection because the key's workspace holds a grant on it — the
+        // registry's reads carry the grant predicate in their SQL. Stated rather than implied,
+        // because "why can I see this?" is now a different question from "who owns it?".
+        put("granted", true)
         // §5 (094): the EFFECTIVE pool settings, not the row's usually-empty `properties.hikari`
         // map — each value with its unit and the layer that supplied it, so an agent explaining
         // a pool-timeout failure can read the number the pool actually runs with.
@@ -52,9 +78,11 @@ class DatasourcesListTool(
         McpTools.tool(
             name = "datasources_list",
             description =
-                "List the datasource connections visible in the key's pinned workspace: its workspace-bound " +
-                    "datasources plus every global one. Returns name, dialect, workspace and connection " +
-                    "metadata — never passwords. Datasources bound to other workspaces are absent, not hidden.",
+                "List the datasources GRANTED to the key's pinned workspace. Visibility is the grant: a " +
+                    "datasource registered elsewhere and not granted to this workspace is ABSENT, not hidden, " +
+                    "and there is no such thing as a global datasource. Returns name, dialect, the workspace " +
+                    "that REGISTERED it (omitted for an instance-level one), granted:true, and connection " +
+                    "metadata — never passwords.",
             schema =
                 """
                 {
@@ -71,8 +99,10 @@ class DatasourcesListTool(
      * §6.2.8 *do* carry the enum. So an unrecognized dialect filter is not a protocol error here:
      * it simply matches nothing, which is what a filter for something that does not exist means.
      *
-     * Visibility (workspaces §5.3): the key's pinned workspace — the same
-     * `visible = bound-to-this-workspace OR global` predicate the REST §9.2 listing applies.
+     * Visibility (RBAC design §4, D-R7): the key's pinned workspace, through the GRANT — the
+     * same `EXISTS(datasource_workspaces …)` predicate the REST §9.2 listing carries in its SQL.
+     * The `bound-to-this-workspace OR global` predicate this KDoc used to name went with the
+     * concept of a global datasource at round 1.
      */
     override fun call(
         args: McpArguments,
@@ -93,9 +123,11 @@ class DatasourcesGetTool(
         McpTools.tool(
             name = "datasources_get",
             description =
-                "Get metadata for a single datasource visible in the key's pinned workspace: name, dialect, JDBC " +
-                    "URL, workspace, readonly flag, pool settings. Credentials are never returned. A datasource " +
-                    "bound to another workspace resolves as not-found.",
+                "Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, " +
+                    "JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), " +
+                    "granted:true, readonly flag, pool settings. Credentials are never returned. A datasource " +
+                    "that is not granted to this workspace resolves as not-found — the same answer a name that " +
+                    "exists nowhere gets, so nothing about it can be probed.",
             schema =
                 """
                 {

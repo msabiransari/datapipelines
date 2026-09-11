@@ -94,7 +94,7 @@ class DatasourceDetailRenderTest {
                 JakartaServletWebApplication
                     .buildApplication(MockServletContext())
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            )
+            ).withRoles()
         model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
         val engine =
             SpringTemplateEngine().apply {
@@ -180,7 +180,7 @@ class DatasourceDetailRenderTest {
                 JakartaServletWebApplication
                     .buildApplication(MockServletContext())
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            )
+            ).withRoles()
         model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
         val engine =
             SpringTemplateEngine().apply {

@@ -36,6 +36,7 @@ class PipelineUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("dialects", Dialect.entries.map { it.wire })
         model.addAttribute("scopes", scopes())
+        RoleModel.stamp(model)
         model.addAttribute("q", q ?: "")
         browse.fillWrapper(
             model,

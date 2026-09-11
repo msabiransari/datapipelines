@@ -32,7 +32,7 @@
         <span class="u-secondary u-text-sm">read-only</span>
       </div>
       <div class="u-row">
-        <button class="ds-button ds-button-primary ds-button-sm" id="tpl-edit-version"
+        <button th:if="${canAuthor}" data-verb="template-edit" class="ds-button ds-button-primary ds-button-sm" id="tpl-edit-version"
                 th:attr="hx-post=@{/partials/templates/editor/edit(name=${templateName},version=${selectedVersion})}"
                 hx-target="#tpl-edit-refusal" hx-swap="innerHTML">Edit</button>
       </div>

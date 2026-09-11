@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<!--
+  114 §C.3(a) — the no-workspace state (ui-screens.md §6).
+
+  Reached when a principal has ZERO ACTIVE memberships: never added to one, removed from the
+  last one, or every workspace they belong to has been deactivated (D-R10). To that person a
+  deactivated workspace is indistinguishable from one that never existed (§11A.3), so this
+  page says the true thing — you are not a member of any active workspace — and never which of
+  the three it was.
+
+  It is deliberately NOT an error page: nothing failed, and `error/403` would tell someone
+  their credential is wrong when their membership is simply absent. What they need is who to
+  ask, and — if they are the instance's super admin — the form that fixes it.
+-->
+<th:block th:fragment="content">
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">No workspace</h1>
+      <p class="app-page-sub">Pipelines, templates and datasources all live inside a workspace, and you are
+        not a member of an active one yet.</p>
+    </div>
+  </div>
+
+  <section class="app-reading u-mb-xl">
+    <div class="ds-empty">
+      <p class="ds-empty-title">You're not a member of any active workspace</p>
+      <p class="ds-empty-description">
+        Ask an administrator of the workspace you should be in to add you — they can do it from
+        this screen in a few seconds. If you were a member before, the workspace may have been
+        deactivated; an instance super admin can bring it back.
+      </p>
+    </div>
+  </section>
+
+  <!-- D-R11: only a super admin creates workspaces. On a fresh instance this form is the whole
+       screen, which is exactly the case it exists for. -->
+  <section th:if="${canCreate}" class="app-reading u-mb-xl">
+    <h2 class="ds-title u-mb-md">Create a workspace</h2>
+    <form th:action="@{/workspaces/create}" method="post" class="u-row-md u-wrap">
+      <input type="text" name="name" class="ds-input app-input-raised app-input-fixed-sm" placeholder="team-etl" required>
+      <input type="text" name="displayName" class="ds-input app-input-raised app-input-fixed-md" placeholder="Display name (optional)">
+      <button type="submit" data-verb="workspace-create" class="ds-button ds-button-primary">Create</button>
+    </form>
+  </section>
+</th:block>
+</html>

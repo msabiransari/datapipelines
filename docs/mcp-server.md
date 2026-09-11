@@ -28,7 +28,7 @@ This spec defines:
 3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user grabs an API key from the UI, passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 4. **MCP versioning follows the protocol.** We commit to a specific MCP protocol version per datapipelines.co release, and document upgrade paths when the protocol evolves.
 5. **Fail loudly, never silently.** MCP-level errors (transport, auth) and application errors (pipeline validation, datasource unreachable) both surface as structured errors the agent can act on. No silent fallbacks.
-6. **Workspace-scoped by the key (workspaces design §5.2/§9).** Every tool and resource operates inside the workspace the API key is PINNED to at issuance — `DP-Workspace` is refused on MCP requests (`400 workspace.header_forbidden`), because a header-switchable agent key would make every leaked key a skeleton key across the user's workspaces. Pipelines, templates and executions of other workspaces are ABSENT (not hidden): their ids resolve as not-found. Datasources visible here are exactly the pinned workspace's bound ones plus every global one. The `initialize` result's `instructions` field states this so an agent does not reason about invisible siblings.
+6. **Workspace-scoped by the key (workspaces design §5.2/§9).** Every tool and resource operates inside the workspace the API key is PINNED to at issuance — `DP-Workspace` is refused on MCP requests (`400 workspace.header_forbidden`), because a header-switchable agent key would make every leaked key a skeleton key across the user's workspaces. Pipelines, templates and executions of other workspaces are ABSENT (not hidden): their ids resolve as not-found. Datasources visible here are exactly the ones GRANTED to the pinned workspace (D-R7): there is no global datasource, and one that is not granted is ABSENT, not hidden. The `initialize` result's `instructions` field states this so an agent does not reason about invisible siblings.
 
 ---
 
@@ -530,7 +530,7 @@ List registered datasources (without credentials).
 ```json
 {
   "name": "datasources_list",
-  "description": "List the datasource connections visible in the key's pinned workspace: its workspace-bound datasources plus every global one. Returns name, dialect, workspace and connection metadata — never passwords. Datasources bound to other workspaces are absent, not hidden.",
+  "description": "List the datasources GRANTED to the key's pinned workspace. Visibility is the grant: a datasource registered elsewhere and not granted to this workspace is ABSENT, not hidden, and there is no such thing as a global datasource. Returns name, dialect, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, and connection metadata — never passwords.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -549,7 +549,7 @@ Fetch a single datasource (without password).
 ```json
 {
   "name": "datasources_get",
-  "description": "Get metadata for a single datasource visible in the key's pinned workspace: name, dialect, JDBC URL, workspace, readonly flag, pool settings. Credentials are never returned. A datasource bound to another workspace resolves as not-found.",
+  "description": "Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, readonly flag, pool settings. Credentials are never returned. A datasource that is not granted to this workspace resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it can be probed.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -562,7 +562,7 @@ Fetch a single datasource (without password).
 
 **Scope:** `read`.
 
-**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map), `readonly` (boolean — the §5.7 flag, machine-readable so an agent can see BEFORE authoring that DML/DDL/output-datasource uses will be refused), `workspace` (string or null — the bound workspace's name; null = global) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape.
+**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map), `readonly` (boolean — the §5.7 flag, machine-readable so an agent can see BEFORE authoring that DML/DDL/output-datasource uses will be refused), `granted` (always `true` — you are seeing this row because your workspace holds a grant on it, D-R7), `workspace` (the name of the workspace that REGISTERED it, **omitted** when a super admin registered it at the instance level — it is never `null`, because the retired `null = global` reading would be the wrong answer to "who can see this?"; visibility is `granted`) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape.
 
 #### 6.2.12 `datasources_test`
 

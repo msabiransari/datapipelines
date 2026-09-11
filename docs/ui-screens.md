@@ -206,6 +206,16 @@ nav packs to the top; the free space below it is deliberate.
   (085 §A) draw from the same sprite: a rotating chevron-right, folder/folder-open on
   folders, file-code on leaves.
 
+- **The role badge (114).** A `.ds-badge.app-ws-role` under the workspace name inside the
+  switcher card, carrying the role the signed-in person holds IN THAT WORKSPACE — `viewer`,
+  `author`, `promoter`, `author · promoter`, `admin`, or `super admin` for an instance super
+  admin in any workspace, membership or not (D-R8). It is derived from the membership's three
+  flags and stored nowhere: no single word names an additive row (D-R2). `data-role` is the
+  stable hook the tests read. It sits INSIDE the `app-rail-label` span, so the collapsed rail
+  hides it with the workspace name rather than leaving a word with nothing to qualify; at all
+  three widths (§3.6) it is the same element in the same place. The role decides what the rest
+  of the app renders — the inventory is [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative).
+
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
 a search field **placeholder**, the light/dark toggle, and the avatar menu.
 
@@ -395,6 +405,7 @@ Since 067 pipeline names are **folder paths** ([Template Hierarchy §14](templat
 - **A new pipeline appears as `v1 draft`** (D55, 099). Creation lands version 1 as a DRAFT, so the leaf's version badge names the **working** version — the draft's number when one exists, the released one otherwise — beside the existing `draft` badge whose tooltip says it is pending release. (`p.currentVersion` alone rendered `vnull` the moment creation stopped releasing.) The Release action lives in the editor and renders for a v1 draft exactly as for any later one; nothing on this screen releases.
 - **The detail pane** is three regions since 106 (§4.3b): a header, a READING column and an ACTING column. A selection swaps `#pipeline-detail`'s innerHTML and touches nothing in the tree.
 - **The screen is READ-ONLY.** The pre-067 "Create Pipeline" button was permanently `disabled` and its tooltip read "Pipeline editor — Phase 2 other worktree" — an affordance the server does not have, advertised with an internal note. Both are gone (T108), replaced by a sentence saying pipelines are authored through agents over the MCP server, with a link to that spec and the fact that browser authoring is on the roadmap.
+- **Rendered for** — every verb on this screen is role-gated since 114; the flag each one needs is [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative)'s table. Release is `canPromote` and NOT `canAuthor`: an author who is not a promoter sees no Release anywhere (D-R2).
 - There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled datasources but populated from `${dialects}`, the controller never had the parameter, and `PipelineRecord` carries no datasource field — serving it needs a join through the pipeline definition, so it was deleted rather than half-wired (deferred).
 
 #### 4.3a The divider handle — both explorers (104)
@@ -559,10 +570,75 @@ re-runs the guard.
 pins it (the four editor sites and the explorers' verb wiring are grep'd; the `hx-confirm` on
 `api/console.html` is htmx's own attribute, not a native call, and is excluded by path).
 
+#### 4.3e Role visibility — every verb, and the flag that renders it (114, normative)
+
+**The role decides what is rendered; the server decides what is allowed** (RBAC design §7).
+Round 1 (112) made the server right: every verb is refused by role through the two-axis matrix.
+This is the other half — a verb the ACTIVE membership cannot perform is **not rendered**.
+
+Rendering a verb the server will refuse is not a safe default: it teaches a person the product
+is broken, and the refusal arrives after they have already decided to act. Round 112 shipped
+exactly that state — a viewer saw Release, Purge, Register and New key, clicked, and got a 403
+with no explanation the screen could give (`ScopeInterceptor` answers before the handler, and
+htmx does not swap a 4xx, so the click simply did nothing).
+
+**Hide, don't disable.** A verb the role cannot perform is absent — no greyed button with a
+tooltip; a viewer is not being teased. The exceptions are two, both stated at their sites: the
+editor's Release stays *disabled with its reason* when the DRAFT is invalid for someone who CAN
+release (a state refusal, and the reason is actionable), and the promotion screen keeps its plan
+readable for everyone while naming who can send it (§4.17).
+
+One helper answers the question for every screen — `web/ui/RoleModel`, stamping `canRead`,
+`canExecute`, `canAuthor`, `canPromote`, `canAdminWorkspace`, `isSuperAdmin` and `roleLabel`
+into the model. No controller derives a role boolean of its own. Every verb control carries a
+`data-verb` attribute, which is both the tests' hook and the inventory: `grep -rn 'data-verb='
+modules/web/src/main/resources/templates` is the list, and a control outside a role guard fails
+`RoleVisibilityRenderTest`.
+
+Each boolean narrows for an API-key principal by the key's SCOPE as well as its issuer's role
+([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) — the credential axis), so a
+`read` key is never shown an author's affordances because the person who minted it is an author.
+
+| Screen | Verb(s) | Rendered when | §7.6 operation |
+|---|---|---|---|
+| Pipelines explorer (§4.3) | Edit, Discard draft, Restore, Purge draft, Purge pipeline | `canAuthor` | `MUTATE_PIPELINES_TEMPLATES` |
+| Pipelines explorer | Release | `canPromote` | `RELEASE_VERSION` |
+| Pipelines explorer | Switch served version | `canAuthor or canPromote` | `SWITCH_SERVED_VERSION` (`Capability.SWITCH`, O-1) |
+| Pipeline editor (§4.4) | Purge draft | `canAuthor` | `MUTATE_PIPELINES_TEMPLATES` |
+| Pipeline editor | Release | `canPromote` | `RELEASE_VERSION` |
+| Pipeline editor | Execute, Cancel | `canExecute` — **viewer-level** (D-R3) | `EXECUTE_PIPELINE` / `CANCEL_EXECUTION` |
+| Templates explorer/editor (§4.6/§4.7) | Create, Edit, Discard, Restore, Purge | `canAuthor` | `MUTATE_PIPELINES_TEMPLATES` |
+| Templates explorer/editor | Release | `canPromote` | `RELEASE_VERSION` |
+| Datasources (§4.5) | Register, Edit, Delete, **Test** | `canAdminWorkspace` | `MUTATE_WORKSPACE_DATASOURCES` / `TEST_DATASOURCE` |
+| Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `MANAGE_DATASOURCE_GRANTS` |
+| API keys (§4.18) | New key | `canAuthor` (O-2 — viewers never mint) | `MANAGE_OWN_API_KEYS` + the §7.4 issuance gate |
+| API keys | Revoke | `canRead` — any member, own keys | `MANAGE_OWN_API_KEYS` |
+| Promotion (§4.17) | Promote | `canPromote` in the SOURCE workspace | `PROMOTE_VERSION` |
+| Workspaces (§4.13) | Members: add, change flags, remove | `canAdminWorkspace`, **in the ACTIVE workspace** | `MANAGE_WORKSPACE_MEMBERS` |
+| Workspaces | Display name | `canAdminWorkspace` | `MANAGE_WORKSPACE` |
+| Workspaces | Create, Deactivate, Reactivate, Delete | `isSuperAdmin` | `WORKSPACE_CREATE` / `MANAGE_INSTANCE_WORKSPACES` |
+| Execution detail (§4.9) | Cancel | `canExecute` **and** the execution is RUNNING | `CANCEL_EXECUTION` |
+| Shell (§3.4) | the role badge | always | — |
+
+Three rows are worth reading twice, because each is a place a reasonable guess is wrong:
+
+- **Datasource Test is `ws_admin`, not `author`.** It is not a read: it opens a live connection
+  with the instance's stored credential and writes the datasource's health down (V9). The design's
+  §1 table keeps "register a datasource bound to THIS workspace; test it" on the workspace-admin
+  row, and the MCP twin `datasources_test` sits on the same capability.
+- **Key REVOKE is `view`, not `author`.** Only ISSUANCE carries the author gate (§7.4). Hiding
+  Revoke from a viewer would strand a DEMOTED author with a live key they are not allowed to
+  withdraw — the opposite of what O-2 is for.
+- **Member verbs follow the ACTIVE workspace.** `ScopeInterceptor` judges
+  `MANAGE_WORKSPACE_MEMBERS` against `principal.workspace`, never the workspace named in the
+  path, so an admin of X working in Y cannot manage X's members until they switch. §4.13's
+  member table therefore renders for the active workspace only, and names the others.
+
 ### 4.4 Pipeline Editor
 
 Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows that touch THIS document's shared contracts are noted here:
 
+- **Rendered for (114):** Release is `canPromote`, Purge draft is `canAuthor`, Execute and Cancel are `canExecute` (viewer-level, D-R3) — [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative). A viewer's editor LOADS and is read-only: the verbs are absent and one quiet `.app-note` line reads `Read-only — you are a viewer in <workspace>`. No toast: nothing failed.
 - **Draft lifecycle actions (102):** the topbar's Release / Discard draft buttons open the §4.3d dialogs in `#pe-dialog` — the release dialog shows the draft's pins and refuses on a DRAFT template pin; the discard dialog is the PURGE (versioning §5.4 — the pre-102 confirm text claiming "an executed draft is kept as history" was false and is gone). A success answers `HX-Redirect` back to the editor with a flash toast (the page's draft state is document-wide); a refusal is §5.1 Shape C. No native `confirm`/`alert` remains on this screen (the pre-102 `draft.js` carried three — a static test pins the count at zero).
 - **The v2 canvas (080, owner-approved mock):** dotted-grid stage, the mock's node card (type-accent icon tile, id + eyebrow, mono facts, footer state + run numbers), bezier edges with three states, minimap, legend, controls and the fit-that-never-zooms-in ceiling. Its tokens are ONE block at the top of `app.css` (`/* app tokens (080): node-type accents */`) — the five node-type accent pairs plus `--brand(-soft)`, `--border-faint`, `--grid-dot` and the `--edge*` strokes — bridged to design-system tokens so every theme re-skins it. 079's shell v2 is told the block exists and must not redeclare it.
 - **The dock (080):** Details | Results | Errors | Events — the 065 inspector overlay is a tab now (owner ruling 2026-09-05), the dock is always present, the chevron collapse is the only contraction, and there is still no close. **Notifications:** unchanged in shape — `pipeline_completed` and `execution_aborted` toast via `DpToast.show` (§5.1 Shape D), `pipeline_failed` keeps the modal — but exactly-once is now structural: the 076 afterSettle rescue stacked Alpine components on a history-restored root (one click → N executions → N toasts), and it destroys the stale tree before re-binding (`editor-toast-once.test.mjs`). Every SSE event of every kind also lands in the **Events** tab in arrival order. **The dock's height is the user's (104).** It was a fixed 232px that could only be collapsed and restored — the owner's report was *"it has a fixed height. You can min/max it but cannot change the height. I want it to be flexible and the user should be able to drag the height."* A `role="separator"` handle straddles the dock's top border (drag, or focus it and use the arrows: ±16px, Shift ±64px, Home/End for the floor and ceiling, double-click to reset). The floor is 120px and the ceiling leaves the canvas a 160px readable strip. The size is one CSS custom property (`--pe-dock-pane-h`) written on `<html>` and remembered in `localStorage` under `dp.pane.editor-dock`; `static/js/splitter.js` is a parser-blocking script ABOVE the markup, so a remembered height is the height of the FIRST frame rather than a shift onto it. Collapse still wins while it is on — expanding restores the remembered height. **The canvas follows:** `.pe-body` is `flex: 1`, so a taller dock is a shorter stage, and graph.js's stage `ResizeObserver` now routes through `handleStageResize` — `cy.resize()` always, re-fit ONLY if the view was still the fit (082/098: fit never zooms IN, and a user who has panned to a corner keeps their view). One path also covers the rail collapsing and the window resizing. The row transition is switched off for the duration of a drag, which is also the only motion `prefers-reduced-motion` users would have met here.
@@ -603,14 +679,48 @@ The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-b
 
 The POST re-runs the guard regardless: a pipeline can start referencing the datasource between the dialog opening and the button being pressed, and the screen is never the authority. Success is §5.1 Shape A — the success node closes the dialog, the refreshed list and the toast ride along out-of-band. Both dialogs are delivered as a WHOLE backdrop rather than a body swapped into a pre-rendered shell: `.u-backdrop` is `display: flex`, so the dialog is on screen the moment htmx swaps it, with no open() script to fall out of step with the markup, and closing is emptying the container. A 4xx refusal renders inline and does NOT close the dialog — the success node carries a `data-ds-saved` marker the refusal never has, which is the same distinction the register modal draws with `data-error` (022/F9).
 
-**§4.13's workspaces screen** owns workspace lifecycle; this screen's Register button is hidden entirely when the caller is a non-admin and `member-datasources-enabled` is off (the demo shape — open datasource creation is an SSRF primitive from the server's network position).
+**Rendered for (114).** Register, Edit, Delete and **Test** are all `canAdminWorkspace` — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) puts `MUTATE_WORKSPACE_DATASOURCES` and `TEST_DATASOURCE` on the `ws_admin` role, not on `author`: a datasource is a live database credential, and testing one is not a read (it opens a connection with the stored secret and writes the health row). An author sees the list, the badges and the Last test column, and no action column at all. Register additionally needs the DEPLOYMENT's `member-datasources-enabled` gate — two gates, both required — so a non-admin on a locked-down server sees no Register even if their role would allow it (the demo shape: open datasource creation is an SSRF primitive from the server's network position). The `global` checkbox's admin-only rule is unchanged.
+
+**§4.13's workspaces screen** owns workspace lifecycle; **[§4.5a](#45a-datasource-grants-114)** owns which workspaces can SEE a datasource.
+
+### 4.5a Datasource grants (114)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /partials/datasources/{name}/grants` (a dialog into `#ds-dialog`) |
+| Auth required | Yes — **super admin** (`MANAGE_DATASOURCE_GRANTS`, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) |
+| Purpose | Decide which workspaces can see a datasource at all (RBAC design §4, D-R7) |
+| Design primitives | `.u-backdrop`, `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-empty`, `.ds-select` |
+| htmx | Yes — the same whole-backdrop-into-`#ds-dialog` contract §4.5's edit and delete dialogs use (094 §A/§B); each mutation re-renders THIS fragment, so the table and the select stay in step with the rows just written |
+
+**Visibility IS the grant.** Round 1 replaced `datasources.workspace_id` (NULL = "global") with
+`datasource_workspaces`: a datasource is registered once — credentials are instance secrets — and
+granted to N workspaces. There is no global datasource. A workspace with no grant does not see the
+row at all: `datasource.not_found`, never a 403, so the name cannot be probed.
+
+Opened from the datasources list's per-row **Grants** button. It shows every workspace the
+datasource is granted to (name, granted by, when), a Revoke per row, and an add form whose
+`<select>` lists the ACTIVE workspaces that do not already hold a grant — re-granting is a legal
+no-op, and an option whose only outcome is "no change" is noise. The registering workspace's own
+grant (created automatically when a workspace admin registers a datasource) is **marked** with a
+badge and is still revocable: the REST surface allows it, and a screen that refuses what the
+server allows is the mirror of the defect §4.3e exists to remove.
+
+**Why super admin and not workspace admin.** The grant LIST names every workspace on the instance
+that holds one, which is exactly the cross-workspace disclosure D-R5 withholds from everyone below
+super admin — the same reason `DatasourceGrantsController`'s READ carries the operation too. A
+workspace admin still registers datasources bound to their own workspace (§4.5) and gets that
+workspace's grant automatically; handing one to somebody ELSE's workspace is this screen.
+
+Every grant and revoke is audited (`datasource.granted` / `datasource.revoked`), which is D-R7's
+"every grant is audited" — the row records who and when, and the event records the decision.
 
 ### 4.6 Template List (the template EXPLORER — tree left, selected template right)
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /templates` |
-| Auth required | Yes (`read` to browse; `author` to create) |
+| Auth required | Yes (`read` to browse; `author` to create — the verbs are role-gated per [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative), and Release is `canPromote`) |
 | Purpose | Browse the template tree, select a template to see its versions, filter by dialect and type, search |
 | Design primitives | `.ds-badge`, `.ds-input`, `.ds-empty`, `.ds-button`, native `<details>`/`<summary>` + `static/css/template-tree.css` (structure and truncation only — every colour, size and gap is a token; the 041 two-pane layout math, `--header-height` viewport fill) |
 | JS | The create modal's lifecycle (open/close, inline refusal, dialect-conditional-on-type), **and** `static/js/template-explorer.js`: selection, roving tabindex, and keyboard — expansion is still `<details>` + htmx, no JS of our own |
@@ -684,13 +794,14 @@ confused for one another.
 | Attribute | Value |
 |---|---|
 | URL | `GET /templates/editor?name={path}` (rest-api §8 addressing: the name never travels in a URL path segment) |
-| Auth required | Yes (`read` to view; `author` to save or render a preview) |
+| Auth required | Yes (`read` to view; `author` to save or render a preview; Release is `canPromote` — [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative)) |
 | Purpose | Edit template body (Freemarker SQL), preview rendered SQL, manage versions |
 | Design primitives | `.ds-card`, `.ds-button`, `.ds-code-block`, `.ds-form` + the 041 layout in `static/css/template-editor.css` — render context in a left rail (`--app-detail-width`), source column filling the viewport below the header (`--header-height` math), preview output below the editor at ~2/3 · 1/3 |
 | JS | Light — tab switching (edit / preview), add/remove context rows, key-value ⇄ JSON toggle; the preview output is highlighted with the shared dependency-free SQL tokenizer (`js/pipeline-editor/sql-highlight.js`, 032) via `js/template-editor/preview.js` — the editable textarea is deliberately plain (highlighting an editing surface needs an overlay/contenteditable round of its own) |
 | htmx | Yes — the version `<select>` swaps the source column (`hx-get="/partials/templates/editor/source?name={path}"`, the select's own `version` riding along, into `#template-source`, `outerHTML`) and **Edit** posts to `/partials/templates/editor/edit` (`#tpl-edit-refusal`, `innerHTML`; success answers `HX-Redirect`). "Render Preview" posts to `/partials/templates/render?name={path}&version={v}`, rendered into `#preview-output` |
 
 Content:
+- **Rendered for (114):** Release is `canPromote`, Purge draft and the read-only version's **Edit** (start a draft from a release) are `canAuthor`. A viewer's editor loads read-only with the same `.app-note` line the pipeline editor carries.
 - **Draft lifecycle actions (102):** Release / Discard draft open the §4.3d template twins in `#te-dialog`, addressed by NAME in the query (§9.6). Success answers `HX-Redirect` back to the editor with a flash toast; refusal is §5.1 Shape C. The pre-102 inline `tplLifecycle` script carried the native `confirm`/`alert` pair and is gone (the static zero-native-dialog test covers this file).
 - **Editor pane**: textarea with the Freemarker body — plain monospace by decision (041 D5: highlighting an editing surface means an overlay or contenteditable; not this round), sized to fill the viewport below the header and scroll inside itself rather than growing the page.
 - **Description panel** (read-only in the preview column): the template's free-text `description`. Since a template declares no variables, this is the only in-app hint about what context it expects ([Templates §2.5](templates.md#2-design-principles)).
@@ -768,7 +879,7 @@ found. This screen renders one sentence and a link to `/api-console`.
 | Attribute | Value |
 |---|---|
 | URL | `GET /settings/api-keys` |
-| Auth required | Yes — any authenticated principal |
+| Auth required | Yes — any authenticated principal (the key VERBS live on §4.18: New key is `canAuthor`, Revoke is `canRead` — [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative)) |
 | Purpose | Point at §4.18. It reads no keys at all |
 | Design primitives | `.ds-card`, `.app-empty`, `.ds-button` |
 | JS | None |
@@ -829,20 +940,71 @@ Content: table of all users (email, display_name, `is_active` and `is_admin` as 
 - Deactivation copy states the effect window: existing JWTs and API keys stop working within the liveness-cache TTL (~60s), not instantly and not at JWT expiry.
 - Scopes are derived, not assigned, in v1: `is_admin` → `admin`, every other active user → `author` ([Auth §7.5](auth.md#75-scopes)). So the "grant admin" toggle *is* the scope control — there is no per-user scope editor to build.
 
-### 4.13 Workspaces (workspaces design §9)
+### 4.13 Workspaces (workspaces design §9; members and deactivation rewritten by 114)
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /workspaces` |
-| Auth required | Yes (`author` for the create/manage actions — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative); ownership/mode gates enforced server-side per [REST §17](rest-api.md#17-workspace-endpoints)) |
-| Purpose | Create/join workspaces per provisioning mode; manage members of owned workspaces; switch the active workspace |
-| Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card` |
-| JS | One `onchange` submit on the navbar switcher (`<noscript>` fallback button included) |
-| htmx | No — plain CSRF-protected form posts with `redirect:` outcomes (`?ok=`/`?error=` query state, the login screen's idiom) |
+| Auth required | Yes. Per-verb: members and the display name need `canAdminWorkspace` **in the ACTIVE workspace**; create, deactivate, reactivate and delete need `isSuperAdmin` ([§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) |
+| Purpose | See the workspaces you belong to, switch between them, manage the members and roles of the one you are in, and — for a super admin — create, deactivate, reactivate and delete |
+| Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card`, `.ds-empty`, `.app-note` |
+| JS | One `onchange` submit on the rail switcher (`<noscript>` fallback button included), and one delegated listener that ticks `author` when `admin` is ticked |
+| htmx | No — plain CSRF-protected form posts with `redirect:` outcomes (`?ok=`/`?error=` query state, the login screen's idiom), rendered into the layout's `#toast` stack |
 
-Content, in order: a **create form** (name + display name; rendered for SUPER ADMINS only — D-R11 removed the provisioning modes and with them `workspace.creation_forbidden`; the joinable list was removed the same way), **your workspaces** (name, role badge, active marker, Switch action — every workspace on the instance for a super admin, marked when deactivated, because this is the screen that reactivates one), and per ADMINISTERED workspace a **member table** (name/email/role) with add-by-email and remove actions. The role badge is a label DERIVED from the three flags ("admin" / "author + promoter" / "viewer") and is stored nowhere: no single word names an additive row. Removing the last admin is refused server-side (`workspace.in_use`) — a workspace nobody administers cannot be repaired from inside it. The three-checkbox editor, deactivation and reactivation are round 2 (113); this round renders the flags without editing them.
+Content, in order:
 
-The **switcher in the navbar** (§3) drives the active workspace; the screen's Switch buttons POST the same `/workspace/switch`. Expected refusals and successes alike render as §5.1 toasts — the redirect contract (`?ok=`/`?error=` query state, the login screen's idiom) is unchanged, but the layout renders the flash into the `#toast` stack server-side instead of the old inline banner (error copy verbatim from the reviewed 022/F8 wording); the generic error page is reserved for the unexpected (§6).
+**A create form**, super admins only (D-R11 removed the provisioning modes, and with them
+`workspace.creation_forbidden` and the joinable list; 114 removed the stale "provisioning mode on
+this server" footnote and the dead join section that survived them).
+
+**Your workspaces** — name, the role you hold there, the active marker, and the verbs. Every
+workspace on the instance for a super admin, with a `inactive` badge and a **Reactivate** verb on
+the deactivated ones, because this is the screen that brings one back; a member never sees a
+deactivated workspace at all ([Auth §11A.3](auth.md#11a3-deactivation) — deactivation must not be
+a signal anybody can read). **Deactivate**, **Reactivate** and **Delete** are super-admin verbs
+(`MANAGE_INSTANCE_WORKSPACES`); deactivation purges nothing, ever, and Reactivate is one row away,
+which is why neither carries a typed confirm. The role label is DERIVED from the three flags
+(`viewer` / `author` / `promoter` / `author · promoter` / `admin`) by the same `RoleModel.labelOf`
+the shell badge and the members table use, and is stored nowhere: no single word names an additive
+row (D-R2).
+
+**Members of the ACTIVE workspace** (114 §C.1) — one section, name/email, the derived role label,
+**three checkboxes** (`author` / `promoter` / `admin`) with a Save, and Remove. The add form at the
+foot carries the same three, so a member arrives with the role the operator meant: before 114 it
+posted `email` only and every member added from the UI was a viewer. Both verbs go through the SAME
+`WorkspaceService` methods the REST surface calls (`addMember`, `setMemberFlags`) — there is no
+second code path, so the last-admin rule and the `admin → author` normalisation are enforced once.
+
+- The flags form is a **REPLACE**: an unticked box is a role being taken away, and a form that
+  posted only what was ticked could never express a demotion.
+- `admin` implies `author`. The checkbox script ticks `author` when `admin` is ticked so the form
+  SHOWS the row it is about to write; the server normalises regardless and the database constrains
+  it (`chk_workspace_member_admin_authors`), so the script is a courtesy and never the rule.
+- **The last admin cannot be demoted or removed** — `409 workspace.last_admin`, rendered as a §5.1
+  error toast that names the remedy ("A workspace needs at least one admin. Give another member
+  admin first."). A workspace nobody administers cannot be repaired from inside it.
+- **Only the ACTIVE workspace gets a member table.** `ScopeInterceptor` judges
+  `MANAGE_WORKSPACE_MEMBERS` against `principal.workspace`, never the workspace named in the path,
+  so an admin of X working in Y had every member form for X rendered and every one of them refused
+  — invisibly, because the interceptor answers before the handler and htmx does not swap a 4xx.
+  The other administered workspaces are named in an `.app-note` with the Switch that reaches them.
+- **Pending invitations** (113) render as ghost rows under the members table when that round
+  lands; the anchor comment is in place.
+
+The **switcher in the rail** (§3.4) drives the active workspace and carries the role badge; the
+screen's Switch buttons POST the same `/workspace/switch`. Expected refusals and successes alike
+render as §5.1 toasts; the generic error page is reserved for the unexpected (§6).
+
+**The no-workspace state** — a principal with zero ACTIVE memberships (never added, removed from
+the last one, or every workspace they belong to deactivated) gets `workspaces/none` instead of an
+empty list: what happened, who to ask, and — super admins only — the create form. It is
+deliberately not an error page: nothing failed, and `error/403` would name the wrong problem.
+**Known gap (114):** the page is not reachable over HTTP yet. `ScopeInterceptor` refuses every
+governed route for a principal with no resolved workspace — `/workspaces` included — before any
+handler runs, so such a user currently meets a raw `404 workspace.not_found` envelope. Making it
+reachable needs `WORKSPACES_READ` to survive a null context ("list the workspaces you belong to"
+being the one operation that is meaningful with none), which is a `ScopeMatrix` change 114's fence
+excluded; the page, the controller branch and their tests are in place for it.
 
 ### 4.14 Change password (local accounts)
 
@@ -929,6 +1091,7 @@ Content: the packaged `docs/*.md` set (the exclusion policy — `docs/superpower
 |---|---|
 | URL | `GET /promotion` |
 | Auth required | Yes — **session only** for the Promote action (`POST /promotion/promote`); the listing needs `read` |
+| Rendered for (114) | The PLAN renders for every member — it is a read, and hiding it would leave an author unable to see what is waiting. **Promote** renders for `canPromote` **in the SOURCE workspace** (the ACTIVE one: `PromotionUiController` reads `principal.requireWorkspace()` and the interceptor judges `PROMOTE_VERSION` against that same context; no target-side role is consulted). A member without it reads a line naming who to ask — the one place this round explains an absence rather than leaving one, because a promotion screen with no button and no words reads as broken |
 | Purpose | Push released content from this deployment to its one configured higher environment ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)) |
 | Endpoints called | The target's [REST API §18](rest-api.md#18-promotion-endpoints-receiver) pair, server-side. The browser never talks to the target |
 | Design primitives | `.ds-table` (the listing), `.ds-empty` (the three empty states), `.ds-badge` (the target label and `absent`) |
@@ -1193,6 +1356,14 @@ These are **full-page** errors — the result of a browser navigation to a page 
 
 All error pages use the design system's `.ds-card` with appropriate `.ds-text--danger` or `.ds-text--warning` classes.
 
+**The no-workspace page is NOT one of them (114).** `workspaces/none` — reached when a principal
+has zero ACTIVE memberships — renders in the app shell, says what happened ("You're not a member of
+any active workspace"), says who to ask, and offers the create form to a super admin. Nothing
+failed: their credential is fine and their membership is absent, which `error/403` would describe
+wrongly. To that person a deactivated workspace and one that never existed look the same
+([Auth §11A.3](auth.md#11a3-deactivation)), so the page names neither. See §4.13 for the
+reachability gap this round left open and the one-line fix it needs.
+
 ---
 
 ## 7. Future Screens (Not in v1)
@@ -1213,6 +1384,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-09-10 | v1.33 | 115 site batch 3 | **§4.15 — the home page speaks to the buyer; the engineering moved to `/how-it-works`.** The homepage sells the outcome in a fixed fold (hero → before/after → the artifact) held to buyer vocabulary by the new `SiteBuyerLanguageTest` (no pipeline/DAG/federated/Iceberg/DuckDB/Parquet/MCP/JDBC/staging from `<main` to the end of `#artifact`; `/how-it-works` must carry ≥6 of those words — the mechanism moved, nothing hidden), with the H1 retargeted to "no data team required" (the pillar keeps the SQL-MCP-server keyword). New sections: verified-by-you, what-you-get (today/next-month badges), who-it's-for, a halved demo; the home FAQ became `SiteFaqs.HOME`'s eight buyer questions, which open `/faq`; the home page's next-month promise carries the roadmap pages' dated `status` markup, so the freshness guard covers it. The engine strip, the agent loop, "What's in the box" and the security teaser moved verbatim to the new `/how-it-works` engineering page (`SiteFaqs.APIS_AND_OPERATIONS`; nav's first item; full nine-edit mechanics incl. the `PublicPaths`/§8.3 row). `WebsiteFactsGuardTest`'s rendered tool-count leg and demo-name sweep followed the moved sections. |
+| 2026-09-10 | v1.34 | 114 RBAC screens | §4.3e (role visibility — the whole verb inventory and the flag that renders each), §3.4 (the role badge beside the switcher), §4.5a (datasource grants), §4.13 rewritten (members with three checkboxes, deactivation, the active-workspace rule), §6 (the no-workspace page), and a "Rendered for" note on §4.3/§4.4/§4.5/§4.6/§4.7/§4.10/§4.17. |
 | 2026-09-09 | v1.31 | 102 lifecycle dialogs | **§4.3d (new) — every lifecycle verb 101 shipped is reachable from a confirm dialog**, one partial per verb, in both explorers (`#px-dialog` / `#tx-dialog`) and both editors (`#pe-dialog` / `#te-dialog`); the template twins are addressed by name in the query. The 094 datasource-delete shape throughout: refusal branches render NO button, the POST re-runs the guard, refusals are §5.1 Shape C with the real 4xx, success is Shape A (re-rendered detail + toast + `HX-Trigger: lifecycle-changed` for the tree badge) — entity purges and editor verbs answer `HX-Redirect` with a flash toast. **Typed confirm (§5.1)** on the two irreversible verbs — type `v4`, type the entity's NAME — enforced client-side for the button and server-side as `400 *.confirm_mismatch` before the service runs; second use after the CLI's `--clean`. §4.3b's header carries at most ONE destructive verb (owner rule) and the version rows move their verbs into a per-row ⋯ menu where a §3.5-refused verb is absent, not disabled. §4.4/§4.7: the editors' native `window.confirm`/`window.alert` sites are gone (a static test pins zero), including the pre-101 discard text that had become false. Two new codes: `pipeline.version.confirm_mismatch` / `template.version.confirm_mismatch` (§13.13/§13.9, landed with constants and catalog rows in the same commit). |
 | 2026-09-09 | v1.30 | 097 the hybrid boundary made uniform | **§2.1 gains the FOURTH shape it never described** — a "Page-route mutation (PRG)" row plus its response contract (a `redirect:` back to the page, `?ok=`/`?error=` KEYS the layout maps to copy, and the §5.1 toast the `#toast-flash` bin turns them into — 076 §B had already retired the banners the round brief expected to find) and the two reasons a mutation may live there: its success changes the SHELL, or it must work without JS. The eight handlers are enumerated and justified one by one in `MutatingHandlerScopeFloorTest.PAGE_ROUTE_MUTATIONS`, whose new arm fails on any mutating handler outside `/partials` and `/api` that is not on that list — so the scheduler cannot invent a third idiom. **§5 gains the BrowseModel rule** (one `<Entity>BrowseModel` + a page controller + a partial controller; neither filters, pages or projects on its own), drift-tested by `BrowseModelConventionTest` over five pairs, and states the first-paint rule with the dashboard as its ONE exception. The rule is written because three screens had already paid for its absence: datasources' two hand-written filters had diverged (`GET /datasources?q=postgres` returned nothing while the typed search returned rows), executions painted a spinner and fetched its rows on a load trigger while ignoring the filters in its own URL, and admin users built its `<tr>`s as strings in Kotlin. All three now project through a model; the admin table and four other Kotlin-built markup sites became Thymeleaf fragments, and `InlineWidthAuditTest` widened from templates to every module's `main/kotlin` with an empty allowlist. **§4.7** — the template editor's ~135-line inline script left the template for `static/js/template-editor/lifecycle.js`: one CSRF reader (`static/js/csrf.js`), `htmx.ajax` for the `/partials` render (§2.1 as written), an in-page confirmation and toasts in place of `window.confirm`/`alert`, and nodes in place of `innerHTML`. |
 | 2026-09-08 | v1.26 | 099 draft-first (D55/D56) | **§4.3** — a new pipeline appears as `v1 draft`: the leaf and search rows name the WORKING version (the draft's number when one exists), because `p.currentVersion` alone rendered `vnull` once creation stopped releasing. The Release action stays the editor's and renders for a v1 draft exactly as for any later one. **§4.8/§4.9** — the executions list and detail label a **DRAFT** run beside the version (`data-draft-run`), from versioning §8's derivation; a v1 run is routinely a draft run now, so the number alone no longer says whether a result came from reviewed content. |
