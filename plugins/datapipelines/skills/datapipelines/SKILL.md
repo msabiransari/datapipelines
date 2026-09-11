@@ -123,6 +123,20 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    and the rows are the ground truth** — never write SQL against a column, a unit, a time
    zone or a sample rate you have not seen. Write what you learned into the pipeline's
    description. `references/authoring-playbook.md` §1 is the full procedure.
+
+   **Read the `facts` that arrive with the schema, before you probe.** `datasources_get`
+   carries the datasource-wide learned facts (its time window, whether it is a sample),
+   `_get_tables` each table's (grain, caveats), `_get_columns` each column's (units, time
+   zones, what a coded value means, joins) — what earlier sessions learned and recorded, each
+   with its `trust` and the evidence that showed it. A fact marked `observed` or `verified`
+   with evidence saves you the probe; one marked `stale` or `needs_review` is a warning, not a
+   truth — re-verify it.
+
+   **Record what you learned, with the query that showed it.** After you have established a
+   fact about the data that introspection could not tell you — a unit, a time zone, a sample
+   rate, a grain, what a coded value means, a join that holds — call `semantics_record` with
+   the probe you ran; when you re-verified a stale fact, record the superseding one. Never
+   record what introspection already returns (types, keys, comments).
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
    will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
@@ -372,7 +386,7 @@ deployment serves them at `GET /skill/<name>.md`; inside a checkout they are fil
 - `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (35 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (38 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings
