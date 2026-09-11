@@ -327,13 +327,11 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         createDraftTemplate("test/lifecycle_probe_twin.sql")
 
         listOf("light", "dark").forEach { mode ->
-            if (mode == "dark") {
-                page.setViewportSize(1280, 900)
-                page.navigate("$baseUrl/pipelines")
-                page.waitForLoadState(LoadState.NETWORKIDLE)
-                page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-                page.locator("html[data-theme='dark']").waitFor()
-            }
+            // Theme-agnostic: the deployment default is dark, so BOTH halves ask for their mode.
+            page.setViewportSize(1280, 900)
+            page.navigate("$baseUrl/pipelines")
+            page.waitForLoadState(LoadState.NETWORKIDLE)
+            ensureTheme(mode)
             listOf(1280, 390).forEach { w ->
                 page.setViewportSize(w, 900)
                 page.navigate("$baseUrl/pipelines")

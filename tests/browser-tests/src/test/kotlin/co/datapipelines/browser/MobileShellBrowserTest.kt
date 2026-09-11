@@ -230,10 +230,12 @@ class MobileShellBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/dashboard")
         page.waitForLoadState(LoadState.NETWORKIDLE)
         page.emulateMedia(Page.EmulateMediaOptions().setColorScheme(ColorScheme.DARK))
-        page.locator("#mode-toggle").click()
-        page.waitForFunction(
-            "() => document.getElementById('theme-link').getAttribute('href').includes('/themes/dark.css')",
-        )
+        // The deployment default is dark (2026-09-11). A blind toggle-then-wait-for-dark
+        // PASSED on a laptop only by racing: the href still read dark.css when the wait
+        // first evaluated, before the PATCH's swap to light landed. On the CI runner the
+        // swap landed first and the wait never saw dark again (90 s, every run). Ask for the
+        // mode by name; the helper is a no-op when it is already live.
+        ensureTheme("dark")
         shot(shots, "dashboard-390-dark")
         shotPipelinesDrawer(shots, "pipelines-390-drawer-dark")
         shotRegisterModal(shots, "datasources-register-modal-390-dark")
@@ -244,10 +246,7 @@ class MobileShellBrowserTest : BrowserSuite() {
         page.setViewportSize(768, 1024)
         page.navigate("$baseUrl/dashboard")
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        page.locator("#mode-toggle").click()
-        page.waitForFunction(
-            "() => document.getElementById('theme-link').getAttribute('href').includes('/themes/light.css')",
-        )
+        ensureTheme("light")
         shot(shots, "dashboard-768-light")
     }
 

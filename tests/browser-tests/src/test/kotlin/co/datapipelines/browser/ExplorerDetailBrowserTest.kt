@@ -488,12 +488,15 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         ready()
         seed()
 
+        page.navigate("$baseUrl/pipelines")
+        ensureTheme("light") // the deployment default is dark; the light walk asks for light
         walk("light")
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/pipelines")
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.locator("html[data-theme='dark']").waitFor()
+        // The deployment default is dark: a blind toggle would flip to LIGHT and the wait
+        // for dark would match only by racing the swap (it did, on laptops; not on CI).
+        ensureTheme("dark")
         walk("dark")
     }
 
