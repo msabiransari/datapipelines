@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Semantic layer</li>
+    </ol>
+  </nav>
+
+  <!--/* 119 §B — the page for the learned semantic layer. The category term ("semantic
+       layer") is what buyers and engineers search, and every existing product under it is a
+       model somebody writes and nobody updates. Ours is the opposite mechanism, and this
+       page says so without once saying "understands" or "AI-powered": the agent learns a
+       fact about YOUR data, records it WITH the query that proved it, and the next agent
+       reads it inline where it was already looking. Every factual sentence carries its cite
+       in a claim comment; the `facts[]` example is verbatim from 118's end-to-end wire
+       capture; the kinds table is guarded against enums.md §19 by SiteSemanticLayerGuardsTest. */-->
+  <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §1, §2 — why the layer is learned, the two scopes (D-S1) and the closed kind list (D-S2) -->
+  <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5, §6 — the trust ladder and the read-time drift check (D-S4, D-S5, D-S6) -->
+  <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7, §13 — the shipped surfaces and the "As shipped" deviations -->
+  <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §11 — round 2 items named on the next list -->
+  <!-- claim: docs/enums.md §19 — the LearnedFactKind table this page renders (guard: SiteSemanticLayerGuardsTest) -->
+  <!-- claim: docs/semantic-layer-research.md Part one, Part five — the market vocabulary and the owner's no-hand-authored-model direction -->
+  <!-- claim: handbacks/118-learned-semantic-layer-v1.md — the facts[] wire example and the tools' schemas, captured from the running server -->
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "A semantic layer that learns, instead of one you write",
+    "datePublished": "2026-09-11",
+    "dateModified": "2026-09-11",
+    "author": { "@type": "Organization", "name": "datapipelines.co" },
+    "publisher": { "@type": "Organization", "name": "datapipelines.co" },
+    "mainEntityOfPage": "https://datapipelines.co/semantic-layer"
+  }
+  </script>
+
+  <section class="section page-hero" aria-labelledby="sl-title">
+    <div class="container">
+      <p class="kicker">Learned by the agent, with evidence</p>
+      <h1 id="sl-title" class="ds-display">A semantic layer that learns, instead of one you write</h1>
+      <p class="section-lede">
+        …for the AI agents that write your SQL. Every agent session reads your schema and probes your data; this one
+        records what it established — a unit, a time zone, a grain, what a code means — with the query that proved it,
+        and every agent after it starts from evidence instead of guessing. Open source, self-hosted, part of the
+        <a th:href="@{/how-it-works}">server your agent already talks to</a>.
+      </p>
+      <p class="dateline" data-roadmap-updated="2026-09-11">Last updated 2026-09-11</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-what">
+    <div class="container">
+      <h2 id="sl-what" class="ds-headline">What a semantic layer is, in the searcher's words</h2>
+      <div class="prose">
+        <!-- claim: docs/semantic-layer-research.md Part one (the convergence: dataset, dimension, measure, relationship, AI context) -->
+        <p>
+          A semantic layer is the set of shared definitions that make two people's — or two agents' — numbers agree:
+          what "revenue" means, which column is the timestamp and in what time zone, how the orders table joins to the
+          customers table, what status code 4 means, what one row represents. dbt's Semantic Layer, Cube, AtScale and
+          LookML all sell versions of the same idea, and behind the different names sits the same anatomy: measures,
+          dimensions, grain, join paths, and the governance that keeps them honest. The honest sentence about the
+          category: in every existing implementation, that shared definition is a file somebody writes by hand — and
+          nobody updates.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-rot">
+    <div class="container">
+      <h2 id="sl-rot" class="ds-headline">Why written models rot</h2>
+      <div class="prose">
+        <!-- claim: docs/semantic-layer-research.md Part five, Decision 1 (the owner rejects the hand-authored model as the authoring mechanism) -->
+        <p>
+          The person who knew what <code>pickup_ts</code> really is leaves. The schema changes under the model. The YAML
+          says the timestamp is UTC and nobody re-checks; the warehouse rename lands on Tuesday and the definition file
+          still points at a column that no longer exists. The failure is silent, because nothing checks a hand-written
+          model against the live database — and an LLM reading that stale file does so with total confidence. That is
+          the argument against the category as-is, and it is why we did not build a better editor for model files.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-learned">
+    <div class="container">
+      <h2 id="sl-learned" class="ds-headline">A semantic model you do not write</h2>
+      <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S7: merged into the metadata surface, no separate step to forget) -->
+      <p class="section-lede">
+        A semantic model is usually a thing you author: entities, measures, dimensions, joins. Here the model is a
+        side effect of the work. The loop, in four steps:
+      </p>
+      <ol class="steps">
+        <li>
+          <h3>The agent reads the schema and probes the rows</h3>
+          <!-- claim: docs/datasources.md §7, docs/datasources.md §7D (the introspection and probe surfaces) -->
+          <p>Introspection says a column is DECIMAL(6,2); it cannot say the value is already in degrees Celsius while a sibling column names its unit. So the agent probes — a bounded, read-only SELECT.</p>
+        </li>
+        <li>
+          <h3>It establishes a fact introspection cannot state</h3>
+          <!-- claim: docs/enums.md §19 (the closed kind list: unit, time_zone, sampling, grain, window, enum_meaning, join, caveat, format, definition, exclusion, preference) -->
+          <p>A unit. A time zone. A sample rate. A grain — one row per what. What a coded value means. A join that holds. A trap. A business definition like "revenue excludes tips".</p>
+        </li>
+        <li>
+          <h3>It records the fact with the query that proved it</h3>
+          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5 (D-S4: evidence-bearing; without evidence the fact is only asserted) -->
+          <p><code>semantics_record</code> stores the fact, its references and its evidence SQL; the evidence runs once at record time, and a fact without evidence is stored as merely <em>asserted</em> — never as observed.</p>
+        </li>
+        <li>
+          <h3>The next agent sees it inline, where it is looking</h3>
+          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.2 (the introspection enrichment) -->
+          <p>No separate "query the memory" step to forget: the facts arrive on <code>datasources_get_columns</code>, <code>datasources_get_tables</code> and <code>datasources_get</code>, and on their REST twins.</p>
+        </li>
+      </ol>
+      <p class="how-footnote">
+        One real response — the sample deployment's <code>datasources_get_columns</code>, captured verbatim from the
+        end-to-end wire test the learned-semantics round shipped — with a recorded unit fact riding on exactly one
+        column:
+      </p>
+      <div class="code-block">
+        <pre><code>[
+  {
+    "name": "id",
+    "type": "INTEGER",
+    "nullable": false,
+    "source_type": "serial",
+    "warnings": []
+  },
+  {
+    "name": "station",
+    "type": "STRING",
+    "nullable": false,
+    "source_type": "text",
+    "warnings": []
+  },
+  {
+    "name": "value_c",
+    "type": "DECIMAL",
+    "precision": 6,
+    "scale": 2,
+    "nullable": false,
+    "source_type": "numeric",
+    "warnings": [],
+    "facts": [
+      {
+        "id": "08938150-f062-4dfb-a52e-b797c2786e15",
+        "scope": "DATASOURCE",
+        "kind": "unit",
+        "fact": "value_c is already in degrees Celsius — never tenths",
+        "trust": "observed",
+        "evidence_summary": "value_c=21.40, unit=c | value_c=19.05, unit=c",
+        "recorded_via": "mcp",
+        "recorded_at": "2026-09-11T16:43:04.080418Z",
+        "from_this_workspace": true,
+        "source_pipeline": {
+          "id": "5e5a0000-0000-0000-0000-0000000000d4",
+          "name": "finance/revenue"
+        }
+      }
+    ]
+  },
+  {
+    "name": "unit",
+    "type": "STRING",
+    "nullable": false,
+    "source_type": "text",
+    "warnings": []
+  }
+]</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-scopes">
+    <div class="container">
+      <h2 id="sl-scopes" class="ds-headline">Two kinds of fact: a business glossary that maintains itself</h2>
+      <div class="prose">
+        <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S1: two scopes, one table) -->
+        <p>
+          Facts come in two scopes, and the split is the difference between physics and policy. A <strong>datasource
+          fact</strong> is true for everyone who reads the data — a unit, a time zone, a sample rate — and it travels
+          with the datasource to every workspace the datasource is granted to. A <strong>workspace fact</strong> is an
+          organisation's meaning — "revenue excludes tips", "regions means the five named ones" — and it stays private
+          to the workspace that recorded it, because another workspace on the same warehouse may define it differently.
+        </p>
+        <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S2: never store what introspection says) -->
+        <p>
+          Nothing JDBC already knows is stored. Types, nullability, keys and comments stay where introspection serves
+          them, because a second copy of a type is a lie by the second week — the store exists for what introspection
+          cannot say, and the facts are checked against introspection, not duplicated by it.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-trust">
+    <div class="container">
+      <h2 id="sl-trust" class="ds-headline">Trust is earned, not assumed</h2>
+      <div class="prose">
+        <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5 (D-S4, D-S5) -->
+        <p>
+          Every fact carries its trust state, and the ladder is short: <code>asserted</code> — recorded without
+          evidence; <code>observed</code> — the evidence query ran at record time and its first rows became the
+          evidence summary; <code>verified</code> — a person confirmed it. A fact is never higher-trust than its
+          evidence: "the pipeline executed" is not evidence of semantic correctness. And when two live facts of the
+          same kind disagree — gross versus net revenue — they coexist and are flagged as a conflict, with provenance
+          on each. The store never picks a winner for you.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-drift">
+    <div class="container">
+      <h2 id="sl-drift" class="ds-headline">Schema drift is detected, never guessed</h2>
+      <div class="prose">
+        <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §6 (the read-time check), §2 (D-S6: never edit, never auto-remap) -->
+        <p>
+          Every introspection response that carries facts also recomputes each fact's fingerprint from the columns it
+          just read — no extra queries. Rename or drop a column and its facts flip to <code>stale</code> at the next
+          read, shown beside the current columns with a message naming what no longer exists. Change a table's column
+          set around a fact that still resolves and the fact is marked <code>needs_review</code>. Three states, all
+          visible, none fatal:
+        </p>
+      </div>
+      <ul class="fact-list-plain sec-list">
+        <li><strong>served as stored</strong> — every reference resolves and the fingerprint matches;</li>
+        <li><strong>needs_review</strong> — the refs still resolve but the table changed since the fact was recorded;</li>
+        <li><strong>stale</strong> — a referenced column or table no longer exists; the fact is shown only as history, never as current truth.</li>
+      </ul>
+      <div class="prose">
+        <p>
+          What a machine never does is decide that a dropped column and a new column are the same thing — a rename and
+          a "drop plus unrelated add" are indistinguishable to software, so nothing is re-mapped automatically. Someone
+          re-verifies and records the successor with <code>supersedes</code>, which links the history and retires the
+          predecessor as <code>superseded</code>. Facts are never deleted; retirement is a state with a reason.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-now">
+    <div class="container">
+      <p class="kicker"><span class="status status-shipped">Today</span></p>
+      <h2 id="sl-now" class="ds-headline">What ships now</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6.1, docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.1 -->
+          <h3>Three MCP tools</h3>
+          <p><code>semantics_record</code>, <code>semantics_list</code>, <code>semantics_retire</code> — record, review and retire, with evidence run at record time and every record landing an audit row.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.2; the REST twins: docs/rest-api.md §9.7A -->
+          <h3>Facts on MCP and REST introspection</h3>
+          <p>The <code>facts[]</code> block rides on <code>datasources_get</code>, <code>_get_tables</code> and <code>_get_columns</code> — and on the same three REST endpoints, so a dashboard can read it too.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §6 -->
+          <h3>Drift at read</h3>
+          <p>Fingerprints recomputed on every introspection read: stale and needs_review marked beside the live columns, with the drift message naming what changed.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.3, §13 (round 1's UI is read-only: a Facts dialog, no recording) -->
+          <h3>The facts list, read-only</h3>
+          <p>A read-only Facts dialog on every datasource row and the same list on the lake detail — trust badges, drift messages, conflicts and provenance. Recording stays with the agent (and REST reads) for now.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-next">
+    <div class="container">
+      <p class="kicker"><span class="status">Next · decided, not scheduled</span></p>
+      <h2 id="sl-next" class="ds-headline">What is next</h2>
+      <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §11 (round 2: harvesting, the index, UI recording, promotion by agreement, OSI export) -->
+      <ul class="fact-list-plain sec-list">
+        <li>Recording and verifying from the UI (round 1's screen is deliberately read-only).</li>
+        <li>Harvesting candidate definitions from saved pipelines — proposed as <code>asserted</code>, never auto-observed.</li>
+        <li>A question-level index: "what do we know about revenue?" across datasources.</li>
+        <li>Promotion by agreement — two independent pipelines computing the same definition.</li>
+        <li>Export as OSI, the interchange format the research brief left the door open for.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-compare">
+    <div class="container">
+      <h2 id="sl-compare" class="ds-headline">How this differs from the dbt semantic layer and Cube</h2>
+      <div class="prose">
+        <!-- claim: docs/semantic-layer-research.md Part one (what dbt/MetricFlow and Cube say they are, from their own docs), Part five Decision 1 -->
+        <p>
+          The dbt semantic layer and Cube are <em>compiled metrics layers</em>: you author a model of measures,
+          dimensions and joins — in YAML for dbt's MetricFlow, in a data model for Cube — and their engines compile
+          that model into consistent metric SQL for the BI tools and applications that call them. That compilation is
+          genuinely valuable, and it is the part we do not do: one measure definition generating the same SQL in
+          Looker, Tableau and a notebook is their strength, and the honest comparison names it.
+        </p>
+        <p>
+          Ours is the opposite direction: not a model you author and an engine compiles, but facts the agent records —
+          attached to your live schema, checked against it on every read, and served to the agent in the introspection
+          response it was already making. There is no YAML to rot and no file to deploy; there is also, today, no
+          compiled metric SQL for BI tools. If that direction matters to you, it is on the
+          <a th:href="@{/roadmap}">roadmap</a> — a universal semantic layer for dashboards and metrics is the same
+          round that brings dashboards, and the headless-BI integration it implies is named there, not here.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sl-engineer">
+    <div class="container">
+      <h2 id="sl-engineer" class="ds-headline">For the engineer: the tools, the kinds, the rules</h2>
+      <div class="prose">
+        <!-- claim: docs/mcp-server.md §6.2 (the three tools' schemas, renumbered by 118's merge); docs/auth.md §7.6 (the scope matrix) -->
+        <p>
+          Three tools, from <code>tools/list</code>: <code>semantics_record</code> — one fact, its structural
+          references, its optional evidence SQL; <code>semantics_list</code> — the facts on a datasource, with trust,
+          drift and provenance, filtered by table, scope or time; <code>semantics_retire</code> — one id, one reason,
+          no delete. Recording needs an <code>author</code>-scoped key; viewing needs none beyond the datasource's
+          visibility — <strong>authors record, viewers never</strong>. Every record lands a
+          <code>semantics.recorded</code> audit row with kind, scope, refs and whether evidence ran.
+        </p>
+        <p>
+          The facts live in <code>learned_facts</code> — a Postgres table in your deployment's metadata database.
+          Nothing leaves: the store is yours, the evidence queries run against your data through the same read-only
+          probe path every other query uses, and a datasource delete cascades its facts when the object itself is gone.
+        </p>
+      </div>
+      <h3 class="group-title">The kinds of fact</h3>
+      <!-- claim: docs/enums.md §19 — rendered from that table; SiteSemanticLayerGuardsTest parses both and fails the build on drift -->
+      <table class="facts-table">
+        <caption>The twelve kinds, each in exactly one scope (enums.md §19). No type, nullable, key or comment kind exists — that is introspection's job.</caption>
+        <thead>
+          <tr><th scope="col">Kind</th><th scope="col">Scope</th><th scope="col">The fact it records</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>unit</code></th><td>DATASOURCE</td><td>The unit of a numeric column</td></tr>
+          <tr><th scope="row"><code>time_zone</code></th><td>DATASOURCE</td><td>What a timestamp's wall-clock means</td></tr>
+          <tr><th scope="row"><code>sampling</code></th><td>DATASOURCE</td><td>The population relation of a table</td></tr>
+          <tr><th scope="row"><code>grain</code></th><td>DATASOURCE</td><td>One row is one what</td></tr>
+          <tr><th scope="row"><code>window</code></th><td>DATASOURCE</td><td>The data's coverage in time</td></tr>
+          <tr><th scope="row"><code>enum_meaning</code></th><td>DATASOURCE</td><td>What a coded value means</td></tr>
+          <tr><th scope="row"><code>join</code></th><td>DATASOURCE</td><td>How two tables relate</td></tr>
+          <tr><th scope="row"><code>caveat</code></th><td>DATASOURCE</td><td>A trap</td></tr>
+          <tr><th scope="row"><code>format</code></th><td>DATASOURCE</td><td>Encoding of a text column</td></tr>
+          <tr><th scope="row"><code>definition</code></th><td>WORKSPACE</td><td>A business measure or entity</td></tr>
+          <tr><th scope="row"><code>exclusion</code></th><td>WORKSPACE</td><td>What a business question leaves out</td></tr>
+          <tr><th scope="row"><code>preference</code></th><td>WORKSPACE</td><td>How this organisation wants a thing computed</td></tr>
+        </tbody>
+      </table>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/mcp-tools}">Every tool, generated from the catalog</a>
+        <a class="btn btn-secondary" th:href="@{/docs/mcp-server}">The tools' full schemas</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Questions this page gets</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The semantic layer, in questions')}"></div>
+      <p class="features-pointer">The engineering picture is <a th:href="@{/how-it-works}">how it works</a>; the sample data it learns on is the <a th:href="@{/demo-data}">demo data</a>; what ships next is on the <a th:href="@{/roadmap}">roadmap</a>.</p>
+    </div>
+  </section>
+
+</th:block>
+</html>

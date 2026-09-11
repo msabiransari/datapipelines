@@ -79,7 +79,12 @@
     <button type="button" class="theme-toggle" data-theme-toggle hidden>Theme: Auto</button>
     <nav class="nav-wide" aria-label="Primary">
       <!-- 115: "How it works" leads the nav; the MCP-server pillar keeps its footer column
-           and its own page — the buyer lands on the home page, the engineer one hop away. -->
+           and its own page — the buyer lands on the home page, the engineer one hop away.
+           119 §C: Pricing joins (the one nav addition its round was allowed), GitHub wears
+           a STATIC star count (no runtime fetch — the CSP forbids third-party requests),
+           an AGPL-3.0 chip sits beside it, and the last item's LABEL is a fact about the
+           host: on datapipelines.co a visitor is invited to the live demo, on a customer's
+           own deployment the same route is how their people sign in. -->
       <a th:href="@{/how-it-works}">How it works</a>
       <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
       <a th:href="@{/published-api}">API</a>
@@ -87,8 +92,12 @@
       <a th:href="@{/roadmap}">Roadmap</a>
       <a th:href="@{/faq}">FAQ</a>
       <a th:href="@{/docs}">Docs</a>
-      <a class="nav-github" href="https://github.com/msabiransari/datapipelines">GitHub</a>
-      <a class="nav-github" th:href="@{/login}">Sign in</a>
+      <a th:href="@{/pricing}">Pricing</a>
+      <a class="nav-github" href="https://github.com/msabiransari/datapipelines">
+        <span aria-hidden="true">&starf;</span> GitHub <span class="nav-star-count" th:text="${githubStars}">0</span>
+      </a>
+      <a class="nav-chip" th:href="@{/pricing}">AGPL-3.0</a>
+      <a class="nav-github" th:href="@{/login}" th:text="${publicOrigin} ? 'Try the live demo' : 'Sign in'">Sign in</a>
     </nav>
     <details class="nav-mobile">
       <summary aria-label="Open menu">
@@ -104,8 +113,10 @@
         <a th:href="@{/roadmap}">Roadmap</a>
         <a th:href="@{/faq}">FAQ</a>
         <a th:href="@{/docs}">Docs</a>
-        <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
-        <a th:href="@{/login}">Sign in</a>
+        <a th:href="@{/pricing}">Pricing</a>
+        <a href="https://github.com/msabiransari/datapipelines">&starf; GitHub <span class="nav-star-count" th:text="${githubStars}">0</span></a>
+        <a class="nav-chip" th:href="@{/pricing}">AGPL-3.0</a>
+        <a th:href="@{/login}" th:text="${publicOrigin} ? 'Try the live demo' : 'Sign in'">Sign in</a>
       </nav>
     </details>
   </div>
@@ -135,6 +146,7 @@
           <li><a th:href="@{/federated-query}">Federated query</a></li>
           <li><a th:href="@{/dp-lake}">dp-lake</a></li>
           <li><a th:href="@{/demo-data}">Demo data</a></li>
+          <li><a th:href="@{/semantic-layer}">The semantic layer, learned</a></li>
           <li><a th:href="@{/published-api}">SQL to API</a></li>
           <li><a th:href="@{/mcp-tools}">The MCP tools</a></li>
           <li><a th:href="@{/security}">Security</a></li>
@@ -162,8 +174,12 @@
           <li><a th:href="@{/docs}">Documentation</a></li>
           <li><a th:href="@{/faq}">FAQ</a></li>
           <li><a th:href="@{/roadmap}">Roadmap</a></li>
+          <li><a th:href="@{/pricing}">Pricing — free and open source</a></li>
           <li><a href="https://github.com/msabiransari/datapipelines">GitHub</a></li>
-          <li><a th:href="@{/login}">Sign in</a></li>
+          <!-- 119 §C.6: the one contact address, rendered from SitePages.CONTACT_EMAIL —
+               never typed in a template; the mailto sweep test holds every page to it. -->
+          <li><a th:href="'mailto:' + ${contactEmail}">Contact — <span th:text="${contactEmail}">datapipelines.co@gmail.com</span></a></li>
+          <li><a th:href="@{/login}" th:text="${publicOrigin} ? 'Try the live demo' : 'Sign in'">Sign in</a></li>
         </ul>
       </div>
     </nav>
@@ -179,7 +195,7 @@
      SiteClaimCitationTest sweeps (that guard reads templates, not renders).
      Parameters: entries, twoCol (true on the home page and /faq), heading (a visible h2 or
      null when the caller owns the heading). */-->
-<div th:fragment="faq(entries, twoCol, heading)" xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="faq(entries, twoCol, heading)" class="faq-block" xmlns:th="http://www.thymeleaf.org">
   <h2 id="faq-title" th:if="${heading != null}" th:text="${heading}">Questions people ask</h2>
   <div class="faq" th:classappend="${twoCol} ? 'faq-2col' : ''">
     <th:block th:each="e, st : ${entries}">

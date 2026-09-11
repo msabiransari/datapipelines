@@ -63,7 +63,9 @@ class SiteV2GuardsTest {
     fun `the roadmap pages are younger than the promises they make`() {
         // Both roadmap pages — /roadmap and the Tableau roadmap page (111) — promise months,
         // so both are revisited on the same clock and carry the same dateline discipline.
-        listOf(SitePages.ROADMAP, SitePages.TABLEAU_ROADMAP).forEach { page ->
+        // 119 §C.4/§B.7: /pricing promises "no paid tier today" and /semantic-layer dates
+        // its today/next list the same way, so both promises are covered by this clock.
+        listOf(SitePages.ROADMAP, SitePages.TABLEAU_ROADMAP, SitePages.PRICING, SitePages.SEMANTIC_LAYER).forEach { page ->
             val html = rendered.getValue(page)
             val updated = Regex("""data-roadmap-updated="([0-9-]+)"""").find(html)!!.groupValues[1]
             val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())

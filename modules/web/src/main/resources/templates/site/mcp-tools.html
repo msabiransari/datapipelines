@@ -52,6 +52,8 @@
           stay <code>read</code> — a count the engine already stored is shape, not data.
         </p>
       </div>
+      <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7 (the semantics_* tools), docs/enums.md §19 (the kinds they record) -->
+      <p class="engine-strip-more">The three <code>semantics_*</code> tools record what an agent learned about your data — a unit, a time zone, a grain, what a code means — so the next session reads it beside the columns. <a th:href="@{/semantic-layer}">The learned semantic layer &rarr;</a></p>
       <div th:each="g : ${toolGroups}" class="feature-group">
         <h3 class="group-title" th:text="${g.title}">Family</h3>
         <ul class="tool-list">

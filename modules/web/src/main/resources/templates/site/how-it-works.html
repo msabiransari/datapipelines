@@ -207,9 +207,9 @@
           </svg>
           <!-- claim: docs/templates.md §4.2–§6 -->
           <h3>Freemarker SQL templates</h3>
-          <p>A save-time scan walks the parsed template AST against a forbidden-construct list — <code>?eval</code>, <code>?new</code>, <code>?api</code>, in-body imports — so SSTI vectors are rejected before a template is ever saved. Library templates import declaratively.</p>
+          <p>A save-time scan walks the parsed template AST against a forbidden-construct list — <code>?eval</code>, <code>?new</code>, <code>?api</code>, in-body imports — so SSTI vectors are rejected before a template is ever saved.</p>
           <!-- claim: docs/templates.md §4.5, §8.4 -->
-          <p>Declared parameters bind as <code>:name</code> on a prepared statement — never interpolated. A template that interpolates a declared parameter into the SQL text instead is refused at save with <code>template.validation.parameter_interpolated</code>, and the message names the bind form to write.<!-- deliberately phrased without a literal dollar-brace: that sequence is how an unresolved Thymeleaf expression looks, and SiteRenderTest sweeps the RENDER for it (an entity is decoded back by the parser) --></p>
+          <p>Declared parameters bind as <code>:name</code> on a prepared statement — never interpolated. Interpolating one into the SQL text instead is refused at save with <code>template.validation.parameter_interpolated</code>.<!-- deliberately phrased without a literal dollar-brace: that sequence is how an unresolved Thymeleaf expression looks, and SiteRenderTest sweeps the RENDER for it (an entity is decoded back by the parser) --></p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -232,11 +232,10 @@
           </svg>
           <!-- claim: docs/template-hierarchy-design.md §4.1, §4.3, §4.5 -->
           <h3>Names are paths, and a folder is mandatory</h3>
-          <p>A template's or pipeline's name <em>is</em> its path — <code>nyc/mobility/revenue_by_borough</code>, <strong>2 to 10 segments</strong>, and the first one is a folder: the root holds folders only. A flat name is refused with <code>details.reason = "folder_required"</code>, and scratch work has a home, <code>test/</code>. Folders are virtual — derived from name prefixes, with no identity, no CRUD and no rename, because a name is an identity every pin depends on.</p>
+          <p>A template's or pipeline's name <em>is</em> its path — <code>nyc/mobility/revenue_by_borough</code>, <strong>2 to 10 segments</strong>, and the first one is a folder: the root holds folders only. A flat name is refused with <code>details.reason = "folder_required"</code>.</p>
           <!-- claim: docs/mcp-server.md §6.2.4, §6.2.8 (the confirm_new_root argument) -->
-          <p>An agent that invents a NEW top-level root is refused until it says so on purpose: <code>confirm_new_root</code>, with the roots that already exist in the error's details. Asking a person before minting a namespace is a guarantee here, not advice in a description.</p>
-          <!-- claim: docs/ui-screens.md §4.6 -->
-          <p>The explorer is a real tree — one server-side prefix query per level, versions on the right, browse and search as two different presentations. The same tree serves pipelines, and the MCP list tools take the same <code>prefix</code>.</p>
+          <p>An agent that invents a NEW top-level root is refused until it says so on purpose: <code>confirm_new_root</code>, with the roots that already exist in the error's details. Asking a person before minting a namespace is a guarantee here, not advice.</p>
+          <a class="card-link" th:href="@{/docs/mcp-server}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -310,9 +309,10 @@
           </svg>
           <!-- claim: docs/datasources.md §8C, §8C.1, §8C.2 -->
           <h3>dp-lake: Parquet and Iceberg, read in place</h3>
-          <p>A <code>LAKE</code> datasource queries Parquet and Apache Iceberg on S3 or any S3-compatible store with no warehouse and no load step. DuckDB is the engine; the catalog is the server's own registry, <strong>dp-catalog</strong>, because the engine cannot list a bucket — tables are registered over REST or by an agent through the <code>lake_tables_*</code> tools, and each becomes a view at connect.</p>
+          <p>A <code>LAKE</code> datasource queries Parquet and Apache Iceberg on S3 or any S3-compatible store with no warehouse and no load step. DuckDB is the engine; the catalog is the server's own registry, <strong>dp-catalog</strong> — tables are registered over REST or by an agent through the <code>lake_tables_*</code> tools.</p>
           <!-- claim: docs/datasources.md §8C.2, §8C.8 -->
           <p>Hive-partitioned Parquet is scanned with partition pruning, so a date predicate reads the days it names and not the table. It is a <strong>read</strong> connector: there is no write path to the bucket. <a th:href="@{/dp-lake}">The whole dp-lake story &rarr;</a></p>
+          <a class="card-link" th:href="@{/docs/datasources}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -342,11 +342,12 @@
           </svg>
           <!-- claim: docs/pipeline-editor.md §5.3, §4.3 -->
           <h3>The pipeline editor</h3>
-          <p>The DAG renders on a full-bleed canvas as node <em>cards</em>, with the facts inside the box: name, a type badge, <code>datasource · dialect</code>, <code>template @ version</code>, and — after a run — elapsed time and rows. Colour carries state, the badge carries type, the ring carries selection, and a minimap holds your place on a big graph.</p>
+          <p>The DAG renders on a full-bleed canvas as node <em>cards</em>, with the facts inside the box: name, a type badge, <code>datasource · dialect</code>, <code>template @ version</code>, and after a run, elapsed time and rows.</p>
           <!-- claim: docs/pipeline-editor.md §10, §10.2, §8 -->
-          <p>Underneath sits one dock with four tabs — <strong>Details</strong>, <strong>Results</strong>, <strong>Errors</strong>, <strong>Events</strong>. A node's details open from the card itself and carry the SQL <em>resolved</em>; a failure opens Errors; every event of the run is in arrival order under Events.</p>
+          <p>One dock, four tabs — <strong>Details</strong>, <strong>Results</strong>, <strong>Errors</strong>, <strong>Events</strong>: a failure opens Errors, every event in arrival order.</p>
           <!-- claim: docs/pipeline-editor.md §11.1, §11.3 -->
-          <p>It executes, streams, cancels, pages results and switches versions. What it deliberately does not do is author: there is no edit mode in v1, because authoring is agent-first. That one is on the roadmap, and it is named there.</p>
+          <p>It executes, streams, cancels and pages results. What it deliberately does not do is author: no edit mode in v1 — authoring is agent-first.</p>
+          <a class="card-link" th:href="@{/docs/pipeline-editor}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -398,11 +399,10 @@
           </svg>
           <!-- claim: docs/versioning.md §10.1, §10.2, §10.3 -->
           <h3>Promotion between environments</h3>
-          <p>Push dev → staging → prod from the UI. The screen lists only <strong>released</strong> versions newer than the target's; drafts never leave the authoring environment, and a same-version push is refused as a bug rather than swallowed as a no-op. Templates and child pipelines travel first, as a dependency closure.</p>
+          <p>Push dev → staging → prod from the UI. The screen lists only <strong>released</strong> versions newer than the target's; drafts never leave the authoring environment, and templates and child pipelines travel first, as a dependency closure.</p>
           <!-- claim: docs/auth.md §7.7 (the server kind), docs/versioning.md §10.6, docs/deployment.md §6.3A -->
-          <p>The credential is a <strong><code>server</code>-kind API key</strong>, not a principal — no user account, so rotation and offboarding are independent of any person. An admin mints it, it is Argon2id-hashed and revocable like every other key, and it opens the promotion routes and nothing else. Rotation is: mint a second, set it on the sender, revoke the first — no restart on either side. No key on either side means promotion is refused; the receiver validates and never calls back.</p>
-          <!-- claim: docs/auth.md §4.5, docs/versioning.md §10.6 -->
-          <p>Imported rows are stamped with a <code>system</code> service account that cannot log in, and the receiver's audit event records the source environment and a fingerprint of the key — never the key.</p>
+          <p>The credential is a <strong><code>server</code>-kind API key</strong>, not a principal — no user account, so rotation and offboarding are independent of any person. Rotation is: mint a second, set it on the sender, revoke the first — no restart on either side.</p>
+          <a class="card-link" th:href="@{/docs/versioning}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -413,11 +413,12 @@
           </svg>
           <!-- claim: docs/deployment.md §6.2 -->
           <h3>Multi-instance ready</h3>
-          <p>Instances are symmetric and stateless for API, MCP, UI and auth — no sticky sessions. Only a <em>running</em> execution is pinned to one JVM; cancel works from any instance through Redis, and results, history and the event log are readable from all of them.</p>
+          <p>Instances are symmetric and stateless for API, MCP, UI and auth — no sticky sessions. Only a <em>running</em> execution is pinned to one JVM; cancel works from any instance through Redis, and results and history are readable from all of them.</p>
           <!-- claim: docs/datasources.md §5.7 -->
-          <p>Datasource pool invalidation rides a Redis channel: repoint or rotate a credential on one instance and every other evicts its pool and rebuilds from the row, instead of serving stale credentials until restart.</p>
+          <p>Datasource pool invalidation rides a Redis channel: repoint or rotate a credential on one instance and every other evicts its pool and rebuilds from the row.</p>
           <!-- claim: docs/deployment.md §6.2 -->
           <p>A crashed instance's in-flight executions are swept to <code>ABORTED</code> by an idempotent stale-execution sweep every replica runs.</p>
+          <a class="card-link" th:href="@{/docs/deployment}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -428,9 +429,10 @@
           </svg>
           <!-- claim: docs/ui-screens.md §4.18 -->
           <h3>One API section</h3>
-          <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/x/…</code>, the keys that may call them, and the MCP connection block — with the tool count rendered live from the same catalog this page renders it from, never a literal.</p>
+          <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/x/…</code>, the keys that may call them, and the MCP connection block — the tool count rendered live from the catalog, never a literal.</p>
           <!-- claim: docs/ui-screens.md §4.18 (the endpoints card) -->
-          <p>It is honest about what it cannot show. There is no "calls in the last 24 h" column, because nothing in this system counts endpoint serves — so the card says the absence instead of filling it from a sample.</p>
+          <p>It is honest about what it cannot show: no "calls in the last 24 h" column, because nothing in this system counts endpoint serves — so the card states the absence instead of filling it from a sample.</p>
+          <a class="card-link" th:href="@{/docs/ui-screens}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -441,9 +443,10 @@
           </svg>
           <!-- claim: docs/datasources.md §5, §5.4 -->
           <h3>Connection pools you can see and set</h3>
-          <p>Eight HikariCP settings are on the datasource form, each prefilled with its <strong>effective</strong> default and labelled with where that default came from — the library, this server, or the dialect adapter. A field left alone is not persisted, so a later change to a product default still reaches the datasource.</p>
+          <p>Eight HikariCP settings are on the datasource form, each prefilled with its <strong>effective</strong> default and labelled with where that default came from. A field left alone is not persisted, so a later change to a product default still reaches the datasource.</p>
           <!-- claim: docs/datasources.md §5 (the ranges are refusals) -->
-          <p>Out-of-range values are <em>refused</em>, not accepted. Hikari's own validation silently rewrites a too-small <code>maxLifetime</code> or <code>keepaliveTime</code> to something else; the row would then hold a number the pool never used. Every floor here restates a rewrite Hikari would otherwise perform, and the test that justifies them builds a real pool and watches it happen.</p>
+          <p>Out-of-range values are <em>refused</em>, not accepted — every floor restates a rewrite Hikari would otherwise perform silently, and the test that justifies them builds a real pool and watches it happen.</p>
+          <a class="card-link" th:href="@{/docs/datasources}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -453,9 +456,10 @@
           </svg>
           <!-- claim: docs/datasources.md §5.2 (Retire, then close) -->
           <h3>A saved datasource never kills a running query</h3>
-          <p>Editing or deleting a datasource <strong>retires</strong> its pool instead of closing it: new leases build a fresh pool from the new row at once, idle connections close now, and a connection still in use closes when its borrower returns it — never mid-statement. A bounded reaper closes what is left, with one WARN naming what it took down.</p>
+          <p>Editing or deleting a datasource <strong>retires</strong> its pool instead of closing it: new leases build a fresh pool from the new row at once, idle connections close now, and a connection still in use closes when its borrower returns it — never mid-statement.</p>
           <!-- claim: docs/datasources.md §6.2 -->
-          <p>Delete asks the question first. The dialog runs the <em>any-version</em> usage scan before it offers anything and lists <code>pipeline &rsaquo; node (v3 released)</code> for every reference; on that branch there is no confirm button to click past. The <code>409</code> and the dialog cannot disagree — same scan — and the POST re-runs it anyway, because a screen is never the authority.</p>
+          <p>Delete asks the question first: the dialog runs the <em>any-version</em> usage scan before it offers anything, and lists <code>pipeline &rsaquo; node (v3 released)</code> for every reference. The <code>409</code> and the dialog cannot disagree — same scan.</p>
+          <a class="card-link" th:href="@{/docs/datasources}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -532,11 +536,10 @@
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p>Three kinds, and two of them are not scoped at all. A <code>user</code> key is an agent's key and a program's key — one credential, two surfaces — and its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to and consults no scopes. A <code>server</code> key, mintable by an admin only, opens the promotion routes and nothing else.</p>
+          <p>Three kinds. A <code>user</code> key is an agent's key and a program's key — its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
-          <p>The confinement is decided centrally, before any handler's own annotation is read, so a new route cannot quietly become reachable to a scopeless key because someone forgot a check. Asking for scopes on a scopeless kind is refused, not silently dropped.</p>
-          <!-- claim: docs/ui-screens.md §4.18 (the create form) -->
-          <p>The form asks in that order — Kind, then Scope, then Name, then Expiry, then Bindings — with scope and bindings appearing only for the kinds that have them, and the <code>server</code> option rendered only for admins, because a form that offers a refused option lies.</p>
+          <p>The confinement is decided centrally, before any handler's annotation is read, so a new route cannot quietly become reachable to a scopeless key.</p>
+          <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -548,9 +551,10 @@
           </svg>
           <!-- claim: docs/mcp-server.md §6.2.22 -->
           <h3>The agent never sees a credential</h3>
-          <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that mints a key. Registering a datasource means handing over a live database credential, and a credential passed through a tool call transits the agent's context, its transcript and whatever the client logs. A person adds the datasource in the UI — or an operator over REST, or the bootstrap file — and the agent uses it <em>by name</em>.</p>
+          <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that mints a key: a credential passed through a tool call transits the agent's context, its transcript and whatever the client logs. A person adds the datasource in the UI, and the agent uses it <em>by name</em>.</p>
           <!-- claim: docs/mcp-server.md §6.2.22, docs/datasources.md §3.4 -->
-          <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns, preview rows. It can discover a connection, confirm it works, read its shape and look at real values — enough to author a pipeline against it — without one ever being handed a password. A tool once shipped with the hazard written into its own description; a description is not a control, so the tool is gone.</p>
+          <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns, preview rows — enough to author a pipeline without ever being handed a password.</p>
+          <a class="card-link" th:href="@{/docs/mcp-server}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -572,7 +576,8 @@
           <h3>Local password accounts</h3>
           <p>No identity provider? Turn on local accounts and the whole product runs with zero external setup. Hashes are <strong>Argon2id</strong> through the same hasher API keys use; there is no self-registration — an admin creates the account, or config seeds the first admin only.</p>
           <!-- claim: docs/auth.md §5A.4, §5A.5, §5A.3 -->
-          <p>Every seeded or admin-reset credential is one-time and the app refuses every other screen until it is changed. Unknown email, OIDC-only account and wrong password give the same banner, the same status <em>and the same cost</em> — the no-row path still runs one Argon2 verification, so timing cannot enumerate. Five consecutive failures lock the account without spending any more hashing memory.</p>
+          <p>Every seeded or admin-reset credential is one-time and the app refuses every other screen until it is changed. Five consecutive failures lock the account — and the unknown-email path spends the same hashing memory, so timing cannot enumerate.</p>
+          <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
         <article class="card ds-hover-lift">
@@ -678,6 +683,7 @@
         <li><a th:href="@{/demo-data}">The demo data, table by table</a></li>
         <li><a th:href="@{/security}">Security</a></li>
         <li><a th:href="@{/mcp-tools}">The MCP tools</a></li>
+        <li><a th:href="@{/semantic-layer}">The learned semantic layer</a></li>
         <li><a th:href="@{/docs}">The specs</a></li>
       </ul>
     </div>

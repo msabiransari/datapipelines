@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Pricing</li>
+    </ol>
+  </nav>
+
+  <!--/* 119 §C.4 — the pricing page. There is no price, and the page exists because buyers
+       look for a pricing page anyway; its job is to answer honestly: what free means here,
+       what free costs YOU (the ops), the no-paid-tier promise under the roadmap's dated
+       status markup so the freshness guard covers it, what AGPL asks of a company, and how
+       to reach a person. The owner's offer sentence renders from CONTACT_EMAIL — the one
+       constant (§C.6), never typed here. */-->
+  <!-- claim: docs/deployment.md §10 — the AGPL-3.0 licence -->
+  <!-- claim: docs/deployment.md §4.3 — egress: the app reaches only what you configure -->
+  <!-- claim: docs/deployment.md §11 — "no phoning-home telemetry" -->
+  <!-- claim: docs/ROADMAP.md §3 — the hosted plan is deliberately not planned -->
+  <!-- claim: docs/deployment.md §4, §7, §8 — the servers, backups and upgrades that are yours -->
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Pricing — free and open source",
+    "datePublished": "2026-09-11",
+    "dateModified": "2026-09-11",
+    "author": { "@type": "Organization", "name": "datapipelines.co" },
+    "publisher": { "@type": "Organization", "name": "datapipelines.co" },
+    "mainEntityOfPage": "https://datapipelines.co/pricing"
+  }
+  </script>
+
+  <section class="section page-hero" aria-labelledby="pricing-title">
+    <div class="container">
+      <p class="kicker">There is no price</p>
+      <h1 id="pricing-title" class="ds-display">Free. Open source. Yours to run.</h1>
+      <!-- claim: docs/deployment.md §10 -->
+      <p class="section-lede">
+        datapipelines.co costs $0 — not a trial, not a freemium tier, not "free up to N rows". The whole product is
+        AGPL-3.0: download it, run it on your own infrastructure, use every feature, for yourself or your customers.
+        This page says what that honestly means, including the costs nobody else puts on their pricing page.
+      </p>
+      <p class="dateline" data-roadmap-updated="2026-09-11">Last updated 2026-09-11</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="free-means">
+    <div class="container">
+      <p class="kicker">What free means here</p>
+      <h2 id="free-means" class="ds-headline">Every feature, every row, every deployment</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/deployment.md §10 -->
+          <h3>No seat count</h3>
+          <p>Your whole company, your contractors, your agents — everyone who can reach the server may use it. Licences are counted in obligations, not people.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/deployment.md §10 -->
+          <h3>No feature gate</h3>
+          <p>Federated joins, dp-lake, promotion between environments, the MCP tools — there is no paid tier that unlocks more, because there is no paid tier.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/deployment.md §4.3, §11 -->
+          <h3>No account with us</h3>
+          <p>Nothing you do is reported anywhere: the app reaches only what you configure, and the docs state there is no phoning-home telemetry. Your deployment is nobody's data point.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="free-costs">
+    <div class="container">
+      <p class="kicker">What free costs you, honestly</p>
+      <h2 id="free-costs" class="ds-headline">You own the operations</h2>
+      <!-- claim: docs/deployment.md §4 (infrastructure), §7 (persistence and backup), §8 (upgrades) -->
+      <p class="section-lede">
+        Free software does not mean free operations, and pretending otherwise would be the first dishonest line on a
+        page about honesty. You provide and pay for: a server to run the image on, the Postgres metadata database and
+        Redis beside it; your backups, with a restore drill you have actually run; and your upgrades, on your schedule
+        with the documented procedure. The runbooks for all three are in <a th:href="@{/docs/deployment}">deployment.md</a> —
+        the same docs that ship inside the product.
+      </p>
+      <!-- claim: docs/ROADMAP.md §3, docs/deployment.md §11 -->
+      <p>
+        <span class="status">There is no paid tier today; if a hosted version ever exists it will be announced on the roadmap first.</span> <span class="dateline" data-roadmap-updated="2026-09-11">&middot; dated 2026-09-11</span>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="agpl-plain">
+    <div class="container">
+      <p class="kicker">The licence, plainly</p>
+      <h2 id="agpl-plain" class="ds-headline">AGPL-3.0, in two sentences</h2>
+      <div class="split">
+        <div>
+          <!-- claim: docs/deployment.md §10 -->
+          <h3>Running it inside your company</h3>
+          <ul>
+            <li><b>Asks nothing of you</b> — internal use at any scale carries no obligation to share anything.</li>
+            <li>Custom pipelines, agents and integrations you write <em>against</em> the server are yours; the AGPL reaches the server's code, not your data or your SQL.</li>
+          </ul>
+        </div>
+        <div>
+          <!-- claim: docs/deployment.md §10 -->
+          <h3>Offering it to others as a service</h3>
+          <ul>
+            <li><b>Publish your changes</b>: if you modify the server and offer it over a network, the licence asks for those modifications under the AGPL.</li>
+            <li>Unmodified self-hosting for customers asks nothing — that is what "AGPL is fine for a self-hosting business" means in practice.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="features-pointer">The full text is the repository's <a href="https://github.com/msabiransari/datapipelines/blob/main/LICENSE">LICENSE</a>; contributions take the one-time CLA described in CONTRIBUTING.md.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="support-title">
+    <div class="container">
+      <p class="kicker">Support</p>
+      <h2 id="support-title" class="ds-headline">A person answers</h2>
+      <!-- claim: docs/deployment.md §8 (the upgrade runbook you own), docs/deployment.md §10 -->
+      <p class="section-lede">
+        There is no support contract to buy. Help is GitHub Discussions and Issues, the packaged specs under
+        <a th:href="@{/docs}">/docs</a>, and the owner — who answers this address personally and will help you connect
+        your first datasource: <a th:href="'mailto:' + ${contactEmail}"><span th:text="${contactEmail}">datapipelines.co@gmail.com</span></a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Pricing questions, answered plainly')}"></div>
+      <p class="features-pointer">More on the <a th:href="@{/faq}">full FAQ</a>; what ships next is on the <a th:href="@{/roadmap}">roadmap</a>, dated; the security posture is on <a th:href="@{/security}">security</a>.</p>
+    </div>
+  </section>
+
+</th:block>
+</html>

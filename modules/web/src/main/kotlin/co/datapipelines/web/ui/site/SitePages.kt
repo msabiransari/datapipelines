@@ -13,6 +13,39 @@ package co.datapipelines.web.ui.site
 const val SITE_ORIGIN: String = "https://datapipelines.co"
 
 /**
+ * The GitHub star count the nav's `★ GitHub` badge renders (119 §C.1).
+ *
+ * A BUILD-TIME constant, deliberately: the badge is baked by the site export and by every
+ * server render, and no visitor's browser ever fetches api.github.com (the CSP forbids
+ * third-party requests, and a counter that phones GitHub from every page view is exactly
+ * what the site's own "no phone-home" strip cell denies). Refreshed BY HAND at each
+ * release — the value the dispatch that added it measured was **0**
+ * (api.github.com/repos/msabiransari/datapipelines, 2026-09-11).
+ */
+const val GITHUB_STARS: Int = 0
+
+/**
+ * The project's contact address (owner, 2026-09-11) — the ONE string the footer's
+ * "Contact" line, /pricing's talk-to-me paragraph and /security's report-a-vulnerability
+ * line all render from. Never typed in a template: a mailto that drifts from this
+ * constant is a mailto nobody answers, and the render test sweeps every page for any
+ * `mailto:` that is not this address.
+ */
+const val CONTACT_EMAIL: String = "datapipelines.co@gmail.com"
+
+/** The host of [SITE_ORIGIN], without the scheme — what a request's server name is compared against. */
+val SITE_ORIGIN_HOST: String = SITE_ORIGIN.removePrefix("https://")
+
+/**
+ * True when the request came in on the PUBLIC site's own origin (119 §C.1). On the public
+ * site the nav's last item invites a visitor to **try the live demo**; on a customer's own
+ * deployment the same `/login` route is how their people sign in, so it reads "Sign in".
+ * The same decision the canonical tag makes — one origin is the published site — applied
+ * to a label instead of a URL.
+ */
+fun isPublicOrigin(serverName: String?): Boolean = serverName != null && serverName.equals(SITE_ORIGIN_HOST, ignoreCase = true)
+
+/**
  * One indexable public page: the route it is served on, the `<title>` and meta description
  * the searcher reads in the result, and the Thymeleaf view that renders it.
  *
@@ -372,6 +405,39 @@ object SitePages {
             view = "site/demo-data",
         )
 
+    /**
+     * 119 §C.4 — the pricing page: there is no price. The page states the licence, what
+     * "free" honestly costs (your servers, your backups, your upgrades), the no-paid-tier
+     * promise in the roadmap's dated `status` markup, and how to reach a person.
+     */
+    val PRICING =
+        SitePage(
+            path = "/pricing",
+            title = "Pricing — free and open source | datapipelines.co",
+            // 119 §C.4's register row, ≤ 155 (SiteSeoMetaTest's pin).
+            description =
+                "There is no price: AGPL-3.0, self-hosted on your infrastructure, every feature, no seat count. " +
+                    "What free costs you honestly, and how to reach a person.",
+            view = "site/pricing",
+        )
+
+    /**
+     * 119 §B — the learned semantic layer: the category term buyers and engineers search,
+     * answered honestly. Ours is not a model somebody writes — it is facts the agent
+     * records with the query that proved them, read back inline where it is looking.
+     */
+    val SEMANTIC_LAYER =
+        SitePage(
+            path = "/semantic-layer",
+            // The brief's description is 174 chars against the 155 pin (SiteSeoMetaTest) —
+            // trimmed from the end as the brief sanctions; every key phrase stays.
+            title = "Semantic layer, learned by the agent — open source | datapipelines.co",
+            description =
+                "An open-source semantic layer your agent builds from your data, recording what it learned with " +
+                    "the query that proved it. Drift is detected, never guessed.",
+            view = "site/semantic-layer",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -500,6 +566,8 @@ object SitePages {
                 FOR_ANALYSTS,
                 HOW_IT_WORKS,
                 DEMO_DATA,
+                PRICING,
+                SEMANTIC_LAYER,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */
