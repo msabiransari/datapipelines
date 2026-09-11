@@ -113,6 +113,28 @@ class LearnedFactsEnricherTest {
     }
 
     @Test
+    fun `a fact already stale on a column rides on its table's entry - shown beside the columns, not lost`() {
+        val staleOnColumn = SemanticsFixtures.fact(refs = listOf(FactRef(null, "orders", "total")), trust = LearnedFactTrust.STALE)
+        val liveOnColumn = SemanticsFixtures.fact()
+        every { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME) } returns listOf(staleOnColumn, liveOnColumn)
+
+        val byTable =
+            enricher.forTables(
+                SemanticsFixtures.ACME,
+                SemanticsFixtures.warehouse,
+                listOf(TableInfo(listOf("public"), "orders", "TABLE")),
+                complete = true,
+            )
+
+        val shown = byTable.getValue("orders")
+        assertAll(
+            { shown.map { it["id"] } shouldContainExactly listOf(staleOnColumn.id.toString()) },
+            { shown.single()["trust"] shouldBe "stale" },
+            { shown.single()["drift"] shouldBe "a referenced column or table no longer exists" },
+        )
+    }
+
+    @Test
     fun `the datasource-wide block carries window and sampling only, served as stored`() {
         val window =
             SemanticsFixtures.fact(

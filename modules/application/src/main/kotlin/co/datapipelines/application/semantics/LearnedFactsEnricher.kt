@@ -7,6 +7,7 @@ import co.datapipelines.datasources.semantics.LearnedFact
 import co.datapipelines.datasources.semantics.LearnedFactDrift
 import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactRepository
+import co.datapipelines.datasources.semantics.LearnedFactTrust
 import co.datapipelines.pipeline.PipelineRepository
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -41,8 +42,10 @@ interface FactEnrichment {
     ): List<Map<String, Any?>>
 
     /**
-     * `datasources_get_tables` — per listed table, its TABLE-grain facts (a ref with no column),
-     * keyed by table name. [complete] says the listing is the WHOLE datasource (no namespace
+     * `datasources_get_tables` — per listed table, its TABLE-grain facts (a ref with no column)
+     * plus every `stale` fact on it (a fact whose column is gone has no column to ride on in the
+     * columns listing; §6 shows it beside the current columns, here), keyed by table name.
+     * [complete] says the listing is the WHOLE datasource (no namespace
      * filter, not truncated): only then can a fact whose table is absent be marked `stale` — a
      * filtered listing proves nothing about what it did not list.
      */
@@ -138,7 +141,17 @@ class LearnedFactsEnricher(
         val conflicts = conflictsAmong(facts)
         return tables
             .associate { table ->
-                val onTable = facts.filter { fact -> fact.refs.any { it.table == table.name && it.column == null } }
+                // The table-grain facts (a ref with no column) — plus every STALE fact on the
+                // table: a fact whose column is gone has no column entry to ride on in the
+                // columns listing, and §6 says it is shown BESIDE the current columns, not lost.
+                // The tables listing is where the agent looks before asking for columns.
+                val onTable =
+                    facts.filter { fact ->
+                        fact.refs.any {
+                            it.table == table.name &&
+                                (it.column == null || verdicts.getValue(fact.id).trust == LearnedFactTrust.STALE)
+                        }
+                    }
                 table.name to onTable.map { render(it, readerWorkspaceId, verdicts.getValue(it.id), it.id in conflicts) }
             }.filterValues { it.isNotEmpty() }
     }

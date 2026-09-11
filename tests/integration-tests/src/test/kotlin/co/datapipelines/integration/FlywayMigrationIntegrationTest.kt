@@ -172,9 +172,28 @@ class FlywayMigrationIntegrationTest {
         // 118 (learned-semantic-layer §3): the column inventory, read from the SHIPPED database.
         columnsOf("learned_facts") shouldContainExactly
             listOf(
-                "datasource_name", "evidence_sql", "evidence_summary", "fact", "id", "kind", "recorded_at", "recorded_by",
-                "recorded_in", "recorded_via", "refs_json", "retired_at", "retired_reason", "schema_fingerprint", "scope",
-                "source_pipeline_id", "source_version", "supersedes", "trust", "verified_at", "verified_by", "workspace_id",
+                "datasource_name",
+                "evidence_sql",
+                "evidence_summary",
+                "fact",
+                "id",
+                "kind",
+                "recorded_at",
+                "recorded_by",
+                "recorded_in",
+                "recorded_via",
+                "refs_json",
+                "retired_at",
+                "retired_reason",
+                "schema_fingerprint",
+                "scope",
+                "source_pipeline_id",
+                "source_version",
+                "supersedes",
+                "trust",
+                "verified_at",
+                "verified_by",
+                "workspace_id",
             )
 
         // The kind CHECK is the §4 list — proven by its definition text, because enums.md §19
