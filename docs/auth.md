@@ -104,6 +104,14 @@ The `provider` field stores the **OIDC registration name** as configured by the 
    - **Yes:** Updates `provider`, `provider_subject`, `last_login_at`, `profile_picture_url` — and `display_name`, which refreshes from the ID token's `name` claim on **every** login (owner-ratified 2026-08-28: there is no profile-edit feature, so a stored name has no user-chosen referent to protect, and freezing it would leave an IdP rename unrepresentable; revisit if a profile surface ever ships). The §4.4 bootstrap-completion case needs no special handling — the `provider = 'bootstrap'` placeholder name is replaced by this same refresh at the first real sign-in.
    Grant-wise this step changes nothing: `is_admin` is decided at row creation and nowhere else (§4.4).
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
+   2a. **Materialises every pending invitation for that email** (§4.6) into real
+       memberships, with their flags, in the same act — and DELETES the invitations. The
+       materialise runs in `WorkspaceService.workspaceForLogin` (step 4), the one resolution
+       both credential paths reach, so it happens before any workspace is stamped: the
+       first login lands an invited user in the invited workspace with the invited flags,
+       and the `demo` join below never fires for them (D-R11 — the invited workspace
+       REPLACES the default, it is not added beside it). Each materialisation is audited
+       (`workspace.invitation_materialised`) with the inviter.
 3. Checks the email domain allowlist (if configured — see §4.3).
    - Domain not allowlisted: reject login with `auth.login.domain_not_allowed`.
 4. **Workspace resolution (§5.1, §12):** determines the active workspace the JWT stamps
@@ -181,6 +189,62 @@ One row serves all of them, provisioned at first boot through the same `createUs
 
 It is deliberately **not** a credential. It holds no API key and no password, and nothing authenticates *as* it; it is the name history writes down when the writer was the system itself. The promotion peer credential is a separate thing entirely (§10.6) — a shared secret between two deployments, with no `users` row of its own.
 
+### 4.6 Invitations
+
+The owner's scenario (2026-09-10): "Admin created a workspace and wants to add employees to
+that… They will have two options: 1. create user/password, 2. company SSO." Today a member is
+added through `POST /workspaces/{name}/members` (§17.7), which requires the `users` row to
+exist — and an SSO user's row is created only at their FIRST login (§4.2). So a workspace
+admin could not add `bob@company.com` before Bob had ever signed in. The bridge is an
+**invitation keyed by email** (metadata-db §4.17) that the login path materialises.
+
+The rules, each load-bearing:
+
+1. **An invitation exists only while no `users` row holds that email.** Inviting an email
+   that has a row makes the person a member AT ONCE (the ordinary member-added path). There
+   is no invitation "pending for an existing user", and nothing pretends a person exists
+   before they do: the invitation references an EMAIL; `workspace_members.user_id` stays
+   `NOT NULL REFERENCES users(id)`.
+2. **Invite-time refusals.** The email is normalized lowercase before every lookup and store
+   (the §4.2 rule — `Bob@Company.com` and `bob@company.com` are one invitee). An email the
+   §4.3 domain allowlist would refuse AT LOGIN is refused at INVITE time with the SAME code
+   the login would use (`auth.login.domain_not_allowed`, at a 400 here — the caller's request
+   is the defect): an invitation that could never be honoured is a trap. Inviting into a
+   DEACTIVATED workspace is refused (`workspace.inactive`, 404) — a super admin can see the
+   greyed workspace, and this is the verb telling them the same thing every other member verb
+   would.
+3. **The latest admin decision wins.** Re-inviting the same email UPSERTS the row: the flags
+   (and inviter, and date) are replaced, and the upsert is audited (`workspace.member_invited`)
+   every time it fires — the row keeps no history; the audit trail does. `admin` implies
+   `author`, enforced by the same database CHECK the members table states.
+4. **Materialisation at login.** When a user row comes into existence (§4.2's first login, or
+   the admin's local-account creation — the two creation paths), every pending invitation for
+   that email becomes a membership with its invited flags, and the invitations are deleted,
+   in one atomic statement. The `demo`-viewer default (§4.2 step 4) is applied ONLY when no
+   invitation materialised — the invited workspace replaces the demo default, it is not added
+   beside it (D-R11) — and `active_workspace` stamps the FIRST-INVITED workspace: the
+   materialised memberships enter the membership ordering at their invitation dates
+   (`joined_at = invited_at`), so "first membership" is the admin's first decision, not an
+   alphabetical accident of same-transaction timestamps.
+5. **Deactivated workspaces wait.** An invitation into a deactivated workspace does not
+   materialise at login — the materialise predicate requires the workspace to be active —
+   and is not lost either: reactivation makes it live at the next login. The row can be
+   revoked meanwhile by a super admin, which is exactly the tidying a super admin inside a
+   greyed workspace is for.
+6. **Revocation and visibility.** `DELETE /workspaces/{name}/invitations/{email}` revokes
+   (workspace admin or super admin, `MANAGE_WORKSPACE_MEMBERS`); a missing invitation is
+   `workspace.invitation.not_found` (404). The members listing (§17.6) returns pending
+   invitations in a SEPARATE `invitations[]` array, never mixed into `members[]` — a client
+   that counts members must not count ghosts.
+
+**No expiry in v1, and no email is ever sent** — the product has no SMTP (§5A); an invitation
+is a row, not a message, and it is revocable like any other membership. There is no
+self-service join: invitations are created by a workspace admin or a super admin, through the
+same capability gate as every other member verb (`MANAGE_WORKSPACE_MEMBERS`).
+
+**Local accounts need no invitation** (§5A.1): the Admin → Users form's optional "also add to
+workspace + flags" writes the user row and the membership in one act, because the row exists
+by the time the membership is written — rule 1 doing the work directly.
 
 ---
 
@@ -1064,6 +1128,9 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
 | `auth.super_admin_acting` | A super admin acted in a workspace they hold no explicit membership in (§11A). Emitted by `ScopeInterceptor` at the one choke point every governed handler passes — **reads included**: the 404 rule's promise is that a workspace is invisible from outside, and the one principal exempt from that promise is the one whose reads most need to be on the record. `details`: the operation, workspace, path, method, and `acting_via: super_admin` |
 | `workspace.member_added` | A member was added, with their capability flags (`details.flags`). The first-login demo join (§4.2) carries `reason: first_login_demo_viewer` |
+| `workspace.member_invited` | An invitation was created (§4.6) — or an existing one's flags REPLACED by a re-invite; the upsert is the latest admin decision winning, so it is audited every time it fires. `details`: workspace, email, flags |
+| `workspace.invitation_revoked` | A pending invitation was revoked (§4.6). `details`: workspace, email |
+| `workspace.invitation_materialised` | A pending invitation became a real membership at login (§4.2 step 2a / §4.6). `details`: workspace, email, flags, and `inviter` — the actor whose decision the login is executing |
 | `workspace.member_removed` | A member was removed |
 | `workspace.member_flags_changed` | A member's flags were replaced — `details.from` and `details.to` carry both sets, because a membership row keeps no history of its own |
 | `workspace.deactivated` | A workspace was deactivated (§11A). Nothing it owns is purged |

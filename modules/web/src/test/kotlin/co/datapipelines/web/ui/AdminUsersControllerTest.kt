@@ -4,10 +4,13 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceMemberRow
+import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -135,8 +138,9 @@ class AdminUsersControllerTest {
 class AdminUsersPartialControllerTest {
     private val userService = mockk<UserService>()
     private val localPasswordService = mockk<LocalPasswordService>()
+    private val workspaceService = mockk<WorkspaceService>(relaxed = true)
     private val partialController =
-        AdminUsersPartialController(userService, localPasswordService, AdminUsersBrowseModel(userService))
+        AdminUsersPartialController(userService, localPasswordService, AdminUsersBrowseModel(userService), workspaceService)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -288,6 +292,61 @@ class AdminUsersPartialControllerTest {
             LocalPasswordService.CreateResult.EmailTaken
 
         refusal(partialController.createLocalUser(model, "taken@example.com", "")).statusCode shouldBe HttpStatus.CONFLICT
+    }
+
+    @Test
+    fun `create local user with the optional workspace also adds the membership - one act, no invitation`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+        every {
+            workspaceService.addMember(
+                any(),
+                "acme",
+                "new@example.com",
+                MembershipFlags(author = true, promoter = true, admin = true),
+            )
+        } returns
+            WorkspaceService.AddMemberOutcome.Added(
+                WorkspaceMemberRow(UUID.randomUUID(), "new@example.com", "New", MembershipFlags.VIEWER, Instant.EPOCH),
+            )
+
+        val html =
+            render(
+                partialController.createLocalUser(
+                    model,
+                    "new@example.com",
+                    "New",
+                    workspace = "acme",
+                    author = true,
+                    promoter = true,
+                    admin = true,
+                ),
+            )
+
+        // The user exists by the time the membership is written, so the INVITATION
+        // branch never fires: addMember resolves the row directly (113 §B.3).
+        html shouldContain "ABCD-EFGH-JKLM"
+        // Thymeleaf escapes the quotes in the note; assert on the un-escaped prefix.
+        html shouldContain "also a member of"
+    }
+
+    @Test
+    fun `create local user whose optional workspace add is refused keeps the user row and says so`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+        // The controller passes sampleUser()'s email — the freshly created row's.
+        every { workspaceService.addMember(any(), "gone", "user@example.com", any()) } throws
+            co.datapipelines.auth.WorkspaceNotFoundException("gone")
+
+        val html =
+            render(partialController.createLocalUser(model, "new@example.com", "New", workspace = "gone"))
+
+        // The USER was created (the row + one-time password render); only the membership
+        // was refused, and the message names the code so the admin knows the next step.
+        html shouldContain "ABCD-EFGH-JKLM"
+        html shouldContain "was refused"
     }
 
     @Test

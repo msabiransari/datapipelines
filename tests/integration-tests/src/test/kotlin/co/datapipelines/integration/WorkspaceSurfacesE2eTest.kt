@@ -356,7 +356,10 @@ class WorkspaceSurfacesE2eTest {
             .get("/api/v1/workspaces/acme/members")
             .then()
             .statusCode(200)
-            .body("data.email", Matchers.hasItems("alice@acme.test", "carol@acme.test"))
+            // 113: the listing is TWO arrays — `members[]` (real people) and `invitations[]`
+            // (pending ghosts), never mixed.
+            .body("data.members.email", Matchers.hasItems("alice@acme.test", "carol@acme.test"))
+            .body("data.invitations", Matchers.empty<Any>())
 
         given()
             .port(port)
@@ -395,8 +398,11 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
-    fun `an unknown member email is the §16-3 unknown-user stand-in`() {
+    fun `an unknown member email becomes a 202 INVITATION, revoked after so the listing stays clean`() {
         ensureSeeded()
+        // 113 §B.1: an email with no users row is no longer the §16.3 unknown-user 404 —
+        // it is a `202` invitation, distinguishable from the `200` membership by status AND
+        // body, so a client never mistakes a ghost for a member.
         given()
             .port(port)
             .contentType(ContentType.JSON)
@@ -405,9 +411,41 @@ class WorkspaceSurfacesE2eTest {
             .`when`()
             .post("/api/v1/workspaces/acme/members")
             .then()
+            .statusCode(202)
+            .body("data.invited", Matchers.equalTo(true))
+            .body("data.email", Matchers.equalTo("ghost@nowhere.test"))
+            .body("data.author", Matchers.equalTo(false))
+
+        // The ghost sits in ITS array, and in no member's array.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, aliceKey)
+            .`when`()
+            .get("/api/v1/workspaces/acme/members")
+            .then()
+            .statusCode(200)
+            .body("data.members.email", Matchers.not(Matchers.hasItem("ghost@nowhere.test")))
+            .body("data.invitations.email", Matchers.hasItem("ghost@nowhere.test"))
+
+        // Revoking is the admin's undo — and this suite's cleanup, so the members listing
+        // test below sees the empty invitations[] it asserts.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, aliceKey)
+            .`when`()
+            .delete("/api/v1/workspaces/acme/invitations/ghost@nowhere.test")
+            .then()
+            .statusCode(204)
+
+        // A second revoke has nothing to remove: `workspace.invitation.not_found`.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, aliceKey)
+            .`when`()
+            .delete("/api/v1/workspaces/acme/invitations/ghost@nowhere.test")
+            .then()
             .statusCode(404)
-            .body("error.code", Matchers.equalTo("pipeline.execution.not_found"))
-            .body("error.details.reason", Matchers.equalTo("user_not_found"))
+            .body("error.code", Matchers.equalTo("workspace.invitation.not_found"))
     }
 
     // ------------------------------------------------------------ UI screens smoke

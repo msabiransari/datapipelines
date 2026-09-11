@@ -71,6 +71,8 @@ class WorkspaceService(
     private val authCache: AuthCache,
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
     private val auditLogger: AuditLogger,
+    private val invitationRepository: WorkspaceInvitationRepository,
+    private val authProperties: AuthProperties,
     private val contentCheck: WorkspaceContentCheck = WorkspaceContentCheck.NONE,
     private val demoWorkspaceSeeder: DemoWorkspaceSeeder? = null,
 ) : WorkspaceLiveness {
@@ -126,19 +128,54 @@ class WorkspaceService(
      * What login stamps as `active_workspace` (design §5.1): last-used when it still resolves,
      * else the first active membership, else — D-R11 — a fresh VIEWER membership of `demo`.
      *
+     * **The materialise step comes first (113, auth.md §4.6):** every invitation for this
+     * email becomes a membership, in the same statement that deletes the invitations, BEFORE
+     * the resolution below reads anything — so an invited user's first login lands them in
+     * the invited workspace with the invited flags, and the demo join never fires for them.
+     * This is the ONE place both credential paths converge (OIDC's success handler and the
+     * local login controller both call it), which is why the hook lives here and not in
+     * either login handler: the owner's rule is about LOGGING IN, not about which provider
+     * did it. It runs on every login, not only the first — a no-op statement when no
+     * invitation exists, and it is what lets an invitation into a workspace that was
+     * deactivated at invite time materialise once the workspace is reactivated (the rows
+     * wait, 113 §B.5).
+     *
      * The demo join lives here rather than in the two login handlers so both credential paths
-     * (OIDC and local) get one answer; the owner's rule is about LOGGING IN, not about which
-     * provider did it. It fires only for a user with NO membership at all, so somebody removed
-     * from `demo` on purpose is not re-added by their next login — the same rule O-3 states for
-     * the workspace itself.
+     * (OIDC and local) get one answer; it fires only for a user with NO membership at all, so
+     * somebody removed from `demo` on purpose is not re-added by their next login — the same
+     * rule O-3 states for the workspace itself. A materialised invitation IS a membership,
+     * which is exactly what keeps D-R11's promise: the invited workspace replaces the
+     * `demo` default, it is not added beside it.
      *
      * Null when there is nothing to stamp: no membership and no active `demo` (deactivated, or
      * never seeded). Round 1 returns that state; round 2 draws the "no workspace" page.
      */
     fun workspaceForLogin(
         user: User,
-        @Suppress("UNUSED_PARAMETER") email: String,
+        email: String,
     ): WorkspaceContext? {
+        val normalized = email.trim().lowercase()
+        val materialised = invitationRepository.materialiseFor(normalized, user.id)
+        if (materialised.isNotEmpty()) {
+            // The resolution below reads memberships through the cache; these memberships
+            // were born one statement ago, so the cache must never see the pre-materialise
+            // snapshot. The audit carries the INVITER (auth.md §10) — the actor who made the
+            // decision being executed here is the new user's login, not the login itself.
+            authCache.invalidateMemberships(user.id)
+            materialised.forEach { row ->
+                auditLogger.log(
+                    event = "workspace.invitation_materialised",
+                    userId = user.id,
+                    details =
+                        mapOf(
+                            "workspace" to row.workspaceName,
+                            "email" to normalized,
+                            "flags" to wire(row.flags),
+                            "inviter" to row.invitedBy.toString(),
+                        ),
+                )
+            }
+        }
         val memberships = activeMemberships(user.id)
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
             memberships.firstOrNull { it.workspaceName == last }?.let { return context(it) }
@@ -328,36 +365,145 @@ class WorkspaceService(
     }
 
     /**
+     * The members listing WITH its pending invitations (113 §B.4): the REST `GET …/members`
+     * returns the two arrays separately, because a client that counts members must not count
+     * ghosts. [members] stays the members-only read for the UI's per-workspace count.
+     */
+    fun membersWithInvitations(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ): MemberListing {
+        val workspace = read(principal, name)
+        return MemberListing(
+            members = workspaceRepository.findMembersOf(workspace.id),
+            invitations = invitationRepository.findByWorkspace(workspace.id),
+        )
+    }
+
+    /** The members listing's two arrays — real memberships and pending invitations, never mixed. */
+    data class MemberListing(
+        val members: List<WorkspaceMemberRow>,
+        val invitations: List<WorkspaceInvitation>,
+    )
+
+    /**
+     * Revokes a pending invitation (113 §B.4). Workspace admin or super admin. An email with
+     * no invitation here answers [WorkspaceInvitationNotFoundException] — the workspace
+     * resolved, so the not-found thing is the invitation (`workspace.invitation.not_found`,
+     * 404).
+     *
+     * A DEACTIVATED workspace is revocable-for-the-super-admin on purpose: its pending
+     * invitations wait (§B.5), and cleaning them up before reactivation is exactly the kind
+     * of tidying a super admin inside a greyed workspace is for. Members cannot reach the
+     * workspace at all (the 404 rule), so nothing leaks.
+     */
+    fun revokeInvitation(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        email: String,
+    ) {
+        val normalized = email.trim().lowercase()
+        val workspace = read(principal, name)
+        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        if (!invitationRepository.delete(workspace.id, normalized)) {
+            throw WorkspaceInvitationNotFoundException(name, normalized)
+        }
+        audit(
+            principal,
+            "workspace.invitation_revoked",
+            name,
+            mapOf("workspace" to name, "email" to normalized),
+        )
+    }
+
+    /**
      * Adds a member with [flags] (design §1; workspace admin or super admin). A member added
      * with no flags is a VIEWER — the D-R11 default and the one the demo path uses.
      *
-     * The email is resolved here so the unknown-user mapping and the membership write are one
-     * transaction of intent; unknown emails surface as [UnknownMemberEmailException], which the
-     * web layer maps to the house §16.3 stand-in.
+     * ## The invitation branch (113, auth.md §4.6)
+     * When no `users` row holds [email], the request does not fail: it creates an INVITATION
+     * keyed by the email — upsert on the same (workspace, email), so a second invite
+     * REPLACES the flags and the latest admin decision wins, audited every time — and
+     * returns [AddMemberOutcome.Invited]. The login path materialises it into a real
+     * membership when the row comes into existence. An invitation for a user who ALREADY
+     * exists is never created: the existing-user branch makes them a member at once.
      *
-     * Idempotent by the repository's `ON CONFLICT DO NOTHING`: re-adding an existing member
-     * returns them unchanged rather than silently resetting their flags to the request's —
-     * changing an existing member's role is [setMemberFlags], which the last-admin rule guards.
+     * An email the §4.3 domain allowlist would refuse AT LOGIN is refused HERE
+     * ([InvitationDomainNotAllowedException] — the login code, at a 400): an invitation
+     * that could never be honoured is a trap, so refuse it early, naming the same rule the
+     * login would have refused it with. A deactivated workspace refuses the verb too
+     * ([WorkspaceInactiveException] — reachable only by a super admin, per the 404 rule).
+     *
+     * The email is normalized lowercase before every lookup and store (§4.2), so
+     * `Bob@Company.com` and `bob@company.com` are one invitee, one row, one person.
+     *
+     * The email is resolved here so the unknown-user mapping and the membership write are one
+     * transaction of intent. Idempotent by the repository's `ON CONFLICT DO NOTHING`:
+     * re-adding an existing member returns them unchanged rather than silently resetting
+     * their flags to the request's — changing an existing member's role is [setMemberFlags],
+     * which the last-admin rule guards.
      */
     fun addMember(
         principal: AuthenticatedPrincipal,
         name: String,
         email: String,
         flags: MembershipFlags = MembershipFlags.VIEWER,
-    ): WorkspaceMemberRow {
+    ): AddMemberOutcome {
         val normalized = email.trim().lowercase()
         val workspace = read(principal, name)
         requireCapability(principal, workspace, Capability.WS_ADMIN)
-        val user = userRepository.findByEmail(normalized) ?: throw UnknownMemberEmailException(normalized)
-        val row = workspaceRepository.addMember(workspace.id, user.id, normalize(flags))
-        authCache.invalidateMemberships(user.id)
+        // §B.5: a deactivated workspace refuses invites. A member never gets here (their 404
+        // rule answered already); this is the super admin, who CAN see the greyed workspace,
+        // being told the same thing the members-verbs would tell any other role.
+        if (!workspace.isActive) throw WorkspaceInactiveException(name)
+        val user = userRepository.findByEmail(normalized)
+        if (user != null) {
+            val row =
+                workspaceRepository.addMember(workspace.id, user.id, normalize(flags))
+                    ?: error("membership for $normalized in $name vanished after insert")
+            authCache.invalidateMemberships(user.id)
+            audit(
+                principal,
+                "workspace.member_added",
+                name,
+                mapOf("workspace" to name, "member" to normalized, "flags" to wire(flags)),
+            )
+            return AddMemberOutcome.Added(row)
+        }
+        // The invitation branch: the person does not exist yet. Refuse emails the allowlist
+        // would refuse at login BEFORE storing anything (§B.1), then upsert — the latest
+        // admin decision wins, and the upsert is audited every time it fires.
+        if (!authProperties.isDomainAllowed(normalized)) {
+            throw InvitationDomainNotAllowedException(normalized)
+        }
+        val normalizedFlags = normalize(flags)
+        invitationRepository.upsert(workspace.id, normalized, normalizedFlags, principal.userId)
         audit(
             principal,
-            "workspace.member_added",
+            "workspace.member_invited",
             name,
-            mapOf("workspace" to name, "member" to normalized, "flags" to wire(flags)),
+            mapOf("workspace" to name, "email" to normalized, "flags" to wire(normalizedFlags)),
         )
-        return row ?: error("membership for $normalized in $name vanished after insert")
+        return AddMemberOutcome.Invited(email = normalized, flags = normalizedFlags)
+    }
+
+    /** What [addMember] did: a real membership now exists, or an invitation now does. */
+    sealed interface AddMemberOutcome {
+        /** The user row existed; the membership was written — the pre-113 behaviour. */
+        data class Added(
+            val row: WorkspaceMemberRow,
+        ) : AddMemberOutcome
+
+        /**
+         * No user row existed; an invitation was created (or its flags replaced). The login
+         * path materialises it when the person first exists. Distinguishable from [Added] by
+         * the HTTP status (202 vs 200) AND the body, so a client never mistakes a ghost for
+         * a member.
+         */
+        data class Invited(
+            val email: String,
+            val flags: MembershipFlags,
+        ) : AddMemberOutcome
     }
 
     /**
@@ -420,7 +566,14 @@ class WorkspaceService(
         )
     }
 
-    /** Unknown member email at [addMember] — mapped by the web layer to the §16.3 unknown-user stand-in. */
+    /**
+     * KEPT for the UI's add-member form ([co.datapipelines.web.ui.WorkspacesUiController],
+     * which catches it for the `user_not_found` banner) — but the REST surface no longer
+     * raises it: since 113, an unknown email at [addMember] creates an INVITATION
+     * ([AddMemberOutcome.Invited]) instead of failing. The UI form therefore invites
+     * silently today; rendering the invited outcome on the workspaces screen (and retiring
+     * this class) is 114's/post-merge work. No production path throws it.
+     */
     class UnknownMemberEmailException(
         val email: String,
     ) : IllegalStateException("No user with email '$email'.")

@@ -9,6 +9,7 @@ import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceService
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -58,7 +59,12 @@ class CredentialMintingSessionOnlyTest {
     private val themeResolver = mockk<ThemeResolver>()
 
     private val partials =
-        AdminUsersPartialController(userService, localPasswordService, AdminUsersBrowseModel(userService))
+        AdminUsersPartialController(
+            userService,
+            localPasswordService,
+            AdminUsersBrowseModel(userService),
+            mockk<WorkspaceService>(relaxed = true),
+        )
     private val model = org.springframework.ui.ExtendedModelMap()
     private val settings =
         UserSettingsController(userRepository, themeResolver, UiProperties(theme = "forest"), localPasswordService)

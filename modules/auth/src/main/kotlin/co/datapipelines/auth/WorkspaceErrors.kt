@@ -59,6 +59,15 @@ object WorkspaceErrorCodes {
      */
     const val INACTIVE = "workspace.inactive"
 
+    /**
+     * 404 — the INVITATION addressed does not exist (113): revoked already, never created,
+     * or created for another workspace. Its own code rather than [NOT_FOUND] because the
+     * WORKSPACE resolved fine — the not-found thing is the invitation — and an admin probing
+     * emails must not be able to reuse the workspace 404 to distinguish an existing
+     * invitation from a missing workspace.
+     */
+    const val INVITATION_NOT_FOUND = "workspace.invitation.not_found"
+
     /** 400 — workspace name fails `[a-z0-9_-]+`, 1–63 (metadata-db §4.11). */
     const val NAME_INVALID = "workspace.validation.name_invalid"
 
@@ -77,6 +86,7 @@ object WorkspaceErrorCodes {
             NOT_FOUND,
             LAST_ADMIN,
             INACTIVE,
+            INVITATION_NOT_FOUND,
             NAME_INVALID,
             DUPLICATE_NAME,
             IN_USE,
@@ -171,6 +181,42 @@ class WorkspaceInactiveException(
         "Workspace '$name' is deactivated.",
         "That workspace has been deactivated.",
         details = mapOf("workspace" to name),
+    )
+
+/**
+ * The INVITATION addressed does not exist (113): revoked already, never created, or
+ * created for another workspace — one answer, so an admin cannot probe which emails
+ * have pending invitations by watching for a different status.
+ */
+class WorkspaceInvitationNotFoundException(
+    name: String,
+    email: String,
+) : AuthException(
+        WorkspaceErrorCodes.INVITATION_NOT_FOUND,
+        HTTP_NOT_FOUND,
+        "No invitation for '$email' in workspace '$name'.",
+        "There is no pending invitation for that email in this workspace.",
+        details = mapOf("workspace" to name, "email" to email),
+    )
+
+/**
+ * An invite whose email the §4.3 domain allowlist would refuse AT LOGIN (113 §B.1).
+ * The CODE is the login path's own [AuthErrorCodes.LOGIN_DOMAIN_NOT_ALLOWED] — an
+ * invitation that could never be honoured is a trap, and refusing it at invite time
+ * must name the same rule the login would have refused it with — but the STATUS is
+ * 400, not the login path's 403: the caller's REQUEST is the defect (they named an
+ * address this deployment will never let in), and it is the API surface answering,
+ * not the login flow. The §13.7 row documents the login status; this raise path's
+ * status is its own (ApiExceptionHandler takes it from the exception).
+ */
+class InvitationDomainNotAllowedException(
+    email: String,
+) : AuthException(
+        AuthErrorCodes.LOGIN_DOMAIN_NOT_ALLOWED,
+        HTTP_BAD_REQUEST,
+        "Email '$email' is outside the deployment's domain allowlist (auth.md §4.3); the invitation could never be honoured.",
+        "That email's domain is not allowed on this deployment. The person could never sign in.",
+        details = mapOf("email" to email),
     )
 
 /** A workspace name outside `[a-z0-9_-]{1,63}` (metadata-db §4.11) — a 400 at the CRUD surface. */

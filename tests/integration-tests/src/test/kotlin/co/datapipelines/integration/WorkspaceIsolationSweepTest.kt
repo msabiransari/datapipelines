@@ -504,6 +504,11 @@ class WorkspaceIsolationSweepTest {
                 "templateName" to "globex_tpl",
                 "version" to "1",
                 "workspace" to "globex",
+                // 113: the invitation route's email. A REAL pending invitation in globex is
+                // seeded by the fixture (GLOBEX_INVITATION_EMAIL), so the differential is
+                // "someone else's pending invitation" vs "no such invitation anywhere" —
+                // and an acme member must be unable to tell them apart.
+                "email" to WorkspaceIsolationIntegrationTest.GLOBEX_INVITATION_EMAIL,
                 // `userId` is deliberately ABSENT. Users are a GLOBAL entity managed by super
                 // admins (D-R8), not a workspace-scoped one, so substituting another user's id
                 // into `/api/v1/auth/users/{userId}/…` is not a cross-workspace probe — it is
@@ -550,6 +555,7 @@ class WorkspaceIsolationSweepTest {
                 "templateName" to "nobody_owns_this",
                 "version" to "1",
                 "workspace" to "no-such-workspace",
+                "email" to "nobody@nowhere.test",
             )
 
         /**

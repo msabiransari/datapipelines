@@ -4,16 +4,17 @@ import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.Workspace
+import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -101,25 +102,52 @@ class WorkspacesController(
         workspaces.delete(currentPrincipal(), name)
     }
 
-    /** §17.6 — the member listing; any member of the workspace (or an admin) may read it. */
+    /**
+     * §17.6 — the member listing; any member of the workspace (or an admin) may read it.
+     *
+     * Two arrays, never mixed (113 §B.4): `members[]` are real memberships — a client that
+     * counts members counts people — and `invitations[]` are the pending, email-keyed rows
+     * (auth.md §4.6) whose `users` row does not exist yet. A ghost never appears in
+     * `members[]`, and a pending invitation never upgrades anybody.
+     */
     @GetMapping("/{name}/members")
     @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
     fun members(
         @PathVariable name: String,
-    ): ApiResponse<List<Map<String, Any?>>> = ApiResponse.of(workspaces.members(currentPrincipal(), name).map { it.toResponse() })
+    ): ApiResponse<Map<String, List<Map<String, Any?>>>> {
+        val listing = workspaces.membersWithInvitations(currentPrincipal(), name)
+        return ApiResponse.of(
+            mapOf(
+                "members" to listing.members.map { it.toResponse() },
+                "invitations" to listing.invitations.map { it.toResponse() },
+            ),
+        )
+    }
 
     /**
      * §17.7 — add a member by email, with their capability flags (RBAC design §1). Workspace
      * admin or super admin; `open-join` went with the provisioning modes (D-R11). Absent flags
-     * mean a VIEWER, which is the D-R11 default and the one the demo path uses. An unknown
-     * email is the §16.3 unknown-user stand-in (§13.7 has no `auth.user.not_found`).
+     * mean a VIEWER, which is the D-R11 default and the one the demo path uses.
+     *
+     * TWO outcomes, distinguishable by status AND body (113 §B.1), so a client never mistakes
+     * a ghost for a member:
+     *
+     * - `200` with the membership row — the user existed and is now (or already was) a member;
+     * - `202` with `{"invited": true, "email", "author", "promoter", "admin"}` — nobody by
+     *   that email exists yet; an invitation (auth.md §4.6) was created, upserting over any
+     *   earlier one, and their first login materialises it.
+     *
+     * An email the §4.3 domain allowlist would refuse at login is refused here with the SAME
+     * code the login would use (`auth.login.domain_not_allowed`) at a 400 — an invitation
+     * that could never be honoured is refused when it is created. A deactivated workspace is
+     * `workspace.inactive` (404).
      */
     @PostMapping("/{name}/members")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
     fun addMember(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
-    ): ApiResponse<Map<String, Any?>> {
+    ): ResponseEntity<ApiResponse<Map<String, Any?>>> {
         val email =
             body.get("email")?.takeIf { it.isTextual }?.asText()
                 ?: throw ApiException(
@@ -132,13 +160,17 @@ class WorkspacesController(
                     "A member email is required.",
                     mapOf("field" to "email"),
                 )
-        val added =
-            try {
-                workspaces.addMember(currentPrincipal(), name, email, flagsOf(body))
-            } catch (e: WorkspaceService.UnknownMemberEmailException) {
-                throw unknownUser(e.email, e) // the §16.3 stand-in mapping IS the handler
+        return when (val outcome = workspaces.addMember(currentPrincipal(), name, email, flagsOf(body))) {
+            is WorkspaceService.AddMemberOutcome.Added -> {
+                ResponseEntity.ok(ApiResponse.of(outcome.row.toResponse()))
             }
-        return ApiResponse.of(added.toResponse())
+
+            is WorkspaceService.AddMemberOutcome.Invited -> {
+                ResponseEntity
+                    .status(HttpStatus.ACCEPTED)
+                    .body(ApiResponse.of(outcome.toResponse()))
+            }
+        }
     }
 
     /**
@@ -156,7 +188,24 @@ class WorkspacesController(
     }
 
     /**
-     * §17.9 — set an existing member's capability flags (RBAC design §1). Workspace admin or
+     * §17.9 — revoke a pending invitation (113 §B.4). Workspace admin or super admin. An
+     * email with no invitation here is `workspace.invitation.not_found` (404) — the workspace
+     * resolved, so the not-found thing is the invitation. The email is normalized lowercase
+     * (§4.2) before the lookup: the revoke of `Bob@Company.com` finds the row the invite of
+     * `bob@company.com` created.
+     */
+    @DeleteMapping("/{name}/invitations/{email}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    fun revokeInvitation(
+        @PathVariable name: String,
+        @PathVariable email: String,
+    ) {
+        workspaces.revokeInvitation(currentPrincipal(), name, email)
+    }
+
+    /**
+     * §17.10 — set an existing member's capability flags (RBAC design §1). Workspace admin or
      * super admin; demoting the LAST admin is `workspace.last_admin` (409).
      *
      * A PUT rather than a PATCH: the three flags are REPLACED wholesale, so a caller that
@@ -206,17 +255,6 @@ class WorkspacesController(
             admin = body.get("admin")?.asBoolean() == true,
         )
 
-    private fun unknownUser(
-        email: String,
-        cause: Throwable?,
-    ): ApiException =
-        ApiException(
-            PipelineErrorCodes.Execution.NOT_FOUND,
-            "No user with email '$email'.",
-            mapOf(ApiErrors.REASON to "user_not_found", "email" to email),
-            cause,
-        )
-
     /** §17.2's wire shape — the fields a reader is entitled to. */
     private fun Workspace.toResponse(): Map<String, Any?> =
         mapOf(
@@ -259,5 +297,29 @@ class WorkspacesController(
             "promoter" to flags.promoter,
             "admin" to flags.admin,
             "joined_at" to joinedAt.toString(),
+        )
+
+    /**
+     * §17.9's invitation row — the decision the admin made, waiting for its person (auth.md
+     * §4.6). No user_id: there is no user yet; the email IS the identity.
+     */
+    private fun WorkspaceInvitation.toResponse(): Map<String, Any?> =
+        mapOf(
+            "email" to email,
+            "author" to flags.author,
+            "promoter" to flags.promoter,
+            "admin" to flags.admin,
+            "invited_by" to invitedBy.toString(),
+            "invited_at" to invitedAt.toString(),
+        )
+
+    /** §17.7's `202` body — the invitation echo. `invited: true` is the flag a client checks. */
+    private fun WorkspaceService.AddMemberOutcome.Invited.toResponse(): Map<String, Any?> =
+        mapOf(
+            "invited" to true,
+            "email" to email,
+            "author" to flags.author,
+            "promoter" to flags.promoter,
+            "admin" to flags.admin,
         )
 }

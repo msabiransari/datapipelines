@@ -92,7 +92,8 @@ class WorkspacesUiControllerTest {
     fun `addMember carries the three role flags into the service`() {
         authenticate()
         val flags = MembershipFlags(author = true, promoter = true, admin = false)
-        every { workspaceService.addMember(principal, "acme", "bob@acme.test", flags) } returns memberRow()
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test", flags) } returns
+            WorkspaceService.AddMemberOutcome.Added(memberRow())
 
         controller.addMember("acme", "bob@acme.test", author = true, promoter = true, admin = null) shouldBe
             "redirect:/workspaces?ok=member_added"
@@ -343,7 +344,8 @@ class WorkspacesUiControllerTest {
     @Test
     fun `addMember redirects ok=member_added`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "bob@acme.test", MembershipFlags.VIEWER) } returns memberRow()
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test", MembershipFlags.VIEWER) } returns
+            WorkspaceService.AddMemberOutcome.Added(memberRow())
 
         controller.addMember("acme", "bob@acme.test", null, null, null) shouldBe "redirect:/workspaces?ok=member_added"
     }

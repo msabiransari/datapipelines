@@ -58,7 +58,16 @@ class WorkspaceMembershipIntegrationTest {
         admin = users.insert("root@company.com", "Root", null, "google", "sub-2", isAdmin = true)
     }
 
-    private fun service() = WorkspaceService(workspaces, users, AuthCache(AuthProperties()), null, auditLogger)
+    private fun service() =
+        WorkspaceService(
+            workspaces,
+            users,
+            AuthCache(AuthProperties()),
+            null,
+            auditLogger,
+            WorkspaceInvitationRepository(jdbc),
+            AuthProperties(),
+        )
 
     private fun principal(
         user: User,

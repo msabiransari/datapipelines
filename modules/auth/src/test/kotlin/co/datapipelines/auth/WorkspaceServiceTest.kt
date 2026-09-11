@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -26,8 +27,10 @@ class WorkspaceServiceTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val lastUsed = mockk<LastUsedWorkspaceStore>(relaxed = true)
     private val demoSeeder = mockk<DemoWorkspaceSeeder>(relaxed = true)
+    private val invitationRepository = mockk<WorkspaceInvitationRepository>(relaxed = true)
 
     private val userId = UUID.randomUUID()
+    private val inviterId = UUID.randomUUID()
     private val wsA = workspace("alpha")
     private val wsB = workspace("beta")
 
@@ -38,6 +41,8 @@ class WorkspaceServiceTest {
             cache,
             lastUsed,
             auditLogger,
+            invitationRepository,
+            AuthProperties(),
             WorkspaceContentCheck.NONE,
             demoSeeder,
         )
@@ -250,6 +255,66 @@ class WorkspaceServiceTest {
         verify(exactly = 0) { demoSeeder.joinDemoIfUnaffiliated(any()) }
     }
 
+    @Test
+    fun `a pending invitation materialises at login and stamps the INVITED workspace, never demo (113)`() {
+        val invitedFlags = MembershipFlags(author = true)
+        every {
+            invitationRepository.materialiseFor("alice@company.com", userId)
+        } returns
+            listOf(
+                WorkspaceInvitationRepository.MaterialisedInvitation("alpha", invitedFlags, inviterId, Instant.EPOCH),
+            )
+        every { lastUsed.lastUsed(userId) } returns null
+        // The materialise invalidated the cache, so the resolution below re-reads the
+        // memberships — which now hold the invited workspace.
+        principal(memberships = listOf(membership(wsA, flags = invitedFlags)))
+
+        val stamped =
+            service().workspaceForLogin(user(), "alice@company.com")
+                ?: error("an invited user's first login must stamp the invited workspace")
+
+        stamped.id shouldBe wsA.id
+        stamped.flags shouldBe invitedFlags
+        // The materialisation was audited with the inviter and the flags (auth.md §10), and
+        // the demo join never fired: the invited workspace REPLACES the default (D-R11).
+        verify(exactly = 0) { demoSeeder.joinDemoIfUnaffiliated(any()) }
+    }
+
+    @Test
+    fun `the materialise audit names the workspace, the normalized email, the flags and the INVITER`() {
+        every {
+            invitationRepository.materialiseFor("alice@company.com", userId)
+        } returns
+            listOf(
+                WorkspaceInvitationRepository.MaterialisedInvitation(
+                    "alpha",
+                    MembershipFlags(promoter = true),
+                    inviterId,
+                    Instant.EPOCH,
+                ),
+            )
+        every { lastUsed.lastUsed(userId) } returns null
+        principal(memberships = listOf(membership(wsA)))
+
+        service().workspaceForLogin(user(), "  alice@company.com  ")
+
+        verify {
+            auditLogger.log(
+                "workspace.invitation_materialised",
+                userId,
+                null,
+                null,
+                null,
+                match {
+                    it["workspace"] == "alpha" &&
+                        it["email"] == "alice@company.com" &&
+                        it["flags"] == listOf("promoter") &&
+                        it["inviter"] == inviterId.toString()
+                },
+            )
+        }
+    }
+
     // ------------------------------------------------------------ create (D-R11)
 
     @Test
@@ -285,4 +350,116 @@ class WorkspaceServiceTest {
 
     private fun user() =
         User(userId, "alice@company.com", "Alice", null, "google", "sub-1", true, false, Instant.now(), Instant.now(), null)
+
+    @Test
+    fun `revoking an invitation that does not exist is workspace-invitation-not-found, not the workspace 404`() {
+        every { repository.findByName("alpha") } returns wsA
+        every { invitationRepository.delete(wsA.id, "ghost@company.com") } returns false
+
+        val thrown =
+            shouldThrow<WorkspaceInvitationNotFoundException> {
+                service().revokeInvitation(principal(memberships = listOf(membership(wsA))), "alpha", "Ghost@Company.com")
+            }
+
+        // The workspace resolved; the not-found thing is the INVITATION. The email was
+        // normalized before the lookup, and the code is the §13.12 three-segment form.
+        thrown.code shouldBe "workspace.invitation.not_found"
+        thrown.status shouldBe 404
+        thrown.details["email"] shouldBe "ghost@company.com"
+    }
+
+    @Test
+    fun `revoking an invitation succeeds, is audited, and never touches memberships`() {
+        every { repository.findByName("alpha") } returns wsA
+        every { invitationRepository.delete(wsA.id, "bob@company.com") } returns true
+
+        service().revokeInvitation(principal(memberships = listOf(membership(wsA))), "alpha", "bob@company.com")
+
+        verify {
+            auditLogger.log(
+                "workspace.invitation_revoked",
+                userId,
+                null,
+                null,
+                null,
+                match { it["workspace"] == "alpha" && it["email"] == "bob@company.com" },
+            )
+        }
+        // A revocation touches the invitation table only: no membership row was written,
+        // removed or reflagged (the visibility read above is read-only).
+        verify(exactly = 0) { repository.removeMember(any(), any()) }
+        verify(exactly = 0) { repository.addMember(any(), any(), any()) }
+        verify(exactly = 0) { repository.setFlags(any(), any(), any()) }
+    }
+
+    @Test
+    fun `an invite whose domain the allowlist would refuse at login is refused AT INVITE, with the login's code`() {
+        val allowlisted =
+            WorkspaceService(
+                repository,
+                userRepository,
+                cache,
+                lastUsed,
+                auditLogger,
+                invitationRepository,
+                AuthProperties(allowlist = AuthProperties.Allowlist(listOf("company.com"))),
+                WorkspaceContentCheck.NONE,
+                demoSeeder,
+            )
+        every { repository.findByName("alpha") } returns wsA
+        every { userRepository.findByEmail("intruder@elsewhere.org") } returns null
+
+        val thrown =
+            shouldThrow<InvitationDomainNotAllowedException> {
+                allowlisted.addMember(
+                    principal(memberships = listOf(membership(wsA))),
+                    "alpha",
+                    "intruder@elsewhere.org",
+                    MembershipFlags(author = true),
+                )
+            }
+
+        // The SAME code the login would refuse the address with — an invite that could
+        // never be honoured is a trap — at a 400, because the caller's REQUEST is the
+        // defect the API surface is answering.
+        thrown.code shouldBe AuthErrorCodes.LOGIN_DOMAIN_NOT_ALLOWED
+        thrown.status shouldBe 400
+        // Nothing was stored, and nothing was audited as an invitation.
+        verify(exactly = 0) { invitationRepository.upsert(any(), any(), any(), any()) }
+        verify(exactly = 0) { auditLogger.log("workspace.member_invited", any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `inviting into a DEACTIVATED workspace is workspace-inactive for the super admin who can see it`() {
+        val deactivated = workspace("alpha", deactivatedAt = Instant.now())
+        every { repository.findByName("alpha") } returns deactivated
+
+        val thrown =
+            shouldThrow<WorkspaceInactiveException> {
+                service().addMember(principal(superAdmin = true), "alpha", "bob@company.com")
+            }
+
+        thrown.code shouldBe WorkspaceErrorCodes.INACTIVE
+        thrown.status shouldBe 404
+        verify(exactly = 0) { invitationRepository.upsert(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `the members listing returns both arrays through one resolution`() {
+        every { repository.findByName("alpha") } returns wsA
+        every { repository.membershipsOf(userId) } returns listOf(membership(wsA))
+        every { repository.findMembersOf(wsA.id) } returns
+            listOf(
+                WorkspaceMemberRow(userId, "a@x.test", "A", MembershipFlags.VIEWER, Instant.EPOCH),
+            )
+        every { invitationRepository.findByWorkspace(wsA.id) } returns
+            listOf(
+                WorkspaceInvitation(wsA.id, "b@x.test", MembershipFlags.VIEWER, invitedBy = userId, invitedAt = Instant.EPOCH),
+            )
+
+        val listing = service().membersWithInvitations(principal(memberships = listOf(membership(wsA))), "alpha")
+
+        listing.members.single().email shouldBe "a@x.test"
+        listing.invitations.single().email shouldBe "b@x.test"
+    }
 }

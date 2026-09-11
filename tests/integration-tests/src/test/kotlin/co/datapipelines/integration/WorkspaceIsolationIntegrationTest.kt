@@ -3,6 +3,8 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.junit.jupiter.api.AfterAll
@@ -181,6 +183,59 @@ class WorkspaceIsolationIntegrationTest {
             .body("error.code", org.hamcrest.Matchers.equalTo("workspace.not_found"))
     }
 
+    // ---------------------------------------------------------------- invitations (113)
+
+    @Test
+    fun `a pending invitation in one workspace is invisible from the other - in the listing and by revoke`() {
+        ensureSeeded()
+        // acme's own listing: members yes, and its invitations[] array is EMPTY — a ghost
+        // invited into globex never appears in acme's arrays, mixed or separate.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/workspaces/acme/members")
+            .then()
+            .statusCode(200)
+            .body("data.invitations", org.hamcrest.Matchers.empty<Any>())
+
+        // Revoking globex's REAL pending invitation from acme is the workspace's 404
+        // (D-R5) — identical for the foreign email and for one that exists nowhere, so
+        // the pair of answers cannot tell acme that dana is invited anywhere.
+        val foreign =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+                .`when`()
+                .delete("/api/v1/workspaces/globex/invitations/$GLOBEX_INVITATION_EMAIL")
+                .then()
+                .extract()
+        val absent =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+                .`when`()
+                .delete("/api/v1/workspaces/globex/invitations/nobody@nowhere.test")
+                .then()
+                .extract()
+        foreign.statusCode() shouldBe 404
+        absent.statusCode() shouldBe foreign.statusCode()
+        foreign.body().asString() shouldNotContain "dana@globex.test"
+
+        // The invitation row itself is untouched: the refusal happened before any delete.
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement("SELECT COUNT(*) FROM workspace_invitations WHERE email = ?")
+                .use { ps ->
+                    ps.setString(1, GLOBEX_INVITATION_EMAIL)
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1) shouldBe 1
+                    }
+                }
+        }
+    }
+
     // ---------------------------------------------------------------- zero memberships
 
     @Test
@@ -264,6 +319,7 @@ class WorkspaceIsolationIntegrationTest {
 
         /** Exposed for [WorkspaceIsolationSweepTest], which drives this suite's world. */
         const val BOB = "bbb00000-0000-0000-0000-000000000002"
+        const val GLOBEX_INVITATION_EMAIL = "dana@globex.test"
         private const val CAROL = "ccc00000-0000-0000-0000-000000000003"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
@@ -372,6 +428,14 @@ class WorkspaceIsolationIntegrationTest {
                     INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
                         ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
                         ('$WS_GLOBEX', '$BOB', TRUE, FALSE, TRUE)
+                    """.trimIndent(),
+                )
+                // 113: one PENDING invitation in globex — the row that must be invisible
+                // from acme, in listings and by revoke (the sweep drives the verb).
+                statement.execute(
+                    """
+                    INSERT INTO workspace_invitations (workspace_id, email, author, invited_by) VALUES
+                        ('$WS_GLOBEX', '$GLOBEX_INVITATION_EMAIL', TRUE, '$BOB')
                     """.trimIndent(),
                 )
             }
