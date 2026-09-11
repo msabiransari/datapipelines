@@ -46,8 +46,9 @@ class SiteOpenSourceSignalsTest {
 
     @Test
     fun `every page carries the one contact address and no other mailto`() {
-        val rendered = SitePages.ALL.associateWith { SitePageRenderer.render(it) } +
-            mapOf(SitePage(path = "/docs", title = "", description = "", view = "") to SitePageRenderer.renderDocsIndex())
+        val rendered =
+            SitePages.ALL.associateWith { SitePageRenderer.render(it) } +
+                mapOf(SitePage(path = "/docs", title = "", description = "", view = "") to SitePageRenderer.renderDocsIndex())
 
         rendered.forEach { (page, html) ->
             val mailtos = MAILTO.findAll(html).map { it.groupValues[1] }.toSet()

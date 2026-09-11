@@ -121,7 +121,9 @@ class SiteBatch2ContentTest {
         const val MIN_WORDS = 1_200
         const val MIN_BODY_LINKS = 3
 
-        /** The seven batch-2 intent pages (111), the engineering page (115 §A.3) and the demo-data page (116). */
+        /** The seven batch-2 intent pages (111), the engineering page (115 §A.3), the demo-data page (116)
+         *  and the semantic-layer page (119 §B). /pricing is deliberately absent: 600-900 words is the
+         *  honest length for "there is no price", so its pins live in SiteOpenSourceSignalsTest instead. */
         val SWEEP: List<SitePage> =
             listOf(
                 SitePages.COMPARE_FIVETRAN,
@@ -133,6 +135,7 @@ class SiteBatch2ContentTest {
                 SitePages.FOR_ANALYSTS,
                 SitePages.HOW_IT_WORKS,
                 SitePages.DEMO_DATA,
+                SitePages.SEMANTIC_LAYER,
             )
 
         /** The searcher's phrase each H1 must carry — the phrase, not the whole H1. */
@@ -147,6 +150,7 @@ class SiteBatch2ContentTest {
                 SitePages.FOR_ANALYSTS.path to "ai sql assistant with governance",
                 SitePages.HOW_IT_WORKS.path to "how it works",
                 SitePages.DEMO_DATA.path to "demo data",
+                SitePages.SEMANTIC_LAYER.path to "semantic layer",
             )
 
         val H1 = Regex("""<h1[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL)

@@ -109,6 +109,7 @@ class SiteBuyerLanguageTest {
     private companion object {
         /** Word-boundary split for the "free" check — "freedom" must not count. */
         val WORD_BOUNDARY = Regex("""\b""")
+
         /** Hero, before/after, artifact — the fold must always render at least these three. */
         const val MIN_FOLD_SECTIONS = 3
 

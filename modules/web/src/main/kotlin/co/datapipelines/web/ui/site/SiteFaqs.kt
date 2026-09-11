@@ -366,6 +366,50 @@ object SiteFaqs {
             ),
         )
 
+    /**
+     * The learned semantic layer's five questions (119 §B.10). Every answer names the doc
+     * it rests on; the "poison" answer carries the trust-and-conflict rule, which is the
+     * whole reason a wrong fact cannot silently win.
+     */
+    val SEMANTIC_LAYER: List<FaqEntry> =
+        listOf(
+            FaqEntry(
+                "Is this a data catalog?",
+                "No. A catalog lists what exists — tables, columns, owners. This records what it means: a unit, a " +
+                    "time zone, a grain, what a code means, how tables join, what revenue excludes — each with the " +
+                    "query that proved it. The introspection surface it rides is docs/datasources.md §7.",
+                "docs/datasources.md §7",
+            ),
+            FaqEntry(
+                "Can a wrong fact poison the agent?",
+                "That is what the trust ladder and the conflict rule are for: a fact is never higher-trust than its " +
+                    "evidence, two live facts of the same kind are shown as a conflict — never a silent winner — and " +
+                    "any fact can be retired with a reason. Facts are specified in docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
+            ),
+            FaqEntry(
+                "Do I have to write anything?",
+                "No. The agent records what it learns while it works; you verify when you want to. Recording needs an " +
+                    "author-scoped key and a release is still a person's act — the same bar as authoring a pipeline " +
+                    "(docs/auth.md §7.6).",
+                "docs/auth.md §7.6",
+            ),
+            FaqEntry(
+                "What happens when my schema changes?",
+                "Drift is detected at read time: a renamed or dropped column flips its facts to stale, shown beside " +
+                    "the current columns — nothing is silently re-mapped to a new column; someone re-verifies and " +
+                    "records the successor. The drift rule is docs/metadata-db.md §4.18.",
+                "docs/metadata-db.md §4.18",
+            ),
+            FaqEntry(
+                "Does it work on my own warehouse?",
+                "Yes — the skill and the tools are demo-free, and the facts come from whatever your agent probes: " +
+                    "Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB, or Parquet and Iceberg through dp-lake " +
+                    "(docs/datasources.md §4).",
+                "docs/datasources.md §4",
+            ),
+        )
+
     /** Every group, in reading order — the `/faq` page opens with the buyer's questions (115). */
     val ALL: List<Pair<String, List<FaqEntry>>> =
         listOf(
@@ -376,5 +420,6 @@ object SiteFaqs {
             "Demo data" to DEMO_DATA,
             "Tableau" to TABLEAU,
             "Pricing" to PRICING,
+            "The semantic layer" to SEMANTIC_LAYER,
         )
 }

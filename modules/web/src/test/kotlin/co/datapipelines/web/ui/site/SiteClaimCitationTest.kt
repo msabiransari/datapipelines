@@ -57,6 +57,7 @@ class SiteClaimCitationTest {
                 "published-api.html",
                 "roadmap.html",
                 "security.html",
+                "semantic-layer.html",
                 "tableau-extracts-alerts-dashboards.html",
                 "tableau-governed-dataset.html",
                 "tableau-prep-vs-pipelines.html",

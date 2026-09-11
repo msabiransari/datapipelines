@@ -4,7 +4,7 @@
 # What it measures: Lighthouse's performance, accessibility, best-practices and
 # SEO categories, on seven pages of the exported static site:
 #   /  /how-it-works  /demo-data  /faq  /tableau  /published-api  /for/saas-teams  /pricing
-# (115 §C added /how-it-works; 116 added /demo-data; 119 added /pricing.)
+# (115 §C added /how-it-works; 116 added /demo-data; 119 added /pricing and /semantic-layer.)
 #
 # The floor is 95 in every audited category on every page. Any score below the
 # floor names the page, the category and the score, and the script exits 1.
@@ -32,7 +32,7 @@ FLOOR=95
 EXPORT_DIR="modules/web/build/website-export"
 # Trailing slashes: the export is a directory tree, and python's http.server answers a
 # slash-less directory path with a redirect — one wasted round trip on the critical chain.
-PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/")
+PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/" "/semantic-layer/")
 CATEGORIES=("performance" "accessibility" "best-practices" "seo")
 
 command -v python3 >/dev/null || { echo "site-lighthouse: python3 is required to serve the export" >&2; exit 1; }
@@ -173,4 +173,4 @@ if [ "$FAILED" -ne 0 ]; then
   echo "site-lighthouse: FAIL — at least one page scored below the floor; fix the cause, never lower the floor" >&2
   exit 1
 fi
-echo "site-lighthouse: OK — eight pages, four categories, all >= $FLOOR"
+echo "site-lighthouse: OK — nine pages, four categories, all >= $FLOOR"

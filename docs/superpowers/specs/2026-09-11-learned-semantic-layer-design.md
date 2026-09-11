@@ -237,6 +237,8 @@ promotion rules).
 
 Everything above shipped as written unless listed here. Each deviation names the thing the code contradicted and what was built instead.
 
+Public page: the marketing site's **/semantic-layer** (119 §B) renders this design for buyers and engineers — the loop, the scopes, the trust ladder, drift, the today/next split of §11, and the §19 kinds table (verbatim, drift-guarded) — with 118's real `facts[]` wire example as the artifact.
+
 | Where | The record says | What shipped, and why |
 |---|---|---|
 | §3 index | `ix_learned_facts_object ON (datasource_name, (refs_json->0->>'table'))` + `ix_learned_facts_ws` | `idx_learned_facts_datasource (datasource_name)` + `idx_learned_facts_workspace (workspace_id) WHERE NOT NULL`. The expression index would index only the FIRST ref of a multi-ref (join) fact and serve none of the reads that ship — every read is per datasource, then narrowed to a table in the reader over a set that is hundreds of rows at most. House `idx_` prefix. |

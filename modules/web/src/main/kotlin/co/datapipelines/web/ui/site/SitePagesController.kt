@@ -169,17 +169,6 @@ class SitePagesController(
     ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, toolCount(), SiteFaqs.APIS_AND_OPERATIONS)
 
     /**
-     * 119 §C.4 — the pricing page: there is no price. Constant content like every page
-     * above — GET-only, anonymous, no datastore; the licence, the honest costs and the
-     * dated no-paid-tier promise are the content.
-     */
-    @GetMapping("/pricing")
-    fun pricing(
-        model: Model,
-        response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.PRICING, toolCount(), SiteFaqs.PRICING)
-
-    /**
      * 116 — the demo-data page. Its one live input is [SiteDemoData], parsed from the
      * vendored manifests at startup and constant from then on — the same "constant content"
      * shape as every handler above: GET-only, anonymous, no datastore, no principal.

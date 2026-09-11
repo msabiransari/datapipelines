@@ -67,7 +67,13 @@ class SiteCardBudgetTest {
             .filter { it.isNotBlank() }
             .size
 
-    private fun heading(card: String): String = H3.find(card)?.groupValues?.get(1)?.trim() ?: card.take(60)
+    private fun heading(card: String): String =
+        H3
+            .find(card)
+            ?.groupValues
+            ?.get(1)
+            ?.trim()
+            ?: card.take(60)
 
     private fun howItWorksSource(): String =
         PathMatchingResourcePatternResolver(javaClass.classLoader)

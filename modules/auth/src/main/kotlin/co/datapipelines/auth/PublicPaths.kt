@@ -174,6 +174,12 @@ object PublicPaths {
                 "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.",
                 "119",
             ),
+            // 119: the learned semantic layer page — the category term, answered honestly.
+            PublicPath(
+                "/semantic-layer",
+                "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.",
+                "119",
+            ),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.

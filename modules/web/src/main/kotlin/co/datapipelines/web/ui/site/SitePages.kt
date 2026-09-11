@@ -421,6 +421,23 @@ object SitePages {
             view = "site/pricing",
         )
 
+    /**
+     * 119 §B — the learned semantic layer: the category term buyers and engineers search,
+     * answered honestly. Ours is not a model somebody writes — it is facts the agent
+     * records with the query that proved them, read back inline where it is looking.
+     */
+    val SEMANTIC_LAYER =
+        SitePage(
+            path = "/semantic-layer",
+            // The brief's description is 174 chars against the 155 pin (SiteSeoMetaTest) —
+            // trimmed from the end as the brief sanctions; every key phrase stays.
+            title = "Semantic layer, learned by the agent — open source | datapipelines.co",
+            description =
+                "An open-source semantic layer your agent builds from your data, recording what it learned with " +
+                    "the query that proved it. Drift is detected, never guessed.",
+            view = "site/semantic-layer",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -550,6 +567,7 @@ object SitePages {
                 HOW_IT_WORKS,
                 DEMO_DATA,
                 PRICING,
+                SEMANTIC_LAYER,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

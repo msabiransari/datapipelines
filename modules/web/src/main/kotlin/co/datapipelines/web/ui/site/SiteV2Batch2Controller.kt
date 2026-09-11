@@ -63,4 +63,19 @@ class SiteV2Batch2Controller {
      * so an injected list would render "0 tools" without one.
      */
     private fun toolCount(): Int = McpToolCatalog.NAMES.size
+
+    // ---- 119: the pricing page (§C.4) and the learned-semantic-layer page (§B) joined this
+    // controller for the same reason the batch-2 pages did: SitePagesController sits at the
+    // detekt function ceiling, and these are the same shape — GET, anonymous, constant.
+    @GetMapping("/pricing")
+    fun pricing(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.PRICING, toolCount(), SiteFaqs.PRICING)
+
+    @GetMapping("/semantic-layer")
+    fun semanticLayer(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.SEMANTIC_LAYER, toolCount(), SiteFaqs.SEMANTIC_LAYER)
 }

@@ -136,7 +136,8 @@ object SitePageRenderer {
             put(SitePages.FOR_ANALYSTS.path, batch2Controller::forAnalysts)
             put(SitePages.HOW_IT_WORKS.path, pagesController::howItWorks)
             put(SitePages.DEMO_DATA.path, pagesController::demoData)
-            put(SitePages.PRICING.path, pagesController::pricing)
+            put(SitePages.PRICING.path, batch2Controller::pricing)
+            put(SitePages.SEMANTIC_LAYER.path, batch2Controller::semanticLayer)
         }
     }
 

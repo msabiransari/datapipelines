@@ -86,7 +86,6 @@ class PublicRouteWalkerTest {
                 "SitePagesController#howItWorks",
                 "SitePagesController#mcpTools",
                 "SitePagesController#pillar",
-                "SitePagesController#pricing",
                 "SitePagesController#publishedApi",
                 "SitePagesController#roadmap",
                 "SitePagesController#security",
@@ -100,6 +99,8 @@ class PublicRouteWalkerTest {
                 "SiteV2Batch2Controller#forAgencies",
                 "SiteV2Batch2Controller#forAnalysts",
                 "SiteV2Batch2Controller#forSaasTeams",
+                "SiteV2Batch2Controller#pricing",
+                "SiteV2Batch2Controller#semanticLayer",
                 "SiteV2Batch2Controller#tableauPrep",
                 "SiteV2Batch2Controller#tableauRoadmap",
                 // Crawler infrastructure (073) — robots.txt is a static file, not a handler.
