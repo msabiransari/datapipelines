@@ -116,12 +116,27 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    `datasources_get_schemas` → `datasources_get_tables(namespace)` →
    `datasources_get_columns(table, namespace)` for every table the SQL will touch, passing
    each table's reported `namespace` array through. Never write SQL against recalled column
-   names.
+   names. **Read the `facts` that arrive with them.** `datasources_get` carries the
+   datasource-wide learned facts (its time window, whether it is a sample), `_get_tables`
+   each table's (grain, caveats), `_get_columns` each column's (units, time zones, what a
+   coded value means, joins) — what earlier sessions learned and recorded, each with its
+   `trust` and the evidence that showed it. Read them before you probe.
+
+   **Record what you learned, with the query that showed it.** After you have established a
+   fact about the data that introspection could not tell you — a unit, a time zone, a sample
+   rate, a grain, what a coded value means, a join that holds — call `semantics_record` with
+   the probe you ran. Read the facts already attached to a table before probing it: a fact
+   marked `observed` or `verified` with evidence saves you the probe; a fact marked `stale`
+   or `needs_review` is a warning, not a truth — re-verify and record the superseding fact.
+   Never record what introspection already returns (types, keys, comments).
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
    will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
    `wall_ms` — a `seq` plan on a large table is the timeout you would meet in step 5, found
-   while it is still cheap. Only then write the template.
+   while it is still cheap. A probe that settles a question about the DATA (not the plan) —
+   "is `reading` already in the unit `unit` names?", "is `occurred_at` UTC or wall-clock?" —
+   is a fact: record it (step 1) so the next session skips the probe. Only then write the
+   template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
    (the description is the only discoverability mechanism for parameters).
@@ -243,6 +258,13 @@ here.
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
 2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
    + credential questions immediately.
+2½. **Learned facts are shared memory — keep them honest.** A fact you record with
+   `evidence_sql` is `observed`; without it, only `asserted`. Two facts of one kind on the
+   same column are both served, flagged `conflict` — a reader decides, the store never picks.
+   To correct one, record the replacement with `supersedes` (the old one retires as
+   `superseded`); `semantics_retire` alone is for a fact that is simply wrong. A DATASOURCE
+   fact is visible to every workspace the datasource is granted to; a `definition`,
+   `exclusion` or `preference` (WORKSPACE scope) stays in yours.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via
    `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` requires `expected_hash` — the
@@ -338,7 +360,7 @@ deployment serves them at `GET /skill/<name>.md`; inside a checkout they are fil
 - `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (34 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (37 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings

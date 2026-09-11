@@ -90,7 +90,10 @@ platform (each Don't below is a real one, 2026-09-08, on the demo data).
   SELECT against the source first — rows, `wall_ms`, and the EXPLAIN plan (captured before
   the run, so it survives the timeout it explains); then `templates_render`; then
   `pipelines_execute_node` on the one node; only then `pipelines_execute` the whole DAG.
-  Each rung is cheaper than the next and isolates a different fault class.
+  Each rung is cheaper than the next and isolates a different fault class. What the probe
+  rung settles about the DATA — a unit, a time zone, a sample rate, what a coded value means
+  — is a fact the next session should not re-probe: `semantics_record` it with that SELECT
+  as `evidence_sql` (SKILL.md, golden path step 1).
   **Stop-loss (T199): three identical failures → stop and report.** A schema refusal is not
   your typo — re-introspect or hand back; a fourth identical call changes nothing.
 - **A table marked unavailable is broken at the lake, not by your query.** If
