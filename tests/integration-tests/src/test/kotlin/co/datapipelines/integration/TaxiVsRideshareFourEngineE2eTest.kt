@@ -604,8 +604,12 @@ class TaxiVsRideshareFourEngineE2eTest {
         private const val MINIO_USER = "minioadmin"
         private const val MINIO_PASSWORD = "minioadmin"
 
-        /** The same MinIO pin the 089 §F MinIO suite verified against Docker Hub. */
-        private const val MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+        /** The same MinIO pin the 089 §F MinIO suite verified against Docker Hub. *
+         * quay.io, not Docker Hub: MinIO withdrew this tag from `minio/minio` on Docker Hub (404
+         * "pull access denied" on every CI run from 2026-09-11); a laptop with the image cached
+         * never noticed.
+         */
+        private const val MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 
         /** The compose stack's exact MySQL pin (deploy/compose.yml). */
         private const val MYSQL_IMAGE = "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"

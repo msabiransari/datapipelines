@@ -34,7 +34,14 @@ class LakeTablePreflightTest {
             dialect = Dialect.LAKE,
             jdbcUrl = "jdbc:duckdb::memory:",
             credentialKind = CredentialKind.NONE,
-            properties = DatasourceProperties(dialect = mapOf("catalog.kind" to "s3")),
+            // `unsigned: true` — these tables are LOCAL files. `kind: none` alone would emit
+            // `CREATE SECRET … PROVIDER credential_chain`, which DuckDB VALIDATES at create
+            // against the box's AWS config: green on a laptop with `~/.aws`, red on a CI
+            // runner with none ("Secret Validation Failure … Credential Chain: 'config'",
+            // 2026-09-11, every GitHub run). The fixture must not depend on the developer's
+            // credentials; a local-file lake declares the public/unsigned posture and no
+            // secret is created (DialectAdapters.lakeSecretStatement).
+            properties = DatasourceProperties(dialect = mapOf("catalog.kind" to "s3", "unsigned" to "true")),
         )
 
     private fun parquet(file: String): File =

@@ -271,8 +271,12 @@ class LakeConnectivityIntegrationTest {
          * The current stable RELEASE tag on Docker Hub (verified 2026-09-08), pinned exactly —
          * the same image tests/integration-tests' MinIO suite uses; each module pins its own
          * because test sources do not cross module bounds.
+         *
+         * quay.io, not Docker Hub: MinIO withdrew this tag from `minio/minio` on Docker Hub (404
+         * "pull access denied" on every CI run from 2026-09-11); a laptop with the image cached
+         * never noticed.
          */
-        private const val MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+        private const val MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 
         @Container
         @JvmStatic
