@@ -310,6 +310,9 @@ code {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   border-radius: var(--radius-md);
+  /* 119 merge: ten items at 1440 wrapped three labels onto two lines and split the
+     AGPL chip — a nav item is one line or it is not a nav item. */
+  white-space: nowrap;
 }
 
 .nav-wide a:hover {
@@ -347,6 +350,7 @@ code {
   background: var(--site-accent-soft);
   border: var(--space-px) solid var(--site-accent-line);
   border-radius: var(--radius-pill);
+  white-space: nowrap;
 }
 
 .nav-chip:hover {
