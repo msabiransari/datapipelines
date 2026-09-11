@@ -1,13 +1,16 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
+import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.web.api.currentPrincipal
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -34,6 +37,7 @@ class AdminUsersPartialController(
     private val userService: UserService,
     private val localPasswordService: LocalPasswordService,
     private val browse: AdminUsersBrowseModel,
+    private val workspaces: WorkspaceService,
 ) {
     @GetMapping("/partials/admin/users")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
@@ -51,13 +55,26 @@ class AdminUsersPartialController(
      * Create a local account (auth.md §5A.1 — admin-created only; there is no
      * self-registration). The one-time password is shown to the admin exactly
      * once, out-of-band into `#admin-notice`; the new row prepends to the table.
+     *
+     * The optional workspace + flags (113 §B.3) put the new account into a workspace
+     * IN THE SAME ACT: no invitation is needed because the row exists by the time the
+     * membership is written — [WorkspaceService.addMember] resolves the freshly created
+     * row directly. The flags ride the workspace's own rules (a super admin caller
+     * passes the capability gate via D-R8; `admin` normalises to admin+author in the
+     * service). An unknown or unreachable workspace is the workspace surface's own
+     * catalogued refusal, rendered as a toast — the USER ROW still exists, and the
+     * admin can add it to a workspace afterwards from the workspaces screen.
      */
     @PostMapping("/partials/admin/users")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun createLocalUser(
         model: Model,
         @RequestParam email: String,
-        @RequestParam(required = false, defaultValue = "") displayName: String,
+        @RequestParam(required = false, defaultValue = "") displayName: String = "",
+        @RequestParam(required = false, defaultValue = "") workspace: String = "",
+        @RequestParam(required = false, defaultValue = "false") author: Boolean = false,
+        @RequestParam(required = false, defaultValue = "false") promoter: Boolean = false,
+        @RequestParam(required = false, defaultValue = "false") admin: Boolean = false,
     ): Any {
         requireSessionAdmin("create-local-user")
         if (email.isBlank() || !email.contains('@')) {
@@ -79,9 +96,58 @@ class AdminUsersPartialController(
                     title = "Local user created",
                     message =
                         result.user.email +
-                            " — the one-time password is shown once on this screen; pass it to the user out-of-band.",
+                            " — the one-time password is shown once on this screen; pass it to the user out-of-band." +
+                            membershipNote(result.user.email, workspace.trim(), author, promoter, admin),
                 )
             }
+        }
+    }
+
+    /**
+     * The optional half of [createLocalUser]: add the freshly created account to
+     * [workspace], and SAY SO in the toast. Null when no workspace was requested.
+     *
+     * An unknown or unreachable workspace is the workspace surface's own catalogued
+     * refusal — logged, and reported in the note with its code — while the USER ROW
+     * still exists: the admin's repair is the workspaces screen, not a retry here.
+     */
+    private fun membershipNote(
+        userEmail: String,
+        workspace: String,
+        author: Boolean,
+        promoter: Boolean,
+        admin: Boolean,
+    ): String? {
+        if (workspace.isBlank()) return null
+        return try {
+            when (
+                val outcome =
+                    workspaces.addMember(
+                        currentPrincipal(),
+                        workspace,
+                        userEmail,
+                        MembershipFlags(author = author, promoter = promoter, admin = admin),
+                    )
+            ) {
+                // The row was JUST created, so the invitation branch is unreachable here —
+                // a race between two creators could land here once in a product's lifetime,
+                // and the honest message still tells the admin what exists.
+                is WorkspaceService.AddMemberOutcome.Invited -> {
+                    " — invited to '$workspace' (an account with that email appeared meanwhile)."
+                }
+
+                is WorkspaceService.AddMemberOutcome.Added -> {
+                    " — also a member of '$workspace'."
+                }
+            }
+        } catch (e: AuthException) {
+            log.warn(
+                "event=admin_user_workspace_add_refused user={} workspace={} code={}",
+                userEmail,
+                workspace,
+                e.code,
+            )
+            " — but adding to '$workspace' was refused (${e.code}); add them from the workspaces screen."
         }
     }
 

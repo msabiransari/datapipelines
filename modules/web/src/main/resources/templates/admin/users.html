@@ -19,8 +19,13 @@
         class="u-row u-mb-md">
     <input type="email" name="email" class="ds-input app-input-inline" placeholder="new-user@example.com" required>
     <input type="text" name="displayName" class="ds-input app-input-inline" placeholder="Display name (optional)">
+    <input type="text" name="workspace" class="ds-input app-input-inline" placeholder="Workspace (optional)"
+           title="Also add the new user to this workspace — leave blank to add them later">
+    <label class="u-text-xs" title="Author can create and edit"><input type="checkbox" name="author" value="true"> author</label>
+    <label class="u-text-xs" title="Promoter can release and promote"><input type="checkbox" name="promoter" value="true"> promoter</label>
+    <label class="u-text-xs" title="Workspace admin manages members"><input type="checkbox" name="admin" value="true"> admin</label>
     <button type="submit" class="ds-button ds-button-primary ds-button-sm">Create local user</button>
-    <span class="u-secondary u-text-xs">Creates a local account with a one-time password, shown once (auth.md §5A.1)</span>
+    <span class="u-secondary u-text-xs">Creates a local account with a one-time password, shown once (auth.md §5A.1); the workspace + flags are applied at once (auth.md §4.6)</span>
   </form>
 
   <div class="u-row u-mb-md">
