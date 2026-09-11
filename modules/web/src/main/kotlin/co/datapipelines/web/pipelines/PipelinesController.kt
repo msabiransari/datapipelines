@@ -171,6 +171,18 @@ class PipelinesController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val released = pipelines.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_VERSION_RELEASED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "pipeline_name" to released.record.name,
+                "version" to released.version.version,
+                "via" to LifecycleVerbs.via(principal),
+            ),
+        )
         return ApiResponse.of(PipelineResponses.full(released.record, released.bodyJson, released.version))
     }
 

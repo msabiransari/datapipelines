@@ -12,6 +12,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.templates.TemplateReleaseService
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
@@ -105,6 +106,7 @@ class TemplateLifecycleDialogControllerTest {
                     .model()
                     .attribute("lifecycleToastTitle", "Released v2"),
             )
+        audit.events shouldBe listOf("template.version.released")
     }
 
     @Test

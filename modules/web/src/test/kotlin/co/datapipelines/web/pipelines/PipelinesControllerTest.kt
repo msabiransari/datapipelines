@@ -53,6 +53,9 @@ class PipelinesControllerTest {
     // 056: the controller takes the SERVICE, built here over the very same mocks this suite
     // already stubbed — so every `every { repository… }` / `every { drafts… }` below still fires
     // unchanged and not one assertion in this file moved.
+
+    /** A RECORDING sink, never a strict mock: a missing audit call must be able to fail a test. */
+    private val audited = mutableListOf<Pair<String, Map<String, Any?>>>()
     private val audit =
         object : co.datapipelines.auth.AuditEventSink {
             override fun log(
@@ -62,7 +65,9 @@ class PipelinesControllerTest {
                 sourceIp: String?,
                 userAgent: String?,
                 details: Map<String, Any?>,
-            ) = Unit
+            ) {
+                audited += event to details
+            }
         }
 
     private val controller =
@@ -326,6 +331,10 @@ class PipelinesControllerTest {
         data.get("version").asInt() shouldBe 2
         data.get("status").asText() shouldBe "RELEASED"
         data.get("current_version").asInt() shouldBe 2
+        // T187 — the D4 human step leaves a record: who, what, which version, through what.
+        audited.map { it.first } shouldBe listOf("pipeline.version.released")
+        audited.single().second["version"] shouldBe 2
+        audited.single().second["via"] shouldBe "session"
     }
 
     @Test

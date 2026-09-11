@@ -54,6 +54,8 @@ class TemplatesControllerTest {
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
     private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
 
+    /** A RECORDING sink, never a strict mock: a missing audit call must be able to fail a test. */
+    private val audited = mutableListOf<Pair<String, Map<String, Any?>>>()
     private val audit =
         object : co.datapipelines.auth.AuditEventSink {
             override fun log(
@@ -63,7 +65,9 @@ class TemplatesControllerTest {
                 sourceIp: String?,
                 userAgent: String?,
                 details: Map<String, Any?>,
-            ) = Unit
+            ) {
+                audited += event to details
+            }
         }
 
     private val controller =
@@ -319,6 +323,10 @@ class TemplatesControllerTest {
             )
         val released = controller.release("hash-v3", """{"name":"test/fetch_orders.sql"}""").data
         released.get("status").asText() shouldBe "RELEASED"
+        // T187 — the release is audited on the REST surface too, with the version and the `via`.
+        audited.map { it.first } shouldBe listOf("template.version.released")
+        audited.single().second["version"] shouldBe 3
+        audited.single().second["via"] shouldBe "session"
 
         every { releases.purge(any(), "test/fetch_orders.sql", "hash-v3") } returns Unit
         controller.discard("hash-v3", """{"name":"test/fetch_orders.sql"}""")

@@ -258,6 +258,17 @@ class TemplatesController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val released = releases.release(workspaceId, nameOf(body), IfMatchHeader.required(ifMatch), principal.userId)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
+            principal,
+            workspaceId,
+            mapOf(
+                "template_id" to released.detail.templateId,
+                "version" to released.detail.version,
+                "via" to LifecycleVerbs.via(principal),
+            ),
+        )
         return ApiResponse.of(withDraftPointer(released.template, null))
     }
 

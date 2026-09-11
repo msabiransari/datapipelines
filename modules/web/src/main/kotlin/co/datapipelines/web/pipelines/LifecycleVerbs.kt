@@ -59,10 +59,21 @@ object LifecycleVerbs {
     const val AUDIT_ENTITY_PURGED = "pipeline.purged"
     const val AUDIT_CURRENT_SWITCHED = "pipeline.current_switched"
 
+    /**
+     * enums.md §15 — the release itself (T187). Versioning D4 makes the release the one human
+     * step, so the record of WHO made it and THROUGH WHAT (`via`: session or key id) is the
+     * audit's whole point; 101 audited the discard family and left this one out.
+     */
+    const val AUDIT_VERSION_RELEASED = "pipeline.version.released"
+
     /** enums.md §15 — the template twins. */
     const val TEMPLATE_AUDIT_VERSION_DISCARDED = "template.version.discarded"
     const val TEMPLATE_AUDIT_VERSION_RESTORED = "template.version.restored"
     const val TEMPLATE_AUDIT_VERSION_PURGED = "template.version.purged"
     const val TEMPLATE_AUDIT_ENTITY_PURGED = "template.purged"
     const val TEMPLATE_AUDIT_CURRENT_SWITCHED = "template.current_switched"
+    const val TEMPLATE_AUDIT_VERSION_RELEASED = "template.version.released"
+
+    /** The `via` detail every release event carries — the D4 question is "was it a person". */
+    fun via(principal: AuthenticatedPrincipal): String = if (principal.keyId != null) "api_key" else "session"
 }

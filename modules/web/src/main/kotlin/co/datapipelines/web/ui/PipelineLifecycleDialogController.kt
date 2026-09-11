@@ -78,9 +78,20 @@ class PipelineLifecycleDialogController(
                     message = "This pipeline has no draft to release.",
                     details = mapOf("pipeline_id" to id.toString()),
                 )
-        // No audit here, exactly like the REST release: 101 audited the discard family;
-        // release stayed the editor's plain verb, and the dialog does not widen the event set.
         val released = pipelines.release(workspaceId, id, draft.bodyHash, principal.userId)
+        // T187 — the release is the D4 human step; it is audited on every surface that offers it.
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.AUDIT_VERSION_RELEASED,
+            principal,
+            workspaceId,
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "pipeline_name" to released.record.name,
+                "version" to released.version.version,
+                "via" to LifecycleVerbs.via(principal),
+            ),
+        )
         return if (from == FROM_EDITOR) {
             redirect("/pipelines/$id/editor?ok=released")
         } else {

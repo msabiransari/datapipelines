@@ -130,6 +130,8 @@ class PipelineLifecycleDialogControllerTest {
                     "v3 is the current version now, and it is locked.",
                 ),
             )
+        // T187 — released on the dialog surface is audited like every other lifecycle verb.
+        audit.events shouldBe listOf("pipeline.version.released")
     }
 
     /**

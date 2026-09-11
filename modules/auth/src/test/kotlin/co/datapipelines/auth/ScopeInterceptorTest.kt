@@ -195,4 +195,88 @@ class ScopeInterceptorTest {
             .preHandle(MockHttpServletRequest("GET", "/api/v1/probe"), response, "not-a-handler-method")
             .shouldBeTrue()
     }
+
+    // ------------------------------------------------------------------ no reachable workspace, in a browser
+
+    private fun authenticateSessionWithoutWorkspace() {
+        val principal =
+            AuthenticatedPrincipal(
+                UUID.randomUUID(),
+                "nobody@b.com",
+                "Nobody",
+                emptySet(),
+                AuthMethod.OIDC,
+                workspace = null,
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
+
+    private fun invokeWith(
+        path: String,
+        vararg headers: Pair<String, String>,
+    ): Pair<Boolean, MockHttpServletResponse> {
+        val handler = HandlerMethod(ProbeController(), ProbeController::class.java.getMethod("read"))
+        val request = MockHttpServletRequest("GET", path)
+        headers.forEach { (k, v) -> request.addHeader(k, v) }
+        val response = MockHttpServletResponse()
+        return interceptor.preHandle(request, response, handler) to response
+    }
+
+    /**
+     * §11A.1 — a PERSON with no reachable workspace navigating to a page is sent to the
+     * workspaces screen (the one that can explain their state), not handed a JSON envelope.
+     * Still refused (the handler never runs) and still audited.
+     */
+    @Test
+    fun `a session with no workspace navigating to a page is redirected to the workspaces screen`() {
+        authenticateSessionWithoutWorkspace()
+
+        val (proceed, response) = invokeWith("/pipelines", "Accept" to "text/html,application/xhtml+xml")
+
+        proceed.shouldBeFalse()
+        response.status shouldBe 302
+        response.redirectedUrl shouldBe "/workspaces"
+        verify { auditLogger.log("auth.scope.denied", any(), any(), any(), any(), any()) }
+    }
+
+    /** The API, a fragment swap and a non-HTML client keep the catalogued 404 envelope. */
+    @Test
+    fun `the same session gets the JSON 404 on the api, on a partial, and without an html accept`() {
+        authenticateSessionWithoutWorkspace()
+
+        listOf(
+            invokeWith("/api/v1/pipelines", "Accept" to "text/html"),
+            invokeWith("/pipelines", "Accept" to "text/html", "HX-Request" to "true"),
+            invokeWith("/pipelines", "Accept" to "application/json"),
+        ).forEach { (proceed, response) ->
+            proceed.shouldBeFalse()
+            response.status shouldBe 404
+            body(response)["code"] shouldBe "workspace.not_found"
+        }
+    }
+
+    /** A key never has "no workspace" as a browsing problem — it keeps the envelope on every path. */
+    @Test
+    fun `an api key with no workspace context is the JSON 404 even on a page path`() {
+        val principal =
+            AuthenticatedPrincipal(
+                UUID.randomUUID(),
+                "agent@b.com",
+                "Agent",
+                setOf(Scope.READ),
+                AuthMethod.API_KEY,
+                "dpk_ABCDEFGHIJKL",
+                workspaceName = "acme",
+                workspace = null,
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+
+        val (proceed, response) = invokeWith("/pipelines", "Accept" to "text/html")
+
+        proceed.shouldBeFalse()
+        response.status shouldBe 404
+        body(response)["code"] shouldBe "workspace.not_found"
+    }
 }

@@ -70,8 +70,19 @@ class TemplateLifecycleDialogController(
                     message = "This template has no draft to release.",
                     details = mapOf("template_id" to name),
                 )
-        // No audit, exactly like the REST release (the discard family is what 101 audited).
         val released = releases.release(workspaceId, name, draft.bodyHash, principal.userId)
+        // T187 — the release is the D4 human step; it is audited on every surface that offers it.
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
+            principal,
+            workspaceId,
+            mapOf(
+                "template_id" to released.detail.templateId,
+                "version" to released.detail.version,
+                "via" to LifecycleVerbs.via(principal),
+            ),
+        )
         return if (from == FROM_EDITOR) {
             redirect("/templates/editor?name=${urlEncode(name)}&ok=released")
         } else {

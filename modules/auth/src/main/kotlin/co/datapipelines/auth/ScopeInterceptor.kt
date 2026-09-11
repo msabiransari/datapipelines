@@ -189,6 +189,15 @@ class ScopeInterceptor(
             keyId = principal.keyId,
             details = mapOf("operation" to operation.name, "code" to decision.code) + decision.details,
         )
+        // A PERSON with no reachable workspace, navigating to a page: the one screen that can
+        // explain their state is the workspaces screen (ui-screens §4.13 no-workspace page,
+        // reachable by auth.md §11A.1's `WORKSPACES_READ` exception). A JSON envelope in a
+        // browser tab explains nothing. Keys, partial swaps and the API keep the envelope —
+        // htmx does not follow a redirect into a fragment, and a client wants the code.
+        if (isPageNavigationWithoutWorkspace(request, principal, decision)) {
+            response.sendRedirect(request.contextPath + NO_WORKSPACE_PAGE)
+            return false
+        }
         errorWriter.write(
             request = request,
             response = response,
@@ -200,6 +209,22 @@ class ScopeInterceptor(
         )
         return false
     }
+
+    private fun isPageNavigationWithoutWorkspace(
+        request: HttpServletRequest,
+        principal: AuthenticatedPrincipal,
+        decision: ScopeMatrix.Decision.Refused,
+    ): Boolean =
+        principal.authMethod != AuthMethod.API_KEY &&
+            principal.workspace == null &&
+            decision.code == WorkspaceErrorCodes.NOT_FOUND &&
+            !isMachineSurface(request.appPath()) &&
+            request.getHeader("HX-Request") == null &&
+            (request.getHeader("Accept") ?: "").contains("text/html")
+
+    /** The API, the fragments and MCP answer machines; every other path is a page a person reads. */
+    private fun isMachineSurface(path: String): Boolean =
+        path.startsWith(API_PREFIX) || path.startsWith(PARTIALS_PREFIX) || path.startsWith(MCP_PREFIX)
 
     /**
      * The HTTP status for a matrix refusal. Only `workspace.not_found` is a 404 — that is
@@ -271,6 +296,10 @@ class ScopeInterceptor(
          */
         const val API_PREFIX = "/api/"
         const val PARTIALS_PREFIX = "/partials/"
+        const val MCP_PREFIX = "/mcp"
+
+        /** Where a person with no reachable workspace is sent instead of a JSON 404 (§11A.1). */
+        const val NO_WORKSPACE_PAGE = "/workspaces"
 
         /**
          * The §8.3 allowlist, parsed once with the SAME parser Spring Security's chain
