@@ -97,6 +97,77 @@ class DatasourceSchemaControllerTest {
     }
 
     @Test
+    fun `columns and tables carry the learned facts the enrichment attaches, keyed to the reader's workspace - 118`() {
+        // A recording fake, not a strict mock: what is asserted is that the enrichment was
+        // ASKED with the columns just read (the §6 drift check needs exactly those), and that
+        // its answer rides on the matching column / table and nowhere else.
+        val asked = mutableListOf<String>()
+        val enrichment =
+            object : co.datapipelines.application.semantics.FactEnrichment {
+                override fun forDatasource(
+                    readerWorkspaceId: java.util.UUID,
+                    datasource: Datasource,
+                ) = emptyList<Map<String, Any?>>()
+
+                override fun forTables(
+                    readerWorkspaceId: java.util.UUID,
+                    datasource: Datasource,
+                    tables: List<TableInfo>,
+                    complete: Boolean,
+                ): Map<String, List<Map<String, Any?>>> {
+                    asked += "tables:${tables.map { it.name }}:complete=$complete:ws=${readerWorkspaceId == workspaceId}"
+                    return mapOf("orders" to listOf(mapOf("id" to "t1", "kind" to "grain")))
+                }
+
+                override fun forColumns(
+                    readerWorkspaceId: java.util.UUID,
+                    datasource: Datasource,
+                    table: String,
+                    namespace: List<String>?,
+                    columns: List<ColumnInfo>,
+                ): Map<String, List<Map<String, Any?>>> {
+                    asked += "columns:$table:${columns.map { it.column.name }}:ws=${readerWorkspaceId == workspaceId}"
+                    return mapOf("amount" to listOf(mapOf("id" to "f1", "kind" to "unit", "trust" to "observed")))
+                }
+            }
+        val enriched = DatasourceSchemaController(introspector, registry, enrichment)
+        val columns =
+            listOf(
+                ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList()),
+                ColumnInfo(ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2), "numeric", emptyList()),
+            )
+        every { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orders", null, null) } returns columns
+        val page =
+            TablesPage(
+                listOf(TableInfo(listOf("public"), "orders", "TABLE"), TableInfo(listOf("public"), "events", "TABLE")),
+                truncated = false,
+            )
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, null, namespaceFilter = null) } returns page
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales", namespaceFilter = null) } returns page
+
+        val columnRows = enriched.columns("pg-prod", "orders", null).data
+        val tableRows = enriched.tables("pg-prod", null).data["tables"] as List<*>
+        enriched.tables("pg-prod", schema = "sales")
+
+        assertAll(
+            { columnRows[0].containsKey("facts") shouldBe false },
+            { (columnRows[1]["facts"] as List<*>).single() shouldBe mapOf("id" to "f1", "kind" to "unit", "trust" to "observed") },
+            { ((tableRows[0] as Map<*, *>)["facts"] as List<*>).size shouldBe 1 },
+            { (tableRows[1] as Map<*, *>).containsKey("facts") shouldBe false },
+            {
+                asked shouldBe
+                    listOf(
+                        "columns:orders:[id, amount]:ws=true",
+                        // Unfiltered and untruncated: complete, so the enrichment may mark absent tables.
+                        "tables:[orders, events]:complete=true:ws=true",
+                        // A schema filter proves nothing about what it did not list.
+                        "tables:[orders, events]:complete=false:ws=true",
+                    )
+            },
+        )
+    }
+
+    @Test
     fun `columns delegates to the introspector and serves the shared wire projection`() {
         val columns =
             listOf(

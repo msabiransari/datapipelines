@@ -100,6 +100,8 @@ class FlywayMigrationIntegrationTest {
                 // 113 — workspace invitations: the email-keyed membership-waiting-for-its-user
                 // (auth.md §4.6); the login path materialises it.
                 "24|workspace invitations|true",
+                // 118 — the learned semantic layer's store (metadata-db §4.18).
+                "25|learned facts|true",
             )
     }
 

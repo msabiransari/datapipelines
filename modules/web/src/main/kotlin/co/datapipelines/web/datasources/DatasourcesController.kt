@@ -65,6 +65,10 @@ class DatasourcesController(
     private val rules: DatasourceWorkspaceRules,
     private val registrations: DatasourceCreateService,
     private val updates: DatasourceUpdateService,
+    // 118 — the learned facts the detail carries (rest-api §9.7A), the same enrichment the MCP
+    // twin uses. Defaulted so the slice tests that construct this controller by hand keep
+    // compiling; the assembled application injects `SemanticsConfiguration`'s bean.
+    private val facts: co.datapipelines.application.semantics.FactEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
 ) {
     /**
      * §9.1 — register. A name already taken is `409 datasource.validation.duplicate_name`
@@ -117,7 +121,11 @@ class DatasourcesController(
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, visible.size.toLong(), items.size)))
     }
 
-    /** §9.3 — one datasource; a workspace-bound datasource of another workspace is not-found (§5.3). */
+    /**
+     * §9.3 — one datasource; a workspace-bound datasource of another workspace is not-found (§5.3).
+     * Carries `facts` (118, §9.7A): the datasource-wide learned facts, served as stored — this
+     * read opens no connection, so there is nothing to recompute drift against.
+     */
     @GetMapping("/{name}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun get(
@@ -125,7 +133,7 @@ class DatasourcesController(
     ): ApiResponse<Map<String, Any?>> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val datasource = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
-        return ApiResponse.of(datasource.toResponse())
+        return ApiResponse.of(datasource.toResponse() + ("facts" to facts.forDatasource(workspaceId, datasource)))
     }
 
     /**

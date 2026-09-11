@@ -1,5 +1,6 @@
 package co.datapipelines.web.datasources
 
+import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
@@ -44,12 +45,20 @@ import org.springframework.web.bind.annotation.RestController
  * live connection against the datasource, and the stated consumer is pipeline authoring. No
  * pagination — the tables and schemas listings are each capped at 2000 (`truncated: true` when
  * the cap dropped any); per-table column listings are naturally bounded.
+ *
+ * Since 118 the tables and columns listings carry the learned facts on what they list
+ * (rest-api §9.7A, the learned-semantic-layer design D-S7): `facts[]` per table / per column
+ * through the shared [FactEnrichment] — the same enrichment the MCP tools attach, so the two
+ * surfaces serve one shape. The enrichment runs the §6 drift check against the columns just read
+ * and writes a demotion back; that read-path write is the enricher's documented choice.
  */
 @RestController
 @RequestMapping("/api/v1/datasources")
 class DatasourceSchemaController(
     private val introspector: SchemaIntrospector,
     private val datasources: DatasourceRegistry,
+    // Defaulted for the hand-constructed slice tests; the assembled application injects the bean.
+    private val facts: FactEnrichment = FactEnrichment.NONE,
 ) {
     /**
      * §7A — the schema listing, the introspection flow's entry point (schemas → tables →
@@ -78,8 +87,17 @@ class DatasourceSchemaController(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
         @RequestParam(required = false) namespace: List<String>? = null,
-    ): ApiResponse<Map<String, Any?>> =
-        ApiResponse.of(visible(name) { introspector.tables(it, schema, namespaceFilter = namespaceOf(namespace)).toWireMap() })
+    ): ApiResponse<Map<String, Any?>> {
+        val filter = namespaceOf(namespace)
+        return ApiResponse.of(
+            visible(name) { datasource ->
+                val page = introspector.tables(datasource, schema, namespaceFilter = filter)
+                // Only a COMPLETE listing (unfiltered, untruncated) may mark a fact's table absent.
+                val complete = filter == null && schema.isNullOrBlank() && !page.truncated
+                page.toWireMap(facts.forTables(currentPrincipal().requireWorkspace().id, datasource, page.tables, complete))
+            },
+        )
+    }
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")
@@ -89,10 +107,16 @@ class DatasourceSchemaController(
         @PathVariable table: String,
         @RequestParam(required = false) schema: String?,
         @RequestParam(required = false) namespace: List<String>? = null,
-    ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(
-            visible(name) { introspector.columns(it, table, schema, namespaceOf(namespace)).map { c -> c.toWireMap() } },
+    ): ApiResponse<List<Map<String, Any?>>> {
+        val filter = namespaceOf(namespace)
+        return ApiResponse.of(
+            visible(name) { datasource ->
+                val columns = introspector.columns(datasource, table, schema, filter)
+                val byColumn = facts.forColumns(currentPrincipal().requireWorkspace().id, datasource, table, filter, columns)
+                columns.map { c -> c.toWireMap(byColumn[c.column.name]) }
+            },
         )
+    }
 
     /**
      * The `namespace` parameter, in either accepted spelling: Spring binds `?namespace=a&namespace=b`

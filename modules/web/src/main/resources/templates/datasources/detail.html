@@ -54,5 +54,10 @@
       <div th:replace="~{partials/lake-table-tree-level :: level}"></div>
     </div>
   </div>
+
+  <!-- 118 §7.3 — the LEARNED FACTS on this datasource, read-only: the same fragment and the
+       same rows as the list's Facts dialog (partials/datasource-facts), so the two never drift. -->
+  <h2 class="ds-title u-mt-lg u-mb-sm">Learned facts</h2>
+  <div th:replace="~{partials/datasource-facts :: table}"></div>
 </th:block>
 </html>
