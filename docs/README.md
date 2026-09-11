@@ -50,7 +50,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [rest-api.md](rest-api.md) | v1.4 frozen | Endpoints, envelopes, SSE execution stream, **uniform result-delivery cursor (§7)**, auth/user-admin endpoints (§16) |
-| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 34 tools, resources, prompts, the agent skill's four deliveries (§15) — a thin adapter over REST. There is deliberately **no** datasource-write tool (§6.2.22): no credential travels through an agent |
+| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 35 tools, resources, prompts, the agent skill's four deliveries (§15) — a thin adapter over REST. There is deliberately **no** datasource-write tool (§6.2.22): no credential travels through an agent |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
 | [versioning.md](versioning.md) | v1.4 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |

@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.6 (revised — see Change Log)
+**Status:** v2.14 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-08-14
+**Last updated:** 2026-09-11
 
 ---
 
@@ -820,7 +820,7 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | Add / remove members, set their flags | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}/members/{user_id}` — the last admin cannot be removed or demoted (`workspace.last_admin`) | `author` | `ws_admin` |
 | Grant / revoke a datasource to a workspace | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | `admin` | `super_admin` |
 
-**MCP tools** (all 34 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 35 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope | Min role |
 |---|---|---|
@@ -830,11 +830,11 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | `pipelines_execute_node` | `author` | `execute` |
 | `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe` | `author` | `view` |
 | `datasources_test` | `author` | `ws_admin` |
-| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render`, `templates_purge_draft` | `author` | `author` |
+| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_update`, `templates_render`, `templates_purge_draft` | `author` | `author` |
 | `endpoints_create`, `endpoints_delete` | `author` | `author` |
 | `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` | `author` |
 
-(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 32 of the 34 tools operate inside the API key's pinned workspace; `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
+(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 33 of the 35 tools operate inside the API key's pinned workspace; `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the flag that renders it, and the operation row above it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the Min role column, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes.
 
@@ -1438,6 +1438,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-11 | v2.14 | 117 templates_update | §7.6 MCP table: `templates_update` joins the `author`/`author` row (34 → 35 tools) — the template mirror of `pipelines_update`, the draft write REST `PUT /templates` already gates. Both `ScopeMatrixSpecDriftTest` counts (scope and capability) moved 34 → 35 in the same commit. |
 | 2026-09-07 | v2.13 | 094 the agent boundary | §7.6 MCP table: `datasources_create` LEAVES the matrix (28 → 27 tools). The standing rule it becomes: **no credential travels through an agent** — a password passed through a tool call transits the agent's context, its transcript and whatever the client logs, which 068 documented as an accepted trade and 094 rejected. Datasource create, update and delete are UI/REST-only; the read and probe tools (`datasources_list`/`_get`/`_test`, the three introspection tools, `datasources_preview_rows`) are unchanged, and none of them accepts a credential. |
 | 2026-09-04 | v2.12 | 068 datasources_create | §7.6 MCP table: `datasources_create` joins the `author` row (21 → 22 tools) — the same floor `datasources_test` sits on, since registration opens a real pool against a production database at save time. `global: true` still requires admin, but as a workspaces D8 rule inside the shared create service, not a scope floor, so it does not appear in this matrix. |
 | 2026-09-02 | v2.11 | 040 template used-by | §7.6 MCP table: `templates_used_by` joins the `read` row (20 → 21 tools) — it returns which pipelines reference which template version, reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data (040 D7). |

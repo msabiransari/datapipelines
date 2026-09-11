@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.28 (frozen contract — additive-only changes after this point)
+**Status:** v1.29 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-09-09
+**Last updated:** 2026-09-11
 
 ---
 
@@ -157,7 +157,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 34 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 35 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -183,6 +183,7 @@ Tools are named `{domain}_{action}`:
 - `templates_get`
 - `templates_used_by`
 - `templates_create`
+- `templates_update`
 - `templates_render`
 - `templates_purge_draft`
 - `datasources_list`
@@ -1340,6 +1341,53 @@ The same-credential rule, in order: an execution the caller may not see is the s
 
 **Mutating.** Declared `mutating` in the tool catalog — cancellation IS a write (it ends a running execution), and the `mcp.tool.write` row is the trace of WHOSE key stopped it (§14).
 
+#### 6.2.36 `templates_update`
+
+Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) — the MCP twin of REST `PUT /templates` (§8.4), and the template mirror of [`pipelines_update`](#625-pipelines_update). Before 117 the only MCP path to change a template draft was `templates_purge_draft` + `templates_create`, and purge is refused the moment any pipeline version pins the template — exactly the state an authoring agent is in mid-build.
+
+```json
+{
+  "name": "templates_update",
+  "description": "Update an existing template by writing its DRAFT — the first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash: the body_hash you read (templates_get, or a previous templates_create/templates_update result) for the version you based your edit on. The result carries status='DRAFT' — your work is NOT released; a human releases it from the UI. On template.version.conflict someone modified it after you loaded it: re-read with templates_get, rebase, retry; never retry blindly. The body takes the same fields as templates_create, and the template's type is fixed at creation — an update naming a different type is refused with template.validation.type_immutable. templates_purge_draft is for a template that was a mistake, not for editing one.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["id", "expected_hash", "display_name", "description", "body"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template to update — the FOLDER PATH id it was created under (nyc/mobility/daily_by_zone.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found."},
+      "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly."},
+      "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
+      "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
+      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect."},
+      "display_name": {"type": "string"},
+      "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
+      "imports": {
+        "type": "array",
+        "description": "Library templates whose macros this body calls. Aliases must be unique within the template; each referenced template must exist at that exact version and be is_library=true.",
+        "items": {
+          "type": "object",
+          "required": ["id", "version", "alias"],
+          "properties": {
+            "id": {"type": "string"},
+            "version": {"type": "integer"},
+            "alias": {"type": "string", "description": "Namespace the macros are bound to, e.g. 'dates' → <@dates.date_range .../>."}
+          },
+          "additionalProperties": false
+        }
+      },
+      "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
+      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."}
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+The save-time validation is the SAME parse-only set `templates_create` runs ([Templates §7.1](templates.md#71-save-time-validation-is-parse-only)); the write is the SAME `TemplateDraftService.write` call REST §8.4 makes — one write path, two surfaces. First write after a release copies the released version to a draft (copy-on-write); later writes overwrite that one draft in place.
+
+Returns: the stored version's projection — `id`, `version`, `status`, `body_hash` (carry this into the next write), `dialect`, `type`, `body`, and the `draft` pointer (`version`, `body_hash`, `updated_by`, `updated_at`) when the write produced a draft. **The update does NOT release** (versioning D4): a human releases from the UI, and `templates_render` (§6.2.9) is the preview step before you hand the draft over. A write whose CONTENT equals the released content is the §5.1 no-op: `status: "RELEASED"`, no draft opened, no version number burned. An unknown id is `template.not_found`; a stale `expected_hash` is `template.version.conflict` with the current state in `details`; an update naming a different `type` than the template's established one is `template.validation.type_immutable` (046 §5.3). There is deliberately no `confirm_new_root` argument: the update names a template that already exists and cannot mint a folder.
+
+**Scope:** `author`. **Mutating.**
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1464,7 +1512,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 34 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 35 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1766,6 +1814,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-11 | v1.29 | 117 templates_update | Tool surface 34 → **35**: new §6.2.36 `templates_update` — the draft write REST `PUT /templates` (§8.4) makes, the template mirror of `pipelines_update`: same parse-only validation as `templates_create`, same `TemplateDraftService.write` one-write-path rule, required `id` (§9.6) and `expected_hash`, copy-on-write first write / in-place later writes / the §5.1 no-op (`status: "RELEASED"`, no draft pointer), `template.not_found` / `template.version.conflict` / `template.validation.type_immutable` refusals. Scope `author`, **mutating**. No `confirm_new_root` argument: an update names a template that exists and cannot mint a folder (094's create-only rule). Before 117 the only MCP path to change a template was purge-and-recreate, and purge is refused once any pipeline pins the template — exactly the state an authoring agent is in mid-build (versioning D4 untouched: the agent writes the draft, a human releases). §6.1 lists it after `templates_create`; §5.1's static-surface count and §8's admission-rule count updated. The fence is drift-pinned to the shipped schema like every §6.2 block; the numbering APPENDS 6.2.36 for the same reason 107 appended 6.2.32–35 — 6.2.23/24 already appear twice and a mid-group insertion would renumber ~20 cross-doc anchors. auth.md §7.6's MCP table and the `ScopeMatrixSpecDriftTest` counts (34 → 35, both axes) moved in the same commit. |
 | 2026-09-09 | v1.28 | 107 agent probes | Tool surface 30 → **34**: new §6.2.32 `templates_purge_draft` (the bounded D61/D62 self-service verb — hard-deletes a never-released, unpinned, author-owned draft template, the entity row with it; scope `author`, **mutating**), §6.2.33 `datasources_get_table_stats` (one table's catalog statistics — row estimate, indexes incl. the lake partition pseudo-index, per-column bounds — always from the engine's OWN catalog, never a scan; scope `read`: stored estimates about shape, never row data), §6.2.34 `sql_probe` (ONE classified read-only SELECT/WITH, row-capped at 500 and timeboxed at 30 s, answering rows + canonical schema + the EXPLAIN plan captured BEFORE the query — so the plan survives the timeout it explains; `tempdb` refused with the §6.2.20 code; scope `author`, the 037 F row-data rule) and §6.2.35 `executions_cancel` (cancel a RUNNING execution this key's OWN MCP calls started — the same-credential rule joins key id x correlation id on the audit log — `pipelines_execute` gained a launch-time `mcp.execution.launched` row for exactly this, because the dispatcher's row is written when the call ENDS and this call blocks until the execution is terminal; requested, not awaited; scope `execute`, **mutating**). §6.1 lists the four; §5.1's static-surface count and §8's admission-rule count updated. §6.2.3's abandoned-call paragraph now points at `executions_cancel`; §12's "an MCP cancel tool" future line removed (shipped). §14 records the one audit exception: a `sql` argument is logged as `sql_sha256` + `sql_length`, never verbatim. The four entries' fences are drift-pinned to the shipped schemas like every §6.2 block; the numbering appends 6.2.32–35 because 6.2.23/24 already appear twice (endpoints and calculators) and 6.2.29–31 are the lake tools. |
 | 2026-09-08 | v1.27 | T199 LAKE in the MCP enum | No new tools. §6.2.6 and §6.2.8 `dialect` enums gain **`LAKE`** — the server accepted it since 087/089, the ADVERTISED schema still listed seven values, so clients refused every LAKE template before the server saw it (an agent blamed its own typing and bypassed MCP over REST). The enum is now derived from `Dialect.entries`; `DialectEnumSchemaTest` and the §6.2 drift test pin it. |
 | 2026-09-08 | v1.26 | 099 draft-first (D55/D56) | **Additive: response VALUES and descriptions, no new tool and no new argument.** §6.2.4 `pipelines_create` lands version 1 as a **DRAFT** — the response carries `status: "DRAFT"`, `current_version: null` and the `draft` pointer, and the description tells an agent to run it and then STOP for a human to release (D4 without exception). §6.2.8 `templates_create` mirrors it. §6.2.5 `pipelines_execute` documents its default in the `version` property: with none given it runs the **WORKING** version — the draft when one exists, else the latest release (D56) — never clamped for an explicit one. §6.2.1 `pipelines_list` rows now state the working `version` and a new `status` (`DRAFT`/`RELEASED`), because a listing that reported the released pointer alone would show nothing for every freshly authored pipeline. The `datapipelines://pipelines/{id}` resource (no `/versions/{n}`) serves the working version too, so reading a body and running it cannot disagree. Tool count unchanged at **30**. |

@@ -214,7 +214,7 @@ object ScopeMatrix {
     }
 
     /**
-     * All 34 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 35 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
@@ -245,6 +245,7 @@ object ScopeMatrix {
             "pipelines_create" to Scope.AUTHOR,
             "pipelines_update" to Scope.AUTHOR,
             "templates_create" to Scope.AUTHOR,
+            "templates_update" to Scope.AUTHOR,
             "templates_render" to Scope.AUTHOR,
             "datasources_test" to Scope.AUTHOR,
             "datasources_get_schemas" to Scope.AUTHOR,
@@ -334,6 +335,7 @@ object ScopeMatrix {
             "pipelines_create" to Capability.AUTHOR,
             "pipelines_update" to Capability.AUTHOR,
             "templates_create" to Capability.AUTHOR,
+            "templates_update" to Capability.AUTHOR,
             "templates_render" to Capability.AUTHOR,
             "templates_purge_draft" to Capability.AUTHOR,
             "endpoints_create" to Capability.AUTHOR,

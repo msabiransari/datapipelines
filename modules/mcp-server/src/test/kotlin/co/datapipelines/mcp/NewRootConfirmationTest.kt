@@ -125,9 +125,10 @@ class NewRootConfirmationTest {
     fun `both create tools accept the argument, and no other tool does`() {
         // The rule is create-only because there is no rename: `pipelines_update` cannot mint a
         // root, so a schema that ACCEPTED the argument there would advertise a decision the tool
-        // cannot take. (There is no `templates_update` tool at all — a template version is
-        // created, never edited in place.) Asserted over the WHOLE shipped surface rather than
-        // over a named pair, so a future tool that grows the argument by accident is caught.
+        // cannot take. (`templates_update` (117) is the same: it names a template that already
+        // exists, so the folder — and any new root it would imply — is already settled.)
+        // Asserted over the WHOLE shipped surface rather than over a named pair, so a future
+        // tool that grows the argument by accident is caught.
         val schemas = realShippedTools().associate { it.name to McpTools.readTree(schemaOf(it)) }
         val accepting = schemas.filterValues { it["properties"]?.has(NewRootConfirmation.ARG) == true }.keys
 

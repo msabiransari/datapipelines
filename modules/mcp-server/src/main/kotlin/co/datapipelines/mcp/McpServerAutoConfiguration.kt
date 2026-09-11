@@ -36,7 +36,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 34 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 35 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -49,7 +49,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 34 tools of §6.1, in `tools/list` order. */
+    /** The 35 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -107,6 +107,10 @@ class McpServerAutoConfiguration {
         // 040's used-by service, same inline-construction discipline (the templates module's
         // configuration declares the bean `web` consumes; this module builds its own).
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
+        // 117 — the template draft write REST PUT /templates goes through, built locally by the
+        // same discipline: stateless over (templates, authoring), so inline construction adds no
+        // wiring and the tool cannot describe a write path the server does not ship.
+        val templateDrafts = co.datapipelines.templates.TemplateDraftService(templates, authoring)
         return listOf(
             PipelinesListTool(pipelineService, pipelines),
             PipelinesGetTool(pipelineService, usage),
@@ -128,6 +132,7 @@ class McpServerAutoConfiguration {
             TemplatesGetTool(templates),
             TemplatesUsedByTool(usage),
             TemplatesCreateTool(templates, authoring, templateValidator),
+            TemplatesUpdateTool(templates, templateDrafts, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
             TemplatesPurgeDraftTool(templates, usage, authoring),
