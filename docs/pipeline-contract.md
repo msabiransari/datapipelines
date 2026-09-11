@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.16 (revised — see Change Log)
+**Status:** v1.17 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-09
+**Last updated:** 2026-09-11
 
 ---
 
@@ -1115,6 +1115,20 @@ response whose `details.errors[]` names every defect at once.
 | `endpoint.request.parameter_repeated` | 400 | The same query key appeared more than once; an endpoint takes one value per parameter |
 | `endpoint.request.value_too_large` | 400 | A single parameter value over 4 KB |
 
+### 13.15 Learned semantics
+
+The learned semantic layer ([design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §3.1, §7.1, O-4): what `semantics_record` / `semantics_retire` refuse. Two-segment codes, like `datasource.not_found` — the domain has no entity dimension; every code is about one fact. Landed with the constants (`PipelineErrorCodes.Semantics`, mirrored in `modules/datasources`'s `SemanticsErrorCodes` because the recorder lives below `pipeline-contract`) and their `ApiErrorCatalog` rows.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `semantics.kind_invalid` | 400 | `kind` is not in the closed list ([Enums §19](enums.md#19-learnedfactkind--what-a-learned-fact-is-about)), or is not a kind of the requested `scope` — the nine data kinds are `DATASOURCE`, the three business kinds `WORKSPACE`; `details.kind` and `details.scope` |
+| `semantics.fact_invalid` | 400 | `fact` is outside its 8–1000 character window, `refs` is empty, or `evidence_summary` exceeds 300 characters; `details.field` names which |
+| `semantics.ref_unresolved` | 400 | A ref does not resolve against the datasource's LIVE introspection — the table is not there, or the column is not one of its columns. The store never starts stale (§3.1); `details.ref` carries the offending `{schema, table, column}` |
+| `semantics.evidence_refused` | 400 | `evidence_sql` is not a single read-only `SELECT`/`WITH` (the `sql_probe` classifier's rule), or names a `:parameter` — evidence binds nothing. Refused before any connection opens |
+| `semantics.evidence_failed` | 400 | `evidence_sql` ran once through the probe path and the database refused it, or it exceeded the probe's timeout; the fact is NOT recorded — evidence that does not run is not evidence. `details.reason` is `execution_failed` or `timeout`; an unreachable datasource stays `pipeline.execution.datasource_unreachable` (502) |
+| `semantics.duplicate` | 409 | An identical LIVE fact — same `(scope, workspace, datasource, kind, refs, fact)` — already exists; `details.existing_id` names it. Refused rather than rate-limited (O-4): an agent looping on the same fact learns nothing from a second row. A retired fact is not a duplicate |
+| `semantics.not_found` | 404 | The fact addressed by `id` (or by `supersedes`) does not exist, or is a WORKSPACE fact of another workspace — the D-R5 answer, identical for both |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations
@@ -1355,6 +1369,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-11 | v1.17 | 118 learned semantic layer | New **§13.15 Learned semantics** — seven two-segment `semantics.*` codes (`kind_invalid`, `fact_invalid`, `ref_unresolved`, `evidence_refused`, `evidence_failed` — all 400; `duplicate` 409; `not_found` 404), landed with `PipelineErrorCodes.Semantics`, the `datasources` mirror `SemanticsErrorCodes` (the recorder lives below this module) and their `ApiErrorCatalog` rows; §13 rows 163 → 170. |
 | 2026-09-10 | v1.16 | 109 §B empty dialect properties | §13.8 gains `datasource.validation.property_empty` (400): a DECLARED dialect property carrying an empty, whitespace-only or null value is refused at register/update — and so at bootstrap, which saves through the same validator — instead of being stored as `""` (the `catalog.ref: ""` incident). The field names the key; a bootstrap field whose whole value is one `${VAR}` that resolves set-but-empty is OMITTED (the operator's off-switch), so the shipped defaults still boot. Additive per §15.2. |
 | 2026-09-10 | v1.15 | 109 §A lake view isolation | §13.8 gains two rows: `datasource.lake.table_unavailable` (502) — a pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20); `details` carry `table` and the recorded `last_error` — and `datasource.validation.lake_table_unreadable` (400) — the registration/import pre-flight refusal: the candidate table's view did not create or a one-row scan through it failed, refused BEFORE storing with the bounded engine error as the message. Additive per §15.2. |
 | 2026-09-09 | v1.14 | 108 executor hardening | New §4.11: a node may declare its own WALL-CLOCK deadline, `settings.timeout_seconds` — the middle of three budgets whose precedence §4.11 now states as one table (execution ≥ node ≥ statement). §4.6 gains the `settings` row and states that `depends_on` is data flow only, never an edge added to avoid contention. §12.8 gains `pipeline.validation.node_timeout_invalid` (the ceiling is `datapipelines.executor.node-timeout-max-seconds`, refused rather than clamped) and §13.4 gains `pipeline.node.timeout` (504) — the executor's own bound, which fires whatever the driver does. Body-hash neutral: `settings` is absent on every stored node and serializes back absent. Additive per §15.2. |

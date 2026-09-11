@@ -72,6 +72,21 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
             ).first()
             .waitFor()
         page.content() shouldContain name
+
+        // 118 §7.3 — Facts is every member's verb (a read): the dialog opens on the new row
+        // and, on a store nobody has recorded into, shows its empty state.
+        val row =
+            page
+                .locator(
+                    "tr",
+                    com.microsoft.playwright.Page
+                        .LocatorOptions()
+                        .setHasText(name),
+                ).first()
+        row.locator("[data-read=datasource-facts]").click()
+        page.waitForSelector("#ds-facts-modal")
+        page.locator("#ds-facts").innerText() shouldContain "Nothing learned yet"
+        page.locator("#ds-facts-modal h2").innerText() shouldContain name
     }
 
     @Test

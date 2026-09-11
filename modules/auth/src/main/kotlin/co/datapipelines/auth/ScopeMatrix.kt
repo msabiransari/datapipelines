@@ -214,7 +214,7 @@ object ScopeMatrix {
     }
 
     /**
-     * All 35 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 38 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
@@ -283,6 +283,12 @@ object ScopeMatrix {
             "executions_cancel" to Scope.EXECUTE,
             // 107 — purge a never-released, unpinned, author-owned draft template: authoring.
             "templates_purge_draft" to Scope.AUTHOR,
+            // 118 — the learned semantic layer. Recording and retiring are authoring acts
+            // (D-S8: the same bar as writing a pipeline that reads the datasource); the
+            // listing returns facts ABOUT the data, never row data, so it sits on `read`.
+            "semantics_record" to Scope.AUTHOR,
+            "semantics_list" to Scope.READ,
+            "semantics_retire" to Scope.AUTHOR,
         )
 
     /**
@@ -343,6 +349,12 @@ object ScopeMatrix {
             "lake_tables_register" to Capability.AUTHOR,
             "lake_tables_import" to Capability.AUTHOR,
             "lake_tables_unregister" to Capability.AUTHOR,
+            // 118 — D-S8: recording is an authoring act; viewers record nothing. Listing is a
+            // read any member may make. The cross-workspace retire rule (ws_admin for a
+            // DATASOURCE fact another workspace established) is the service's, not a matrix row.
+            "semantics_record" to Capability.AUTHOR,
+            "semantics_list" to Capability.VIEW,
+            "semantics_retire" to Capability.AUTHOR,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

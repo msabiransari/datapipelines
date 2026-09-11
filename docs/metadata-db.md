@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.16 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.17 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-09-09
+**Last updated:** 2026-09-11
 
 ---
 
@@ -67,6 +67,9 @@ pipeline_executions ──1:N── execution_events
 templates ──1:N── template_versions
 
 datasources ──1:N── lake_tables (datasource_id references the datasources NAME primary key — §4.15)
+datasources ──1:N── learned_facts (datasource_name references the NAME primary key, ON DELETE CASCADE — §4.18)
+workspaces  ──1:N── learned_facts (workspace_id: the WORKSPACE-scope binding; recorded_in: provenance — §4.18)
+learned_facts ──1:N── learned_facts (supersedes — the drift history, §4.18)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -699,6 +702,64 @@ CREATE INDEX idx_workspace_invitations_email ON workspace_invitations(email);
 - **Materialisation preserves `invited_at` as `joined_at`.** A user invited into two workspaces materialises both in one statement, and the membership ordering (`joined_at`, §4.12) then stamps `active_workspace` to the EARLIER invitation — the admin's first decision, not the alphabetical accident of two same-transaction timestamps.
 - **Pending invitations into a DEACTIVATED workspace do not materialise** (113 §B.5): the materialise predicate requires the workspace to be active, so the rows wait and reactivation makes them live again. The index on `email` is the materialise lookup's access path — the PK prefix serves only the per-workspace listing.
 
+### 4.18 `learned_facts`
+
+**What an agent learned about a datasource that introspection could not tell it** (V25, round 118; the [learned semantic layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §3–§6). A unit, a time zone, a sample rate, a grain, what a coded value means, a join that holds — structured rows keyed by the object they describe, served INLINE by the three introspection surfaces (`datasources_get` / `_get_tables` / `_get_columns` and their REST twins) so the next session reads them where it is already looking (D-S7). Rows are written by `SemanticsService` alone (`semantics_record` / `semantics_retire`; the §6 drift check's trust mark on the read path).
+
+```sql
+CREATE TABLE learned_facts (
+    id                  UUID        PRIMARY KEY,
+    scope               TEXT        NOT NULL,
+    workspace_id        UUID        REFERENCES workspaces(id),                    -- NULL iff scope = DATASOURCE
+    datasource_name     TEXT        NOT NULL REFERENCES datasources(name) ON DELETE CASCADE,
+    kind                TEXT        NOT NULL,                                     -- closed list, enums.md §19
+    fact                TEXT        NOT NULL,
+    refs_json           JSONB       NOT NULL,                                     -- [{schema?, table, column?}], ≥ 1
+    evidence_sql        TEXT,                                                     -- the probe that showed it
+    evidence_summary    TEXT,                                                     -- what the probe returned, ≤ 300 chars
+    trust               TEXT        NOT NULL,
+    schema_fingerprint  TEXT        NOT NULL,                                     -- per referenced table, at record time
+    recorded_by         UUID        NOT NULL REFERENCES users(id),
+    recorded_via        TEXT        NOT NULL,                                     -- WriteSurface: mcp | session | api_key
+    recorded_in         UUID        NOT NULL REFERENCES workspaces(id),           -- the ACTIVE workspace at record time (provenance)
+    source_pipeline_id  UUID        REFERENCES pipelines(id) ON DELETE SET NULL,
+    source_version      INT,
+    recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    verified_by         UUID        REFERENCES users(id),
+    verified_at         TIMESTAMPTZ,
+    supersedes          UUID        REFERENCES learned_facts(id),
+    retired_at          TIMESTAMPTZ,
+    retired_reason      TEXT,
+    CONSTRAINT chk_learned_facts_scope CHECK (scope IN ('DATASOURCE', 'WORKSPACE')),
+    CONSTRAINT chk_learned_facts_kind CHECK (kind IN (
+        'unit', 'time_zone', 'sampling', 'grain', 'window', 'enum_meaning', 'join', 'caveat', 'format',
+        'definition', 'exclusion', 'preference'
+    )),
+    CONSTRAINT chk_learned_facts_kind_scope CHECK (
+        (scope = 'WORKSPACE') = (kind IN ('definition', 'exclusion', 'preference'))
+    ),
+    CONSTRAINT chk_learned_facts_fact_length CHECK (length(fact) BETWEEN 8 AND 1000),
+    CONSTRAINT chk_learned_facts_summary_length CHECK (evidence_summary IS NULL OR length(evidence_summary) <= 300),
+    CONSTRAINT chk_learned_facts_refs CHECK (jsonb_typeof(refs_json) = 'array' AND jsonb_array_length(refs_json) >= 1),
+    CONSTRAINT chk_learned_facts_trust CHECK (trust IN ('asserted', 'observed', 'verified', 'needs_review', 'stale', 'retired')),
+    CONSTRAINT chk_learned_facts_via CHECK (recorded_via IN ('session', 'api_key', 'mcp')),
+    CONSTRAINT chk_learned_facts_scope_workspace CHECK ((scope = 'WORKSPACE') = (workspace_id IS NOT NULL)),
+    CONSTRAINT chk_learned_facts_retired CHECK ((trust = 'retired') = (retired_at IS NOT NULL))
+);
+
+CREATE INDEX idx_learned_facts_datasource ON learned_facts (datasource_name);
+CREATE INDEX idx_learned_facts_workspace ON learned_facts (workspace_id) WHERE workspace_id IS NOT NULL;
+```
+
+**Notes:**
+- **Two scopes, one table (D-S1).** A `DATASOURCE` fact describes the data and is visible wherever the datasource is granted (§4.16) — `workspace_id` is NULL; a `WORKSPACE` fact is one organisation's meaning and is visible to that workspace only. The visibility predicate is ONE line in `LearnedFactRepository` (`scope = 'DATASOURCE' OR workspace_id = :reader`) and the 112 sweep walks the three tools and the REST block that use it. `recorded_in` is provenance (which workspace was active when the fact was recorded), never visibility.
+- **Nothing JDBC metadata provides is stored (D-S2).** The `kind` CHECK is the closed list of [Enums §19](enums.md#19-learnedfactkind--what-a-learned-fact-is-about) — no `type`, `nullable`, `key`, `comment`, `partition` or `row_count` kind exists. `chk_learned_facts_kind_scope` states the per-kind scope once in the database: the three business kinds are WORKSPACE facts, the nine data kinds DATASOURCE facts.
+- **Refs are structural (D-S3)** and stored NORMALISED — sorted by `schema.table.column` — so the O-4 duplicate refusal (`semantics.duplicate`) is a `jsonb` equality over `(scope, workspace_id, datasource_name, kind, refs_json, fact)` among live rows. A ref is validated against live introspection at record time; a ref that does not resolve is refused, so the store never starts stale.
+- **`schema_fingerprint` is per referenced table, addressable.** Sorted `tableKey=sha256` entries joined by `;` — each entry the SHA-256 of that table's sorted `(column, canonical type)` list. The read-time drift check (design §6) recomputes only the table whose columns it just read, so a two-table join fact must keep each table's digest addressable; hashing the concatenation once more would make such a fact un-checkable from either listing alone.
+- **Trust is demoted, never promoted, by machine (D-S6).** `markTrust` refuses a retired row and the drift check only ever asks for `needs_review` or `stale`; a read path writing a mark is deliberate (idempotent, and the alternative is serving a mark the server computed and then forgot). Promotion to `verified` is a human act (UI round 2 / REST).
+- **Never hard-deleted by users (D-S11).** `retired` is a state and `chk_learned_facts_retired` ties it to its stamp; `supersedes` links the history. The one cascade is the datasource's own delete (the object is gone). A purged source pipeline only detaches — `ON DELETE SET NULL` — because the fact outlives the pipeline that learned it.
+- **No expression index over `refs_json`.** The design sketched `(datasource_name, (refs_json->0->>'table'))`; it would index only the FIRST ref of a multi-ref fact and serve none of the reads that ship (every read is per datasource, then narrowed to a table in the reader over a set that is hundreds of rows at most). The honest index is the datasource one.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -758,6 +819,9 @@ CREATE INDEX idx_workspace_invitations_email ON workspace_invitations(email);
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
 | `lake_tables` | `lake_tables_pkey` | via PK | Lookup by surrogate id |
 | `lake_tables` | `uq_lake_tables_datasource_namespace_name` | via UNIQUE | One registration per (datasource, namespace, name); doubles as the list-by-datasource access path ([§4.15](#415-lake_tables)) |
+| `learned_facts` | `learned_facts_pkey` | via PK | Lookup by id (`semantics_retire`, `supersedes`) |
+| `learned_facts` | `idx_learned_facts_datasource` | explicit | Every read is per datasource: the introspection enrichment, the listing, the drift check ([§4.18](#418-learned_facts)) |
+| `learned_facts` | `idx_learned_facts_workspace` | explicit (partial) | A workspace's own WORKSPACE facts; partial because DATASOURCE facts carry no workspace ([§4.18](#418-learned_facts)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -802,6 +866,7 @@ table and the test's expected-table list in the same commit.
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
+| `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
 | `lake_tables` | environment-local | LakeTable | — | — | Rows point at an environment-local [`datasources`](#410-datasources) row and at bucket locations whose credentials never leave the deployment; the registry is rebuilt on the target from its own manifest import, exactly as the datasource itself is re-registered there |
 
 ---
@@ -1080,6 +1145,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-09-05 | v1.9 | V12 migration (077) | §4.8 `templates`: `name` requires a **folder** ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and migration **V12** carries the deploy gate for stored names — a `DO`-block pre-check that aborts naming every flat offender, active and soft-deleted, and **no DDL at all**. No table, column, index, constraint or classification changes, which is why every other section of this document is untouched. The gate deliberately ignores `pipelines`: that name is validated at save only, so a legacy flat pipeline still runs and an abort over it would be a false alarm ([Template Hierarchy §14.2](template-hierarchy-design.md)). |
 | 2026-09-07 | v1.10 | V13 + V14 migrations (087) | §4.10 `datasources`: `password_encrypted` → **`credential_encrypted`, now NULLABLE**, plus **`credential_kind TEXT NOT NULL DEFAULT 'password'`** and a nullable `username` (V13, [Datasources §3.4](datasources.md#34-credential-kinds)). Three CHECKs: the kind is one of the enums.md §5A set, `kind = 'none'` ⟺ no ciphertext (which is what makes `password_set` derivable rather than a stored flag), and `username` is present exactly when the kind allows it. The backfill is TRUE rather than a guess — every pre-087 row went through a save path that required a username and a password. The credential blob stays kind-agnostic under the V10 versioned envelope, so rotation is untouched. **V14** widens `chk_datasource_dialect` to admit `'LAKE'` (dropped and recreated — Postgres has no ALTER for a CHECK expression); no data changes, since no existing row can hold a value that did not exist. |
 | 2026-09-10 | v1.12 | V23 migration (112, RBAC round 1) | **§4.12 `workspace_members` is now the capability record** (RBAC design D-R1/D-R2): `role TEXT` and its CHECK are gone, replaced by three additive flags — `author`, `promoter`, `admin` — with `chk_workspace_member_admin_authors` stating "admin implies author" once, in the database, so every predicate can read `author` off the row. A row with all three false is a viewer. V23's backfill is `owner → admin+author`, `member → author`, which preserves exactly what worked the day before: session capability WAS `JwtService.scopesFor`, giving every non-admin user `author` globally. The last-admin rule is deliberately NOT a constraint (a cross-row invariant no CHECK can state, and a trigger's refusal carries no catalogued code) — `WorkspaceService` enforces it and answers `workspace.last_admin`; `idx_workspace_members_admins` makes its count cheap. **§4.11 `workspaces` gains `deactivated_at` / `deactivated_by`** (D-R10: deactivate, never delete — nothing is purged, ever) (D-R11's `demo` workspace is created by `DemoWorkspaceSeeder` at boot, NOT by this migration — the seeder imports the example content in the same act and SQL cannot, so seeding the row here would have made the seeder dead code). **§4.10 `datasources` loses `workspace_id`** and gains `owner_workspace_id`: ownership and visibility were one column and are now two concepts. **New §4.16 `datasource_workspaces`** is the visibility half (D-R7) — "global" is gone, and V23's backfill grants every former global datasource to every existing workspace so nothing visible yesterday stopped being visible. It is keyed by `datasource_name`, because `datasources` is keyed by its name and there is no id to point at (the design record's `datasource_id UUID` names a column that has never existed). **`users.scopes` was NOT dropped: it never existed** — the only `scopes TEXT[]` in the schema is `api_keys.scopes`, which stays, and what carried global session capability was Kotlin, not a column. |
+| 2026-09-11 | v1.17 | V25 migration (118, learned semantic layer round 1) | **New §4.18 `learned_facts`** — the facts an agent learned about a datasource that introspection could not tell it (the 2026-09-11 learned-semantic-layer design record): two scopes in one table (`DATASOURCE` visible wherever the datasource is granted, `WORKSPACE` bound to one workspace — `chk_learned_facts_scope_workspace`), a closed `kind` CHECK with no JDBC-provided kind (D-S2) and a `kind ↔ scope` CHECK stating each kind's scope once, structural refs stored normalised as JSONB (the O-4 duplicate key), a per-table addressable `schema_fingerprint`, the six-state `trust` with `retired` tied to its stamp, `recorded_via` under the V20 write-surface set, and `supersedes` for history. Cascades: the datasource delete only; a purged source pipeline detaches (`SET NULL`). Two indexes — per datasource, and a partial one on `workspace_id`; the design's expression index over `refs_json->0` was not created (it indexes only the first ref and serves no shipped read). §5 and §5A (environment-local) updated. |
 | 2026-09-10 | v1.13 | V24 migration (113, workspace invitations) | **New §4.17 `workspace_invitations`** — the bridge that lets a workspace admin add `bob@company.com` BEFORE Bob has ever signed in. Keyed by `(workspace_id, email)` with the email stored lowercase (a CHECK enforces the §4.2 canonical form); the member flags are carried on the row under the same `admin → author` CHECK the members table states, and a re-invite REPLACES them (the latest admin decision wins, audited). Deliberately separate from `workspace_members`: that table's `user_id` stays `NOT NULL` and nothing pretends a person exists before they do. The login path materialises the row into a membership in one statement, preserving `invited_at` as `joined_at` so a multi-workspace invitee's `active_workspace` stamps the EARLIER invitation; pending invitations into a deactivated workspace wait for reactivation. `idx_workspace_invitations_email` is the materialise lookup's access path. No expiry column in v1 — an invitation is revocable like any other membership (owner ruling). |
 | 2026-09-07 | v1.11 | V15 migration (089 §A) | New **§4.15 `lake_tables`** — the dp-lake catalog: which Parquet/Iceberg tables a LAKE-dialect datasource serves (the 2026-09-07 lake-datasource design record §2). `datasource_id` is TEXT referencing `datasources(name)` — the datasource PK IS its name; there is no surrogate id to point at. `namespace` is 087's segment list as a Postgres `TEXT[]`; `format` is CHECKed (`parquet` \| `iceberg`) because a third value would generate bad view SQL later; the named `uq_lake_tables_datasource_namespace_name` lets the service map a re-registration to the catalogued `datasource.lake_table_duplicate`, and its index doubles as the list-by-datasource access path, so §5 gains no separate FK index. §3 ERD, §5 index table and §5A's classification updated: the table is **environment-local** — it points at an environment-local datasource row and at bucket locations whose credentials never leave the deployment. |
 | 2026-09-10 | v1.16 | V22 migration (109 §A) | `lake_tables` gains `last_error TEXT` / `last_error_at TIMESTAMPTZ` — the per-table connect-time view-creation outcome (datasources.md §8C.2): a failing view is recorded and skipped rather than failing the pool build. Both NULL = healthy; transition-only writes; cleared on the next successful view creation. §4.15 sketch and notes amended. |

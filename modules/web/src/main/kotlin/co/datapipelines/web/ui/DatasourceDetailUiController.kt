@@ -33,6 +33,8 @@ class DatasourceDetailUiController(
     private val lakeTables: LakeTableRegistryService,
     private val browse: LakeTableBrowseModel,
     private val themeResolver: ThemeResolver,
+    // 118 §7.3 — the learned facts rendered inline under the catalog tree, read-only.
+    private val semantics: co.datapipelines.application.semantics.SemanticsService,
 ) {
     /**
      * The page. Only a LAKE datasource HAS a catalog to show; anything else (unknown,
@@ -54,6 +56,20 @@ class DatasourceDetailUiController(
         // runs with, and never a secret-valued key, on either surface.
         model.addAttribute("dialectProperties", visibleDialectProperties(datasource.dialect, datasource.properties.dialect))
         browse.fillLevel(model, lakeTables.list(datasource), prefix = null, offset = 0)
+        // 118 §7.3 — the same rows and the same fragment as the list's Facts dialog. The page
+        // is behind READ_RESOURCES, so a principal is always present here; the null branch is
+        // the "no facts" render, never a refusal.
+        val facts =
+            principal()?.let {
+                semantics.list(
+                    it,
+                    datasource,
+                    co.datapipelines.application.semantics.SemanticsService
+                        .ListQuery(),
+                )
+            }
+                ?: emptyList()
+        DatasourceFactsModel.fill(model, datasource, facts)
         RoleModel.stamp(model, principal())
         return "datasources/detail"
     }

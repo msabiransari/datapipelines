@@ -538,6 +538,13 @@ class WorkspaceIsolationSweepTest {
                 "datasources_get_tables" to """{"name":"globex-only-db"}""",
                 "sql_probe" to """{"datasource":"globex-only-db","sql":"SELECT 1"}""",
                 "endpoints_get" to """{"path_pattern":"/globex/report"}""",
+                // 118 — the learned semantic layer: two tools address a datasource (globex's),
+                // one addresses a fact by id (a WORKSPACE fact of globex, seeded).
+                "semantics_list" to """{"datasource":"globex-only-db"}""",
+                "semantics_record" to
+                    """{"scope":"DATASOURCE","datasource":"globex-only-db","kind":"unit",""" +
+                    """"fact":"amount is in cents, never dollars","refs":[{"table":"orders","column":"amount"}]}""",
+                "semantics_retire" to """{"id":"${WorkspaceIsolationIntegrationTest.FACT_GLOBEX}","reason":"swept"}""",
             )
 
         /**

@@ -120,6 +120,10 @@ class BrowseModelConventionTest {
                     "a DIALOG over one datasource (§4.5a, 114 §C.2), like the edit and delete dialogs " +
                     "DatasourcePartialController already owns — it has no page twin because there is no " +
                     "grants PAGE, and its list is one datasource's grants, not a browsable collection",
+                "DatasourceFactsPartialController" to
+                    "a read-only DIALOG over one datasource (§4.5b, 118): one datasource's learned facts, " +
+                    "not a browsable collection; the same fragment and model (DatasourceFactsModel) render " +
+                    "inline on the lake detail, which is the page half — the projection is already shared",
             )
     }
 }

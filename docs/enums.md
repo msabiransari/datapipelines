@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.9 (living document — updated as enums evolve)
+**Status:** v1.11 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -427,6 +427,13 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 | `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. |
 | `template.version.discarded` / `template.version.restored` / `template.version.purged` / `template.purged` / `template.current_switched` | The template twins, by name — same triggers, template surfaces ([Versioning §3.5's notation rule](versioning.md#35-the-lifecycle-table)) |
 
+**Learned-semantics audit events** (same `audit_log` table, defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §9; emitted by `SemanticsService` for the `semantics_record` / `semantics_retire` MCP tools — 118):
+
+| Value | Trigger |
+|---|---|
+| `semantics.recorded` | One learned fact was recorded. `details` carries `fact_id`, `kind`, `scope`, `datasource`, `refs` (as `table.column` keys), `trust`, `via` (`mcp` \| `session` \| `api_key`), `evidence` (whether a probe backed it), and `supersedes` / `source_pipeline_id` when present — never the fact text or the evidence SQL. The row the §9 acceptance counts ("facts recorded per session") |
+| `semantics.retired` | One learned fact was retired (`semantics_retire`). `details` carries `fact_id`, `kind`, `scope`, `datasource`, `reason`, and `recorded_in_this_workspace` — false when a workspace admin retired a DATASOURCE fact another workspace established |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -434,7 +441,7 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `template.not_found`, `rate_limit.exceeded`, `rate_limit.unavailable`). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `template.not_found`, `rate_limit.exceeded`, `rate_limit.unavailable`, and every `semantics.*` code — a learned fact has no sub-entity). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|
@@ -454,6 +461,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
 | `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
+| `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -502,6 +510,32 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 
 ---
 
+---
+
+## 19. `LearnedFactKind` — what a learned fact is about
+
+**Source:** [Learned semantic layer design §4](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) (the ruling); the `chk_learned_facts_kind` CHECK of [Metadata DB §4.18](metadata-db.md#418-learned_facts) is the enforcing copy.
+**Used by:** datasources (`LearnedFactKind`, the recorder), mcp-server (`semantics_record`'s `kind` enum, derived), the introspection enrichment, the UI.
+
+**Closed.** No `type`, `nullable`, `key`, `comment`, `partition` or `row_count` kind exists and none will (D-S2: nothing JDBC metadata already provides is stored — introspection stays the source for those and is what facts are checked against). Each kind belongs to exactly one scope; the database states the same rule in `chk_learned_facts_kind_scope`. Three sources — this table, the CHECK's list, the Kotlin enum — are held to one truth by `LearnedFactKindSpecDriftTest`.
+
+| Value | Scope | Meaning | Example fact |
+|---|---|---|---|
+| `unit` | `DATASOURCE` | The unit of a numeric column | "reading is in the standard unit named by `unit` (°C, mm, m/s) — never tenths" |
+| `time_zone` | `DATASOURCE` | What a timestamp's wall-clock means | "occurred_at is naive local time (Europe/Berlin); no UTC offset" |
+| `sampling` | `DATASOURCE` | The population relation of a table | "1-in-16 deterministic hash sample of all events; multiply counts by 16 to estimate" |
+| `grain` | `DATASOURCE` | One row is one what | "one row per (sensor, day, element)" |
+| `window` | `DATASOURCE` | The data's coverage in time | "2024-01-01 → 2025-12-31 inclusive" |
+| `enum_meaning` | `DATASOURCE` | What a coded value means | "status 3 = shipped, 4 = returned" |
+| `join` | `DATASOURCE` | How two tables relate | "orders.customer_id → customers.id, many-to-one" |
+| `caveat` | `DATASOURCE` | A trap | "cal_date is ISO-8601 TEXT — cast to DATE before joining a DATE column" |
+| `format` | `DATASOURCE` | Encoding of a text column | "holiday_name is '' (never NULL) on a non-holiday" |
+| `definition` | `WORKSPACE` | A business measure or entity | "revenue = SUM(amount); tips and tolls excluded" |
+| `exclusion` | `WORKSPACE` | What a business question leaves out | "regions means the five named ones; drop 'Unknown' and 'N/A'" |
+| `preference` | `WORKSPACE` | How this organisation wants a thing computed | "share comparisons within mode only — the events feed is a sample" |
+
+**Trust** (the companion state, design §5 — not an enum a caller supplies): `asserted` (no evidence) → `observed` (evidence ran at record time) → `verified` (a human confirmed); the mechanical demotions `needs_review` (the table's column set changed around a still-resolving ref) and `stale` (a referenced column or table no longer exists); and `retired` (explicit, with a reason — never a delete). Written as the `chk_learned_facts_trust` CHECK.
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -525,6 +559,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `AuthAuditEvent` | auth (+ datasource/mcp event tables in §15) | observability |
 | `ExecutionTrigger` | rest-api | mcp-server, persistence |
 | `ApiKeyKind` | [auth.md §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) | metadata-db, rest-api, mcp-server |
+| `LearnedFactKind` | [learned-semantic-layer design §4](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) (§19 here is the wire table) | datasources, metadata-db (the V25 CHECK), mcp-server, rest-api |
 
 ---
 
@@ -561,4 +596,5 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-09-08 | v1.8 | 101 version lifecycle | §15 gains the **version lifecycle audit events** table: `pipeline.version.discarded`/`restored`/`purged`, `pipeline.purged`, `pipeline.current_switched`, and the template twins — the first lifecycle audit events anywhere (release and draft writes were previously unaudited). Authority: Versioning §3/§7; emitted by the 101 REST verbs, all session-only. `scripts/docs-audit.sh`'s §15 event extraction widened to the `pipeline`/`template` domains (the endpoint/074 and mcp/052 precedent) so these are recognised as events, not demanded as §13 error codes. |
 | 2026-09-07 | v1.5 | 087 connector seams | New **§5A `CredentialKind`** (`password` \| `token` \| `private_key` \| `service_account_json` \| `none`) — what a datasource's stored credential IS, authored by [Datasources §3.4](datasources.md#34-credential-kinds); the cross-reference table gains its row. §5 `Dialect` gains **`LAKE`** (object storage read in place; DuckDB is the engine, with a different §5.6 posture from `DUCKDB`) — not a reserved value: it ships with an adapter, a driver mapping and a CHECK. |
 | 2026-09-10 | v1.9 | 112 RBAC round 1 | New **§8B `Capability`** — the ROLE axis, carried by the workspace MEMBERSHIP rather than by a credential (D-R1), and deliberately not a hierarchy: an author may not `release` and a promoter may not author, so each value is a predicate over the membership row, never an ordinal. §8 `Scope` gains an "issuable to a key?" column: `admin` left the key wire (O-2), and a session carries no scopes at all. §15 gains the round's audit events — `auth.super_admin_acting` (D-R8, emitted on READS too, because the 404 rule's promise is that a workspace is invisible from outside and the one principal exempt from it is the one whose reads most need recording), `workspace.member_added`/`removed`/`flags_changed`, `workspace.deactivated`/`reactivated`, `datasource.granted`/`revoked` — and loses `auth.workspace.provisioned` with the `auto-per-user` mode that emitted it. Cross-reference table gains the `Capability` row. |
+| 2026-09-11 | v1.11 | 118 learned semantic layer | New **§19 `LearnedFactKind`** — the closed kind list of the learned semantic layer (twelve kinds, each with its scope; no JDBC-provided kind by design, D-S2) and its companion trust states; three sources (this table, the V25 CHECK, the Kotlin enum) drift-tested to one truth. §15 gains `semantics.recorded` / `semantics.retired`; §16 registers the `semantics.*` error domain (§13.15, two-segment). |
 | 2026-09-10 | v1.10 | 113 workspace invitations | §15 gains the invitation audit events — `workspace.member_invited` (also fired on every RE-INVITE, because the upsert is the latest admin decision winning and it is audited every time), `workspace.invitation_revoked`, and `workspace.invitation_materialised` (fired at login, carrying `inviter` — the actor whose decision the invitee's sign-in is executing). Authority: [Auth §4.6](auth.md#46-invitations); emitted by `WorkspaceService`. |

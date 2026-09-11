@@ -131,6 +131,15 @@
               <button th:if="${isSuperAdmin}" data-verb="datasource-grants" class="ds-button ds-button-secondary ds-button-sm"
                       th:attr="hx-get=@{/partials/datasources/{name}/grants(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
                       hx-disabled-elt="this">Grants</button>
+              <!-- 118 §7.3 — Facts: what agents LEARNED about this datasource (units, time zones,
+                   sampling, joins…), read-only in round 1 and visible to every member: the
+                   listing is the store's own visibility predicate, the same rows the
+                   introspection tools serve beside the columns. `data-read`, not `data-verb`:
+                   a viewer's screen renders NO verbs (RoleVisibilityBrowserTest counts them),
+                   and this button changes nothing — like the LAKE row's Tables link. -->
+              <button data-read="datasource-facts" class="ds-button ds-button-secondary ds-button-sm"
+                      th:attr="hx-get=@{/partials/datasources/{name}/facts(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
+                      hx-disabled-elt="this">Facts</button>
 
             </td>
           </tr>

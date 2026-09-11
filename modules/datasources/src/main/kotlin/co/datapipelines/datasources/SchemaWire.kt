@@ -19,13 +19,16 @@ package co.datapipelines.datasources
  * release so a pre-087 client keeps reading the field it knows. Both are always present — this is
  * an ADDITIVE change, and a client that reads `schema` sees exactly what it saw before.
  */
-fun TableInfo.toWireMap(): Map<String, Any?> =
+fun TableInfo.toWireMap(facts: List<Map<String, Any?>>? = null): Map<String, Any?> =
     buildMap {
         put("namespace", namespace)
         put("schema", schema)
         put("name", name)
         put("type", type)
         remarks?.let { put("remarks", it) }
+        // 118 (design §7.2): the learned facts on this table, when the caller attached any —
+        // omitted, not empty, when there are none (the envelope's omitted-when-null rule).
+        facts?.takeIf { it.isNotEmpty() }?.let { put("facts", it) }
     }
 
 /**
@@ -33,7 +36,7 @@ fun TableInfo.toWireMap(): Map<String, Any?> =
  * ingress type mapper's warning MESSAGES (type-system §8.2/§10.5) — an author sees why a column
  * fell back to STRING without parsing warning objects.
  */
-fun ColumnInfo.toWireMap(): Map<String, Any?> =
+fun ColumnInfo.toWireMap(facts: List<Map<String, Any?>>? = null): Map<String, Any?> =
     buildMap {
         put("name", column.name)
         put("type", column.type.wire)
@@ -43,12 +46,17 @@ fun ColumnInfo.toWireMap(): Map<String, Any?> =
         put("source_type", sourceTypeName)
         put("warnings", warnings.map { it.message })
         remarks?.let { put("remarks", it) }
+        // 118 (design §7.2): the learned facts on this column — omitted when none.
+        facts?.takeIf { it.isNotEmpty() }?.let { put("facts", it) }
     }
 
-/** The §7A tables listing (`datasources_get_tables` / `GET .../tables`). */
-fun TablesPage.toWireMap(): Map<String, Any?> =
+/**
+ * The §7A tables listing (`datasources_get_tables` / `GET .../tables`). [factsByTable] (118) is
+ * the caller's per-table learned facts, keyed by table name; a table with none carries no key.
+ */
+fun TablesPage.toWireMap(factsByTable: Map<String, List<Map<String, Any?>>> = emptyMap()): Map<String, Any?> =
     mapOf(
-        "tables" to tables.map { it.toWireMap() },
+        "tables" to tables.map { it.toWireMap(factsByTable[it.name]) },
         "truncated" to truncated,
     )
 

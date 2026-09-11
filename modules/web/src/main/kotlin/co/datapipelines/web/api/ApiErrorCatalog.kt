@@ -239,6 +239,15 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING to HttpStatus.CONFLICT,
+            // 118 §13.15 — the learned semantic layer. Bare `semantics.` codes with no family
+            // default (the auth.role_required reasoning): each row is explicit.
+            PipelineErrorCodes.Semantics.KIND_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Semantics.FACT_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Semantics.REF_UNRESOLVED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Semantics.EVIDENCE_REFUSED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Semantics.EVIDENCE_FAILED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Semantics.DUPLICATE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Semantics.NOT_FOUND to HttpStatus.NOT_FOUND,
         )
 
     /**

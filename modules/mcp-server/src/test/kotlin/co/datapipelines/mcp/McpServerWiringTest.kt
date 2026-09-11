@@ -95,18 +95,20 @@ class McpServerWiringTest {
             LakeTableTools.all(
                 datasources,
                 mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
-            )
+            ) +
+            // 118 — the three learned-semantics tools, appended after the lake tools.
+            SemanticsTools.all(datasources, mockk<co.datapipelines.application.semantics.SemanticsService>())
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 35 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 38 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist. (28 → 27 with 094 removing
-     * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four; 34 → 35 with 117's
-     * `templates_update`.)
+     * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four; 34 → 35 with 117's `templates_update`; 35 → 38 with 118's
+     * `semantics_*` three.)
      */
     @Test
-    fun `the tool surface is exactly the 35 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 38 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
@@ -116,7 +118,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 35 tools and all three prompts registered`() {
+    fun `the server builds with all 38 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

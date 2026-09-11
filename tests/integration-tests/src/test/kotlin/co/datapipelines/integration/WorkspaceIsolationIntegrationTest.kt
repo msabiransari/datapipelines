@@ -325,6 +325,9 @@ class WorkspaceIsolationIntegrationTest {
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
         private const val PIPE_ACME = "a1b00000-0000-0000-0000-000000000001"
         const val PIPE_GLOBEX = "b2b00000-0000-0000-0000-000000000002"
+
+        /** 118: a WORKSPACE-scope learned fact of globex, on its own datasource — `semantics_retire`'s foreign id. */
+        const val FACT_GLOBEX = "fac00000-0000-0000-0000-000000000002"
         private const val TPL_ACME_ID = "a3b00000-0000-0000-0000-000000000001"
         private const val TPL_GLOBEX_ID = "b4b00000-0000-0000-0000-000000000002"
         private const val EXEC_ACME = "a5b00000-0000-0000-0000-000000000001"
@@ -509,6 +512,19 @@ class WorkspaceIsolationIntegrationTest {
                     INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
                     VALUES ('globex-only-db', '$WS_GLOBEX', '$BOB')
                     ON CONFLICT DO NOTHING
+                    """.trimIndent(),
+                )
+                // 118 — one WORKSPACE-scope learned fact that belongs to globex (metadata-db §4.18),
+                // so `semantics_retire` can be swept with a REAL foreign id: an acme key must get
+                // the same not-found for it as for an id that exists nowhere.
+                statement.execute(
+                    """
+                    INSERT INTO learned_facts (id, scope, workspace_id, datasource_name, kind, fact, refs_json, trust,
+                                               schema_fingerprint, recorded_by, recorded_via, recorded_in)
+                    VALUES ('$FACT_GLOBEX', 'WORKSPACE', '$WS_GLOBEX', 'globex-only-db', 'definition',
+                            'revenue = SUM(amount); tips excluded', '[{"schema": null, "table": "orders", "column": null}]',
+                            'asserted', 'orders=seed', '$BOB', 'session', '$WS_GLOBEX')
+                    ON CONFLICT (id) DO NOTHING
                     """.trimIndent(),
                 )
             }

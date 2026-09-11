@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
@@ -118,6 +119,7 @@ class DatasourcesListTool(
 /** `datasources_get` (mcp-server.md §6.2.11). Scope: `read`. */
 class DatasourcesGetTool(
     private val datasources: DatasourceRegistry,
+    private val facts: FactEnrichment = FactEnrichment.NONE,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -125,9 +127,11 @@ class DatasourcesGetTool(
             description =
                 "Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, " +
                     "JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), " +
-                    "granted:true, readonly flag, pool settings. Credentials are never returned. A datasource " +
-                    "that is not granted to this workspace resolves as not-found — the same answer a name that " +
-                    "exists nowhere gets, so nothing about it can be probed.",
+                    "granted:true, readonly flag, pool settings, and `facts` — the datasource-wide learned facts " +
+                    "agents recorded (its time window, whether it is a sample) — read them before you assume " +
+                    "coverage. Credentials are never returned. A datasource that is not granted to this workspace " +
+                    "resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it " +
+                    "can be probed.",
             schema =
                 """
                 {
@@ -145,7 +149,10 @@ class DatasourcesGetTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return datasources.requireVisible(name, ctx).toMcpMetadata()
+        val gated = datasources.requireVisible(name, ctx)
+        // 118 (design §7.2): the datasource-wide facts (window, sampling), served as stored —
+        // this read opens no connection, so there is nothing to recompute drift against.
+        return gated.toMcpMetadata() + ("facts" to facts.forDatasource(ctx.principal.requireWorkspace().id, gated))
     }
 }
 

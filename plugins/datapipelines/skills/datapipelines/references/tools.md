@@ -212,7 +212,7 @@ List the datasources GRANTED to the key's pinned workspace. Visibility is the gr
 
 Scope `read` · read-only
 
-Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, readonly flag, pool settings. Credentials are never returned. A datasource that is not granted to this workspace resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it can be probed.
+Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, readonly flag, pool settings, and `facts` — the datasource-wide learned facts agents recorded (its time window, whether it is a sample) — read them before you assume coverage. Credentials are never returned. A datasource that is not granted to this workspace resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it can be probed.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -242,7 +242,7 @@ List the namespaces of a registered datasource by reading its live JDBC metadata
 
 Scope `author` · read-only
 
-List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. Read-only, for pipeline authoring.
+List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. A table carries `facts` when agents have recorded table-level learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact marked stale or needs_review is a warning, not a truth. Read-only, for pipeline authoring.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -254,7 +254,7 @@ List the tables and views of a registered datasource by reading its live JDBC me
 
 Scope `author` · read-only
 
-List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it, and its `namespace` array with it. Without a namespace only the connection's current one is read; if the datasource reports none, an explicit namespace is required (list them with datasources_get_schemas). On a two-level engine an unqualified read can merge same-named tables from different catalogs, which is why the namespace is worth passing. Read-only, for pipeline authoring.
+List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it, and its `namespace` array with it. Without a namespace only the connection's current one is read; if the datasource reports none, an explicit namespace is required (list them with datasources_get_schemas). On a two-level engine an unqualified read can merge same-named tables from different catalogs, which is why the namespace is worth passing. Each column carries `facts` when agents have recorded learned facts on it — a unit, a time zone, what a coded value means, a join, a caveat — with trust and evidence: read them before probing, and treat stale or needs_review as a warning to re-verify, then record the superseding fact. Read-only, for pipeline authoring.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -457,3 +457,49 @@ Unregister one table from a LAKE datasource's catalog. Mirrors DELETE /api/v1/da
 | `name` | string | required | Datasource name. A LAKE datasource visible in the key's pinned workspace. |
 | `namespace` | any | required | The table's namespace, outermost first — an array of segments or the dotted shorthand ('acme.analytics'). |
 | `table` | string | required | The table to unregister. |
+
+## semantics
+
+### `semantics_record`
+
+Scope `author` · **writes**
+
+Record ONE fact you learned about a datasource that introspection could not tell you — a unit, a time zone, a sample rate, a grain, what a coded value means, a join that holds, a trap — so the next session reads it beside the columns instead of probing again. Never record what introspection already returns (types, keys, comments). refs name the table(s) and column(s) the fact is about, structurally; every ref is checked against the live schema and an unknown one is refused. Pass evidence_sql (the SELECT that showed the fact): it runs once, its first rows become evidence_summary, and the fact is stored as observed — without it the fact is only asserted. scope DATASOURCE is about the data and is shared with every workspace the datasource is granted to; scope WORKSPACE (definition, exclusion, preference) is this organisation's meaning and stays here. To correct a stale or wrong fact, record the replacement with supersedes: the old one is retired as superseded. An identical live fact is refused as semantics.duplicate. Mutating.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `scope` | string (`DATASOURCE` \| `WORKSPACE`) | required | DATASOURCE: a fact about the data, visible wherever the datasource is granted. WORKSPACE: this organisation's meaning, visible here only. |
+| `datasource` | string | required | Datasource name (must be granted to this workspace). |
+| `kind` | string (`unit` \| `time_zone` \| `sampling` \| `grain` \| `window` \| `enum_meaning` \| `join` \| `caveat` \| `format` \| `definition` \| `exclusion` \| `preference`) | required | What the fact is about. unit, time_zone, sampling, grain, window, enum_meaning, join, caveat, format are DATASOURCE kinds; definition, exclusion, preference are WORKSPACE kinds. |
+| `fact` | string | required | The fact, in one or two sentences, specific enough to act on: 'value is already in the unit named by unit_col', 'pickup_ts is naive local time (America/New_York)'. |
+| `refs` | array of object | required | The object(s) the fact is about. One ref for a column fact, two for a join, a column-less ref for a table-grain fact. |
+| `evidence_sql` | string | optional | ONE read-only SELECT/WITH that shows the fact (no :parameters). Runs once at record time under the sql_probe rules; a statement that fails refuses the record. |
+| `evidence_summary` | string | optional | What the evidence showed, in your words. Defaults to the probe's first rows. |
+| `source_pipeline_id` | string | optional | The pipeline you learned this while building, if any. Shown only to readers who can read that pipeline. |
+| `source_version` | integer | optional |  |
+| `supersedes` | string | optional | The id of the fact this one replaces (a stale or wrong one); it is retired with reason superseded. |
+
+### `semantics_list`
+
+Scope `read` · read-only
+
+List the learned facts recorded on a datasource this workspace can see — every DATASOURCE fact (whoever recorded it) and this workspace's own WORKSPACE facts — with trust, drift, refs, the evidence SQL and who recorded it through what. The same facts also arrive inline on datasources_get / _get_tables / _get_columns, which is where to read them while authoring; use this to review, to find a fact's id to supersede or retire, or to answer 'what was recorded since <time>'. Retired facts are hidden unless include_retired.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `datasource` | string | required | Datasource name. |
+| `table` | string | optional | Only facts with a ref on this table. |
+| `scope` | string (`DATASOURCE` \| `WORKSPACE`) | optional |  |
+| `include_retired` | boolean, default `false` | optional |  |
+| `since` | string | optional | Only facts recorded at or after this ISO-8601 instant. |
+
+### `semantics_retire`
+
+Scope `author` · **writes**
+
+Retire one learned fact with a reason — it stops being served beside the columns but keeps its row (facts are never deleted; history is the audit). Prefer semantics_record with supersedes when you know the correct fact: that retires the old one and records the new in one step. A fact this workspace cannot see is not-found; a DATASOURCE fact another workspace established can only be retired by a workspace admin. Mutating.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `id` | string | required | The fact's id, from semantics_list or an introspection response. |
+| `reason` | string | required | Why — one sentence, kept on the row and in the audit log. |

@@ -88,6 +88,8 @@ class DatasourceDetailRenderTest {
         model.addAttribute("workspaceOptions", emptyList<Any>())
         model.addAttribute("activeWorkspace", "acme")
         LakeTableBrowseModel().fillLevel(model, tables, prefix = null, offset = 0)
+        // 118 — the learned-facts section reads `facts`; the header assertions need none.
+        DatasourceFactsModel.fill(model, datasource(dialect), emptyList())
 
         val context =
             WebContext(

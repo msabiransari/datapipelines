@@ -1,0 +1,83 @@
+<!-- The datasource LEARNED FACTS (ui-screens.md §4.5b, round 118; the learned-semantic-layer
+     design §7.3) — round 1 is READ-ONLY: what agents recorded about this datasource that
+     introspection could not tell them, per object, with trust badges.
+
+     Two fragments, one table. `dialog` is the datasources-list row's dialog, on the grants
+     dialog's swap contract (114 §C.2 / 094 §A: the whole backdrop into the page's one empty
+     #ds-dialog container, closing is emptying it). `table` is the same rows rendered inline on
+     the LAKE detail page. Recording, verifying and retiring facts from the UI are round 2; the
+     verbs today are the semantics_* MCP tools, and the text says so. -->
+<th:block xmlns:th="http://www.thymeleaf.org">
+
+<div th:fragment="dialog" class="u-backdrop" id="ds-facts-modal">
+  <div class="ds-card app-modal app-modal-lg">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" onclick="closeDsDialog()">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md">Learned facts — <span th:text="${datasource.name}">pg-prod</span></h2>
+    <div th:replace="~{partials/datasource-facts :: table}"></div>
+  </div>
+</div>
+
+<div th:fragment="table" id="ds-facts">
+  <p class="u-secondary u-text-sm u-mb-md">
+    What agents learned about this datasource that its schema could not say — units, time zones,
+    sampling, grain, what coded values mean, joins, caveats — each with the probe that showed it.
+    Agents record them with the <code>semantics_record</code> MCP tool and read them beside the
+    columns; a fact marked <em>needs review</em> or <em>stale</em> is a warning, not a truth.
+  </p>
+
+  <div th:if="${#lists.isEmpty(facts)}" class="ds-empty u-mb-md">
+    <p class="ds-empty-title">Nothing learned yet</p>
+    <p class="ds-empty-description">No agent has recorded a fact about this datasource that this workspace can see.</p>
+  </div>
+
+  <table class="ds-table u-mb-md" th:unless="${#lists.isEmpty(facts)}" id="ds-facts-table">
+    <thead>
+      <tr>
+        <th>Object</th>
+        <th>Kind</th>
+        <th>Fact</th>
+        <th>Trust</th>
+        <th>Evidence</th>
+        <th>Recorded</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr th:each="f : ${facts}" th:attr="data-fact-id=${f['id']}, data-trust=${f['trust']}">
+        <td class="u-mono u-text-sm" th:text="${f['object']}">orders.amount</td>
+        <td>
+          <span class="ds-badge ds-badge-default" th:text="${f['kind']}">unit</span>
+          <!-- A WORKSPACE fact is this organisation's meaning; a DATASOURCE one is shared with
+               every workspace the datasource is granted to (D-S1). -->
+          <span th:if="${f['scope']} == 'WORKSPACE'" class="ds-badge ds-badge-primary">workspace</span>
+        </td>
+        <td>
+          <span th:text="${f['fact']}">amount is in cents</span>
+          <!-- D-S5: conflicts coexist and are shown as conflicts — the reader decides. -->
+          <span th:if="${f['conflict']}" class="ds-badge ds-badge-warning">conflict</span>
+        </td>
+        <td>
+          <span class="ds-badge" th:classappend="${f['trustBadge']}" th:text="${f['trust']}">observed</span>
+          <div th:if="${f['drift']} != null" class="u-secondary u-text-sm" th:text="${f['drift']}">column X no longer exists</div>
+        </td>
+        <td class="u-text-sm">
+          <span th:if="${f['evidence_summary']} != null" th:text="${f['evidence_summary']}">amount=1250 | amount=300</span>
+          <span th:if="${f['evidence_summary']} == null" class="u-secondary">none — asserted</span>
+        </td>
+        <td class="u-secondary u-text-sm">
+          <span th:text="${f['recorded_at']}">2026-09-11T10:00:00Z</span>
+          <span class="ds-badge ds-badge-default" th:text="${f['recorded_via']}">mcp</span>
+          <!-- D-S9: a fact another workspace established arrives with its evidence and trust,
+               marked; its pipeline link only when this workspace can read that pipeline. -->
+          <span th:if="${!f['from_this_workspace']}" class="ds-badge ds-badge-default">via another workspace</span>
+          <a th:if="${f['source_pipeline']} != null" class="u-text-sm"
+             th:href="@{/pipelines/{id}/editor(id=${f['source_pipeline']['id']})}" th:text="${f['source_pipeline']['name']}">finance/revenue</a>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</th:block>

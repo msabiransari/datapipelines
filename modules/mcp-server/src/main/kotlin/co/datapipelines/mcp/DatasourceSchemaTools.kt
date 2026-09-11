@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
@@ -31,6 +32,12 @@ import co.datapipelines.typesystem.DatapipelinesException
  * topology in error messages). The catch cannot live in a shared home: the code belongs to
  * `pipeline-contract`, a sibling of `datasources`, so each surface keeps its own three-line
  * translation (accepted in the round-2 hardening review).
+ *
+ * Since 118 the tables and columns listings carry the learned facts on what they list
+ * (mcp-server.md §7A.5, design D-S7): `facts[]` per table / per column, through the shared
+ * [FactEnrichment] — the same enrichment the REST twins attach, so the two surfaces serve one
+ * shape. The enrichment also runs the §6 drift check against the columns just read and writes
+ * a demotion back; that read-path write is the enricher's documented choice, not this tool's.
  */
 
 /**
@@ -78,6 +85,7 @@ class DatasourcesGetSchemasTool(
 class DatasourcesGetTablesTool(
     private val introspector: SchemaIntrospector,
     private val datasources: DatasourceRegistry,
+    private val facts: FactEnrichment = FactEnrichment.NONE,
 ) : McpTool {
     override val definition =
         McpTools.tool(
@@ -85,7 +93,9 @@ class DatasourcesGetTablesTool(
             description =
                 "List the tables and views of a registered datasource by reading its live JDBC metadata. " +
                     "The listing spans namespaces — pass each table's reported `namespace` array to " +
-                    "datasources_get_columns. Read-only, for pipeline authoring.",
+                    "datasources_get_columns. A table carries `facts` when agents have recorded table-level " +
+                    "learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact " +
+                    "marked stale or needs_review is a warning, not a truth. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -110,8 +120,20 @@ class DatasourcesGetTablesTool(
     ): Any {
         val name = args.requiredString("name")
         val gated = datasources.requireVisible(name, ctx)
+        val namespace = args.namespace()
+        val schema = args.string("schema")
         return introspecting(name) {
-            introspector.tables(gated, args.string("schema"), namespaceFilter = args.namespace()).toWireMap()
+            val page = introspector.tables(gated, schema, namespaceFilter = namespace)
+            // Only a COMPLETE listing (unfiltered, untruncated) may mark a fact's table absent.
+            val byTable =
+                facts.forTables(
+                    ctx.principal.requireWorkspace().id,
+                    gated,
+                    page.tables,
+                    complete =
+                        namespace == null && schema == null && !page.truncated,
+                )
+            page.toWireMap(byTable)
         }
     }
 }
@@ -120,6 +142,7 @@ class DatasourcesGetTablesTool(
 class DatasourcesGetColumnsTool(
     private val introspector: SchemaIntrospector,
     private val datasources: DatasourceRegistry,
+    private val facts: FactEnrichment = FactEnrichment.NONE,
 ) : McpTool {
     override val definition =
         McpTools.tool(
@@ -130,7 +153,11 @@ class DatasourcesGetColumnsTool(
                     "with it. Without a namespace only the connection's current one is read; if the datasource " +
                     "reports none, an explicit namespace is required (list them with datasources_get_schemas). " +
                     "On a two-level engine an unqualified read can merge same-named tables from different " +
-                    "catalogs, which is why the namespace is worth passing. Read-only, for pipeline authoring.",
+                    "catalogs, which is why the namespace is worth passing. Each column carries `facts` when " +
+                    "agents have recorded learned facts on it — a unit, a time zone, what a coded value means, a " +
+                    "join, a caveat — with trust and evidence: read them before probing, and treat stale or " +
+                    "needs_review as a warning to re-verify, then record the superseding fact. Read-only, for " +
+                    "pipeline authoring.",
             schema =
                 """
                 {
@@ -157,8 +184,11 @@ class DatasourcesGetColumnsTool(
         val name = args.requiredString("name")
         val table = args.requiredString("table")
         val gated = datasources.requireVisible(name, ctx)
+        val namespace = args.namespace()
         return introspecting(name) {
-            introspector.columns(gated, table, args.string("schema"), args.namespace()).map { it.toWireMap() }
+            val columns = introspector.columns(gated, table, args.string("schema"), namespace)
+            val byColumn = facts.forColumns(ctx.principal.requireWorkspace().id, gated, table, namespace, columns)
+            columns.map { it.toWireMap(byColumn[it.column.name]) }
         }
     }
 }

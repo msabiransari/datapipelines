@@ -74,6 +74,9 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
         // The REST/MCP-only registration note (R10) is on the page.
         page.content() shouldContain "Registration and import are agent-first"
         page.content() shouldContain "lake_tables_"
+        // 118 §7.3 — the read-only learned-facts section, in its empty state on a fresh store.
+        page.waitForSelector("#ds-facts")
+        page.locator("#ds-facts").innerText() shouldContain "Nothing learned yet"
 
         // Root level: the first namespace segment, with the live table count of its subtree.
         val nyc = page.locator("summary.tpl-summary", Page.LocatorOptions().setHasText("nyc")).first()

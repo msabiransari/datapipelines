@@ -168,8 +168,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 162 → 163 with 113 (workspace invitations): §13.12 gains
          * `workspace.invitation.not_found` (404), landed in the SAME commit as its constants
          * (both sides of the auth mirror) and its catalog row. Re-derived from the parse.
+         *
+         * 163 → 170 with 118 (learned semantic layer): the seven `semantics.*` rows of the new
+         * §13.15, landed in the SAME commit as their constants (pipeline-contract and the
+         * datasources mirror) and their catalog rows. Re-derived from the parse.
          */
-        const val SECTION_13_ROW_COUNT = 164
+        const val SECTION_13_ROW_COUNT = 171
 
         /**
          * §12's distinct validation codes.

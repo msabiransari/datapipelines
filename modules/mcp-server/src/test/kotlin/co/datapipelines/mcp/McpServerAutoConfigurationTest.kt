@@ -105,6 +105,13 @@ class McpServerAutoConfigurationTest {
         // assembled application; the lake_tables_* tools take it.
         @Bean fun lakeTableRegistryService(): co.datapipelines.application.datasources.LakeTableRegistryService = mockk()
 
+        // 118 — the learned semantic layer's service and enrichment, declared by `web`'s
+        // SemanticsConfiguration in the assembled application.
+        @Bean fun semanticsService(): co.datapipelines.application.semantics.SemanticsService = mockk()
+
+        @Bean fun factEnrichment(): co.datapipelines.application.semantics.FactEnrichment =
+            co.datapipelines.application.semantics.FactEnrichment.NONE
+
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 
         @Bean fun executions(): ExecutionRepository = mockk()

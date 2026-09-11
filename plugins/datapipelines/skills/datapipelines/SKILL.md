@@ -127,7 +127,10 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
    `wall_ms` — a `seq` plan on a large table is the timeout you would meet in step 5, found
-   while it is still cheap. Only then write the template.
+   while it is still cheap. A probe that settles a question about the DATA (not the plan) —
+   "is `reading` already in the unit `unit` names?", "is `occurred_at` UTC or wall-clock?" —
+   is a fact: record it (step 1) so the next session skips the probe. Only then write the
+   template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
    (the description is the only discoverability mechanism for parameters). **To change a
@@ -253,6 +256,13 @@ here.
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
 2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
    + credential questions immediately.
+2½. **Learned facts are shared memory — keep them honest.** A fact you record with
+   `evidence_sql` is `observed`; without it, only `asserted`. Two facts of one kind on the
+   same column are both served, flagged `conflict` — a reader decides, the store never picks.
+   To correct one, record the replacement with `supersedes` (the old one retires as
+   `superseded`); `semantics_retire` alone is for a fact that is simply wrong. A DATASOURCE
+   fact is visible to every workspace the datasource is granted to; a `definition`,
+   `exclusion` or `preference` (WORKSPACE scope) stays in yours.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via
    `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` and `templates_update` require

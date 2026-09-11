@@ -103,6 +103,12 @@ object McpToolCatalog {
             Entry("lake_tables_register", mutating = true),
             Entry("lake_tables_import", mutating = true),
             Entry("lake_tables_unregister", mutating = true),
+            // 118 — the learned semantic layer. record and retire write `learned_facts`
+            // (the `mcp.tool.write` audit's business, beside the domain's own
+            // `semantics.recorded` / `semantics.retired` rows); list is a read.
+            Entry("semantics_record", mutating = true),
+            Entry("semantics_list", mutating = false),
+            Entry("semantics_retire", mutating = true),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */
