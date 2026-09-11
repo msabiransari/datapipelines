@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.6 (revised — see Change Log)
+**Status:** v2.14 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-08-14
+**Last updated:** 2026-09-11
 
 ---
 
@@ -1439,6 +1439,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-11 | v2.14 | 118 learned semantic layer | §7.6 MCP table 34 → **37** tools: `semantics_list` joins the `read`/`view` row; a new `semantics_record` / `semantics_retire` row on `author`/`author` (recording is an authoring act, D-S8; the DATASOURCE-scope grant requirement is the §5.3 gate — not-found otherwise; the cross-workspace retire rule needs the workspace-admin role, enforced in the service). §10's event registry (enums.md §15) gains `semantics.recorded` / `semantics.retired`. |
 | 2026-09-07 | v2.13 | 094 the agent boundary | §7.6 MCP table: `datasources_create` LEAVES the matrix (28 → 27 tools). The standing rule it becomes: **no credential travels through an agent** — a password passed through a tool call transits the agent's context, its transcript and whatever the client logs, which 068 documented as an accepted trade and 094 rejected. Datasource create, update and delete are UI/REST-only; the read and probe tools (`datasources_list`/`_get`/`_test`, the three introspection tools, `datasources_preview_rows`) are unchanged, and none of them accepts a credential. |
 | 2026-09-04 | v2.12 | 068 datasources_create | §7.6 MCP table: `datasources_create` joins the `author` row (21 → 22 tools) — the same floor `datasources_test` sits on, since registration opens a real pool against a production database at save time. `global: true` still requires admin, but as a workspaces D8 rule inside the shared create service, not a scope floor, so it does not appear in this matrix. |
 | 2026-09-02 | v2.11 | 040 template used-by | §7.6 MCP table: `templates_used_by` joins the `read` row (20 → 21 tools) — it returns which pipelines reference which template version, reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data (040 D7). |

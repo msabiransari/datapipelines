@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.16 (revised — see Change Log)
+**Status:** v1.17 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-09
+**Last updated:** 2026-09-11
 
 ---
 
@@ -1368,6 +1368,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-11 | v1.17 | 118 learned semantic layer | New **§13.15 Learned semantics** — seven two-segment `semantics.*` codes (`kind_invalid`, `fact_invalid`, `ref_unresolved`, `evidence_refused`, `evidence_failed` — all 400; `duplicate` 409; `not_found` 404), landed with `PipelineErrorCodes.Semantics`, the `datasources` mirror `SemanticsErrorCodes` (the recorder lives below this module) and their `ApiErrorCatalog` rows; §13 rows 163 → 170. |
 | 2026-09-10 | v1.16 | 109 §B empty dialect properties | §13.8 gains `datasource.validation.property_empty` (400): a DECLARED dialect property carrying an empty, whitespace-only or null value is refused at register/update — and so at bootstrap, which saves through the same validator — instead of being stored as `""` (the `catalog.ref: ""` incident). The field names the key; a bootstrap field whose whole value is one `${VAR}` that resolves set-but-empty is OMITTED (the operator's off-switch), so the shipped defaults still boot. Additive per §15.2. |
 | 2026-09-10 | v1.15 | 109 §A lake view isolation | §13.8 gains two rows: `datasource.lake.table_unavailable` (502) — a pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20); `details` carry `table` and the recorded `last_error` — and `datasource.validation.lake_table_unreadable` (400) — the registration/import pre-flight refusal: the candidate table's view did not create or a one-row scan through it failed, refused BEFORE storing with the bounded engine error as the message. Additive per §15.2. |
 | 2026-09-09 | v1.14 | 108 executor hardening | New §4.11: a node may declare its own WALL-CLOCK deadline, `settings.timeout_seconds` — the middle of three budgets whose precedence §4.11 now states as one table (execution ≥ node ≥ statement). §4.6 gains the `settings` row and states that `depends_on` is data flow only, never an edge added to avoid contention. §12.8 gains `pipeline.validation.node_timeout_invalid` (the ceiling is `datapipelines.executor.node-timeout-max-seconds`, refused rather than clamped) and §13.4 gains `pipeline.node.timeout` (504) — the executor's own bound, which fires whatever the driver does. Body-hash neutral: `settings` is absent on every stored node and serializes back absent. Additive per §15.2. |
