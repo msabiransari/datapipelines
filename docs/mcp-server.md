@@ -460,7 +460,7 @@ Create a new template.
     "type": "object",
     "required": ["display_name", "description", "body"],
     "properties": {
-      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (nyc/mobility/daily_by_zone.sql). A FOLDER IS REQUIRED — a bare 'daily_by_zone.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now."},
+      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now."},
       "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
       "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect."},
@@ -900,7 +900,7 @@ Publish a released pipeline as a `GET` endpoint under `/api/x` ([REST API §19](
     "properties": {
       "path": {
         "type": "string",
-        "description": "e.g. /nyc/revenue/{borough} — no /api/x prefix, no trailing slash."
+        "description": "e.g. /finance/revenue/{region} — no /api/x prefix, no trailing slash."
       },
       "pipeline": {
         "type": "string",
@@ -945,7 +945,7 @@ One published endpoint, by its path PATTERN.
 ```json
 {
   "name": "endpoints_get",
-  "description": "One published endpoint by its path (the pattern, not a request URL — '/nyc/revenue/{borough}').",
+  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/revenue/{region}').",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -955,7 +955,7 @@ One published endpoint, by its path PATTERN.
     "properties": {
       "path": {
         "type": "string",
-        "description": "The published path PATTERN, e.g. /nyc/revenue/{borough}."
+        "description": "The published path PATTERN, e.g. /finance/revenue/{region}."
       }
     }
   }
@@ -981,7 +981,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
     "properties": {
       "path": {
         "type": "string",
-        "description": "The published path PATTERN, e.g. /nyc/revenue/{borough}."
+        "description": "The published path PATTERN, e.g. /finance/revenue/{region}."
       }
     }
   }
@@ -1048,7 +1048,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
 ```json
 {
   "name": "lake_tables_register",
-  "description": "Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table's CURRENT metadata file, e.g. s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so register the file, and re-register it when the table commits) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.",
+  "description": "Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'acme.analytics' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table's CURRENT metadata file, e.g. s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so register the file, and re-register it when the table commits) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1080,7 +1080,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
       },
       "table": {
         "type": "string",
-        "description": "The table's name — one segment of the same grammar, e.g. hvfhv_zone_day."
+        "description": "The table's name — one segment of the same grammar, e.g. events_by_day."
       },
       "format": {
         "type": "string",
@@ -1095,7 +1095,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
       },
       "partition_column": {
         "type": "string",
-        "description": "Optional. The hive-style partition column, e.g. pickup_date."
+        "description": "Optional. The hive-style partition column, e.g. event_date."
       }
     }
   }
@@ -1191,7 +1191,7 @@ Unregister one table. The objects in the bucket are untouched — the table stop
         "description": "Datasource name. A LAKE datasource visible in the key's pinned workspace."
       },
       "namespace": {
-        "description": "The table's namespace, outermost first — an array of segments or the dotted shorthand ('nyc.mobility').",
+        "description": "The table's namespace, outermost first — an array of segments or the dotted shorthand ('acme.analytics').",
         "anyOf": [
           {
             "type": "array",
@@ -1355,7 +1355,7 @@ Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) 
     "type": "object",
     "required": ["id", "expected_hash", "display_name", "description", "body"],
     "properties": {
-      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template to update — the FOLDER PATH id it was created under (nyc/mobility/daily_by_zone.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found."},
+      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found."},
       "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly."},
       "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
       "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
@@ -1462,7 +1462,7 @@ Returns the pipeline JSON body, content-type `application/json`.
 
 Returns the template body (Freemarker SQL), content-type `text/x-freemarker-sql`.
 
-**`{id}` contains slashes.** A template id is a folder path ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and, since 077, always at least two segments — so the id is **every segment after `templates`**, not one. `datapipelines://templates/nyc/mobility/daily_by_zone.sql` is the latest version of `nyc/mobility/daily_by_zone.sql`. The `versions/{version}` suffix is recognised by the LAST two segments, never by position, so a folder named `versions` stays a folder: `…/templates/acme/versions/report.sql` is the template `acme/versions/report.sql`, and `…/templates/acme/versions/report.sql/versions/2` is its version 2. (Corrected in 077: the parser had required exactly two segments since 043, so every hierarchical id read as not-found.)
+**`{id}` contains slashes.** A template id is a folder path ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and, since 077, always at least two segments — so the id is **every segment after `templates`**, not one. `datapipelines://templates/acme/finance/daily_orders.sql` is the latest version of `acme/finance/daily_orders.sql`. The `versions/{version}` suffix is recognised by the LAST two segments, never by position, so a folder named `versions` stays a folder: `…/templates/acme/versions/report.sql` is the template `acme/versions/report.sql`, and `…/templates/acme/versions/report.sql/versions/2` is its version 2. (Corrected in 077: the parser had required exactly two segments since 043, so every hierarchical id read as not-found.)
 
 #### 7.2.3 `datapipelines://datasources/{name}`
 
