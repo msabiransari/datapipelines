@@ -41,14 +41,14 @@ class DatasourceDialogShotsBrowserTest : BrowserSuite() {
         val pipeline = "test/shot_uses_" + used.replace("-", "_")
         seedPipelineUsing(used, pipeline) shouldBe 201
 
+        page.navigate("$baseUrl/datasources")
+        ensureTheme("light")
         walk("light", used, unused, pipeline)
 
         // The app's own toggle, and the stylesheet href is the completion signal — the PATCH
         // answers with an out-of-band swap and nothing else in the response says it landed.
         page.navigate("$baseUrl/datasources")
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('/themes/dark.css')")
-        page.locator("html[data-theme='dark']").waitFor()
+        ensureTheme("dark")
 
         walk("dark", used, unused, pipeline)
     }

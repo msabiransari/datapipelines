@@ -53,7 +53,9 @@ import org.springframework.web.servlet.ModelAndView
  */
 @ControllerAdvice(basePackageClasses = [UiController::class])
 @Order(Ordered.HIGHEST_PRECEDENCE)
-class UiExceptionHandler {
+class UiExceptionHandler(
+    private val uiProperties: UiProperties = UiProperties(),
+) {
     private val log = LoggerFactory.getLogger(UiExceptionHandler::class.java)
 
     @ExceptionHandler(org.springframework.security.access.AccessDeniedException::class)
@@ -239,7 +241,9 @@ class UiExceptionHandler {
         status: HttpStatus,
     ): ModelAndView {
         val model = ModelAndView(viewName, status)
-        model.addObject("activeTheme", "saas")
+        // The DEPLOYMENT default, not a literal: an error page painted in the wrong theme is
+        // a flash of the wrong product (the owner's dark deployment answered a 404 in light).
+        model.addObject("activeTheme", uiProperties.theme)
         return model
     }
 

@@ -10,5 +10,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties
  */
 @ConfigurationProperties(prefix = "datapipelines.ui")
 data class UiProperties(
-    val theme: String = "saas",
+    val theme: String = "dark",
 )

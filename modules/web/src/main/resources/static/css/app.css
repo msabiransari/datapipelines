@@ -195,6 +195,33 @@
    Bootstrap's reboot used to be that reset — it painted <body> concrete white
    under every theme (024 T40 cause 2). Bootstrap is gone (076 §C); the rule
    stays as the standing guard over whatever ships hereafter. */
+/* An ANCHOR styled as a button. base.css's `a:hover` (specificity 0,1,1 — element +
+   pseudo-class) outranks `.ds-button-primary` (0,1,0), so on hover the link colour and
+   an underline won: on the primary variant the label turned accent-on-accent and
+   vanished (owner, the login page's "Continue with Google", 2026-09-11). The design
+   system is vendored (sync-design-system.sh), so the correction lives here, at a
+   specificity that wins, one rule per variant that sets its own text colour. */
+a.ds-button:hover,
+a.ds-button:focus-visible {
+  text-decoration: none;
+}
+
+a.ds-button-primary:hover {
+  color: var(--accent-primary-text);
+}
+
+a.ds-button-secondary:hover {
+  color: var(--accent-secondary-text);
+}
+
+a.ds-button-danger:hover {
+  color: var(--accent-danger-text);
+}
+
+a.ds-button-ghost:hover {
+  color: var(--text-primary);
+}
+
 body {
   background-color: var(--surface-page);
   color: var(--text-primary);
@@ -538,14 +565,20 @@ button.app-busy::after {
    approved 2026-09-05).
 
    Layout is ONE grid on <div class="app-shell">: the rail spans both rows, the
-   top bar is row 1 of the content column, <main> is row 2. The document keeps
-   scrolling — the rail is `position: sticky; height: 100vh` rather than the
-   mock's `height:100vh` flex shell — because four stylesheets size their panes
-   with `calc(100dvh - var(--header-height) - …)` (pipeline-editor.css,
-   template-editor.css, template-tree.css) and that arithmetic is only correct
-   while <main> starts at the bottom of the bar and scrolls with the page. A
-   fixed-height shell with its own scroll container would have made every one
-   of those panes a viewport too tall, silently.
+   top bar is row 1 of the content column, <main> is row 2.
+
+   THE SHELL IS THE VIEWPORT (owner, 2026-09-11: "Global page has a vertical
+   scroll bar which it should not. Each pane is responsible for its contents.").
+   The shell is exactly 100dvh tall and <main> is the ONE scroll container under
+   the bar; the document itself never scrolls, so the rail and the bar stay put
+   and a screen built from panes (the explorers, the editors) never drags the
+   whole application when one pane runs a few pixels long. Long single-column
+   screens (/workspaces, /docs, /settings) scroll INSIDE <main> instead of the
+   page — same motion, header and rail fixed. 079 kept the document scrolling
+   because four stylesheets size their panes with `calc(100dvh -
+   var(--header-height) - …)`; that arithmetic is unchanged and still correct —
+   <main> still starts at the bottom of the bar and its padding is the same —
+   it only stops being a reason to let the page move.
 
    --app-rail-width is a GEOMETRY value, not a colour: the same kind of literal
    --app-sidebar-width has carried since 076. Every colour, radius, shadow and
@@ -564,8 +597,18 @@ button.app-busy::after {
 .app-shell {
   display: grid;
   grid-template-columns: var(--app-rail-width) 1fr;
-  grid-template-rows: var(--header-height) 1fr;
-  min-height: 100vh;
+  grid-template-rows: var(--header-height) minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* <main> is the scroll container (see the shell note above). `min-height: 0`
+   lets the grid row shrink below its content so the overflow is main's, not the
+   shell's; without it the row grows with the content and nothing scrolls. */
+.app-shell > .app-main {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
 }
 
 /* Signed out (login, the public docs, error pages): no rail, no top bar, one
@@ -1866,6 +1909,21 @@ button.app-busy::after {
 .u-hidden { display: none; }
 .u-full { width: 100%; }
 .u-scroll-x { overflow-x: auto; }
+
+/* A scroll viewport whose direct child is a framed table: the frame moves onto the viewport,
+   so a table wider than the box keeps a visible right edge and its corners (the editor's
+   result dock had the same defect — pipeline-editor.css `.pe-result-table-container`). */
+.u-scroll-x:has(> .ds-table) {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+}
+
+.u-scroll-x > .ds-table {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
 .u-flex { display: flex; }
 
 /* Gap overrides for the row/col utilities above. Declared AFTER them so the

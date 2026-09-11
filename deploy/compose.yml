@@ -202,7 +202,7 @@ services:
       DATAPIPELINES_ORG_WEEK_START: ${DATAPIPELINES_ORG_WEEK_START:-monday}
       DATAPIPELINES_ORG_TIMEZONE: ${DATAPIPELINES_ORG_TIMEZONE:-UTC}
       DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:-false}
-      DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-saas}
+      DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-dark}
       # 075 — the two variables an org sets (configuration.md §3.23, environments.md).
       # `DATAPIPELINES_ENV` is the ORG's label for this deployment; `DATAPIPELINES_POSTURE`
       # is the PRODUCT's stance and also selects the Spring profile that carries the

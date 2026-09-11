@@ -89,7 +89,7 @@ class OrgConfigKeysSpecDriftTest {
         shipped["datapipelines.bootstrap.examples-file"] shouldBe "\${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}"
         shipped["datapipelines.audit.retention-days"] shouldBe "\${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}"
         shipped["datapipelines.observability.logging.format"] shouldBe "\${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}"
-        shipped["datapipelines.ui.theme"] shouldBe "\${DATAPIPELINES_UI_THEME:saas}"
+        shipped["datapipelines.ui.theme"] shouldBe "\${DATAPIPELINES_UI_THEME:dark}"
         shipped["datapipelines.executions.error-detail"] shouldBe "\${DATAPIPELINES_EXECUTIONS_ERROR_DETAIL:full}"
         shipped["datapipelines.workspaces.member-datasources-enabled"] shouldBe
             "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"

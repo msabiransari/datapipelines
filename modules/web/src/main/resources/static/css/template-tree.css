@@ -652,8 +652,18 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
  * will not shrink, so they took the row and left the meta column about ten pixels — "just now
  * · Browser User · 0 runs" rendered one CHARACTER per line. The acting column is ~325px at
  * 1440 and narrower below it; a row with three verbs in it does not fit on one line at that
- * width, at any font size. Two lines is the honest layout, and it is the same at every width,
- * so there is no breakpoint at which the row is briefly unreadable. */
+ * width, at any font size. Two lines stays the layout for a NARROW pane. But 102 moved every
+ * lifecycle verb into the row's ⋯ menu, so the acting column is two controls (Open + ⋯,
+ * ~100px), and on a WIDE pane the two-line layout reads as misaligned — actions hanging
+ * under nothing (owner's screenshot, 1150px pane, 2026-09-11). So the row is sized by its
+ * CONTAINER, not the viewport: below 560px the actions take their own line; at and above
+ * it they sit in a fourth track on the row's own line. `ExplorerDetailBrowserTest` pins the
+ * narrow case's meta width at 1440 (the pane is ~260px there). */
+.tplx-vlist {
+  container-type: inline-size;
+  container-name: vlist;
+}
+
 .tplx-vrow,
 .tplx-runrow {
   display: grid;
@@ -694,6 +704,18 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   gap: var(--gap-xs);
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+@container vlist (min-width: 560px) {
+  .tplx-vrow {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+
+  .tplx-vacts {
+    grid-column: auto;
+    flex-wrap: nowrap;
+    justify-self: end;
+  }
 }
 
 .tplx-usage-h {

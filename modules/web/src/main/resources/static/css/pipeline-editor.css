@@ -1472,9 +1472,54 @@ html.dp-splitting-y * {
 }
 
 .pe-result-table-container {
-  /* Scroll only — .ds-table supplies the border, radius and background (032). */
+  /* The FRAME belongs to the scroll viewport, not to the table (owner, 2026-09-11: "results
+     table does not have border on the right"). 032 had the table carry border, radius and
+     background; a result wider than the dock then scrolled its own right edge — and its
+     rounded corners — out of view, and the visible box read as a table with three sides.
+     Same shape as `.app-card-table` (app.css): the viewport draws the box, the table runs
+     edge to edge inside it and scrolls. */
   overflow-x: auto;
-  padding: var(--gap-sm, 8px);
+  margin: var(--gap-sm, 8px);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+}
+
+.pe-result-table-container > .ds-table {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+/* Locked header, scrolling body (owner, 2026-09-11). `position: sticky` pins to the
+   nearest SCROLLING ancestor, so the table container has to be the pane's vertical
+   scroller — not the dock body above it. The results pane is a column: the ttl line and
+   the actions row keep their height, the table container takes the rest and scrolls both
+   ways, and the header row rides on top of it with an opaque ground so rows never show
+   through the labels. */
+#pe-pane-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.pe-result-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pe-result-body > .pe-result-table-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pe-result-table-container thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-inset); /* app.css's header ground — restated because sticky needs it opaque */
 }
 
 .pe-result-actions {

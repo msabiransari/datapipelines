@@ -293,7 +293,7 @@ datapipelines:
     max-body-chars: ${DATAPIPELINES_TEMPLATES_MAX_BODY_CHARS:262144}
 
   ui:
-    theme: ${DATAPIPELINES_UI_THEME:saas}
+    theme: ${DATAPIPELINES_UI_THEME:dark}
 
   executions:
     event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}

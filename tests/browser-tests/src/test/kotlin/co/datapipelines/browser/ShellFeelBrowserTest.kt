@@ -544,11 +544,11 @@ class ShellFeelBrowserTest : BrowserSuite() {
         ready()
         page.setViewportSize(REVIEW_WIDTH, REVIEW_HEIGHT)
 
+        page.navigate("$baseUrl/dashboard")
+        ensureTheme("light")
         walk("light")
         page.navigate("$baseUrl/dashboard")
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('/themes/dark.css')")
-        page.locator("html[data-theme='dark']").waitFor()
+        ensureTheme("dark")
         walk("dark")
     }
 

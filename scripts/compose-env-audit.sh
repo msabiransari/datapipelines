@@ -74,14 +74,14 @@ t = t.replace("      DATAPIPELINES_AUTH_COOKIE_SECURE:\n",
 # the audit parses, so checks 3 and 4 never fired and the self-test was green on 1/2/5
 # alone (found 2026-09-06 by printing the doctored run's failures instead of its exit code
 # — MISTAKES.md: a guard that cannot go red is not a guard).
-t = t.replace("      DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-saas}\n",
+t = t.replace("      DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-dark}\n",
               "      DATAPIPELINES_MADE_UP_KEY: hard-coded\n")
 open(p, "w").write(t)
 e = open(defaults).read()
 e = re.sub(r"^DATAPIPELINES_ORG_TIMEZONE=.*\n", "", e, flags=re.M)
 open(defaults, "w").write(e)
 s = open(secrets_example).read()
-s = s.replace("# DATAPIPELINES_UI_THEME=saas", "# DATAPIPELINES_UI_THEME=drifted")
+s = s.replace("# DATAPIPELINES_UI_THEME=dark", "# DATAPIPELINES_UI_THEME=drifted")
 open(secrets_example, "w").write(s)
 PY
   if (cd "$tmp" && bash "scripts/compose-env-audit.sh" >/dev/null 2>&1); then

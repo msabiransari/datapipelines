@@ -184,12 +184,16 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
                  const v = window.__peInstance.cy.edges()[0].style('line-color');
                  return Array.isArray(v) ? 'rgb(' + v.join(', ') + ')' : String(v);
                }"""
-        val light = page.evaluate(edgeColour).toString()
+        val before = page.evaluate(edgeColour).toString()
 
-        // A real theme swap: the top bar's mode toggle, the same route a user takes.
+        // A real theme swap: the top bar's mode toggle, the same route a user takes. The
+        // toggle flips whichever mode is live (the deployment default is dark), so the
+        // completion signal is the href LEAVING its current theme, not arriving at one.
+        val hrefBefore = page.locator("#theme-link").first().getAttribute("href")
         page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
         page.waitForFunction(
-            "() => document.getElementById('theme-link').getAttribute('href').includes('/themes/dark.css')",
+            "(before) => document.getElementById('theme-link').getAttribute('href') !== before",
+            hrefBefore,
         )
         // updateTheme() runs on the NEW stylesheet's load event, so the colour changing
         // IS the completion signal — waiting on a timeout would be waiting on nothing.
@@ -198,13 +202,13 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
                  const v = window.__peInstance.cy.edges()[0].style('line-color');
                  return (Array.isArray(v) ? 'rgb(' + v.join(', ') + ')' : String(v)) !== before;
                }""",
-            light,
+            before,
         )
-        val dark = page.evaluate(edgeColour).toString()
+        val after = page.evaluate(edgeColour).toString()
 
         // Both are colours a renderer can use — never a `color-mix(…)` declaration.
-        light shouldMatch Regex("""^(rgb|#).*""")
-        dark shouldMatch Regex("""^(rgb|#).*""")
+        before shouldMatch Regex("""^(rgb|#).*""")
+        after shouldMatch Regex("""^(rgb|#).*""")
         complaints.shouldBeEmpty()
 
         // The sharper half, and the one that catches the SECOND defect. `cy.style(array)`

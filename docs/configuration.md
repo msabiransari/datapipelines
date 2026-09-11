@@ -170,7 +170,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 
 | YAML path | Default | Description |
 |---|---|---|
-| `datapipelines.ui.theme` | `saas` | Design system theme name. Validated at startup against the vendored themes in `modules/web/src/main/resources/static/vendor/design-system/` |
+| `datapipelines.ui.theme` | `dark` | Design system theme name. Validated at startup against the vendored themes in `modules/web/src/main/resources/static/vendor/design-system/` |
 
 ### 3.11 Execution History
 
@@ -588,7 +588,7 @@ datapipelines:
     render-timeout-ms: ${DATAPIPELINES_TEMPLATES_RENDER_TIMEOUT_MS:5000}
 
   ui:
-    theme: ${DATAPIPELINES_UI_THEME:saas}
+    theme: ${DATAPIPELINES_UI_THEME:dark}
 
   executions:
     event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}

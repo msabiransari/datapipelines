@@ -44,6 +44,74 @@ class AppShellBrowserTest : BrowserSuite() {
             "/admin/users",
         )
 
+    /**
+     * An anchor styled as a button keeps its label on hover. base.css's `a:hover` outranked
+     * `.ds-button-primary` and painted the label in the link colour on the accent ground —
+     * invisible (the login page's "Continue with Google", owner 2026-09-11). Asserted on the
+     * computed style AFTER a real hover, on the one primary anchor every deployment renders
+     * (the keys screen's "Go to API"); the login providers need an OIDC registration this
+     * suite does not have, but the rule is per variant, not per page.
+     */
+    @Test
+    fun `an anchor styled as a primary button keeps its label colour on hover`() {
+        signedIn("hover")
+        page.navigate("$baseUrl/settings/api-keys")
+        val link = page.locator("a.ds-button-primary").first()
+        link.waitFor()
+
+        fun style(prop: String): String =
+            link
+                .evaluate("(el, p) => getComputedStyle(el).getPropertyValue(p)", prop)
+                .toString()
+                .trim()
+        val resting = style("color")
+        val background = style("background-color")
+        link.hover()
+        page.waitForTimeout(250.0) // base.css transitions colour over --duration-fast
+
+        style("color") shouldBe resting
+        style("text-decoration-line") shouldBe "none"
+        // The label must contrast with the ground it sits on: same colour as the background
+        // is exactly the defect.
+        (style("color") == style("background-color")) shouldBe false
+        background.isNotBlank() shouldBe true
+    }
+
+    /**
+     * The shell is the viewport (app.css, 079 §A note, revised 2026-09-11): the DOCUMENT never
+     * scrolls — `<main>` does. A screen whose panes run a few pixels long used to drag the
+     * whole application (rail, bar and all) by that much; a long single-column screen
+     * (/workspaces, /docs) now scrolls inside `<main>` with the chrome fixed. Measured on the
+     * document element at two desktop sizes on every app screen, the long ones included —
+     * `/docs` is 500px taller than a 900px viewport and is the one that proves the model.
+     */
+    @Test
+    fun `the document never scrolls vertically - main does`() {
+        startTrace()
+        signedIn("vscroll")
+        val offenders = mutableListOf<String>()
+        listOf(1440 to 900, 1920 to 1080).forEach { (w, h) ->
+            page.setViewportSize(w, h)
+            appPages.forEach { route ->
+                page.navigate("$baseUrl$route")
+                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+                val extra =
+                    (page.evaluate("() => document.documentElement.scrollHeight - document.documentElement.clientHeight") as Number)
+                        .toLong()
+                if (extra > 0) offenders += "$route at ${w}x$h: document ${extra}px taller than the viewport"
+            }
+        }
+        offenders shouldBe emptyList()
+        // Non-vacuity: the model is only proven by a screen that HAS more content than fits.
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/docs")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        val mainOverflow =
+            (page.evaluate("() => { const m = document.getElementById('app-main'); return m.scrollHeight - m.clientHeight }") as Number)
+                .toLong()
+        (mainOverflow > 0) shouldBe true
+    }
+
     private fun signedIn(slug: String): String {
         val user = seedLocalUser(uniqueEmail("$slug-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
         login(user.email, user.oneTimePassword)
@@ -62,7 +130,15 @@ class AppShellBrowserTest : BrowserSuite() {
         // Playwright hands back an Integer for a small whole number and a Long for a big one,
         // so the result is read as a Number and normalised — a direct `as Long` throws
         // ClassCastException on every page that does NOT overflow, which is the pass case.
-        (page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth") as Number).toLong()
+        // Since <main> became the scroll container (2026-09-11) a document-widener shows up
+        // as MAIN's horizontal overflow, not the document's — so both are measured and the
+        // larger reported; the guard would otherwise have gone vacuous the day main scrolled.
+        (
+            page.evaluate(
+                """() => { const d = document.documentElement, m = document.getElementById('app-main');
+                       return Math.max(d.scrollWidth - d.clientWidth, m ? m.scrollWidth - m.clientWidth : 0) }""",
+            ) as Number
+        ).toLong()
 
     /**
      * The elements whose right edge is past the viewport. "The page overflows by 9px" is a
@@ -229,6 +305,8 @@ class AppShellBrowserTest : BrowserSuite() {
         startTrace()
         signedIn("mode")
         page.navigate("$baseUrl/dashboard")
+        // The deployment default is dark; this test is about the SWAP, so start from light.
+        ensureTheme("light")
 
         val documents = mutableListOf<String>()
         page.onRequest { request -> if (request.resourceType() == "document") documents += request.url() }

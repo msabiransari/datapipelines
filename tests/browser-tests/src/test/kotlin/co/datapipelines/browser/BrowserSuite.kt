@@ -235,6 +235,22 @@ abstract class BrowserSuite {
         return LocalUser(email, password, generatedPassword("chosen"))
     }
 
+    /**
+     * Puts the signed-in user's theme into [mode] (`light` / `dark`) through the top bar's own
+     * toggle, and waits for the PATCH's out-of-band `#theme-link` swap — the href changing is
+     * the completion signal. A no-op when the page already shows that mode. The deployment
+     * default is `dark` (owner, 2026-09-11), so a test that photographs "light then dark" starts
+     * by asking for light; it must not assume where the toggle begins.
+     */
+    protected fun ensureTheme(mode: String) {
+        val wanted = "/themes/$mode.css"
+        val current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        if (current.contains(wanted)) return
+        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
+        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
+        page.locator("html[data-theme='$mode']").waitFor()
+    }
+
     /** Generates per-run secrets — no literal secret in any fixture (the HIGH-2 rule). */
     protected fun generatedPassword(prefix: String): String =
         "$prefix-" + (1..24).map { BASE32[SECURE_RANDOM.nextInt(BASE32.length)] }.joinToString("")
