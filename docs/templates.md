@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.9 (frozen contract — additive-only changes after this point)
+**Status:** v1.11 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-11
 
 ---
 
@@ -244,6 +244,8 @@ lock first), so the ordering is unchanged. The exception is the path that is not
 2. Stores as a new version (current version + 1).
 3. Does NOT modify or remove previous versions.
 
+The MCP twin is `templates_update` ([MCP §6.2.36](mcp-server.md#6236-templates_update)): the same parse-only validation and the SAME draft write (`TemplateDraftService.write`), with the `If-Match` hash precondition carried as the required `expected_hash` argument instead of a header. A payload naming a different `type` than the template's established one is refused with `template.validation.type_immutable` on every surface. `templates_purge_draft` is NOT the edit verb — it hard-deletes a never-released draft and is refused once any pipeline pins the template.
+
 Existing pipelines are unaffected: they pin `{id, version}`, so a new version is invisible to them until a pipeline is edited to reference it — at which point that pipeline's save re-runs the dry-render check ([Pipeline Contract §12.6](pipeline-contract.md#126-template-validations)).
 
 ### 5.4 Used-by: the reverse arrow (v1.9, 040)
@@ -465,7 +467,7 @@ too). When a grouped expression carries a `:name`, prefer one of those two shape
 | Create template | `POST /templates` |
 | Get working version | `GET /templates?name={id}` |
 | Get specific version | `GET /templates/versions?name={id}&version={n}` |
-| Update (writes the draft branch) | `PUT /templates` — `id` in the body |
+| Update (writes the draft branch) | `PUT /templates` — `id` in the body; MCP twin `templates_update` (§6.2.36) |
 | List | `GET /templates?dialect={d}&type={t}&q={search}` |
 | Delete (soft; `409 template.in_use` while referenced — §5.4) | `DELETE /templates?name={id}` |
 | Preview render with a caller-supplied context | `POST /templates/render` — `name`, `version`, `context` in the body |
@@ -658,6 +660,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-11 | v1.11 | 117 templates_update | §5.3 gains the MCP twin: `templates_update` ([MCP §6.2.36](mcp-server.md#6236-templates_update)) — the same parse-only validation and the same `TemplateDraftService.write` the REST PUT makes, the `If-Match` hash carried as the required `expected_hash` argument, and the type-immutability refusal named on every surface. §9's CRUD table names the twin. `templates_purge_draft` is explicitly not the edit verb. |
 | 2026-09-08 | v1.10 | 099 draft-first (D55) | §5.2's lifecycle: **create lands version 1 as a DRAFT** (`POST /templates`, `templates_create`, the editor), `templates.current_version` is null until a human releases, and the release step is now shown in the sequence. A DRAFT pipeline may pin a DRAFT template version while iterating — unchanged; the pipeline's RELEASE is still what requires released pins (versioning §6). The import path (promotion, the seeders) lands RELEASED. |
 | 2026-09-06 | v1.10 | 078 contract gaps | §7.2's interpolation scan: the declared set gains every calculator output key (a CALCULATOR node's `context_key`, typed by its kind's output type), refused inside `${}` with `template.validation.parameter_interpolated` like a declared parameter — and additionally in a conditional's test (`<#if x??>`, `<#elseif x>`), because a derived value gating SQL structure is the same hole one directive earlier. Declared parameters in directive tests stay legal (042 B1 unchanged). Additive. |
 | 2026-09-02 | v1.9 | 040 template used-by | New **§5.4 Used-by**: the reverse arrow from a template version to its pinning pipelines — two questions kept apart (working-version scan for "who uses `t@2` now", any-version scan for "is it safe to remove"), the `templates_used_by` MCP tool and the per-version in-use count as surfaces, and the pipeline read's `upgrade_available` signal. §5.1/§9: template delete is refused with `409 template.in_use` (§13.9) while any pipeline version pins any version — the refusal carries the referencing pipelines, nodes and versions. |

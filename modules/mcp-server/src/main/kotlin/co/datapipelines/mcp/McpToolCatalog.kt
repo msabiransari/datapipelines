@@ -53,6 +53,9 @@ object McpToolCatalog {
             Entry("templates_get", mutating = false),
             Entry("templates_used_by", mutating = false),
             Entry("templates_create", mutating = true),
+            // 117 — the draft write REST PUT /templates makes, mirror of pipelines_update. The
+            // agent's edit verb: parse-only validation, then TemplateDraftService.write.
+            Entry("templates_update", mutating = true),
             Entry("templates_render", mutating = false),
             // 107 — the bounded D61/D62 self-service verb: hard-deletes a never-released,
             // unpinned, author-owned draft template. A write, so the `mcp.tool.write` audit's

@@ -124,7 +124,11 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    while it is still cheap. Only then write the template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
-   (the description is the only discoverability mechanism for parameters).
+   (the description is the only discoverability mechanism for parameters). **To change a
+   draft template, read its `body_hash` with `templates_get` and call `templates_update`** —
+   it writes the DRAFT the same way `pipelines_update` writes a pipeline's. `templates_purge_draft`
+   is for a template that should not exist, not for editing one, and it is refused once a
+   pipeline pins the template.
 3. **Preview the SQL.** `templates_render` with a representative context — save-time
    validation is parse-only, so this is your check that the SQL is actually what you
    meant. This is mandatory before step 4 for anything non-trivial.
@@ -245,8 +249,9 @@ here.
    + credential questions immediately.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via
    `pipelines_update` only after re-rendering the new version.
-4. **Carry the hash you read.** `pipelines_update` requires `expected_hash` — the
-   `body_hash` from `pipelines_get` or your previous update's result. `pipelines_get`
+4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
+   `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous
+   update's result. `pipelines_get`
    (and `templates_get`) default to the **working version** — the draft when unreleased
    edits exist, else the latest released — and say which `version`/`status` they returned,
    so you always edit the newest content. The hash is the protocol that keeps two writers
@@ -338,7 +343,7 @@ deployment serves them at `GET /skill/<name>.md`; inside a checkout they are fil
 - `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (34 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (35 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings

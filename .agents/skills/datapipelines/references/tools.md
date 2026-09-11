@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **34 tools**, in `tools/list` order.
+There are **35 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -154,6 +154,25 @@ Create a new template. Templates use Freemarker syntax. A template declares NO p
 | `is_library` | boolean, default `false` | optional | true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required. |
 | `body` | string | required | Template source. Must not contain <#import> or <#include>. |
 | `confirm_new_root` | boolean | optional | Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it. |
+
+### `templates_update`
+
+Scope `author` · **writes**
+
+Update an existing template by writing its DRAFT — the first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash: the body_hash you read (templates_get, or a previous templates_create/templates_update result) for the version you based your edit on. The result carries status='DRAFT' — your work is NOT released; a human releases it from the UI. On template.version.conflict someone modified it after you loaded it: re-read with templates_get, rebase, retry; never retry blindly. The body takes the same fields as templates_create, and the template's type is fixed at creation — an update naming a different type is refused with template.validation.type_immutable. templates_purge_draft is for a template that was a mistake, not for editing one.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `id` | string | required | Template to update — the FOLDER PATH id it was created under (nyc/mobility/daily_by_zone.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found. |
+| `expected_hash` | string | required | The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly. |
+| `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
+| `type` | string (`sql` \| `html`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'). |
+| `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect. |
+| `display_name` | string | required |  |
+| `description` | string | required | Free text. State the variables the body expects and their types — the template declares none. |
+| `imports` | array of object | optional | Library templates whose macros this body calls. Aliases must be unique within the template; each referenced template must exist at that exact version and be is_library=true. |
+| `is_library` | boolean, default `false` | optional | true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required. |
+| `body` | string | required | Template source. Must not contain <#import> or <#include>. |
 
 ### `templates_render`
 
