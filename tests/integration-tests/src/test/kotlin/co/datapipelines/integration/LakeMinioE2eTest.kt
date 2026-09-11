@@ -281,6 +281,10 @@ class LakeMinioE2eTest {
             ).`when`()
             .post("/api/v1/datasources/$DS/tables")
             .then()
+            // The refusal BODY is the diagnosis (the catalogued code + the engine's own text) —
+            // a bare "expected 201 but was 400" on a CI runner said nothing for five runs.
+            .log()
+            .ifValidationFails()
             .statusCode(201)
     }
 
@@ -342,8 +346,12 @@ class LakeMinioE2eTest {
                 response.statusCode() shouldBe 200
                 E2eSse.parseEvents(response.body(), mapper)
             }
-        events.map { it.first } shouldContainExactly
-            listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
+        // On a failure the node_failed event's payload IS the diagnosis; say it in the clue.
+        val failed = events.firstOrNull { it.first == "node_failed" }?.second
+        io.kotest.assertions.withClue("node_failed payload: $failed") {
+            events.map { it.first } shouldContainExactly
+                listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
+        }
         val executionId = events.first().second["execution_id"].asText()
         return given()
             .port(port)
