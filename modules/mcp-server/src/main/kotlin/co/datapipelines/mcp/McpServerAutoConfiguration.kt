@@ -144,8 +144,13 @@ class McpServerAutoConfiguration {
             DatasourcesGetColumnsTool(introspector, datasources),
             DatasourcesGetTableStatsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, sqlRunner),
-            // 107 — the bounded probe, same inline-construction discipline as `sqlRunner`.
-            SqlProbeTool(datasources, SqlProbe(datasources)),
+            // 107 — the bounded probe, same inline-construction discipline as `sqlRunner`. The
+            // staging MODE rides along so the tempdb scratch check parses like the real tempdb.
+            SqlProbeTool(
+                datasources,
+                SqlProbe(datasources),
+                tempdbMode = environment.getProperty("datapipelines.staging.h2.mode", SqlProbe.DEFAULT_SCRATCH_MODE),
+            ),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, executorConfig.result),

@@ -4,6 +4,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ExplainPlanSummary
 import co.datapipelines.datasources.QueryRows
 import co.datapipelines.datasources.ResultSchema
+import co.datapipelines.datasources.ScratchProbeOutcome
 import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.datasources.SqlProbeExecutionException
 import co.datapipelines.datasources.SqlProbeParameter
@@ -17,6 +18,7 @@ import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.maps.shouldNotContainKey
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -156,19 +158,45 @@ class SqlProbeToolTest {
         )
     }
 
+    /**
+     * 2026-09-11 — `tempdb` is a syntax-and-names check against an empty scratch H2, never a
+     * gated datasource read: the registry is not consulted and the real probe never runs. The
+     * scratch outcome is the service's; the tool shapes it (`parsed`, `missing_table`, `note`).
+     */
     @Test
-    fun `tempdb is refused before any gate or connection`() {
-        val thrown =
-            shouldThrow<DatapipelinesException> {
-                tool.call(McpArguments(mapOf("name" to "tempdb", "sql" to "SELECT 1 FROM stage")), ctx)
-            }
+    fun `tempdb runs the scratch check and never touches the registry or the real probe`() {
+        every { probe.probeScratch(any(), any(), any(), any(), any()) } returns
+            ScratchProbeOutcome.Parsed(missingTable = "stg_orders", wallMs = 3)
+
+        @Suppress("UNCHECKED_CAST")
+        val payload =
+            tool.call(McpArguments(mapOf("name" to "tempdb", "sql" to "SELECT 1 FROM stg_orders")), ctx) as Map<String, Any?>
 
         assertAll(
-            { thrown.code shouldBe PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
-            { thrown.details["reason"] shouldBe "tempdb_source" },
+            { payload["check"] shouldBe "syntax_and_names" },
+            { payload["parsed"] shouldBe true },
+            { payload["missing_table"] shouldBe "stg_orders" },
+            { (payload["note"] as String) shouldContain "exists only inside a full execution" },
         )
         verify(exactly = 0) { datasources.getVisible(any(), any()) }
         verify(exactly = 0) { probe.probe(any(), any(), any(), any(), any()) }
+    }
+
+    /** An H2 error in the scratch check is the same catalogued refusal a real probe reports. */
+    @Test
+    fun `a tempdb statement H2 refuses is the node-query code with H2's message`() {
+        every { probe.probeScratch(any(), any(), any(), any(), any()) } throws
+            SqlProbeExecutionException("tempdb", SQLException("Column \"column1\" not found", "42S22", 42122))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("name" to "tempdb", "sql" to "SELECT column1 FROM (VALUES (1))")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED },
+            { (thrown.message ?: "") shouldContain "column1" },
+        )
     }
 
     @Test

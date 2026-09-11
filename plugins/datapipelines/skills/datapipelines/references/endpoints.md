@@ -11,9 +11,9 @@ application fetches rows with one `GET` and no event handling. Three steps: publ
 call it.
 
 ```
-endpoints_create {"path": "/nyc/revenue/{borough}", "pipeline": "revenue_by_borough",
+endpoints_create {"path": "/finance/revenue/{region}", "pipeline": "revenue_by_region",
                   "timeout_seconds": 60}
-→ url: /api/x/nyc/revenue/{borough}
+→ url: /api/x/finance/revenue/{region}
 ```
 
 Then mint a key for it and bind it (REST or the UI — there is no key-minting MCP tool, on
@@ -23,10 +23,10 @@ transcript):
 ```bash
 curl -s http://localhost:8080/api/v1/auth/api-keys -X POST \
   -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
-  -d '{"name": "nyc-serving", "kind": "endpoint", "bindings": ["/nyc"]}'
+  -d '{"name": "finance-serving", "kind": "endpoint", "bindings": ["/finance"]}'
 # the plaintext key is in this response ONCE
 
-curl -s http://localhost:8080/api/x/nyc/revenue/Manhattan -H "DP-API-Key: dpk_..."
+curl -s http://localhost:8080/api/x/finance/revenue/EMEA -H "DP-API-Key: dpk_..."
 ```
 
 The `200` body is the `data_ready` payload you already know from `pipelines_execute`:
@@ -55,7 +55,7 @@ status; the cursor `404`s until the result exists). Do not treat a `202` as a fa
 retry it as a new run: the answer is already coming, and retrying starts a second execution.
 
 **Keys are bound to tree NODES, and a deeper binding replaces a shallower one.** A key bound at
-`/nyc` authorises everything beneath it — until some node deeper down carries its own binding,
+`/finance` authorises everything beneath it — until some node deeper down carries its own binding,
 which then decides for that subtree alone. An endpoint with no binding on any ancestor accepts
 `user` keys of its workspace holding `execute`; an `endpoint` key with no binding authorises
 nothing at all. An endpoint key reaches published endpoints and the cursor of executions it

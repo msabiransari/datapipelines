@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
+import co.datapipelines.datasources.ScratchProbeOutcome
 import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.datasources.SqlProbeExecutionException
 import co.datapipelines.datasources.SqlProbeParameter
@@ -51,6 +52,8 @@ internal val PROBE_TYPE_ENUM_JSON: String =
 class SqlProbeTool(
     private val datasources: DatasourceRegistry,
     private val probe: SqlProbe,
+    /** The staging engine's `MODE` (`datapipelines.staging.h2.mode`), so the scratch H2 parses like the real one. */
+    private val tempdbMode: String = SqlProbe.DEFAULT_SCRATCH_MODE,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -63,8 +66,11 @@ class SqlProbeTool(
                     "verb (INSERT, DROP, ATTACH, EXPLAIN, INTO, ...) anywhere in it, is refused without touching " +
                     "the datasource. Parameters bind as named :name placeholders through the same binder pipeline " +
                     "SQL uses; every referenced name must be supplied in `parameters` with its canonical type. " +
-                    "`tempdb` is refused as a datasource — the staging database exists only inside a full " +
-                    "execution (use pipelines_execute). On a timeout the error details carry wall_ms and the plan, " +
+                    "`tempdb` is a SYNTAX-AND-NAMES check: the statement runs against an EMPTY scratch H2 in the " +
+                    "staging mode (no staged tables, no data) — `parsed: true` with `missing_table` means the SQL is " +
+                    "sound and only its staged input is absent; an error is a real H2 error (a syntax slip, a " +
+                    "`VALUES` column named column1 where H2 says C1) found in milliseconds instead of a full run. " +
+                    "On a timeout the error details carry wall_ms and the plan, " +
                     "so the plan that explains the timeout survives it. The sql text never reaches the audit log — " +
                     "only its SHA-256 and length are recorded.",
             schema =
@@ -74,7 +80,7 @@ class SqlProbeTool(
                   "required": ["name", "sql"],
                   "additionalProperties": false,
                   "properties": {
-                    "name": {"type": "string", "description": "Datasource name. The reserved name tempdb is refused — it exists only inside a full execution (pipelines_execute)."},
+                    "name": {"type": "string", "description": "Datasource name, or the reserved name tempdb for a syntax-and-names check of a staging (H2) statement against an empty scratch engine — parsed: true with missing_table is the pass; staged tables only exist inside a full execution."},
                     "sql": {"type": "string", "description": "ONE SELECT or WITH statement. A second statement or a denylisted verb is refused before any connection opens."},
                     "parameters": {
                       "type": "object",
@@ -100,16 +106,6 @@ class SqlProbeTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        if (name == TEMPDB) {
-            // The pipelines_execute_node refusal (037 E2), restated for a free-SQL probe: tempdb
-            // exists only inside a full execution, and manufacturing one would be a different
-            // feature. Use pipelines_execute for the pipeline that builds the table.
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED,
-                message = "Datasource 'tempdb' exists only inside a full execution — run pipelines_execute to build it.",
-                details = mapOf("datasource" to name, "reason" to "tempdb_source"),
-            )
-        }
         val sql = args.requiredString("sql")
         val limit = args.int("limit", default = SqlProbe.DEFAULT_LIMIT, min = 1, max = SqlProbe.MAX_LIMIT)
         val timeout = args.int("timeout_seconds", default = SqlProbe.DEFAULT_TIMEOUT_SECONDS, min = 1, max = SqlProbe.MAX_TIMEOUT_SECONDS)
@@ -117,6 +113,15 @@ class SqlProbeTool(
         // block is `-32602` regardless of what the caller may see, so the gate's answer cannot
         // depend on argument hygiene.
         val parameters = parametersOf(args)
+        if (name == TEMPDB) {
+            // 2026-09-11: `tempdb` used to be refused outright (037 E2) — the staging database
+            // exists only inside an execution. But an agent's H2 mistakes were then found only
+            // by a FULL DAG run (the pipeline-3 audit: five source nodes green, the caller node
+            // dead on an H2 name H2 itself defines). The probe now runs the statement against
+            // an EMPTY scratch H2 in the staging mode: no data, no gate to pass, and a syntax or
+            // self-contained-name error surfaces in milliseconds. "Table not found" is the pass.
+            return probing(name) { scratchWireMap(probe.probeScratch(sql, parameters, tempdbMode, limit, timeout)) }
+        }
         val gated = datasources.requireVisible(name, ctx)
         return probing(name) {
             probe.probe(gated, sql, parameters, limit, timeout).toWireMap()
@@ -195,6 +200,37 @@ class SqlProbeTool(
                 details = mapOf("datasource" to name),
                 cause = e,
             )
+        }
+
+    /**
+     * The tempdb payload: `check: "syntax_and_names"` + `engine`, then EITHER `parsed: true` with
+     * the staged table H2 could not find (the statement is sound; only the input is absent —
+     * the note says so, because an agent reading "not found" will otherwise chase it) OR the
+     * ordinary probe payload when the statement was self-contained and produced rows.
+     */
+    private fun scratchWireMap(outcome: ScratchProbeOutcome): Map<String, Any?> =
+        buildMap {
+            put("check", "syntax_and_names")
+            put("engine", "H2 empty scratch, MODE=$tempdbMode — no staged tables exist here")
+            when (outcome) {
+                is ScratchProbeOutcome.Parsed -> {
+                    put("parsed", true)
+                    put("missing_table", outcome.missingTable)
+                    put("wall_ms", outcome.wallMs)
+                    put(
+                        "note",
+                        "The statement parsed and every name it defines itself resolved. H2 stopped at the first " +
+                            "staged table it could not find (" + (outcome.missingTable ?: "unknown") + "), which is " +
+                            "expected in a scratch probe: that table exists only inside a full execution. Nothing " +
+                            "about the SQL needs to change for this reason alone.",
+                    )
+                }
+
+                is ScratchProbeOutcome.Rows -> {
+                    put("parsed", true)
+                    putAll(outcome.result.toWireMap())
+                }
+            }
         }
 
     private companion object {

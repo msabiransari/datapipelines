@@ -37,8 +37,8 @@ The workflow is three steps:
 
 **Bare vs qualified table names.** When ALL of the datasource's registered tables share
 exactly ONE namespace, the server sets the search path at connect, so a template reads
-`FROM hvfhv_zone_day` bare (the demo's choice). With several namespaces there is no default —
-use the full three-part name, `FROM nyc.mobility.hvfhv_zone_day`.
+`FROM events_by_day` bare. With several namespaces there is no default —
+use the full three-part name, `FROM acme.analytics.events_by_day`.
 
 **Iceberg: register the metadata FILE, not the table root.** DuckDB 1.5.5 cannot
 `iceberg_scan` a pyiceberg table by its root (its version-hint filenames never match the
@@ -48,14 +48,14 @@ receives commits gets a new metadata file per commit: re-register to follow it.
 
 **Every query prunes on the partition column — egress is real.** A lake table's bytes cross
 the network from S3 when the engine scans them, and you pay for what you scan: a predicate on
-the partition column (`WHERE pickup_date = DATE '2024-06-01'` or
-`WHERE pickup_date BETWEEN :start_date AND :end_date`) makes the engine read only the
+the partition column (`WHERE event_date = DATE '2024-06-01'` or
+`WHERE event_date BETWEEN :start_date AND :end_date`) makes the engine read only the
 matching partitions, while an unfiltered `SELECT *` over a partitioned table downloads every
 partition. Write the predicate into the template by default, not as an afterthought:
 
 ```sql
-SELECT pickup_date, pu_location_id, SUM(trip_count) AS trips
-FROM hvfhv_zone_day
-WHERE pickup_date BETWEEN :start_date AND :end_date
-GROUP BY pickup_date, pu_location_id
+SELECT event_date, region_id, SUM(event_count) AS events
+FROM events_by_day
+WHERE event_date BETWEEN :start_date AND :end_date
+GROUP BY event_date, region_id
 ```

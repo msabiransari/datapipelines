@@ -8,8 +8,8 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 
 - **Which host?** The user's own deployment — this product is self-hosted, so there is no
   default endpoint and you must ask for one rather than assume `localhost`. If the user has
-  no server yet, one command on a machine with Docker gives them a working one with sample
-  data in it: `./app.sh --start --demo nyc` from a checkout. That deployment is
+  no server yet, one command on a machine with Docker gives them a working one:
+  `./app.sh --start` from a checkout (the deployment guide covers what it can load). That deployment is
   `DATAPIPELINES_ENV=local` under the `development` posture, and `app.sh` prints the login
   that exists after it is healthy. A deployment their organisation runs will be named
   something else and may be `hardened`, which refuses authoring writes — see the

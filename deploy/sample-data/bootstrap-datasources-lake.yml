@@ -52,8 +52,12 @@ datasources:
       hvfhv_zone_day (trips, fares, tips, driver pay and shared-ride requests
       per pickup zone x day x company, the table the showcase pipeline reads),
       hvfhv_trips_sample (a 1-in-16 hash sample of every trip),
-      hvfhv_trips (every trip, day-partitioned — only the partitions a query's
-      date predicate names are read), hvfhs_companies (the licence lookup).
+      hvfhv_trips (every trip, PARTITIONED ON pickup_date — filter on that column
+      and only the named partitions are read; a predicate on pickup_at alone reads
+      every file), hvfhs_companies (the licence lookup: hvfhs_license_num -> company
+      name). pickup_at/dropoff_at are NAIVE LOCAL New York time; pickup_date is the
+      local date. Money columns are USD; driver_pay is the driver's share, base_fare
+      the passenger's base fare. Window 2023-01 through 2024-12.
       These records are generated from the FHV Trip Record submissions made by
       bases, so we cannot guarantee or confirm their accuracy or completeness.
     dialect: LAKE

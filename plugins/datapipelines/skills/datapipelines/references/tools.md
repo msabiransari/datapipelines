@@ -144,7 +144,7 @@ Create a new template. Templates use Freemarker syntax. A template declares NO p
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `id` | string | optional | Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (nyc/mobility/daily_by_zone.sql). A FOLDER IS REQUIRED — a bare 'daily_by_zone.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now. |
+| `id` | string | optional | Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now. |
 | `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
 | `type` | string (`sql` \| `html`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'). |
 | `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect. |
@@ -163,7 +163,7 @@ Update an existing template by writing its DRAFT — the first update after a re
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `id` | string | required | Template to update — the FOLDER PATH id it was created under (nyc/mobility/daily_by_zone.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found. |
+| `id` | string | required | Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found. |
 | `expected_hash` | string | required | The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly. |
 | `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
 | `type` | string (`sql` \| `html`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'). |
@@ -295,11 +295,11 @@ Preview up to `limit` rows of one table's data, read live from the datasource. T
 
 Scope `author` · read-only
 
-Run ONE read-only SELECT or WITH statement against a datasource and return up to `limit` wire-encoded rows, the canonical column schema, wall_ms of query time, and the EXPLAIN plan captured BEFORE the query ran — a bounded debug probe, not an export. The statement is classified before any connection opens: anything but a single SELECT/WITH, or a denylisted verb (INSERT, DROP, ATTACH, EXPLAIN, INTO, ...) anywhere in it, is refused without touching the datasource. Parameters bind as named :name placeholders through the same binder pipeline SQL uses; every referenced name must be supplied in `parameters` with its canonical type. `tempdb` is refused as a datasource — the staging database exists only inside a full execution (use pipelines_execute). On a timeout the error details carry wall_ms and the plan, so the plan that explains the timeout survives it. The sql text never reaches the audit log — only its SHA-256 and length are recorded.
+Run ONE read-only SELECT or WITH statement against a datasource and return up to `limit` wire-encoded rows, the canonical column schema, wall_ms of query time, and the EXPLAIN plan captured BEFORE the query ran — a bounded debug probe, not an export. The statement is classified before any connection opens: anything but a single SELECT/WITH, or a denylisted verb (INSERT, DROP, ATTACH, EXPLAIN, INTO, ...) anywhere in it, is refused without touching the datasource. Parameters bind as named :name placeholders through the same binder pipeline SQL uses; every referenced name must be supplied in `parameters` with its canonical type. `tempdb` is a SYNTAX-AND-NAMES check: the statement runs against an EMPTY scratch H2 in the staging mode (no staged tables, no data) — `parsed: true` with `missing_table` means the SQL is sound and only its staged input is absent; an error is a real H2 error (a syntax slip, a `VALUES` column named column1 where H2 says C1) found in milliseconds instead of a full run. On a timeout the error details carry wall_ms and the plan, so the plan that explains the timeout survives it. The sql text never reaches the audit log — only its SHA-256 and length are recorded.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `name` | string | required | Datasource name. The reserved name tempdb is refused — it exists only inside a full execution (pipelines_execute). |
+| `name` | string | required | Datasource name, or the reserved name tempdb for a syntax-and-names check of a staging (H2) statement against an empty scratch engine — parsed: true with missing_table is the pass; staged tables only exist inside a full execution. |
 | `sql` | string | required | ONE SELECT or WITH statement. A second statement or a denylisted verb is refused before any connection opens. |
 | `parameters` | object | optional | Bind values for the statement's :name placeholders, keyed by name. type is the canonical logical type; value is its wire string (BIGINTEGER/BIGDECIMAL as decimal text, temporal in ISO forms, BINARY as padded base64). A null value binds SQL NULL. |
 | `limit` | integer, default `50` | optional |  |
@@ -382,7 +382,7 @@ Publish a released pipeline as a GET endpoint under /api/x. The pipeline must ha
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `path` | string | required | e.g. /nyc/revenue/{borough} — no /api/x prefix, no trailing slash. |
+| `path` | string | required | e.g. /finance/revenue/{region} — no /api/x prefix, no trailing slash. |
 | `pipeline` | string | required | The pipeline NAME. It must have a released version. |
 | `timeout_seconds` | integer | optional | Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running. |
 | `description` | string | optional |  |
@@ -399,11 +399,11 @@ No arguments.
 
 Scope `read` · read-only
 
-One published endpoint by its path (the pattern, not a request URL — '/nyc/revenue/{borough}').
+One published endpoint by its path (the pattern, not a request URL — '/finance/revenue/{region}').
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `path` | string | required | The published path PATTERN, e.g. /nyc/revenue/{borough}. |
+| `path` | string | required | The published path PATTERN, e.g. /finance/revenue/{region}. |
 
 ### `endpoints_delete`
 
@@ -413,7 +413,7 @@ Unpublish an endpoint by its path. The pipeline is untouched — only the URL st
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `path` | string | required | The published path PATTERN, e.g. /nyc/revenue/{borough}. |
+| `path` | string | required | The published path PATTERN, e.g. /finance/revenue/{region}. |
 
 ## lake
 
@@ -421,16 +421,16 @@ Unpublish an endpoint by its path. The pipeline is untouched — only the URL st
 
 Scope `author` · **writes**
 
-Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table's CURRENT metadata file, e.g. s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so register the file, and re-register it when the table commits) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.
+Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'acme.analytics' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table's CURRENT metadata file, e.g. s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a pyiceberg table by its root, so register the file, and re-register it when the table commits) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `name` | string | required | Datasource name. A LAKE datasource visible in the key's pinned workspace. |
 | `namespace` | any | required | Namespace — a segments array or the dotted shorthand. 1-9 segments, the segment grammar without dots. |
-| `table` | string | required | The table's name — one segment of the same grammar, e.g. hvfhv_zone_day. |
+| `table` | string | required | The table's name — one segment of the same grammar, e.g. events_by_day. |
 | `format` | string (`parquet` \| `iceberg`) | required |  |
 | `location` | string | required | s3://bucket/prefix/ (parquet dir/glob; iceberg: the current metadata file, not the table root) or file:// path. Nothing else; no injection chars. |
-| `partition_column` | string | optional | Optional. The hive-style partition column, e.g. pickup_date. |
+| `partition_column` | string | optional | Optional. The hive-style partition column, e.g. event_date. |
 
 ### `lake_tables_import`
 
@@ -455,5 +455,5 @@ Unregister one table from a LAKE datasource's catalog. Mirrors DELETE /api/v1/da
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `name` | string | required | Datasource name. A LAKE datasource visible in the key's pinned workspace. |
-| `namespace` | any | required | The table's namespace, outermost first — an array of segments or the dotted shorthand ('nyc.mobility'). |
+| `namespace` | any | required | The table's namespace, outermost first — an array of segments or the dotted shorthand ('acme.analytics'). |
 | `table` | string | required | The table to unregister. |

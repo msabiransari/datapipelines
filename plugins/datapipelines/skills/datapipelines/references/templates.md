@@ -5,7 +5,7 @@ Open when you are writing SQL: what a template is, how library imports work, and
 Part of the `datapipelines` skill — the operating core is `SKILL.md` beside this file.
 
 **Template** — Freemarker SQL: `id` — always a folder path, e.g.
-`nyc/mobility/daily_by_zone.sql` (2–10 `/`-separated segments, each starting `[a-z0-9]`,
+`acme/finance/daily_orders.sql` (2–10 `/`-separated segments, each starting `[a-z0-9]`,
 ≤ 64 chars per segment, ≤ 200 total; a bare `fetch_orders.sql` is refused), `dialect` (one of
 `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`, `LAKE`), `display_name`,
 `description`, `imports` (`[{"id","version","alias"}]` for library macros), `body`,

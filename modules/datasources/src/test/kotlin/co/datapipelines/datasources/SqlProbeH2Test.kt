@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -168,5 +169,51 @@ class SqlProbeH2Test {
             { thrown.driverMessage.length shouldBeLessThanOrEqualTo SqlExecutionException.MAX_MESSAGE_CHARS },
             { thrown.driverMessage shouldContain "NO_SUCH_PROBE_TABLE" },
         )
+    }
+
+    // ------------------------------------------------------------------ the tempdb scratch check (2026-09-11)
+
+    /**
+     * The pass signal: a statement over a staged table that does not exist parses, resolves
+     * every name it defines, and stops at the missing input — reported as Parsed, naming it.
+     */
+    @Test
+    fun `scratch - a sound statement over a missing staged table is Parsed with the table named`() {
+        val outcome =
+            probe.probeScratch(
+                "SELECT t.hr, s.n FROM (VALUES (0),(1)) AS t(hr) LEFT JOIN stg_orders s ON s.hr = t.hr WHERE s.n > :min",
+                parameters = mapOf("min" to SqlProbeParameter(LogicalType.INTEGER, "1")),
+            )
+
+        outcome.shouldBeInstanceOf<ScratchProbeOutcome.Parsed>()
+        outcome.missingTable shouldBe "stg_orders"
+    }
+
+    /** The defect that cost a full DAG run: H2 names VALUES columns C1, not column1. */
+    @Test
+    fun `scratch - an H2 name error is the execution exception with H2's message`() {
+        val thrown =
+            shouldThrow<SqlProbeExecutionException> {
+                probe.probeScratch("SELECT CAST(column1 AS INTEGER) AS hr FROM (VALUES (0),(1),(2))")
+            }
+        thrown.driverMessage shouldContain "column1"
+    }
+
+    /** A self-contained statement runs and returns rows, exactly as a real probe would. */
+    @Test
+    fun `scratch - a self-contained statement returns rows`() {
+        val outcome = probe.probeScratch("SELECT t.hr FROM (VALUES (0),(1),(2)) AS t(hr) ORDER BY t.hr")
+
+        outcome.shouldBeInstanceOf<ScratchProbeOutcome.Rows>()
+        outcome.result.rows.rows.size shouldBe 3
+        outcome.result.rows.schema.columns
+            .single()
+            .name shouldBe "hr"
+    }
+
+    /** The classifier still guards the scratch engine: nothing but one SELECT/WITH runs. */
+    @Test
+    fun `scratch - a non-SELECT is refused before any engine opens`() {
+        shouldThrow<SqlProbeRefusalException> { probe.probeScratch("DROP TABLE stg_orders") }
     }
 }

@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.TemplateType
 import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContain
@@ -109,6 +110,28 @@ class TemplateValidatorTest {
     fun `syntax_error rejects an unparseable body`() {
         validator().validate(TemplateFixtures.draft(body = "<#if x>never closed"), workspaceId).codes shouldContain
             PipelineErrorCodes.Template.SYNTAX_ERROR
+    }
+
+    /** 2026-09-11 — `WHERE rn &lt;= :top_n` reached the server from an agent client and died at execution. */
+    @Test
+    fun `html_entity rejects an HTML-escaped operator in a sql body and names the line`() {
+        val failure =
+            validator()
+                .validate(TemplateFixtures.draft(body = "SELECT 1\nFROM t\nWHERE rn &lt;= :top_n"), workspaceId)
+                .failures
+                .single { it.code == PipelineErrorCodes.Template.HTML_ENTITY }
+
+        failure.details["entity"] shouldBe "&lt;"
+        failure.details["line"] shouldBe 3
+    }
+
+    @Test
+    fun `html_entity is not raised for a plain operator, nor for an html template`() {
+        validator().validate(TemplateFixtures.draft(body = "SELECT 1 FROM t WHERE rn <= :top_n"), workspaceId).codes shouldNotContain
+            PipelineErrorCodes.Template.HTML_ENTITY
+        validator()
+            .validate(TemplateFixtures.draft(type = TemplateType.HTML, dialect = null, body = "<p>&lt;b&gt; is escaped</p>"), workspaceId)
+            .codes shouldNotContain PipelineErrorCodes.Template.HTML_ENTITY
     }
 
     @Test

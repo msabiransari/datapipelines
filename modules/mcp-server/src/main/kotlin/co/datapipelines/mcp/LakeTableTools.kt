@@ -37,7 +37,7 @@ class LakeTablesRegisterTool(
             description =
                 "Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors " +
                     "POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted " +
-                    "'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; " +
+                    "'acme.analytics' shorthand), table, format (parquet | iceberg) and location are required; " +
                     "partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or " +
                     "glob; iceberg: the table's CURRENT metadata file, e.g. " +
                     "s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a " +
@@ -87,13 +87,13 @@ class LakeTablesRegisterTool(
                     {"type": "string"}
                   ]
                 },
-                "table": {"type": "string", "description": "The table's name — one segment of the same grammar, e.g. hvfhv_zone_day."},
+                "table": {"type": "string", "description": "The table's name — one segment of the same grammar, e.g. events_by_day."},
                 "format": {"type": "string", "enum": ["parquet", "iceberg"]},
                 "location": {
                   "type": "string",
                   "description": "s3://bucket/prefix/ (parquet dir/glob; iceberg: the current metadata file, not the table root) or file:// path. Nothing else; no injection chars."
                 },
-                "partition_column": {"type": "string", "description": "Optional. The hive-style partition column, e.g. pickup_date."}
+                "partition_column": {"type": "string", "description": "Optional. The hive-style partition column, e.g. event_date."}
               }
             }
             """.trimIndent()
@@ -220,7 +220,7 @@ class LakeTablesUnregisterTool(
               "properties": {
                 "name": {"type": "string", "description": "Datasource name. A LAKE datasource visible in the key's pinned workspace."},
                 "namespace": {
-                  "description": "The table's namespace, outermost first — an array of segments or the dotted shorthand ('nyc.mobility').",
+                  "description": "The table's namespace, outermost first — an array of segments or the dotted shorthand ('acme.analytics').",
                   "anyOf": [
                     {"type": "array", "items": {"type": "string"}},
                     {"type": "string"}

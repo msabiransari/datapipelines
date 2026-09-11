@@ -81,7 +81,7 @@ truth about what is there.
 
 - **A pipeline and the templates it uses share a prefix.** That is the whole payoff — one
   prefix query shows an area's work whichever kind you browse.
-- **Shared macros live under `<owner>/lib/`** (`nyc/lib/metrics.sql`), beside their owner,
+- **Shared macros live under `<owner>/lib/`** (`acme/lib/metrics.sql`), beside their owner,
   not at the root.
 - **Scratch lives under `test/`** (`test/scratch`, `test/od_matrix_spike`).
 
@@ -90,7 +90,7 @@ truth about what is there.
 ```
 pipelines_list  {"prefix": ""}     → the roots, each with a count
 templates_list  {"prefix": ""}     → the same, for templates
-pipelines_list  {"prefix": "nyc"}  → one level down: sub-folders + the pipelines directly there
+pipelines_list  {"prefix": "acme"} → one level down: sub-folders + the pipelines directly there
 ```
 
 Reuse an existing root. If none fits, **ask the human** — a new root is a claim about how the
@@ -111,12 +111,18 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    `template.validation.new_root_requires_confirmation` with `details.existing_roots` listing
    what already exists. `test/` never needs it. Everything you create in the steps below goes
    under the prefix you settle on here — and it cannot be moved later.
-1. **Verify the source.** `datasources_test` (or `datasources_list`/`datasources_get`)
-   to confirm name + dialect + connectivity, then introspect the schema:
-   `datasources_get_schemas` → `datasources_get_tables(namespace)` →
-   `datasources_get_columns(table, namespace)` for every table the SQL will touch, passing
-   each table's reported `namespace` array through. Never write SQL against recalled column
-   names.
+1. **Learn before you assume.** You know nothing about a datasource until you have read
+   it — not its time zone, not its units, not whether a table is a sample or a census, not
+   what a coded value means. For EVERY datasource the pipeline will touch, in this order:
+   `datasources_get` (the description, the dialect, a lake's registered tables and partition
+   columns) → `datasources_get_schemas` → `datasources_get_tables(namespace)` →
+   `datasources_get_columns(table, namespace)` for every table the SQL will read, passing
+   each table's reported `namespace` array through → `datasources_get_table_stats` →
+   `sql_probe` a few rows and the distinct values of every column you will filter, group
+   or join by. Descriptions and `remarks` are one input, written by a person; **the columns
+   and the rows are the ground truth** — never write SQL against a column, a unit, a time
+   zone or a sample rate you have not seen. Write what you learned into the pipeline's
+   description. `references/authoring-playbook.md` §1 is the full procedure.
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
    will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
@@ -292,18 +298,31 @@ here.
     supplying `start_date` directly skips the calculator.
 14. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
     H2 fails to match the GROUP BY expression to the identical SELECT expression when it
-    contains a parameter marker — `Column "w.prcp_mm" must be in the GROUP BY list`
+    contains a parameter marker — `Column "x.amount" must be in the GROUP BY list`
     (SQLState 90016), a lie that sends you chasing the wrong fix. Compute the classified
-    value in a derived table (`FROM (SELECT CASE ... :threshold ... END AS weather ...) x`)
-    and `GROUP BY x.weather` — a plain column always matches. Measured on H2 2.3.232
-    (2026-09-04, congestion/tip pipelines).
-14. **Never divide DECIMAL by DECIMAL in H2 (tempdb) — cast to DOUBLE first.**
+    value in a derived table (`FROM (SELECT CASE ... :threshold ... END AS bucket ...) x`)
+    and `GROUP BY x.bucket` — a plain column always matches. Measured on H2 2.3.232.
+15. **Never divide DECIMAL by DECIMAL in H2 (tempdb) — cast to DOUBLE first.**
     H2's DECIMAL arithmetic collapses result scale (a `DECIMAL(·,2)/DECIMAL(·,0)` division
-    can come back scale-0): `SUM(miles)/SUM(seconds)*3600` returned **0 mph** where the
-    true answer was ~12, and `100.0 * tip / fare` rounded to one decimal. Cast every
+    can come back scale-0): `SUM(distance)/SUM(seconds)*3600` returned **0** where the
+    true answer was ~12, and `100.0 * part / whole` rounded to one decimal. Cast every
     ratio operand: `CAST(SUM(x) AS DOUBLE) / NULLIF(CAST(SUM(y) AS DOUBLE), 0)`.
     Verified empirically against the pinned driver 2.3.232 — plain DECIMAL gave 2448.00
-    where DOUBLE gave the correct 2456.81 (2026-09-04, congestion/tip/OD pipelines).
+    where DOUBLE gave the correct 2456.81.
+16. **H2 (tempdb) names `VALUES` columns `C1, C2, …` — not `column1`.** Postgres and DuckDB
+    call a `VALUES` row's columns `column1…`; H2 2.x calls them `C1…`, so `SELECT column1
+    FROM (VALUES (0),(1))` fails at execution with `Column "column1" not found` after every
+    other node ran green. Dialect-safe form: alias the derived table's columns —
+    `FROM (VALUES (0),(1)) AS t(hr)` — or spell a small spine as `SELECT 0 AS hr UNION ALL
+    SELECT 1 …`. H2 has no schema to introspect, so check every tempdb statement with
+    `sql_probe {"name": "tempdb"}` (an empty engine: syntax and self-contained errors
+    surface in milliseconds; "table not found" means the statement parsed) before you pay a
+    full DAG run to find out.
+17. **A source node sees only its own datasource.** Its SQL runs on that engine; staged
+    tables are visible only to `source: "tempdb"` nodes, and no engine reads another. To
+    filter a source by a set computed elsewhere, bind a parameter or write literals and keep
+    the computing node for the labels — and say so in the description
+    (`references/authoring-playbook.md` §3).
 
 ## References — open one when you need it
 

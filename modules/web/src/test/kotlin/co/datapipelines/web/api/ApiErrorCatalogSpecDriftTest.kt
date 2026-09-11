@@ -169,7 +169,7 @@ class ApiErrorCatalogSpecDriftTest {
          * `workspace.invitation.not_found` (404), landed in the SAME commit as its constants
          * (both sides of the auth mirror) and its catalog row. Re-derived from the parse.
          */
-        const val SECTION_13_ROW_COUNT = 163
+        const val SECTION_13_ROW_COUNT = 164
 
         /**
          * §12's distinct validation codes.

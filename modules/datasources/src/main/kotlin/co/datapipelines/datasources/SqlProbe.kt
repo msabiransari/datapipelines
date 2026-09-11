@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.JsonEncoder
 import org.slf4j.LoggerFactory
 import org.springframework.dao.InvalidDataAccessApiUsageException
@@ -8,8 +9,10 @@ import org.springframework.jdbc.core.StatementCreatorUtils
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterUtils
 import java.sql.Connection
+import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.SQLException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -72,6 +75,70 @@ class SqlProbe(
             query(connection, datasource, positionalSql, bindValues, rowCap, timeout, plan)
         }
     }
+
+    /**
+     * The tempdb SYNTAX-AND-NAMES check (2026-09-11): the statement runs against a FRESH, EMPTY
+     * in-memory H2 opened in the staging engine's own `MODE` and lower-folding — the same URL
+     * shape `StagingFactory` builds, minus the execution. Staging tables do not exist here, so
+     * the outcomes are:
+     *
+     *  - **H2 reports a missing table** (`42102`, the first `FROM` it could not resolve) → the
+     *    statement PARSED and every name it defines itself resolved; only the staged input is
+     *    absent. That is the pass signal — [ScratchProbeOutcome.Parsed] names the table.
+     *  - **The statement ran** (a self-contained `VALUES` spine, a constant expression) → rows,
+     *    exactly as a real probe returns them ([ScratchProbeOutcome.Rows]).
+     *  - **Anything else** (a syntax error, a `VALUES` column named `column1` that H2 calls
+     *    `C1`, a bad cast) → [SqlProbeExecutionException] with H2's message — the error that
+     *    used to cost a full DAG run to see (the `pipeline-3` audit: five source nodes green,
+     *    the caller node dead on `Column "column1" not found`).
+     *
+     * No registry, no lease, no visibility gate: nothing here can read data. The database is
+     * discarded when the connection closes (no `DB_CLOSE_DELAY`, the staging rule).
+     */
+    fun probeScratch(
+        sql: String,
+        parameters: Map<String, SqlProbeParameter> = emptyMap(),
+        mode: String = DEFAULT_SCRATCH_MODE,
+        limit: Int = DEFAULT_LIMIT,
+        timeoutSeconds: Int = DEFAULT_TIMEOUT_SECONDS,
+    ): ScratchProbeOutcome {
+        val statement = SqlStatementClassifier.classify(sql, Dialect.H2)
+        val rowCap = limit.coerceIn(1, MAX_LIMIT)
+        val timeout = timeoutSeconds.coerceIn(1, MAX_TIMEOUT_SECONDS)
+        val values = parameters.mapValues { (name, parameter) -> parameter.toJdbcValue(name) }
+        val (positionalSql, bindValues) = translateBinds(statement, values)
+        val scratch =
+            Datasource(
+                name = SCRATCH_NAME,
+                displayName = "tempdb (empty scratch)",
+                dialect = Dialect.H2,
+                jdbcUrl = "jdbc:h2:mem:probe_${UUID.randomUUID()};MODE=$mode;DATABASE_TO_LOWER=TRUE",
+            )
+        val startedAt = System.nanoTime()
+        DriverManager.getConnection(scratch.jdbcUrl).use { connection ->
+            try {
+                connection.prepareStatement(positionalSql).use { prepared ->
+                    prepared.queryTimeout = timeout
+                    prepared.maxRows = rowCap + 1
+                    bind(prepared, bindValues)
+                    return ScratchProbeOutcome.Rows(SqlProbeResult(readRows(prepared, scratch, rowCap), wallMs(startedAt), null))
+                }
+            } catch (e: SQLException) {
+                if (e.errorCode in H2_TABLE_NOT_FOUND_CODES) {
+                    return ScratchProbeOutcome.Parsed(missingTable = missingTableOf(e), wallMs = wallMs(startedAt))
+                }
+                throw SqlProbeExecutionException(scratch.name, e)
+            }
+        }
+    }
+
+    /** H2's `Table "STG_X" not found` — the quoted name, lower-folded like the staging tables are. */
+    private fun missingTableOf(e: SQLException): String? =
+        MISSING_TABLE
+            .find(e.message ?: "")
+            ?.groupValues
+            ?.get(1)
+            ?.lowercase()
 
     /**
      * `:name` → positional `?` + ordered values through Spring's [NamedParameterUtils] — the
@@ -226,6 +293,16 @@ class SqlProbe(
     private fun wallMs(startedAt: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
 
     companion object {
+        /** The staging engine's default `MODE` (`H2StagingProperties.mode`); callers pass the configured one. */
+        const val DEFAULT_SCRATCH_MODE = "PostgreSQL"
+        const val SCRATCH_NAME = "tempdb"
+
+        /**
+         * H2's table-not-found family: `TABLE_OR_VIEW_NOT_FOUND_1` (42102), `…_WITH_CANDIDATES_2`
+         * (42103) and `…_DATABASE_EMPTY_1` (42104) — the last is what an EMPTY scratch reports.
+         */
+        private val H2_TABLE_NOT_FOUND_CODES = setOf(42102, 42103, 42104)
+        private val MISSING_TABLE = Regex("Table \"([^\"]+)\" not found")
         const val DEFAULT_LIMIT = 50
 
         /** The hard row cap — a probe is a debug read, not an export. */
@@ -249,4 +326,18 @@ class SqlProbe(
         /** A `:name` reference — used only to NAME the missing parameter in the refusal. */
         private val PARAMETER_NAME = Regex(""":([A-Za-z_][A-Za-z0-9_]*)""")
     }
+}
+
+/** What [SqlProbe.probeScratch] found — the statement parsed and resolved (a staged input is absent), or it ran. */
+sealed interface ScratchProbeOutcome {
+    /** Parsed; every self-defined name resolved; [missingTable] is the staged table H2 could not find. */
+    data class Parsed(
+        val missingTable: String?,
+        val wallMs: Long,
+    ) : ScratchProbeOutcome
+
+    /** The statement was self-contained and produced rows. */
+    data class Rows(
+        val result: SqlProbeResult,
+    ) : ScratchProbeOutcome
 }

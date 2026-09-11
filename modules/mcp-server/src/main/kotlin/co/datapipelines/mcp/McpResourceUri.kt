@@ -167,7 +167,7 @@ sealed interface McpResourceUri {
          * since 077, so the id is every segment after `templates`, not `segments[1]`.
          *
          * That is the bug this shape had from 043 until 077 found it: a fixed
-         * `segments.size == 2` meant `datapipelines://templates/nyc/mobility/daily.sql` parsed
+         * `segments.size == 2` meant `datapipelines://templates/acme/finance/daily.sql` parsed
          * to null and the resource read answered "not found" for every hierarchical name. It
          * went unnoticed because the only names anyone addressed this way were flat; 077 makes
          * every name a path, so it would have been the whole surface.

@@ -31,7 +31,7 @@ import io.modelcontextprotocol.spec.McpSchema
  */
 private const val ID_ARG_DESC =
     "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments " +
-        "(nyc/mobility/daily_by_zone.sql). A FOLDER IS REQUIRED — a bare 'daily_by_zone.sql' is refused with " +
+        "(acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with " +
         "template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and " +
         "shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. " +
         "Optional; auto-generated if omitted. There is no rename, so choose the folder now."
@@ -93,7 +93,7 @@ private const val DIALECT_FIELD_DESC =
  * already exists, so only the folder-identity half of the create-time prose carries over.
  */
 private const val UPDATE_ID_ARG_DESC =
-    "Template to update — the FOLDER PATH id it was created under (nyc/mobility/daily_by_zone.sql). " +
+    "Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). " +
         "Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, " +
         "so the id cannot change — an unknown id is the catalogued template.not_found."
 

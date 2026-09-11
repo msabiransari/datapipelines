@@ -160,6 +160,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Template.TYPE_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.TYPE_IMMUTABLE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.HTML_ENTITY to HttpStatus.BAD_REQUEST,
             // §12.6 (046) — the html-reference refusal at pipeline save; 400 like the
             // pipeline.validation family default, wired explicitly for the same A2 reason.
             PipelineErrorCodes.Validation.TEMPLATE_TYPE_MISMATCH to HttpStatus.BAD_REQUEST,

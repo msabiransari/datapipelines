@@ -4,18 +4,18 @@ Open when you are choosing where a new pipeline or template lives, or explaining
 
 Part of the `datapipelines` skill — the operating core is `SKILL.md` beside this file.
 
-**Worked example (the shipped demo).** The NYC family keeps its pipelines and the templates
+**Worked example.** An organisation's finance area keeps its pipelines and the templates
 they read under one prefix:
 
 ```
-nyc/mobility/revenue_by_borough      (pipeline)
-nyc/mobility/mobility_briefing       (pipeline — a PIPELINE node invoking borough_od_matrix)
-nyc/mobility/daily_by_zone.sql       (template the pipelines read)
-nyc/lib/metrics.sql                  (shared macros)
+acme/finance/revenue_by_region       (pipeline)
+acme/finance/monthly_briefing        (pipeline — a PIPELINE node invoking revenue_by_region)
+acme/finance/daily_orders.sql        (template the pipelines read)
+acme/lib/metrics.sql                 (shared macros)
 ```
 
-A new NYC mobility pipeline goes under `nyc/mobility/`; a first finance pipeline is a new
-root, so you ask.
+A new finance pipeline goes under `acme/finance/`; a first pipeline for a different
+organisation or product is a new root, so you ask.
 
 **What folders are NOT:**
 

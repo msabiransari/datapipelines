@@ -79,6 +79,7 @@ class TemplateValidator(
         addEngineFailure(draft, failures)
         addSchemaVersionFailure(draft, failures)
         addTypeDialectFailures(draft, failures)
+        addHtmlEntityFailure(draft, failures)
         addBodyFailures(draft, failures, trace)
         libraryResolver.validate(workspaceId, draft.imports, failures, trace)
 
@@ -188,6 +189,29 @@ class TemplateValidator(
     }
 
     /**
+     * `template.validation.html_entity` — a body carrying `&lt;`/`&gt;`/`&amp;`/`&quot;`/`&#39;`
+     * was HTML-escaped on its way here and can never be the SQL its author meant. Named so the
+     * fix is one edit, not a full run ending in a driver syntax error (pipeline-3 audit).
+     * Applies to `sql` templates only: an `html` template may legitimately emit entities.
+     */
+    private fun addHtmlEntityFailure(
+        draft: TemplateDraft,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        if (draft.type == TemplateType.HTML) return
+        val match = HTML_ENTITY.find(draft.body) ?: return
+        val line = draft.body.substring(0, match.range.first).count { it == '\n' } + 1
+        failures +=
+            TemplateValidationFailure(
+                code = PipelineErrorCodes.Template.HTML_ENTITY,
+                message =
+                    "Body contains the HTML entity '${match.value}' at line $line — a SQL body was HTML-escaped " +
+                        "between the author and the server. Send the operator itself.",
+                details = mapOf("entity" to match.value, "line" to line),
+            )
+    }
+
+    /**
      * Every body-derived §7 check: the length cap, the source-level refusals, the parse, the
      * §4.2 AST scan and the `is_library` structure check — in that order, because each stage's
      * cost is only bounded once the previous one has passed.
@@ -285,6 +309,9 @@ class TemplateValidator(
     }
 
     companion object {
+        /** The five entities a SQL body can only have acquired by being HTML-escaped. */
+        private val HTML_ENTITY = Regex("&(lt|gt|amp|quot|#39);")
+
         /**
          * `datapipelines.templates.max-body-chars` (configuration.md §3.9) — mirrored here for
          * the code path and for tests that construct a validator directly, never as a second

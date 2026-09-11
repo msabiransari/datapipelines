@@ -24,8 +24,14 @@ datasources:
   - name: sample-trips
     display_name: "NYC Taxi Trips (sample)"
     description: >-
-      NYC TLC yellow-taxi trips, a hash-sampled 24-month window (~4.9M rows) plus
-      daily and monthly rollups. Tables: trips, trips_daily, trips_monthly.
+      NYC TLC yellow-taxi trips, 2023-01 through 2024-12. trips is a deterministic
+      1-IN-16 HASH SAMPLE of all yellow trips (~4.9M rows): multiply a count by 16
+      to estimate the population, and never compare it as a share against a
+      full-count feed. pickup_ts/dropoff_ts are NAIVE LOCAL New York time (no
+      offset); pickup_date is the local date, indexed. Money columns are USD.
+      trips_daily (one row per day) and trips_monthly (one row per month x pickup
+      zone) are rollups of the SAME sample. Tables: trips, trips_daily,
+      trips_monthly; _sample_meta records the artifact version.
     dialect: POSTGRES
     jdbc_url: jdbc:postgresql://postgres:5432/dp_sample_trips
     credential:
@@ -38,9 +44,11 @@ datasources:
   - name: sample-weather
     display_name: "NYC Weather (sample)"
     description: >-
-      NOAA GHCN-Daily observations for five NYC-area stations over the same
-      window, melted to one row per station/day/element. Tables: stations,
-      observations.
+      NOAA GHCN-Daily observations for five NYC-area stations, 2023-01 through
+      2024-12, one row per (station_id, obs_date, element). value is ALREADY in the
+      standard unit named by the unit column (TMAX/TMIN in degrees C, PRCP in mm,
+      AWND in m/s) — not GHCN's native tenths. obs_date is the local calendar day.
+      Tables: stations (id, name, coordinates), observations.
     dialect: MYSQL
     jdbc_url: jdbc:mysql://mysql:3306/dp_sample_weather
     credential:
@@ -53,9 +61,13 @@ datasources:
   - name: sample-reference
     display_name: "NYC Reference Data (sample)"
     description: >-
-      TLC taxi zones and boroughs, rate-code and payment-type lookups, and a
-      weekend/US-federal-holiday calendar for the window. Tables: zones,
-      rate_codes, payment_types, calendar.
+      TLC taxi zones and boroughs (location_id is the join key the trip tables'
+      pu/do_location_id carry; the table includes non-borough rows such as EWR,
+      Unknown and N/A), rate-code and payment-type lookups, and a calendar with one
+      row per day of 2023-01..2024-12 carrying day_of_week, is_weekend, is_holiday
+      (US federal, OBSERVED dates) and holiday_name ('' on a non-holiday, never
+      NULL). SQLite has no DATE type: cal_date is ISO-8601 TEXT — CAST it before
+      joining a DATE column. Tables: zones, rate_codes, payment_types, calendar.
     dialect: SQLITE
     # SQLite is a FILE. There is no server, no login, and the xerial driver
     # ignores a username and password entirely.

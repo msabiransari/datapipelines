@@ -616,6 +616,16 @@ object PipelineErrorCodes {
          * template's `type`, which is fixed at creation and identical across every version.
          */
         const val TYPE_IMMUTABLE = "template.validation.type_immutable"
+
+        /**
+         * §13.9 — the body contains an HTML entity for a SQL operator (`&lt;`, `&gt;`, `&amp;`,
+         * `&quot;`, `&#39;`). No SQL dialect reads those; a body carrying one was HTML-escaped
+         * somewhere between the author and the server (an agent client, a copy from a rendered
+         * page) and would fail at execution with an H2/driver syntax error far from its cause
+         * (pipeline-3 audit, 2026-09-11: `WHERE rn &lt;= :top_n`). Refused at save with the
+         * entity named, so the fix is one edit and not a full run.
+         */
+        const val HTML_ENTITY = "template.validation.html_entity"
         const val ENGINE_UNSUPPORTED = "template.validation.engine_unsupported"
         const val SCHEMA_VERSION_UNSUPPORTED = "template.validation.schema_version_unsupported"
         const val IS_LIBRARY_WITHOUT_MACROS = "template.validation.is_library_without_macros"

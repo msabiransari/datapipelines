@@ -992,6 +992,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.type_invalid` | 400 | `type` not one of `sql`, `html` (046, template-hierarchy-design §5.4) |
 | `template.validation.dialect_not_allowed` | 400 | `dialect` is present on a `type='html'` template — an html template declares no dialect (046, template-hierarchy-design §7). Deliberately distinct from `dialect_invalid`: presence on the wrong type and an unknown value are different failures |
 | `template.validation.type_immutable` | 400 | A payload attempted to change a template's `type`, which is chosen at create and identical on every version (046, template-hierarchy-design §5.3) |
+| `template.validation.html_entity` | 400 | The body contains an HTML entity where a SQL operator belongs (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&#39;`) — the body was HTML-escaped between the author and the server (an agent client, a copy from a rendered page). Refused at save with `details.entity` and the first line it appears on, because at execution it surfaces as an opaque driver syntax error far from its cause (2026-09-11). |
 | `template.validation.engine_unsupported` | 400 | `engine` not a value v1 supports (only `freemarker`) |
 | `template.validation.schema_version_unsupported` | 400 | `schema_version` not a value v1 supports (only `1`) |
 | `template.validation.is_library_without_macros` | 400 | `is_library: true` but body has no macro definitions or has output outside them |

@@ -108,7 +108,7 @@ object EndpointsTools {
                   "required": ["path", "pipeline"],
                   "additionalProperties": false,
                   "properties": {
-                    "path": {"type": "string", "description": "e.g. /nyc/revenue/{borough} — no /api/x prefix, no trailing slash."},
+                    "path": {"type": "string", "description": "e.g. /finance/revenue/{region} — no /api/x prefix, no trailing slash."},
                     "pipeline": {"type": "string", "description": "The pipeline NAME. It must have a released version."},
                     "timeout_seconds": {"type": "integer", "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."},
                     "description": {"type": "string"}
@@ -145,7 +145,7 @@ object EndpointsTools {
         override val definition: McpSchema.Tool =
             McpTools.tool(
                 name = "endpoints_get",
-                description = "One published endpoint by its path (the pattern, not a request URL — '/nyc/revenue/{borough}').",
+                description = "One published endpoint by its path (the pattern, not a request URL — '/finance/revenue/{region}').",
                 schema = PATH_SCHEMA,
             )
 
@@ -206,7 +206,7 @@ object EndpointsTools {
           "required": ["path"],
           "additionalProperties": false,
           "properties": {
-            "path": {"type": "string", "description": "The published path PATTERN, e.g. /nyc/revenue/{borough}."}
+            "path": {"type": "string", "description": "The published path PATTERN, e.g. /finance/revenue/{region}."}
           }
         }
         """.trimIndent()
