@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "version": "v4",
+  "family": "trade",
+  "artifact_version": "v4",
+  "window": {
+    "start": "2023-01",
+    "end": "2024-12"
+  },
+  "artifacts": [
+    {
+      "file": "examples.json",
+      "engine": null,
+      "sha256": "089d2cc0844f37932afba2a4740c8f9fab551c7062dc8358caedf480a250ac70",
+      "bytes": 18413,
+      "restore_hint": "seed content: templates + example pipelines for new workspaces"
+    },
+    {
+      "file": "fx_rates.db",
+      "engine": "SQLITE",
+      "sha256": "c64064c7b23c8e6022880b12dffbc78018faa0b332af2023ec4224f2cae2a092",
+      "bytes": 196608,
+      "restore_hint": "register as a SQLITE datasource: jdbc:sqlite:<path> (readonly)"
+    },
+    {
+      "file": "mysql-trade.sql.gz",
+      "engine": "MYSQL",
+      "sha256": "bed38543183703bbea6a4c2e6497ad98a03c7da19d698317ffd4cc6f20fe742a",
+      "bytes": 1299,
+      "restore_hint": "gunzip < mysql-trade.sql.gz | mysql (creates database dp_sample_trade)"
+    },
+    {
+      "file": "us_trade.duckdb",
+      "engine": "DUCKDB",
+      "sha256": "3c0bc2dbec3d9dee7148bf2916ebc4a1ab24eb8d0e1de5368c1e76c9e3506cfc",
+      "bytes": 233844736,
+      "restore_hint": "register as a DUCKDB datasource: jdbc:duckdb:<path> (readonly)"
+    }
+  ],
+  "tables": [
+    {
+      "engine": "duckdb",
+      "table": "trade_monthly",
+      "rows": 2373825,
+      "sha256": "a260a84f7bc34142c55b9eed0e8ee73f92ff1143cf94f1e3984e30e6b31faf13"
+    },
+    {
+      "engine": "duckdb",
+      "table": "partners",
+      "rows": 15,
+      "sha256": "280eeb9d140787a506313850b78550d53f0aadf57b82bbb65fed719e566dec0c"
+    },
+    {
+      "engine": "duckdb",
+      "table": "hs_chapters",
+      "rows": 98,
+      "sha256": "cbe93e4fd3bad59ab2a7ac5e463ccf324f2751c0a42f5ed597354abcc00039f8"
+    },
+    {
+      "engine": "duckdb",
+      "table": "trade_flow_monthly",
+      "rows": 48,
+      "sha256": "625b150b032991d9e3efc1b05a87b1c4bdba3f514121171ac5a51e2f6796dcac"
+    },
+    {
+      "engine": "duckdb",
+      "table": "partner_iso_crosswalk",
+      "rows": 5,
+      "sha256": "2c528324284b142d6a4a09610c82bfdcbc8e72bebefa9a03052578f3612acfca"
+    },
+    {
+      "engine": "mysql",
+      "table": "comtrade_annual",
+      "rows": 27,
+      "sha256": "446c03cdad1ad4b38038995f9940d54ba2e769be80c5336658d886a33f604043"
+    },
+    {
+      "engine": "mysql",
+      "table": "reporters",
+      "rows": 5,
+      "sha256": "7b6b4a4c1c167495da4c23d7a3c596162a2a77583b48b025c1bc5a12d21b81df"
+    },
+    {
+      "engine": "sqlite",
+      "table": "fx_daily",
+      "rows": 2500,
+      "sha256": "dcdc07b77360ff78d73ac52e0b7c62d37fc904a3e4eecb07edb6169fe2a9a99d"
+    },
+    {
+      "engine": "sqlite",
+      "table": "fx_monthly",
+      "rows": 120,
+      "sha256": "79ef2f82cafc6b94c2147fe6ec347ff92022a6413d3e2205ed4415c26fa3cb9c"
+    },
+    {
+      "engine": "sqlite",
+      "table": "currencies",
+      "rows": 5,
+      "sha256": "4dc51ea150f6e4610f8eab6ca77a775d950de97678d44259434c57bef256b9b6"
+    },
+    {
+      "engine": "sqlite",
+      "table": "partner_currency",
+      "rows": 5,
+      "sha256": "c04d46b99ca007f1c2fb304ac971d8c488a280f6e0c2b338185e5067d6dd4b70"
+    }
+  ],
+  "provenance": [
+    {
+      "source": "US Census Bureau International Trade API (imports/hs, exports/hs)",
+      "source_url": "https://api.census.gov/data/timeseries/intltrade/",
+      "retrieved_at": null,
+      "transform": "per partner-month API pulls merged to canonical JSONL; HS-6 rows kept as the aggregate grain; lookups derived from the same pulls",
+      "artifact": "us_trade.duckdb",
+      "license": "US Government work; Census API terms of service",
+      "notice": "This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.",
+      "license_verified": "2026-09-04"
+    },
+    {
+      "source": "UN Comtrade preview API (annual TOTAL flows, reporters x USA)",
+      "source_url": "https://comtradeapi.un.org/public/v1/preview/",
+      "retrieved_at": null,
+      "transform": "preview pulls per reporter-year-flow merged to canonical JSONL; values cast to DECIMAL",
+      "artifact": "mysql-trade.sql.gz",
+      "license": "UN Comtrade terms of use (preview tier); the slice is deliberately under the 100,000-record fee-free re-dissemination line",
+      "citation": "Source: UN Comtrade (https://comtradeplus.un.org)",
+      "license_verified": "2026-09-04"
+    },
+    {
+      "source": "Board of Governors of the Federal Reserve System, H.10 Foreign Exchange Rates (daily) and its G.5 monthly averages, via the Data Download Program",
+      "source_url": "https://www.federalreserve.gov/releases/h10/",
+      "retrieved_at": null,
+      "transform": "two DDP CSV packages reshaped to long form for five currencies; 'ND' observations dropped, never zero-filled; reciprocally-quoted series inverted so per_usd is always foreign-per-USD",
+      "artifact": "fx_rates.db",
+      "license": "Work of the US Government; no copyright (17 U.S.C. 105). The H.10 release page, its About page, the DDP chooser and the Board's site-wide Website Policies carry no terms-of-use or copyright statement over Board content (checked 2026-09-04).",
+      "citation": "Source: Board of Governors of the Federal Reserve System, H.10",
+      "license_verified": "2026-09-04"
+    }
+  ]
+}

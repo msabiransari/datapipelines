@@ -50,6 +50,7 @@ class PublicPathsTest {
                 "/tableau/*",
                 "/for/*",
                 "/how-it-works",
+                "/demo-data",
                 "/docs",
                 "/docs/*",
                 "/skill.md",
@@ -135,14 +136,14 @@ class PublicPathsTest {
         const val MIN_REASON_LENGTH = 20
 
         /**
-         * 36 rows: the 033 site pair, the seven 073 intent-cluster pages, 089's `/dp-lake`,
+         * 37 rows: the 033 site pair, the seven 073 intent-cluster pages, 089's `/dp-lake`,
          * the docs pair, 095's skill pair, the two crawler files, three probes, the
          * login/OIDC trio, four static-asset patterns and `/error`. 096 §B removed the
          * `webjars` glob (28 -> 27) when htmx was vendored under `static/vendor`. Site v2 added
          * seven intent-page rows (27 -> 34); batch 2 (111) added the `for` glob (34 -> 35);
-         * 115 added the engineering page (35 -> 36).
+         * 115 added the engineering page (35 -> 36); 116 added the demo-data page (36 -> 37).
          * (Kotlin block comments nest, so the glob's spelling is written without its star.)
          */
-        const val DOCUMENTED_ROWS = 36
+        const val DOCUMENTED_ROWS = 37
     }
 }

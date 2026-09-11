@@ -658,6 +658,12 @@ an engineer spins up exactly the data they need:
 Any combination is fine — the app's bootstrap keys are comma-separated lists built
 from the active families, and the MySQL service is shared.
 
+The public marketing site's [`/demo-data` page](https://datapipelines.co/demo-data)
+renders these published manifests as documentation — every table, row count, source
+and licence per family, generated from the same manifest files the loader verifies
+(vendored at `modules/web/src/main/resources/site/demo/`, pinned to the versions
+above). It is the page to hand anyone who asks what the demo contains.
+
 The **lake** family is different in kind from the other two and the difference is
 worth stating before the commands: it has a compose profile and a `--demo` flag
 like its siblings, but **no loader service**, because nothing is loaded. What

@@ -24,7 +24,9 @@ import org.springframework.web.servlet.ModelAndView
  * the SEO guards read the same rows. A handler is a lookup plus [PublicPage.render].
  */
 @Controller
-class SitePagesController {
+class SitePagesController(
+    private val demoData: SiteDemoData,
+) {
     @GetMapping("/mcp-server-for-sql-databases")
     fun pillar(
         model: Model,
@@ -165,4 +167,21 @@ class SitePagesController {
         model: Model,
         response: HttpServletResponse,
     ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, toolCount(), SiteFaqs.APIS_AND_OPERATIONS)
+
+    /**
+     * 116 — the demo-data page. Its one live input is [SiteDemoData], parsed from the
+     * vendored manifests at startup and constant from then on — the same "constant content"
+     * shape as every handler above: GET-only, anonymous, no datastore, no principal.
+     */
+    @GetMapping("/demo-data")
+    fun demoData(
+        model: Model,
+        response: HttpServletResponse,
+    ): String {
+        model.addAttribute("demoFamilies", demoData.families)
+        model.addAttribute("demoNyc", demoData.family("nyc"))
+        model.addAttribute("demoTrade", demoData.family("trade"))
+        model.addAttribute("demoLake", demoData.family("lake"))
+        return PublicPage.render(model, response, SitePages.DEMO_DATA, toolCount(), SiteFaqs.DEMO_DATA)
+    }
 }

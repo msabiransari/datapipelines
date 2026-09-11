@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test
 
 /**
  * Batch 2's content contract for the SEVEN new intent pages (111 §D), extended by 115 §A.3
- * to the `/how-it-works` engineering page (an eighth page in the same sweep) — measured on the
- * render through the real controller, like every other site guard:
+ * to the `/how-it-works` engineering page and by 116 to the `/demo-data` page — measured on
+ * the render through the real controller, like every other site guard:
  *
  *  1. the H1 carries the page's primary query phrase, in the searcher's words (the map below
  *     is the phrase, not the whole H1 — the H1 may dress it up, the phrase must be there);
@@ -28,7 +28,7 @@ class SiteBatch2ContentTest {
     private val rendered: Map<SitePage, String> by lazy { SWEEP.associateWith { SitePageRenderer.render(it) } }
 
     @Test
-    fun `the sweep sees all eight pages`() {
+    fun `the sweep sees all nine pages`() {
         rendered.keys.map { it.path }.toSet() shouldBe SWEEP.map { it.path }.toSet()
     }
 
@@ -121,7 +121,7 @@ class SiteBatch2ContentTest {
         const val MIN_WORDS = 1_200
         const val MIN_BODY_LINKS = 3
 
-        /** The seven batch-2 intent pages (111) plus the engineering page (115 §A.3). */
+        /** The seven batch-2 intent pages (111), the engineering page (115 §A.3) and the demo-data page (116). */
         val SWEEP: List<SitePage> =
             listOf(
                 SitePages.COMPARE_FIVETRAN,
@@ -132,6 +132,7 @@ class SiteBatch2ContentTest {
                 SitePages.FOR_SAAS_TEAMS,
                 SitePages.FOR_ANALYSTS,
                 SitePages.HOW_IT_WORKS,
+                SitePages.DEMO_DATA,
             )
 
         /** The searcher's phrase each H1 must carry — the phrase, not the whole H1. */
@@ -145,6 +146,7 @@ class SiteBatch2ContentTest {
                 SitePages.FOR_SAAS_TEAMS.path to "embedded analytics",
                 SitePages.FOR_ANALYSTS.path to "ai sql assistant with governance",
                 SitePages.HOW_IT_WORKS.path to "how it works",
+                SitePages.DEMO_DATA.path to "demo data",
             )
 
         val H1 = Regex("""<h1[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL)

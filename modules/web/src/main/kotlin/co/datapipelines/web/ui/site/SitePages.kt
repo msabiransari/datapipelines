@@ -352,6 +352,26 @@ object SitePages {
             view = "site/how-it-works",
         )
 
+    /**
+     * 116 — the demo-data page: what the three published sample-data families hold, where
+     * each came from, what to ask it, and the licence each ships under. Its tables render
+     * from the manifests vendored at `resources/site/demo/` (pinned to the deploy versions
+     * by `SiteDemoDataGuardsTest`), never from typed rows.
+     */
+    val DEMO_DATA =
+        SitePage(
+            path = "/demo-data",
+            // 116 §B's title is 72 chars against the 70 pin, so "and" tightens away; the
+            // search phrases (NYC taxi, rideshare, trade, weather) all stay.
+            title = "Demo data — NYC taxi, rideshare, US trade, weather | datapipelines.co",
+            // 116 §B's description is 159 chars against the 155 pin; the same sentence with
+            // the two words its tail does not need.
+            description =
+                "Three public datasets, published as read-only artifacts one command loads: what each table holds, " +
+                    "where it came from, what to ask, and the licence.",
+            view = "site/demo-data",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -479,6 +499,7 @@ object SitePages {
                 FOR_SAAS_TEAMS,
                 FOR_ANALYSTS,
                 HOW_IT_WORKS,
+                DEMO_DATA,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

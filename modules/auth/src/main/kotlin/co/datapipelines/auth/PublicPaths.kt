@@ -160,6 +160,14 @@ object PublicPaths {
                 "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.",
                 "115",
             ),
+            // 116: the demo-data page. Its one input beyond the shared chrome is the
+            // SiteDemoData model — the vendored manifests parsed once at startup — so the
+            // content is constant per deployment, exactly like the compile-time tool count.
+            PublicPath(
+                "/demo-data",
+                "Demo-data page: GET-only, renders the vendored manifests parsed at startup; no datastore, no principal.",
+                "116",
+            ),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.
