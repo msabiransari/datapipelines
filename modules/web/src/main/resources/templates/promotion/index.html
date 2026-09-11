@@ -137,10 +137,11 @@
         <div class="u-row-md u-mt-lg">
           <button th:if="${canPromote == true}" type="submit" data-verb="promote" class="ds-button ds-button-primary"
                   th:disabled="${plan.targetAuthoringEnabled}">Promote</button>
-          <p th:unless="${canPromote == true}" class="app-note" data-role-note="promote">
-            Promotion is a promoter's verb here — ask someone with the promoter or admin role in
-            <span th:text="${activeWorkspace}">workspace</span> to send this batch.
-          </p>
+          <div th:unless="${canPromote == true}" class="app-note" data-role-note="promote">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+            <span>Promotion is a promoter&#39;s verb here — ask someone with the promoter or admin
+              role in <span th:text="${activeWorkspace}">workspace</span> to send this batch.</span>
+          </div>
           <span class="u-secondary u-text-xs">
             The templates each pipeline pins and the child pipelines it runs are sent with it,
             in dependency order. The target applies the whole batch or none of it.

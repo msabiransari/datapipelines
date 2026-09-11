@@ -43,7 +43,11 @@ class RoleVisibilityRenderTest {
      */
     @Test
     fun `a viewer's pipeline editor is read-only, says so once, and keeps Execute`() {
-        val viewer = render("pipelines/editor") { editorModel(); withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true)) }
+        val viewer =
+            render("pipelines/editor") {
+                editorModel()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true))
+            }
 
         viewer shouldNotContain "data-verb=\"pipeline-release\""
         viewer shouldNotContain "data-verb=\"pipeline-purge\""
@@ -185,15 +189,50 @@ class RoleVisibilityRenderTest {
      */
     @Test
     fun `the no-workspace page explains, points at an admin, and shows create only to a super admin`() {
-        val superAdmin = render("workspaces/none") { chrome(); setVariable("canCreate", true) }
+        val superAdmin =
+            render("workspaces/none") {
+                chrome()
+                setVariable("canCreate", true)
+            }
         superAdmin shouldContain "not a member of any active workspace"
         superAdmin shouldContain "data-verb=\"workspace-create\""
 
-        val member = render("workspaces/none") { chrome(); setVariable("canCreate", false) }
+        val member =
+            render("workspaces/none") {
+                chrome()
+                setVariable("canCreate", false)
+            }
         member shouldNotContain "data-verb=\"workspace-create\""
         member shouldContain "Ask an administrator"
         // It must not read as a REFUSAL — a 403 page names the wrong problem entirely.
         member shouldNotContain "You don&#39;t have permission"
+    }
+
+    // ------------------------------------------------------------------ degrade, never throw
+
+    /**
+     * **A fragment rendered with NO role attributes renders as a viewer's — it never throws and
+     * never leaks a verb.**
+     *
+     * Two things make this worth pinning. Thymeleaf's SpEL raises on a null operand of `and`/`or`
+     * in some shapes (a bare `${a and b}` with `a` absent did, in this round's first render run),
+     * so a forgotten stamp could turn a whole partial into a 500; and a null read as "true" would
+     * leak every verb to a viewer. Writing every role operand `== true` makes the answer FALSE in
+     * both directions: a missing role fails closed and quiet.
+     *
+     * The stamp itself now lives in `fillDetail`, where all three callers of the detail fragment
+     * get it — this arm is the second line, not the first.
+     */
+    @Test
+    fun `a detail fragment with no role attributes renders as a viewer's, not as an error`() {
+        listOf("partials/pipeline-detail", "partials/pipeline-versions").forEach { view ->
+            val html = engine().process(view, bare().apply { pipelineDetailModel() })
+            html shouldNotContain "data-verb="
+        }
+        listOf("partials/template-detail", "partials/template-versions").forEach { view ->
+            val html = engine().process(view, bare().apply { templateDetailModel() })
+            html shouldNotContain "data-verb="
+        }
     }
 
     // ------------------------------------------------------------------ the inventory
@@ -262,6 +301,42 @@ class RoleVisibilityRenderTest {
     }
 
     // ------------------------------------------------------------------ fixtures
+
+    /** A context with NO role attributes at all — the forgotten-stamp case. */
+    private fun bare(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
+
+    /**
+     * The lifecycle FLAGS all true, so every verb would render if the role allowed it — the
+     * arm is worthless against a fixture whose state already hides them.
+     */
+    private fun WebContext.pipelineDetailModel() {
+        setVariable("pipelineId", java.util.UUID.fromString("22222222-2222-2222-2222-222222222222"))
+        setVariable("pipeline", null)
+        setVariable("releasableVersion", 2)
+        setVariable("draftVersion", 2)
+        setVariable("canDelete", true)
+        setVariable("canDiscardCurrent", true)
+        setVariable("canPurgeDraftInHeader", true)
+        setVariable("canSwitchHeader", true)
+        setVariable("versions", emptyList<Any>())
+    }
+
+    private fun WebContext.templateDetailModel() {
+        setVariable("templateId", "demo/top_carrier.sql")
+        setVariable("template", null)
+        setVariable("releasableVersion", 2)
+        setVariable("draftVersion", 2)
+        setVariable("currentReleaseVersion", 1)
+        setVariable("canDelete", true)
+        setVariable("canDiscardCurrent", true)
+        setVariable("canPurgeDraftInHeader", true)
+        setVariable("versions", emptyList<Any>())
+    }
 
     private fun WebContext.chrome() {
         setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
@@ -378,8 +453,14 @@ class RoleVisibilityRenderTest {
          */
         val ROLE_ATTRS =
             listOf(
-                "canRead", "canExecute", "canAuthor", "canPromote", "canAdminWorkspace", "isSuperAdmin",
-                "canCancel", "canCreate",
+                "canRead",
+                "canExecute",
+                "canAuthor",
+                "canPromote",
+                "canAdminWorkspace",
+                "isSuperAdmin",
+                "canCancel",
+                "canCreate",
             )
 
         /**

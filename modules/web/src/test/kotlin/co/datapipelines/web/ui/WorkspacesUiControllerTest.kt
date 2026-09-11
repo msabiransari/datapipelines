@@ -11,10 +11,10 @@ import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
 import co.datapipelines.auth.WorkspaceInUseException
+import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
-import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -28,8 +28,8 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
-import org.springframework.ui.ExtendedModelMap
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.ui.ExtendedModelMap
 import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
@@ -57,7 +57,6 @@ class WorkspacesUiControllerTest {
             AuthProperties(),
             themeResolver,
         )
-
 
     private val userId = UUID.randomUUID()
     private val principal =

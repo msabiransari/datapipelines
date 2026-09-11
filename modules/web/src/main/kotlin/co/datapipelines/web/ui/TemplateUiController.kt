@@ -65,7 +65,6 @@ class TemplateUiController(
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
         return principal?.scopes?.map { it.name }?.toSet() ?: emptySet()
     }
-
 }
 
 /**

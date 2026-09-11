@@ -94,12 +94,6 @@
                 <span class="u-muted u-text-xs"
                       th:text="${#temporals.format(ds.lastTest.testedAt, 'yyyy-MM-dd HH:mm')}">2026-09-03 10:00</span>
               </th:block>
-              <!-- 114 §C.2 — Grants: WHICH WORKSPACES can see this datasource (D-R7). A super
-                   admin's verb (§7.6 `MANAGE_DATASOURCE_GRANTS`), not a workspace admin's: the
-                   grant list names every workspace on the instance holding one. -->
-              <button th:if="${isSuperAdmin}" data-verb="datasource-grants" class="ds-button ds-button-secondary ds-button-sm"
-                      th:attr="hx-get=@{/partials/datasources/{name}/grants(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
-                      hx-disabled-elt="this">Grants</button>
             </td>
             <td class="num u-nowrap">
               <!-- 089 §A: a LAKE datasource has a catalog to show — its registered tables live
@@ -131,6 +125,13 @@
                         th:attr="hx-get=@{/partials/datasources/{name}/delete(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
                         hx-disabled-elt="this">Delete</button>
               </th:block>
+              <!-- 114 §C.2 — Grants: WHICH WORKSPACES can see this datasource (D-R7). A super
+                   admin's verb (§7.6 `MANAGE_DATASOURCE_GRANTS`), not a workspace admin's: the
+                   grant list names every workspace on the instance holding one. -->
+              <button th:if="${isSuperAdmin}" data-verb="datasource-grants" class="ds-button ds-button-secondary ds-button-sm"
+                      th:attr="hx-get=@{/partials/datasources/{name}/grants(name=${ds.name})}, hx-target='#ds-dialog', hx-swap='innerHTML'"
+                      hx-disabled-elt="this">Grants</button>
+
             </td>
           </tr>
         </tbody>

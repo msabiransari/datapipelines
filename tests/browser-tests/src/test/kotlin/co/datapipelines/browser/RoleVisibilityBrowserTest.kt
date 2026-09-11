@@ -166,7 +166,11 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         admin.page.click("$row [data-verb='member-flags']")
 
         admin.page.waitForSelector(".ds-toast-danger")
-        admin.page.locator(".ds-toast-danger").first().innerText().lowercase()
+        admin.page
+            .locator(".ds-toast-danger")
+            .first()
+            .innerText()
+            .lowercase()
             .contains("at least one admin") shouldBe true
 
         // The row is untouched: a refused write must not half-apply.
@@ -321,5 +325,4 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             }
 
     private fun suffix(): String = generatedPassword("s").take(8).lowercase()
-
 }

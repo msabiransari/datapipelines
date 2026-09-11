@@ -214,6 +214,4 @@ class TemplatePartialController(
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 
     private fun scopes(): Set<String> = principal()?.scopes?.map { it.name }?.toSet() ?: emptySet()
-
-    /** The Create Template affordance — the capability, not the scope (`isAuthor`). */
 }

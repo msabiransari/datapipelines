@@ -227,15 +227,6 @@ class TemplateExplorerRenderTest {
         html shouldNotContain "tpl-tree"
     }
 
-    // ------------------------------------------------------------------ fixtures
-
-    /**
-     * The ROOT level: folders and nothing else (077, §4.1).
-     *
-     * It used to carry `template("legacy_flat.sql")` — a leaf sitting at the root, which the
-     * grammar now forbids and `TemplateBrowseModel` no longer even queries for. Every
-     * assertion about a LEAF therefore moved onto [fillNestedLevel].
-     */
     /**
      * 114 §B — the template twin of the pipeline ladder. Same rule, same reason: Release is
      * the promoter's (D-R2), the three destructive verbs are the author's (D-R4), and a
@@ -271,6 +262,16 @@ class TemplateExplorerRenderTest {
         viewer shouldNotContain "data-verb="
         viewer shouldContain "Open in editor"
     }
+
+    // ------------------------------------------------------------------ fixtures
+
+    /**
+     * The ROOT level: folders and nothing else (077, §4.1).
+     *
+     * It used to carry `template("legacy_flat.sql")` — a leaf sitting at the root, which the
+     * grammar now forbids and `TemplateBrowseModel` no longer even queries for. Every
+     * assertion about a LEAF therefore moved onto [fillNestedLevel].
+     */
 
     private fun WebContext.fillLevel() {
         setVariable("searching", false)

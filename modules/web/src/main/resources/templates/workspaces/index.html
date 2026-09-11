@@ -88,12 +88,17 @@
   <!-- The member sections follow the ACTIVE workspace, because that is the one the server
        will accept member verbs for (see WorkspacesUiController.screen). The others are named
        here with the switch that reaches them, rather than shown with forms that 403. -->
-  <p th:if="${!#lists.isEmpty(manageableElsewhere)}" class="app-note" data-role-note="manage-elsewhere">
-    You also administer
-    <span th:each="w, i : ${manageableElsewhere}"><span class="u-mono" th:text="${w}">team</span><span
-      th:if="${!i.last}">, </span></span>.
-    Switch to one above to manage its members.
-  </p>
+  <!-- `.app-note` is `display: flex`, so its content must be ONE child: bare text and a
+       sibling span become separate flex items that cannot wrap, and a handful of workspace
+       names then runs off a 390px screen (caught by AppShellBrowserTest's overflow sweep).
+       Icon + one span is the house shape — see api/console.html. -->
+  <div th:if="${!#lists.isEmpty(manageableElsewhere)}" class="app-note" data-role-note="manage-elsewhere">
+    <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+    <span>You also administer
+      <span th:each="w, i : ${manageableElsewhere}"><span class="u-mono" th:text="${w}">team</span><span
+        th:if="${!i.last}">, </span></span>.
+      Switch to one above to manage its members.</span>
+  </div>
 
   <!-- `data-workspace` is the stable hook a test (and a future partial swap) addresses this
        section by: the heading carries the name inside a span, which is a fragile thing to
@@ -105,7 +110,7 @@
 
     <!-- §C.1 — the display name is a workspace admin's verb (`MANAGE_WORKSPACE`), sitting
          with the members it shares a screen with rather than on a page of its own. -->
-    <form th:action="@{/workspaces/{name}/display-name(name=${entry.key})}" method="post" class="u-row-md u-mb-md">
+    <form th:action="@{/workspaces/{name}/display-name(name=${entry.key})}" method="post" class="u-row-md u-wrap u-mb-md">
       <input type="text" name="displayName" class="ds-input app-input-raised app-input-fixed-md"
              placeholder="Display name" required>
       <button type="submit" data-verb="workspace-display-name" class="ds-button ds-button-secondary ds-button-sm">Rename</button>
@@ -134,7 +139,7 @@
                `?error=last_admin`, which the layout renders as a toast naming the rule. -->
           <td>
             <form th:action="@{/workspaces/{name}/members/{userId}/flags(name=${entry.key}, userId=${member.userId})}"
-                  method="post" class="u-row-md app-member-flags">
+                  method="post" class="u-row-md u-wrap app-member-flags">
               <label class="u-row u-gap-xs u-text-sm">
                 <input type="checkbox" name="author" value="true" data-flag="author" th:checked="${member.flags.author}"> author
               </label>
@@ -159,7 +164,7 @@
       </tbody>
     </table>
 
-    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" class="u-row-md app-member-flags">
+    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" class="u-row-md u-wrap app-member-flags">
       <input type="email" name="email" class="ds-input app-input-raised app-input-fixed-lg" placeholder="member@example.com" required>
       <label class="u-row u-gap-xs u-text-sm">
         <input type="checkbox" name="author" value="true" data-flag="author"> author

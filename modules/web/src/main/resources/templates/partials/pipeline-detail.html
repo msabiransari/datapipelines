@@ -57,28 +57,28 @@
              rule): Purge pipeline (the {D} shape) / Discard of a RELEASED current / Purge
              draft, in that priority, and never two of them. Each opens its partial into
              #px-dialog; the POST calls the service 101 wired and answers Shape A / Shape C. -->
-        <button th:if="${canDelete == true and canAuthor}" data-verb="pipeline-purge-entity" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
+        <button th:if="${canDelete == true and canAuthor == true}" data-verb="pipeline-purge-entity" type="button" class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'">Purge pipeline…</button>
 
-        <button th:if="${canDelete != true and canDiscardCurrent == true and canAuthor}" data-verb="pipeline-discard" type="button"
+        <button th:if="${canDelete != true and canDiscardCurrent == true and canAuthor == true}" data-verb="pipeline-discard" type="button"
                 class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${pipeline.currentVersion})},
                          hx-target='#px-dialog', hx-swap='innerHTML'"
                 th:text="'Discard v' + ${pipeline.currentVersion} + '…'">Discard v2…</button>
 
-        <button th:if="${canPurgeDraftInHeader == true and canAuthor}" data-verb="pipeline-purge" type="button"
+        <button th:if="${canPurgeDraftInHeader == true and canAuthor == true}" data-verb="pipeline-purge" type="button"
                 class="ds-button ds-button-ghost ds-button-sm tplx-danger"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${draftVersion})},
                          hx-target='#px-dialog', hx-swap='innerHTML'"
                 th:text="'Purge v' + ${draftVersion} + '…'">Purge v3…</button>
 
-        <button th:if="${releasableVersion != null and canPromote}" data-verb="pipeline-release" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${releasableVersion != null and canPromote == true}" data-verb="pipeline-release" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'"
                 th:text="'Release v' + ${releasableVersion} + '…'">Release v1…</button>
 
-        <button th:if="${canSwitchHeader == true and (canAuthor or canPromote)}" data-verb="pipeline-switch" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${canSwitchHeader == true and (canAuthor == true or canPromote == true)}" data-verb="pipeline-switch" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'">Switch…</button>
 

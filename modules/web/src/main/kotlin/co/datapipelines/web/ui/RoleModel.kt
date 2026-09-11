@@ -136,19 +136,6 @@ object RoleModel {
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 
     /**
-     * The word the shell shows next to the workspace name.
-     *
-     * Derived from the flags, stored nowhere — no single label names an additive row, which is
-     * why the membership carries three booleans and not a role column (D-R2). A super admin
-     * reads `super admin` in every workspace, including ones they hold no explicit membership in
-     * (D-R8), because that is the authority they are acting with.
-     *
-     * The label follows the EFFECTIVE booleans, not the raw row: an API key whose scope
-     * narrows its issuer's authoring reach must not print `author`, or the badge would
-     * contradict the buttons beside it. `super admin` is the exception and says so at the
-     * branch — it is what the credential's OWNER is, not what this credential may do.
-     */
-    /**
      * The label for a MEMBERSHIP ROW, rather than for the current principal — what the members
      * table and the workspace list print about somebody else.
      *
@@ -166,6 +153,19 @@ object RoleModel {
             else -> "viewer"
         }
 
+    /**
+     * The word the shell shows next to the workspace name.
+     *
+     * Derived from the flags, stored nowhere — no single label names an additive row, which is
+     * why the membership carries three booleans and not a role column (D-R2). A super admin
+     * reads `super admin` in every workspace, including ones they hold no explicit membership
+     * in (D-R8), because that is the authority they are acting with.
+     *
+     * The label follows the EFFECTIVE booleans, not the raw row: an API key whose scope narrows
+     * its issuer's authoring reach must not print `author`, or the badge would contradict the
+     * buttons beside it. `super admin` is the exception and says so at the branch — it is what
+     * the credential's OWNER is, not what this credential may do.
+     */
     private fun label(
         superAdmin: Boolean,
         admin: Boolean,
@@ -177,10 +177,15 @@ object RoleModel {
             // credential: a key held by a super admin still belongs to one, even though it
             // cannot drive the instance verbs (O-2 — no key holds `admin` scope).
             superAdmin -> "super admin"
+
             admin -> "admin"
+
             author && promoter -> "author · promoter"
+
             author -> "author"
+
             promoter -> "promoter"
+
             else -> "viewer"
         }
 

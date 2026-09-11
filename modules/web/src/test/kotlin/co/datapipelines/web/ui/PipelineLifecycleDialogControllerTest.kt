@@ -15,6 +15,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -129,6 +130,40 @@ class PipelineLifecycleDialogControllerTest {
                     "v3 is the current version now, and it is locked.",
                 ),
             )
+    }
+
+    /**
+     * 114 — Shape A's re-rendered detail carries the ROLE attributes its verbs are guarded on.
+     *
+     * The re-render is the third caller of `PipelineBrowseModel.fillDetail`, and it was the one
+     * that forgot: the pane came back from a Release with no role attributes at all, so every
+     * verb on it — Release, Switch, Discard, Purge — silently vanished until the next selection
+     * re-fetched it. The stamp lives in `fillDetail` now, which is why this asserts the MODEL
+     * rather than the controller: whoever calls it next gets the same answer without knowing to.
+     */
+    @Test
+    fun `release - the re-rendered detail carries the role attributes its verbs are guarded on`() {
+        happyPathReads(record(currentVersion = 3))
+        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
+            PipelineReleaseService.Released(
+                record = record(currentVersion = 3),
+                version = draftDetail().copy(status = PipelineVersionStatus.RELEASED),
+                bodyJson = "{}",
+            )
+
+        val result =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isOk)
+                .andReturn()
+
+        val model = result.modelAndView?.model.orEmpty()
+        listOf("canRead", "canExecute", "canAuthor", "canPromote", "canAdminWorkspace", "isSuperAdmin", "roleLabel")
+            .forEach { attribute -> model.keys shouldContain attribute }
     }
 
     @Test

@@ -96,9 +96,24 @@ class WorkspacesUiController(
         )
         // The ones this caller administers but is not IN — named so the screen can say "switch
         // to manage" instead of silently showing nothing where a section used to be.
+        //
+        // EMPTY for a super admin. They administer every workspace on the instance (D-R8), so
+        // the answer is "all of them" — which is not information, and on a real instance is an
+        // unbounded line of names (it ran 276px off a 390px screen in the overflow sweep the
+        // first time round). The switcher above already lists them, which is the same journey
+        // this note describes.
         model.addAttribute(
             "manageableElsewhere",
-            administered.filter { it.workspaceName != activeWorkspace }.map { it.workspaceName },
+            if (principal.isSuperAdmin) {
+                emptyList()
+            } else {
+                memberships
+                    .filter {
+                        it.workspaceActive &&
+                            it.workspaceName != activeWorkspace &&
+                            Capability.WS_ADMIN.satisfiedBy(it.flags)
+                    }.map { it.workspaceName }
+            },
         )
         // Section C.3(a) — zero ACTIVE memberships is the no-workspace state. Decided HERE
         // rather than by a redirect so there is one answer and one place to change it.
@@ -271,8 +286,7 @@ class WorkspacesUiController(
         author: Boolean?,
         promoter: Boolean?,
         admin: Boolean?,
-    ): MembershipFlags =
-        MembershipFlags(author = author == true, promoter = promoter == true, admin = admin == true)
+    ): MembershipFlags = MembershipFlags(author = author == true, promoter = promoter == true, admin = admin == true)
 
     /** One shared outcome wrapper: run the action, bounce back with ok/error, never a raw error page. */
     private fun action(
