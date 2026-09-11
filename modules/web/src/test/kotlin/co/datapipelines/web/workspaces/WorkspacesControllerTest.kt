@@ -7,6 +7,7 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
 import co.datapipelines.auth.WorkspaceInUseException
+import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceNameInvalidException
@@ -110,29 +111,77 @@ class WorkspacesControllerTest {
     }
 
     @Test
-    fun `addMember maps the unknown email to the §16-3 stand-in`() {
+    fun `addMember answers 200 with the member row when the user exists`() {
         authenticate()
-        every { service.addMember(any(), "acme", "ghost@company.com") } throws
-            WorkspaceService.UnknownMemberEmailException("ghost@company.com")
+        every { service.addMember(any(), "acme", "alice@company.com", any()) } returns
+            WorkspaceService.AddMemberOutcome.Added(
+                WorkspaceMemberRow(userId, "alice@company.com", "Alice", MembershipFlags(author = true, admin = true), Instant.EPOCH),
+            )
 
-        val thrown = shouldThrow<ApiException> { controller.addMember("acme", mapper.readTree("""{"email":"ghost@company.com"}""")) }
-        thrown.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
-        thrown.details["reason"] shouldBe "user_not_found"
+        val response = controller.addMember("acme", mapper.readTree("""{"email":"alice@company.com","admin":true}"""))
+
+        response.statusCode.value() shouldBe 200
+        response.body!!.data["user_id"] shouldBe userId.toString()
+        response.body!!.data["admin"] shouldBe true
+        // A membership, never a ghost: the invited flag exists only on the 202 branch.
+        response.body!!.data.keys shouldBe setOf("user_id", "email", "display_name", "author", "promoter", "admin", "joined_at")
     }
 
     @Test
-    fun `the member listing projects identity, capability flags and join date`() {
+    fun `addMember answers 202 with the invitation echo when the email has no user row`() {
         authenticate()
-        every { service.members(any(), "acme") } returns
-            listOf(WorkspaceMemberRow(userId, "alice@company.com", "Alice", MembershipFlags(author = true, admin = true), Instant.EPOCH))
+        every { service.addMember(any(), "acme", "ghost@company.com", any()) } returns
+            WorkspaceService.AddMemberOutcome.Invited("ghost@company.com", MembershipFlags(author = true))
 
-        val row = controller.members("acme").data.single()
+        val response = controller.addMember("acme", mapper.readTree("""{"email":"ghost@company.com","author":true}"""))
 
-        row.keys shouldBe setOf("user_id", "email", "display_name", "author", "promoter", "admin", "joined_at")
-        // A workspace admin: `admin` true and, by the database's own invariant, `author` too.
-        row["author"] shouldBe true
-        row["admin"] shouldBe true
-        row["promoter"] shouldBe false
+        response.statusCode.value() shouldBe 202
+        response.body!!.data shouldBe
+            mapOf(
+                "invited" to true,
+                "email" to "ghost@company.com",
+                "author" to true,
+                "promoter" to false,
+                "admin" to false,
+            )
+    }
+
+    @Test
+    fun `the member listing returns members and invitations as SEPARATE arrays - a ghost is not a member`() {
+        authenticate()
+        val memberId = UUID.randomUUID()
+        every { service.membersWithInvitations(any(), "acme") } returns
+            WorkspaceService.MemberListing(
+                members =
+                    listOf(
+                        WorkspaceMemberRow(
+                            memberId,
+                            "alice@company.com",
+                            "Alice",
+                            MembershipFlags(author = true, admin = true),
+                            Instant.EPOCH,
+                        ),
+                    ),
+                invitations =
+                    listOf(
+                        WorkspaceInvitation(
+                            ws.id,
+                            "bob@company.com",
+                            MembershipFlags.VIEWER,
+                            invitedBy = memberId,
+                            invitedAt = Instant.EPOCH,
+                        ),
+                    ),
+            )
+
+        val data = controller.members("acme").data
+
+        data.keys shouldBe setOf("members", "invitations")
+        data["members"]!!.single()["user_id"] shouldBe memberId.toString()
+        // The invitation is in ITS array, with the email as identity and no user_id.
+        val invitation = data["invitations"]!!.single()
+        invitation.keys shouldBe setOf("email", "author", "promoter", "admin", "invited_by", "invited_at")
+        invitation["email"] shouldBe "bob@company.com"
     }
 
     @Test

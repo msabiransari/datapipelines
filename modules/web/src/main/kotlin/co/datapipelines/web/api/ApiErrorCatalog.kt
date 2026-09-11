@@ -216,6 +216,8 @@ object ApiErrorCatalog {
             // D-R5: a deactivated workspace is a 404 for the same reason an unreachable one is
             // — deactivation must not be a signal a caller can read off a status code.
             PipelineErrorCodes.Workspace.INACTIVE to HttpStatus.NOT_FOUND,
+            // 113 §13.12: the workspace resolved; the invitation addressed did not exist.
+            PipelineErrorCodes.Workspace.INVITATION_NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Workspace.LAST_ADMIN to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.NAME_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Workspace.DUPLICATE_NAME to HttpStatus.CONFLICT,
@@ -350,6 +352,8 @@ object ApiErrorCatalog {
                 "A template with that name already exists in this workspace. Pick a different name.",
             PipelineErrorCodes.Workspace.DUPLICATE_NAME to
                 "A workspace with that name already exists. Pick a different name.",
+            PipelineErrorCodes.Workspace.INVITATION_NOT_FOUND to
+                "There is no pending invitation for that email in this workspace.",
             PipelineErrorCodes.Workspace.IN_USE to
                 "This workspace still has content in it, so it can't be deleted yet.",
             PipelineErrorCodes.Result.EXPIRED to

@@ -219,7 +219,8 @@ class WorkspacesUiControllerTest {
     @Test
     fun `join adds the caller's own email and redirects ok=joined`() {
         authenticate()
-        every { workspaceService.addMember(principal, "globex", "alice@acme.test") } returns memberRow("alice@acme.test")
+        every { workspaceService.addMember(principal, "globex", "alice@acme.test") } returns
+            WorkspaceService.AddMemberOutcome.Added(memberRow("alice@acme.test"))
 
         controller.join("globex") shouldBe "redirect:/workspaces?ok=joined"
     }
@@ -227,7 +228,8 @@ class WorkspacesUiControllerTest {
     @Test
     fun `addMember redirects ok=member_added`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "bob@acme.test") } returns memberRow()
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test") } returns
+            WorkspaceService.AddMemberOutcome.Added(memberRow())
 
         controller.addMember("acme", "bob@acme.test") shouldBe "redirect:/workspaces?ok=member_added"
     }

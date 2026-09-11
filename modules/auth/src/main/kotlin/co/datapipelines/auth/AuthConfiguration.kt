@@ -40,6 +40,9 @@ class AuthConfiguration {
     fun workspaceRepository(jdbc: NamedParameterJdbcTemplate): WorkspaceRepository = WorkspaceRepository(jdbc)
 
     @Bean
+    fun workspaceInvitationRepository(jdbc: NamedParameterJdbcTemplate): WorkspaceInvitationRepository = WorkspaceInvitationRepository(jdbc)
+
+    @Bean
     fun authCache(authProperties: AuthProperties): AuthCache = AuthCache(authProperties)
 
     @Bean
@@ -80,6 +83,8 @@ class AuthConfiguration {
         authCache: AuthCache,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         auditLogger: AuditLogger,
+        workspaceInvitationRepository: WorkspaceInvitationRepository,
+        authProperties: AuthProperties,
         contentCheck: ObjectProvider<WorkspaceContentCheck>,
         demoWorkspaceSeeder: ObjectProvider<DemoWorkspaceSeeder>,
     ): WorkspaceService =
@@ -89,6 +94,8 @@ class AuthConfiguration {
             authCache,
             lastUsedWorkspaceStore.getIfAvailable(),
             auditLogger,
+            workspaceInvitationRepository,
+            authProperties,
             contentCheck.getIfAvailable() ?: WorkspaceContentCheck.NONE,
             // An ObjectProvider so auth-only test slices — which have no user service and no
             // examples file — construct a WorkspaceService without one. In the application it

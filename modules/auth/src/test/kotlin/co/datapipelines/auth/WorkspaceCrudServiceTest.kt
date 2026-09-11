@@ -6,6 +6,7 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -25,6 +26,7 @@ class WorkspaceCrudServiceTest {
     private val userRepository = mockk<UserRepository>(relaxed = true)
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val contentCheck = mockk<WorkspaceContentCheck>(relaxed = true)
+    private val invitationRepository = mockk<WorkspaceInvitationRepository>(relaxed = true)
     private val service =
         WorkspaceService(
             repository,
@@ -32,6 +34,8 @@ class WorkspaceCrudServiceTest {
             AuthCache(AuthProperties()),
             null,
             auditLogger,
+            invitationRepository,
+            AuthProperties(),
             contentCheck,
         )
 
@@ -165,7 +169,8 @@ class WorkspaceCrudServiceTest {
             User(memberB, "bob@company.com", "Bob", null, "google", "s", true, false, Instant.EPOCH, Instant.EPOCH, null)
         every { repository.addMember(ws.id, memberB, MembershipFlags.VIEWER) } returns memberRow(memberB, MembershipFlags.VIEWER)
 
-        service.addMember(wsAdmin(), "acme", "bob@company.com").flags shouldBe MembershipFlags.VIEWER
+        val outcome = service.addMember(wsAdmin(), "acme", "bob@company.com")
+        (outcome as WorkspaceService.AddMemberOutcome.Added).row.flags shouldBe MembershipFlags.VIEWER
         verify { repository.addMember(ws.id, memberB, MembershipFlags.VIEWER) }
     }
 
@@ -184,11 +189,36 @@ class WorkspaceCrudServiceTest {
     }
 
     @Test
-    fun `an unknown member email is the mapped IllegalStateException - never a silent null`() {
+    fun `an unknown member email becomes an INVITATION - the latest admin decision wins, audited`() {
         every { repository.findByName("acme") } returns ws
         every { userRepository.findByEmail(any()) } returns null
 
-        shouldThrow<WorkspaceService.UnknownMemberEmailException> { service.addMember(wsAdmin(), "acme", "ghost@company.com") }
+        val outcome = service.addMember(wsAdmin(), "acme", "Ghost@Company.com", MembershipFlags(author = true))
+
+        // 113 §B.1: an email with no users row is invited, keyed by the NORMALIZED email,
+        // with the requested flags stored (and the upsert audited as its own event).
+        val invited = outcome as WorkspaceService.AddMemberOutcome.Invited
+        invited.email shouldBe "ghost@company.com"
+        invited.flags shouldBe MembershipFlags(author = true)
+        verify { invitationRepository.upsert(ws.id, "ghost@company.com", MembershipFlags(author = true), adminId) }
+        verify { auditLogger.log("workspace.member_invited", adminId, null, null, null, any()) }
+    }
+
+    @Test
+    fun `a second invite with DIFFERENT flags replaces the first - the upsert, not an error`() {
+        every { repository.findByName("acme") } returns ws
+        every { userRepository.findByEmail(any()) } returns null
+
+        service.addMember(wsAdmin(), "acme", "ghost@company.com", MembershipFlags(author = true))
+        service.addMember(wsAdmin(), "acme", "ghost@company.com", MembershipFlags(admin = true))
+
+        // Both decisions were stored and both were audited; the row's final flags are the
+        // second call's (upsert semantics — the repository call order is the decision order).
+        verifySequence {
+            invitationRepository.upsert(ws.id, "ghost@company.com", MembershipFlags(author = true), adminId)
+            invitationRepository.upsert(ws.id, "ghost@company.com", MembershipFlags(author = true, admin = true), adminId)
+        }
+        verify(exactly = 2) { auditLogger.log("workspace.member_invited", adminId, null, null, null, any()) }
     }
 
     @Test

@@ -32,6 +32,7 @@ class WorkspaceKeyPinTest {
     private val userRepository = mockk<UserRepository>(relaxed = true)
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val contentCheck = mockk<WorkspaceContentCheck>(relaxed = true)
+    private val invitationRepository = mockk<WorkspaceInvitationRepository>(relaxed = true)
     private val service =
         WorkspaceService(
             repository,
@@ -39,6 +40,8 @@ class WorkspaceKeyPinTest {
             AuthCache(AuthProperties()),
             null,
             auditLogger,
+            invitationRepository,
+            AuthProperties(),
             contentCheck,
         )
 

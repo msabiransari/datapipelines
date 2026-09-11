@@ -763,6 +763,15 @@ object PipelineErrorCodes {
         /** §13.12 — a super admin addressed a DEACTIVATED workspace on a path that must refuse it. */
         const val INACTIVE = "workspace.inactive"
 
+        /**
+         * §13.12 — the invitation addressed does not exist (113): revoked already, never
+         * created, or created for another workspace. Its own code rather than [NOT_FOUND]:
+         * the WORKSPACE resolved fine, so the not-found thing is the invitation — and a
+         * caller probing emails must not be able to use the workspace's 404 to tell an
+         * existing invitation from a missing workspace.
+         */
+        const val INVITATION_NOT_FOUND = "workspace.invitation.not_found"
+
         /** §13.12 — workspace name fails `[a-z0-9_-]+`, 1–63. */
         const val NAME_INVALID = "workspace.validation.name_invalid"
 

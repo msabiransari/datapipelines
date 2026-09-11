@@ -932,7 +932,7 @@ Defined and described in [Auth §9](auth.md#9-auth-errors); cataloged here as th
 | `auth.session.expired` | 401 | Session JWT past its expiry |
 | `auth.scope.insufficient` | 403 | Principal lacks required scope for this operation |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched (browser flows) |
-| `auth.login.domain_not_allowed` | 403 | Login rejected: email domain not in allowlist (OIDC) |
+| `auth.login.domain_not_allowed` | 403 | Login rejected: email domain not in allowlist (OIDC or local). The SAME code is raised at INVITE time (113, [Auth §4.6](auth.md#46-invitations)) with a 400 — an invitation that could never be honoured at login is refused when it is created; the row's status is the login refusal's, which is a redirect rather than an envelope |
 | `auth.login.user_inactive` | 403 | Login rejected: account deactivated (OIDC or local) |
 | `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical ([Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)) |
 | `auth.login.locked` | 403 | Local login rejected: account locked after consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
@@ -1054,6 +1054,7 @@ there is no name there whose existence a 403 could leak.
 | `workspace.not_found` | 404 | The addressed workspace does not exist FOR THIS CALLER: unknown name, non-member, or deactivated — one answer for all three (D-R5), so nothing about a workspace is probeable. Also refuses a promotion batch naming a workspace the receiver does not have (O-4); nothing is auto-created |
 | `workspace.last_admin` | 409 | The membership change would leave the workspace with no admin. Its own code rather than `workspace.in_use`: the caller's next step is "give someone else the admin role first", which is a different instruction from "empty the workspace first" |
 | `workspace.inactive` | 404 | A super admin addressed a deactivated workspace on a path that must refuse it (D-R10). Members never see this code — for them a deactivated workspace is `workspace.not_found`, because deactivation must not become a signal — and API keys get `auth.key_workspace_inactive` |
+| `workspace.invitation.not_found` | 404 | The INVITATION addressed does not exist (113): revoked already, never created, or created for another workspace. Its own code rather than `workspace.not_found` because the workspace itself resolved fine — the not-found thing is the invitation — and one answer for all three causes keeps an admin from probing which emails hold pending invitations off the status code ([Auth §4.6](auth.md#46-invitations)) |
 | `workspace.validation.name_invalid` | 400 | Workspace name fails `[a-z0-9_-]+`, 1–63 |
 | `workspace.validation.duplicate_name` | 409 | Workspace name exists (global namespace, soft-deleted included — house rule) |
 | `workspace.in_use` | 409 | Delete blocked: workspace still owns non-deleted pipelines/templates/datasources. Deactivation (D-R10) is the operation that needs no such check — it purges nothing |

@@ -1586,22 +1586,47 @@ Soft delete. `409 workspace.in_use` while the workspace still owns non-deleted p
 ```
 GET /workspaces/{name}/members
 ```
-`{user_id, email, display_name, role, joined_at}` rows, oldest membership first. Any member of the workspace, or a global admin.
+TWO arrays, never mixed ([Auth §4.6](auth.md#46-invitations)) — a client that counts members must not count ghosts:
+
+- `members[]`: `{user_id, email, display_name, author, promoter, admin, joined_at}` rows, oldest membership first. Any member of the workspace, or a global admin.
+- `invitations[]`: `{email, author, promoter, admin, invited_by, invited_at}` rows — the pending, email-keyed invitations ([Auth §4.6](auth.md#46-invitations)) whose `users` row does not exist yet. No `user_id`: there is no user yet; the email IS the identity.
 
 ### 17.7 Add member
 
 ```
 POST /workspaces/{name}/members
-{"email": "bob@example.com"}
+{"email": "bob@example.com", "author": true}
 ```
-Owner or global admin — except the `open-join` self-service path: when `datapipelines.workspaces.open-join` is `true` (self-serve mode) and the email is the caller's own, any authenticated principal joins. The user must already exist (OIDC-provisioned); an unknown email is the §16.3 unknown-user 404 stand-in (`pipeline.execution.not_found`, `details.reason = "user_not_found"`). A missing or non-textual `email` is the surface's generic bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "email"`). Adding an existing member is idempotent.
+Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`; D-R11 retired the `open-join` self-service path). `author`/`promoter`/`admin` are optional booleans, absent = false — a body that says nothing asks for a VIEWER, the D-R11 default. The email is normalized lowercase before every lookup and store (the [Auth §4.2](auth.md#42-user-provisioning) rule). Adding an existing member is idempotent: the existing membership is returned unchanged — changing flags is §17.10.
+
+TWO outcomes, distinguishable by status AND body, so a client never mistakes a ghost for a member:
+
+- **`200`** with the membership row — the `users` row existed; the person is now (or already was) a member.
+- **`202`** with `{"invited": true, "email", "author", "promoter", "admin"}` — nobody by that email exists yet; an invitation ([Auth §4.6](auth.md#46-invitations)) was created, upserting over any earlier one (the latest admin decision wins, audited), and their first login materialises it.
+
+A missing or non-textual `email` is the surface's generic bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "email"`). An email the §4.3 domain allowlist would refuse at login is refused HERE with the SAME code the login would use — `auth.login.domain_not_allowed` at a 400 — because an invitation that could never be honoured is a trap. A deactivated workspace is `workspace.inactive` (404).
 
 ### 17.8 Remove member
 
 ```
 DELETE /workspaces/{name}/members/{user_id}
 ```
-Owner or global admin. Removing a member with the `owner` role is refused with `409 workspace.in_use` (`details.blocked_by = "owner_membership"`) — ownership transfer is not a v1 operation, and a workspace must never be left without its owner.
+Workspace admin or super admin. Removing the LAST admin is refused with `409 workspace.last_admin` — a workspace with no admin is unmanageable, and the caller's next step is "give someone else the admin role first" (§13.12). A `user_id` that names no member of the workspace is the workspace's own 404 (`workspace.not_found`), so the member list cannot be probed one id at a time.
+
+### 17.9 Revoke an invitation
+
+```
+DELETE /workspaces/{name}/invitations/{email}
+```
+Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`). Removes a pending invitation ([Auth §4.6](auth.md#46-invitations)) — `204` on success. An email with no invitation in this workspace is `404 workspace.invitation.not_found`: the workspace itself resolved, so the not-found thing is the invitation, and one answer for "revoked already", "never created" and "another workspace's" keeps an admin from probing which emails hold pending invitations. The email is normalized lowercase, so revoking `Bob@Company.com` finds the row the invite of `bob@company.com` created. A super admin may revoke inside a DEACTIVATED workspace (its pending invitations wait; cleanup before reactivation is the point).
+
+### 17.10 Set a member's flags
+
+```
+PUT /workspaces/{name}/members/{user_id}
+{"author": true, "promoter": true}
+```
+Workspace admin or super admin. REPLACES the three capability flags wholesale — a PUT, not a PATCH, because additive flags make a partial update ambiguous in precisely the way this surface must not be: a body that says nothing asks for a VIEWER. Demoting the LAST admin is `409 workspace.last_admin`.
 
 ---
 

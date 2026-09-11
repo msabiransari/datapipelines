@@ -164,8 +164,12 @@ class ApiErrorCatalogSpecDriftTest {
          * §13.8 (`datasource.grant_required`) and two §13.12 (`workspace.last_admin`,
          * `workspace.inactive`), less one retired — `workspace.creation_forbidden` went with
          * the provisioning modes. Re-derived from the parse, not from the arithmetic.
+         *
+         * 162 → 163 with 113 (workspace invitations): §13.12 gains
+         * `workspace.invitation.not_found` (404), landed in the SAME commit as its constants
+         * (both sides of the auth mirror) and its catalog row. Re-derived from the parse.
          */
-        const val SECTION_13_ROW_COUNT = 162
+        const val SECTION_13_ROW_COUNT = 163
 
         /**
          * §12's distinct validation codes.
