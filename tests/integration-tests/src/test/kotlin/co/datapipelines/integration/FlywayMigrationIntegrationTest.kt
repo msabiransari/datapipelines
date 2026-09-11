@@ -166,6 +166,31 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    fun `V25 creates the learned facts table with its closed kind list, checked and cascading`() {
+        // 118 (learned-semantic-layer §3): the column inventory, read from the SHIPPED database.
+        columnsOf("learned_facts") shouldContainExactly
+            listOf(
+                "datasource_name", "evidence_sql", "evidence_summary", "fact", "id", "kind", "recorded_at", "recorded_by",
+                "recorded_in", "recorded_via", "refs_json", "retired_at", "retired_reason", "schema_fingerprint", "scope",
+                "source_pipeline_id", "source_version", "supersedes", "trust", "verified_at", "verified_by", "workspace_id",
+            )
+
+        // The kind CHECK is the §4 list — proven by its definition text, because enums.md §19
+        // and the Kotlin enum are drift-tested against this exact list.
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_learned_facts_kind'",
+        ) { it.getString(1) }.single() shouldContain
+            "'unit'::text, 'time_zone'::text, 'sampling'::text, 'grain'::text, 'window'::text, 'enum_meaning'::text, " +
+            "'join'::text, 'caveat'::text, 'format'::text, 'definition'::text, 'exclusion'::text, 'preference'::text"
+
+        // D-S11: a datasource delete cascades its facts; a purged source pipeline only detaches.
+        query(
+            "SELECT confdeltype FROM pg_constraint WHERE conrelid = 'learned_facts'::regclass AND contype = 'f'" +
+                " AND confrelid IN ('datasources'::regclass, 'pipelines'::regclass) ORDER BY confrelid::regclass::text",
+        ) { it.getString(1) } shouldContainExactly listOf("c", "n")
+    }
+
+    @Test
     fun `V20 stamps the write surface on both version tables, checked and defaulted`() {
         // The ruling's schema half, read from the SHIPPED database: the columns exist on BOTH
         // tables, carry the default (existing rows "backfill" by it), and the CHECK admits
@@ -444,6 +469,8 @@ class FlywayMigrationIntegrationTest {
                 "execution_events",
                 // 089 §A (V15) — the dp-lake catalog.
                 "lake_tables",
+                // 118 (V25) — the learned semantic layer.
+                "learned_facts",
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
@@ -503,6 +530,10 @@ class FlywayMigrationIntegrationTest {
                 "execution_events.uq_events_execution_event",
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
+                // 118 (V25) — every read is per datasource; the workspace half is partial.
+                "learned_facts.idx_learned_facts_datasource",
+                "learned_facts.idx_learned_facts_workspace",
+                "learned_facts.learned_facts_pkey",
                 "pipeline_executions.idx_executions_correlation",
                 "pipeline_executions.idx_executions_heartbeat",
                 "pipeline_executions.idx_executions_pipeline",
@@ -584,6 +615,19 @@ class FlywayMigrationIntegrationTest {
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
+                // 118 (V25) — learned_facts: the closed kind list, the kind↔scope rule, the
+                // fact/summary length windows, refs ≥ 1, the trust set, the write surface, the
+                // scope↔workspace rule and the retired stamp (learned-semantic-layer §3/§4/§5).
+                "chk_learned_facts_fact_length",
+                "chk_learned_facts_kind",
+                "chk_learned_facts_kind_scope",
+                "chk_learned_facts_refs",
+                "chk_learned_facts_retired",
+                "chk_learned_facts_scope",
+                "chk_learned_facts_scope_workspace",
+                "chk_learned_facts_summary_length",
+                "chk_learned_facts_trust",
+                "chk_learned_facts_via",
                 // 101 (V19): discard stamps — both NULL unless DISCARDED, a stamp when it is.
                 "chk_pipeline_versions_discard_stamps",
                 "chk_pipeline_versions_status",
