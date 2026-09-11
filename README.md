@@ -135,4 +135,5 @@ is upstream: open a PR ([CONTRIBUTING.md](CONTRIBUTING.md), one-time
 project owner.
 
 Need changes, integrations, or help running it in production?
-**Consulting is available from the author** — open an issue or reach out.
+**Consulting is available from the author** — open an issue or email
+**datapipelines.co@gmail.com**. Found a security problem? [SECURITY.md](SECURITY.md).
