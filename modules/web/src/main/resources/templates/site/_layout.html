@@ -179,7 +179,7 @@
      SiteClaimCitationTest sweeps (that guard reads templates, not renders).
      Parameters: entries, twoCol (true on the home page and /faq), heading (a visible h2 or
      null when the caller owns the heading). */-->
-<div th:fragment="faq(entries, twoCol, heading)" xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="faq(entries, twoCol, heading)" class="faq-block" xmlns:th="http://www.thymeleaf.org">
   <h2 id="faq-title" th:if="${heading != null}" th:text="${heading}">Questions people ask</h2>
   <div class="faq" th:classappend="${twoCol} ? 'faq-2col' : ''">
     <th:block th:each="e, st : ${entries}">
