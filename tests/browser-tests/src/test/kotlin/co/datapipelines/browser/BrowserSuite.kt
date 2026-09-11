@@ -53,7 +53,7 @@ abstract class BrowserSuite {
     @BeforeEach
     fun freshPage() {
         context = newBrowserContext()
-        page = context.newPage()
+        page = context.newPage().patient()
     }
 
     @AfterEach
@@ -167,8 +167,18 @@ abstract class BrowserSuite {
 
     protected fun newSession(): Session {
         val ctx = newBrowserContext()
-        return Session(ctx.newPage(), ctx)
+        return Session(ctx.newPage().patient(), ctx)
     }
+
+    /**
+     * Playwright's per-action default is 30 s. On a 2-vCPU CI runner that is ALSO running the
+     * unit suite in parallel, the screenshot-set tests (`the handback screenshots`, `the seven
+     * widths…`, `the dialog screenshot set`) — dozens of navigations each — exceeded it on a
+     * single page load (2026-09-11, every GitHub run) while every assertion they make held.
+     * Under `CI=true` (GitHub sets it) the same assertions get 90 s of patience per action;
+     * locally the 30 s stays, because on a laptop a 30 s wait IS the defect.
+     */
+    private fun Page.patient(): Page = apply { if (System.getenv("CI") == "true") setDefaultTimeout(CI_ACTION_TIMEOUT_MS) }
 
     /** A per-test local user: its one-time password, its chosen password, its unique email. */
     protected class LocalUser(
@@ -263,6 +273,8 @@ abstract class BrowserSuite {
     protected fun uniqueEmail(slug: String): String = "$slug@browser.datapipelines.test".lowercase()
 
     companion object {
+        const val CI_ACTION_TIMEOUT_MS = 90_000.0
+
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         private val SECURE_RANDOM = SecureRandom()
