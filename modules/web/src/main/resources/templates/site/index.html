@@ -92,9 +92,17 @@
           <p class="eyebrow">Open source · runs on your servers · your data stays where it is</p>
           <h1 id="hero-title" class="ds-display">Show your customers their data. No data team required.</h1>
           <p class="hero-sub">Describe the dataset in a sentence. An AI agent builds it against your real databases, you check the numbers, and your app calls the API — today. Embeddable dashboards ship next month.</p>
+          <div class="install">
+            <!-- claim: docs/deployment.md Appendix A (the reference compose ./app.sh brings up),
+                 docs/deployment.md Appendix B (the demo quickstart), docs/deployment.md §10 (free, AGPL-3.0) -->
+            <div class="code-block">
+              <pre><code>./app.sh --start</code></pre>
+              <button type="button" class="copy-btn" hidden>Copy</button>
+            </div>
+            <p class="install-label">Run it on your machine — free, one command, no account.</p>
+          </div>
           <div class="btn-row">
-            <a class="btn btn-primary" href="#artifact">See the sentence become an API</a>
-            <a class="btn btn-secondary" href="#demo">Try it on real data</a>
+            <a class="btn btn-secondary" href="#artifact">See it work</a>
             <a class="btn btn-secondary" th:href="@{/how-it-works}">For engineers: how it works</a>
             <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">
               <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -111,16 +119,19 @@
           <div class="shot-placeholder" data-shot="sentence-to-result" style="--shot-ratio: 16 / 10"><b>[shot: sentence-to-result]</b>the sentence at the top of the console, the result table beneath, the published URL in the header</div>
           <figcaption>One sentence in, a table of numbers out, and the URL your app calls — the whole product in one picture.</figcaption>
         </figure>
-        <div class="strip">
-          <!-- claim: docs/rest-api.md §19 (one release, one publish) -->
-          <div><div class="strip-k">Your first API</div><div class="strip-v"><b>same day</b></div></div>
-          <!-- claim: docs/versioning.md §3 -->
-          <div><div class="strip-k">Approvals before it goes live</div><div class="strip-v"><b>one</b>yours</div></div>
-          <!-- claim: docs/staging.md §3 (the scratch area lives in memory for the run and is dropped after it) -->
-          <div><div class="strip-k">Copies of your data</div><div class="strip-v"><b>none</b></div></div>
-          <!-- claim: docs/datasources.md §7 -->
-          <div><div class="strip-k">Who ever sees your database password</div><div class="strip-v"><b>only the server</b></div></div>
-        </div>
+          <div class="strip strip--five">
+            <!-- claim: docs/rest-api.md §19 (one release, one publish) -->
+            <div><div class="strip-k">Your first API</div><div class="strip-v"><b>same day</b></div></div>
+            <!-- claim: docs/versioning.md §3 -->
+            <div><div class="strip-k">Approvals before it goes live</div><div class="strip-v"><b>one</b>yours</div></div>
+            <!-- claim: docs/staging.md §3 (the scratch area lives in memory for the run and is dropped after it) -->
+            <div><div class="strip-k">Copies of your data</div><div class="strip-v"><b>none</b></div></div>
+            <!-- claim: docs/datasources.md §7 -->
+            <div><div class="strip-k">Who ever sees your database password</div><div class="strip-v"><b>only the server</b></div></div>
+            <!-- claim: docs/deployment.md §10 (the AGPL-3.0 licence), §4.3 (network egress: the app reaches
+                 only what you configure), §11 ("no phoning-home telemetry" — the prompt's §12 is §11 here) -->
+            <div><div class="strip-k">Price</div><div class="strip-v"><b>$0</b><span class="strip-sub">AGPL-3.0 · self-hosted · no phone-home</span></div></div>
+          </div>
       </div>
     </section>
 

@@ -86,6 +86,7 @@ class PublicRouteWalkerTest {
                 "SitePagesController#howItWorks",
                 "SitePagesController#mcpTools",
                 "SitePagesController#pillar",
+                "SitePagesController#pricing",
                 "SitePagesController#publishedApi",
                 "SitePagesController#roadmap",
                 "SitePagesController#security",

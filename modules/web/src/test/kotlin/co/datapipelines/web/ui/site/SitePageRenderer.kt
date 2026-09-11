@@ -46,8 +46,14 @@ object SitePageRenderer {
 
     private val docsController by lazy { DocsController(docs) }
 
-    /** The rendered HTML of one registry page, exactly as the app would serve it anonymously. */
-    fun render(page: SitePage): String {
+    /** The rendered HTML of one registry page, exactly as the app would serve it anonymously.
+     *  [serverName] stands in for the request's host (119 §C.1): the static export passes
+     *  the public origin's host so its nav reads "Try the live demo"; tests that omit it
+     *  render as a customer's own deployment ("Sign in"). */
+    fun render(
+        page: SitePage,
+        serverName: String? = null,
+    ): String {
         val model = ExtendedModelMap()
         val response = MockHttpServletResponse()
         val view =
@@ -104,7 +110,7 @@ object SitePageRenderer {
                     error("SitePageRenderer has no handler for ${page.path} — add it beside the controller's")
                 }
             }
-        return process(view, model)
+        return process(view, model, serverName)
     }
 
     /**
@@ -130,6 +136,7 @@ object SitePageRenderer {
             put(SitePages.FOR_ANALYSTS.path, batch2Controller::forAnalysts)
             put(SitePages.HOW_IT_WORKS.path, pagesController::howItWorks)
             put(SitePages.DEMO_DATA.path, pagesController::demoData)
+            put(SitePages.PRICING.path, pagesController::pricing)
         }
     }
 
@@ -147,32 +154,46 @@ object SitePageRenderer {
             .invoke(model, response)
 
     /** The anonymous docs index, through [DocsController]. */
-    fun renderDocsIndex(): String {
+    fun renderDocsIndex(serverName: String? = null): String {
         val model = ExtendedModelMap()
         val view = docsController.index(model, MockHttpServletResponse())
-        return process(view, model)
+        return process(view, model, serverName)
     }
 
     /** One anonymous doc page, through [DocsController]. */
-    fun renderDoc(slug: String): String {
+    fun renderDoc(
+        slug: String,
+        serverName: String? = null,
+    ): String {
         val model = ExtendedModelMap()
         val mav = docsController.doc(slug, model, MockHttpServletResponse())
-        return process(checkNotNull(mav.viewName) { "no view for doc $slug" }, model)
+        return process(checkNotNull(mav.viewName) { "no view for doc $slug" }, model, serverName)
     }
 
+    /** [serverName] decides the nav's demo/sign-in label exactly like the live advice does. */
     private fun process(
         view: String,
         model: Model,
+        serverName: String?,
     ): String {
-        val context = webContext()
+        val context = webContext(serverName)
         model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
+        // The offline render bypasses Spring MVC (no SiteOriginAdvice), so the label's
+        // decision is repeated here from the same predicate — the export passes the public
+        // host, tests default to a deployment host.
+        context.setVariable("publicOrigin", isPublicOrigin(serverName))
+        context.setVariable("githubStars", GITHUB_STARS)
+        context.setVariable("contactEmail", CONTACT_EMAIL)
         return engine.process(view, context)
     }
 
-    private fun webContext(): WebContext =
-        WebContext(
+    private fun webContext(serverName: String?): WebContext {
+        val request = MockHttpServletRequest()
+        serverName?.let { request.serverName = it }
+        return WebContext(
             JakartaServletWebApplication
                 .buildApplication(MockServletContext())
-                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+                .buildExchange(request, MockHttpServletResponse()),
         )
+    }
 }

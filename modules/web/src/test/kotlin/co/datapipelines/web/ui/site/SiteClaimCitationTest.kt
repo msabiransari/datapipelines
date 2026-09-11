@@ -53,6 +53,7 @@ class SiteClaimCitationTest {
                 "index.html",
                 "mcp-tools.html",
                 "pillar.html",
+                "pricing.html",
                 "published-api.html",
                 "roadmap.html",
                 "security.html",

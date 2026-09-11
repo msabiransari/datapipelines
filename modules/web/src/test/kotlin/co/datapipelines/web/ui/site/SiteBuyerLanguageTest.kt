@@ -62,6 +62,29 @@ class SiteBuyerLanguageTest {
         BANNED.find("the pipeline runs where the data lives")?.value shouldBe "pipeline"
     }
 
+    /**
+     * 119 §C — the POSITIVE half of the open-source rule. The owner's measurement
+     * (`marketing/site-open-source-signals.md`, 2026-09-11): the home page said "open
+     * source" four times and "AGPL" twice, but "free" ZERO times, and the first screen did
+     * not answer "is this something I buy". So the fold must SAY it: "free" and "open
+     * source" above the fold, and "AGPL" somewhere on the page. Falsified at birth: on the
+     * page as 115 shipped it, this ran RED — the fold carried neither word.
+     */
+    @Test
+    fun `the fold says free and open source, and the page says AGPL`() {
+        val html = SitePageRenderer.render(SitePages.HOME)
+        val foldText = strip(fold(html)).lowercase()
+        withClue("the fold must contain the word \"free\" — a visitor decides \"is this something I buy\" on the first screen") {
+            ("free" in foldText.split(WORD_BOUNDARY)) shouldBe true
+        }
+        withClue("the fold must contain the phrase \"open source\"") {
+            foldText.contains("open source") shouldBe true
+        }
+        withClue("the page must name the licence: \"AGPL\" at least once") {
+            strip(html).contains("AGPL") shouldBe true
+        }
+    }
+
     /** From `<main` to the closing tag of `section#artifact` — the fold, as the buyer reads it. */
     private fun fold(html: String): String {
         val from = html.indexOf("<main")
@@ -84,6 +107,8 @@ class SiteBuyerLanguageTest {
     private fun strip(html: String): String = TAG.replace(COMMENT.replace(html, " "), " ")
 
     private companion object {
+        /** Word-boundary split for the "free" check — "freedom" must not count. */
+        val WORD_BOUNDARY = Regex("""\b""")
         /** Hero, before/after, artifact — the fold must always render at least these three. */
         const val MIN_FOLD_SECTIONS = 3
 

@@ -252,7 +252,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "What does it cost?",
-                "Nothing to run: it is open source under AGPL-3.0 and you host it. There is no hosted plan today; " +
+                "Nothing to run: it is free and open source under AGPL-3.0 and you host it. There is no hosted plan today; " +
                     "when there is, the roadmap page will say so first. (Licence and packaging: docs/deployment.md §10.)",
                 "docs/deployment.md §10",
             ),
@@ -319,6 +319,53 @@ object SiteFaqs {
             ),
         )
 
+    /**
+     * The pricing page's five questions (119 §C.4): really free, what AGPL asks of you,
+     * whether a hosted version is coming, whether support can be bought, and the demo
+     * data's licences. The owner's offer sentence renders on the page from
+     * [co.datapipelines.web.ui.site.CONTACT_EMAIL]; the FAQ keeps the honest "no paid
+     * support today".
+     */
+    val PRICING: List<FaqEntry> =
+        listOf(
+            FaqEntry(
+                "Is it really free?",
+                "Yes — free to run, for yourself or your customers, with every feature on every deployment. There is " +
+                    "no seat count, no feature gate and no account with us, because the licence is AGPL-3.0 and you " +
+                    "host it. (Licence and packaging: docs/deployment.md §10.)",
+                "docs/deployment.md §10",
+            ),
+            FaqEntry(
+                "What does AGPL require of me?",
+                "Running it inside your company — even at scale, even commercially — asks nothing of you. If you " +
+                    "modify the server and offer it to others over a network, you publish your modifications under " +
+                    "the same licence; that is the whole obligation. (The licence: docs/deployment.md §10.)",
+                "docs/deployment.md §10",
+            ),
+            FaqEntry(
+                "Will there be a hosted version?",
+                "There is no paid tier today, and nothing hosted is planned this year; if a hosted version ever " +
+                    "exists it will be announced on the roadmap page first — never launched quietly. What is " +
+                    "deliberately not planned lives on the roadmap's later band. (Source: docs/ROADMAP.md §3.)",
+                "docs/ROADMAP.md §3",
+            ),
+            FaqEntry(
+                "Can I pay for support?",
+                "Not today — there is nothing to buy. Help is GitHub Discussions and Issues, the docs under /docs, " +
+                    "and the owner answers the contact address on the pricing page personally. You also own the ops: " +
+                    "the upgrade runbook is docs/deployment.md §8.",
+                "docs/deployment.md §8",
+            ),
+            FaqEntry(
+                "What about the demo data's licences?",
+                "The sample families are real public data, each under its own terms — NYC Open Data's " +
+                    "no-restrictions statement, US Government public-domain works, the Census API terms — and the " +
+                    "demo-data page quotes the operative sentence per family. (The demo and its gates: " +
+                    "docs/deployment.md Appendix B.)",
+                "docs/deployment.md §Appendix B",
+            ),
+        )
+
     /** Every group, in reading order — the `/faq` page opens with the buyer's questions (115). */
     val ALL: List<Pair<String, List<FaqEntry>>> =
         listOf(
@@ -328,5 +375,6 @@ object SiteFaqs {
             "APIs and operations" to APIS_AND_OPERATIONS,
             "Demo data" to DEMO_DATA,
             "Tableau" to TABLEAU,
+            "Pricing" to PRICING,
         )
 }

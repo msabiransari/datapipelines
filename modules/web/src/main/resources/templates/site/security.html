@@ -162,6 +162,19 @@
     </div>
   </section>
 
+  <section class="section" aria-labelledby="sec-report">
+    <div class="container">
+      <p class="kicker">If you find a hole</p>
+      <h2 id="sec-report" class="ds-headline">Report a vulnerability</h2>
+      <!-- claim: the project contact address, the CONTACT_EMAIL constant in SitePages.kt (owner, 2026-09-11);
+           what a report reaches: docs/auth.md §10 (the audit log every event already lands in) -->
+      <p class="section-lede">
+        Email <a th:href="'mailto:' + ${contactEmail}"><span th:text="${contactEmail}">datapipelines.co@gmail.com</span></a>
+        directly — the address reaches the owner, and the code you read is the code that runs.
+      </p>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>

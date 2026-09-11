@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.web.ui.site.SITE_ORIGIN
+import co.datapipelines.web.ui.site.SITE_ORIGIN_HOST
 import co.datapipelines.web.ui.site.SitePageRenderer
 import co.datapipelines.web.ui.site.SitePages
 import co.datapipelines.web.ui.site.SitemapXml
@@ -31,16 +32,19 @@ fun main(args: Array<String>) {
     outDir.mkdirs()
 
     var pages = 0
+    // The export IS the public site (it is what S3 serves at SITE_ORIGIN), so every page
+    // renders as the public origin — the nav's last item reads "Try the live demo", the
+    // GitHub badge and the licence chip ride the header.
     SitePages.ALL.forEach { page ->
-        writePage(outDir, page.path, SitePageRenderer.render(page))
+        writePage(outDir, page.path, SitePageRenderer.render(page, SITE_ORIGIN_HOST))
         pages++
     }
 
-    writePage(outDir, "/docs", SitePageRenderer.renderDocsIndex())
+    writePage(outDir, "/docs", SitePageRenderer.renderDocsIndex(SITE_ORIGIN_HOST))
     pages++
     val slugs = SitePageRenderer.docs.index().flatMap { group -> group.docs.map { it.slug } }
     slugs.forEach { slug ->
-        writePage(outDir, "/docs/$slug", SitePageRenderer.renderDoc(slug))
+        writePage(outDir, "/docs/$slug", SitePageRenderer.renderDoc(slug, SITE_ORIGIN_HOST))
         pages++
     }
 
