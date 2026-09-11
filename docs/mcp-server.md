@@ -1406,6 +1406,15 @@ Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) 
       "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."}
     },
     "additionalProperties": false
+  }
+}
+```
+
+The save-time validation is the SAME parse-only set `templates_create` runs ([Templates §7.1](templates.md#71-save-time-validation-is-parse-only)); the write is the SAME `TemplateDraftService.write` call REST §8.4 makes — one write path, two surfaces. First write after a release copies the released version to a draft (copy-on-write); later writes overwrite that one draft in place.
+
+Returns: the stored version's projection — `id`, `version`, `status`, `body_hash` (carry this into the next write), `dialect`, `type`, `body`, and the `draft` pointer (`version`, `body_hash`, `updated_by`, `updated_at`) when the write produced a draft. **The update does NOT release** (versioning D4): a human releases from the UI, and `templates_render` (§6.2.9) is the preview step before you hand the draft over. A write whose CONTENT equals the released content is the §5.1 no-op: `status: "RELEASED"`, no draft opened, no version number burned. An unknown id is `template.not_found`; a stale `expected_hash` is `template.version.conflict` with the current state in `details`; an update naming a different `type` than the template's established one is `template.validation.type_immutable` (046 §5.3). There is deliberately no `confirm_new_root` argument: the update names a template that already exists and cannot mint a folder.
+
+**Scope:** `author`. **Mutating.**
 
 #### 6.2.37 `semantics_record`
 
@@ -1515,10 +1524,6 @@ Record ONE fact you learned about a datasource that introspection could not tell
   }
 }
 ```
-
-The save-time validation is the SAME parse-only set `templates_create` runs ([Templates §7.1](templates.md#71-save-time-validation-is-parse-only)); the write is the SAME `TemplateDraftService.write` call REST §8.4 makes — one write path, two surfaces. First write after a release copies the released version to a draft (copy-on-write); later writes overwrite that one draft in place.
-
-Returns: the stored version's projection — `id`, `version`, `status`, `body_hash` (carry this into the next write), `dialect`, `type`, `body`, and the `draft` pointer (`version`, `body_hash`, `updated_by`, `updated_at`) when the write produced a draft. **The update does NOT release** (versioning D4): a human releases from the UI, and `templates_render` (§6.2.9) is the preview step before you hand the draft over. A write whose CONTENT equals the released content is the §5.1 no-op: `status: "RELEASED"`, no draft opened, no version number burned. An unknown id is `template.not_found`; a stale `expected_hash` is `template.version.conflict` with the current state in `details`; an update naming a different `type` than the template's established one is `template.validation.type_immutable` (046 §5.3). There is deliberately no `confirm_new_root` argument: the update names a template that already exists and cannot mint a folder.
 
 Returns: the stored fact in the FULL shape — the §6.2.18a block plus `datasource`, `refs[]` (`{schema, table, column}`, normalised), `evidence_sql`, `recorded_by`, `source_version`, `supersedes`, `retired_at`/`retired_reason` (omitted-when-absent). Validation, in order, each a catalogued refusal before anything is written ([Pipeline Contract §13.15](pipeline-contract.md#1315-learned-semantics)): `kind` in the closed list AND of the requested scope (`semantics.kind_invalid`); the fact window, `refs ≥ 1`, the summary cap (`semantics.fact_invalid`); every ref resolves against the LIVE schema — one column read per referenced table, which is also the table's fingerprint (`semantics.ref_unresolved`; the store never starts stale); no identical live fact (`semantics.duplicate`, `details.existing_id`); `evidence_sql` runs ONCE through the `sql_probe` path — a statement the classifier refuses or that names a `:parameter` is `semantics.evidence_refused`, one the database refuses or that times out is `semantics.evidence_failed`, and the fact is NOT recorded. Trust follows the evidence: `observed` with it, `asserted` without. `supersedes` retires the named fact with reason `superseded` in the same call; an id the workspace cannot see — or a `source_pipeline_id` it cannot read — is the not-found answer (D-R5). A DATASOURCE-scope record on a datasource not granted to this workspace is the §5.3 not-found BEFORE anything runs — that gate IS the grant requirement (D-S8). Audited as `semantics.recorded` (kind, scope, datasource, refs, trust, via — never the fact text or the SQL) beside the dispatcher's `mcp.tool.write`.
 
