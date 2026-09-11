@@ -157,7 +157,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 34 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 37 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -207,6 +207,9 @@ Tools are named `{domain}_{action}`:
 - `lake_tables_register`
 - `lake_tables_import`
 - `lake_tables_unregister`
+- `semantics_record`
+- `semantics_list`
+- `semantics_retire`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -549,7 +552,7 @@ Fetch a single datasource (without password).
 ```json
 {
   "name": "datasources_get",
-  "description": "Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, readonly flag, pool settings. Credentials are never returned. A datasource that is not granted to this workspace resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it can be probed.",
+  "description": "Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, readonly flag, pool settings, and `facts` — the datasource-wide learned facts agents recorded (its time window, whether it is a sample) — read them before you assume coverage. Credentials are never returned. A datasource that is not granted to this workspace resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it can be probed.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -562,7 +565,7 @@ Fetch a single datasource (without password).
 
 **Scope:** `read`.
 
-**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map), `readonly` (boolean — the §5.7 flag, machine-readable so an agent can see BEFORE authoring that DML/DDL/output-datasource uses will be refused), `granted` (always `true` — you are seeing this row because your workspace holds a grant on it, D-R7), `workspace` (the name of the workspace that REGISTERED it, **omitted** when a super admin registered it at the instance level — it is never `null`, because the retired `null = global` reading would be the wrong answer to "who can see this?"; visibility is `granted`) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape.
+**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map), `readonly` (boolean — the §5.7 flag, machine-readable so an agent can see BEFORE authoring that DML/DDL/output-datasource uses will be refused), `granted` (always `true` — you are seeing this row because your workspace holds a grant on it, D-R7), `workspace` (the name of the workspace that REGISTERED it, **omitted** when a super admin registered it at the instance level — it is never `null`, because the retired `null = global` reading would be the wrong answer to "who can see this?"; visibility is `granted`) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape — minus `facts` (118): the datasource-wide LEARNED FACTS (kinds `window` and `sampling`, the [learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §7.2), an array in the §7A.5 fact shape below, `[]` when none; served as stored, because this read opens no connection and has nothing to recompute drift against.
 
 #### 6.2.12 `datasources_test`
 
@@ -729,7 +732,7 @@ List a datasource's tables and views.
 ```json
 {
   "name": "datasources_get_tables",
-  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. Read-only, for pipeline authoring.",
+  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. A table carries `facts` when agents have recorded table-level learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact marked stale or needs_review is a warning, not a truth. Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -746,7 +749,7 @@ List a datasource's tables and views.
 }
 ```
 
-Returns: `{"tables": [{"namespace": [...], "schema", "name", "type", "remarks"?}], "truncated": bool}` — `namespace` is the containing path outermost-first and `schema` its last segment (kept for one release so a pre-087 client reads what it always read); `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `namespace` and `schema` filters are exact-match, not LIKE patterns, and a namespace deeper than the dialect's own matches nothing. Without a filter the listing **spans namespaces** — pass each table's reported `namespace` to `datasources_get_columns` (there, no namespace argument means the connection's current one only, and a datasource reporting **none** fails with the catalogued `pipeline.execution.parameter_required` rather than merging same-named tables' columns — the merge hazard lives in `datasources_get_columns` alone; a tables listing carries each row's own namespace and cannot merge, so it deliberately has no such guard and works unfiltered on those datasources too).
+Returns: `{"tables": [{"namespace": [...], "schema", "name", "type", "remarks"?}], "truncated": bool}` — `namespace` is the containing path outermost-first and `schema` its last segment (kept for one release so a pre-087 client reads what it always read); `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none; `facts` (118) is the table's TABLE-GRAIN learned facts — refs with no column: `grain`, `window`, `sampling`, a table-level `caveat` — in the §7A.5 shape, omitted when there are none. Only a COMPLETE listing (no `namespace`/`schema` filter, not truncated) runs the §7A.5 drift mark for a fact whose table is no longer listed; a filtered listing proves nothing about what it did not list. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `namespace` and `schema` filters are exact-match, not LIKE patterns, and a namespace deeper than the dialect's own matches nothing. Without a filter the listing **spans namespaces** — pass each table's reported `namespace` to `datasources_get_columns` (there, no namespace argument means the connection's current one only, and a datasource reporting **none** fails with the catalogued `pipeline.execution.parameter_required` rather than merging same-named tables' columns — the merge hazard lives in `datasources_get_columns` alone; a tables listing carries each row's own namespace and cannot merge, so it deliberately has no such guard and works unfiltered on those datasources too).
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
@@ -757,7 +760,7 @@ List one table's columns with canonical types.
 ```json
 {
   "name": "datasources_get_columns",
-  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it, and its `namespace` array with it. Without a namespace only the connection's current one is read; if the datasource reports none, an explicit namespace is required (list them with datasources_get_schemas). On a two-level engine an unqualified read can merge same-named tables from different catalogs, which is why the namespace is worth passing. Read-only, for pipeline authoring.",
+  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it, and its `namespace` array with it. Without a namespace only the connection's current one is read; if the datasource reports none, an explicit namespace is required (list them with datasources_get_schemas). On a two-level engine an unqualified read can merge same-named tables from different catalogs, which is why the namespace is worth passing. Each column carries `facts` when agents have recorded learned facts on it — a unit, a time zone, what a coded value means, a join, a caveat — with trust and evidence: read them before probing, and treat stale or needs_review as a warning to re-verify, then record the superseding fact. Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "table"],
@@ -775,9 +778,32 @@ List one table's columns with canonical types.
 }
 ```
 
-Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings", "remarks"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean), `remarks` the engine-stored column comment (omitted when there is none); `precision`/`scale`/`nullable`/`remarks` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned. System-schema rows are excluded; without a `schema` argument the read defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns — and a datasource that reports **no current schema** makes that default impossible, so the call fails with the catalogued `pipeline.execution.parameter_required` instead of silently merging (`datasources_get_schemas` lists the schemas to pass; schemaless datasources such as SQLite are the exception — there is nothing to merge).
+Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings", "remarks"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean), `remarks` the engine-stored column comment (omitted when there is none); `precision`/`scale`/`nullable`/`remarks` are omitted when the metadata does not report them; `facts` (118) is the column's learned facts in the §7A.5 shape — every fact with a ref on this column, a two-column `join` fact on both — omitted when there are none. This is the read that runs the §7A.5 drift check: each fact's fingerprint is recomputed from the columns just listed, and a demotion (`needs_review`, `stale`) is written back to the row before it is served. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned. System-schema rows are excluded; without a `schema` argument the read defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns — and a datasource that reports **no current schema** makes that default impossible, so the call fails with the catalogued `pipeline.execution.parameter_required` instead of silently merging (`datasources_get_schemas` lists the schemas to pass; schemaless datasources such as SQLite are the exception — there is nothing to merge).
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
+
+#### 6.2.18a The learned-fact block on introspection responses (118)
+
+The three introspection tools above and `datasources_get` carry the facts agents recorded about the objects they return ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) D-S7, §7.2) — INLINE, so the fact is where the agent is already looking and there is no separate memory to forget to query. The REST twins (`GET /api/v1/datasources/{name}`, `.../tables`, `.../tables/{t}/columns`, [REST API §9.7A](rest-api.md#97a-learned-facts-on-the-introspection-endpoints)) carry the identical block from the same code. Each fact renders as:
+
+```jsonc
+{
+  "id": "…",
+  "scope": "DATASOURCE",
+  "kind": "unit",
+  "fact": "value is already in the unit named by unit_col — never tenths",
+  "trust": "observed",
+  "drift": "column X no longer exists",
+  "evidence_summary": "unit=°C, value=21.4 | unit=mm, value=0.8",
+  "recorded_via": "mcp",
+  "recorded_at": "2026-09-11T10:15:00Z",
+  "from_this_workspace": true,
+  "source_pipeline": {"id": "…", "name": "finance/revenue"},
+  "conflict": true
+}
+```
+
+`drift`, `evidence_summary`, `source_pipeline` and `conflict` are omitted-when-absent. `trust` is `asserted` (no evidence) / `observed` (evidence ran at record time) / `verified` (a human confirmed) / `needs_review` (the table's column set changed around a still-resolving ref) / `stale` (a referenced column or table no longer exists); `retired` facts are never served here (`semantics_list` with `include_retired` lists them). **The drift check runs at read (design §6):** `datasources_get_columns` recomputes each fact's per-table fingerprint from the columns it just read and a complete `datasources_get_tables` listing checks each fact's tables — a demotion is written back to the row (idempotent, one-way; the alternative is serving a mark the server computed and then forgot). Nothing re-maps: a rename and a "drop + unrelated add" are indistinguishable to a machine, so a `stale` fact stays beside the current columns until an agent records the superseding fact with evidence (`semantics_record` with `supersedes`). **Conflicts coexist (D-S5):** two live facts of one kind on the same refs are both served, each `conflict: true`; the reader decides. **Provenance stops at the reader's visibility (D-S9):** a DATASOURCE fact recorded from another workspace arrives with its evidence and trust and `from_this_workspace: false`; `source_pipeline` is present only when the reader's workspace can read that pipeline — the same `findById(workspace, id)` predicate every pipeline read uses.
 
 #### 6.2.19 `datasources_preview_rows`
 
@@ -1340,6 +1366,203 @@ The same-credential rule, in order: an execution the caller may not see is the s
 
 **Mutating.** Declared `mutating` in the tool catalog — cancellation IS a write (it ends a running execution), and the `mcp.tool.write` row is the trace of WHOSE key stopped it (§14).
 
+#### 6.2.36 `semantics_record`
+
+Record ONE fact you learned about a datasource that introspection could not tell you ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §7.1) — the second half of the skill's *learn before you assume* step: what a session learned should not die with it.
+
+```json
+{
+  "name": "semantics_record",
+  "description": "Record ONE fact you learned about a datasource that introspection could not tell you — a unit, a time zone, a sample rate, a grain, what a coded value means, a join that holds, a trap — so the next session reads it beside the columns instead of probing again. Never record what introspection already returns (types, keys, comments). refs name the table(s) and column(s) the fact is about, structurally; every ref is checked against the live schema and an unknown one is refused. Pass evidence_sql (the SELECT that showed the fact): it runs once, its first rows become evidence_summary, and the fact is stored as observed — without it the fact is only asserted. scope DATASOURCE is about the data and is shared with every workspace the datasource is granted to; scope WORKSPACE (definition, exclusion, preference) is this organisation's meaning and stays here. To correct a stale or wrong fact, record the replacement with supersedes: the old one is retired as superseded. An identical live fact is refused as semantics.duplicate. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "scope",
+      "datasource",
+      "kind",
+      "fact",
+      "refs"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "scope": {
+        "type": "string",
+        "enum": [
+          "DATASOURCE",
+          "WORKSPACE"
+        ],
+        "description": "DATASOURCE: a fact about the data, visible wherever the datasource is granted. WORKSPACE: this organisation's meaning, visible here only."
+      },
+      "datasource": {
+        "type": "string",
+        "description": "Datasource name (must be granted to this workspace)."
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "unit",
+          "time_zone",
+          "sampling",
+          "grain",
+          "window",
+          "enum_meaning",
+          "join",
+          "caveat",
+          "format",
+          "definition",
+          "exclusion",
+          "preference"
+        ],
+        "description": "What the fact is about. unit, time_zone, sampling, grain, window, enum_meaning, join, caveat, format are DATASOURCE kinds; definition, exclusion, preference are WORKSPACE kinds."
+      },
+      "fact": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 1000,
+        "description": "The fact, in one or two sentences, specific enough to act on: 'value is already in the unit named by unit_col', 'pickup_ts is naive local time (America/New_York)'."
+      },
+      "refs": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": [
+            "table"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "type": "string",
+              "description": "Namespace as datasources_get_tables reported it (a label, or the dotted catalog.schema form). Omit for the connection's current schema."
+            },
+            "table": {
+              "type": "string",
+              "description": "Table name exactly as datasources_get_tables returned it."
+            },
+            "column": {
+              "type": "string",
+              "description": "Column name exactly as datasources_get_columns returned it. Omit for a table-grain fact (grain, window, sampling, a table-level caveat)."
+            }
+          }
+        },
+        "description": "The object(s) the fact is about. One ref for a column fact, two for a join, a column-less ref for a table-grain fact."
+      },
+      "evidence_sql": {
+        "type": "string",
+        "description": "ONE read-only SELECT/WITH that shows the fact (no :parameters). Runs once at record time under the sql_probe rules; a statement that fails refuses the record."
+      },
+      "evidence_summary": {
+        "type": "string",
+        "maxLength": 300,
+        "description": "What the evidence showed, in your words. Defaults to the probe's first rows."
+      },
+      "source_pipeline_id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The pipeline you learned this while building, if any. Shown only to readers who can read that pipeline."
+      },
+      "source_version": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "supersedes": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The id of the fact this one replaces (a stale or wrong one); it is retired with reason superseded."
+      }
+    }
+  }
+}
+```
+
+Returns: the stored fact in the FULL shape — the §6.2.18a block plus `datasource`, `refs[]` (`{schema, table, column}`, normalised), `evidence_sql`, `recorded_by`, `source_version`, `supersedes`, `retired_at`/`retired_reason` (omitted-when-absent). Validation, in order, each a catalogued refusal before anything is written ([Pipeline Contract §13.15](pipeline-contract.md#1315-learned-semantics)): `kind` in the closed list AND of the requested scope (`semantics.kind_invalid`); the fact window, `refs ≥ 1`, the summary cap (`semantics.fact_invalid`); every ref resolves against the LIVE schema — one column read per referenced table, which is also the table's fingerprint (`semantics.ref_unresolved`; the store never starts stale); no identical live fact (`semantics.duplicate`, `details.existing_id`); `evidence_sql` runs ONCE through the `sql_probe` path — a statement the classifier refuses or that names a `:parameter` is `semantics.evidence_refused`, one the database refuses or that times out is `semantics.evidence_failed`, and the fact is NOT recorded. Trust follows the evidence: `observed` with it, `asserted` without. `supersedes` retires the named fact with reason `superseded` in the same call; an id the workspace cannot see — or a `source_pipeline_id` it cannot read — is the not-found answer (D-R5). A DATASOURCE-scope record on a datasource not granted to this workspace is the §5.3 not-found BEFORE anything runs — that gate IS the grant requirement (D-S8). Audited as `semantics.recorded` (kind, scope, datasource, refs, trust, via — never the fact text or the SQL) beside the dispatcher's `mcp.tool.write`.
+
+**Scope:** `author` — recording is an authoring act (D-S8), the same bar as writing a pipeline that reads the datasource. **Mutating.**
+
+#### 6.2.37 `semantics_list`
+
+The facts on a datasource this workspace can see, with trust, drift, refs, evidence and provenance.
+
+```json
+{
+  "name": "semantics_list",
+  "description": "List the learned facts recorded on a datasource this workspace can see — every DATASOURCE fact (whoever recorded it) and this workspace's own WORKSPACE facts — with trust, drift, refs, the evidence SQL and who recorded it through what. The same facts also arrive inline on datasources_get / _get_tables / _get_columns, which is where to read them while authoring; use this to review, to find a fact's id to supersede or retire, or to answer 'what was recorded since <time>'. Retired facts are hidden unless include_retired.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "datasource"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "datasource": {
+        "type": "string",
+        "description": "Datasource name."
+      },
+      "table": {
+        "type": "string",
+        "description": "Only facts with a ref on this table."
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "DATASOURCE",
+          "WORKSPACE"
+        ]
+      },
+      "include_retired": {
+        "type": "boolean",
+        "default": false
+      },
+      "since": {
+        "type": "string",
+        "format": "date-time",
+        "description": "Only facts recorded at or after this ISO-8601 instant."
+      }
+    }
+  }
+}
+```
+
+Returns: `{datasource, facts: [FULL fact shape, oldest first], count}`. Visibility is the store's one predicate: every DATASOURCE fact on the datasource (whoever recorded it, `from_this_workspace` says which) and this workspace's own WORKSPACE facts. `since` answers the §9 acceptance question "what was recorded since <time>". Served AS STORED — this read opens no connection, so no drift is recomputed; `drift` carries the message a previous introspection read left. `retired` facts appear only with `include_retired: true`.
+
+**Scope:** `read` — facts ABOUT the data, never row data (the `templates_used_by` reasoning).
+
+#### 6.2.38 `semantics_retire`
+
+Retire one fact with a reason — the D-S11 verb: a state, never a delete.
+
+```json
+{
+  "name": "semantics_retire",
+  "description": "Retire one learned fact with a reason — it stops being served beside the columns but keeps its row (facts are never deleted; history is the audit). Prefer semantics_record with supersedes when you know the correct fact: that retires the old one and records the new in one step. A fact this workspace cannot see is not-found; a DATASOURCE fact another workspace established can only be retired by a workspace admin. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id",
+      "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The fact's id, from semantics_list or an introspection response."
+      },
+      "reason": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 300,
+        "description": "Why — one sentence, kept on the row and in the audit log."
+      }
+    }
+  }
+}
+```
+
+Returns: the retired fact in the full shape (`trust: "retired"`, `retired_at`, `retired_reason`). A fact this workspace cannot see is `semantics.not_found` (D-R5, identical for an id that exists nowhere); a DATASOURCE fact recorded from ANOTHER workspace needs `ws_admin` — `auth.role_required` otherwise (you do not silently retire what someone else established). Audited as `semantics.retired`. Prefer `semantics_record` with `supersedes` when the correct fact is known: one call retires the old and records the new.
+
+**Scope:** `author`. **Mutating.**
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1464,7 +1687,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 34 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 37 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 

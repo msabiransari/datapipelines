@@ -4,6 +4,8 @@ import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.mcp.McpCallAudit
+import co.datapipelines.application.semantics.FactEnrichment
+import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
@@ -36,7 +38,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 34 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 37 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -49,7 +51,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 34 tools of §6.1, in `tools/list` order. */
+    /** The 37 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -93,6 +95,11 @@ class McpServerAutoConfiguration {
         // 107: the launch-time audit row executions_cancel joins on — pipelines_execute blocks
         // until the execution is terminal, so the dispatcher's end-of-call row comes too late.
         auditSink: co.datapipelines.auth.AuditEventSink,
+        // 118 — the learned semantic layer: the SAME service and enrichment the REST twins use
+        // (declared by `web`'s SemanticsConfiguration, the LakeConfiguration precedent), so a
+        // fact recorded over MCP is validated, audited and served exactly as anywhere else.
+        semanticsService: SemanticsService,
+        factEnrichment: FactEnrichment,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -132,11 +139,11 @@ class McpServerAutoConfiguration {
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
             TemplatesPurgeDraftTool(templates, usage, authoring),
             DatasourcesListTool(datasources),
-            DatasourcesGetTool(datasources),
+            DatasourcesGetTool(datasources, factEnrichment),
             DatasourcesTestTool(datasources),
             DatasourcesGetSchemasTool(introspector, datasources),
-            DatasourcesGetTablesTool(introspector, datasources),
-            DatasourcesGetColumnsTool(introspector, datasources),
+            DatasourcesGetTablesTool(introspector, datasources, factEnrichment),
+            DatasourcesGetColumnsTool(introspector, datasources, factEnrichment),
             DatasourcesGetTableStatsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, sqlRunner),
             // 107 — the bounded probe, same inline-construction discipline as `sqlRunner`.
@@ -149,7 +156,8 @@ class McpServerAutoConfiguration {
             // exactly why these two need no workspace, no repository and no registry.
             CalculatorsListTool(),
             CalculatorsGetTool(),
-        ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService)
+        ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService) +
+            SemanticsTools.all(datasources, semanticsService)
     }
 
     @Bean

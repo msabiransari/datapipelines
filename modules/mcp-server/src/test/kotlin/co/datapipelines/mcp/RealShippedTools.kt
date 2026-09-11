@@ -53,5 +53,7 @@ fun realShippedTools(): List<McpTool> {
         cancellationService = mockk<co.datapipelines.executor.ExecutionCancellationService>(),
         mcpCallAudit = mockk<co.datapipelines.application.mcp.McpCallAudit>(),
         auditSink = mockk<co.datapipelines.auth.AuditEventSink>(),
+        semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
+        factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
     )
 }

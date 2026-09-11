@@ -71,7 +71,7 @@ object LearnedFactDrift {
     ): Verdict = if (fact.trust == LearnedFactTrust.STALE) unchanged(fact) else Verdict(to, message)
 
     /** The message a previously demoted fact keeps carrying when the read that demoted it is not this one. */
-    private fun storedDrift(fact: LearnedFact): String? =
+    fun storedDrift(fact: LearnedFact): String? =
         when (fact.trust) {
             LearnedFactTrust.STALE -> "a referenced column or table no longer exists"
             LearnedFactTrust.NEEDS_REVIEW -> "table columns changed since this was recorded"

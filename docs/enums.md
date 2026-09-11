@@ -427,6 +427,13 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 | `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. |
 | `template.version.discarded` / `template.version.restored` / `template.version.purged` / `template.purged` / `template.current_switched` | The template twins, by name — same triggers, template surfaces ([Versioning §3.5's notation rule](versioning.md#35-the-lifecycle-table)) |
 
+**Learned-semantics audit events** (same `audit_log` table, defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §9; emitted by `SemanticsService` for the `semantics_record` / `semantics_retire` MCP tools — 118):
+
+| Value | Trigger |
+|---|---|
+| `semantics.recorded` | One learned fact was recorded. `details` carries `fact_id`, `kind`, `scope`, `datasource`, `refs` (as `table.column` keys), `trust`, `via` (`mcp` \| `session` \| `api_key`), `evidence` (whether a probe backed it), and `supersedes` / `source_pipeline_id` when present — never the fact text or the evidence SQL. The row the §9 acceptance counts ("facts recorded per session") |
+| `semantics.retired` | One learned fact was retired (`semantics_retire`). `details` carries `fact_id`, `kind`, `scope`, `datasource`, `reason`, and `recorded_in_this_workspace` — false when a workspace admin retired a DATASOURCE fact another workspace established |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)

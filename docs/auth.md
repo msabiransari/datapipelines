@@ -820,11 +820,11 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | Add / remove members, set their flags | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}/members/{user_id}` — the last admin cannot be removed or demoted (`workspace.last_admin`) | `author` | `ws_admin` |
 | Grant / revoke a datasource to a workspace | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | `admin` | `super_admin` |
 
-**MCP tools** (all 34 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 37 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope | Min role |
 |---|---|---|
-| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats` | `read` | `view` |
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats`, `semantics_list` | `read` | `view` |
 | `endpoints_list`, `endpoints_get` | `read` | `view` |
 | `pipelines_execute`, `executions_cancel` | `execute` | `execute` |
 | `pipelines_execute_node` | `author` | `execute` |
@@ -833,8 +833,9 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render`, `templates_purge_draft` | `author` | `author` |
 | `endpoints_create`, `endpoints_delete` | `author` | `author` |
 | `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` | `author` |
+| `semantics_record`, `semantics_retire` — recording a learned fact is an authoring act ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) D-S8); a DATASOURCE-scope record additionally needs the datasource granted to the active workspace (the §5.3 gate — not-found otherwise), and retiring a DATASOURCE fact another workspace established needs the workspace-admin role, enforced in the service | `author` | `author` |
 
-(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 32 of the 34 tools operate inside the API key's pinned workspace; `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
+(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 35 of the 37 tools operate inside the API key's pinned workspace; `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the flag that renders it, and the operation row above it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the Min role column, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes.
 
