@@ -210,7 +210,9 @@ class LakeDialectAdapterTest {
                 ),
             )
 
-        init.filter { it.startsWith("LOAD") } shouldContainExactly listOf("LOAD httpfs", "LOAD aws", "LOAD iceberg")
+        // avro precedes iceberg in INSTALL mode too: LOAD iceberg auto-installs it and
+        // autoinstall is off (CI, 2026-09-11).
+        init.filter { it.startsWith("LOAD") } shouldContainExactly listOf("LOAD httpfs", "LOAD aws", "LOAD avro", "LOAD iceberg")
     }
 
     @Test

@@ -243,7 +243,9 @@ object LakeViewStatements {
         if (tables.none { it.format == "iceberg" }) return emptyList()
         return when (extensionDirectory) {
             null -> {
-                listOf("INSTALL iceberg", "LOAD iceberg")
+                // avro first: `LOAD iceberg` auto-installs avro, which the adapter's
+                // `autoinstall_known_extensions=false` refuses (CI, 2026-09-11).
+                listOf("INSTALL avro", "LOAD avro", "INSTALL iceberg", "LOAD iceberg")
             }
 
             else -> {

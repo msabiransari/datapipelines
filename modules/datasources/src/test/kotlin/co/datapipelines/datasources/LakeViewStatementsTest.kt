@@ -188,6 +188,8 @@ class LakeViewStatementsTest {
 
         statements shouldContainExactly
             listOf(
+                "INSTALL avro",
+                "LOAD avro",
                 "INSTALL iceberg",
                 "LOAD iceberg",
                 "CREATE SCHEMA IF NOT EXISTS \"lake\"",

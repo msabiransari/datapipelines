@@ -734,8 +734,9 @@ class LakeDialectAdapter(
      * egress. `avro` appears in this mode's Iceberg list because `LOAD iceberg` auto-loads it
      * from the directory, and an explicit `LOAD avro` first keeps a forgotten bundle's failure
      * message about avro, not about iceberg's init function. With the directory unset the
-     * `INSTALL`+`LOAD` pairs are exactly what earlier rounds shipped — `INSTALL iceberg` pulls
-     * `avro` in as a dependency over the network.
+     * `INSTALL`+`LOAD` pairs run, `avro` explicitly before `iceberg` — `INSTALL iceberg` does
+     * NOT pull avro in: `LOAD iceberg` tries to AUTO-install it, and this adapter's
+     * `autoinstall_known_extensions=false` refuses exactly that (measured on CI, 2026-09-11).
      */
     private fun extensionStatements(properties: Map<String, Any?>): List<String> {
         val kind = properties["catalog.kind"]?.toString()?.lowercase() ?: return emptyList()
@@ -748,7 +749,12 @@ class LakeDialectAdapter(
             }
 
             else -> {
-                val extensions = if (iceberg) listOf("httpfs", "aws", "iceberg") else listOf("httpfs", "aws")
+                // `avro` BEFORE `iceberg` here too: `LOAD iceberg` asks DuckDB to auto-install
+                // avro, and `autoinstall_known_extensions=false` (defence in depth, above) refuses
+                // that — so on a box with no cached avro the iceberg init function throws
+                // "Install it first using INSTALL avro" (every GitHub run until 2026-09-11; a
+                // laptop with avro already in ~/.duckdb never showed it).
+                val extensions = if (iceberg) listOf("httpfs", "aws", "avro", "iceberg") else listOf("httpfs", "aws")
                 extensions.flatMap { listOf("INSTALL $it", "LOAD $it") }
             }
         }
