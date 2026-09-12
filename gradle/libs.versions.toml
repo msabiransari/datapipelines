@@ -136,8 +136,10 @@ konsist = "0.17.3"
 mcp-sdk = "2.0.0"
 # Playwright for Java — the browser suite's driver AND pinned browser set
 # (a Playwright release pins its bundled chromium build). Current stable on
-# Maven Central, verified 2026-09-03.
-playwright = "1.52.0"
+# Maven Central, verified 2026-09-11. 1.52.0 refused to install chromium on
+# Ubuntu 26.04 ("Playwright does not support chromium on ubuntu26.04-x64");
+# 1.62.0 lists ubuntu26.04 as a supported host.
+playwright = "1.62.0"
 
 [libraries]
 # --- Spring Boot starters (version from the BOM) -----------------------------
