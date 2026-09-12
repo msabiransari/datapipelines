@@ -95,11 +95,13 @@ class InlineWidthAuditTest {
      * Every `.kt` under a module's main sources. The resolver walks the compiled classpath for
      * templates; Kotlin sources are not on it, so this walks the tree from the module root —
      * the test runs with `modules/web` as its working directory, and the repository root is
-     * two levels up.
+     * two levels up. The walk starts at `modules/`, not the root: lane worktrees are checked
+     * out at `.claude/worktrees/<lane>` inside the repo, and walking the root would read a
+     * lane's copy of every source as if it were this tree's.
      */
     private val kotlinSources: Map<String, String> =
         java.io
-            .File("../..")
+            .File("../../modules")
             .walkTopDown()
             .filter { it.isFile && it.extension == "kt" && it.path.contains("/src/main/kotlin/") }
             .filterNot { it.path.contains("/build/") }

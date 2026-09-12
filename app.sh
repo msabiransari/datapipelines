@@ -505,6 +505,81 @@ EOM
   exit 0
 }
 
+# ---------------------------------------------------------------- demo loaders
+# `compose up --wait` returns 1 when a one-shot loader exits non-zero, and this script
+# discards that verdict on purpose (wait_until_healthy). So the loaders' outcome has to
+# be read on its own: the app comes up either way, and printing "demo data loaded" over a
+# loader that failed is a lie (2026-09-12: a stale MySQL root password failed both MySQL
+# loaders with exit 1 and --start reported success). The list is what SHOULD have run
+# for the families asked for — a model query could only say what did.
+demo_loader_services() {
+  if ((DEMO_NYC)); then printf '%s\n' sample-data sample-data-mysql; fi
+  if ((DEMO_TRADE)); then printf '%s\n' sample-data-trade sample-data-trade-mysql; fi
+  if ((DEMO_LAKE)); then printf '%s\n' sample-data-lake; fi
+}
+
+# Where one loader ended: "<state> <exit-code>". `-a`, because compose ps hides exited
+# containers by default and every finished loader IS exited. "absent 0" when compose never
+# created the container; "unknown 0" when the answer could not be read.
+loader_state() {
+  "${COMPOSE[@]}" ps -a --format json "$1" 2>/dev/null | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    rows = json.loads(raw)
+    rows = [rows] if isinstance(rows, dict) else rows
+except json.JSONDecodeError:
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+if rows:
+    print(rows[0].get("State", "unknown"), rows[0].get("ExitCode", 0))
+else:
+    print("absent 0")
+' || echo "unknown 0"
+}
+
+# A cold load downloads gigabytes; the app may already be healthy (it was running before
+# this start) while a loader is still at work. Bounded, like the health wait.
+LOADER_WAIT_SECONDS="${LOADER_WAIT_SECONDS:-900}"
+verify_demo_loaders() {
+  local services=() failed=() svc state code waited=0
+  mapfile -t services < <(demo_loader_services)
+  if ((${#services[@]} == 0)); then return 0; fi
+  for svc in "${services[@]}"; do
+    while :; do
+      state=""; code=""
+      read -r state code < <(loader_state "$svc") || true
+      case "${state:-unknown}" in
+        exited|dead|absent|unknown) break ;;
+        *) # running / created / restarting
+          if ((waited >= LOADER_WAIT_SECONDS)); then state="still-running"; break; fi
+          if ((waited % 15 == 0)); then echo "    ... loader $svc still running (${waited}s)"; fi
+          sleep 5
+          waited=$((waited + 5)) ;;
+      esac
+    done
+    if [[ ${state:-unknown} != exited || ${code:-1} != 0 ]]; then
+      failed+=("$svc (${state:-unknown}, exit ${code:-?})")
+    fi
+  done
+  if ((${#failed[@]} == 0)); then return 0; fi
+  local entry
+  for entry in "${failed[@]}"; do
+    svc=${entry%% *}
+    echo "---- loader $svc, last 20 log lines ----"
+    "${COMPOSE[@]}" logs --no-log-prefix --tail 20 "$svc" 2>/dev/null || true
+  done
+  cat >&2 <<EOM
+app.sh: demo data NOT loaded — ${#failed[@]} loader(s) did not complete: ${failed[*]}.
+    The app is UP at ${APP_URL} without that family's data. Fix the cause and run
+    --start again (a loader skips what already matches its verified artifacts).
+    If the log says "Access denied for user 'root'", the demo MySQL volume was
+    initialised under a different SAMPLE_MYSQL_ROOT_PASSWORD than deploy/secrets.env
+    holds now: docker volume rm ${COMPOSE_PROJECT}-mysql-data (demo SOURCE data only;
+    the metadata volume is untouched), then --start again.
+EOM
+  exit 1
+}
+
 # ---------------------------------------------------------------- verbs
 start() {
   local do_build=1
@@ -539,6 +614,7 @@ start() {
   wait_until_healthy
   echo "==> UP — ${APP_URL}"
   print_login
+  verify_demo_loaders # exits 1, naming the loader, when a family's data did not land
   if ((DEMO_NYC || DEMO_TRADE || DEMO_LAKE)); then
     cat <<EOM
 ==> demo data loaded (${DEMO_FAMILIES}). Your personal workspace is provisioned with

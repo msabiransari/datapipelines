@@ -14,6 +14,12 @@
 #   1. container running, /health never answers -> the bound is reached, guidance, exit 0
 #   2. container exited                          -> hard failure naming the container, exit 1
 #   3. /health answers                           -> "UP", the login, exit 0
+#   6. --demo, every loader exited 0             -> "demo data loaded", exit 0
+#   7. --demo, one loader exited 1               -> the loader named, its logs, exit 1,
+#                                                   and NO "demo data loaded" line
+#      (2026-09-12: a stale MySQL root password failed both MySQL loaders and --start
+#      printed success — `up --wait`'s verdict is discarded on purpose, so the loaders'
+#      exit codes have to be read explicitly)
 #
 # THE STUB REFUSES (P34). scripts/lib/docker-stub.sh records every invocation and exits 97
 # on anything the test did not explicitly fake — no fallthrough to the real binary, which
@@ -51,8 +57,11 @@ ARGV_LOG="$tmp/docker-argv.log"
 
 # $1 = the State the app container reports ("running" | "exited")
 # $2 = the psql row seeded_admin() should see ("" = none)
+# $3 = the exit code every demo LOADER reports to `ps -a --format json <service>` ("" = 0).
+#      Answered in the NDJSON shape compose v2.21+ emits (one object per line), with the
+#      service name echoed back, so the check is proven against the real wire format.
 make_stub_docker() {
-  local state="$1" row="${2:-}"
+  local state="$1" row="${2:-}" loader_exit="${3:-0}"
   write_docker_stub "$tmp/bin/docker" "$ARGV_LOG" <<FAKE
 # --no-build image check: \`docker image inspect <tag>\`. The 075 stub tested \$3 here,
 # which never matched — it worked only because that stub's catch-all was a silent
@@ -61,6 +70,11 @@ make_stub_docker() {
 if [[ \${1:-} == image && \${2:-} == inspect ]]; then exit 0; fi
 # the health probe: FAILS, exactly as compose does when the HEALTHCHECK window lapses
 if [[ \$* == *"up -d --wait"* ]]; then exit 1; fi
+if [[ \$* == *"ps -a --format json"* ]]; then
+  # the last argv element is the loader service being asked about
+  echo "{\"Service\":\"\${@: -1}\",\"State\":\"exited\",\"ExitCode\":$loader_exit}"
+  exit 0
+fi
 if [[ \$* == *"ps --format json"* ]]; then
   echo '[{"Service":"datapipelines","State":"$state"}]'
   exit 0
@@ -84,6 +98,11 @@ CURL
 run_start() {
   (cd "$tmp" && PATH="$tmp/bin:$PATH" APP_COMPOSE_PROJECT="appstarttest$$" APP_HOST_PORT=18976 \
     HEALTH_WAIT_SECONDS="${1:-10}" bash app.sh --start --no-build 2>&1)
+}
+
+run_start_demo() { # $1 = the --demo families
+  (cd "$tmp" && PATH="$tmp/bin:$PATH" APP_COMPOSE_PROJECT="appstarttest$$" APP_HOST_PORT=18976 \
+    HEALTH_WAIT_SECONDS=10 bash app.sh --start --no-build --demo "$1" 2>&1)
 }
 
 fail() { echo "app-sh-start-test: $*" >&2; exit 1; }
@@ -137,6 +156,40 @@ grep -q "app.sh --scaffold" <<<"$out" \
   BEFORE the seed. Got:
 $out"
 
+# 6. --demo nyc,trade with every loader exited 0 -> the demo line, exit 0, and the check
+#    asked about EVERY loader of both families (four services), with -a.
+make_stub_docker "running" "admin@local.test|t" 0
+make_stub_curl up
+out=$(run_start_demo nyc,trade) || fail "a demo start whose loaders all exited 0 must exit 0, got:
+$out"
+grep -q "demo data loaded (nyc,trade)" <<<"$out" || fail "expected the demo line, got:
+$out"
+for svc in sample-data sample-data-mysql sample-data-trade sample-data-trade-mysql; do
+  grep -q "ps -a --format json $svc\$" "$ARGV_LOG" \
+    || fail "the loader check never asked compose about $svc (with -a; exited one-shots are hidden without it)"
+done
+
+# 7. --demo nyc with a loader exited 1 -> exit 1, the loader named, its logs shown, and
+#    NOT the demo line. The app is healthy throughout: health alone must not be the verdict.
+make_stub_docker "running" "admin@local.test|t" 1
+make_stub_curl up
+if out=$(run_start_demo nyc); then
+  fail "a demo start with a failed loader must exit 1, but --start succeeded:
+$out"
+fi
+grep -q "demo data NOT loaded" <<<"$out" || fail "expected the loader failure message, got:
+$out"
+grep -q "sample-data-mysql (exited, exit 1)" <<<"$out" || fail "the failing loader must be NAMED with its exit code, got:
+$out"
+grep -q "UP — http://localhost:18976" <<<"$out" || fail "the app was healthy; the UP line must still be reported, got:
+$out"
+grep -q "(stub: no logs)" <<<"$out" || fail "the failing loader's logs must be shown, got:
+$out"
+if grep -q "demo data loaded (" <<<"$out"; then
+  fail "the success line was printed over a failed loader:
+$out"
+fi
+
 # 4. THE REFUSAL (P34). Every argv the run issued is in the log; the ones the fakes above
 #    do not answer must exit non-zero. `compose up` WITHOUT `--wait` is the shape that took
 #    the owner's stack down — the 075 stub answered it with a silent `exit 0` after
@@ -153,4 +206,5 @@ sed 's/^/    /' "$tmp/refusal.txt"
 
 echo "app-sh-start-test: OK (bounded wait exits 0 with guidance; dead container exits 1;"
 echo "                       a healthy boot prints the seeded login; a first start scaffolds and"
-echo "                       says the seed fires now; the stub refuses and records)"
+echo "                       says the seed fires now; demo loaders are read back — all 0 says"
+echo "                       loaded, one non-zero names it and exits 1; the stub refuses and records)"

@@ -69,7 +69,11 @@ $(cat "$tmp/scaffold.out")"
 [ -f "$tmp/deploy/secrets.env" ] || fail "app.sh --scaffold did not write deploy/secrets.env"
 grep -q "DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL" "$tmp/scaffold.out" \
   || fail "--scaffold must say that the admin address is editable before the first start"
-[ "$(stat -f '%Lp' "$tmp/deploy/secrets.env" 2>/dev/null || stat -c '%a' "$tmp/deploy/secrets.env")" = "600" ] \
+# GNU stat first: on Linux `stat -f` is FILE-SYSTEM status and takes '%Lp' as a path, so it
+# prints the real file's filesystem block to stdout and only THEN fails — the BSD-first form
+# captured that block plus "600" and read a 600 file as not-600 (2026-09-12, first Linux run).
+# macOS's stat rejects -c on stderr alone, so the fallback there stays clean.
+[ "$(stat -c '%a' "$tmp/deploy/secrets.env" 2>/dev/null || stat -f '%Lp' "$tmp/deploy/secrets.env")" = "600" ] \
   || fail "deploy/secrets.env must be mode 600 — it holds every credential"
 
 # 1b. ONE DERIVATION: the scaffold names exactly what the template names, active lines and

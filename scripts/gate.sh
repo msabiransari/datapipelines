@@ -131,7 +131,9 @@ for i in $(seq 1 "$CYCLES"); do
     fi
   done
 
-  tests=$(find . -path '*/build/test-results/test/TEST-*.xml' 2>/dev/null | wc -l | tr -d ' ')
+  # -prune .claude: lane worktrees live at .claude/worktrees/<lane> INSIDE the repo, and their
+  # build/test-results would otherwise be counted as this tree's.
+  tests=$(find . -path ./.claude -prune -o -path '*/build/test-results/test/TEST-*.xml' -print 2>/dev/null | wc -l | tr -d ' ')
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
 
