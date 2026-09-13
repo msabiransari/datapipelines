@@ -1,5 +1,7 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
@@ -21,6 +23,7 @@ internal object ReferenceRules {
         workspaceId: java.util.UUID,
         orgContext: OrgContext,
         into: FailureCollector,
+        calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
     ) {
         // §0.2's tiers, as the save-time render sees them: org config and the platform keys are
         // deployment constants, so a template binding `:org_currency_symbol` or `:current_date`
@@ -28,8 +31,9 @@ internal object ReferenceRules {
         // same name still wins, because it is applied last (tier 3 over tiers 1-2). Calculator
         // output keys come LAST (078 A1): tier 5 wins over everything at run, and a key that
         // collided with a declared parameter is already a §12.10 refusal, so the order can
-        // never mask a legitimate failure.
-        val calculatorKeys = pipeline.calculatorOutputs()
+        // never mask a legitimate failure. A multi-output node contributes every key it maps
+        // (121), so the guarded set and the sample context cover each of them.
+        val calculatorKeys = pipeline.calculatorOutputs(calculatorKinds)
         val sampleContext =
             ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters, calculatorKeys).sampleContext()
         pipeline.nodes.forEachIndexed { index, node ->

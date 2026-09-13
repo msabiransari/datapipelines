@@ -90,4 +90,22 @@ class DerivedInputsTest {
             .get("derived")
             .asBoolean() shouldBe true
     }
+
+    @Test
+    fun `a multi-output node lists every key it writes - one derived entry per mapped output`() {
+        // 121: the declared set is every key, so the read surface lists both — an agent reading
+        // the merged parameters can discover that `window_end` is supply-able exactly as
+        // `window_start` is. The merge itself has no multi-specific branch: it prints
+        // `calculatorOutputs()`, which is where the N entries come from.
+        val body = bodyOf(Fixtures.pipeline(nodes = listOf(Fixtures.windowNode(), Fixtures.node())))
+
+        DerivedInputs.mergeInto(body, kinds = Fixtures.windowKinds)
+
+        listOf("window_start", "window_end").forEach { key ->
+            val derived = body.withObject("/parameters").get(key)
+            derived.get("type").asText() shouldBe "DATE"
+            derived.get("required").asBoolean() shouldBe false
+            derived.get("derived").asBoolean() shouldBe true
+        }
+    }
 }

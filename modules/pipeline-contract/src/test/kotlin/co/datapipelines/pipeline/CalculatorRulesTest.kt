@@ -1,6 +1,9 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.typesystem.LogicalType
+import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -18,7 +21,12 @@ import java.util.UUID
  * the day it does not, the answer is silently a default. Every ordering test below therefore has
  * a matching one that makes the edge legal and expects a clean save — a rule that only ever
  * refuses is a rule nobody can tell apart from a bug.
+ *
+ * `LargeClass` is suppressed: this suite is §12.10's contract in one place — the single-output
+ * rules and 121's named-set rules are one rule family, and splitting it would be the
+ * ConfigValidator split in reverse (the same precedent PipelineRepositoryIntegrationTest set).
  */
+@Suppress("LargeClass")
 class CalculatorRulesTest {
     private val workspaceId = UUID.randomUUID()
 
@@ -37,7 +45,14 @@ class CalculatorRulesTest {
         pipeline: Pipeline,
         templates: TemplateDryRenderer = StubTemplates(),
         orgContext: OrgContext = OrgContext.DEFAULTS,
-    ): ValidationResult = Fixtures.validator(templates = templates, orgContext = orgContext).validate(pipeline, workspaceId)
+        kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
+    ): ValidationResult = Fixtures.validator(templates = templates, orgContext = orgContext, kinds = kinds).validate(pipeline, workspaceId)
+
+    /** Validates with the multi-output fixture kind registered through the seam (121). */
+    private fun validateMulti(
+        pipeline: Pipeline,
+        templates: TemplateDryRenderer = StubTemplates(),
+    ): ValidationResult = validate(pipeline, templates = templates, kinds = Fixtures.windowKinds)
 
     // ---- shape ----
 
@@ -645,4 +660,291 @@ class CalculatorRulesTest {
     // `:run_fiscal_quarter` as a bind stays valid — pinned by the suite's first test
     // ("a well-formed calculator feeding a SQL node that depends on it is valid"), which stubs
     // exactly that bind and expects a clean save. The A1 set tightens `${}` and `<#if>` only.
+
+    // ---- 121: one key, or a named set ----
+
+    @Test
+    fun `a multi-output node with every output mapped feeding a SQL node is valid - the happy path`() {
+        val result =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.windowNode(),
+                            Fixtures.node("report", dependsOn = listOf("window")),
+                        ),
+                ),
+                templates = StubTemplates(bound = mapOf(SQL_TEMPLATE to listOf("window_start", "window_end"))),
+            )
+
+        result.failures.map { "${it.code} ${it.path}" }.shouldBeEmpty()
+    }
+
+    @Test
+    fun `context_keys on a single-output kind is a shape mismatch`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes = listOf(Fixtures.calculatorNode(contextKey = null, contextKeys = mapOf("start" to "run_fiscal_quarter"))),
+                ),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+        result
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+            .single()
+            .details["reason"] shouldBe "single_output_kind"
+    }
+
+    @Test
+    fun `context_key on a multi-output kind is a shape mismatch`() {
+        val result =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = Fixtures.WINDOW_KIND.kind,
+                                inputs = mapOf("date" to Fixtures.ref("current_date")),
+                                contextKey = "window_start",
+                            ),
+                        ),
+                ),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+        result
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+            .single()
+            .details["reason"] shouldBe "multi_output_kind"
+    }
+
+    @Test
+    fun `both key fields present is a shape mismatch - never both`() {
+        val result =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = Fixtures.WINDOW_KIND.kind,
+                                inputs = mapOf("date" to Fixtures.ref("current_date")),
+                                contextKey = "window_start",
+                                contextKeys = mapOf("start" to "window_start", "end" to "window_end"),
+                            ),
+                        ),
+                ),
+            )
+
+        result
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+            .single()
+            .details["reason"] shouldBe "both_fields"
+    }
+
+    @Test
+    fun `neither key field present is a shape mismatch - never neither`() {
+        // Before 121 this body failed `calculator_node_incomplete` with missing=context_key; D3
+        // gives the key-shape verdicts their own code, so kind + inputs present + no mapping at
+        // all is a shape mismatch whose message names both legal fields.
+        val result =
+            validate(
+                Fixtures.pipeline(nodes = listOf(Fixtures.calculatorNode(contextKey = null))),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+        result
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH)
+            .single()
+            .details["reason"] shouldBe "neither_field"
+    }
+
+    @Test
+    fun `a mapping naming an output the kind does not declare is refused, listing the ones it does`() {
+        val result =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.windowNode(
+                                contextKeys = mapOf("start" to "window_start", "middle" to "window_mid", "end" to "window_end"),
+                            ),
+                        ),
+                ),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_UNKNOWN)
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_UNKNOWN).single()
+        failure.details["output"] shouldBe "middle"
+        failure.details["known_outputs"] shouldBe listOf("start", "end")
+    }
+
+    @Test
+    fun `a declared output left unmapped is refused - no partial mapping`() {
+        val result =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes = listOf(Fixtures.windowNode(contextKeys = mapOf("start" to "window_start"))),
+                ),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Validation.CALCULATOR_OUTPUTS_INCOMPLETE)
+        result
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUTS_INCOMPLETE)
+            .single()
+            .details["missing"] shouldBe listOf("end")
+    }
+
+    @Test
+    fun `a mapped key obeys every key rule - name, parameter collision and one writer per key`() {
+        val invalidName =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes = listOf(Fixtures.windowNode(contextKeys = mapOf("start" to "Window Start", "end" to "window_end"))),
+                ),
+            )
+        invalidName
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_NAME_INVALID)
+            .single()
+            .path shouldBe "nodes[0].context_keys.start"
+
+        val parameterCollision =
+            validateMulti(
+                Fixtures.pipeline(
+                    parameters = mapOf("window_end" to Parameter(LogicalType.DATE)),
+                    nodes = listOf(Fixtures.windowNode()),
+                ),
+            )
+        parameterCollision
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_COLLISION)
+            .single()
+            .details["collides_with"] shouldBe "parameter"
+
+        val twoWriters =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.windowNode(id = "a"),
+                            Fixtures.windowNode(id = "b", contextKeys = mapOf("start" to "other_start", "end" to "window_end")),
+                        ),
+                ),
+            )
+        val collision = twoWriters.withCode(PipelineErrorCodes.Validation.CALCULATOR_OUTPUT_COLLISION).single()
+        collision.path shouldBe "nodes[1].context_keys.end"
+        collision.details["context_key"] shouldBe "window_end"
+    }
+
+    @Test
+    fun `a SQL node binding only one of a multi node's keys still needs the edge - transitively`() {
+        fun pipelineWith(dependsOn: List<String>) =
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.windowNode(),
+                        // A DIFFERENT template than the report's, so the stub's `:window_end`
+                        // bind belongs to the report alone — the refusal must name the reader
+                        // that lacks the edge, once.
+                        Fixtures.node(
+                            "middle",
+                            template = TemplateRef("test/middle.sql", 1),
+                            dependsOn = dependsOn,
+                            output = NodeOutput.Tempdb("stg_middle"),
+                        ),
+                        Fixtures.node("report", dependsOn = listOf("middle")),
+                    ),
+            )
+        // Only `:window_end` is bound — a partial read is still a read of the node's write.
+        val templates = StubTemplates(bound = mapOf(SQL_TEMPLATE to listOf("window_end")))
+
+        val unordered = validateMulti(pipelineWith(emptyList()), templates = templates)
+        val failure = unordered.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_UNORDERED).single()
+        failure.details["context_key"] shouldBe "window_end"
+        failure.details["written_by"] shouldBe "window"
+
+        // The TRANSITIVE edge is enough: report → middle → window is reachability, not adjacency.
+        validateMulti(pipelineWith(listOf("window")), templates = templates).failures.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a reference to a multi node's key resolves to that output's type`() {
+        fun pipelineWith(readerInputs: Map<String, JsonNode>) =
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.windowNode(),
+                        Fixtures.calculatorNode(
+                            id = "classify",
+                            kind = "quarter_of_year",
+                            inputs = readerInputs,
+                            contextKey = "run_quarter",
+                            dependsOn = listOf("window"),
+                        ),
+                    ),
+            )
+
+        // window_end is DATE, quarter_of_year's `date` takes DATE: the happy path.
+        validateMulti(pipelineWith(mapOf("date" to Fixtures.ref("window_end")))).failures.shouldBeEmpty()
+
+        // window_start is DATE too — feeding it to an INTEGER input is the mismatch the type
+        // resolution exists to catch at save.
+        val mismatch =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.windowNode(),
+                            Fixtures.calculatorNode(
+                                id = "shift",
+                                kind = "add_days",
+                                inputs = mapOf("date" to Fixtures.ref("current_date"), "days" to Fixtures.ref("window_start")),
+                                contextKey = "run_target",
+                                dependsOn = listOf("window"),
+                            ),
+                        ),
+                ),
+            )
+        mismatch
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH)
+            .single()
+            .details["reference"] shouldBe "window_start"
+    }
+
+    @Test
+    fun `a multi node's key gating a template conditional is refused - every key is guarded`() {
+        // 078 A1's guarded set comes from `calculatorOutputs()`, which now lists every key a
+        // multi node writes — so `<#if window_end??>` is refused exactly as a single key is.
+        val result =
+            validateMulti(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.windowNode(),
+                            Fixtures.node("report", dependsOn = listOf("window")),
+                        ),
+                ),
+                templates = StubTemplates(conditioned = mapOf(SQL_TEMPLATE to setOf("window_end"))),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED)
+    }
+
+    @Test
+    fun `the dry render's context carries every key a multi node writes`() {
+        val templates = StubTemplates()
+        validateMulti(
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.windowNode(),
+                        Fixtures.node("report", dependsOn = listOf("window")),
+                    ),
+            ),
+            templates = templates,
+        )
+
+        val context = templates.renderedContexts.getValue(SQL_TEMPLATE)
+        context.containsKey("window_start") shouldBe true
+        context.containsKey("window_end") shouldBe true
+    }
 }

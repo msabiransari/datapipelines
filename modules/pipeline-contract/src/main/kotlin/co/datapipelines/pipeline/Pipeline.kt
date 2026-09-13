@@ -1,5 +1,7 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorOutput
 import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.annotation.JsonCreator
@@ -53,7 +55,7 @@ data class Pipeline(
     fun node(id: String): Node? = nodes.firstOrNull { it.id == id }
 
     /**
-     * Every CALCULATOR node's `context_key`, typed by the kind's output — the pipeline's
+     * Every CALCULATOR node's Context keys, typed by the kind's output — the pipeline's
      * **calculator output declared set** (078 A5, owner ruling 2026-09-05).
      *
      * A calculator `context_key` is an implicit OPTIONAL execute input: a caller who supplies it
@@ -64,16 +66,24 @@ data class Pipeline(
      * (`ReferenceRules`) and the node-run debug path (`NodeSqlResolver`) — the three must agree,
      * or a key one accepts another refuses.
      *
+     * A node on a **multi-output** kind (121) contributes one entry PER mapped output, typed by
+     * that output's declared type: its `context_keys` mapping is what names the keys. Every rule
+     * that applies to a single node's key — collision, ordering, caller override — applies to
+     * each of these, unchanged, because they all read this one set.
+     *
      * A node whose `kind` is unknown contributes no key: §12.10 already refuses it, and a second
      * opinion here would only fork the verdict.
+     *
+     * [kinds] is the registry lookup, defaulted to the deployment's registry so production
+     * callers pass nothing; a test injects a fixture kind through it (the same seam
+     * `PipelineValidator.orgContext` established).
      */
-    fun calculatorOutputs(): Map<String, LogicalType?> =
+    fun calculatorOutputs(kinds: (String) -> CalculatorKind? = CalculatorRegistry::find): Map<String, LogicalType?> =
         nodes
             .filter { it.type == NodeType.CALCULATOR }
-            .mapNotNull { node ->
-                val key = node.contextKey?.takeUnless { it.isBlank() } ?: return@mapNotNull null
-                val kind = node.kind?.let(CalculatorRegistry::find) ?: return@mapNotNull null
-                key to kind.output
+            .flatMap { node ->
+                val kind = node.kind?.let(kinds) ?: return@flatMap emptyList()
+                calculatorOutputEntries(node, kind)
             }.toMap()
 
     companion object {
@@ -113,3 +123,32 @@ data class Pipeline(
             )
     }
 }
+
+/**
+ * The Context keys [node] writes when its kind is [kind], each with its type — one entry for a
+ * single-output kind (`context_key` typed by [CalculatorKind.output]), one per mapped output
+ * for a multi-output kind (121: each `context_keys` value typed by its [CalculatorOutput]).
+ *
+ * The ONE derivation of "which keys does this node write": [Pipeline.calculatorOutputs] reads
+ * the whole pipeline through it, and `CalculatorRules` resolves a `$reference`'s type through
+ * the same entries — a key the declared set accepts and the type check resolved differently
+ * would be two opinions about one fact.
+ *
+ * A blank key or an unmapped output contributes nothing: §12.10 owns those verdicts
+ * (`calculator_output_name_invalid`, `calculator_outputs_incomplete`), and a second report here
+ * would only fork them.
+ */
+internal fun calculatorOutputEntries(
+    node: Node,
+    kind: CalculatorKind,
+): List<Pair<String, LogicalType?>> =
+    if (kind.outputs.isEmpty()) {
+        listOfNotNull(node.contextKey?.takeUnless { it.isBlank() }?.let { it to kind.output })
+    } else {
+        kind.outputs.mapNotNull { output ->
+            node.contextKeys
+                ?.get(output.name)
+                ?.takeUnless { it.isBlank() }
+                ?.let { it to output.type }
+        }
+    }

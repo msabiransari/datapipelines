@@ -250,7 +250,11 @@ object PipelineErrorCodes {
         /** §12.9 — the static reference-tree depth is within the configured maximum. */
         const val COMPOSITION_TOO_DEEP = "pipeline.validation.composition_too_deep"
 
-        /** §12.10 — a CALCULATOR node declares all three of `kind`, `inputs` and `context_key`. */
+        /**
+         * §12.10 — a CALCULATOR node declares `kind` and `inputs`. A missing key mapping is
+         * not reported here: [CALCULATOR_OUTPUT_SHAPE_MISMATCH] names both legal fields
+         * (`context_key` / `context_keys`), which is the guidance an author needs (121).
+         */
         const val CALCULATOR_NODE_INCOMPLETE = "pipeline.validation.calculator_node_incomplete"
 
         /** §12.10 — no other node type carries `kind`, `inputs` or `context_key`. */
@@ -297,6 +301,26 @@ object PipelineErrorCodes {
 
         /** §12.10 / §6.1 — `context_key` matches `[a-z_][a-z0-9_]*`. */
         const val CALCULATOR_OUTPUT_NAME_INVALID = "pipeline.validation.calculator_output_name_invalid"
+
+        /**
+         * §12.10 (121) — the key mapping does not fit the kind's output shape: `context_keys`
+         * on a single-output kind, `context_key` on a multi-output kind, BOTH fields present,
+         * or neither. `context_key` XOR `context_keys` — one field per kind shape.
+         */
+        const val CALCULATOR_OUTPUT_SHAPE_MISMATCH = "pipeline.validation.calculator_output_shape_mismatch"
+
+        /**
+         * §12.10 (121) — a `context_keys` entry names an output the kind does not declare.
+         * `details.known_outputs` lists the names it does.
+         */
+        const val CALCULATOR_OUTPUT_UNKNOWN = "pipeline.validation.calculator_output_unknown"
+
+        /**
+         * §12.10 (121) — a multi-output kind's declared output is not mapped in `context_keys`.
+         * No partial mapping: a caller who needs one value still maps every output, so no
+         * reader can bind a key the node never writes. `details.missing` lists the unmapped.
+         */
+        const val CALCULATOR_OUTPUTS_INCOMPLETE = "pipeline.validation.calculator_outputs_incomplete"
     }
 
     /** §13.2 — pipeline import. */
@@ -329,6 +353,15 @@ object PipelineErrorCodes {
         const val CONCURRENCY_LIMIT = "pipeline.execution.concurrency_limit"
         const val NOT_RUNNING = "pipeline.execution.not_running"
         const val INSTANCE_LOST = "pipeline.execution.instance_lost"
+
+        /**
+         * §13.3 (121) — the caller supplied a PROPER SUBSET of a multi-output node's keys.
+         * Override is all-or-nothing per node: every key supplied and the node is skipped
+         * (`provided_by: "caller"` on its stats), none and it computes; some is refused before
+         * any node runs, with the same shape as [INVALID_PARAMETER_TYPE]. `details` carries
+         * `supplied` and `missing`. HTTP 400.
+         */
+        const val CALCULATOR_KEYS_PARTIAL = "pipeline.execution.calculator_keys_partial"
 
         /** §13.8 — pre-execution reachability check failed for a referenced datasource. */
         const val DATASOURCE_UNREACHABLE = "pipeline.execution.datasource_unreachable"

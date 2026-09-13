@@ -1,6 +1,8 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.calculators.CalculatorInput
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorRegistry
 import com.fasterxml.jackson.databind.node.ObjectNode
 
 /**
@@ -21,10 +23,19 @@ import com.fasterxml.jackson.databind.node.ObjectNode
  * is skipped — the collision is §12.10's save-time refusal, and the parameter owns its name.
  */
 object DerivedInputs {
-    /** Merges one derived entry per calculator `context_key` into [body]'s `parameters` object. */
-    fun mergeInto(body: ObjectNode) {
+    /**
+     * Merges one derived entry per calculator Context key into [body]'s `parameters` object —
+     * a multi-output node contributes one per mapped output (121), each typed by its output.
+     *
+     * [kinds] is the registry lookup, defaulted so production callers pass nothing; a test
+     * injects a fixture kind through it.
+     */
+    fun mergeInto(
+        body: ObjectNode,
+        kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
+    ) {
         val pipeline = PipelineJson.objectMapper().treeToValue(body, Pipeline::class.java)
-        val outputs = pipeline.calculatorOutputs()
+        val outputs = pipeline.calculatorOutputs(kinds)
         if (outputs.isEmpty()) return
         val parameters = body.get("parameters") as? ObjectNode ?: body.putObject("parameters")
         outputs.forEach { (key, type) ->

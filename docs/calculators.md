@@ -11,8 +11,9 @@ Design record: [Calculators — Configurable Pure Transformations](superpowers/s
 
 ## 1. What a calculator is
 
-A **calculator** is a pure function the server ships: typed inputs in, one typed value out. You use
-one by putting a `CALCULATOR` node in a pipeline ([Pipeline Contract §4.10](pipeline-contract.md)):
+A **calculator** is a pure function the server ships: typed inputs in, one typed value out — or,
+for a **multi-output** kind, a named SET of typed values out. You use one by putting a
+`CALCULATOR` node in a pipeline ([Pipeline Contract §4.10](pipeline-contract.md)):
 
 ```json
 { "id": "fiscal_q", "type": "CALCULATOR",
@@ -25,6 +26,24 @@ one by putting a `CALCULATOR` node in a pipeline ([Pipeline Contract §4.10](pip
 The node writes one value into the execution Context under `context_key`, and every node that
 `depends_on` it — directly or transitively — can bind it as `:run_fiscal_quarter`.
 
+A kind whose answer is genuinely several values (a window is two dates, not one) declares a set
+of **named outputs** instead, and the node maps every output to a Context key through
+`context_keys`:
+
+```json
+{ "id": "window", "type": "CALCULATOR",
+  "kind": "period_bounds",
+  "inputs": { "date": "$current_date", "unit": "quarter" },
+  "context_keys": { "start": "window_start", "end": "window_end" },
+  "depends_on": [] }
+```
+
+Every declared output must be mapped — no partial windows — and each mapped key obeys the same
+rules a single `context_key` does: the name shape, one writer per key, no shadowing a declared
+parameter, and the ordering rule below. `context_key` XOR `context_keys`: never both, never
+neither, and the field always fits the kind — a kind's output shape is the catalog's, not the
+author's.
+
 Three rules are worth learning once:
 
 1. **`$name` is a reference, anything else is a literal.** `"fiscal_start": "$org_fiscal_start_date"`
@@ -35,9 +54,9 @@ Three rules are worth learning once:
    `context_key`, or a SQL node binding one, is valid only if the reader depends on the writer.
    Otherwise the save is refused with `pipeline.validation.calculator_input_unordered` — the node
    would otherwise read a key that may or may not have been written yet, depending on scheduling.
-3. **A calculator is not for row data.** It computes ONE value for the whole run. Transforming
-   columns is SQL's job — on the source engine, or in tempdb, reused through a library template
-   ([Templates §6](templates.md)).
+3. **A calculator is not for row data.** It computes ONE value — or one named set of values —
+   for the whole run. Transforming columns is SQL's job — on the source engine, or in tempdb,
+   reused through a library template ([Templates §6](templates.md)).
 
 Each kind also declares the everyday **phrases** it answers (the Phrases column below) — match a
 question's words against them to choose the kind; that lookup, not any rule, is how a relative

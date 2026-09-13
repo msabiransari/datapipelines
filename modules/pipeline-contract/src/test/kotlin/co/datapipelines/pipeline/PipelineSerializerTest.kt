@@ -163,4 +163,36 @@ class PipelineSerializerTest {
         pretty shouldContain "\n"
         PipelineDeserializer().readOrThrow(pretty) shouldBe pipeline
     }
+
+    @Test
+    fun `a context_key body serialises without context_keys - existing bodies are byte-identical`() {
+        // 121/D2's hash-neutrality proof, first direction: the new field is nullable under the
+        // class's NON_NULL inclusion, so a body written before `context_keys` existed serialises
+        // exactly as it did — no stored version's body hash moves (versioning §9.2).
+        val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.calculatorNode()))
+
+        val written = serializer.write(pipeline)
+
+        written.contains("context_keys") shouldBe false
+        val node = Fixtures.json(written).path("nodes").single()
+        node.path("context_key").asText() shouldBe "run_fiscal_quarter"
+        PipelineDeserializer().readOrThrow(written) shouldBe pipeline
+    }
+
+    @Test
+    fun `a context_keys body round-trips byte-identically`() {
+        // The second direction: a multi-output mapping survives serialize → deserialize →
+        // serialize unchanged, and the single-shape field stays OFF the wire for it.
+        val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.windowNode()))
+
+        val written = serializer.write(pipeline)
+
+        val node = Fixtures.json(written).path("nodes").single()
+        node.has("context_key") shouldBe false
+        node.path("context_keys").path("start").asText() shouldBe "window_start"
+        node.path("context_keys").path("end").asText() shouldBe "window_end"
+        val reread = PipelineDeserializer().readOrThrow(written)
+        reread shouldBe pipeline
+        serializer.write(reread) shouldBe written
+    }
 }

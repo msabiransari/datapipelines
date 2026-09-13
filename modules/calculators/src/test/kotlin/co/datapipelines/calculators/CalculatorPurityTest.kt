@@ -1,9 +1,11 @@
 package co.datapipelines.calculators
 
+import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.io.File
 
@@ -88,6 +90,87 @@ class CalculatorPurityTest {
         // absence-assertions, which is exactly the shape that passes vacuously.
         productionSources().shouldNotBeEmpty()
     }
+
+    @Test
+    fun `every kind evaluates to its declared shape - a scalar for single kinds, the declared key set for multi`() {
+        // 121/D1's contract, made mechanical over the whole registry: a single-output kind
+        // returns ONE value, a multi-output kind returns a map whose key set EQUALS the declared
+        // output names — a missing key is a reader binding null, an extra one is a write nobody
+        // validated. Evaluating through the documented example (ExampleInputs) rather than a
+        // fixture of this test's own is what keeps the check honest about what the catalog
+        // promises.
+        val offenders = CalculatorRegistry.KINDS.mapNotNull { kind -> shapeOffense(kind, kind.evaluate(ExampleInputs.of(kind))) }
+        withClue("A kind whose example result contradicts its declared output shape") {
+            offenders.shouldBeEmpty()
+        }
+    }
+
+    @Test
+    fun `the shape check is not vacuous - it accepts a well-formed multi kind and refuses a wrong key set`() {
+        // Every kind in the registry is single-output until the two period kinds land (121
+        // commit C), so the registry sweep above exercises only the single arm. This fixture —
+        // the throwaway multi-output kind the lane's brief allows — proves the multi arm can
+        // fail: a map missing a declared name, or carrying an undeclared one, must be caught.
+        val good =
+            multiFixture { mapOf("start" to it["date"], "end" to it["date"]) }
+        shapeOffense(good, good.evaluate(ExampleInputs.of(good))) shouldBe null
+
+        val missing = multiFixture { mapOf("start" to it["date"]) }
+        shapeOffense(missing, missing.evaluate(ExampleInputs.of(missing))) shouldBe
+            "fixture: declared outputs [end] missing from the result"
+
+        val extra = multiFixture { mapOf("start" to it["date"], "end" to it["date"], "middle" to it["date"]) }
+        shapeOffense(extra, extra.evaluate(ExampleInputs.of(extra))) shouldBe
+            "fixture: result carries undeclared outputs [middle]"
+    }
+
+    /** One kind's shape verdict, or null when the result honours the declaration. */
+    private fun shapeOffense(
+        kind: CalculatorKind,
+        result: Any?,
+    ): String? =
+        when {
+            kind.outputs.isEmpty() && result is Map<*, *> -> {
+                "${kind.kind}: single-output kind returned a Map"
+            }
+
+            kind.outputs.isEmpty() -> {
+                null
+            }
+
+            result !is Map<*, *> -> {
+                "${kind.kind}: multi-output kind returned a ${result?.javaClass?.simpleName ?: "null"}, not a map"
+            }
+
+            else -> {
+                val declared = kind.outputs.map { it.name }
+                val missing = declared.filterNot { it in result.keys }
+                val extra = result.keys.filterNot { it in declared }
+                when {
+                    missing.isNotEmpty() -> "${kind.kind}: declared outputs $missing missing from the result"
+                    extra.isNotEmpty() -> "${kind.kind}: result carries undeclared outputs $extra"
+                    else -> null
+                }
+            }
+        }
+
+    /** The throwaway two-output fixture kind (121): `start` and `end`, both DATE. */
+    private fun multiFixture(body: (Map<String, Any?>) -> Map<String, Any?>): CalculatorKind =
+        SimpleKind(
+            kind = "fixture",
+            displayName = "Fixture",
+            description = "A fixture.",
+            phrases = listOf("fixture"),
+            inputs = listOf(input("date", LogicalType.DATE, "The date.")),
+            output = null,
+            example = example("date" to "2026-08-14", output = "start=2026-08-14, end=2026-08-14"),
+            outputs =
+                listOf(
+                    CalculatorOutput("start", LogicalType.DATE, "The first day."),
+                    CalculatorOutput("end", LogicalType.DATE, "The last day."),
+                ),
+            body = body,
+        )
 
     private fun productionSources(): List<File> =
         repoFile("modules/calculators/src/main/kotlin")
