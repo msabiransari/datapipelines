@@ -40,7 +40,9 @@ GROUP BY region
 
 **Call `calculators_list` before you author one.** The kind names and their input names are not
 guessable; the tool returns every kind with typed inputs, its output type and a worked example.
-`calculators_get {kind}` is the same entry for one kind.
+Each kind also lists `phrases` — the everyday phrases it answers — and matching the question's
+words against them is how a kind is chosen. `calculators_get {kind}` is the same entry for one
+kind.
 
 Four rules, and the third is the one that bites:
 

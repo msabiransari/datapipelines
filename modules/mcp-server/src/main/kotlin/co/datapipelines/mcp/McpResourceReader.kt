@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
@@ -8,6 +9,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.TemplateRepository
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
+import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
@@ -25,6 +27,13 @@ import java.util.UUID
  * An unknown or malformed URI is the SDK's `RESOURCE_NOT_FOUND` JSON-RPC error, which is a
  * protocol-level answer (§9.1) — `resources/read` has no `isError` content channel.
  *
+ * Every read is written to the audit log as `mcp.resource.read` (120) — uri, outcome, error
+ * code on failure, elapsed_ms, correlation id, key id and owner — emitted HERE, at the one
+ * place every read passes through, for the dispatcher's own reason: a read path that forgets
+ * is the failure mode, and a choke point cannot forget. Emission follows the tool event's
+ * discipline (§14): after the read, on success and failure alike, and a sink failure is
+ * logged and swallowed — the caller's read never changes outcome because bookkeeping did.
+ *
  * The one kind that is not an entity is the skill (095 §C2): `datapipelines://docs/skill` and
  * `…/skill/{reference}` serve the packaged Markdown ([SkillDocs]) — the same bytes the
  * deployment serves at `GET /skill.md`, and the same file a checkout holds at
@@ -37,9 +46,31 @@ class McpResourceReader(
     private val datasources: DatasourceRegistry,
     private val executions: ExecutionRepository,
     private val events: ExecutionEventRepository,
+    private val auditSink: AuditEventSink,
 ) {
+    private val log = LoggerFactory.getLogger(McpResourceReader::class.java)
+
     /** Reads [uri] for [ctx], or raises `RESOURCE_NOT_FOUND`. */
+    @Suppress("TooGenericExceptionCaught")
     fun read(
+        uri: String,
+        ctx: McpToolContext,
+    ): McpSchema.ReadResourceResult {
+        val startedAt = System.nanoTime()
+        try {
+            return readInternal(uri, ctx).also { audit(uri, ctx, outcome = "success", code = null, startedAt = startedAt) }
+        } catch (e: McpError) {
+            audit(uri, ctx, outcome = "error", code = auditCode(e), startedAt = startedAt)
+            throw e
+        } catch (e: Exception) {
+            // The handler's own catch renders this as the §9.1 internal error; the audit row
+            // names it the way the dispatcher's internal_error outcome names a tool's.
+            audit(uri, ctx, outcome = "error", code = "internal_error", startedAt = startedAt)
+            throw e
+        }
+    }
+
+    private fun readInternal(
         uri: String,
         ctx: McpToolContext,
     ): McpSchema.ReadResourceResult {
@@ -208,8 +239,56 @@ class McpResourceReader(
 
     private fun notFound(uri: String): McpError = McpError.RESOURCE_NOT_FOUND.apply(uri)
 
+    /**
+     * The single emission point for `mcp.resource.read` (120). Only the URI is recorded — the
+     * read's CONTENT never is, for the same reason the tool audit never records parameter
+     * values (§14): the row says THAT a read happened and by whom, never what it returned.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun audit(
+        uri: String,
+        ctx: McpToolContext,
+        outcome: String,
+        code: String?,
+        startedAt: Long,
+    ) {
+        val details =
+            buildMap {
+                put("uri", uri)
+                put("outcome", outcome)
+                put("correlation_id", ctx.correlationId.toString())
+                code?.let { put("code", it) }
+                put("elapsed_ms", (System.nanoTime() - startedAt) / NANOS_PER_MILLI)
+                // D-R8, the dispatcher's own row shape: a super admin acting in a workspace
+                // they hold no membership in is marked, or the audit promise is not a promise.
+                if (ctx.principal.workspace?.actingViaSuperAdmin == true) put("acting_via", "super_admin")
+            }
+        try {
+            auditSink.log(
+                event = AUDIT_EVENT,
+                userId = ctx.principal.userId,
+                keyId = ctx.principal.keyId,
+                details = details,
+            )
+        } catch (e: Exception) {
+            log.warn("MCP resource-read audit emission failed uri={} correlation_id={}", uri, ctx.correlationId, e)
+        }
+    }
+
+    /** The failure's identity for the audit row — a name, never the JSON-RPC number. */
+    private fun auditCode(e: McpError): String =
+        when (e.jsonRpcError.code()) {
+            McpSchema.ErrorCodes.RESOURCE_NOT_FOUND -> "resource_not_found"
+            McpArguments.FORBIDDEN -> "forbidden"
+            McpArguments.INVALID_PARAMS -> "invalid_params"
+            else -> "internal_error"
+        }
+
     private companion object {
         /** rest-api §6.2 — the media type the replayed framing belongs to. */
         const val MIME_EVENT_STREAM = "text/event-stream"
+
+        const val AUDIT_EVENT = "mcp.resource.read"
+        const val NANOS_PER_MILLI = 1_000_000L
     }
 }

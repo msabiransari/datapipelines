@@ -25,10 +25,13 @@ class CalculatorsListTool : McpTool {
             description =
                 "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed " +
                     "inputs (name, type, required, whether it takes a JSON array, and its default when optional), " +
-                    "its output type, and one worked example. Call this before authoring a CALCULATOR node — the " +
-                    "kind names and input names are not guessable. Also returns the Context keys every pipeline " +
-                    "can reference without declaring anything: the deployment's org_* values and the platform " +
-                    "keys current_date, current_timestamp and execution_id. Read-only.",
+                    "its output type, one worked example, and `phrases` — the everyday phrases the kind answers. " +
+                    "Call this before authoring a CALCULATOR node — the kind names and input names are not " +
+                    "guessable — and match the question's words against `phrases` before you pick a kind: a " +
+                    "relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never " +
+                    "by interpreting it yourself. Also returns the Context keys every pipeline can reference " +
+                    "without declaring anything: the deployment's org_* values and the platform keys " +
+                    "current_date, current_timestamp and execution_id. Read-only.",
             schema =
                 """
                 {
@@ -63,9 +66,11 @@ class CalculatorsGetTool : McpTool {
         McpTools.tool(
             name = "calculators_get",
             description =
-                "One calculator kind's full definition: display name, description, typed inputs, output type and " +
-                    "a worked example. Use it when you know the kind and need its exact input names and types. " +
-                    "An unknown kind is refused with the catalogued names in the error detail. Read-only.",
+                "One calculator kind's full definition: display name, description, typed inputs, output type, " +
+                    "a worked example and `phrases` — the everyday phrases the kind answers, which you match " +
+                    "the question's words against before picking a kind. Use it when you know the kind and " +
+                    "need its exact input names and types. An unknown kind is refused with the catalogued " +
+                    "names in the error detail. Read-only.",
             schema =
                 """
                 {
@@ -105,6 +110,7 @@ internal object CalculatorPayload {
             "kind" to kind.kind,
             "display_name" to kind.displayName,
             "description" to kind.description,
+            "phrases" to kind.phrases,
             "inputs" to kind.inputs.map(::input),
             "output" to (kind.output?.wire ?: CalculatorInput.ANY_TYPE),
             "example" to mapOf("inputs" to kind.example.inputs, "output" to kind.example.output),

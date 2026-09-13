@@ -146,7 +146,10 @@ PY
 
 # --- artifact HTTP server ----------------------------------------------------
 SRV_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-python3 -m http.server "$SRV_PORT" --bind 127.0.0.1 --directory "$WORK" >/dev/null 2>&1 &
+# 0.0.0.0, not 127.0.0.1: the loader containers reach this server over the
+# bridge gateway (host.docker.internal), an address 127.0.0.1 does not listen
+# on (120 — the run died "connection refused" after the name resolved).
+python3 -m http.server "$SRV_PORT" --bind 0.0.0.0 --directory "$WORK" >/dev/null 2>&1 &
 SRV_PID=$!
 disown "$SRV_PID" # keep bash's job-control "Terminated" notice out of the report
 BASE_URL="http://host.docker.internal:$SRV_PORT"
@@ -162,7 +165,12 @@ LOADER_FAMILY=nyc
 run_loader() { # <image> <log> <engines>
   local image="$1" logfile="$2" engines="$3" rc=0
   shift 3
+  # --add-host: `host.docker.internal` resolves inside a container only under
+  # Docker Desktop; on a Linux daemon it needs the host-gateway mapping (120 —
+  # without it the loader's manifest fetch died with `wget: bad address` before
+  # a single assertion could exercise load.sh).
   docker run --rm --network "$NET" \
+    --add-host host.docker.internal:host-gateway \
     -v "$SCRIPT_DIR":/opt/sample-data:ro \
     -v "$SRVD":/srv/sample \
     -e SAMPLE_DIR=/srv/sample \
@@ -325,7 +333,9 @@ if pg_run "$LOG" -e SAMPLE_PG_PASSWORD="$PW_PG"; then
 else
   bad "postgres re-load over the populated database wedged (F2 regression — see $LOG)"
 fi
-v=$(demo_psql "$PW_PG" "SELECT version FROM _sample_meta" 2>/dev/null || true)
+v=$(demo_psql "$PW_PG" "SELECT DISTINCT version FROM _sample_meta" 2>/dev/null || true)
+# DISTINCT: 120 gave _sample_meta key/value fact rows beside the one marker row —
+# the marker contract is "every row names the loaded version", not "one row total".
 [ "$v" = "v1" ] || bad "postgres marker not restored by the re-load (got: '$v')"
 
 LOG="$WORK/reload-my.log"
@@ -334,7 +344,7 @@ if my_run "$LOG" -e SAMPLE_MYSQL_PASSWORD="$PW_MY"; then
 else
   bad "mysql re-load over the populated database wedged (F2 regression — see $LOG)"
 fi
-v=$(demo_mysql "$PW_MY" "SELECT version FROM _sample_meta" 2>/dev/null || true)
+v=$(demo_mysql "$PW_MY" "SELECT DISTINCT version FROM _sample_meta" 2>/dev/null || true)
 [ "$v" = "v1" ] || bad "mysql marker not restored by the re-load (got: '$v')"
 
 n=$(demo_psql "$PW_PG" "SELECT count(*) FROM trips" 2>/dev/null || true)

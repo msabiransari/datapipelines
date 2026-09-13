@@ -157,7 +157,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 38 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 40 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -211,6 +211,8 @@ Tools are named `{domain}_{action}`:
 - `semantics_record`
 - `semantics_list`
 - `semantics_retire`
+- `docs_list`
+- `docs_get`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -1031,7 +1033,7 @@ The catalog of calculator kinds a `CALCULATOR` node can evaluate ([Calculators �
 ```json
 {
   "name": "calculators_list",
-  "description": "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, and one worked example. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.",
+  "description": "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, one worked example, and `phrases` — the everyday phrases the kind answers. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable — and match the question's words against `phrases` before you pick a kind: a relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never by interpreting it yourself. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.",
   "inputSchema": {
     "type": "object",
     "properties": {},
@@ -1042,7 +1044,7 @@ The catalog of calculator kinds a `CALCULATOR` node can evaluate ([Calculators �
 
 **Scope:** `read` — and read in the strongest sense the surface has: the answer is a property of the BUILD, identical for every caller, every key and every workspace. No workspace scoping applies because there is no workspace data in it.
 
-**Response:** `kinds` (each with `kind`, `display_name`, `description`, `inputs`, `output`, `example`), `count`, `context_keys` (`org` names and `platform` name/type pairs), and `docs` pointing at the catalog page. An input carries `list: true` only when it takes a JSON array, and `default` only when it is optional — the absent keys carry the same information as `false`/`null` would, without spending an agent's context window on eighty of them.
+**Response:** `kinds` (each with `kind`, `display_name`, `description`, `phrases`, `inputs`, `output`, `example`), `count`, `context_keys` (`org` names and `platform` name/type pairs), and `docs` pointing at the catalog page. `phrases` lists the everyday phrases the kind answers — match the question's words against them before picking a kind (the same lookup the skill's calculator rule teaches). An input carries `list: true` only when it takes a JSON array, and `default` only when it is optional — the absent keys carry the same information as `false`/`null` would, without spending an agent's context window on eighty of them.
 
 #### 6.2.24 `calculators_get`
 
@@ -1051,7 +1053,7 @@ One kind's full definition — the same entry `calculators_list` returns, for a 
 ```json
 {
   "name": "calculators_get",
-  "description": "One calculator kind's full definition: display name, description, typed inputs, output type and a worked example. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.",
+  "description": "One calculator kind's full definition: display name, description, typed inputs, output type, a worked example and `phrases` — the everyday phrases the kind answers, which you match the question's words against before picking a kind. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.",
   "inputSchema": {
     "type": "object",
     "required": ["kind"],
@@ -1613,6 +1615,51 @@ Returns: the retired fact in the full shape (`trust: "retired"`, `retired_at`, `
 
 **Scope:** `author`. **Mutating.**
 
+#### 6.2.40 `docs_list`
+
+The skill's document catalog, as a tool (120, ruling R3). The skill has been served as resources since 095 (§7.2.4), but resources are a weak surface — several MCP clients fetch them reluctantly or never, while every client calls tools. This and `docs_get` serve EXACTLY what the resources serve, from the same `SkillDocs` loader, so the two surfaces cannot drift.
+
+```json
+{
+  "name": "docs_list",
+  "description": "The datapipelines skill's document catalog: the operating core (`skill`) first, then every reference in the order the skill's own map lists them, each with its title and a one-line purpose (when to open it). The same documents the datapipelines://docs/skill resources serve, for clients that fetch resources reluctantly or never. Read-only.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}
+```
+
+**Scope:** `read` — the §6.2.23 reasoning: the manual this deployment ships is a property of the BUILD, identical for every caller, every key and every workspace.
+
+**Response:** `[{name, title, purpose}]` — `skill` first (the operating core, `SKILL.md`), then every reference in the order the skill's own map lists them; `title` is the document's own H1, `purpose` the map's one-line "open this when…". A reference on disk with no map line, or a map line with no file, is a build failure (`SkillDistributionTest`), not a warning.
+
+#### 6.2.41 `docs_get`
+
+One skill document's full markdown — the same bytes the `datapipelines://docs/skill/<name>` resource serves.
+
+```json
+{
+  "name": "docs_get",
+  "description": "One datapipelines skill document's full markdown: `name` is `skill` for the operating core or a reference name from docs_list. Returns {name, title, markdown} — the same bytes the datapipelines://docs/skill/<name> resource serves. An unknown name is refused with the catalogued names in the error detail. Read-only.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+      "name": {"type": "string", "description": "The document name: `skill` for the operating core, or a reference name from docs_list, e.g. authoring-playbook."}
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Scope:** `read`.
+
+**Returns:** `{name, title, markdown}`. `name` is `skill` for the operating core or a reference name from `docs_list`; the `.md`-suffixed form is accepted like the resource's own tolerance.
+
+**Errors:** an unknown name is `mcp.doc_not_found` (pipeline-contract §13.16) with `details.known_docs` — the tool-surface answer to a resource read's RESOURCE_NOT_FOUND, which is a protocol-level error that cannot travel in a §9.2 content envelope.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1737,7 +1784,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 38 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 40 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1940,15 +1987,16 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 
 > **Status:** normative (052, ruling R4 on T65). The same `audit_log` sink the [`auth.*` events](auth.md#101-events) use — no separate table, no execution rows, no UI history.
 
-**Two events, both emitted at `McpToolDispatcher`** — the single dispatch choke point, so no tool can forget its own trace:
+**The tool events are emitted at `McpToolDispatcher`** — the single dispatch choke point, so no tool can forget its own trace. **The resource event is emitted at `McpResourceReader.read`** (120), the one place every read passes through, for the same reason:
 
 | Event | When | 
 |---|---|
 | `mcp.tool.called` | Every tool call, every outcome (success, domain error, invalid params, internal error, scope refusal) |
 | `mcp.tool.write` | Exactly one per call to a tool the catalog declares **mutating**, emitted after the tool returns — on success and on failure alike. A §7.6 scope refusal never invoked the tool, so it writes no write event: the refusal is recorded by `mcp.tool.called` alone |
 | `mcp.execution.launched` | One per `pipelines_execute` launch (107), emitted BEFORE the blocking run begins: key id + correlation id + pipeline/execution id. It exists so §6.2.35's same-credential rule can authorize cancelling an IN-FLIGHT execution — the end-of-call `mcp.tool.called` row only exists once the blocking call returns, which for this tool is after the execution is terminal |
+| `mcp.resource.read` | Every `resources/read`, success or failure (120). Until this event the read side of the MCP surface left no trace at all — the audit of an agent's session could show 35 tool calls and silence about which documents it opened |
 
-**Fields** (identical for both events): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`.
+**Fields** (the two tool events identical; the resource event mirrors them): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`. A resource read records `uri` instead of `tool`/`target`, and its `code` names the failure (`resource_not_found`, `forbidden`, `internal_error`) — a name, never the JSON-RPC number.
 
 **Which tools are mutating is a declared property of the catalog entry** (`McpToolCatalog.Entry.mutating`), never a name pattern — `McpToolCatalogBindingTest` fails if a catalogued tool lacks the declaration or a known writer (`pipelines_create`, `pipelines_update`, `pipelines_execute`, `pipelines_execute_node`, `templates_create`) is flagged read. The failure direction is asymmetric: a read tool declared mutating is a harmless over-audit; a mutating tool declared read is the hole.
 
@@ -1988,7 +2036,10 @@ first five calls belongs in the skill instead.
 
 **Delivery 2 — the resource (pull, MCP).** `datapipelines://docs/skill` and
 `datapipelines://docs/skill/{reference}` (§7.1, §7.2.4), `read` scope, listed by
-`resources/list` ahead of the entity kinds.
+`resources/list` ahead of the entity kinds. Since 120 the same bytes also answer as TOOLS —
+`docs_list` / `docs_get` (§6.2.40–41), from the same `SkillDocs` loader — because resources
+are a weak surface: several clients fetch them reluctantly or never, and every client calls
+tools (R3).
 
 **Delivery 3 — the URL (pull, HTTP).** `GET /skill.md` and `GET /skill/{reference}.md`,
 `text/markdown`, **unauthenticated** — it is the manual, it holds no secret, and requiring a
@@ -2039,6 +2090,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-12 | v1.32 | 120 docs as tools + catalog phrases | Tool surface 38 → **40**: new §6.2.40 `docs_list` and §6.2.41 `docs_get` (both scope `read`, non-mutating) — the skill's documents as TOOLS (ruling R3), serving exactly the `SkillDocs` bytes the §7.2.4 resources serve, because several MCP clients fetch resources reluctantly or never while every client calls tools. New code `mcp.doc_not_found` (pipeline-contract §13.16) for an unknown `docs_get` name — the resource read's not-found is the protocol's RESOURCE_NOT_FOUND, which a §9.2 content envelope cannot carry. §6.2.23/24 (`calculators_list`/`calculators_get`): every kind's entry gains **`phrases`** — the everyday phrases the kind answers (ruling R2); the descriptions say to match the question's words against them before picking a kind (ruling R1: the skill teaches the lookup, never the interpretation). **§14 gains `mcp.resource.read`** — every `resources/read` audited at `McpResourceReader.read` (uri, outcome, code, elapsed_ms, correlation id, key id + owner); until now a resource read left no trace. auth.md §7.6's MCP table, the §5.1 static-surface count and §8's admission-rule count moved in the same commit; §6.1 lists the two; the numbering appends 6.2.40–41 after 6.2.39 like 117/107 appended theirs. |
 | 2026-09-11 | v1.30 | tempdb scratch probe + demo-free skill | §6.2.34 `sql_probe`: `name: "tempdb"` is a syntax-and-names check against an empty scratch H2 in the staging mode (was a refusal); pass = `parsed: true` + `missing_table`. Tool descriptions carry no sample-data names (`acme/finance/…`, `/finance/revenue/{region}`, `events_by_day`) — `SkillHasNoDemoContentTest` scans the skill and the rendered `tools.md`. New `template.validation.html_entity` (§13.9) on `templates_create`/`_update`. |
 | 2026-09-11 | v1.29 | 117 templates_update | Tool surface 34 → **35**: new §6.2.36 `templates_update` — the draft write REST `PUT /templates` (§8.4) makes, the template mirror of `pipelines_update`: same parse-only validation as `templates_create`, same `TemplateDraftService.write` one-write-path rule, required `id` (§9.6) and `expected_hash`, copy-on-write first write / in-place later writes / the §5.1 no-op (`status: "RELEASED"`, no draft pointer), `template.not_found` / `template.version.conflict` / `template.validation.type_immutable` refusals. Scope `author`, **mutating**. No `confirm_new_root` argument: an update names a template that exists and cannot mint a folder (094's create-only rule). Before 117 the only MCP path to change a template was purge-and-recreate, and purge is refused once any pipeline pins the template — exactly the state an authoring agent is in mid-build (versioning D4 untouched: the agent writes the draft, a human releases). §6.1 lists it after `templates_create`; §5.1's static-surface count and §8's admission-rule count updated. The fence is drift-pinned to the shipped schema like every §6.2 block; the numbering APPENDS 6.2.36 for the same reason 107 appended 6.2.32–35 — 6.2.23/24 already appear twice and a mid-group insertion would renumber ~20 cross-doc anchors. auth.md §7.6's MCP table and the `ScopeMatrixSpecDriftTest` counts (34 → 35, both axes) moved in the same commit. |
 | 2026-09-11 | v1.31 | 118 learned semantic layer | Tool surface 35 → **38**: new §6.2.37 `semantics_record` (one learned fact — kind from the closed enums.md §19 list, structural refs validated against the LIVE schema, `evidence_sql` run once through the probe path with its first rows as `evidence_summary`, `supersedes` retiring the predecessor; scope `author`, **mutating**, audited as `semantics.recorded`), §6.2.38 `semantics_list` (the facts a workspace can see, with `since`; scope `read`) and §6.2.39 `semantics_retire` (retire with a reason — a state, never a delete; a DATASOURCE fact another workspace established needs `ws_admin`; scope `author`, **mutating**). **New §6.2.18a**: the learned-fact block `facts[]` on `datasources_get` (datasource-wide kinds), `_get_tables` (table-grain facts and every `stale` one) and `_get_columns` (per column) — the §6 drift check runs at read on `/columns` and on a complete `/tables` listing and writes its demotion back; conflicts coexist (D-S5); `source_pipeline` renders only where the reader can read the pipeline (D-S9). The three descriptions (§6.2.11/17/18) say so. §5.1's static-surface count and §8's admission-rule count updated. Design record: `docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md`. |

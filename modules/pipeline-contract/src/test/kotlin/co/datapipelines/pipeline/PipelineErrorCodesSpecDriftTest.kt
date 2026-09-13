@@ -136,6 +136,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "endpoint.request.",
                 // 118 — the learned semantic layer (§13.15).
                 "semantics.",
+                // 120 — the MCP surface itself (§13.16).
+                "mcp.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -204,6 +206,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Semantics.EVIDENCE_FAILED,
                 PipelineErrorCodes.Semantics.DUPLICATE,
                 PipelineErrorCodes.Semantics.NOT_FOUND,
+                // 120 §13.16 — the `mcp` domain has no entity dimension either.
+                PipelineErrorCodes.Mcp.DOC_NOT_FOUND,
             )
 
         /** First cell of a markdown table row, when it is a backticked lowercase code. */

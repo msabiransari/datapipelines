@@ -1024,4 +1024,15 @@ object PipelineErrorCodes {
         /** The fact addressed by id does not exist or is not visible to the caller's workspace (D-R5). */
         const val NOT_FOUND = "semantics.not_found"
     }
+
+    /**
+     * §13.16 — the MCP surface itself (120). Two-segment like `semantics.not_found`: the domain
+     * has no entity dimension. Raised by `modules/mcp-server`'s tools. The resource surface's
+     * not-found is deliberately NOT here — it is the JSON-RPC protocol's RESOURCE_NOT_FOUND
+     * (mcp-server §9.1), which never travels in a §9.2 content envelope.
+     */
+    object Mcp {
+        /** `docs_get` named a document the shipped skill does not carry; `details.known_docs` lists them. */
+        const val DOC_NOT_FOUND = "mcp.doc_not_found"
+    }
 }

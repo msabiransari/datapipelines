@@ -35,6 +35,7 @@ internal object ValueKinds {
                 kind = "round",
                 displayName = "Round",
                 description = "A decimal rounded to a number of places under an explicit rounding mode.",
+                phrases = listOf("round a number to decimal places", "round to a whole number"),
                 inputs =
                     listOf(
                         input("value", DECIMAL, "The number to round."),
@@ -58,6 +59,7 @@ internal object ValueKinds {
                 description =
                     "The change from `previous` to `current` as a percentage: (current − previous) ÷ previous × 100. " +
                         "A zero `previous` is refused rather than reported as infinity.",
+                phrases = listOf("percent change", "how many percent up or down", "growth versus the previous value"),
                 inputs =
                     listOf(
                         input("current", DECIMAL, "The current value."),
@@ -71,6 +73,7 @@ internal object ValueKinds {
                 kind = "coalesce",
                 displayName = "Coalesce",
                 description = "The first value that is not null; null when every one of them is.",
+                phrases = listOf("the first value that is not null", "fall back through candidates"),
                 inputs =
                     listOf(
                         input(
@@ -87,6 +90,7 @@ internal object ValueKinds {
                 kind = "if_null",
                 displayName = "Default if null",
                 description = "The value, or `default` when the value is null. `coalesce` for exactly two candidates.",
+                phrases = listOf("the value or a default when it is null", "default if null"),
                 inputs =
                     listOf(
                         input("value", null, "The value to test. Present in the node, and null at run time is the point."),
@@ -102,6 +106,7 @@ internal object ValueKinds {
                     "Translates a value through a lookup carried in the node itself: the value at the position " +
                         "in `from` where it matches, or `default`. The pairs are parallel arrays rather than a " +
                         "list of objects so each element types like any other literal.",
+                phrases = listOf("translate a value through a lookup", "map these values to those"),
                 inputs =
                     listOf(
                         input("value", null, "The value to translate."),

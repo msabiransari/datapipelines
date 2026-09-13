@@ -10,4 +10,4 @@ WHEN SOMETHING FAILS. (1) pipeline.version.conflict means the pipeline changed a
 
 Everything you author lands as a DRAFT — a create included, at version 1 — and is not live until a person releases it from the UI. Run your draft to test it (pipelines_execute with no version runs it), then stop and say it is waiting for review. Never claim otherwise; no tool releases anything. Promotion between deployments is a human action with no tool.
 
-Before authoring anything beyond a one-node pipeline, read the resource datapipelines://docs/skill.
+Before authoring anything beyond a one-node pipeline, read the skill: docs_get {"name": "skill"} (or the resource datapipelines://docs/skill); before anything with more than two nodes, ALSO docs_get {"name": "authoring-playbook"}.

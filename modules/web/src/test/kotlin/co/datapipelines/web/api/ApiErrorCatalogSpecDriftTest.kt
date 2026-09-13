@@ -172,8 +172,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 163 → 170 with 118 (learned semantic layer): the seven `semantics.*` rows of the new
          * §13.15, landed in the SAME commit as their constants (pipeline-contract and the
          * datasources mirror) and their catalog rows. Re-derived from the parse.
+         *
+         * 171 → 172 with 120 (docs as tools): the one `mcp.*` row of the new §13.16, landed in
+         * the SAME commit as its constant and its catalog row. Re-derived from the parse.
          */
-        const val SECTION_13_ROW_COUNT = 171
+        const val SECTION_13_ROW_COUNT = 172
 
         /**
          * §12's distinct validation codes.

@@ -38,6 +38,19 @@ interface CalculatorKind {
     /** One sentence: what the kind computes, in the terms an author thinks in. */
     val description: String
 
+    /**
+     * The everyday phrases the kind answers — "last quarter", "month to date", "days between" —
+     * lower-case, and kept to what the kind literally computes (120, owner ruling R2).
+     *
+     * They are the lookup path for a relative phrase in a question: an agent matches the
+     * question's words against `phrases` across the catalog and picks the kind that fits, rather
+     * than being told by the skill what any phrase means (R1 — the skill never enumerates
+     * interpretations). They are time and arithmetic words only, never dataset vocabulary, and a
+     * kind with nothing to say is a catalog defect the drift test fails on: every kind lists at
+     * least one.
+     */
+    val phrases: List<String>
+
     /** The declared inputs, in the order the catalog documents them. */
     val inputs: List<CalculatorInput>
 

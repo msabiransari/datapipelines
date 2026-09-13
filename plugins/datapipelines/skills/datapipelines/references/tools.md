@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **38 tools**, in `tools/list` order.
+There are **40 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -358,7 +358,7 @@ Request cancellation of a RUNNING execution. This key can cancel ONLY an executi
 
 Scope `read` · read-only
 
-The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, and one worked example. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.
+The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, one worked example, and `phrases` — the everyday phrases the kind answers. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable — and match the question's words against `phrases` before you pick a kind: a relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never by interpreting it yourself. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.
 
 No arguments.
 
@@ -366,7 +366,7 @@ No arguments.
 
 Scope `read` · read-only
 
-One calculator kind's full definition: display name, description, typed inputs, output type and a worked example. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.
+One calculator kind's full definition: display name, description, typed inputs, output type, a worked example and `phrases` — the everyday phrases the kind answers, which you match the question's words against before picking a kind. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -503,3 +503,23 @@ Retire one learned fact with a reason — it stops being served beside the colum
 |---|---|---|---|
 | `id` | string | required | The fact's id, from semantics_list or an introspection response. |
 | `reason` | string | required | Why — one sentence, kept on the row and in the audit log. |
+
+## docs
+
+### `docs_list`
+
+Scope `read` · read-only
+
+The datapipelines skill's document catalog: the operating core (`skill`) first, then every reference in the order the skill's own map lists them, each with its title and a one-line purpose (when to open it). The same documents the datapipelines://docs/skill resources serve, for clients that fetch resources reluctantly or never. Read-only.
+
+No arguments.
+
+### `docs_get`
+
+Scope `read` · read-only
+
+One datapipelines skill document's full markdown: `name` is `skill` for the operating core or a reference name from docs_list. Returns {name, title, markdown} — the same bytes the datapipelines://docs/skill/<name> resource serves. An unknown name is refused with the catalogued names in the error detail. Read-only.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `name` | string | required | The document name: `skill` for the operating core, or a reference name from docs_list, e.g. authoring-playbook. |

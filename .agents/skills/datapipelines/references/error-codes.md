@@ -33,3 +33,4 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 | `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
 | `datasource.lake.table_unavailable` | A lake table's view failed to build at connect and was skipped; `details` carries `table` and the recorded `last_error` | Do not retry — the query is fine, the registration is broken. Report `last_error` to the user and let them fix or re-register the table |
 | `datasource.validation.property_empty` | A datasource property was `""`, whitespace, or null | Set the key to a real value or drop it entirely — empty is never stored |
+| `mcp.doc_not_found` | `docs_get` named a document the shipped skill does not carry | `docs_list` is the truth — pick a name from `details.known_docs`; `skill` is the operating core |

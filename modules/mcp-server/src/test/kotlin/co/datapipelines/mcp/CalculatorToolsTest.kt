@@ -32,6 +32,11 @@ class CalculatorToolsTest {
         kinds.map { it["kind"] } shouldContainExactly CalculatorRegistry.NAMES
         payload["count"] shouldBe CalculatorRegistry.KINDS.size
         payload["docs"] shouldBe "docs/calculators.md"
+        // 120/R2: every listed kind carries its phrases — the field the question's words are
+        // matched against — identical to what calculators_get returns for the same kind.
+        kinds.forEach { entry ->
+            entry["phrases"] shouldBe CalculatorRegistry.require(entry["kind"] as String).phrases
+        }
     }
 
     @Test
@@ -55,6 +60,9 @@ class CalculatorToolsTest {
         payload["kind"] shouldBe "fiscal_quarter"
         payload["display_name"] shouldBe "Fiscal quarter"
         payload["output"] shouldBe "INTEGER"
+        // 120/R2: the phrases the kind answers — the lookup path the skill's calculator rule
+        // points at. Asserted from the registry, never a transcribed copy.
+        payload["phrases"] shouldBe CalculatorRegistry.require("fiscal_quarter").phrases
 
         @Suppress("UNCHECKED_CAST")
         val inputs = payload["inputs"] as List<Map<String, Any?>>

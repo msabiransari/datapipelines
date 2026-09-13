@@ -343,13 +343,27 @@ EOSQL
 
     # The marker is written LAST: an interrupted restore leaves no marker and the
     # next run redoes the engine from scratch.
+    #
+    # 120/R4: `_sample_meta` also carries the facts the DATA cannot reveal — the
+    # sample rate, the time zone, the money unit — as key/value rows, because the
+    # datasource description shrank to what a customer writes (one or two sentences)
+    # and an agent that reads every table finds them here (the playbook's "a metadata
+    # table" heuristic). DROP+CREATE, not CREATE IF NOT EXISTS: a table left by an
+    # older loader lacks the key/value columns, and MySQL has no ADD COLUMN IF NOT
+    # EXISTS — the content is rewritten right after either way.
     psql_sample <<EOSQL
-CREATE TABLE IF NOT EXISTS _sample_meta (
+DROP TABLE IF EXISTS _sample_meta;
+CREATE TABLE _sample_meta (
     version     TEXT        NOT NULL,
-    loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    key         TEXT,
+    value       TEXT
 );
-DELETE FROM _sample_meta;
 INSERT INTO _sample_meta (version) VALUES ('$VERSION');
+INSERT INTO _sample_meta (version, key, value) VALUES
+    ('$VERSION', 'sample_rate', 'trips is a deterministic 1-in-16 hash sample of all yellow trips; multiply a count by 16 to estimate the population, and never compare it as a share against a full-count feed'),
+    ('$VERSION', 'time_zone',   'pickup_ts/dropoff_ts are naive local America/New_York time (no offset); pickup_date is the local date'),
+    ('$VERSION', 'units',       'money columns are USD');
 GRANT SELECT ON _sample_meta TO $DEMO_USER;
 EOSQL
     log "  loaded, marker set to $VERSION"
@@ -406,11 +420,16 @@ FLUSH PRIVILEGES;
 EOSQL
 
     my -D "$SAMPLE_MYSQL_DB" <<EOSQL
-CREATE TABLE IF NOT EXISTS _sample_meta (
+-- 120/R4: one marker shape across engines (the pg sibling's comment explains the
+-- DROP+CREATE and the key/value columns). This family's facts are all derivable
+-- from names, types, stats and probes, so no key/value rows are written here.
+DROP TABLE IF EXISTS _sample_meta;
+CREATE TABLE _sample_meta (
     version   VARCHAR(32) NOT NULL,
-    loaded_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+    loaded_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    \`key\`     VARCHAR(64) NULL,
+    value     VARCHAR(500) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-DELETE FROM _sample_meta;
 INSERT INTO _sample_meta (version) VALUES ('$VERSION');
 EOSQL
     log "  loaded, marker set to $VERSION"

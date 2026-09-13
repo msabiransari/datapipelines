@@ -1129,6 +1129,14 @@ The learned semantic layer ([design record](superpowers/specs/2026-09-11-learned
 | `semantics.duplicate` | 409 | An identical LIVE fact — same `(scope, workspace, datasource, kind, refs, fact)` — already exists; `details.existing_id` names it. Refused rather than rate-limited (O-4): an agent looping on the same fact learns nothing from a second row. A retired fact is not a duplicate |
 | `semantics.not_found` | 404 | The fact addressed by `id` (or by `supersedes`) does not exist, or is a WORKSPACE fact of another workspace — the D-R5 answer, identical for both |
 
+### 13.16 MCP surface
+
+The MCP server's own refusals (120). Two-segment, like `semantics.not_found` — the domain has no entity dimension. The resource surface's unknown-URI answer is deliberately absent here: it is the JSON-RPC protocol's RESOURCE_NOT_FOUND ([MCP §9.1](mcp-server.md#91-mcp-level-errors)), which never travels in a §9.2 content envelope. Landed with the constant (`PipelineErrorCodes.Mcp`) and its `ApiErrorCatalog` row.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `mcp.doc_not_found` | 404 | `docs_get` named a document the shipped skill does not carry ([MCP §6.2.41](mcp-server.md#6241-docs_get)); `details.name` and `details.known_docs` — the tool-surface answer to a resource read's not-found |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations

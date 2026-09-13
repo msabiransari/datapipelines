@@ -109,6 +109,11 @@ object McpToolCatalog {
             Entry("semantics_record", mutating = true),
             Entry("semantics_list", mutating = false),
             Entry("semantics_retire", mutating = true),
+            // 120 — the skill docs as tools (R3): the same SkillDocs bytes the resources
+            // serve, for clients that fetch resources reluctantly or never. A property of
+            // the BUILD, like the calculator catalog — reads in the strongest sense.
+            Entry("docs_list", mutating = false),
+            Entry("docs_get", mutating = false),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

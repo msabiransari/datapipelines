@@ -34,7 +34,12 @@ class McpResourceReaderTest {
     private val events = mockk<ExecutionEventRepository>()
     private val ctx = McpFixtures.ctx(Scope.READ)
 
-    private val reader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events)
+    // 120 — a REAL in-memory sink, never a strict mock: the contract is "the read is
+    // recorded", and a strict double is green precisely when the call is missing (MISTAKES).
+    private val auditSink = RecordingAuditSink()
+
+    private val reader =
+        McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events, auditSink)
 
     private fun contents(uri: String): McpSchema.TextResourceContents =
         reader.read(uri, ctx).contents().single() as McpSchema.TextResourceContents
@@ -81,6 +86,42 @@ class McpResourceReaderTest {
             // A path is not a name: nothing here concatenates caller input into a file path.
             { shouldThrow<McpError> { reader.read("datapipelines://docs/skill/../../etc/passwd", ctx) } },
             { shouldThrow<McpError> { reader.read("datapipelines://docs/other", ctx) } },
+        )
+    }
+
+    @Test
+    fun `a read is audited as mcp_resource_read with the uri, outcome, timing and caller`() {
+        auditSink.rows.clear()
+        reader.read(McpResourceUri.skill(), ctx)
+
+        val row = auditSink.rows.single { it.event == "mcp.resource.read" }
+        assertAll(
+            { row.userId shouldBe McpFixtures.USER },
+            { row.keyId shouldBe McpFixtures.KEY_ID },
+            { row.details["uri"] shouldBe McpResourceUri.skill() },
+            { row.details["outcome"] shouldBe "success" },
+            { row.details["correlation_id"] shouldBe McpFixtures.CORRELATION_ID.toString() },
+            { (row.details["elapsed_ms"] is Number) shouldBe true },
+        )
+    }
+
+    @Test
+    fun `an unknown uri records the error with its code - and still throws as before`() {
+        auditSink.rows.clear()
+
+        shouldThrow<McpError> { reader.read("datapipelines://nope", ctx) }
+        val malformed = auditSink.rows.single { it.event == "mcp.resource.read" }
+        assertAll(
+            { malformed.details["uri"] shouldBe "datapipelines://nope" },
+            { malformed.details["outcome"] shouldBe "error" },
+            { malformed.details["code"] shouldBe "resource_not_found" },
+        )
+
+        shouldThrow<McpError> { reader.read(McpResourceUri.skillReference("nope"), ctx) }
+        val unknownReference = auditSink.rows.last { it.event == "mcp.resource.read" }
+        assertAll(
+            { unknownReference.details["outcome"] shouldBe "error" },
+            { unknownReference.details["code"] shouldBe "resource_not_found" },
         )
     }
 
@@ -278,5 +319,29 @@ class McpResourceReaderTest {
                 contents(uri).text() shouldBe "SELECT 1"
             }
         }
+    }
+}
+
+/** One audit row as the sink received it (120). */
+private data class AuditRow(
+    val event: String,
+    val userId: java.util.UUID?,
+    val keyId: String?,
+    val details: Map<String, Any?>,
+)
+
+/** The in-memory [AuditEventSink] that records instead of mocking — the effect is the assertion. */
+private class RecordingAuditSink : co.datapipelines.auth.AuditEventSink {
+    val rows = mutableListOf<AuditRow>()
+
+    override fun log(
+        event: String,
+        userId: java.util.UUID?,
+        keyId: String?,
+        sourceIp: String?,
+        userAgent: String?,
+        details: Map<String, Any?>,
+    ) {
+        rows += AuditRow(event, userId, keyId, details)
     }
 }

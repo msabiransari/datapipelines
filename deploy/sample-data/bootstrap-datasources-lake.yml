@@ -48,16 +48,10 @@ datasources:
     display_name: "NYC Rideshare Lake (sample)"
     description: >-
       NYC TLC high-volume for-hire trips (Uber, Lyft, Via, Juno), read IN
-      PLACE from Parquet on S3 — nothing was downloaded or restored. Tables:
-      hvfhv_zone_day (trips, fares, tips, driver pay and shared-ride requests
-      per pickup zone x day x company, the table the showcase pipeline reads),
-      hvfhv_trips_sample (a 1-in-16 hash sample of every trip),
-      hvfhv_trips (every trip, PARTITIONED ON pickup_date — filter on that column
-      and only the named partitions are read; a predicate on pickup_at alone reads
-      every file), hvfhs_companies (the licence lookup: hvfhs_license_num -> company
-      name). pickup_at/dropoff_at are NAIVE LOCAL New York time; pickup_date is the
-      local date. Money columns are USD; driver_pay is the driver's share, base_fare
-      the passenger's base fare. Window 2023-01 through 2024-12.
+      PLACE from Parquet on S3 — nothing was downloaded or restored. Window
+      2023-01 through 2024-12. Facts the data cannot reveal: pickup_at and
+      dropoff_at are naive local New York time, money columns are USD, and
+      hvfhv_trips_sample is a 1-in-16 hash sample of every trip.
       These records are generated from the FHV Trip Record submissions made by
       bases, so we cannot guarantee or confirm their accuracy or completeness.
     dialect: LAKE
