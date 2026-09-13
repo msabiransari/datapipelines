@@ -619,6 +619,110 @@ test("the skeleton appears only after the delay, and a fast swap never flashes i
   assert.equal(target.children.length, 0);
 });
 
+// ---------------------------------------------------------------------------
+// The owner's document scrollbar (2026-09-13, /dashboard): the skeleton on BODY.
+// A boosted navigation's htmx target at beforeRequest is <body> — shell.js only
+// retargets it at beforeSwap — so a slow boosted request armed the skeleton row
+// on body, outside the 100dvh shell, and the document grew by one row. htmx
+// then snapshotted the page for history WITH that row in it (the snapshot is
+// taken during the swap, before afterRequest removes the live one), and Back
+// restored the row as static markup nobody owned. Three guards, one root:
+// the skeleton never lands on body; the snapshot never carries one; a restore
+// purges any orphan. Driven through the REAL listeners init() installs.
+
+function mkShellDoc() {
+  const listeners = {};
+  const main = mkBusyEl("MAIN");
+  const body = mkBusyEl("BODY");
+  const bar = mkBusyEl("DIV");
+  const all = () => [body, main, ...body.children, ...main.children];
+  const doc = {
+    readyState: "complete",
+    // Several shell listeners share an event name (beforeRequest: the busy tracker and
+    // the click acknowledgement), so the double keeps ALL of them and fires each.
+    body: Object.assign(body, { addEventListener: (t, fn) => { (listeners[t] = listeners[t] || []).push(fn); } }),
+    addEventListener() {},
+    documentElement: { classList: { toggle() {}, contains: () => false } },
+    getElementById: (id) => (id === "app-main" ? main : id === "app-progress" ? bar : null),
+    createElement: (tag) => mkBusyEl(tag.toUpperCase()),
+    querySelectorAll: (sel) => {
+      if (sel === ".app-target-skeleton") return all().filter((e) => (e.className || "").includes("app-target-skeleton"));
+      if (sel === '[aria-busy="true"]') return all().filter((e) => e.getAttribute("aria-busy") === "true");
+      return [];
+    },
+  };
+  const fire = (type, evt) => (listeners[type] || []).forEach((fn) => fn(evt));
+  return { doc, fire, main, body };
+}
+
+test("a boosted request's skeleton lands in #app-main, never on body, and clears on the original target", () => {
+  const timers = mkClock();
+  globalThis.window = { location: { pathname: "/dashboard" }, localStorage: { setItem() {} }, addEventListener() {}, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout };
+  const { doc, fire, main, body } = mkShellDoc();
+  globalThis.document = doc;
+  loadShell();
+  const link = mkBusyEl("A");
+  const detail = { boosted: true, target: body, elt: link, shouldSwap: true };
+  fire("htmx:beforeRequest", { detail });
+  timers.fireNext(); // the 150ms arm
+  assert.equal(body.children.length, 0, "nothing is ever appended to body");
+  assert.equal(main.children.length, 1, "the skeleton stands in the pane the swap will replace");
+  assert.equal(main.getAttribute("aria-busy"), "true");
+  // htmx's afterRequest carries the SAME detail object — target still body.
+  fire("htmx:afterRequest", { detail });
+  assert.equal(main.children.length, 0);
+  assert.equal(main.getAttribute("aria-busy"), null);
+  delete globalThis.window;
+  delete globalThis.document;
+});
+
+test("the history snapshot never carries a skeleton: beforeHistorySave strips the live ones", () => {
+  const timers = mkClock();
+  globalThis.window = { location: { pathname: "/dashboard" }, localStorage: { setItem() {} }, addEventListener() {}, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout };
+  const { doc, fire, main } = mkShellDoc();
+  globalThis.document = doc;
+  loadShell();
+  const detail = { boosted: true, target: doc.body, elt: mkBusyEl("A"), shouldSwap: true };
+  fire("htmx:beforeRequest", { detail });
+  timers.fireNext();
+  assert.equal(main.children.length, 1);
+  fire("htmx:beforeHistorySave", { detail: { path: "/dashboard", historyElt: doc.body } });
+  assert.equal(main.children.length, 0, "the snapshot htmx is about to take has no skeleton in it");
+  assert.equal(main.getAttribute("aria-busy"), null);
+  // The request is still in flight; its ending must not throw or double-remove.
+  fire("htmx:afterRequest", { detail });
+  assert.equal(main.children.length, 0);
+  delete globalThis.window;
+  delete globalThis.document;
+});
+
+test("a restored page purges any orphan skeleton and stale aria-busy — the cache already poisoned in the field", () => {
+  globalThis.window = { location: { pathname: "/dashboard" }, localStorage: { setItem() {} }, addEventListener() {} };
+  const { doc, fire, body } = mkShellDoc();
+  globalThis.document = doc;
+  loadShell();
+  const orphan = mkBusyEl("DIV");
+  orphan.className = "ds-skeleton ds-skeleton-table-row app-target-skeleton";
+  body.appendChild(orphan);
+  body.setAttribute("aria-busy", "true");
+  fire("htmx:historyRestore", { detail: { path: "/dashboard" } });
+  assert.equal(body.children.length, 0, "the orphan is gone");
+  assert.equal(body.getAttribute("aria-busy"), null, "and the stale busy mark with it");
+  delete globalThis.window;
+  delete globalThis.document;
+});
+
+test("swapTargetFor resolves a boosted request to #app-main up front, and leaves a partial's target alone", () => {
+  const shell = loadShell();
+  const main = {};
+  const pane = {};
+  const doc = { getElementById: (id) => (id === "app-main" ? main : null) };
+  assert.equal(shell.swapTargetFor({ boosted: true, target: "body" }, doc), main);
+  assert.equal(shell.swapTargetFor({ boosted: false, target: pane }, doc), pane);
+  assert.equal(shell.swapTargetFor({ boosted: true, target: "body" }, { getElementById: () => null }), "body", "no main on the page: the request's own target");
+  assert.equal(shell.swapTargetFor(null, doc), null);
+});
+
 test("concurrent requests into the same target share one skeleton; different targets get their own", () => {
   const shell = loadShell();
   const clock = mkClock();

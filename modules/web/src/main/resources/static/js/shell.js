@@ -90,8 +90,18 @@
  *    row; a faster request never shows either (no flash on fast swaps). Timers
  *    and skeletons are paired PER TARGET — concurrent requests into different
  *    panes are normal — and the request's afterRequest cancels and removes
- *    everything, which always runs BEFORE the swap, so a skeleton never
- *    coexists with the content it was standing in for.
+ *    everything. The target is resolved ONCE, by swapTargetFor, at both ends:
+ *    a boosted navigation's htmx target is <body> until beforeSwap retargets
+ *    it, and a skeleton appended to body stands OUTSIDE the 100dvh shell —
+ *    the one place on the page that can grow the document. That is how the
+ *    owner's dashboard grew a scrollbar (2026-09-13): the row was armed on
+ *    body during a slow boosted navigation, htmx snapshotted the page for
+ *    history WITH the row in it (the snapshot is taken during the swap, before
+ *    afterRequest removes the live one), and Back restored the row as static
+ *    markup no tracker entry owned. So: the skeleton lands in #app-main for a
+ *    boosted request; htmx:beforeHistorySave strips every live skeleton and
+ *    busy mark before the snapshot; htmx:historyRestore and pageshow purge any
+ *    orphan a cache written before this fix still carries.
  *
  * 103 §A/§B added the FEEDBACK AND ATMOSPHERE layer — measured against
  * algoschool.app (notes T195), which has zero hx-boost and still reads as the
@@ -183,6 +193,21 @@
     detail.selectOverride = MAIN_SELECTOR;
     detail.swapOverride = SWAP_SPEC;
     return true;
+  }
+
+  /* The swap target a request will ACTUALLY replace, decided once and used at
+     both ends of the flight. htmx hands beforeRequest and afterRequest the same
+     detail object, whose `target` for a boosted navigation is <body> — the
+     retarget at #app-main happens later, in applyBoostSwap on beforeSwap. A
+     skeleton appended to body sits outside the shell and grows the document;
+     one appended to main sits in the scroll container it is standing in for. */
+  function swapTargetFor(detail, doc) {
+    if (!detail) return null;
+    if (detail.boosted && doc && doc.getElementById) {
+      var main = doc.getElementById(MAIN_ID);
+      if (main) return main;
+    }
+    return detail.target;
   }
 
   function progressBar(doc) {
@@ -303,9 +328,49 @@
       }
     }
 
+    /* Before htmx snapshots the page for history: every live skeleton and busy
+       mark comes off, entries and timers untouched — the request is still in
+       flight and its ending still runs, it just finds nothing left to remove. */
+    function snapshotClean() {
+      for (var i = 0; i < targets.length; i++) {
+        var entry = targets[i];
+        entry.target.removeAttribute("aria-busy");
+        if (entry.skeleton) {
+          if (entry.skeleton.parentNode) entry.skeleton.parentNode.removeChild(entry.skeleton);
+          entry.skeleton = null;
+        }
+      }
+    }
+
+    /* After a history restore (or a bfcache pageshow): a skeleton or an
+       aria-busy no entry owns is a leftover of a snapshot taken before
+       snapshotClean existed — caches in the field carry them — and is removed. */
+    function purgeOrphans(doc) {
+      if (!doc || !doc.querySelectorAll) return 0;
+      var owned = [];
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].skeleton) owned.push(targets[i].skeleton);
+      }
+      var removed = 0;
+      var stray = doc.querySelectorAll("." + SKELETON_CLASS);
+      for (var j = 0; j < stray.length; j++) {
+        if (owned.indexOf(stray[j]) !== -1) continue;
+        if (stray[j].parentNode) stray[j].parentNode.removeChild(stray[j]);
+        removed += 1;
+      }
+      var busyEls = doc.querySelectorAll('[aria-busy="true"]');
+      for (var k = 0; k < busyEls.length; k++) {
+        if (targetEntry(busyEls[k], false)) continue;
+        busyEls[k].removeAttribute("aria-busy");
+      }
+      return removed;
+    }
+
     return {
       begin: begin,
       end: end,
+      snapshotClean: snapshotClean,
+      purgeOrphans: purgeOrphans,
       inFlight: function () {
         return inFlight;
       },
@@ -778,11 +843,19 @@
     var busy = createBusyTracker(window, SKELETON_DELAY_MS);
     doc.body.addEventListener("htmx:beforeRequest", function (evt) {
       if (!evt.detail) return;
-      busy.begin(doc, evt.detail.elt, evt.detail.target);
+      busy.begin(doc, evt.detail.elt, swapTargetFor(evt.detail, doc));
     });
     doc.body.addEventListener("htmx:afterRequest", function (evt) {
       if (!evt.detail) return;
-      busy.end(doc, evt.detail.elt, evt.detail.target);
+      busy.end(doc, evt.detail.elt, swapTargetFor(evt.detail, doc));
+    });
+    /* Header note 9: the history snapshot carries no transient chrome, and a
+       restored page carries no orphan of one. */
+    doc.body.addEventListener("htmx:beforeHistorySave", function () {
+      busy.snapshotClean();
+    });
+    doc.body.addEventListener("htmx:historyRestore", function () {
+      busy.purgeOrphans(doc);
     });
 
     /* 103 §A — the click's own acknowledgement. The pend is on the CLICK, not on
@@ -822,7 +895,10 @@
     doc.body.addEventListener("htmx:afterSettle", clearPending);
     var terminal = ["htmx:responseError", "htmx:sendError", "htmx:timeout", "htmx:swapError", "htmx:sendAbort"];
     for (var t = 0; t < terminal.length; t++) doc.body.addEventListener(terminal[t], clearPending);
-    window.addEventListener("pageshow", clearPending);
+    window.addEventListener("pageshow", function (evt) {
+      clearPending(evt);
+      busy.purgeOrphans(doc);
+    });
 
     var resync = function () {
       syncNavActive(doc, window.location.pathname);
@@ -978,6 +1054,7 @@
     themeFromHref: themeFromHref,
     activeTheme: activeTheme,
     applyTheme: applyTheme,
+    swapTargetFor: swapTargetFor,
     setMenuOpen: setMenuOpen,
     menuIsOpen: menuIsOpen,
     menuSelection: menuSelection,

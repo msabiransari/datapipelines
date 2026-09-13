@@ -292,6 +292,100 @@ class ShellBusyBrowserTest : BrowserSuite() {
         }
     }
 
+    /**
+     * The owner's document scrollbar (2026-09-13, `/dashboard`): a boosted navigation's htmx
+     * target is `<body>` until shell.js retargets it at beforeSwap, so a navigation still in
+     * flight after 150ms armed the skeleton row ON BODY — outside the 100dvh shell, the one
+     * place that can grow the document. htmx then snapshotted the page for history with the
+     * row in it (the snapshot is taken during the swap, before afterRequest removes the live
+     * one), and Back restored the row as static markup no tracker owned. Held boosted GET,
+     * settle, Back: no skeleton anywhere, no body-level busy mark, and the document exactly
+     * the viewport's height — the same measurement AppShellBrowserTest's guard makes on a
+     * plain load, taken here on the path only a history restore walks.
+     */
+    @Test
+    fun `a slow boosted navigation leaves no skeleton behind - not live, not in the history snapshot`() {
+        startTrace()
+        loginReadyUser("orphan")
+        page.navigate("$baseUrl/dashboard")
+        page.waitForSelector("a.app-nav-link[href='/pipelines']")
+        val hold = BoostHold("/pipelines").apply { install() }
+        try {
+            page.waitForRequest({ req -> req.url().endsWith("/pipelines") && req.headers()["hx-request"] == "true" }) {
+                page.click("a.app-nav-link[href='/pipelines']")
+            }
+            hold.awaitCaptured(1)
+            // Past the arm: the skeleton exists, and it is INSIDE #app-main, not on body.
+            page.waitForSelector(".app-target-skeleton")
+            page.locator("#app-main > .app-target-skeleton").count() shouldBe 1
+            page.locator("body > .app-target-skeleton").count() shouldBe 0
+            hold.release()
+            page.waitForURL("**/pipelines")
+            barHidden()
+            page.locator(".app-target-skeleton").count() shouldBe 0
+
+            page.goBack()
+            page.waitForURL("**/dashboard")
+            page.waitForSelector("a.app-nav-link[href='/pipelines']")
+            page.locator(".app-target-skeleton").count() shouldBe 0
+            page.locator("body[aria-busy='true']").count() shouldBe 0
+            documentOverflow() shouldBe 0L
+        } finally {
+            hold.release()
+        }
+    }
+
+    /** How many pixels the DOCUMENT is taller than the viewport — 0 on a correct page. */
+    private fun documentOverflow(): Long =
+        (page.evaluate("() => document.documentElement.scrollHeight - document.documentElement.clientHeight") as Number).toLong()
+
+    /** Holds the boosted document GET for one section until [release] — ShellFeelBrowserTest's throttle. */
+    private inner class BoostHold(
+        private val section: String,
+    ) {
+        private val held = mutableListOf<Pair<Route, APIResponse>>()
+
+        @Volatile
+        private var captured = 0
+
+        @Suppress("SwallowedException") // a dead request has nothing to hold
+        fun install() {
+            page.route("**$section") { route ->
+                if (route.request().headers()["hx-request"] != "true") {
+                    route.resume()
+                    return@route
+                }
+                try {
+                    held.add(route to route.fetch())
+                    captured += 1
+                } catch (e: PlaywrightException) {
+                    // Died between interception and fetch — nothing to hold.
+                }
+            }
+        }
+
+        fun awaitCaptured(n: Int) {
+            val deadline = System.currentTimeMillis() + AWAIT_CAPTURED_TIMEOUT_MILLIS
+            while (captured < n) {
+                if (System.currentTimeMillis() > deadline) throw AssertionError("hold captured $captured of $n boosted GETs")
+                page.evaluate("() => 0")
+            }
+        }
+
+        @Suppress("SwallowedException") // already handled; nothing left to do
+        fun release() {
+            val batch = held.toList()
+            held.clear()
+            for ((route, response) in batch) {
+                try {
+                    route.fulfill(Route.FulfillOptions().setResponse(response))
+                } catch (e: PlaywrightException) {
+                    // Already handled.
+                }
+            }
+        }
+    }
+
     @Test
     fun `a fast swap never flashes the skeleton`() {
         startTrace()
