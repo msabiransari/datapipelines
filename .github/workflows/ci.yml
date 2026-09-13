@@ -1,5 +1,10 @@
 # GitHub Actions CI (025 E1/E2, closing O2/O3; 025b review round). Free on public repos.
 #
+# RUNNER SIZING — every job first writes a gradle.properties into its Gradle user home that
+# sizes Gradle for the 2-vCPU runner (workers 2, no test forks, 2 GB daemons); the repo's
+# gradle.properties is sized for the dev box and would oversubscribe this one
+# (DEVELOPMENT.md §9.5).
+#
 # WHAT RUNS WHERE —
 #
 #   gate (ubuntu-latest, REQUIRES the runner's Docker daemon):
@@ -77,6 +82,23 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      # Size Gradle for THIS runner (2 vCPU / 7 GB), not for the repo's defaults, which
+      # gradle.properties sizes for a 96-thread dev box (DEVELOPMENT.md §9.5). A per-machine
+      # gradle.properties in the Gradle user home wins over the repo's — the documented
+      # override path. At the repo defaults (workers 6, forked test JVMs, 3+4 GB daemons)
+      # this runner is oversubscribed and load-sensitive UI assertions lose their race
+      # (2026-09-13: an entrance animation measured 116.7 ms against its 120 ms floor).
+      - name: size Gradle for the runner
+        run: |
+          mkdir -p ~/.gradle
+          cat >> ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.workers.max=2
+          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          kotlin.daemon.jvmargs=-Xmx2g
+          dp.test.forks=1
+          dp.test.forks.e2e=1
+          dp.test.heap=1g
+          EOF
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         run: ./gradlew build ktlintCheck detekt -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
       - name: docs audit
@@ -92,6 +114,23 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      # Size Gradle for THIS runner (2 vCPU / 7 GB), not for the repo's defaults, which
+      # gradle.properties sizes for a 96-thread dev box (DEVELOPMENT.md §9.5). A per-machine
+      # gradle.properties in the Gradle user home wins over the repo's — the documented
+      # override path. At the repo defaults (workers 6, forked test JVMs, 3+4 GB daemons)
+      # this runner is oversubscribed and load-sensitive UI assertions lose their race
+      # (2026-09-13: an entrance animation measured 116.7 ms against its 120 ms floor).
+      - name: size Gradle for the runner
+        run: |
+          mkdir -p ~/.gradle
+          cat >> ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.workers.max=2
+          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          kotlin.daemon.jvmargs=-Xmx2g
+          dp.test.forks=1
+          dp.test.forks.e2e=1
+          dp.test.heap=1g
+          EOF
       - name: integration tests + fat-jar smoke (Testcontainers; Docker required)
         run: ./gradlew integrationTest
 
@@ -107,6 +146,23 @@ jobs:
       # NO setup-gradle cache here — a warm cache is exactly the blind spot this job
       # exists to close. GRADLE_USER_HOME points at a fresh dir so every dependency,
       # POM and module-metadata file is downloaded and therefore VERIFIED.
+      # Size Gradle for THIS runner (2 vCPU / 7 GB), not for the repo's defaults, which
+      # gradle.properties sizes for a 96-thread dev box (DEVELOPMENT.md §9.5). A per-machine
+      # gradle.properties in the Gradle user home wins over the repo's — the documented
+      # override path. At the repo defaults (workers 6, forked test JVMs, 3+4 GB daemons)
+      # this runner is oversubscribed and load-sensitive UI assertions lose their race
+      # (2026-09-13: an entrance animation measured 116.7 ms against its 120 ms floor).
+      - name: size Gradle for the runner
+        run: |
+          mkdir -p ${{ runner.temp }}/cold-gradle-home
+          cat >> ${{ runner.temp }}/cold-gradle-home/gradle.properties <<'EOF'
+          org.gradle.workers.max=2
+          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          kotlin.daemon.jvmargs=-Xmx2g
+          dp.test.forks=1
+          dp.test.forks.e2e=1
+          dp.test.heap=1g
+          EOF
       - name: cold-cache dependency verification (the T30 guard)
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home

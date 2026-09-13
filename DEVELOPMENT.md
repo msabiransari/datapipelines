@@ -614,8 +614,11 @@ above.
 ### 9.5 Sizing the build for your machine
 
 The gate's wall time is decided by three knobs and one budget. All three live in
-`gradle.properties` (repo defaults) and can be overridden per machine in
-`~/.gradle/gradle.properties` or per run with `-P`:
+`gradle.properties` (repo defaults, sized for the 96-thread dev box) and can be overridden per
+machine in `~/.gradle/gradle.properties` or per run with `-P`. CI is the worked example: every
+job in `.github/workflows/ci.yml` first writes that file for GitHub's 2-vCPU runner (workers 2,
+no forks, 2 GB daemons) — at the repo defaults the runner is oversubscribed and load-sensitive
+UI assertions lose their race.
 
 | Knob | Default | What it buys | What it costs |
 |---|---|---|---|
