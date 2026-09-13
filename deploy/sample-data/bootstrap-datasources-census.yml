@@ -32,9 +32,8 @@ datasources:
     # as "Census-verified" or "Census-powered".
     description: >-
       US Census monthly imports/exports at HS-6 grain for the top-15 trading
-      partners (data-derived), 2023-2024, plus partner and HS-chapter lookups
-      and the Census-to-ISO partner crosswalk. Tables: trade_monthly, partners,
-      hs_chapters, trade_flow_monthly, partner_iso_crosswalk.
+      partners, 2023-2024, with partner and HS-chapter lookups and the
+      Census-to-ISO partner crosswalk.
       This product uses the Census Bureau Data API but is not endorsed or
       certified by the Census Bureau.
     dialect: DUCKDB
@@ -63,9 +62,8 @@ datasources:
     display_name: "World Trade Mirror (sample)"
     description: >-
       UN Comtrade mirror statistics: what the top-5 partners report trading
-      with the USA, annual TOTAL level, 2022-2024 — reconciled against the
-      US-reported facts in sample-trade-us. Tables: comtrade_annual,
-      reporters. Source: UN Comtrade (https://comtradeplus.un.org).
+      with the USA, annual totals, 2022-2024.
+      Source: UN Comtrade (https://comtradeplus.un.org).
     dialect: MYSQL
     jdbc_url: jdbc:mysql://mysql:3306/dp_sample_trade
     credential:
@@ -78,13 +76,9 @@ datasources:
   - name: sample-fx
     display_name: "Foreign Exchange Rates (sample)"
     description: >-
-      Federal Reserve H.10 daily noon buying rates and their G.5 monthly
-      averages for the five currencies of the reconciled trading partners
-      (CAD, CNY, EUR, JPY, MXN), 2023-2024, with the Census partner-to-currency
-      lookup. per_usd is always foreign-currency-per-USD and usd_per its
-      inverse, so no query divides. Tables: fx_daily, fx_monthly, currencies,
-      partner_currency. Source: Board of Governors of the Federal Reserve
-      System, H.10.
+      Federal Reserve H.10 daily and G.5 monthly exchange rates for CAD, CNY,
+      EUR, JPY and MXN, 2023-2024, with the partner-to-currency lookup.
+      Source: Board of Governors of the Federal Reserve System, H.10.
     dialect: SQLITE
     # A FILE, exactly like the NYC family's reference db: no server, no login,
     # and the xerial driver ignores both of these values entirely. Non-empty
