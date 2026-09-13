@@ -113,7 +113,7 @@ class LakeTablesImportTool(
         McpTools.tool(
             name = "lake_tables_import",
             description =
-                "Bulk-register lake tables from a manifest.json tables[] block (the sample-data-lake shape). " +
+                "Bulk-register lake tables from a manifest's `tables[]` shape. " +
                     "Mirrors POST /api/v1/datasources/{name}/tables/import: pass EITHER tables (an array of " +
                     "{name, format, location|path, partition_column?, namespace?}, with publish_prefix for " +
                     "relative paths and an optional shared namespace) OR manifest_url. A manifest URL is fetched " +

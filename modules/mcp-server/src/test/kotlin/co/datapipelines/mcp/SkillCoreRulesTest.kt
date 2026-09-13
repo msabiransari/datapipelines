@@ -71,6 +71,11 @@ class SkillCoreRulesTest {
         assertClause("lands as `asserted`")
     }
 
+    @Test
+    fun `the record is the primary act - the reply is not what the next session finds`() {
+        assertClause("not your reply")
+    }
+
     /** Finds [clause] somewhere in SKILL.md and fails naming the line when absent. */
     private fun assertClause(clause: String) {
         val found = lines.indexOfFirst { it.contains(clause) }

@@ -330,13 +330,13 @@ here.
     in every template's `description`. The calculator's `context_key` is already an optional
     execute input — never also declare it as a parameter
     (`pipeline.validation.calculator_output_collision`).
-13½. **A number you did not measure is not a number.** Row counts, sample rates and windows
-    come from `datasources_get_table_stats`, a probe, or a metadata table — never estimated.
-    When the data cannot reveal a fact you depend on (a sample rate no table states, a time
-    zone no type states): write the assumption into the pipeline's `description`,
-    `semantics_record` it WITHOUT evidence so it lands as `asserted` for a human to verify,
-    and say which facts you derived and which you assumed. An assumption that moves the answer
-    by an order of magnitude: stop and ask first.
+13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come
+    from `datasources_get_table_stats`, a probe, or a metadata table — never estimated. When the
+    data cannot reveal a fact you depend on (a sample rate no table states, a time zone no type
+    states): write the assumption into the pipeline's `description`, `semantics_record` it WITHOUT
+    evidence so it lands as `asserted` for a human to verify — that record, not your reply, is what
+    the next session finds — and say in the reply which facts you derived and which you assumed. An
+    assumption that moves the answer by an order of magnitude: stop and ask first.
 14. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
     H2 fails to match the GROUP BY expression to the identical SELECT expression when it
     contains a parameter marker — `Column "x.amount" must be in the GROUP BY list`
@@ -391,7 +391,7 @@ Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` 
 - `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (38 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (tools, prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings
