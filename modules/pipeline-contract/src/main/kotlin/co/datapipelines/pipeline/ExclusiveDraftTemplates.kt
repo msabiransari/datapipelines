@@ -12,9 +12,10 @@ import java.util.UUID
  * and the aggregation layer supplies the implementation over `TemplateRepository` — the
  * established pattern, not a new one.
  *
- * "Exclusive" is precise (§3.5): the template's ONLY version is a DRAFT, and no live
- * pipeline version OTHER than [pipelineId]'s pins it — it is this pipeline's private
- * work-in-progress, orphaned by the purge, and safe to offer.
+ * "Exclusive" is precise (§3.5): the template's ONLY version is a DRAFT, and no stored
+ * pipeline version OTHER than [pipelineId]'s pins it — DRAFT, RELEASED or DISCARDED (owner
+ * ruling R12, 2026-09-13: a discarded version can be restored and must keep what it runs).
+ * It is this pipeline's private work-in-progress, orphaned by the purge, and safe to offer.
  */
 interface ExclusiveDraftTemplates {
     /** The ids (template names) of the draft-only templates [pipelineId] pins exclusively. */

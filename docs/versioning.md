@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.8 — 117 template update tool: `templates_update` is the §7.1 MCP authoring path for templates (no lifecycle rule changed)
+**Status:** v1.9 — R12: a discarded pipeline version protects the draft templates it pins (the entity-purge offer counted only live pinners)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-09-11
@@ -240,7 +240,9 @@ first."*
 
 **Purging a draft pipeline offers its exclusive draft templates.** The purge call accepts
 `include_exclusive_draft_templates: true`: the service computes the set of DRAFT template
-versions the draft body pins that no OTHER live pipeline version pins, and either purges
+versions the draft body pins that no OTHER stored pipeline version pins — DRAFT, RELEASED or
+DISCARDED alike (R12, 2026-09-13: a discarded version can be restored and must keep what it
+runs; a purged version has no row and cannot pin) — and either purges
 them with the pipeline (true) or merely returns them in the response (false, the default)
 — either way the caller sees the set, so the UI (102's entity-purge dialog, §4.3d) offers
 the cleanup as a checkbox and the default is the same offer the response carries.
@@ -276,7 +278,7 @@ substitute `template.version.last_release` / `not_released` / `not_discarded` /
 | {D} | `1D cur=∅` | release | dev | — | allowed | `1R cur=1` | ACTIVE |
 | {D} | `1D cur=∅` | purge(v1) | dev | — | allowed — row + executions deleted; sole version ⇒ entity purge | entity gone | gone |
 | {D} | `1D cur=∅` | purge(entity) | dev | — | allowed — same outcome as purge(v1) | entity gone | gone |
-| {D} | `1D cur=∅` | purge(entity) | dev | draft template pinned by a live pipeline version (template twin) | refused `template.in_use` | `1D cur=∅` | ACTIVE |
+| {D} | `1D cur=∅` | purge(entity) | dev | draft template pinned by a stored pipeline version, discarded included (template twin) | refused `template.in_use` | `1D cur=∅` | ACTIVE |
 | {D} | `1D cur=∅` | discard(v1) | dev | — | refused `pipeline.version.not_released` (drafts are purged, never discarded) | `1D cur=∅` | ACTIVE |
 | {D} | `1D cur=∅` | switch(v1) | dev | — | allowed — a draft is eligible in development | `1D cur=1` | ACTIVE |
 | {D} | `1D cur=∅` | switch(v1) | hard | — | refused `pipeline.version.not_eligible` | `1D cur=∅` | ACTIVE |
@@ -292,7 +294,7 @@ substitute `template.version.last_release` / `not_released` / `not_discarded` /
 | {R,D} | `1R 2D cur=1` | release | dev | — | allowed | `1R 2R cur=2` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | release | dev | draft pins a DRAFT template version | refused `pipeline.release.template_not_released` (§5.3's rule, restated) | `1R 2D cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | purge(v2) | dev | — | allowed — draft + its executions deleted | `1R cur=1` | ACTIVE |
-| {R,D} | `1R 2D cur=1` | purge(v2) | dev | draft template v2 pinned by another live pipeline version (template twin) | refused `template.in_use` | `1R 2D cur=1` | ACTIVE |
+| {R,D} | `1R 2D cur=1` | purge(v2) | dev | draft template v2 pinned by another stored pipeline version, discarded included (template twin) | refused `template.in_use` | `1R 2D cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | discard(v1) | dev | — | allowed — fallback: the draft is the highest eligible live version | `1X 2D cur=2` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | switch(v2) | dev | — | allowed | `1R 2D cur=2` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | switch(v2) | hard | — | refused `pipeline.version.not_eligible` | `1R 2D cur=1` | ACTIVE |
@@ -1265,6 +1267,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v1.9 | R12 discarded pinners protect | §3.5: **a DISCARDED pipeline version protects the draft templates it pins**, exactly like a live one. The entity purge's exclusive-template offer counted only DRAFT/RELEASED pinners of other pipelines (`EXCLUSIVE_DRAFT_TEMPLATES_SQL`), so purging pipeline B could take a template that A's discarded version still pins, and D59's "restore always works" would revive a version that cannot run. Owner ruling (b): restore must keep what it runs — the status filter on other pinners is gone (a purged version has no row and never pinned). The direct template purge/discard guard (`findAnyVersionTemplatePins`) already counted every stored version; its prose said "live" and now says "stored". Found by `ExclusiveDraftTemplatesIntegrationTest`, the first test of that SQL (the service suite stubs the seam, the web suites stub the model); the table's two template-twin rows reworded, still excluded from the replay by their "(template twin)" marker. |
 | 2026-09-11 | v1.8 | 117 templates_update | §7.1's MCP-authoring paragraph now names the template twin: `templates_update` calls the same `TemplateDraftService.write` as `PUT /templates` and lands its work as drafts, with the `If-Match` hash as the required `expected_hash` argument. No lifecycle rule changed — the agent writes the draft, a human releases (D4). |
 | 2026-09-08 | v1.7 | 101 version lifecycle (D57–D60) | **§3 rewritten** as a table-first model: version statuses `DRAFT → RELEASED → DISCARDED` with the verb pairing **purge = the draft verb** (row hard-deleted WITH its executions — the §3.4 tombstone rule and every sentence about the executed-draft DISCARDED flip are withdrawn), **discard = the release verb** (reversible via **restore**), entity status **derived** (ACTIVE while any version is live; DISCARDED when all are), **names unique forever** (D59 — `is_deleted` soft delete retired in V19, every reader moves to the derived status, `pipeline_reference_deleted` becomes the derived entity-DISCARDED refusal), and **`current_version` sticky and event-driven** (D60 — moves only on release / discard-of-current / restore-above-current / manual switch / purge-of-current-draft; picks the highest ELIGIBLE live version; DRAFT eligible only under development posture; import never moves an existing pointer except the first import onto a current-less entity). **New §3.5 "The lifecycle table"**: ~67 rows over ten version-set shapes × events × postures with an inbound-edge column — the ruling, parsed by `VersioningSpecDriftTest` so the model test runs the DOC's rows. New decisions **D57** (≥ 1 version row; `last_release` refuses only the purge path on a release), **D58** (PIPELINE nodes pin RELEASED children only — `pipeline.validation.pipeline_reference_not_released` at save), **D59**, **D60**. §5.4 is now the draft purge (executions deleted in-transaction, Redis keys expire on TTL); §7's REST table gains the 101 verbs (all MUTATE_PIPELINES_TEMPLATES, all **session-only**, all audited — `pipeline.version.discarded/restored/purged`, `pipeline.purged`, `pipeline.current_switched`, template twins); §9.2's import table drops "bump if greater" for the D60 pointer rule, and index metadata now rides the pointer, not the number. §13 gains the model-test acceptance gate. Old §3.2/§3.5 became §3.6/§3.7. |
 | 2026-09-08 | v1.6 | 099 draft-first (D55/D56) | **§3.2 rewritten.** Creation lands version 1 as a **DRAFT** for pipelines and templates alike, and `pipelines.current_version` / `templates.current_version` are NULL until a human releases (`V18` makes them nullable and drops `DEFAULT 0`; the two import readers that did arithmetic on the pointer read it through `COALESCE(…, 0)`). The old sentence — "creation is not a modification … lands version 1 directly as RELEASED, so an MCP-authored pipeline is executable the moment it is created" — was an ASSUMPTION written 2026-08-31, never ratified, contradicting D4, and its only justification has been false since 039 made drafts executable. **New §7.2:** execute with no version runs the WORKING version (draft if one exists, else the latest release), resolved in ONE place (`PipelineService.workingVersion`) for REST execute, `pipelines_execute` and the MCP body resource; released-only surfaces (promotion candidates and inventory, published endpoints, the export bundle) are unchanged and now say so. §3.4 records the nullable pointer, the working-version reads and the one "no version at all" state (discard of the sole draft of a never-released pipeline). §7's REST rows updated; new decisions **D55** (create lands DRAFT, D4 without exception) and **D56** (execute runs the last version; hardened deployments hold no drafts by construction). The non-authoring create paths — promotion import and the seeders that ride it — still land RELEASED, now as a required `CreateLifecycle` argument rather than an implicit default. |

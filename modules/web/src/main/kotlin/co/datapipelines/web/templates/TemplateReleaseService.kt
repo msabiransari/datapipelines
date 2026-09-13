@@ -164,7 +164,7 @@ open class TemplateReleaseService(
 
     /**
      * §3.2 (101) — the template entity purge: only when the ONLY version is a DRAFT and no
-     * live pipeline version pins ANY version of the template (`template.in_use` otherwise;
+     * stored pipeline version — draft, released or discarded — pins ANY version of the template (`template.in_use` otherwise;
      * a non-draft version present is `template.version.last_release`).
      */
     @Transactional("metadataTransactionManager")

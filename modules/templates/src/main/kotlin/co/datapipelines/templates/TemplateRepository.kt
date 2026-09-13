@@ -1580,9 +1580,13 @@ class TemplateRepository(
 
         /**
          * §3.5 (101) — the entity purge's offer: DRAFT-ONLY templates whose only pinner
-         * among LIVE pipeline versions is the pipeline being purged. The pin probes walk the
-         * nodes laterally and match the template pin exactly — a text LIKE over the body
-         * would false-positive on a name that merely appears in prose.
+         * among pipeline versions is the pipeline being purged. "Only pinner" counts EVERY
+         * stored version of every other pipeline — DRAFT, RELEASED and DISCARDED alike
+         * (owner ruling R12, 2026-09-13): a discarded version can be restored, and restore
+         * would lose its meaning if the templates it runs could be purged out from under it.
+         * A purged version has no row, so it cannot pin. The pin probes walk the nodes
+         * laterally and match the template pin exactly — a text LIKE over the body would
+         * false-positive on a name that merely appears in prose.
          */
         private val EXCLUSIVE_DRAFT_TEMPLATES_SQL =
             """
@@ -1600,7 +1604,7 @@ class TemplateRepository(
                AND NOT EXISTS (
                    SELECT 1 FROM pipeline_versions pv JOIN pipelines pp ON pp.id = pv.pipeline_id
                    CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
-                    WHERE pv.pipeline_id <> :pipelineId AND pv.status IN ('DRAFT','RELEASED')
+                    WHERE pv.pipeline_id <> :pipelineId
                       AND pp.workspace_id = :workspaceId
                       AND pnode->'template'->>'id' = t.name
                )

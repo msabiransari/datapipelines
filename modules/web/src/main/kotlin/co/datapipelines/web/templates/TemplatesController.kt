@@ -300,7 +300,7 @@ class TemplatesController(
 
     /**
      * §8 (101) — discard RELEASED version v: flip to DISCARDED (reversible via restore),
-     * pointer per D60; `template.in_use` while a live pipeline version pins it. The name and
+     * pointer per D60; `template.in_use` while any stored pipeline version (discarded included) pins it. The name and
      * version are body fields (§9.6: the name never travels in a path segment). Session-only,
      * audited.
      */

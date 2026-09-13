@@ -990,7 +990,7 @@ POST /templates/current                  {"name": "...", "version": 2}
 
 The pipeline twins by name (§5.12–§5.15; §9.6: the name never travels in a path segment):
 discard flips a RELEASED version to DISCARDED (`409 template.version.not_released`;
-`409 template.in_use` while a live pipeline version pins it), restore brings it back
+`409 template.in_use` while any stored pipeline version — discarded included — pins it), restore brings it back
 (`template.version.not_discarded`), purge is drafts-only
 (`template.version.last_release`), and `current` is the manual switch
 (`template.version.not_eligible`). The template's sticky pointer follows the same D60
@@ -1019,7 +1019,7 @@ DELETE /templates?name={path}
 
 **The entity purge** (replaces the V1 soft delete, retired in V19): allowed only when the
 template's ONLY version is a DRAFT (`409 template.version.last_release` otherwise) and no
-live pipeline version pins any version of it (`409 template.in_use`, naming the pinners).
+stored pipeline version — draft, released or discarded — pins any version of it (`409 template.in_use`, naming the pinners).
 Existing pipelines referencing any version continue to work (we never hard-delete template
 versions); **session-only**, audited as `template.purged`.
 

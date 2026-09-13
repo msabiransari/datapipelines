@@ -624,7 +624,7 @@ open class PipelineService(
     /** What an entity purge produced (§3.2) — and the exclusive draft templates it offered. */
     data class EntityPurgeResult(
         val executionsDeleted: Int,
-        /** Draft-only templates pinned by this draft body and by no OTHER live pipeline version. */
+        /** Draft-only templates pinned by this draft body and by no OTHER stored pipeline version (discarded included, R12). */
         val exclusiveDraftTemplates: List<String>,
         /** Whether [exclusiveDraftTemplates] were purged with the entity (the `include` flag). */
         val exclusiveTemplatesPurged: Boolean,
@@ -637,7 +637,7 @@ open class PipelineService(
      * `pipeline.version.pinned`.
      *
      * [includeExclusiveDraftTemplates] computes the set of DRAFT-ONLY templates the draft
-     * body pins that no OTHER live pipeline version pins, and (when true) purges them with
+     * body pins that no OTHER stored pipeline version pins (discarded included, R12), and (when true) purges them with
      * the entity. Either way the response carries the set (§3.5) — the UI (102) shows the
      * offer even when the caller did not take it.
      *

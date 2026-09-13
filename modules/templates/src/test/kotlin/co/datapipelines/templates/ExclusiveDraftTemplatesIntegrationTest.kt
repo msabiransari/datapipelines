@@ -110,18 +110,19 @@ class ExclusiveDraftTemplatesIntegrationTest {
     }
 
     /**
-     * §3.5's word is LIVE: a DISCARDED version of another pipeline does not protect the template.
-     * This pins the rule as written so that a change to it is a decision, not drift — the ledger
-     * (R12) asks the owner whether a discarded pinner should count, since D59 promises "restore
-     * always works" and a restored version whose template was purged cannot run.
+     * Owner ruling R12 (2026-09-13): a DISCARDED version of another pipeline protects the
+     * template exactly like a live one — a discarded version can be restored (D59: "restore
+     * always works"), and restore would lose its meaning if the templates it runs could be
+     * purged out from under it. Before the ruling the query counted only DRAFT/RELEASED pinners.
      */
     @Test
-    fun `a pin held only by another pipeline's DISCARDED version does not protect the template`() {
+    fun `a pin held only by another pipeline's DISCARDED version protects the template - restore must keep what it runs`() {
         draftTemplate("demo/lake/only_live.sql")
-        val mine = pipeline("demo/p1", "DRAFT", pins = listOf("demo/lake/only_live.sql"))
+        draftTemplate("demo/lake/truly_mine.sql")
+        val mine = pipeline("demo/p1", "DRAFT", pins = listOf("demo/lake/only_live.sql", "demo/lake/truly_mine.sql"))
         pipeline("demo/p2", "DISCARDED", pins = listOf("demo/lake/only_live.sql"))
 
-        repository.exclusiveDraftTemplateIds(workspaceId, mine) shouldContainExactly listOf("demo/lake/only_live.sql")
+        repository.exclusiveDraftTemplateIds(workspaceId, mine) shouldContainExactly listOf("demo/lake/truly_mine.sql")
     }
 
     // ------------------------------------------------------------------ fixtures
