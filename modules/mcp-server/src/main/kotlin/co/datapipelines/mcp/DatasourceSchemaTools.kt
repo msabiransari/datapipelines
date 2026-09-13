@@ -3,10 +3,12 @@ package co.datapipelines.mcp
 import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
+import co.datapipelines.datasources.IndexStats
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 
 /*
  * The schema-introspection tools (mcp-server.md §6.2.16–18, datasources.md §7A) — thin adapters
@@ -214,6 +216,10 @@ class DatasourcesGetTableStatsTool(
             description =
                 "One table's catalog statistics: a row estimate, the index list (a lake table's partition column " +
                     "reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds. " +
+                    "For a LAKE table the payload also carries partition_column: the registered partition column's " +
+                    "name, or null when the table has none — null means ONE unpartitioned file every read scans " +
+                    "whole; filter pushdown inside a file is not pruning, whatever a plan's READ_PARQUET filter " +
+                    "line shows. " +
                     "Every number comes from the engine's own catalog (pg_class, information_schema, parquet " +
                     "footers) — never a scan of the table, so this is safe at any table size. When a dialect holds " +
                     "no catalog stats the stat fields are null and stats_source is \"none\" — probe an explicit " +
@@ -245,7 +251,23 @@ class DatasourcesGetTableStatsTool(
         val name = args.requiredString("name")
         val table = args.requiredString("table")
         val gated = datasources.requireVisible(name, ctx)
-        return introspecting(name) { introspector.tableStats(gated, table, args.namespace()).toWireMap() }
+        return introspecting(name) {
+            val stats = introspector.tableStats(gated, table, args.namespace())
+            val wire = stats.toWireMap()
+            // 125 §B2 — a LAKE table says its partition status OUT LOUD: the registered column's
+            // name, or an explicit null. Inferring the absence from an empty `partition`-kind
+            // index list is the inference both audited acceptance runs got wrong.
+            if (gated.dialect == Dialect.LAKE) {
+                val partitionColumn =
+                    stats.indexes
+                        .firstOrNull { it.kind == IndexStats.INDEX_KIND_PARTITION }
+                        ?.columns
+                        ?.firstOrNull()
+                wire + ("partition_column" to partitionColumn)
+            } else {
+                wire
+            }
+        }
     }
 }
 

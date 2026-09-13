@@ -51,7 +51,13 @@ the network from S3 when the engine scans them, and you pay for what you scan: a
 the partition column (`WHERE event_date = DATE '2024-06-01'` or
 `WHERE event_date BETWEEN :start_date AND :end_date`) makes the engine read only the
 matching partitions, while an unfiltered `SELECT *` over a partitioned table downloads every
-partition. Write the predicate into the template by default, not as an afterthought:
+partition. **First check the table HAS one — the stats read is the only place that says.**
+`datasources_get_table_stats` reports a registered partition column as `partition_column`
+(and an index entry of kind `partition`); `partition_column: null` means the table is ONE
+unpartitioned file and every read scans it whole — row-group filter pushdown inside a file
+is not pruning, whatever the plan's `READ_PARQUET` filter line shows. Never write "the read
+prunes on the partition column" into a description from a plan alone. Write the predicate
+into the template by default, not as an afterthought:
 
 ```sql
 SELECT event_date, region_id, SUM(event_count) AS events

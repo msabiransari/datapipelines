@@ -76,6 +76,16 @@ class SkillCoreRulesTest {
         assertClause("not your reply")
     }
 
+    @Test
+    fun `a last-N-periods phrase anchors on the day AFTER the data's last date - 125 A1`() {
+        assertClause("the day AFTER the data's last date")
+    }
+
+    @Test
+    fun `a description never carries claims about the agent's own process - 125 A2`() {
+        assertClause("never claims about your own process")
+    }
+
     /** Finds [clause] somewhere in SKILL.md and fails naming the line when absent. */
     private fun assertClause(clause: String) {
         val found = lines.indexOfFirst { it.contains(clause) }

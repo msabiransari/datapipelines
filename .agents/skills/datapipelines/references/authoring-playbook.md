@@ -18,8 +18,9 @@ assumption that survives into your SQL must have been checked against them.
 The mandatory read order, for **every** datasource a pipeline will touch:
 
 1. `datasources_get` — the description (grain, sampling, units, window, time zone, if the
-   registrant wrote them), the dialect, and for a lake datasource the registered tables with
-   their partition columns and any `last_error`.
+   registrant wrote them), the dialect, and the connection facts. It does NOT list tables:
+   a lake's registered tables come from `datasources_get_tables`, and their partition
+   status from `datasources_get_table_stats` (step 4).
 2. `datasources_get_schemas` → `datasources_get_tables(namespace)` — every table, with its
    `remarks`. Read the names as an analyst would (§2), then confirm.
 3. `datasources_get_columns(table, namespace)` for every table the SQL will read — canonical
@@ -28,12 +29,18 @@ The mandatory read order, for **every** datasource a pipeline will touch:
 4. `datasources_get_table_stats(table)` — row estimate, indexes, per-column bounds, from the
    catalog (never a scan). The bounds tell you the data's window and whether a timestamp
    column carries dates or date-times; the indexes tell you which predicates will be cheap.
+   For a lake table this is also the ONE read that states partition status: a registered
+   partition column reports as `partition_column` (and an index entry of kind `partition`);
+   `partition_column: null` means the table is one unpartitioned file that every read
+   scans whole — filter pushdown inside a file is not pruning, whatever the plan shows.
 5. `sql_probe` — a few rows of every table you will filter or join on, and the distinct
    values of every column you will filter on, group by, or join by. This is where you learn
    what a code means, whether a "date" is text, whether an empty value is `NULL` or `''`,
    whether a numeric column is in the unit its name suggests, whether a timestamp is local
    or UTC (compare a known event; read the `remarks`; if nothing says, treat it as naive
-   local and write that assumption down).
+   local and write that assumption down). A claim about which values a column holds over the
+   WHOLE table needs a whole-table probe (`SELECT col, MIN(d), MAX(d) … GROUP BY col` over
+   the full window) — never an inference from a lookup table or a description.
 
    With NO description — the usual case; nobody fills table- and column-level detail into a
    form — the surfaces still answer, one line each:
@@ -50,6 +57,12 @@ The mandatory read order, for **every** datasource a pipeline will touch:
    that the schema alone does not state (time zone, units, sampling, grain, partition
    column, window, what an enum value means). A reader who cannot see your probes must
    still be able to trust your numbers.
+7. **Then re-read that description before `pipelines_create`, and strike every sentence you
+   cannot point at a call you made.** A description carries facts about the data and the
+   interpretation you chose — never claims about your own process: "validated", "reproduced",
+   "checked" go in your reply to the person, not in a home that outlives the session. And a
+   description is an EXEMPLAR: the next agent reads existing pipelines to copy their idioms,
+   so a claim you wrote without running its probe is a claim the next pipeline inherits.
 
 Two facts you must establish before you touch a number: **is this table a sample or a
 census** (a hash-sampled feed compared to a full count as a share gives nonsense; if a
@@ -95,7 +108,12 @@ semantics; the question's words decide the window.
 - **"Today" is a decision, say which.** `$current_date` is right for a live, scheduled
   pipeline. For a fixed dataset — read its window from the stats or the description — an
   `as_of` (or window) parameter **defaulting to the data's last date** is right, or "last
-  quarter" resolves to an empty window next year. A relative phrase is never yours to
+  quarter" resolves to an empty window next year. **One correction for the trailing kinds:**
+  `trailing_periods` and `prior_period` resolve the complete periods immediately before the
+  one CONTAINING the anchor, so for them the anchor defaults to **the day AFTER the data's
+  last date** — data ends 2026-06-30, "last quarter" → anchor `2026-07-01` →
+  2026-04-01..2026-06-30; anchored `2026-06-30` (still inside Q2) it resolves Q1. A relative
+  phrase is never yours to
   interpret: read `calculators_list`, pick the kind whose `phrases` match the question's
   words — asking the person when two kinds fit — then write the interpretation you chose
   into the pipeline's description in the question's own words, and name the window the same
@@ -146,8 +164,13 @@ semantics; the question's words decide the window.
   `settings.timeout_seconds` and say why in your handback — see Timeouts below.
 - **One template, bound per node.** If two nodes run the same SQL over different values,
   that is one template with parameters, not two copies. Copies drift.
-- **On a lake table, filter on the PARTITION column.** `datasources_get` names each
-  registered table's partition column; a predicate over that column prunes:
+- **On a lake table, read the stats first — a table with no `partition` index has no
+  partition column to filter on.** `datasources_get_table_stats` is the one read that states
+  partition status: a registered partition column reports as `partition_column` and an index
+  entry of kind `partition`; `partition_column: null` means the table is ONE unpartitioned
+  file and every read scans it whole — row-group filter pushdown inside the file is not
+  pruning, whatever the plan's `READ_PARQUET` filter line shows. When the column IS
+  registered, a predicate over it prunes:
   `WHERE <partition_col> IN (DATE '…', …)`, `BETWEEN` two dates, and — measured on
   DuckDB 1.5.5 — a deterministic expression of the column such as `CAST(<partition_col> AS …)`
   still prune. **Bound parameters prune too**: write `:d` for a date filter and the engine
@@ -175,8 +198,9 @@ semantics; the question's words decide the window.
   just met.
   **Stop-loss: three identical failures → stop and report.** A schema refusal is not
   your typo — re-introspect or hand back; a fourth identical call changes nothing.
-- **A table marked unavailable is broken at the lake, not by your query.** If
-  `datasources_get` shows a lake table with `last_error` set, or a node fails
+- **A table marked unavailable is broken at the lake, not by your query.** If a lake
+  table's registration carries a `last_error` (the register/import response shows it), or a
+  node fails
   `datasource.lake.table_unavailable`, the table's view failed to build at connect
   (bad prefix, wrong format, unreadable files) and was skipped. Re-running the query will
   never fix it — report the recorded `last_error` to the user and let them re-register or

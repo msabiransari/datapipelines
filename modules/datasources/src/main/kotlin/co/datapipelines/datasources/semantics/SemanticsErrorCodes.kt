@@ -18,6 +18,9 @@ object SemanticsErrorCodes {
     /** A ref does not resolve against live introspection — the store never starts stale (§3.1). */
     const val REF_UNRESOLVED = "semantics.ref_unresolved"
 
+    /** The fact's text names a table its `refs` do not (125 §B) — raised by the MCP tool, which owns the check. */
+    const val REF_MISMATCH = "semantics.ref_mismatch"
+
     /** `evidence_sql` is not a single read-only SELECT/WITH, or names a parameter. Refused before any connection opens. */
     const val EVIDENCE_REFUSED = "semantics.evidence_refused"
 

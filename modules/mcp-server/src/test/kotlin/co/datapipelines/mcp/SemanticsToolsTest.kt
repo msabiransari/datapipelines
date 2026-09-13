@@ -5,6 +5,9 @@ import co.datapipelines.auth.Capability
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.SchemaIntrospector
+import co.datapipelines.datasources.TableInfo
+import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.semantics.FactRef
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -51,6 +54,13 @@ class SemanticsToolsTest {
         )
     private val registry = FakeDatasourceRegistry(listOf(warehouse))
     private val service = mockk<SemanticsService>()
+    private val introspector = mockk<SchemaIntrospector>()
+
+    /** A tool whose catalog listing is [tables] — an empty page skips the text/refs check (125 §B). */
+    private fun recordTool(tables: List<TableInfo> = emptyList()): SemanticsRecordTool {
+        every { introspector.tables(any<Datasource>()) } returns TablesPage(tables, false)
+        return SemanticsRecordTool(registry, service, introspector)
+    }
 
     @Test
     fun `all three are catalogued on both matrix axes - record and retire mutating and author, list a viewer read`() {
@@ -80,7 +90,7 @@ class SemanticsToolsTest {
         val supersedes = UUID.randomUUID()
 
         val result =
-            SemanticsRecordTool(registry, service).call(
+            recordTool().call(
                 McpArguments(
                     mapOf(
                         "scope" to "DATASOURCE",
@@ -120,7 +130,7 @@ class SemanticsToolsTest {
                 workspace = co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "globex", McpFixtures.WORKSPACE.flags),
             )
 
-        val record = shouldThrow<DatapipelinesException> { SemanticsRecordTool(registry, service).call(McpArguments(recordArgs()), other) }
+        val record = shouldThrow<DatapipelinesException> { recordTool().call(McpArguments(recordArgs()), other) }
         val list =
             shouldThrow<DatapipelinesException> {
                 SemanticsListTool(registry, service).call(
@@ -143,14 +153,11 @@ class SemanticsToolsTest {
     fun `argument-shape faults are -32602 - a bad scope, a ref without a table, a malformed since`() {
         val badScope =
             shouldThrow<McpError> {
-                SemanticsRecordTool(
-                    registry,
-                    service,
-                ).call(McpArguments(recordArgs() + ("scope" to "GLOBAL")), McpFixtures.ctx(Scope.AUTHOR))
+                recordTool().call(McpArguments(recordArgs() + ("scope" to "GLOBAL")), McpFixtures.ctx(Scope.AUTHOR))
             }
         val badRef =
             shouldThrow<McpError> {
-                SemanticsRecordTool(registry, service).call(
+                recordTool().call(
                     McpArguments(recordArgs() + ("refs" to listOf(mapOf("column" to "x")))),
                     McpFixtures.ctx(Scope.AUTHOR),
                 )
@@ -185,6 +192,62 @@ class SemanticsToolsTest {
             { badRef.message shouldContain "table" },
             { badSince.message shouldContain "since" },
             { shortReason.message shouldContain "reason" },
+        )
+    }
+
+    @Test
+    fun `a fact whose text names a table its refs do not is refused before the service runs - 125 B`() {
+        val catalog =
+            listOf(
+                TableInfo(listOf("public"), "orders", "TABLE", null),
+                TableInfo(listOf("public"), "order_items", "TABLE", null),
+            )
+        every { service.record(any(), any(), any(), any()) } returns mapOf("id" to "f1")
+        val tool = recordTool(catalog)
+
+        // The misspelling, with CORRECT refs: the text lies, the refusal names the nearest listed table.
+        val misspelled =
+            shouldThrow<DatapipelinesException> {
+                tool.call(
+                    McpArguments(recordArgs() + ("fact" to "order_itemz joins to orders on order_id")),
+                    McpFixtures.ctx(Scope.AUTHOR),
+                )
+            }
+
+        // A listed table spelled exactly but absent from refs: same code, no "did you mean".
+        val exact =
+            shouldThrow<DatapipelinesException> {
+                tool.call(
+                    McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
+                    McpFixtures.ctx(Scope.AUTHOR),
+                )
+            }
+
+        // The same fact spelled as the refs spell it, and a fact whose underscores are prose: both reach the service.
+        val spelledRight =
+            tool.call(
+                McpArguments(
+                    recordArgs() +
+                        mapOf(
+                            "fact" to "order_items joins to orders on order_id",
+                            "refs" to listOf(mapOf("table" to "order_items"), mapOf("table" to "orders")),
+                        ),
+                ),
+                McpFixtures.ctx(Scope.AUTHOR),
+            )
+        val proseUnderscores =
+            tool.call(
+                McpArguments(recordArgs() + ("fact" to "amount is a row_count-weighted average, closing at the as_of date")),
+                McpFixtures.ctx(Scope.AUTHOR),
+            )
+
+        assertAll(
+            { misspelled.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
+            { misspelled.message shouldContain "did you mean 'order_items'" },
+            { exact.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
+            { (spelledRight as Map<*, *>)["id"] shouldBe "f1" },
+            { (proseUnderscores as Map<*, *>)["id"] shouldBe "f1" },
+            { verify(exactly = 2) { service.record(any(), any(), any(), any()) } },
         )
     }
 
