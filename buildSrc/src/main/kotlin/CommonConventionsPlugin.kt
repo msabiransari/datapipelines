@@ -191,6 +191,14 @@ class CommonConventionsPlugin : Plugin<Project> {
 
         project.tasks.withType<Test>().configureEach {
             useJUnitPlatform()
+            // Test-JVM parallelism (DEVELOPMENT.md §9.5; the knobs are documented in
+            // gradle.properties). Classes are split across `dp.test.forks` JVMs, each with a
+            // `dp.test.heap` ceiling. A module that needs something else overrides in its own
+            // build script AFTER this (tests/integration-tests: 6g; the two Testcontainers
+            // suites: dp.test.forks.e2e). Providers, so a -P override is a tracked input.
+            maxParallelForks =
+                project.providers.gradleProperty("dp.test.forks").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+            maxHeapSize = project.providers.gradleProperty("dp.test.heap").orNull ?: "1g"
             // Order-shuffle verification (round 060 §A): `./gradlew :m:test
             // -Pjunit.jupiter.testmethod.order.default=org.junit.jupiter.api.MethodOrderer$Random
             // -Pjunit.jupiter.execution.order.random.seed=<seed>` must reach the TEST JVM.

@@ -68,4 +68,9 @@ tasks.named<Test>("test") {
     // suites (the MinIO suite and the two-context lake registry suite). A ceiling, not an
     // allocation — the JVM takes only what the cache actually needs.
     maxHeapSize = "6g"
+    // Forks are containers AND contexts: each fork boots its own Postgres/Redis/MySQL set and
+    // its own Spring contexts (SharedE2e is per JVM). Sized by dp.test.forks.e2e, not the
+    // ordinary dp.test.forks — DEVELOPMENT.md §9.5 has the RAM arithmetic.
+    maxParallelForks =
+        project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
 }

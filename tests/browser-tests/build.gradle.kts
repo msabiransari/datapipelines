@@ -58,3 +58,12 @@ tasks.register<JavaExec>("siteShots") {
         }
     }
 }
+
+// The browser suite is the tail of every full gate (680 s serial on 2026-09-12: 25 classes,
+// one JVM). Forks split the classes across JVMs; each fork boots its own containers, app and
+// Chromium (SharedBrowserE2e is per JVM), so the count is dp.test.forks.e2e — the RAM-priced
+// knob — not the ordinary dp.test.forks. DEVELOPMENT.md §9.5.
+tasks.named<Test>("test") {
+    maxParallelForks =
+        project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+}

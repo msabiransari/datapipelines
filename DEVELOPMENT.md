@@ -611,6 +611,46 @@ results` (two builds sharing one `build/`), a corrupted result store — re-run 
 conclusion. `scripts/gate.sh` classifies these for you and is the scripted form of all of the
 above.
 
+### 9.5 Sizing the build for your machine
+
+The gate's wall time is decided by three knobs and one budget. All three live in
+`gradle.properties` (repo defaults) and can be overridden per machine in
+`~/.gradle/gradle.properties` or per run with `-P`:
+
+| Knob | Default | What it buys | What it costs |
+|---|---|---|---|
+| `org.gradle.workers.max` (or `--max-workers=N`) | 6 | tasks running at once across modules — compile, lint and test tasks overlap | one JVM per running test task; Docker load when several are integration modules |
+| `dp.test.forks` | 3 | test classes of an ordinary module split across N JVMs | N × `dp.test.heap` per test task that is running |
+| `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
+| `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g) | RAM, only when the JVM actually needs it |
+
+**Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
+26.04) — the numbers to size against:
+
+- The old settings (`workers 4`, no forks, `--max-workers=3` out of habit): **14 m 35 s**, CPU
+  85 % idle, three worker JVMs alive. 1,765 class-seconds of tests fit in an 865 s span; the
+  browser suite alone was a serial **680 s** tail (25 classes in one JVM), `modules/web` 312 s,
+  `pipeline-contract` 171 s. One gate peaked around **16 GB** (JVMs 10.4 GB, Chromium ≈ 5 GB
+  proportional, containers < 1 GB) and ~4 busy cores.
+- The defaults above are sized for **two full gates at once on that box**: about 24 logical
+  CPUs and up to ~28 GB each (build daemon 3 GB, a share of the single 4 GB Kotlin daemon,
+  ordinary forks ≈ 3 modules × 3 × 0.7 GB, the two e2e suites at 2 forks ≈ 10 GB), leaving
+  the OS, Docker and a demo stack their ~8 GB.
+
+**Sizing for N concurrent gates.** Per gate, budget roughly `3 GB + workers × forks × 0.7 GB`
+for ordinary modules and `5 GB × dp.test.forks.e2e` for the browser and integration suites at
+their peak, then add 8 GB for the machine. Four fast gates (`workers 8`, `forks 4`, e2e `4`)
+need about 150 GB; on 64 GB run two, or four at `forks 1` / e2e `1`. CPU is rarely the limit
+below 24 threads per gate. Past the RAM or Docker ceiling the build does not slow down
+gracefully — it goes **red** on wall-clock assertions (see the 6381 s run in
+`gradle.properties`), so lower the knobs before you see that.
+
+**Two more things worth a minute on a dedicated box.** The CPU governor: Ubuntu ships
+`powersave`; `sudo cpupower frequency-set -g performance` helps the serial tails (a 146 s model
+test cannot be forked). And `--profile` on any gate writes `build/reports/profile/` with per-task
+times — that report, plus `scripts/test-recount.sh`, is how to tell whether a knob helped; never
+the feel of it.
+
 ---
 
 ## 10. Linting and Formatting
