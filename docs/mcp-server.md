@@ -1031,7 +1031,7 @@ The catalog of calculator kinds a `CALCULATOR` node can evaluate ([Calculators �
 ```json
 {
   "name": "calculators_list",
-  "description": "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, and one worked example. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.",
+  "description": "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, one worked example, and `phrases` — the everyday phrases the kind answers. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable — and match the question's words against `phrases` before you pick a kind: a relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never by interpreting it yourself. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.",
   "inputSchema": {
     "type": "object",
     "properties": {},
@@ -1042,7 +1042,7 @@ The catalog of calculator kinds a `CALCULATOR` node can evaluate ([Calculators �
 
 **Scope:** `read` — and read in the strongest sense the surface has: the answer is a property of the BUILD, identical for every caller, every key and every workspace. No workspace scoping applies because there is no workspace data in it.
 
-**Response:** `kinds` (each with `kind`, `display_name`, `description`, `inputs`, `output`, `example`), `count`, `context_keys` (`org` names and `platform` name/type pairs), and `docs` pointing at the catalog page. An input carries `list: true` only when it takes a JSON array, and `default` only when it is optional — the absent keys carry the same information as `false`/`null` would, without spending an agent's context window on eighty of them.
+**Response:** `kinds` (each with `kind`, `display_name`, `description`, `phrases`, `inputs`, `output`, `example`), `count`, `context_keys` (`org` names and `platform` name/type pairs), and `docs` pointing at the catalog page. `phrases` lists the everyday phrases the kind answers — match the question's words against them before picking a kind (the same lookup the skill's calculator rule teaches). An input carries `list: true` only when it takes a JSON array, and `default` only when it is optional — the absent keys carry the same information as `false`/`null` would, without spending an agent's context window on eighty of them.
 
 #### 6.2.24 `calculators_get`
 
@@ -1051,7 +1051,7 @@ One kind's full definition — the same entry `calculators_list` returns, for a 
 ```json
 {
   "name": "calculators_get",
-  "description": "One calculator kind's full definition: display name, description, typed inputs, output type and a worked example. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.",
+  "description": "One calculator kind's full definition: display name, description, typed inputs, output type, a worked example and `phrases` — the everyday phrases the kind answers, which you match the question's words against before picking a kind. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.",
   "inputSchema": {
     "type": "object",
     "required": ["kind"],

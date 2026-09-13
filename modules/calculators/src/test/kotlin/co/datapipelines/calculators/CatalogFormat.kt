@@ -22,4 +22,7 @@ object CatalogFormat {
     fun example(kind: CalculatorKind): String =
         kind.example.inputs.entries
             .joinToString(", ") { (name, value) -> "$name=$value" } + " → ${kind.example.output}"
+
+    /** `this quarter, month to date` — the phrases cell (120/R2: the lookup path, verbatim from the registry). */
+    fun phrases(kind: CalculatorKind): String = kind.phrases.joinToString(", ")
 }

@@ -27,6 +27,13 @@ import java.time.temporal.WeekFields
  * calendar year it STARTS in, `02-29` resolves to 02-28 in a non-leap year — live in [Calendar].
  */
 internal object DateKinds {
+    /**
+     * `period_start` and `period_end` answer the same containing-period phrases — the two
+     * boundaries of one window (120/R2: the everyday phrases the kinds answer, verbatim from the
+     * review that asked for them).
+     */
+    private val CONTAINING_PERIOD_PHRASES = listOf("this quarter", "month to date", "the current week", "start of the fiscal year")
+
     private val FISCAL_START =
         input("fiscal_start", STRING, "The fiscal year's first day as `MM-DD` — usually `\$org_fiscal_start_date`.")
 
@@ -45,6 +52,7 @@ internal object DateKinds {
                 kind = "quarter_of_year",
                 displayName = "Quarter of year",
                 description = "Which calendar quarter (1-4) a date falls in.",
+                phrases = listOf("which quarter a date falls in", "what quarter is it"),
                 inputs = listOf(input("date", DATE, "The date to classify.")),
                 output = INTEGER,
                 example = example("date" to "2026-08-14", output = "3"),
@@ -55,6 +63,7 @@ internal object DateKinds {
                 description =
                     "The fiscal year a date falls in, labelled by the calendar year the fiscal year STARTS in " +
                         "(with a 04-06 start, 2026-01-15 is fiscal year 2025).",
+                phrases = listOf("which fiscal year a date falls in", "what fiscal year is it"),
                 inputs = listOf(input("date", DATE, "The date to classify."), FISCAL_START),
                 output = INTEGER,
                 example = example("date" to "2026-01-15", "fiscal_start" to "04-06", output = "2025"),
@@ -65,6 +74,7 @@ internal object DateKinds {
                 kind = "fiscal_quarter",
                 displayName = "Fiscal quarter",
                 description = "Which quarter (1-4) of its fiscal year a date falls in.",
+                phrases = listOf("which fiscal quarter a date falls in", "what fiscal quarter is it"),
                 inputs = listOf(input("date", DATE, "The date to classify."), FISCAL_START),
                 output = INTEGER,
                 example = example("date" to "2026-08-14", "fiscal_start" to "09-15", output = "4"),
@@ -75,12 +85,14 @@ internal object DateKinds {
                 kind = "period_start",
                 displayName = "Period start",
                 description = "The first day of the week, month, quarter or year containing a date.",
+                phrases = CONTAINING_PERIOD_PHRASES,
                 exampleOutput = "2026-07-01",
             ) { date, unit, mode, fiscalStart, weekStart -> Calendar.periodStart(date, unit, mode, fiscalStart, weekStart) },
             periodKind(
                 kind = "period_end",
                 displayName = "Period end",
                 description = "The last day of the week, month, quarter or year containing a date.",
+                phrases = CONTAINING_PERIOD_PHRASES,
                 exampleOutput = "2026-09-30",
             ) { date, unit, mode, fiscalStart, weekStart -> Calendar.periodEnd(date, unit, mode, fiscalStart, weekStart) },
             SimpleKind(
@@ -89,6 +101,7 @@ internal object DateKinds {
                 description =
                     "The first day of the period `offset` periods before the one containing a date — " +
                         "the anchor a period-over-period comparison filters from.",
+                phrases = listOf("last quarter", "previous month", "the quarter before last", "N periods ago"),
                 inputs =
                     listOf(
                         input("date", DATE, "The date whose period the offset is counted back from."),
@@ -114,6 +127,7 @@ internal object DateKinds {
                 kind = "date_trunc",
                 displayName = "Truncate date",
                 description = "A date snapped back to the start of its day, week, month, quarter or year.",
+                phrases = listOf("snap a date back to the start of its month", "floor a date to its week", "truncate a date"),
                 inputs =
                     listOf(
                         input("date", DATE, "The date to truncate."),
@@ -135,6 +149,7 @@ internal object DateKinds {
                 kind = "iso_week",
                 displayName = "ISO week",
                 description = "The ISO-8601 week number (1-53) of a date.",
+                phrases = listOf("which ISO week a date falls in", "the ISO week number"),
                 inputs = listOf(input("date", DATE, "The date to classify.")),
                 output = INTEGER,
                 example = example("date" to "2026-01-01", output = "1"),
@@ -145,6 +160,7 @@ internal object DateKinds {
                 description =
                     "The ISO-8601 week-based year of a date — which differs from the calendar year " +
                         "in the days either side of New Year, and is why it is its own kind.",
+                phrases = listOf("which ISO week-based year a date falls in", "the ISO year"),
                 inputs = listOf(input("date", DATE, "The date to classify.")),
                 output = INTEGER,
                 example = example("date" to "2027-01-01", output = "2026"),
@@ -153,6 +169,7 @@ internal object DateKinds {
                 kind = "day_of_week",
                 displayName = "Day of week",
                 description = "The day's position in the week (1-7), counting from `week_start`.",
+                phrases = listOf("which day of the week a date is", "the day's position in the week"),
                 inputs = listOf(input("date", DATE, "The date to classify."), WEEK_START),
                 output = INTEGER,
                 example = example("date" to "2026-08-14", "week_start" to "monday", output = "5"),
@@ -164,6 +181,7 @@ internal object DateKinds {
                 kind = "days_in_month",
                 displayName = "Days in month",
                 description = "How many days the date's calendar month has (28-31).",
+                phrases = listOf("how many days in the month", "the length of a month"),
                 inputs = listOf(input("date", DATE, "Any date in the month.")),
                 output = INTEGER,
                 example = example("date" to "2028-02-10", output = "29"),
@@ -174,6 +192,7 @@ internal object DateKinds {
                 description =
                     "Whole units from one date to another; negative when `to` precedes `from`. " +
                         "Partial units are truncated, never rounded.",
+                phrases = listOf("days between", "how many months since"),
                 inputs =
                     listOf(
                         input("from", DATE, "The earlier date."),
@@ -194,6 +213,7 @@ internal object DateKinds {
                 kind = "add_days",
                 displayName = "Add days",
                 description = "A date shifted by a whole number of calendar days; negative shifts back.",
+                phrases = listOf("N days later", "N days earlier", "days from now"),
                 inputs = listOf(input("date", DATE, "The starting date."), input("days", INTEGER, "Days to add.")),
                 output = DATE,
                 example = example("date" to "2026-08-14", "days" to "-30", output = "2026-07-15"),
@@ -204,6 +224,7 @@ internal object DateKinds {
                 description =
                     "A date shifted by whole months, clamped to the target month's last day " +
                         "(2026-01-31 plus one month is 2026-02-28).",
+                phrases = listOf("one month later", "a year ago"),
                 inputs = listOf(input("date", DATE, "The starting date."), input("months", INTEGER, "Months to add.")),
                 output = DATE,
                 example = example("date" to "2026-01-31", "months" to "1", output = "2026-02-28"),
@@ -214,6 +235,7 @@ internal object DateKinds {
                 description =
                     "A date shifted by working days, skipping the weekend days and the listed holidays. " +
                         "Negative counts step backwards; the starting date is never counted.",
+                phrases = listOf("business days later", "working days from now", "N working days earlier"),
                 inputs =
                     listOf(
                         input("date", DATE, "The starting date."),
@@ -250,6 +272,7 @@ internal object DateKinds {
                 description =
                     "A date read out of text with an explicit pattern. The grammar is Java's " +
                         "`DateTimeFormatter`, which is contract: `dd/MM/yyyy`, `yyyyMMdd`, `MMM d, yyyy`.",
+                phrases = listOf("read a date out of text", "parse a date string"),
                 inputs =
                     listOf(
                         input("text", STRING, "The text to read."),
@@ -262,6 +285,7 @@ internal object DateKinds {
                 kind = "date_format",
                 displayName = "Format date",
                 description = "A date rendered as text with an explicit `DateTimeFormatter` pattern.",
+                phrases = listOf("render a date as text", "format a date"),
                 inputs =
                     listOf(
                         input("date", DATE, "The date to render."),
@@ -277,6 +301,7 @@ internal object DateKinds {
                     "Re-reads a timestamp's wall-clock time from one zone in another: the clock face is " +
                         "kept and the instant moves. This is the kind for a timestamp that was stored " +
                         "under the wrong zone, not for displaying one — a timestamp is already absolute.",
+                phrases = listOf("a timestamp stored under the wrong zone", "re-read a wall-clock time in another zone"),
                 inputs =
                     listOf(
                         input("timestamp", TIMESTAMP, "The timestamp to re-read."),
@@ -299,6 +324,7 @@ internal object DateKinds {
         kind: String,
         displayName: String,
         description: String,
+        phrases: List<String>,
         exampleOutput: String,
         boundary: (LocalDate, String, String, java.time.MonthDay, DayOfWeek) -> LocalDate,
     ): CalculatorKind =
@@ -306,6 +332,7 @@ internal object DateKinds {
             kind = kind,
             displayName = displayName,
             description = description,
+            phrases = phrases,
             inputs =
                 listOf(
                     input("date", DATE, "Any date inside the period."),

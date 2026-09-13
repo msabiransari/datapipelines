@@ -90,7 +90,11 @@ class SkillCoreRulesTest {
                 .firstOrNull { RULE_START.matches(it.value) }
                 ?.index
                 ?: lines.size
-        return lines.withIndex().drop(start).take(end - start).map { (i, line) -> i + 1 to line }
+        return lines
+            .withIndex()
+            .drop(start)
+            .take(end - start)
+            .map { (i, line) -> i + 1 to line }
     }
 
     /** Whole-word for identifier-shaped names (`prior_period` inside `prior_periods` must not match). */

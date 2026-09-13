@@ -15,6 +15,7 @@ internal class SimpleKind(
     override val kind: String,
     override val displayName: String,
     override val description: String,
+    override val phrases: List<String>,
     override val inputs: List<CalculatorInput>,
     override val output: LogicalType?,
     override val example: CalculatorExample,

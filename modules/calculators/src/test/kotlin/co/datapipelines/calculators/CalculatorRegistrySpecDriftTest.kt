@@ -86,8 +86,35 @@ class CalculatorRegistrySpecDriftTest {
     }
 
     @Test
+    fun `every row's phrases are the registry's own`() {
+        // 120/R2: the phrases are the lookup path an agent matches a question's words against,
+        // so the doc's column is derived from the registry like the signature and example cells —
+        // a kind whose doc phrases drift is a catalog telling the agent the wrong words.
+        val wrong =
+            CalculatorRegistry.KINDS.mapNotNull { kind ->
+                val row = documented[kind.kind] ?: return@mapNotNull null
+                val expected = CatalogFormat.phrases(kind)
+                if (row.phrases == expected) null else "${kind.kind}: doc='${row.phrases}' registry='$expected'"
+            }
+        withClue("Phrases cells that disagree with the registry's declared phrases") {
+            wrong.shouldBeEmpty()
+        }
+    }
+
+    @Test
+    fun `every kind lists at least one phrase - the non-vacuity floor`() {
+        // A kind with no phrases is invisible to the R2 lookup: nothing the question could say
+        // would ever match it. The floor is registry-side, not doc-side, so it holds even if the
+        // doc's column were deleted outright.
+        val silent = CalculatorRegistry.KINDS.filter { it.phrases.isEmpty() }.map { it.kind }
+        withClue("Kinds with no phrases — a kind added without them fails here") {
+            silent.shouldBeEmpty()
+        }
+    }
+
+    @Test
     fun `every documented example actually evaluates to its documented answer`() {
-        // The strongest of the six: the example is not just consistent between two files, it is
+        // The strongest of the eight: the example is not just consistent between two files, it is
         // TRUE. A kind whose behaviour changes fails here even if somebody dutifully updated both
         // the doc and the declaration to match the new (wrong) answer.
         val wrong =
@@ -114,9 +141,10 @@ class CalculatorRegistrySpecDriftTest {
 
     private fun render(value: Any?): String = value?.toString() ?: "null"
 
-    /** One parsed row: the two cells this test compares. */
+    /** One parsed row: the three cells this test compares. */
     private data class DocumentedKind(
         val signature: String,
+        val phrases: String,
         val example: String,
     )
 
@@ -128,7 +156,9 @@ class CalculatorRegistrySpecDriftTest {
         check(end > start) { "'$SECTION_END' not found after '$SECTION_START' in docs/calculators.md" }
         return ROW
             .findAll(text.substring(start, end))
-            .associate { m -> m.groupValues[1] to DocumentedKind(m.groupValues[2].trim(), m.groupValues[4].trim()) }
+            .associate { m ->
+                m.groupValues[1] to DocumentedKind(m.groupValues[2].trim(), m.groupValues[4].trim(), m.groupValues[5].trim())
+            }
     }
 
     /** The repo root is the nearest ancestor holding `settings.gradle.kts` (the house locator). */
@@ -144,7 +174,7 @@ class CalculatorRegistrySpecDriftTest {
         const val SECTION_START = "## 2. The catalog"
         const val SECTION_END = "## 3. When it fails"
 
-        /** `| \`kind\` | signature | description | example |` — four cells, none of them optional. */
-        val ROW = Regex("^\\|\\s*`([a-z0-9_]+)`\\s*\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|\\s*$", RegexOption.MULTILINE)
+        /** `| \`kind\` | signature | description | phrases | example |` — five cells, none of them optional. */
+        val ROW = Regex("^\\|\\s*`([a-z0-9_]+)`\\s*\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|\\s*$", RegexOption.MULTILINE)
     }
 }
