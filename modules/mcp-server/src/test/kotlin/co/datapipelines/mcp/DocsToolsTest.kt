@@ -37,7 +37,17 @@ class DocsToolsTest {
     private val datasources = mockk<DatasourceRegistry>(relaxed = true)
     private val executions = mockk<ExecutionRepository>(relaxed = true)
     private val events = mockk<ExecutionEventRepository>(relaxed = true)
-    private val resourceReader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events)
+    private val resourceReader =
+        McpResourceReader(
+            McpFixtures.pipelineService(pipelines),
+            templates,
+            datasources,
+            executions,
+            events,
+            // The resource-read audit (120) is not this suite's subject; the dispatcher row for
+            // docs_get IS, and it has a recording sink below.
+            mockk<co.datapipelines.auth.AuditEventSink>(relaxed = true),
+        )
 
     @Test
     fun `docs_list is skill first then the reference map in its own order, with its purposes`() {

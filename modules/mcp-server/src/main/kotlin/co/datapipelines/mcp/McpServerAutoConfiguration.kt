@@ -214,7 +214,9 @@ class McpServerAutoConfiguration {
         datasources: DatasourceRegistry,
         executions: ExecutionRepository,
         events: ExecutionEventRepository,
-    ): McpResourceReader = McpResourceReader(pipelines, templates, datasources, executions, events)
+        // 120 — the reader's `mcp.resource.read` rows share the dispatcher's sink.
+        auditSink: co.datapipelines.auth.AuditEventSink,
+    ): McpResourceReader = McpResourceReader(pipelines, templates, datasources, executions, events, auditSink)
 
     @Bean
     @ConditionalOnMissingBean
