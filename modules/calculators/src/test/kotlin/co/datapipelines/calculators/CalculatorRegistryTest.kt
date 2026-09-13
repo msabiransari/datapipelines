@@ -37,11 +37,13 @@ class CalculatorRegistryTest {
                 "iso_year",
                 "map",
                 "percent_change",
+                "period_bounds",
                 "period_end",
                 "period_start",
                 "prior_period",
                 "quarter_of_year",
                 "round",
+                "trailing_periods",
                 "tz_shift",
             ).sorted()
     }

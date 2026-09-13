@@ -155,6 +155,99 @@ class DateKindsTest {
         evaluate("prior_period", "date" to day, "unit" to "month", "offset" to 0) shouldBe date("2026-08-01")
     }
 
+    // ---- the two multi-output period kinds (121) ----
+
+    @Suppress("UNCHECKED_CAST")
+    private fun bounds(
+        kind: String,
+        vararg inputs: Pair<String, Any?>,
+    ): Map<String, LocalDate> = evaluate(kind, *inputs) as Map<String, LocalDate>
+
+    @Test
+    fun `period_bounds brackets the containing period in every unit`() {
+        val day = date("2026-08-14")
+        bounds("period_bounds", "date" to day, "unit" to "week") shouldBe
+            mapOf("start" to date("2026-08-10"), "end" to date("2026-08-16"))
+        bounds("period_bounds", "date" to day, "unit" to "month") shouldBe
+            mapOf("start" to date("2026-08-01"), "end" to date("2026-08-31"))
+        bounds("period_bounds", "date" to day, "unit" to "quarter") shouldBe
+            mapOf("start" to date("2026-07-01"), "end" to date("2026-09-30"))
+        bounds("period_bounds", "date" to day, "unit" to "year") shouldBe
+            mapOf("start" to date("2026-01-01"), "end" to date("2026-12-31"))
+    }
+
+    @Test
+    fun `period_bounds honours week_start, and fiscal mode with a mid-month start`() {
+        val friday = date("2026-08-14")
+        // week_start sunday moves both boundaries back a day, exactly as period_start's does.
+        bounds("period_bounds", "date" to friday, "unit" to "week", "week_start" to "sunday") shouldBe
+            mapOf("start" to date("2026-08-09"), "end" to date("2026-08-15"))
+        // A fiscal start MID-MONTH: the year runs 09-15 to 09-14, and Q3 of it is 06-15 to 09-14.
+        bounds("period_bounds", "date" to friday, "unit" to "year", "mode" to "fiscal", "fiscal_start" to "09-15") shouldBe
+            mapOf("start" to date("2025-09-15"), "end" to date("2026-09-14"))
+        bounds("period_bounds", "date" to friday, "unit" to "quarter", "mode" to "fiscal", "fiscal_start" to "09-15") shouldBe
+            mapOf("start" to date("2026-06-15"), "end" to date("2026-09-14"))
+        // A month is a month in both modes — the same pinning the single kinds carry.
+        bounds("period_bounds", "date" to friday, "unit" to "month", "mode" to "fiscal", "fiscal_start" to "09-15") shouldBe
+            mapOf("start" to date("2026-08-01"), "end" to date("2026-08-31"))
+    }
+
+    @Test
+    fun `trailing_periods spans the complete periods just ended, for count 1, 4 and 12`() {
+        val day = date("2026-08-14")
+        // count 1 (and the documented default when omitted): the quarter just ended.
+        bounds("trailing_periods", "date" to day, "unit" to "quarter") shouldBe
+            mapOf("start" to date("2026-04-01"), "end" to date("2026-06-30"))
+        bounds("trailing_periods", "date" to day, "unit" to "quarter", "count" to 1) shouldBe
+            mapOf("start" to date("2026-04-01"), "end" to date("2026-06-30"))
+        // count 4: the last four quarters — a full year back, ending where count 1 ends.
+        bounds("trailing_periods", "date" to day, "unit" to "quarter", "count" to 4) shouldBe
+            mapOf("start" to date("2025-07-01"), "end" to date("2026-06-30"))
+        // count 12 on month: trailing twelve months — August 2025 through July 2026.
+        bounds("trailing_periods", "date" to day, "unit" to "month", "count" to 12) shouldBe
+            mapOf("start" to date("2025-08-01"), "end" to date("2026-07-31"))
+    }
+
+    @Test
+    fun `trailing_periods clamps the window's end across a February`() {
+        // The period one back is February: the window's end is its 28th (or 29th), never the
+        // 31st of the anchor's own month — the clamp `periodEnd` computes, reused whole.
+        bounds("trailing_periods", "date" to date("2026-03-31"), "unit" to "month") shouldBe
+            mapOf("start" to date("2026-02-01"), "end" to date("2026-02-28"))
+        bounds("trailing_periods", "date" to date("2028-03-31"), "unit" to "month") shouldBe
+            mapOf("start" to date("2028-02-01"), "end" to date("2028-02-29"))
+    }
+
+    @Test
+    fun `trailing_periods crosses the year boundary backwards from a December or January anchor`() {
+        // December anchor: the quarter just ended is Q3 of the SAME year.
+        bounds("trailing_periods", "date" to date("2026-12-15"), "unit" to "quarter") shouldBe
+            mapOf("start" to date("2026-07-01"), "end" to date("2026-09-30"))
+        // January anchor: the quarter just ended is Q4 of the PREVIOUS year — the case a
+        // hand-rolled minus-3-months gets wrong at the seam.
+        bounds("trailing_periods", "date" to date("2027-01-10"), "unit" to "quarter") shouldBe
+            mapOf("start" to date("2026-10-01"), "end" to date("2026-12-31"))
+        bounds("trailing_periods", "date" to date("2027-01-10"), "unit" to "year") shouldBe
+            mapOf("start" to date("2026-01-01"), "end" to date("2026-12-31"))
+    }
+
+    @Test
+    fun `trailing_periods honours fiscal mode, and refuses a count below 1 naming the input`() {
+        // Fiscal year 09-15: the complete fiscal year before the one containing 2026-08-14 is
+        // 2024-09-15 … 2025-09-14 (the containing one started 2025-09-15).
+        bounds("trailing_periods", "date" to date("2026-08-14"), "unit" to "year", "mode" to "fiscal", "fiscal_start" to "09-15") shouldBe
+            mapOf("start" to date("2024-09-15"), "end" to date("2025-09-14"))
+
+        // Zero periods is an empty window — refused the catalog's way, naming the input, so the
+        // failure record says `count`, not a silent empty range downstream.
+        val thrown =
+            shouldThrow<CalculatorEvaluationException> {
+                evaluate("trailing_periods", "date" to date("2026-08-14"), "unit" to "quarter", "count" to 0)
+            }
+        thrown.input shouldBe "count"
+        thrown.message shouldContain "at least 1"
+    }
+
     @Test
     fun `date_trunc snaps back and never forward`() {
         evaluate("date_trunc", "date" to date("2026-08-14"), "unit" to "day") shouldBe date("2026-08-14")

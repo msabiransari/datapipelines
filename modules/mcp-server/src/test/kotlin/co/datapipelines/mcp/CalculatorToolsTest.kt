@@ -142,9 +142,18 @@ class CalculatorToolsTest {
 
         @Suppress("UNCHECKED_CAST")
         val kinds = list.call(McpArguments(emptyMap()), ctx).asMap()["kinds"] as List<Map<String, Any?>>
-        kinds.forEach { entry ->
-            entry.containsKey("outputs") shouldBe false
-            (entry["output"] != null) shouldBe true
+        // Registry-driven, so the day a kind ships multi it cannot slip into the wrong shape:
+        // single kinds keep the wire they have always had, multi kinds say so — and nothing else.
+        CalculatorRegistry.KINDS.forEach { kind ->
+            val entry = kinds.first { it["kind"] == kind.kind }
+            if (kind.outputs.isEmpty()) {
+                entry.containsKey("outputs") shouldBe false
+                (entry["output"] != null) shouldBe true
+            } else {
+                entry["output"] shouldBe null
+                @Suppress("UNCHECKED_CAST")
+                (entry["outputs"] as List<Map<String, Any?>>).map { it["name"] } shouldBe kind.outputs.map { it.name }
+            }
         }
     }
 
@@ -168,6 +177,13 @@ class CalculatorToolsTest {
         // The single ANY shape is untouched — "ANY", never null — so the two nulls stay distinct.
         CalculatorPayload.of(SINGLE_ANY_FIXTURE)["output"] shouldBe "ANY"
         CalculatorPayload.of(SINGLE_ANY_FIXTURE).containsKey("outputs") shouldBe false
+
+        // 121 commit C made the shape real: `trailing_periods` is in the registry, so the TOOL
+        // — not just the projection — serves its outputs set.
+        val real = get.call(McpArguments(mapOf("kind" to "trailing_periods")), ctx).asMap()
+        real["output"] shouldBe null
+        @Suppress("UNCHECKED_CAST")
+        (real["outputs"] as List<Map<String, Any?>>).map { it["name"] } shouldBe listOf("start", "end")
     }
 
     @Suppress("UNCHECKED_CAST")

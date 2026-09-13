@@ -13,6 +13,9 @@ package co.datapipelines.calculators
  * ship undocumented and a documented kind cannot be missing.
  */
 object CalculatorRegistry {
+    /** §6.1's context-key shape — an output name becomes a `context_keys` object key. */
+    private val OUTPUT_NAME = Regex("[a-z_][a-z0-9_]*")
+
     /** Every kind, in catalog order: calendar and time first, then numeric, then value. */
     val KINDS: List<CalculatorKind> = DateKinds.ALL + ValueKinds.ALL
 
@@ -35,9 +38,6 @@ object CalculatorRegistry {
         }
         KINDS.forEach(::requireValidOutputs)
     }
-
-    /** §6.1's context-key shape — an output name becomes a `context_keys` object key. */
-    private val OUTPUT_NAME = Regex("[a-z_][a-z0-9_]*")
 
     /**
      * The D1 output-shape invariant, enforced on every kind at registration (121).
