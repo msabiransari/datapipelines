@@ -63,6 +63,41 @@ class ExecutionNodeStatsRenderTest {
         html shouldNotContain "context_key"
     }
 
+    @Test
+    fun `a multi-output calculator node renders every key it wrote (121 D5)`() {
+        val nodeStats =
+            ExecutorJson.mapper.readTree(
+                """
+                [
+                  {"node_id": "window", "rows_out": 0, "duration_ms": 2,
+                   "context_values": {"window_start": "2026-04-01", "window_end": "2026-06-30"}},
+                  {"node_id": "supplied_window", "rows_out": 0, "duration_ms": 1,
+                   "context_values": {"window_start": "2026-01-05", "window_end": "2026-02-20"},
+                   "provided_by": "caller"},
+                  {"node_id": "quarter", "rows_out": 0, "duration_ms": 3,
+                   "context_key": "current_quarter", "context_value": "2026-Q3"}
+                ]
+                """.trimIndent(),
+            )
+
+        val html =
+            engine.process(
+                "partials/execution-node-stats",
+                webContext().apply { setVariable("nodeStats", nodeStats) },
+            )
+
+        // The multi row lists every key the one evaluation wrote, in the same mono cell the
+        // single pair uses; the caller-supplied half says (provided) exactly as a single does.
+        html shouldContain "window_start → 2026-04-01"
+        html shouldContain "window_end → 2026-06-30"
+        html shouldContain "window_start → 2026-01-05"
+        html shouldContain "window_end → 2026-02-20"
+        html shouldContain " (provided)"
+        html shouldContain "current_quarter → 2026-Q3"
+        html.split("—").size - 1 shouldBe 0
+        html shouldNotContain "context_values"
+    }
+
     private fun webContext(): WebContext =
         WebContext(
             JakartaServletWebApplication

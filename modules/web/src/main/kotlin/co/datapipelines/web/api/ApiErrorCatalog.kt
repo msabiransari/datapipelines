@@ -107,6 +107,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Execution.PARAMETER_REQUIRED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE to HttpStatus.BAD_REQUEST,
+            // §13.3 / 121 — a proper subset of a multi-output node's keys: 400 like its
+            // invalid_parameter_type sibling — the execute input is not acceptable, nothing ran.
+            PipelineErrorCodes.Execution.CALCULATOR_KEYS_PARTIAL to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Execution.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
             PipelineErrorCodes.Execution.CONCURRENCY_LIMIT to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Execution.NOT_RUNNING to HttpStatus.CONFLICT,

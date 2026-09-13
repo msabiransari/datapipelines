@@ -86,6 +86,26 @@ data class Pipeline(
                 calculatorOutputEntries(node, kind)
             }.toMap()
 
+    /**
+     * Every **multi-output** CALCULATOR node's written key set, by node id (121 D5) — the
+     * groups the all-or-nothing caller-override rule applies to.
+     *
+     * A single-output node has no group: one key is trivially all-or-nothing. The override
+     * refusal (`pipeline.execution.calculator_keys_partial`) is per NODE — a proper subset of
+     * one of these sets is the shape it refuses — so the binder needs the keys grouped by the
+     * node that writes them, not the flat [calculatorOutputs] map.
+     */
+    fun calculatorOutputGroups(kinds: (String) -> CalculatorKind? = CalculatorRegistry::find): Map<String, Set<String>> =
+        nodes
+            .filter { it.type == NodeType.CALCULATOR }
+            .mapNotNull { node ->
+                val kind = node.kind?.let(kinds) ?: return@mapNotNull null
+                if (kind.outputs.isEmpty()) return@mapNotNull null
+                val keys = calculatorOutputEntries(node, kind).map { it.first }.toSet()
+                if (keys.isEmpty()) return@mapNotNull null
+                node.id to keys
+            }.toMap()
+
     companion object {
         /** The only pipeline-JSON schema version v1 accepts (§3.2, §12.1). */
         const val SUPPORTED_SCHEMA_VERSION = 1

@@ -211,6 +211,7 @@
             duration_ms: payload.duration_ms,
             rows_out: payload.rows_out,
             context_value: payload.context_key ? payload.context_value : undefined,
+            context_values: payload.context_values !== undefined ? payload.context_values : undefined,
           });
         }
         // 072: a CALCULATOR node's whole output is one value. Recorded per node for the
@@ -219,6 +220,16 @@
         if (payload.context_key) {
           if (editor.nodeValues) editor.nodeValues[payload.node_id] = payload.context_value;
           if (editor.contextValues) editor.contextValues[payload.context_key] = payload.context_value;
+        }
+        // 121: a multi-output node wrote a SET — recorded whole for the Details pane, and
+        // every key merged into the Context for the same on-screen resolution as the run.
+        if (payload.context_values) {
+          if (editor.nodeValues) editor.nodeValues[payload.node_id] = payload.context_values;
+          if (editor.contextValues) {
+            Object.keys(payload.context_values).forEach(function (k) {
+              editor.contextValues[k] = payload.context_values[k];
+            });
+          }
         }
         // 080 §B: a PIPELINE node's completion links to the child it spawned — the
         // Details pane's Execution row reads it.

@@ -1,10 +1,15 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.calculators.CalculatorExample
+import co.datapipelines.calculators.CalculatorInput
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorOutput
 import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -127,6 +132,68 @@ class CalculatorToolsTest {
             .requiredScopeForTool("calculators_get") shouldBe co.datapipelines.auth.Scope.READ
     }
 
+    // ---- 121/D6: the output half of the wire shape ----
+
+    @Test
+    fun `a single-output kind carries output and NO outputs key - the wire it has always had`() {
+        val fromGet = get.call(McpArguments(mapOf("kind" to "fiscal_quarter")), ctx).asMap()
+        fromGet["output"] shouldBe "INTEGER"
+        fromGet.containsKey("outputs") shouldBe false
+
+        @Suppress("UNCHECKED_CAST")
+        val kinds = list.call(McpArguments(emptyMap()), ctx).asMap()["kinds"] as List<Map<String, Any?>>
+        kinds.forEach { entry ->
+            entry.containsKey("outputs") shouldBe false
+            (entry["output"] != null) shouldBe true
+        }
+    }
+
+    @Test
+    fun `a multi-output kind carries output null and the named outputs set - one projection for both tools`() {
+        // No multi-output kind is registered yet (the two period kinds land in 121 commit C), so
+        // the multi arm is driven through a fixture kind at the PROJECTION — the one function
+        // both tools return, which is what keeps the two wire shapes from drifting apart.
+        val payload = CalculatorPayload.of(MULTI_FIXTURE)
+
+        payload["output"] shouldBe null
+
+        @Suppress("UNCHECKED_CAST")
+        val outputs = payload["outputs"] as List<Map<String, Any?>>
+        outputs shouldBe
+            listOf(
+                mapOf("name" to "start", "type" to "DATE", "description" to "The first day."),
+                mapOf("name" to "end", "type" to "DATE", "description" to "The last day."),
+            )
+
+        // The single ANY shape is untouched — "ANY", never null — so the two nulls stay distinct.
+        CalculatorPayload.of(SINGLE_ANY_FIXTURE)["output"] shouldBe "ANY"
+        CalculatorPayload.of(SINGLE_ANY_FIXTURE).containsKey("outputs") shouldBe false
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun Any?.asMap(): Map<String, Any?> = this as Map<String, Any?>
+
+    private companion object {
+        /** The throwaway multi-output fixture kind (121) — the D6 wire shape's test double. */
+        val MULTI_FIXTURE: CalculatorKind =
+            object : CalculatorKind {
+                override val kind = "period_window"
+                override val displayName = "Period window"
+                override val description = "The first and last day of a window."
+                override val phrases = listOf("this window")
+                override val inputs = listOf(CalculatorInput("date", LogicalType.DATE, "The date."))
+                override val output: LogicalType? = null
+                override val outputs =
+                    listOf(
+                        CalculatorOutput("start", LogicalType.DATE, "The first day."),
+                        CalculatorOutput("end", LogicalType.DATE, "The last day."),
+                    )
+                override val example = CalculatorExample(mapOf("date" to "2026-08-14"), "start=2026-08-01, end=2026-08-31")
+
+                override fun evaluate(values: Map<String, Any?>): Any = emptyMap<String, Any>()
+            }
+
+        /** An ANY-output single kind — the shape a null `output` must never be confused with. */
+        val SINGLE_ANY_FIXTURE: CalculatorKind = CalculatorRegistry.require("if_null")
+    }
 }

@@ -175,8 +175,13 @@ class ApiErrorCatalogSpecDriftTest {
          *
          * 171 → 172 with 120 (docs as tools): the one `mcp.*` row of the new §13.16, landed in
          * the SAME commit as its constant and its catalog row. Re-derived from the parse.
+         *
+         * 172 → 173 with 121 (calculator multi-output): §13.3 gains
+         * `pipeline.execution.calculator_keys_partial` (400 — a proper subset of a multi-output
+         * node's keys), landed in the SAME commit-chain as its constant and its catalog row.
+         * Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 172
+        const val SECTION_13_ROW_COUNT = 173
 
         /**
          * §12's distinct validation codes.
@@ -195,7 +200,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 60 → 61 with 108: `pipeline.validation.node_timeout_invalid` — a node's own
          * `settings.timeout_seconds` outside `1..node-timeout-max-seconds` (§4.11). Landed in
          * the SAME commit as its constant.
+         *
+         * 61 → 64 with 121 (calculator multi-output): §12.10's three mapping rules
+         * (`calculator_output_shape_mismatch`, `calculator_output_unknown`,
+         * `calculator_outputs_incomplete`), landed in the SAME commit-chain as their constants.
          */
-        const val SECTION_12_CODE_COUNT = 61
+        const val SECTION_12_CODE_COUNT = 64
     }
 }

@@ -34,10 +34,22 @@ import java.time.LocalTime
  * container is refused with the same code — §13 has no other code for a bad execute input.
  * A key that collides with a declared parameter binds as the parameter (the collision itself
  * is §12.10's save-time refusal, `CalculatorRules`' job — never the binder's).
+ *
+ * ## All-or-nothing per multi-output node (121 D5)
+ *
+ * [calculatorGroups] carries every multi-output node's written key set, by node id
+ * ([Pipeline.calculatorOutputGroups]). Override is all-or-nothing per node: every key supplied
+ * and the node is skipped, none and it computes — a PROPER subset is refused with
+ * `pipeline.execution.calculator_keys_partial` (`details` names the `node`, the `supplied`
+ * keys and the `missing` ones), because a half-written window is the silent wrong answer the
+ * mapping completeness rule (§12.10 `calculator_outputs_incomplete`) already refuses at save.
+ * The refusal rides the same [ParameterBindingResult.Rejected] list as a type failure, so the
+ * caller gets it with the identical shape and before anything runs.
  */
 class ParameterBinder(
     private val parameters: Map<String, Parameter>,
     private val calculatorOutputs: Map<String, LogicalType?> = emptyMap(),
+    private val calculatorGroups: Map<String, Set<String>> = emptyMap(),
 ) {
     /** Binds [inputs] — the `parameters` object of an execute request — into a Context. */
     fun bind(inputs: Map<String, JsonNode>): ParameterBindingResult {
@@ -66,6 +78,15 @@ class ParameterBinder(
             if (name in parameters) return@forEach
             val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
             coerceCalculatorInto(name, outputType, supplied, bound, failures)
+        }
+        // 121 D5: the all-or-nothing check reads the REQUEST, not the bound map — a key whose
+        // value failed coercion above is still "supplied", and its type failure is already
+        // reported beside this one (exhaustive, like every rule here).
+        calculatorGroups.forEach { (nodeId, keys) ->
+            val supplied = keys.filter { inputs[it]?.takeUnless { v -> v.isNull } != null }.sorted()
+            if (supplied.isNotEmpty() && supplied.size < keys.size) {
+                failures += keysPartial(nodeId, keys, supplied)
+            }
         }
         return if (failures.isEmpty()) {
             ParameterBindingResult.Bound(ExecutionContext(bound))
@@ -162,6 +183,30 @@ class ParameterBinder(
         path = "parameters.${name.truncateForError()}",
         message = "Parameter '${name.truncateForError()}': $reason.",
         details = mapOf("parameter" to name.truncateForError(), "declared_type" to declaredType),
+    )
+
+    /**
+     * 121 D5's refusal — a proper subset of a multi-output node's keys. Same shape as
+     * [invalidType] (one [ValidationFailure] on the rejected bind), because to the caller it
+     * is the same category of answer: this execute input is not acceptable, nothing ran.
+     */
+    private fun keysPartial(
+        nodeId: String,
+        keys: Set<String>,
+        supplied: List<String>,
+    ) = validationFailure(
+        code = PipelineErrorCodes.Execution.CALCULATOR_KEYS_PARTIAL,
+        path = "parameters",
+        message =
+            "Calculator node '${nodeId.truncateForError()}' writes ${keys.size} keys and override is all-or-nothing: " +
+                "supply every one of them or none — ${supplied.joinToString()} supplied, " +
+                "${(keys - supplied.toSet()).sorted().joinToString()} missing.",
+        details =
+            mapOf(
+                "node" to nodeId.truncateForError(),
+                "supplied" to supplied,
+                "missing" to (keys - supplied.toSet()).sorted(),
+            ),
     )
 
     private fun requiredMissing(name: String) =

@@ -50,6 +50,14 @@ const CALC = {
   context_key: "run_fiscal_quarter",
   inputs: { date: "$current_date", fiscal_start: "$org_fiscal_start_date" },
 };
+// 121: a multi-output kind's node — the mapping lives in context_keys.
+const CALC_MULTI = {
+  id: "window",
+  type: "CALCULATOR",
+  kind: "period_bounds",
+  context_keys: { start: "window_start", end: "window_end" },
+  inputs: { date: "$current_date", unit: "quarter" },
+};
 const CHILD = {
   id: "rainy_vs_dry",
   type: "PIPELINE",
@@ -96,6 +104,20 @@ test("a CALCULATOR node's Details: kind, inputs with resolved values, writes, va
   assert.match(html, /date = \$current_date/);
   assert.match(html, /-- 2026-09-05/);
   assert.match(html, /→ run_fiscal_quarter = <span class="pe-sql-tok-parameter">&quot;2026-Q3&quot;<\/span>/);
+});
+
+test("a multi-output CALCULATOR node's Details: the mapping in Writes, every value in Value (121)", () => {
+  editor.contextValues = { current_date: "2026-09-05" };
+  editor.nodeValues = { window: { window_start: "2026-04-01", window_end: "2026-06-30" } };
+  const map = Object.fromEntries(editor.detailsMeta(CALC_MULTI));
+  assert.equal(map.Writes, "start → window_start · end → window_end", "the mapping, output → key");
+  assert.equal(map.Value, 'window_start = "2026-04-01" · window_end = "2026-06-30"', "every key the one evaluation wrote");
+  assert.equal(editor.outputText(CALC_MULTI), "context keys window_start, window_end");
+
+  // The evaluation pane: the call, the mapping in braces, the values unescaped and safe.
+  const html = editor.definitionHtml(CALC_MULTI);
+  assert.match(html, /period_bounds\(/);
+  assert.match(html, /\{start → window_start, end → window_end\} = <span class="pe-sql-tok-parameter">/);
 });
 
 test("a PIPELINE node's Details: child, parameter mapping, output, child execution id", () => {

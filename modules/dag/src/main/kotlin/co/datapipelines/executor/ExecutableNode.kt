@@ -49,6 +49,12 @@ data class ExecutableNode(
     /** CALCULATOR nodes only: the Context key this node writes (§4.10). */
     val contextKey: String? = null,
     /**
+     * CALCULATOR nodes on a multi-output kind only (§4.10, 121): the Context key each of the
+     * kind's named outputs is written to, as `{output name: context key}` — every output
+     * mapped. Null on a single-output node, which writes its one value under [contextKey].
+     */
+    val contextKeys: Map<String, String>? = null,
+    /**
      * `node.settings.timeout_seconds` (pipeline-contract §6.4, 108) — this node's own wall-clock
      * deadline, or null to take `datapipelines.executor.node-timeout-seconds`. Resolved through
      * [ExecutorConfig.nodeTimeoutSecondsFor], never read raw.
@@ -74,6 +80,7 @@ data class ExecutableNode(
                 kind = node.kind,
                 inputs = node.inputs,
                 contextKey = node.contextKey,
+                contextKeys = node.contextKeys,
                 timeoutSeconds = node.settings?.timeoutSeconds,
             )
     }

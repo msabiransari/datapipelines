@@ -368,7 +368,10 @@ class PipelineImportService(
     ) {
         val provided =
             orgContext.keys + ContextKeys.PLATFORM + pipeline.parameters.keys +
-                pipeline.nodes.mapNotNull { it.contextKey }
+                // Every key a CALCULATOR node writes (121: a multi-output node's whole set) —
+                // the one derivation, so import and save-time validation cannot disagree about
+                // which keys the body itself provides.
+                pipeline.calculatorOutputs().keys
         val referenced =
             pipeline.nodes.flatMap { node ->
                 val fromInputs =

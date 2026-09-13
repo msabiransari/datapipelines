@@ -29,9 +29,10 @@
                place a wrong-quarter debug session looks. Every other node type gets the
                em-dash; the keys are NON_NULL-included, so they are absent, not null.
                078 A5: a key the CALLER supplied skips the node, and the row says "(provided)";
-               otherwise a supplied 7 and a computed 7 are indistinguishable here. -->
-          <td class="u-mono"
-              th:text="${n.has('context_key')} ? ${n.get('context_key').asText() + ' → ' + (n.has('context_value') ? n.get('context_value').asText() : '') + (n.has('provided_by') ? ' (provided)' : '')} : '—'">ctx</td>
+               otherwise a supplied 7 and a computed 7 are indistinguishable here.
+               121 D5: a multi-output node's cell lists every key the one evaluation wrote,
+               each `key → value`, comma-joined in the same cell. -->
+          <td class="u-mono"><span th:if="${n.has('context_values')}"><span th:each="e, s : ${n.get('context_values').properties()}" th:text="${e.key + ' → ' + (e.value.isNull() ? '' : e.value.asText()) + (s.last ? '' : ', ')}">k → v</span><span th:if="${n.has('provided_by')}"> (provided)</span></span><span class="u-mono" th:if="${!n.has('context_values')}" th:text="${n.has('context_key')} ? ${n.get('context_key').asText() + ' → ' + (n.has('context_value') ? n.get('context_value').asText() : '') + (n.has('provided_by') ? ' (provided)' : '')} : '—'">ctx</span></td>
         </tr>
       </th:block>
     </tbody>

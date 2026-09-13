@@ -13,10 +13,17 @@ package co.datapipelines.calculators
  * only real test classes — the convention `McpFixtures` and `ConfigSnapshots` follow.
  */
 object CatalogFormat {
-    /** `` `date` DATE, `mode?` STRING → DATE `` — the signature cell. */
+    /**
+     * `` `date` DATE, `mode?` STRING → DATE `` — the signature cell. A multi-output kind (121)
+     * renders its named set in braces: `→ {start DATE, end DATE}`.
+     */
     fun signature(kind: CalculatorKind): String =
         kind.inputs.joinToString(", ") { "`${it.name}${if (it.isList) "[]" else ""}${if (it.required) "" else "?"}` ${it.typeName}" } +
-            " → ${kind.output?.wire ?: CalculatorInput.ANY_TYPE}"
+            if (kind.outputs.isEmpty()) {
+                " → ${kind.output?.wire ?: CalculatorInput.ANY_TYPE}"
+            } else {
+                kind.outputs.joinToString(", ", " → {", "}") { "${it.name} ${it.type?.wire ?: CalculatorInput.ANY_TYPE}" }
+            }
 
     /** `date=2026-08-14, unit=quarter → 2026-07-01` — the example cell. */
     fun example(kind: CalculatorKind): String =

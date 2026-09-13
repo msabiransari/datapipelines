@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.TemplateRef
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -111,6 +112,109 @@ class CalculatorProvidedInputTest {
 
     // ------------------------------------------------------------------ fixture
 
+    // ---- 121 D5: a multi-output node's keys override all-or-nothing ----
+
+    @Test
+    fun `every key of a multi-output node supplied skips it - the supplied values bind downstream`() =
+        runBlocking<Unit> {
+            val result = executeMulti(inputs = mapOf("window_start" to text(SUPPLIED_START), "window_end" to text(SUPPLIED_END)))
+
+            result.status shouldBe ExecutionStatus.SUCCESS
+
+            // The computed window would be 2026-08-01 … 2026-08-31 — anything else proves the
+            // values on the row travelled from the request, not from the kind's evaluation.
+            val ready = harnessEmitter!!.events.filterIsInstance<co.datapipelines.events.DataReady>().single()
+            ready.rows
+                .single()
+                .map { it.toString() } shouldBe listOf(SUPPLIED_START, SUPPLIED_END)
+
+            val stats = result.nodeStats.single { it.nodeId == "window" }
+            stats.status shouldBe NodeStatus.SUCCESS
+            stats.contextValues shouldBe mapOf("window_start" to SUPPLIED_START, "window_end" to SUPPLIED_END)
+            stats.providedBy shouldBe "caller"
+        }
+
+    @Test
+    fun `no key supplied and the multi node computes both`() =
+        runBlocking<Unit> {
+            val result = executeMulti()
+
+            result.nodeStats
+                .single { it.nodeId == "window" }
+                .providedBy
+                .shouldBeNull()
+            result.nodeStats.single { it.nodeId == "window" }.contextValues shouldBe
+                mapOf("window_start" to "2026-08-01", "window_end" to "2026-08-31")
+        }
+
+    @Test
+    fun `a proper subset is refused before any node runs - the run record shows none started`() =
+        runBlocking<Unit> {
+            val thrown =
+                io.kotest.assertions.throwables
+                    .shouldThrow<co.datapipelines.pipeline.PipelineValidationException> {
+                        executeMulti(inputs = mapOf("window_end" to text(SUPPLIED_END)))
+                    }
+
+            thrown.code shouldBe "pipeline.execution.calculator_keys_partial"
+            val failure = thrown.result.failures.single()
+            failure.code shouldBe "pipeline.execution.calculator_keys_partial"
+            failure.details["node"] shouldBe "window"
+            failure.details["supplied"] shouldBe listOf("window_end")
+            failure.details["missing"] shouldBe listOf("window_start")
+
+            // The evidence is the run record, not a mock: NO node started — and not even the
+            // execution's opening event was emitted, because the refusal rides the same bind
+            // rejection as an ill-typed parameter, before the stream opens.
+            harnessEmitter!!.events.filterIsInstance<co.datapipelines.events.NodeStarted>().shouldBeEmpty()
+            harnessEmitter!!.events.filterIsInstance<co.datapipelines.events.ExecutionStarted>().shouldBeEmpty()
+        }
+
+    private suspend fun executeMulti(inputs: Map<String, JsonNode> = emptyMap()): ExecutionResult {
+        val engine = Fixtures.templateEngine(mapOf(TEMPLATE_ID to "SELECT :window_start AS s, :window_end AS e"))
+        val harness =
+            ExecutorHarness(
+                templateEngine = engine,
+                config = ExecutorConfig(maxParallelNodes = 4, executionTimeoutSeconds = 60, orgContext = org),
+                calculatorKinds = WindowKindFixture.lookup,
+            )
+        harnessEmitter = harness.emitter
+        return harness.use {
+            it.executor.execute(
+                Fixtures
+                    .request(
+                        Fixtures.pipeline(
+                            nodes =
+                                listOf(
+                                    windowNode(),
+                                    Fixtures.node(
+                                        "report",
+                                        source = "tempdb",
+                                        output = NodeOutput.Caller,
+                                        dependsOn = listOf("window"),
+                                    ),
+                                ),
+                        ),
+                    ).copy(executionId = UUID.randomUUID(), parameters = inputs),
+            )
+        }
+    }
+
+    private fun windowNode(): Node =
+        Node(
+            id = "window",
+            description = "the run's window",
+            type = NodeType.CALCULATOR,
+            source = "",
+            template = TemplateRef(),
+            output = null,
+            dependsOn = emptyList(),
+            kind = WindowKindFixture.kind,
+            inputs = mapOf("date" to text(AS_OF.toString())),
+            contextKey = null,
+            contextKeys = mapOf("start" to "window_start", "end" to "window_end"),
+        )
+
     private fun expectedQuarter(): Int =
         co.datapipelines.calculators.CalculatorRegistry
             .require("fiscal_quarter")
@@ -173,6 +277,10 @@ class CalculatorProvidedInputTest {
 
         /** Distinct from the computed quarter (4), so the two halves cannot pass on each other's value. */
         const val SUPPLIED = "7"
+
+        /** The supplied window — distinct from the computed 2026-08-01 … 2026-08-31, same reason. */
+        const val SUPPLIED_START = "2026-01-05"
+        const val SUPPLIED_END = "2026-02-20"
 
         /** Fixed, never "today": a test whose expectation depends on the day it runs gets deleted. */
         val AS_OF: java.time.LocalDate = java.time.LocalDate.of(2026, 8, 14)

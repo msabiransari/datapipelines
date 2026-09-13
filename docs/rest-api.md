@@ -240,8 +240,9 @@ it returned, carries that version's `body_hash` (the precondition token for the 
 write), `current_version` (the latest RELEASED version — the execute-default pointer,
 unmoved), and a `draft` pointer — `{version, body_hash, updated_by, updated_at}` — when a
 draft exists. Since 078 the body's `parameters` also lists the pipeline's **derived execute
-inputs** — one entry per CALCULATOR node's `context_key`,
-`{"type": <kind output wire type, or "ANY">, "required": false, "derived": true}` — because a
+inputs** — one entry per key a CALCULATOR node writes (121: every mapped `context_keys`
+value of a multi-output kind too),
+`{"type": <the key's output wire type, or "ANY">, "required": false, "derived": true}` — because a
 calculator key is an implicit optional input of the execute endpoint (pipeline-contract
 §4.10: supply it and the node is skipped). Declared parameters carry no `derived` flag;
 derived on read, never stored.

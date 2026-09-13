@@ -129,6 +129,22 @@ class SseEventProjectionTest {
     }
 
     @Test
+    fun `a multi-output calculator's completion carries context_values - and a single's never does (121)`() {
+        val multi =
+            NodeCompleted(
+                executionId,
+                "window",
+                stats(NodeStatus.SUCCESS).copy(contextValues = mapOf("window_start" to "2026-04-01", "window_end" to "2026-06-30")),
+            )
+        val payload = projection.payload(multi)
+        payload["context_values"] shouldBe mapOf("window_start" to "2026-04-01", "window_end" to "2026-06-30")
+
+        // The additive discipline: a node without the field ships no key, so every existing
+        // consumer's payload is byte-for-byte what it was.
+        projection.payload(NodeCompleted(executionId, "n", stats(NodeStatus.SUCCESS))).containsKey("context_values") shouldBe false
+    }
+
+    @Test
     fun `the failure record rides the error object - node, sql, exception, correlation_id`() {
         // 057/T85: the record the executor completed at the failure site, as the wire carries it.
         val record =

@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorOutput
 import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.OrgContext
@@ -25,7 +26,8 @@ class CalculatorsListTool : McpTool {
             description =
                 "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed " +
                     "inputs (name, type, required, whether it takes a JSON array, and its default when optional), " +
-                    "its output type, one worked example, and `phrases` — the everyday phrases the kind answers. " +
+                    "its output type (or, for a multi-output kind, the named `outputs` set a node maps through " +
+                    "`context_keys`), one worked example, and `phrases` — the everyday phrases the kind answers. " +
                     "Call this before authoring a CALCULATOR node — the kind names and input names are not " +
                     "guessable — and match the question's words against `phrases` before you pick a kind: a " +
                     "relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never " +
@@ -66,11 +68,12 @@ class CalculatorsGetTool : McpTool {
         McpTools.tool(
             name = "calculators_get",
             description =
-                "One calculator kind's full definition: display name, description, typed inputs, output type, " +
-                    "a worked example and `phrases` — the everyday phrases the kind answers, which you match " +
-                    "the question's words against before picking a kind. Use it when you know the kind and " +
-                    "need its exact input names and types. An unknown kind is refused with the catalogued " +
-                    "names in the error detail. Read-only.",
+                "One calculator kind's full definition: display name, description, typed inputs, output type " +
+                    "(or the named `outputs` set of a multi-output kind), a worked example and `phrases` — " +
+                    "the everyday phrases the kind answers, which you match the question's words against " +
+                    "before picking a kind. Use it when you know the kind and need its exact input names " +
+                    "and types. An unknown kind is refused with the catalogued names in the error detail. " +
+                    "Read-only.",
             schema =
                 """
                 {
@@ -105,15 +108,35 @@ class CalculatorsGetTool : McpTool {
 
 /** The one projection both tools return, so the two shapes cannot drift apart. */
 internal object CalculatorPayload {
+    /**
+     * The output half of the entry (121/D6). A single-output kind keeps `"output": "DATE"`
+     * exactly as the wire has always carried it (the catalog is additive forever — no consumer
+     * re-reads a payload it already understands), and has NO `outputs` key at all, the same
+     * conditional-key discipline as an input's `list`. A multi-output kind carries
+     * `"output": null` — explicit, never the `"ANY"` an ANY-output single kind legitimately
+     * wears — plus `"outputs"` as the named set an agent maps through `context_keys`.
+     */
     fun of(kind: CalculatorKind): Map<String, Any?> =
+        buildMap {
+            put("kind", kind.kind)
+            put("display_name", kind.displayName)
+            put("description", kind.description)
+            put("phrases", kind.phrases)
+            put("inputs", kind.inputs.map(::input))
+            if (kind.outputs.isEmpty()) {
+                put("output", kind.output?.wire ?: CalculatorInput.ANY_TYPE)
+            } else {
+                put("output", null)
+                put("outputs", kind.outputs.map(::output))
+            }
+            put("example", mapOf("inputs" to kind.example.inputs, "output" to kind.example.output))
+        }
+
+    private fun output(output: CalculatorOutput): Map<String, Any?> =
         mapOf(
-            "kind" to kind.kind,
-            "display_name" to kind.displayName,
-            "description" to kind.description,
-            "phrases" to kind.phrases,
-            "inputs" to kind.inputs.map(::input),
-            "output" to (kind.output?.wire ?: CalculatorInput.ANY_TYPE),
-            "example" to mapOf("inputs" to kind.example.inputs, "output" to kind.example.output),
+            "name" to output.name,
+            "type" to (output.type?.wire ?: CalculatorInput.ANY_TYPE),
+            "description" to output.description,
         )
 
     private fun input(input: CalculatorInput): Map<String, Any?> =

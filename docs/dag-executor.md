@@ -248,11 +248,13 @@ The executor asserts **nothing** about DAG position: the caller node may be a si
    is legal). The acyclicity check §5.1 asks for is performed by DagBuilder.build()
    itself (§3.1), so it cannot be skipped.
 5. Bind parameters into the ExecutionContext (defaults + coercion, pipeline-contract §7.1).
-   The pipeline's calculator `context_key`s bind here too, as implicit OPTIONAL inputs
-   (078, owner ruling 2026-09-05): a supplied key is coerced against its kind's output type
+   The pipeline's calculator keys bind here too, as implicit OPTIONAL inputs
+   (078, owner ruling 2026-09-05): a supplied key is coerced against its output type
    and marks the node for skipping (§7.3); unsupplied, the node computes it later. A rejected
    value — parameter or calculator key — is a 400-class failure with NO execution stream at
-   all — §8.2 catalogues no executor code for it.
+   all — §8.2 catalogues no executor code for it. 121: a multi-output node's keys override
+   all-or-nothing — a proper subset is refused HERE, before any node runs, with
+   `pipeline.execution.calculator_keys_partial` riding the same rejected bind.
    -------- the stream opens here --------
 6. Emit execution_started event
 7. Register the execution in the cancellation registry (§8.3) so DELETE /executions/{id},
@@ -900,9 +902,9 @@ Why the snapshot is worth a column at all: without it a completed execution cann
 
 Written from the terminal event (`pipeline_completed` / `pipeline_failed` / `execution_aborted`), each of which carries the snapshot, so the executor stays free of the database. A serialization failure leaves the insert-time value in place rather than losing the terminal UPDATE with it.
 
-Per-node, a `CALCULATOR` node's `NodeStats` also carries `context_key` and `context_value` (§7.2), so the run detail page and `executions_get` show what each calculator produced without reading the whole snapshot.
+Per-node, a `CALCULATOR` node's `NodeStats` also carries `context_key` and `context_value` (§7.2) — or, on a multi-output kind (121), `context_values` with every key the one evaluation wrote, the single pair staying byte-identical — so the run detail page and `executions_get` show what each calculator produced without reading the whole snapshot.
 
-**A calculator the caller supplied the key for is SKIPPED, not evaluated** (078, owner ruling 2026-09-05 — tier order org < platform < parameters < caller-supplied calculator keys < calculator outputs). Its stats row still carries `context_key` and `context_value` — the SUPPLIED value, read from the live Context — plus `"provided_by": "caller"` (absent otherwise, never null), so a run record distinguishes "the caller said 7" from "the kind computed 7". A calculator that RUNS `put()`s its key and wins over everything below tier 5, exactly as before.
+**A calculator the caller supplied the key for is SKIPPED, not evaluated** (078, owner ruling 2026-09-05 — tier order org < platform < parameters < caller-supplied calculator keys < calculator outputs). Its stats row still carries `context_key` and `context_value` — the SUPPLIED value, read from the live Context — plus `"provided_by": "caller"` (absent otherwise, never null), so a run record distinguishes "the caller said 7" from "the kind computed 7". A calculator that RUNS `put()`s its key and wins over everything below tier 5, exactly as before. 121: for a multi-output node the rule is all-or-nothing — EVERY key supplied and the node is skipped (the supplied values in `context_values`, `provided_by` one field on the node); a proper subset never reaches the executor, refused at the bind with `pipeline.execution.calculator_keys_partial`.
 
 ---
 
