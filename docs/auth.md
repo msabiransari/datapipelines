@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.14 (revised — see Change Log)
+**Status:** v2.16 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-09-11
+**Last updated:** 2026-09-13
 
 ---
 
@@ -839,6 +839,8 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the flag that renders it, and the operation row above it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the Min role column, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes.
 
+One PAGE route floors above `read` without being a mutation: the pipeline editor (`GET /pipelines/{id}/editor`) declares `EXECUTE_PIPELINE` (122) — the operation the screen exists to perform for its LOWEST role (D-R3: viewers execute what they can read), so an `execute` key and a viewer session reach the page and a `read` key is refused. The AUTHORING state the page renders is read, never written — the authoring verbs on it are role-hidden (114) and every mutating call it makes is verb-guarded or viewer-level. The template editor (`GET /templates/editor`) keeps `MUTATE_PIPELINES_TEMPLATES`: nothing a viewer may do lives there (096 §C's reasoning holds).
+
 ### 7.7 Key kinds and published-endpoint bindings
 
 Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`); round 091 adds the third. Two of the three have an authorisation model that is not scopes at all.
@@ -1442,6 +1444,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v2.16 | 122 viewer executes | §7.6: no matrix row changed — the round re-floored a PAGE route. The pipeline editor (`GET /pipelines/{id}/editor`) declares `EXECUTE_PIPELINE` instead of `MUTATE_PIPELINES_TEMPLATES`: D-R3 says viewers execute, the §4.3e table already gave the viewer's editor an Execute verb, and the author floor refused the viewer before any of it was reachable (the owner's 2026-09-12 report). The template editor keeps the author floor. New paragraph after the UI-screens one states the page-route reasoning; the read key's "everything except the editors" property is unchanged (read < execute). Status line had drifted a version behind the rows (119-style); now current. |
 | 2026-09-11 | v2.14 | 117 templates_update | §7.6 MCP table: `templates_update` joins the `author`/`author` row (34 → 35 tools) — the template mirror of `pipelines_update`, the draft write REST `PUT /templates` already gates. Both `ScopeMatrixSpecDriftTest` counts (scope and capability) moved 34 → 35 in the same commit. |
 | 2026-09-11 | v2.15 | 118 learned semantic layer | §7.6 MCP table 35 → **38** tools: `semantics_list` joins the `read`/`view` row; a new `semantics_record` / `semantics_retire` row on `author`/`author` (recording is an authoring act, D-S8; the DATASOURCE-scope grant requirement is the §5.3 gate — not-found otherwise; the cross-workspace retire rule needs the workspace-admin role, enforced in the service). §10's event registry (enums.md §15) gains `semantics.recorded` / `semantics.retired`. |
 | 2026-09-07 | v2.13 | 094 the agent boundary | §7.6 MCP table: `datasources_create` LEAVES the matrix (28 → 27 tools). The standing rule it becomes: **no credential travels through an agent** — a password passed through a tool call transits the agent's context, its transcript and whatever the client logs, which 068 documented as an accepted trade and 094 rejected. Datasource create, update and delete are UI/REST-only; the read and probe tools (`datasources_list`/`_get`/`_test`, the three introspection tools, `datasources_preview_rows`) are unchanged, and none of them accepts a credential. |

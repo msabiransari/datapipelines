@@ -96,6 +96,141 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
     }
 
     /**
+     * 122 — D-R3's execute right, through the DOOR the screen actually has: the explorer's
+     * "Open in editor" link. The record said a viewer's editor loads and executes (D-R3,
+     * ui-screens §4.3e's pipeline-editor row, RoleVisibilityRenderTest §A) while the route
+     * floored the GET at MUTATE_PIPELINES_TEMPLATES, so the click landed on a 403 and the
+     * verbs 114 rendered were unreachable — a render test cannot see that, because it never
+     * walks the route (this test is the arm that can go red on it).
+     *
+     * The whole walk rides the app's own links — explorer search, leaf click, Open — never a
+     * direct editor URL (the owner's 2026-09-05 rule; 076 missed a P0 by entering by URL).
+     * A response listener records EVERY response from the first page load through the walk
+     * and the run: any ≥ 400 is a failure, which is what proves the viewer's page carries no
+     * hidden 403 from a load-time call an author floor would refuse (122 §A.2).
+     *
+     * The pipeline is seeded by an AUTHOR through REST because a viewer cannot create one —
+     * the subject here is run-and-read, not creation. Execute runs the DRAFT the editor pins
+     * (draft.js sends the shown version; D55's execute-default is the same last-version rule
+     * rest-wide), so the viewer runs exactly what the screen showed them.
+     */
+    @Test
+    fun `a viewer opens a pipeline from the explorer and executes it in the editor`() {
+        startTrace()
+        val name = "test/browser_122_" + generatedPassword("p").take(6).lowercase()
+        val author = signIn("rbv-exec-author", author = true, promoter = false, admin = false)
+        createDraftPipeline(author.page, name)
+        author.close()
+
+        val viewer = signIn("rbv-exec-viewer", author = false, promoter = false, admin = false)
+        val badResponses = mutableListOf<String>()
+        var editorDocumentStatus = 0
+        viewer.page.onResponse { response ->
+            if (response.status() >= 400) {
+                badResponses += "${response.status()} ${response.request().method()} ${response.url()}"
+            }
+            if (response.request().isNavigationRequest() && response.url().contains("/editor")) {
+                editorDocumentStatus = response.status()
+            }
+        }
+
+        // Explorer → leaf → detail → editor, the app's own links the whole way.
+        viewer.page.navigate("$baseUrl/pipelines?q=$name")
+        viewer.page.waitForSelector("[data-role]")
+        viewer.roleBadge() shouldBe "viewer"
+        viewer.page
+            .locator("button.tpl-result, button.tpl-leaf")
+            .first()
+            .click()
+        val open = viewer.page.locator("a:has-text('Open in editor')").first()
+        open.waitFor()
+        badResponses shouldBe emptyList()
+
+        open.click()
+        viewer.page.waitForURL("**/pipelines/*/editor")
+        // LOAD, not the cards: at base the route answers 403 and no card ever comes, so the
+        // red must be the listener's, naming the refused request — not a 30 s card timeout.
+        viewer.page.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD)
+
+        // The 403 the route used to answer IS the red this test is born with: assert the
+        // listener first, so the failure names the refused request instead of timing out
+        // on a note that never rendered.
+        badResponses shouldBe emptyList()
+        editorDocumentStatus shouldBe 200
+
+        // The graph's node cards are the signal that the editor finished loading (the same
+        // wait every editor walk uses).
+        viewer.page
+            .locator(".pe-card")
+            .first()
+            .waitFor()
+
+        // 114 §A's screen, now actually reachable: the read-only note, Execute kept,
+        // no authoring verb anywhere on the page.
+        viewer.page.locator("[data-role-note='read-only']").waitFor()
+        viewer.verbs().contains("pipeline-execute") shouldBe true
+        viewer.verbs().contains("pipeline-release") shouldBe false
+        viewer.verbs().contains("pipeline-purge") shouldBe false
+
+        // The run itself — D-R3's point. The Execute button re-enables when the stream
+        // ends (x-bind:disabled="isExecuting"); the status chip names the terminal phase.
+        viewer.page.locator("[data-verb='pipeline-execute']").click()
+        viewer.page
+            .locator("[data-verb='pipeline-execute']:not([disabled])")
+            .waitFor(
+                com.microsoft.playwright.Locator
+                    .WaitForOptions()
+                    .setTimeout(EXECUTION_TIMEOUT_MS),
+            )
+        viewer.page.locator(".pe-status:has-text('Completed')").waitFor()
+        badResponses shouldBe emptyList()
+        viewer.close()
+    }
+
+    /** A one-node `fiscal_quarter` pipeline (102's fixture), created in-page by [page]'s cookies. */
+    @Suppress("UNCHECKED_CAST")
+    private fun createDraftPipeline(
+        page: Page,
+        name: String,
+    ): String {
+        val result =
+            page.evaluate(
+                """async (args) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const res = await fetch('/api/v1/pipelines', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
+                    },
+                    body: JSON.stringify({
+                      name: args.name,
+                      display_name: args.name,
+                      nodes: [{
+                        id: 'fq',
+                        type: 'CALCULATOR',
+                        kind: 'fiscal_quarter',
+                        context_key: 'run_fiscal_quarter',
+                        inputs: { date: '${'$'}current_date', fiscal_start: '${'$'}org_fiscal_start_date' },
+                      }],
+                    }),
+                  });
+                  const body = await res.text();
+                  return { status: res.status, body: body };
+                }""",
+                mapOf("name" to name),
+            ) as Map<String, Any?>
+        (result["status"] as Number).toInt() shouldBe 201
+        return Regex(""""id"\s*:\s*"([0-9a-f-]+)"""").find(result["body"] as String)!!.groupValues[1]
+    }
+
+    private companion object {
+        /** A calculator run is engine-internal (no datasource); 60 s is already generous. */
+        const val EXECUTION_TIMEOUT_MS = 60_000.0
+    }
+
+    /**
      * §C.1 — the members screen a workspace admin gets: three checkboxes per row, three on the
      * add form, and the flags landing in `workspace_members`. Asserted at the ROW, because "did
      * the checkbox reach the database" is the only question that matters and a rendered form

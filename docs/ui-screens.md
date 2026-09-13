@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.39
+**Status:** v1.40
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-11 (118)
+**Last updated:** 2026-09-13 (122)
 
 ---
 
@@ -637,6 +637,13 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Execution detail (§4.9) | Cancel | `canExecute` **and** the execution is RUNNING | `CANCEL_EXECUTION` |
 | Shell (§3.4) | the role badge | always | — |
 
+A viewer reaches the PIPELINE editor through the explorer's **Open in editor** link and executes
+there (122): the page route's floor is `EXECUTE_PIPELINE` — the operation the screen exists to
+perform for its lowest role, D-R3 — so the verbs this table gives the viewer are actually
+reachable, and the read-only line on that screen is 114 §A's. The TEMPLATE editor keeps the
+author floor: nothing a viewer may do lives there (a viewer reads template bodies in the
+explorer's Source tab, §4.6).
+
 Three rows are worth reading twice, because each is a place a reasonable guess is wrong:
 
 - **Datasource Test is `ws_admin`, not `author`.** It is not a read: it opens a live connection
@@ -832,7 +839,7 @@ confused for one another.
 | htmx | Yes — the version `<select>` swaps the source column (`hx-get="/partials/templates/editor/source?name={path}"`, the select's own `version` riding along, into `#template-source`, `outerHTML`) and **Edit** posts to `/partials/templates/editor/edit` (`#tpl-edit-refusal`, `innerHTML`; success answers `HX-Redirect`). "Render Preview" posts to `/partials/templates/render?name={path}&version={v}`, rendered into `#preview-output` |
 
 Content:
-- **Rendered for (114):** Release is `canPromote`, Purge draft and the read-only version's **Edit** (start a draft from a release) are `canAuthor`. A viewer's editor loads read-only with the same `.app-note` line the pipeline editor carries.
+- **Rendered for (114):** Release is `canPromote`, Purge draft and the read-only version's **Edit** (start a draft from a release) are `canAuthor`. The route keeps the author floor (096 §C's reasoning holds here — nothing a viewer may DO lives on this screen; the explorer's Source tab is a viewer's read), so the viewer read-only line 114 rendered is not reachable through this route today; widening the floor would be an owner decision, not made by 122.
 - **Draft lifecycle actions (102):** Release / Discard draft open the §4.3d template twins in `#te-dialog`, addressed by NAME in the query (§9.6). Success answers `HX-Redirect` back to the editor with a flash toast; refusal is §5.1 Shape C. The pre-102 inline `tplLifecycle` script carried the native `confirm`/`alert` pair and is gone (the static zero-native-dialog test covers this file).
 - **Editor pane**: textarea with the Freemarker body — plain monospace by decision (041 D5: highlighting an editing surface means an overlay or contenteditable; not this round), sized to fill the viewport below the header and scroll inside itself rather than growing the page.
 - **Description panel** (read-only in the preview column): the template's free-text `description`. Since a template declares no variables, this is the only in-app hint about what context it expects ([Templates §2.5](templates.md#2-design-principles)).
@@ -1426,6 +1433,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v1.40 | 122 viewer executes (owner testing round, day 2) | **The route caught up with the record.** D-R3 and §4.3e already gave the viewer a read-only pipeline editor with Execute; the route refused them at the door — `GET /pipelines/{id}/editor` was floored at `MUTATE_PIPELINES_TEMPLATES`, so the explorer's Open link (the only door to Execute) answered 403 `auth.scope.insufficient`. The floor is now `EXECUTE_PIPELINE` — the operation the screen exists to perform for its lowest role — so an `execute` key and a viewer session reach the page while a `read` key stays out; the template editor keeps the author floor (§4.7 note corrected to match). §4.3e states the Open route and the 114 read-only line; RoleVisibilityBrowserTest walks a viewer explorer → Open → Execute (zero ≥400 responses, terminal state reached) and JarSmokeE2eTest pins the key boundary (`execute` 200 / `read` 403) in one test. |
 | 2026-09-12 | v1.39 | owner testing round, day 2 | Two defects the owner saw everywhere a tree or a version list shows. §3.4 icons: **a leaf row keeps the chevron slot** (`template-tree.css .tpl-leaf` pads it; the guide's tick runs on to the file glyph), so a leaf's glyph and label sit level with a sibling folder's and one indent right of its parent's — before, the glyph sat IN the chevron slot and every leaf's label landed at its parent's x. §4.3b: **the ⋯ menu is a top-layer popover** (`popover="manual"` on `.tplx-vmenu-list`, placed by `lifecycle-dialog.js`'s pure `menuPlacement` — under the ⋯, above it when the viewport has no room below, clamped inside it) — it was `position: absolute` inside `.tplx-tabpanel`, which scrolls, so on a one-row list the open menu fell into the panel's scrollable overflow and never showed. `TreeIndentAndVersionMenuBrowserTest` pins both in both explorers (label offsets to the px; the menu's centre hit-tests to the menu). |
 | 2026-09-11 | v1.38 | 119 open-source signals | **§4.15 — the site reads as free and open source on the first screen** (owner: the fold did not answer "is this something I buy"). Hero CTA is the install itself — a copyable `./app.sh --start` via the standard `.code-block`/`.copy-btn` pair (zero new clipboard JS), labelled *Run it on your machine — free, one command, no account*; the strip gains the **Price · $0 · AGPL-3.0 · self-hosted · no phone-home** cell (cites deployment.md §10, §4.3, §11); nav gains **Pricing** plus the ★GitHub star badge and the licence chip, and its last item is host-aware (**Try the live demo** on the public origin, **Sign in** elsewhere) via `SiteOriginAdvice`; `/pricing` page with `SiteFaqs.PRICING` and the dated no-paid-tier promise (freshness guard extended to it); `CONTACT_EMAIL` renders from one constant in the footer, /pricing and a new /security report-a-vulnerability section; "free" now in the home FAQ cost answer and the open-source section; `SiteOpenSourceSignalsTest` (red at birth: the fold carried neither "free" nor the licence on the first screen). |
 | 2026-09-11 | v1.37 | 119 site batch 4 | **§4.15 — one vertical rhythm for every public page (measured, not felt).** New `--site-gap-head` token (20px phone / 24px desktop) applied by ONE selector per structure (`.section .container > h2 + *`), ledes keeping 16px and passing the gap on; card padding/gap 24 from 64rem; the card's internal rhythm set once on `.card`; `align-items: start` in feature groups + the 90-word card body budget (`SiteCardBudgetTest`, red at birth on 11 cards, surplus moved to cited-docs links); `.group-title` takes the kicker treatment; `.hero-shot` clamped to `--site-hero-max` so the proof strip starts in the fold (phone order: copy → numbers → picture); the home dateline folded into its pill; `.shot img` framed while the pre-re-shoot light captures ship; long machine tokens in prose break instead of widening the page. All pinned by `SiteRhythmBrowserTest` (real viewports, 1440/390). |
