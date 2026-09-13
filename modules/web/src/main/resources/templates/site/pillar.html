@@ -13,10 +13,10 @@
   <section class="section page-hero" aria-labelledby="pillar-title">
     <div class="container">
       <!-- claim: docs/mcp-server.md §6.1, docs/deployment.md §10 -->
-      <p class="eyebrow">MCP server · <span th:text="${toolCount}">34</span> tools · six engines · AGPL-3.0</p>
+      <p class="eyebrow">MCP server · <span th:text="${facts.toolCount}">30</span> tools · <span th:text="${facts.engineCountWord}">eight</span> engines · AGPL-3.0</p>
       <p class="kicker">MCP server for SQL databases</p>
-      <h1 id="pillar-title" class="ds-display">One SQL MCP server for six database engines</h1>
-      <p class="section-lede">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.</p>
+      <h1 id="pillar-title" class="ds-display" th:text="|One SQL MCP server for ${facts.engineCountWord} database engines|">One SQL MCP server for eight database engines</h1>
+      <p class="section-lede" th:text="|${facts.engines} behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.|">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.</p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add it to Claude Code or Cursor</a>
         <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">GitHub</a>
@@ -81,7 +81,7 @@
         <article class="card">
           <!-- claim: docs/staging.md §1 -->
           <h3>Cross-database joins land nothing</h3>
-          <p>A pipeline that reads two engines stages each result set into an in-memory database created for that one execution, joins there, and destroys it when the execution ends. <a th:href="@{/federated-query}">How the staging join works</a>.</p>
+          <p>A pipeline that reads across engines stages each result set into an in-memory database created for that one execution, joins there, and destroys it when the execution ends. <a th:href="@{/federated-query}">How the staging join works</a>.</p>
         </article>
       </div>
     </div>
@@ -90,9 +90,9 @@
   <section class="section" aria-labelledby="engines-title">
     <div class="container">
       <p class="kicker">Pick your engine</p>
-      <h2 id="engines-title" class="ds-headline">Connect Claude Code to Postgres, MySQL, SQL Server, Oracle, SQLite or DuckDB</h2>
+      <h2 id="engines-title" class="ds-headline" th:text="|Connect Claude Code to ${facts.engines}|">Connect Claude Code to Postgres, MySQL, SQL Server, Oracle, SQLite or DuckDB</h2>
       <!-- claim: docs/datasources.md §4.1, docs/deployment.md §3.5 -->
-      <p class="section-lede">One server speaks all six. Each page carries that engine's dialect constant, its JDBC driver and license, whether the driver ships in the published image, and the client config to paste.</p>
+      <p class="section-lede" th:text="|One server speaks all ${facts.engineCountWord}. Each page carries that engine's dialect constant, its JDBC driver and license, whether the driver ships in the published image, and the client config to paste.|">One server speaks all eight. Each page carries that engine's dialect constant, its JDBC driver and license, whether the driver ships in the published image, and the client config to paste.</p>
       <div class="engine-grid">
         <article class="engine-card" th:each="e : ${engines}">
           <h3><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></h3>
@@ -106,9 +106,9 @@
   <section class="section" aria-labelledby="tools-title">
     <div class="container">
       <p class="kicker">The surface</p>
-      <h2 id="tools-title" class="ds-headline">The <span th:text="${toolCount}">26</span> MCP tools an agent gets</h2>
+      <h2 id="tools-title" class="ds-headline">The <span th:text="${facts.toolCount}">30</span> MCP tools an agent gets</h2>
       <!-- claim: docs/mcp-server.md §6.1 -->
-      <p class="section-lede">Discovery, authoring, execution and result reading — the full lifecycle, in <code>tools/list</code> order. <span th:text="${readCount}">16</span> of them read; <span th:text="${mutatingCount}">6</span> can write, and those are the ones the audit log flags with <code>mcp.tool.write</code>.</p>
+      <p class="section-lede">Discovery, authoring, execution and result reading — the full lifecycle, in <code>tools/list</code> order. <span th:text="${facts.readToolCount}">24</span> of them read; <span th:text="${facts.mutatingToolCount}">6</span> can write, and those are the ones the audit log flags with <code>mcp.tool.write</code>.</p>
       <ul class="tool-list">
         <li th:each="t : ${toolNames}"><code th:text="${t}">tool</code></li>
       </ul>
@@ -147,7 +147,7 @@
       <h2 id="cta-title" class="ds-headline">Point your agent at the demo first</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        One command brings up the server, six engines' worth of demo sources and the pipelines that join them. The
+        One command brings up the server, the demo sources and the pipelines that join them. The
         afternoon you spend on the demo is the cheapest way to find out what governed agent access feels like.
       </p>
       <div class="btn-row">

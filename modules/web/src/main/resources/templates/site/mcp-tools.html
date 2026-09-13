@@ -25,7 +25,7 @@
       <p class="kicker">Generated from the server's own catalogue</p>
       <h1 id="mt-title" class="ds-display">The MCP tools: everything an agent can do against your databases</h1>
       <p class="section-lede">
-        <span th:text="${toolCount}">34</span> tools over Streamable HTTP, <span th:text="${mutatingCount}">16</span> of
+        <span th:text="${facts.toolCount}">30</span> tools over Streamable HTTP, <span th:text="${facts.mutatingToolCount}">16</span> of
         them writes, every one gated by the scope its key must hold. The list below is rendered from the same catalogue
         the server registers at startup, so it cannot drift from what your agent sees in <code>tools/list</code>. What is
         <em>not</em> here is as deliberate as what is: there is no release tool, no promote tool, and no tool that returns

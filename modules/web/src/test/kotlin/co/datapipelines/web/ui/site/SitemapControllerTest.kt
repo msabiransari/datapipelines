@@ -54,7 +54,7 @@ class SitemapControllerTest {
                     if (path.contains("{")) SitePages.ENGINES.map { SitePages.ENGINE_PREFIX + it.slug } else listOf(path)
                 }.distinct()
 
-        // Non-vacuity: seven handlers, of which one templated route expands to six pages.
+        // Non-vacuity: seven handlers, of which one templated route expands to the engine pages.
         check(routes.size >= MIN_ROUTES) { "the reflection scan found only ${routes.size} routes" }
 
         val locations = controller(buildTime = null).locations()
@@ -134,7 +134,7 @@ class SitemapControllerTest {
         /** The packaged spec set is ~25 docs; well under it means the classpath scan broke. */
         const val MIN_DOCS = 15
 
-        /** Six engine pages plus six one-off cluster pages plus the pillar. */
+        /** The engine pages plus the one-off cluster pages plus the pillar. */
         const val MIN_ROUTES = 13
     }
 }

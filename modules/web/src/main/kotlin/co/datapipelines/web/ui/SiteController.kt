@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.GetMapping
  * site; the signed-in dashboard moved to `/dashboard`, no auto-redirect).
  *
  * GET-only, anonymous, read-only. Everything on this page is CONSTANT content (Decision 4 —
- * no DB-backed facts on public surfaces): the one live number, the MCP tool count, comes
- * from [McpToolCatalog.NAMES], a compile-time constant. Injecting `List<McpTool>` instead
- * would render "0 tools" on any deployment where the conditional tool bean is absent
+ * no DB-backed facts on public surfaces): the live numbers come from [SiteFacts] — the tool
+ * count is the compile-time [McpToolCatalog.NAMES] size. Injecting `List<McpTool>` instead
+ * would render an empty count on any deployment where the conditional tool bean is absent
  * (033/C4).
  *
  * Defence is cache headers, NOT a rate limiter (033/D1, OPEN-ITEMS T46): the login limiter
@@ -36,5 +36,5 @@ class SiteController {
     fun home(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.HOME, McpToolCatalog.NAMES.size, SiteFaqs.HOME)
+    ): String = PublicPage.render(model, response, SitePages.HOME, faq = SiteFaqs.HOME)
 }

@@ -11,6 +11,9 @@ package co.datapipelines.web.ui.site
  * — the roadmap has its own page and the answers that touch it say "roadmap" in as many words.
  */
 object SiteFaqs {
+    /** The site's derived numbers — the engine count and names below come from the catalogs, not from prose (124 §A). */
+    private val facts: SiteFacts = SiteFacts.current()
+
     val WHAT_IT_IS: List<FaqEntry> =
         listOf(
             FaqEntry(
@@ -30,8 +33,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases does it talk to?",
-                "PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, CSV and Iceberg on S3 read " +
-                    "in place by an embedded DuckDB. One pipeline can mix all of them; each node runs where its data lives. " +
+                "${facts.engines} — dp-lake is Parquet, CSV and Iceberg on S3 read in place by an embedded " +
+                    "DuckDB. One pipeline can mix all of them; each node runs where its data lives. " +
                     "The dialect matrix with driver and licence notes is docs/datasources.md §4.",
                 "docs/datasources.md §4",
             ),
@@ -258,8 +261,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases?",
-                "The eight engines are PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, " +
-                    "CSV and Iceberg on S3 read in place — and one dataset can read several of them in the same run " +
+                "The ${facts.engineCountWord} engines are ${facts.engines} — dp-lake reads Parquet, CSV and " +
+                    "Iceberg on S3 in place — and one dataset can read several of them in the same run " +
                     "(docs/datasources.md §4).",
                 "docs/datasources.md §4",
             ),
@@ -404,8 +407,7 @@ object SiteFaqs {
             FaqEntry(
                 "Does it work on my own warehouse?",
                 "Yes — the skill and the tools are demo-free, and the facts come from whatever your agent probes: " +
-                    "Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB, or Parquet and Iceberg through dp-lake " +
-                    "(docs/datasources.md §4).",
+                    "${facts.engines} (docs/datasources.md §4).",
                 "docs/datasources.md §4",
             ),
         )

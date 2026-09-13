@@ -16,9 +16,10 @@ import org.springframework.web.servlet.ModelAndView
  * **Every handler here is GET-only, anonymous and read-only, by construction.** There is no
  * mutating handler and there never should be: these routes are `permitAll` in
  * `SecurityConfig`, so a POST added here would be an unauthenticated write. The content is
- * CONSTANT — the one live number is [McpToolCatalog.NAMES]`.size`, a compile-time constant —
- * so no request on this controller touches a database, a principal or a workspace, and the
- * defence is the shared-cache header [PublicPage] sets, not a rate limiter (033/D1).
+ * CONSTANT — the live numbers come from [SiteFacts], compile-time constants derived from the
+ * catalogs themselves — so no request on this controller touches a database, a principal or a
+ * workspace, and the defence is the shared-cache header [PublicPage] sets, not a rate limiter
+ * (033/D1).
  *
  * Titles and descriptions are NOT here: they live in [SitePages], because the sitemap and
  * the SEO guards read the same rows. A handler is a lookup plus [PublicPage.render].
@@ -33,15 +34,11 @@ class SitePagesController(
         response: HttpServletResponse,
     ): String {
         model.addAttribute("toolNames", McpToolCatalog.NAMES)
-        // Derived, never transcribed: "N of them read, M can write" on the page is the
-        // catalog's own split, so adding a tool cannot leave the sentence wrong.
-        model.addAttribute("mutatingCount", McpToolCatalog.MUTATING.size)
-        model.addAttribute("readCount", McpToolCatalog.NAMES.size - McpToolCatalog.MUTATING.size)
-        return PublicPage.render(model, response, SitePages.PILLAR, toolCount(), SiteFaqsCluster.PILLAR)
+        return PublicPage.render(model, response, SitePages.PILLAR, faq = SiteFaqsCluster.PILLAR)
     }
 
     /**
-     * The six `/mcp-server/{engine}` pages: ONE template over the [SitePages.ENGINES] rows.
+     * The `/mcp-server/{engine}` pages: ONE template over the [SitePages.ENGINES] rows.
      * An unknown engine is an ordinary miss (404), never an error page — same rule the docs
      * viewer follows for an unknown slug.
      */
@@ -53,7 +50,7 @@ class SitePagesController(
     ): ModelAndView {
         val facts = SitePages.engine(engine.lowercase()) ?: return ModelAndView("error/404", HttpStatus.NOT_FOUND)
         model.addAttribute("engine", facts)
-        val view = PublicPage.render(model, response, SitePages.enginePage(facts), toolCount(), SiteFaqsCluster.ENGINES)
+        val view = PublicPage.render(model, response, SitePages.enginePage(facts), faq = SiteFaqsCluster.ENGINES)
         return ModelAndView(view, model.asMap())
     }
 
@@ -61,50 +58,43 @@ class SitePagesController(
     fun addToClaudeCode(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.ADD_TO_CLAUDE_CODE, toolCount(), SiteFaqsCluster.ADD_TO_CLIENT)
+    ): String = PublicPage.render(model, response, SitePages.ADD_TO_CLAUDE_CODE, faq = SiteFaqsCluster.ADD_TO_CLIENT)
 
     @GetMapping("/ai-data-pipeline")
     fun aiDataPipeline(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.AI_DATA_PIPELINE, toolCount(), SiteFaqsCluster.AI_DATA_PIPELINE)
+    ): String = PublicPage.render(model, response, SitePages.AI_DATA_PIPELINE, faq = SiteFaqsCluster.AI_DATA_PIPELINE)
 
     @GetMapping("/text-to-sql-agent")
     fun textToSqlAgent(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.TEXT_TO_SQL_AGENT, toolCount(), SiteFaqsCluster.TEXT_TO_SQL)
+    ): String = PublicPage.render(model, response, SitePages.TEXT_TO_SQL_AGENT, faq = SiteFaqsCluster.TEXT_TO_SQL)
 
     @GetMapping("/compare/airflow")
     fun compareAirflow(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.COMPARE_AIRFLOW, toolCount(), SiteFaqsCluster.COMPARE_AIRFLOW)
+    ): String = PublicPage.render(model, response, SitePages.COMPARE_AIRFLOW, faq = SiteFaqsCluster.COMPARE_AIRFLOW)
 
     @GetMapping("/compare/dbt")
     fun compareDbt(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.COMPARE_DBT, toolCount(), SiteFaqsCluster.COMPARE_DBT)
+    ): String = PublicPage.render(model, response, SitePages.COMPARE_DBT, faq = SiteFaqsCluster.COMPARE_DBT)
 
     @GetMapping("/federated-query")
     fun federatedQuery(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.FEDERATED_QUERY, toolCount(), SiteFaqsCluster.FEDERATED_QUERY)
+    ): String = PublicPage.render(model, response, SitePages.FEDERATED_QUERY, faq = SiteFaqsCluster.FEDERATED_QUERY)
 
     @GetMapping("/dp-lake")
     fun dpLake(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.DP_LAKE, toolCount(), SiteFaqs.DP_LAKE)
-
-    /**
-     * The tool count, from the compile-time catalog rather than an injected `List<McpTool>`:
-     * the tool bean is `@ConditionalOnBean(PipelineExecutor::class)` (033/C4), so an injected
-     * list would render "0 tools" on any deployment without the engine.
-     */
-    private fun toolCount(): Int = McpToolCatalog.NAMES.size
+    ): String = PublicPage.render(model, response, SitePages.DP_LAKE, faq = SiteFaqs.DP_LAKE)
 
     // ---- Site v2 (2026-09-09): the intent pages. Same shape: GET, anonymous, no DB read.
     @GetMapping("/faq")
@@ -113,26 +103,26 @@ class SitePagesController(
         response: HttpServletResponse,
     ): String {
         model.addAttribute("faqGroups", SiteFaqs.ALL)
-        return PublicPage.render(model, response, SitePages.FAQ, toolCount(), SiteFaqs.ALL.flatMap { it.second })
+        return PublicPage.render(model, response, SitePages.FAQ, faq = SiteFaqs.ALL.flatMap { it.second })
     }
 
     @GetMapping("/roadmap")
     fun roadmap(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.ROADMAP, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.ROADMAP)
 
     @GetMapping("/security")
     fun security(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.SECURITY, toolCount(), SiteFaqs.AGENTS_AND_SECURITY)
+    ): String = PublicPage.render(model, response, SitePages.SECURITY, faq = SiteFaqs.AGENTS_AND_SECURITY)
 
     @GetMapping("/published-api")
     fun publishedApi(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.PUBLISHED_API, toolCount(), SiteFaqs.APIS_AND_OPERATIONS.take(2))
+    ): String = PublicPage.render(model, response, SitePages.PUBLISHED_API, faq = SiteFaqs.APIS_AND_OPERATIONS.take(2))
 
     @GetMapping("/mcp-tools")
     fun mcpTools(
@@ -140,21 +130,20 @@ class SitePagesController(
         response: HttpServletResponse,
     ): String {
         model.addAttribute("toolGroups", McpToolGroups.groups())
-        model.addAttribute("mutatingCount", McpToolCatalog.MUTATING.size)
-        return PublicPage.render(model, response, SitePages.MCP_TOOLS, toolCount())
+        return PublicPage.render(model, response, SitePages.MCP_TOOLS)
     }
 
     @GetMapping("/tableau")
     fun tableau(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.TABLEAU, toolCount(), SiteFaqs.TABLEAU)
+    ): String = PublicPage.render(model, response, SitePages.TABLEAU, faq = SiteFaqs.TABLEAU)
 
     @GetMapping("/tableau/governed-dataset")
     fun tableauGovernedDataset(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.TABLEAU_GOVERNED_DATASET, toolCount())
+    ): String = PublicPage.render(model, response, SitePages.TABLEAU_GOVERNED_DATASET)
 
     /**
      * 115 §A.3 — the engineering page the buyer-facing home page handed its vocabulary to.
@@ -166,7 +155,7 @@ class SitePagesController(
     fun howItWorks(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, toolCount(), SiteFaqs.APIS_AND_OPERATIONS)
+    ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, faq = SiteFaqs.APIS_AND_OPERATIONS)
 
     /**
      * 116 — the demo-data page. Its one live input is [SiteDemoData], parsed from the
@@ -182,6 +171,12 @@ class SitePagesController(
         model.addAttribute("demoNyc", demoData.family("nyc"))
         model.addAttribute("demoTrade", demoData.family("trade"))
         model.addAttribute("demoLake", demoData.family("lake"))
-        return PublicPage.render(model, response, SitePages.DEMO_DATA, toolCount(), SiteFaqs.DEMO_DATA)
+        return PublicPage.render(
+            model,
+            response,
+            SitePages.DEMO_DATA,
+            facts = SiteFacts.current(demoData.families.associate { it.key to it.engineCount }),
+            faq = SiteFaqs.DEMO_DATA,
+        )
     }
 }

@@ -14,7 +14,7 @@
   <section class="section page-hero" aria-labelledby="add-title">
     <div class="container">
       <!-- claim: docs/mcp-server.md §6.1 -->
-      <p class="eyebrow">One endpoint · <span th:text="${toolCount}">34</span> tools · API keys only</p>
+      <p class="eyebrow">One endpoint · <span th:text="${facts.toolCount}">30</span> tools · API keys only</p>
       <p class="kicker">Client setup</p>
       <h1 id="add-title" class="ds-display">Add an MCP server to Claude Code, Cursor or Copilot</h1>
       <p class="section-lede">
@@ -146,7 +146,7 @@
       <h2 id="step4-title" class="ds-headline">Check that the tools came back</h2>
       <!-- claim: docs/mcp-server.md §6.1 -->
       <p class="section-lede">
-        Ask the agent to list its tools. A working connection reports <span th:text="${toolCount}">26</span> from this
+        Ask the agent to list its tools. A working connection reports <span th:text="${facts.toolCount}">30</span> from this
         server, starting with <code>pipelines_list</code> and <code>datasources_list</code>. Nothing else needs
         configuring: capabilities come from the standard <code>initialize</code> handshake.
       </p>

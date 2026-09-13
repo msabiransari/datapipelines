@@ -179,11 +179,11 @@
 
   <section class="section" aria-labelledby="sl-scopes">
     <div class="container">
-      <h2 id="sl-scopes" class="ds-headline">Two kinds of fact: a business glossary that maintains itself</h2>
+      <h2 id="sl-scopes" class="ds-headline" th:text="|${#strings.capitalize(facts.learnedFactScopeCountWord)} scopes of fact: a business glossary that maintains itself|">Two scopes of fact: a business glossary that maintains itself</h2>
       <div class="prose">
         <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S1: two scopes, one table) -->
         <p>
-          Facts come in two scopes, and the split is the difference between physics and policy. A <strong>datasource
+          Facts come in <span th:text="${facts.learnedFactScopeCountWord}">two</span> scopes, and the split is the difference between physics and policy. A <strong>datasource
           fact</strong> is true for everyone who reads the data — a unit, a time zone, a sample rate — and it travels
           with the datasource to every workspace the datasource is granted to. A <strong>workspace fact</strong> is an
           organisation's meaning — "revenue excludes tips", "regions means the five named ones" — and it stays private
@@ -252,7 +252,7 @@
       <div class="features-grid">
         <article class="card">
           <!-- claim: docs/mcp-server.md §6.1, docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.1 -->
-          <h3>Three MCP tools</h3>
+          <h3 th:text="|${#strings.capitalize(facts.semanticsToolCountWord)} MCP tools|">Three MCP tools</h3>
           <p><code>semantics_record</code>, <code>semantics_list</code>, <code>semantics_retire</code> — record, review and retire, with evidence run at record time and every record landing an audit row.</p>
         </article>
         <article class="card">
@@ -317,9 +317,9 @@
     <div class="container">
       <h2 id="sl-engineer" class="ds-headline">For the engineer: the tools, the kinds, the rules</h2>
       <div class="prose">
-        <!-- claim: docs/mcp-server.md §6.2 (the three tools' schemas, renumbered by 118's merge); docs/auth.md §7.6 (the scope matrix) -->
+        <!-- claim: docs/mcp-server.md §6.2 (the semantics tools' schemas, renumbered by 118's merge); docs/auth.md §7.6 (the scope matrix) -->
         <p>
-          Three tools, from <code>tools/list</code>: <code>semantics_record</code> — one fact, its structural
+          <span th:text="|${#strings.capitalize(facts.semanticsToolCountWord)} tools, from|">Three tools, from</span> <code>tools/list</code>: <code>semantics_record</code> — one fact, its structural
           references, its optional evidence SQL; <code>semantics_list</code> — the facts on a datasource, with trust,
           drift and provenance, filtered by table, scope or time; <code>semantics_retire</code> — one id, one reason,
           no delete. Recording needs an <code>author</code>-scoped key; viewing needs none beyond the datasource's
@@ -335,7 +335,7 @@
       <h3 class="group-title">The kinds of fact</h3>
       <!-- claim: docs/enums.md §19 — rendered from that table; SiteSemanticLayerGuardsTest parses both and fails the build on drift -->
       <table class="facts-table">
-        <caption>The twelve kinds, each in exactly one scope (enums.md §19). No type, nullable, key or comment kind exists — that is introspection's job.</caption>
+        <caption th:text="|The ${facts.learnedFactKindCountWord} kinds, each in exactly one scope (enums.md §19). No type, nullable, key or comment kind exists — that is introspection's job.|">The twelve kinds, each in exactly one scope (enums.md §19). No type, nullable, key or comment kind exists — that is introspection's job.</caption>
         <thead>
           <tr><th scope="col">Kind</th><th scope="col">Scope</th><th scope="col">The fact it records</th></tr>
         </thead>

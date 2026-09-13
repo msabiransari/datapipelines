@@ -65,8 +65,8 @@ data class SitePage(
 }
 
 /**
- * One engine's page facts (073 §B): the six `/mcp-server/{engine}` routes are ONE template
- * over this row, because everything that differs between them is data — the dialect
+ * The facts a single engine page states (073 §B): the `/mcp-server/{engine}` routes are ONE
+ * template over this row, because everything that differs between them is data — the dialect
  * constant, the JDBC driver and its license, whether that driver ships in the published
  * image, a URL example, and which demo pipeline (if any) reads that engine.
  *
@@ -96,7 +96,7 @@ data class EngineFacts(
  *
  * The searcher's vocabulary drives every title here, measured rather than guessed
  * (`notes/2026-09-04-seo-keywords.md` addendum, DataForSEO 2026-09-04): the pattern that
- * carries the volume is *"{engine} mcp server"*, so that phrasing leads the six engine
+ * carries the volume is *"{engine} mcp server"*, so that phrasing leads the engine
  * titles and *"SQL MCP server"* leads the pillar. Phrasings with no measured volume
  * ("connect claude code to postgres") appear in H2s and body copy, never in a title.
  *
@@ -105,6 +105,9 @@ data class EngineFacts(
  * remember — which is the point of the list existing at all.
  */
 object SitePages {
+    /** The site's derived numbers — built from the code that owns each fact, never a literal (124 §A). */
+    private val facts: SiteFacts = SiteFacts.current()
+
     /**
      * `GET /` — the homepage. 115 retargeted it from the engineer to the buyer: the title and
      * H1 speak "no data team required" (the pillar page keeps "SQL MCP server" in its own
@@ -129,10 +132,10 @@ object SitePages {
     val PILLAR =
         SitePage(
             path = "/mcp-server-for-sql-databases",
-            title = "SQL MCP server — one database MCP server, six engines",
+            title = "SQL MCP server — one database MCP server, ${facts.engineCountWord} engines",
             description =
                 "A database MCP server your agent uses instead of your production credentials: " +
-                    "six SQL engines, read-only by default, scoped keys, every call audited.",
+                    "${facts.engineCountWord} SQL engines, read-only by default, scoped keys, every call audited.",
             view = "site/pillar",
         )
 
@@ -233,7 +236,7 @@ object SitePages {
             path = "/roadmap",
             title = "Roadmap — what ships now, next month, and later | datapipelines.co",
             description =
-                "Shipped: MCP server, eight engines, published APIs. Next month: scheduler, embedded dashboards, " +
+                "Shipped: MCP server, ${facts.engineCountWord} engines, published APIs. Next month: scheduler, embedded dashboards, " +
                     "JSONata and JavaScript nodes. Later: lake extracts, alerts.",
             view = "site/roadmap",
         )
@@ -438,15 +441,17 @@ object SitePages {
             view = "site/semantic-layer",
         )
 
-    /** The route prefix the six engine pages share. */
+    /** The route prefix the engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
     /**
-     * The six engines with their own page, in the order the measured volume ranks them
-     * (postgres 720 · sql-server 640 · mysql 320 · oracle 260 · sqlite 140 · duckdb 90).
-     *
-     * H2 is deliberately absent: it is the staging engine, not a database anyone runs their
-     * business on, and a page targeting "h2 mcp server" would target nothing.
+     * Every dialect has its page (124 §B — the owner's eight-engines ruling: H2 is a
+     * legitimate engine an engineer uses like Postgres or MySQL, LAKE is dp-lake, and tempdb
+     * is implicit and never counted or listed). The measured six lead in search-volume order
+     * (postgres 720 · sql-server 640 · mysql 320 · oracle 260 · sqlite 140 · duckdb 90), H2
+     * and dp-lake follow. `SiteEngineFactsGuardTest` holds this set EQUAL to
+     * `Dialect.entries`: a ninth dialect cannot ship without a page, and a page cannot
+     * outlive its dialect.
      */
     val ENGINES: List<EngineFacts> =
         listOf(
@@ -521,6 +526,30 @@ object SitePages {
                 jdbcUrlExample = "jdbc:duckdb:/data/warehouse.duckdb",
                 demo = null,
                 demoHref = null,
+            ),
+            EngineFacts(
+                slug = "h2",
+                displayName = "H2",
+                dialect = "H2",
+                driver = "com.h2database:h2",
+                license = "MPL 2.0 / EPL 1.0",
+                bundled = true,
+                otherwise = "",
+                jdbcUrlExample = "jdbc:h2:tcp://db.internal:9092/~/analytics",
+                demo = null,
+                demoHref = null,
+            ),
+            EngineFacts(
+                slug = "dp-lake",
+                displayName = "dp-lake",
+                dialect = "LAKE",
+                driver = "org.duckdb:duckdb_jdbc",
+                license = "MIT",
+                bundled = true,
+                otherwise = "",
+                jdbcUrlExample = "jdbc:duckdb: — embedded; tables register in dp-catalog (docs/datasources.md §8C), no URL to paste",
+                demo = "nyc/mobility/taxi_vs_rideshare",
+                demoHref = "/dp-lake",
             ),
         )
 

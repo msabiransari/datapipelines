@@ -84,6 +84,9 @@ data class DemoFamily(
 
     /** The combined byte size of the family's published files — the artifacts[] families only. */
     val artifactsBytes: Long = artifacts.sumOf { it.bytes }
+
+    /** The distinct engines the family's tables live on (uppercased — the manifests mix cases). */
+    val engineCount: Int = tables.map { it.engine.uppercase(Locale.ROOT) }.distinct().size
 }
 
 /**

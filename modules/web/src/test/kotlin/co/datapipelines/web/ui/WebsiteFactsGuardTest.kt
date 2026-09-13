@@ -15,6 +15,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.web.TestRepoFiles
+import co.datapipelines.web.ui.site.SiteFacts
 import co.datapipelines.web.ui.site.SitePages
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -158,7 +159,7 @@ class WebsiteFactsGuardTest {
         val html =
             engine.process(
                 "site/how-it-works",
-                WebContext(exchange).apply { setVariable("toolCount", McpToolCatalog.NAMES.size) },
+                WebContext(exchange).apply { setVariable("facts", SiteFacts.current()) },
             )
         return SITE_COUNT
             .find(html)

@@ -52,12 +52,12 @@
         <article class="card">
           <!-- claim: docs/mcp-server.md §6 -->
           <h3>The MCP server</h3>
-          <p>An agent authors, runs, inspects and iterates pipelines through <span th:text="${toolCount}">34</span> tools over Streamable HTTP, with a scoped key and an audit row per call. <a th:href="@{/mcp-tools}">The tool list.</a></p>
+          <p>An agent authors, runs, inspects and iterates pipelines through <span th:text="${facts.toolCount}">30</span> tools over Streamable HTTP, with a scoped key and an audit row per call. <a th:href="@{/mcp-tools}">The tool list.</a></p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §4 -->
-          <h3>Eight engines, one pipeline</h3>
-          <p>PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, CSV and Iceberg on S3, read in place. Each node runs where its data lives.</p>
+          <h3 th:text="|${#strings.capitalize(facts.engineCountWord)} engines, one pipeline|">Eight engines, one pipeline</h3>
+          <p th:text="|${facts.engines} — Parquet, CSV and Iceberg on S3, read in place. Each node runs where its data lives.|">PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, CSV and Iceberg on S3, read in place. Each node runs where its data lives.</p>
         </article>
         <article class="card">
           <!-- claim: docs/staging.md §3 -->

@@ -7,12 +7,15 @@ package co.datapipelines.web.ui.site
  * lists.
  */
 object SiteFaqsCluster {
+    /** The site's derived numbers — the engine count and names below come from the catalogs, not from prose (124 §A). */
+    private val facts: SiteFacts = SiteFacts.current()
+
     /** The pillar's five, from its own cards: reach, the credential, the write, the revoke, the audit. */
     val PILLAR: List<FaqEntry> =
         listOf(
             FaqEntry(
                 "Which databases can one MCP server reach?",
-                "PostgreSQL, MySQL, SQL Server, Oracle, SQLite and DuckDB — one MCP endpoint over all six, each with " +
+                "${facts.engines} — one MCP endpoint over all ${facts.engineCountWord}, each with " +
                     "its own dialect adapter, and any of them marked read-only where writes must never happen. The " +
                     "dialect catalog with drivers and licenses is docs/datasources.md §4.",
                 "docs/datasources.md §4",
@@ -249,7 +252,7 @@ object SiteFaqsCluster {
             ),
         )
 
-    /** The engine pages' four — one list over the six routes: the driver, the auth, the credential, the registration. */
+    /** The engine pages' four — one list over the engine routes: the driver, the auth, the credential, the registration. */
     val ENGINES: List<FaqEntry> =
         listOf(
             FaqEntry(
