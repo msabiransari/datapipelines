@@ -257,6 +257,12 @@ html.dp-splitting-x * {
   background: var(--border-subtle);
 }
 
+/* A LEAF row's tick runs on to its file glyph: the leaf keeps the chevron slot EMPTY (see
+   .tpl-leaf below), so the tick that stops at a folder's chevron would stop at nothing. */
+.tpl-level .tpl-level .tpl-node:has(> .tpl-leaf)::after {
+  width: calc(var(--gap-xs) + var(--icon-xs) + var(--gap-sm) - var(--tpl-guide-x));
+}
+
 /* 085 §A: the per-row border-bottom hairline is gone, deliberately — the mock
    (design-records/mocks/2026-09-05-app-shell-v2.html) draws rows with whitespace and a
    hover tint only, and the guides now carry the structure the hairlines were
@@ -379,10 +385,18 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 }
 
 /* Tree leaves stand on the same row height the guides are drawn against (folders get
-   it from .tpl-summary). Search results are a FLAT list — no guides, no row contract. */
+   it from .tpl-summary). Search results are a FLAT list — no guides, no row contract.
+
+   A leaf carries the chevron SLOT a folder row has (--gap-xs + --icon-xs + --gap-sm), left
+   empty: its file glyph then sits where a sibling folder's glyph sits and its label where
+   that folder's label sits — one --tpl-indent right of its own parent's. Before (085 §A) the
+   glyph sat in the chevron's slot, which put every leaf's label at its PARENT'S label x, so
+   a leaf read as a sibling of the folder that holds it, at every depth of every tree (owner,
+   2026-09-12). The guide's tick reaches the glyph either way — the leaf variant above. */
 .tpl-leaf {
   min-height: var(--tpl-row-h);
   box-sizing: border-box;
+  padding-left: calc(var(--gap-xs) + var(--icon-xs) + var(--gap-sm));
 }
 
 .tpl-leaf:hover,
@@ -895,26 +909,44 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 /* ============================================================================
  * 102 — the version rows' ⋯ overflow menu, and the Switch dialog's radio rows.
  *
- * The menu is a native <details> popover (the tree's own idiom — no JS to open); this block
- * only positions it. Tokens only, and no motion: the menu appears, it does not animate in
- * (prefers-reduced-motion needs nothing special here BY CONSTRUCTION, the §3.5 rule).
+ * The menu is a native <details> (the tree's own idiom — no JS to open). It is ALSO a
+ * `popover="manual"`: open, it lives in the browser's TOP LAYER, positioned by
+ * lifecycle-dialog.js against the ⋯ it belongs to. It was an absolutely positioned child of
+ * the row, and the row sits inside `.tplx-tabpanel`, which SCROLLS — so on a one-row list
+ * the open menu fell into the panel's scrollable overflow: in the DOM, off the screen
+ * (owner, 2026-09-12: "the dot menu does not show"). A scroll container clips every
+ * positioned descendant but a fixed one, and the top layer is where a popover belongs —
+ * no ancestor's overflow, transform or z-index can reach it. Where the Popover API is
+ * missing, the same rules paint it `position: fixed` at the coordinates the script sets,
+ * which a scroll ancestor cannot clip either. Tokens only, and no motion: the menu
+ * appears, it does not animate in (prefers-reduced-motion needs nothing special here BY
+ * CONSTRUCTION, the §3.5 rule).
  * ========================================================================== */
 .tplx-vmenu {
   position: relative;
 }
 
-.tplx-vmenu[open] > .tplx-vmenu-list {
+/* Open state — both the popover's own pseudo-class and the details fallback. The UA's
+   popover sheet centres the element (`inset: 0; margin: auto`) and gives it a canvas
+   border, padding and overflow; every one of those is overridden below. */
+.tplx-vmenu[open] > .tplx-vmenu-list,
+.tplx-vmenu-list:popover-open {
   display: flex;
 }
 
 .tplx-vmenu-list {
   display: none;
-  position: absolute;
-  /* Right-aligned under the ⋯, ABOVE the row when there is no room below it — the acting
-     card scrolls inside itself, and a bottom-row menu must not open out of view. */
-  bottom: calc(100% + var(--gap-xs, 4px));
-  right: 0;
-  z-index: var(--z-popover, 30);
+  position: fixed;
+  inset: auto;
+  /* Set by lifecycle-dialog.js from the ⋯'s own rect: right-aligned under it, or above it
+     when the viewport has no room below (the old first-two-rows-open-downward rule, now
+     decided by MEASURING rather than by row index). */
+  top: var(--vmenu-top, auto);
+  left: var(--vmenu-left, auto);
+  margin: 0;
+  overflow: visible;
+  color: var(--text-primary);
+  z-index: var(--z-dropdown);
   flex-direction: column;
   min-width: 12rem;
   padding: var(--gap-xs, 4px);
@@ -922,13 +954,6 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   border-radius: var(--radius-base);
   background: var(--surface-raised);
   box-shadow: var(--shadow-md, 0 4px 16px color-mix(in srgb, var(--text-primary) 12%, transparent));
-}
-
-/* The row's first ⋯ (top of the list) opens DOWNWARD — there is nothing above it to cover. */
-.tplx-vrow:first-child .tplx-vmenu-list,
-.tplx-vrow:nth-child(2) .tplx-vmenu-list {
-  bottom: auto;
-  top: calc(100% + var(--gap-xs, 4px));
 }
 
 .tplx-vmenu-item {

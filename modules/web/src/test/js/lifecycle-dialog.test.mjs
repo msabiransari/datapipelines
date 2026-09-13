@@ -14,7 +14,7 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-globalThis.window = {};
+globalThis.window = { addEventListener: function () {} };
 globalThis.document = {
   addEventListener: function () {},
   querySelector: function () { return null; },
@@ -35,4 +35,38 @@ test("the typed confirm matches only the exact expected text, trimmed", () => {
   assert.equal(dialogs.confirmMatches("test/my_pipeline", "test/my_pipeline"), true);
   assert.equal(dialogs.confirmMatches(null, "v4"), false);
   assert.equal(dialogs.confirmMatches("v4", null), false);
+});
+
+// The ⋯ menu's placement (owner 2026-09-12: the menu fell into the tab panel's scrollable
+// overflow and never showed). The list lives in the top layer now, so WHERE it goes is this
+// pure rule's decision: under the ⋯, right-aligned; above it when the viewport has no room
+// below; clamped inside the viewport when neither side fits.
+const vp = { width: 1280, height: 900 };
+const size = { width: 192, height: 120 };
+
+test("the menu opens right-aligned under its ⋯ when there is room below", () => {
+  const at = dialogs.menuPlacement({ top: 300, bottom: 328, left: 1000, right: 1028 }, size, vp, 4);
+  assert.deepEqual(at, { top: 332, left: 836, above: false });
+});
+
+test("the menu opens above its ⋯ when the viewport has no room below", () => {
+  const at = dialogs.menuPlacement({ top: 850, bottom: 878, left: 1000, right: 1028 }, size, vp, 4);
+  assert.deepEqual(at, { top: 726, left: 836, above: true });
+});
+
+test("a menu that fits on neither side takes the roomier side, inside the viewport", () => {
+  const tiny = { width: 400, height: 100 };
+  // 30px above, 70px below: below wins, and the list is pinned to the viewport's top so
+  // its bottom edge lands on the viewport's bottom (100 - 120 clamps to 0).
+  assert.deepEqual(dialogs.menuPlacement({ top: 30, bottom: 30, left: 300, right: 328 }, size, tiny, 0),
+    { top: 0, left: 136, above: true });
+  // 70px above, 30px below: above wins — the top clamps to 0 the same way.
+  assert.deepEqual(dialogs.menuPlacement({ top: 70, bottom: 70, left: 300, right: 328 }, size, tiny, 0),
+    { top: 0, left: 136, above: true });
+});
+
+test("the menu's left edge never leaves the viewport", () => {
+  const at = dialogs.menuPlacement({ top: 10, bottom: 38, left: 20, right: 48 }, size, vp, 4);
+  assert.equal(at.left, 0);
+  assert.equal(at.top, 42);
 });

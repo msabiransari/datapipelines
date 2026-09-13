@@ -19,7 +19,11 @@
  *    [data-lifecycle-applied] marker riding with it is what closes the dialog — a refusal
  *    (Shape C, retargeted at #toast) never carries the marker, so an error cannot close
  *    over the dialog.
- * 5. MENUS. The version rows' ⋯ overflow menus close on Escape and when a dialog opens.
+ * 5. MENUS. The version rows' ⋯ overflow menus close on Escape, on scroll, and when a
+ *    dialog opens — and, open, they are PLACED: the list is a `popover="manual"` living in
+ *    the top layer (the tab panel it sits in scrolls and used to clip it), so this script
+ *    puts it under (or, out of room, above) its own ⋯ from the ⋯'s measured rect. The
+ *    placement rule is pure and exported (`menuPlacement`) for `node --test`.
  */
 (function () {
   'use strict';
@@ -128,13 +132,76 @@
     Array.prototype.forEach.call(menus, function (m) { m.open = false; });
   }
 
+  /**
+   * Where an open ⋯ menu goes — the pure half. `anchor` is the ⋯'s rect, `size` the
+   * list's, `viewport` {width, height}; all CSS px. Right-aligned to the anchor and
+   * `gap` below it; ABOVE it when the viewport has no room below and does above; when
+   * neither side fits, the side with more room, clamped inside the viewport. The left
+   * edge never leaves the viewport either (a narrow pane with a wide menu).
+   */
+  function menuPlacement(anchor, size, viewport, gap) {
+    var g = typeof gap === 'number' ? gap : 0;
+    var belowTop = anchor.bottom + g;
+    var aboveTop = anchor.top - g - size.height;
+    var fitsBelow = belowTop + size.height <= viewport.height;
+    var fitsAbove = aboveTop >= 0;
+    var top;
+    if (fitsBelow) top = belowTop;
+    else if (fitsAbove) top = aboveTop;
+    else {
+      var roomBelow = viewport.height - belowTop;
+      var roomAbove = anchor.top - g;
+      top = roomBelow >= roomAbove ? Math.max(0, viewport.height - size.height) : 0;
+    }
+    var left = Math.min(anchor.right - size.width, viewport.width - size.width);
+    return { top: top, left: Math.max(0, left), above: top < anchor.top };
+  }
+
+  /** Show or hide one menu's list as its <details> toggles, and place it when shown. */
+  function placeMenu(details) {
+    var list = details.querySelector('.tplx-vmenu-list');
+    var summary = details.querySelector('summary');
+    if (!list || !summary) return;
+    var popover = typeof list.showPopover === 'function';
+    if (!details.open) {
+      if (popover && list.matches(':popover-open')) list.hidePopover();
+      return;
+    }
+    if (popover && !list.matches(':popover-open')) list.showPopover();
+    var anchor = summary.getBoundingClientRect();
+    var size = list.getBoundingClientRect();
+    var gap = parseFloat(getComputedStyle(list).getPropertyValue('--gap-xs')) || 4;
+    var at = menuPlacement(anchor, { width: size.width, height: size.height },
+      { width: window.innerWidth, height: window.innerHeight }, gap);
+    list.style.setProperty('--vmenu-top', at.top + 'px');
+    list.style.setProperty('--vmenu-left', at.left + 'px');
+  }
+
+  // `toggle` does not bubble: capture it at the document so menus that arrive by htmx swap
+  // need no per-element wiring.
+  document.addEventListener('toggle', function (event) {
+    var details = event.target;
+    if (!details || !details.matches || !details.matches('details.tplx-vmenu')) return;
+    placeMenu(details);
+  }, true);
+
+  // A placed menu is pinned to the viewport, not to the row: any scroll or resize would
+  // leave it floating over the wrong thing, so it closes instead.
+  document.addEventListener('scroll', function () {
+    if (document.querySelector('details.tplx-vmenu[open]')) closeMenus();
+  }, true);
+  window.addEventListener('resize', closeMenus);
+
   document.addEventListener('click', function (event) {
     if (!event.target.closest) return;
     if (event.target.closest('details.tplx-vmenu')) return;
     closeMenus();
   });
 
-  var api = { confirmMatches: confirmMatches, closeDialog: closeDialog, closeMenus: closeMenus };
+  var api = {
+    confirmMatches: confirmMatches, closeDialog: closeDialog, closeMenus: closeMenus,
+    menuPlacement: menuPlacement,
+  };
   if (typeof window !== 'undefined') window.lifecycleDialog = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

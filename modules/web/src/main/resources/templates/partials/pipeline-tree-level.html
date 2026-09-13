@@ -101,8 +101,10 @@
               hx-indicator="#pipeline-detail-spinner">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
              (§9.4's rule for every surface that shows a path-shaped name). The
-             file-code glyph (085 §A) sits in the same slot as a folder's chevron, so
-             the guide's horizontal tick meets folders and leaves at the same x.
+             file-code glyph sits where a sibling FOLDER's glyph sits — the leaf keeps the
+             chevron slot empty (template-tree.css .tpl-leaf) — so a leaf's label lands one
+             indent right of its parent's, level with its sibling folders' (owner,
+             2026-09-12: a leaf in the chevron slot read as a sibling of its own folder).
 
              There is no "at the root" branch here any more (077): §4.1 requires a folder, so
              a leaf always sits under a non-empty prefix. PipelineBrowseModel drops the root

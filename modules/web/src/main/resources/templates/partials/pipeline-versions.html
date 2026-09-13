@@ -6,9 +6,12 @@
       failure the /api-console screenshot found on 2026-09-08). A row states the same six facts
       in a grid that can reflow: version · status · (created · who · runs) · actions.
 
-      The row's verbs live in a per-row overflow menu (⋯), a native <details> popover like the
-      tree's folders — no JS to open, and explorer-detail.js closes menus on outside clicks,
-      Escape and dialog opens. A verb the §3.5 table refuses for the row's status is NOT
+      The row's verbs live in a per-row overflow menu (⋯), a native <details> like the tree's
+      folders — no JS to open. The list is a `popover="manual"` too: open, it sits in the
+      browser's TOP LAYER, placed by lifecycle-dialog.js against its ⋯, because the tab panel
+      it lives in scrolls and clipped it whenever the list was shorter than the menu (owner,
+      2026-09-12). lifecycle-dialog.js closes menus on outside clicks, Escape, scroll and
+      dialog opens. A verb the §3.5 table refuses for the row's status is NOT
       rendered (absent, never disabled), so the table and the screen cannot disagree; the POST
       still re-runs the guard. The flags come from the model ([VersionRowView]). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist">
@@ -46,7 +49,7 @@
       <th:block th:if="${mayRelease or mayPurge or mayDiscard or mayRestore or maySwitch}">
         <details class="tplx-vmenu">
           <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
-          <div class="tplx-vmenu-list" role="menu" data-vmenu>
+          <div class="tplx-vmenu-list" role="menu" data-vmenu popover="manual">
             <button th:if="${mayRelease}" data-verb="pipeline-release" type="button" role="menuitem" class="tplx-vmenu-item"
                     th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
                              hx-target='#px-dialog', hx-swap='innerHTML'"
