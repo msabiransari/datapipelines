@@ -353,7 +353,16 @@ class AppShellBrowserTest : BrowserSuite() {
         signedIn("console")
 
         val errors = mutableListOf<String>()
-        page.onConsoleMessage { message -> if (message.type() == "error") errors += message.text() }
+        // `net::ERR_NETWORK_CHANGED` is Chromium's transport layer, not the app: on a Linux host
+        // with IPv6 enabled every Docker container start adds a veth with a link-local IPv6
+        // address, Chromium's NetworkChangeNotifier reports an IP-address change, and any load
+        // in flight is aborted (docker/for-linux#914; measured here 2026-09-12 with forked test
+        // JVMs starting containers beside this test). DEVELOPMENT.md §9.5 has the sysctl that
+        // removes the cause; this assertion is about the APP's console, so that one message is
+        // set aside by name — every other error line still fails it.
+        page.onConsoleMessage { message ->
+            if (message.type() == "error" && !message.text().contains("net::ERR_NETWORK_CHANGED")) errors += message.text()
+        }
         val externalFonts = mutableListOf<String>()
         page.onRequest { request ->
             if (request.url().contains("fonts.googleapis") || request.url().contains("fonts.gstatic")) {

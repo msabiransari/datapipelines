@@ -645,11 +645,24 @@ below 24 threads per gate. Past the RAM or Docker ceiling the build does not slo
 gracefully — it goes **red** on wall-clock assertions (see the 6381 s run in
 `gradle.properties`), so lower the knobs before you see that.
 
-**Two more things worth a minute on a dedicated box.** The CPU governor: Ubuntu ships
-`powersave`; `sudo cpupower frequency-set -g performance` helps the serial tails (a 146 s model
-test cannot be forked). And `--profile` on any gate writes `build/reports/profile/` with per-task
-times — that report, plus `scripts/test-recount.sh`, is how to tell whether a knob helped; never
-the feel of it.
+**Three more things worth a minute on a dedicated Linux box.**
+
+- **The CPU governor.** Ubuntu ships `powersave`; `sudo cpupower frequency-set -g performance`
+  helps the serial tails (a 146 s model test cannot be forked).
+- **IPv6 on Docker's veth interfaces.** Every container start adds a `veth` on the host with a
+  link-local IPv6 address; Chromium sees an IP-address change and aborts whatever the browser
+  suite was loading (`net::ERR_NETWORK_CHANGED`, docker/for-linux#914). With forked test JVMs
+  starting containers throughout the run this is no longer rare. Stop new interfaces from
+  getting one — the host's own NIC keeps its addresses:
+
+  ```bash
+  echo 'net.ipv6.conf.default.disable_ipv6 = 1' | sudo tee /etc/sysctl.d/60-docker-veth-no-ipv6.conf
+  sudo sysctl --system
+  ```
+
+- **`--profile`** on any gate writes `build/reports/profile/` with per-task times — that
+  report, plus `scripts/test-recount.sh`, is how to tell whether a knob helped; never the feel
+  of it.
 
 ---
 
