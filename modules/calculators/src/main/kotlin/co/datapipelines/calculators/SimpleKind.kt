@@ -19,6 +19,7 @@ internal class SimpleKind(
     override val inputs: List<CalculatorInput>,
     override val output: LogicalType?,
     override val example: CalculatorExample,
+    override val outputs: List<CalculatorOutput> = emptyList(),
     private val body: (Map<String, Any?>) -> Any?,
 ) : CalculatorKind {
     override fun evaluate(values: Map<String, Any?>): Any? = body(values)

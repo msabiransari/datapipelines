@@ -399,12 +399,17 @@
    * `duration_ms` / `rows_out` (SseEventProjection; NOT_MEASURED is -1) — there is no
    * rows_in on the wire, so the mock's `in → out` collapses to the out count; the
    * edge label picks the same number up as the count flowing OUT of the source.
-   * A CALCULATOR completion carries context_value instead of rows.
+   * A CALCULATOR completion carries context_value instead of rows — or, on a
+   * multi-output kind (121), the whole `context_values` set it wrote.
    */
   function formatRunLine(stats) {
     if (!stats) return null;
     var out = "";
-    if (stats.context_value !== undefined && stats.context_value !== null) {
+    if (stats.context_values !== undefined && stats.context_values !== null) {
+      out = "= " + Object.keys(stats.context_values).map(function (k) {
+        return k + "=" + JSON.stringify(stats.context_values[k]);
+      }).join(", ");
+    } else if (stats.context_value !== undefined && stats.context_value !== null) {
       out = "= " + JSON.stringify(stats.context_value);
     } else {
       var r = Number(stats.rows_out);
@@ -1240,8 +1245,14 @@
     } else if (type === "CALCULATOR") {
       // The fact the 072 brief asks for: `kind → context_key`. It answers the same
       // question a SQL node's source line does — what does this node work on, and
-      // what does it leave behind.
-      data.facts.push({ kind: "source", icon: "calculator", text: (n.kind || "?") + " → " + (n.context_key || "?") });
+      // what does it leave behind. 121: a multi-output node says what it writes —
+      // every key, `kind → window_start, window_end`; the mapping itself (which
+      // output feeds which key) is the Details pane's row. The keys are SORTED:
+      // body_json is JSONB, which does not preserve an object's insertion order,
+      // so the author's `{"start": …, "end": …}` comes back in storage order —
+      // a deterministic order beats one that flips with the persistence layer.
+      var writes = n.context_keys ? Object.keys(n.context_keys).sort().map(function (o) { return n.context_keys[o]; }) : [n.context_key || "?"];
+      data.facts.push({ kind: "source", icon: "calculator", text: (n.kind || "?") + " → " + writes.join(", ") });
       var inputs = n.inputs ? Object.keys(n.inputs) : [];
       if (inputs.length) {
         data.facts.push({ kind: "inputs", icon: "db", text: inputs.slice(0, 3).join(" · ") });

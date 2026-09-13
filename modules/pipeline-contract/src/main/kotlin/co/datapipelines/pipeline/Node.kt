@@ -74,6 +74,24 @@ data class Node(
     @field:JsonProperty("context_key") @get:JsonProperty("context_key") @param:JsonProperty("context_key")
     val contextKey: String? = null,
     /**
+     * CALCULATOR nodes on a **multi-output** kind only (§4.10, 121): the Context key each of the
+     * kind's named outputs is written to, as `{output name: context key}` — every declared
+     * output mapped, no partial mapping.
+     *
+     * `context_key` XOR `context_keys`, never both and never neither: a single-output kind names
+     * its one value with `context_key`; a multi-output kind maps its set with `context_keys`.
+     * The verdicts are §12.10's — `calculator_output_shape_mismatch` for a wrong or doubled
+     * shape, `calculator_output_unknown` for a name the kind does not declare,
+     * `calculator_outputs_incomplete` for an unmapped output.
+     *
+     * Nullable, with a null default, under the class's `NON_NULL` inclusion — exactly as [kind],
+     * [inputs] and [contextKey] are, and for the same reason: an existing pipeline's canonical
+     * JSON is byte-identical after this field exists, so no stored version's body hash moves and
+     * no release has to be re-signed (versioning §9.2).
+     */
+    @field:JsonProperty("context_keys") @get:JsonProperty("context_keys") @param:JsonProperty("context_keys")
+    val contextKeys: Map<String, String>? = null,
+    /**
      * Per-node execution settings (§6.4) — today only `timeout_seconds`, the node's own
      * wall-clock deadline.
      *
@@ -126,6 +144,7 @@ data class Node(
             @JsonProperty("kind") kind: String?,
             @JsonProperty("inputs") inputs: Map<String, JsonNode>?,
             @JsonProperty("context_key") contextKey: String?,
+            @JsonProperty("context_keys") contextKeys: Map<String, String>?,
             @JsonProperty("settings") settings: NodeSettings?,
         ): Node =
             Node(
@@ -147,6 +166,9 @@ data class Node(
                 kind = kind,
                 inputs = inputs,
                 contextKey = contextKey,
+                // Absent stays absent for the same body-hash reason as the three above: a node
+                // that declared no output mapping must serialize back with no `context_keys` key.
+                contextKeys = contextKeys,
                 // Absent stays absent for the same body-hash reason as the three above: a node
                 // that declared no settings must serialize back with no `settings` key at all.
                 settings = settings,

@@ -82,7 +82,7 @@ test("a node_completed frame reaches the graph as run numbers — red where sse.
   const statsCall = calls.find((c) => c[0] === "stats");
   assert.ok(statsCall, "node_completed never delivered the stats — the card's run line stays empty");
   assert.equal(statsCall[1], "stage_daily_trips");
-  assert.deepEqual(statsCall[2], { duration_ms: 1234, rows_out: 366, context_value: undefined });
+  assert.deepEqual(statsCall[2], { duration_ms: 1234, rows_out: 366, context_value: undefined, context_values: undefined });
 });
 
 test("formatRunLine: the mock's `rows · ms`, NOT_MEASURED honoured, a calculator shows its value", () => {
@@ -94,6 +94,11 @@ test("formatRunLine: the mock's `rows · ms`, NOT_MEASURED honoured, a calculato
   assert.equal(g.formatRunLine({ rows_out: 12 }), "12 rows");
   // A CALCULATOR's completion: the value it wrote, quoted
   assert.equal(g.formatRunLine({ duration_ms: 1, context_value: "2026-Q3" }), '= "2026-Q3" · 1 ms');
+  // 121: a multi-output completion shows every key the one evaluation wrote
+  assert.equal(
+    g.formatRunLine({ duration_ms: 2, context_values: { window_start: "2026-04-01", window_end: "2026-06-30" } }),
+    '= window_start="2026-04-01", window_end="2026-06-30" · 2 ms',
+  );
   assert.equal(g.formatRunLine(null), null);
   assert.equal(g.formatRunLine({ duration_ms: -1, rows_out: -1 }), null);
 });
@@ -316,6 +321,29 @@ test("a CALCULATOR node's card facts are kind → context_key, and its eyebrow r
     "085 §B: the honest glyph — the `file` stand-in is retired with the full icon set");
   assert.equal(card.includes("lucide-sprite.svg#db"), false,
     "a calculator touches no database; #db is iconForType's fallback and would be actively misleading");
+});
+
+test("a multi-output CALCULATOR node's card says what it writes - every key (121)", () => {
+  const g = loadGraph();
+  const els = g.buildElements(
+    [
+      {
+        id: "window",
+        type: "CALCULATOR",
+        kind: "period_bounds",
+        context_keys: { start: "window_start", end: "window_end" },
+        inputs: { date: "$current_date", unit: "quarter" },
+        depends_on: [],
+      },
+    ],
+    { tempdb: { engine: "H2" } },
+  );
+
+  const sourceFact = els[0].data.facts.find((f) => f.kind === "source");
+  assert.equal(sourceFact.text, "period_bounds → window_end, window_start", "one evaluation, both keys named — sorted: JSONB does not preserve key order");
+  const card = g.buildCardHtml(els[0].data);
+  assert.match(card, /period_bounds → window_end, window_start/);
+  assert.match(card, /class="pe-card-kind">calculator</, "still the calculator eyebrow and accent");
 });
 
 test("an UNKNOWN node type still renders a card rather than breaking the graph", () => {

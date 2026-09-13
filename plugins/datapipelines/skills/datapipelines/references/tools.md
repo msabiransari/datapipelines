@@ -358,7 +358,7 @@ Request cancellation of a RUNNING execution. This key can cancel ONLY an executi
 
 Scope `read` · read-only
 
-The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, one worked example, and `phrases` — the everyday phrases the kind answers. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable — and match the question's words against `phrases` before you pick a kind: a relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never by interpreting it yourself. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.
+The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type (or, for a multi-output kind, the named `outputs` set a node maps through `context_keys`), one worked example, and `phrases` — the everyday phrases the kind answers. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable — and match the question's words against `phrases` before you pick a kind: a relative time phrase ('last quarter', 'month to date') is resolved by that lookup, never by interpreting it yourself. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.
 
 No arguments.
 
@@ -366,7 +366,7 @@ No arguments.
 
 Scope `read` · read-only
 
-One calculator kind's full definition: display name, description, typed inputs, output type, a worked example and `phrases` — the everyday phrases the kind answers, which you match the question's words against before picking a kind. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.
+One calculator kind's full definition: display name, description, typed inputs, output type (or the named `outputs` set of a multi-output kind), a worked example and `phrases` — the everyday phrases the kind answers, which you match the question's words against before picking a kind. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

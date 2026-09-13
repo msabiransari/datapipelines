@@ -11,8 +11,9 @@ Design record: [Calculators — Configurable Pure Transformations](superpowers/s
 
 ## 1. What a calculator is
 
-A **calculator** is a pure function the server ships: typed inputs in, one typed value out. You use
-one by putting a `CALCULATOR` node in a pipeline ([Pipeline Contract §4.10](pipeline-contract.md)):
+A **calculator** is a pure function the server ships: typed inputs in, one typed value out — or,
+for a **multi-output** kind, a named SET of typed values out. You use one by putting a
+`CALCULATOR` node in a pipeline ([Pipeline Contract §4.10](pipeline-contract.md)):
 
 ```json
 { "id": "fiscal_q", "type": "CALCULATOR",
@@ -25,6 +26,24 @@ one by putting a `CALCULATOR` node in a pipeline ([Pipeline Contract §4.10](pip
 The node writes one value into the execution Context under `context_key`, and every node that
 `depends_on` it — directly or transitively — can bind it as `:run_fiscal_quarter`.
 
+A kind whose answer is genuinely several values (a window is two dates, not one) declares a set
+of **named outputs** instead, and the node maps every output to a Context key through
+`context_keys`:
+
+```json
+{ "id": "window", "type": "CALCULATOR",
+  "kind": "period_bounds",
+  "inputs": { "date": "$current_date", "unit": "quarter" },
+  "context_keys": { "start": "window_start", "end": "window_end" },
+  "depends_on": [] }
+```
+
+Every declared output must be mapped — no partial windows — and each mapped key obeys the same
+rules a single `context_key` does: the name shape, one writer per key, no shadowing a declared
+parameter, and the ordering rule below. `context_key` XOR `context_keys`: never both, never
+neither, and the field always fits the kind — a kind's output shape is the catalog's, not the
+author's.
+
 Three rules are worth learning once:
 
 1. **`$name` is a reference, anything else is a literal.** `"fiscal_start": "$org_fiscal_start_date"`
@@ -35,9 +54,9 @@ Three rules are worth learning once:
    `context_key`, or a SQL node binding one, is valid only if the reader depends on the writer.
    Otherwise the save is refused with `pipeline.validation.calculator_input_unordered` — the node
    would otherwise read a key that may or may not have been written yet, depending on scheduling.
-3. **A calculator is not for row data.** It computes ONE value for the whole run. Transforming
-   columns is SQL's job — on the source engine, or in tempdb, reused through a library template
-   ([Templates §6](templates.md)).
+3. **A calculator is not for row data.** It computes ONE value — or one named set of values —
+   for the whole run. Transforming columns is SQL's job — on the source engine, or in tempdb,
+   reused through a library template ([Templates §6](templates.md)).
 
 Each kind also declares the everyday **phrases** it answers (the Phrases column below) — match a
 question's words against them to choose the kind; that lookup, not any rule, is how a relative
@@ -79,6 +98,8 @@ them to choose the kind, rather than being told what any phrase means.
 | `period_start` | `date` DATE, `unit` STRING, `mode?` STRING, `fiscal_start?` STRING, `week_start?` STRING → DATE | The first day of the week, month, quarter or year containing a date. | this quarter, month to date, the current week, start of the fiscal year | date=2026-08-14, unit=quarter → 2026-07-01 |
 | `period_end` | `date` DATE, `unit` STRING, `mode?` STRING, `fiscal_start?` STRING, `week_start?` STRING → DATE | The last day of the week, month, quarter or year containing a date. | this quarter, month to date, the current week, start of the fiscal year | date=2026-08-14, unit=quarter → 2026-09-30 |
 | `prior_period` | `date` DATE, `unit` STRING, `offset?` INTEGER, `mode?` STRING, `fiscal_start?` STRING, `week_start?` STRING → DATE | The first day of the period `offset` periods before the one containing a date — the anchor a period-over-period comparison filters from. | last quarter, previous month, the quarter before last, N periods ago | date=2026-08-14, unit=quarter, offset=1 → 2026-04-01 |
+| `period_bounds` | `date` DATE, `unit` STRING, `mode?` STRING, `fiscal_start?` STRING, `week_start?` STRING → {start DATE, end DATE} | The first and last day of the week, month, quarter or year containing a date — the containing period as ONE node writing two keys (`context_keys`), where `period_start` + `period_end` are two. | this quarter, the current month, month to date, year to date, this fiscal year | date=2026-08-14, unit=quarter → start=2026-07-01, end=2026-09-30 |
+| `trailing_periods` | `date` DATE, `unit` STRING, `count?` INTEGER, `mode?` STRING, `fiscal_start?` STRING, `week_start?` STRING → {start DATE, end DATE} | The `count` complete periods immediately before the one containing a date: `start` is the first day of the period `count` back, `end` the last day of the period one back. `count` must be at least 1. | last quarter, previous month, last week, the last 4 quarters, trailing twelve months, the prior fiscal year | date=2026-08-14, unit=quarter, count=1 → start=2026-04-01, end=2026-06-30 |
 | `date_trunc` | `date` DATE, `unit` STRING, `week_start?` STRING → DATE | A date snapped back to the start of its day, week, month, quarter or year. | snap a date back to the start of its month, floor a date to its week, truncate a date | date=2026-08-14, unit=month → 2026-08-01 |
 | `iso_week` | `date` DATE → INTEGER | The ISO-8601 week number (1-53) of a date. | which ISO week a date falls in, the ISO week number | date=2026-01-01 → 1 |
 | `iso_year` | `date` DATE → INTEGER | The ISO-8601 week-based year of a date — which differs from the calendar year in the days either side of New Year, and is why it is its own kind. | which ISO week-based year a date falls in, the ISO year | date=2027-01-01 → 2026 |

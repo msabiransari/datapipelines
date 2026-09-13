@@ -244,4 +244,71 @@ class ParameterBinderTest {
         result.shouldBeInstanceOf<ParameterBindingResult.Bound>()
         return result.context
     }
+
+    // ---- 121 D5: a multi-output node's keys override all-or-nothing ----
+
+    private val windowBinder =
+        ParameterBinder(
+            parameters,
+            calculatorOutputs = mapOf("window_start" to LogicalType.DATE, "window_end" to LogicalType.DATE),
+            calculatorGroups = mapOf("window" to setOf("window_start", "window_end")),
+        )
+
+    @Test
+    fun `every key of a multi-output node supplied binds all of them`() {
+        val context =
+            windowBinder
+                .bind(
+                    mapOf(
+                        "start_date" to Fixtures.json("\"2026-08-01\""),
+                        "window_start" to Fixtures.json("\"2026-04-01\""),
+                        "window_end" to Fixtures.json("\"2026-06-30\""),
+                    ),
+                ).shouldBeInstanceOf<ParameterBindingResult.Bound>()
+                .context
+
+        context.asMap()["window_start"].toString() shouldBe "2026-04-01"
+        context.asMap()["window_end"].toString() shouldBe "2026-06-30"
+    }
+
+    @Test
+    fun `no key of a multi-output node supplied binds none - the node computes`() {
+        val context = windowBinder.bind(mapOf("start_date" to Fixtures.json("\"2026-08-01\"")))
+        context.shouldBeInstanceOf<ParameterBindingResult.Bound>()
+    }
+
+    @Test
+    fun `a proper subset of a multi-output node's keys is refused with calculator_keys_partial`() {
+        val result =
+            windowBinder.bind(
+                mapOf(
+                    "start_date" to Fixtures.json("\"2026-08-01\""),
+                    "window_end" to Fixtures.json("\"2026-06-30\""),
+                ),
+            )
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+        val failure = result.failures.single()
+        failure.code shouldBe PipelineErrorCodes.Execution.CALCULATOR_KEYS_PARTIAL
+        failure.details["node"] shouldBe "window"
+        failure.details["supplied"] shouldBe listOf("window_end")
+        failure.details["missing"] shouldBe listOf("window_start")
+    }
+
+    @Test
+    fun `a key whose value failed coercion still counts as supplied - the refusal is exhaustive`() {
+        // window_start is ill-typed (its own invalid_parameter_type fires) AND the group is
+        // partial: both verdicts come back together, like every rule on this binder.
+        val result =
+            windowBinder.bind(
+                mapOf(
+                    "start_date" to Fixtures.json("\"2026-08-01\""),
+                    "window_start" to Fixtures.json("\"not-a-date\""),
+                ),
+            )
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+        result.failures.map { it.code } shouldBe
+            listOf(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE, PipelineErrorCodes.Execution.CALCULATOR_KEYS_PARTIAL)
+    }
 }

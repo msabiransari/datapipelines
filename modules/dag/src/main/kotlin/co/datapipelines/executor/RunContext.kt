@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.ParameterBinder
@@ -99,13 +101,20 @@ class RunContext private constructor(
             inputs: Map<String, JsonNode>,
             executionId: UUID,
             startedAt: Instant,
+            kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
         ): RunContext {
             val zone = ContextKeys.zoneOf(org)
             // 078 A5: the pipeline's calculator output keys bind as implicit OPTIONAL inputs —
             // supplied → the value enters the Context from the caller and the node is skipped;
             // unsupplied → the binder puts nothing in, and the node runs and writes the key.
-            val calculatorOutputs = pipeline.calculatorOutputs()
-            val bound = ParameterBinder(pipeline.parameters, calculatorOutputs).bindOrThrow(inputs).asMap()
+            // 121 D5: a multi-output node's keys override all-or-nothing — the binder's groups
+            // carry each node's key set, and a proper subset is refused here, BEFORE any node
+            // runs, with the same rejected-bind shape as an ill-typed parameter.
+            val calculatorOutputs = pipeline.calculatorOutputs(kinds)
+            val bound =
+                ParameterBinder(pipeline.parameters, calculatorOutputs, pipeline.calculatorOutputGroups(kinds))
+                    .bindOrThrow(inputs)
+                    .asMap()
             return RunContext(
                 org.values + ContextKeys.platformValues(executionId, startedAt, zone) + bound,
                 // A calculator key is in the bound map only when the caller supplied it (the

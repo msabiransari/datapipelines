@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.calculators.CalculatorEvaluationException
+import co.datapipelines.calculators.CalculatorKind
 import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
@@ -181,75 +182,24 @@ class NodeRunner(
      * which it has no fields for.
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
+    /**
+     * The calculator-catalog lookup (121) — the registry is a deployment constant, so production
+     * constructs this class unchanged; a test injects a fixture kind through the seam, exactly
+     * as `PipelineValidator.calculatorKinds` established on the save-time side.
+     */
+    private val calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
 ) {
     /**
-     * A CALCULATOR node (§4.10, calculators design §0.3): resolve the inputs from the live
-     * Context, evaluate the kind, write the value back under `context_key`.
-     *
-     * Except when the caller already supplied the key (078 A5): a calculator `context_key` is
-     * an implicit optional execute input, and a supplied value SKIPS the evaluation entirely —
-     * the stats then carry the supplied value with `provided_by: "caller"`. A calculator that
-     * RUNS still `put()`s and wins over everything (tier order org < platform < params <
-     * caller-supplied calculator keys < calculator outputs).
-     *
-     * The write is the whole point, and it is why [NodeExecutionContext.values] is a live
-     * [RunContext] rather than a snapshot: nodes scheduled after this one render and bind against
-     * the same map, so a downstream `:run_fiscal_quarter` resolves by topology with nothing
-     * passed between the two nodes. Save-time validation (§12.10) has already proved the
-     * reference order, so the value is there when the reader runs.
-     *
-     * `rows_out` is 0 and that is honest — a calculator produces no rows. What it produced
-     * travels as `context_key` / `context_value` on the node's stats, so the run detail page and
-     * `executions_get` can show it.
+     * A CALCULATOR node dispatches to [CalculatorNodeRuns] — its own object for the reason
+     * [SourceStreaming] is its own object: this class is at detekt's size ceiling, and the
+     * calculator leg (single and 121's multi-output shape, the caller-supplied skip, the live
+     * [RunContext] write) is self-contained.
      */
     private fun runCalculator(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-    ): NodeResult {
-        val kindName = node.kind.orEmpty()
-        val contextKey = node.contextKey.orEmpty()
-        // 078 A5 (owner ruling 2026-09-05): the caller supplied this key at execute time, so the
-        // node does NOT evaluate — the value is already in the live Context, bound and coerced
-        // by ParameterBinder. The stats still carry the key and the SUPPLIED value, marked
-        // provided_by: "caller", so the run detail page shows where the number came from.
-        if (contextKey in ctx.values.callerSupplied) {
-            return NodeResult.of(
-                nodeId = node.id,
-                rowsOut = 0,
-                startedAt = startedAt,
-                contextKey = contextKey,
-                contextValue = ctx.values[contextKey]?.toString(),
-                providedBy = NodeResult.PROVIDED_BY_CALLER,
-            )
-        }
-        val value =
-            try {
-                val kind = CalculatorRegistry.require(kindName)
-                kind.evaluate(CalculatorInputResolver.resolve(kind, node.inputs.orEmpty(), ctx.values))
-            } catch (e: CalculatorEvaluationException) {
-                throw DatapipelinesException(
-                    code = PipelineErrorCodes.Node.CALCULATOR_FAILED,
-                    message = "Calculator '$kindName' on node '${node.id}' failed: ${e.message}",
-                    details =
-                        mapOf(
-                            "node" to node.id,
-                            "kind" to kindName,
-                            "input" to e.input,
-                            "context_key" to contextKey,
-                        ),
-                    cause = e,
-                )
-            }
-        ctx.values.put(contextKey, value)
-        return NodeResult.of(
-            nodeId = node.id,
-            rowsOut = 0,
-            startedAt = startedAt,
-            contextKey = contextKey,
-            contextValue = value?.toString(),
-        )
-    }
+    ): NodeResult = CalculatorNodeRuns.run(node, ctx, startedAt, calculatorKinds)
 
     /** Executes [node] and returns its result. Throws [NodeFailedSignal] on any failure. */
     suspend fun run(

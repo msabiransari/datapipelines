@@ -93,6 +93,15 @@ class PipelineExecutor(
      * fixture.
      */
     private val resultUrls: ResultUrlFactory,
+    /**
+     * The calculator-catalog lookup (121) — the registry is a deployment constant, so production
+     * constructs this class unchanged; a test injects a fixture kind through the seam. Threaded
+     * to [RunContext.create] (binding and the all-or-nothing refusal) and to the [NodeRunner]
+     * (evaluation), which must resolve kinds through the SAME lookup or the two halves of one
+     * node would disagree about what it is.
+     */
+    private val calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
+        co.datapipelines.calculators.CalculatorRegistry::find,
 ) {
     init {
         metrics.bindConcurrency(executionSlots)
@@ -148,7 +157,7 @@ class PipelineExecutor(
         // declared parameters resolved against the request's inputs. LIVE — a CALCULATOR node
         // writes tier 5 into this same map at its DAG position, and every node scheduled after
         // it renders and binds against the value (RunContext's KDoc).
-        val context = RunContext.create(config.orgContext, request.pipeline, request.parameters, executionId, startedAt)
+        val context = RunContext.create(config.orgContext, request.pipeline, request.parameters, executionId, startedAt, calculatorKinds)
         val run = ExecutionRun(executionId, request, plan, startedAt, context)
 
         // §5.1 step 4 before steps 8-10: `execution_started` precedes every allocation whose
@@ -1071,10 +1080,27 @@ fun pipelineExecutor(
      * the executor writes node stats once, at the end, exactly as it did before 108.
      */
     progress: ExecutionProgress = ExecutionProgress.NONE,
+    /**
+     * The calculator-catalog lookup (121) — see [PipelineExecutor.calculatorKinds]. Defaulted to
+     * the deployment's registry; a test wires a fixture kind here and it reaches both the
+     * binding half ([RunContext.create]) and the evaluation half ([NodeRunner]).
+     */
+    calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
+        co.datapipelines.calculators.CalculatorRegistry::find,
 ): PipelineExecutor =
     PipelineExecutor(
         nodeRunner =
-            NodeRunner(templateEngine, datasourceRegistry, writebackRunner, resultStore, config, auditSink, metrics, subPipelineRunner),
+            NodeRunner(
+                templateEngine,
+                datasourceRegistry,
+                writebackRunner,
+                resultStore,
+                config,
+                auditSink,
+                metrics,
+                subPipelineRunner,
+                calculatorKinds,
+            ),
         stagingFactory = stagingFactory,
         resultStore = resultStore,
         eventEmitter = eventEmitter,
@@ -1086,4 +1112,5 @@ fun pipelineExecutor(
         metrics = metrics,
         progress = progress,
         resultUrls = resultUrls,
+        calculatorKinds = calculatorKinds,
     )

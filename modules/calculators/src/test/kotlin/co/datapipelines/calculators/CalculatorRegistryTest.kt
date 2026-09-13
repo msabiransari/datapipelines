@@ -1,5 +1,6 @@
 package co.datapipelines.calculators
 
+import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -36,11 +37,13 @@ class CalculatorRegistryTest {
                 "iso_year",
                 "map",
                 "percent_change",
+                "period_bounds",
                 "period_end",
                 "period_start",
                 "prior_period",
                 "quarter_of_year",
                 "round",
+                "trailing_periods",
                 "tz_shift",
             ).sorted()
     }
@@ -167,6 +170,90 @@ class CalculatorRegistryTest {
         CalculatorRegistry.find("no_such_kind") shouldBe null
         io.kotest.assertions.throwables
             .shouldThrow<CalculatorEvaluationException> { CalculatorRegistry.require("no_such_kind") }
+    }
+
+    // ---- 121/D1: the output-shape invariant ----
+
+    @Test
+    fun `every kind is single-output with an empty set or multi-output with a null output`() {
+        // The registry's init refuses a bad kind outright, so this is the invariant stated over
+        // the SET, not the refusal — a kind that slipped the constructor-time check fails here.
+        val offenders =
+            CalculatorRegistry.KINDS.filter { kind ->
+                when {
+                    kind.outputs.isEmpty() -> false
+                    kind.outputs.size == 1 -> true
+                    kind.output != null -> true
+                    else -> false
+                }
+            }
+        withClue("A kind must be single-output (no outputs, `output` as today) or multi-output (2+ outputs, output == null)") {
+            offenders.map { it.kind }.shouldBeEmpty()
+        }
+    }
+
+    @Test
+    fun `every declared output name is a snake_case identifier, unique within the kind, with a description`() {
+        val offenders =
+            CalculatorRegistry.KINDS.flatMap { kind ->
+                val names = kind.outputs.map { it.name }
+                names
+                    .filterIndexed { index, name ->
+                        !NAME.matches(name) || names.indexOf(name) != index || kind.outputs[index].description.isBlank()
+                    }.map { "${kind.kind}.$it" }
+            }
+        offenders.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a one-entry output set is refused at registration - a single named output is a single output`() {
+        val oneOutput =
+            SimpleKind(
+                kind = "fixture",
+                displayName = "Fixture",
+                description = "A fixture.",
+                phrases = listOf("fixture"),
+                inputs = listOf(input("date", LogicalType.DATE, "The date.")),
+                output = null,
+                example = example("date" to "2026-08-14", output = "2026-08-14"),
+                outputs = listOf(CalculatorOutput("start", LogicalType.DATE, "The first day.")),
+            ) { null }
+
+        io.kotest.assertions.throwables
+            .shouldThrow<IllegalArgumentException> { CalculatorRegistry.requireValidOutputs(oneOutput) }
+    }
+
+    @Test
+    fun `a multi-output kind with a non-null output, a duplicate or malformed name is refused`() {
+        fun fixture(
+            outputs: List<CalculatorOutput>,
+            output: LogicalType? = null,
+        ) = SimpleKind(
+            kind = "fixture",
+            displayName = "Fixture",
+            description = "A fixture.",
+            phrases = listOf("fixture"),
+            inputs = listOf(input("date", LogicalType.DATE, "The date.")),
+            output = output,
+            example = example("date" to "2026-08-14", output = "2026-08-14"),
+            outputs = outputs,
+        ) { null }
+        val start = CalculatorOutput("start", LogicalType.DATE, "The first day.")
+        val end = CalculatorOutput("end", LogicalType.DATE, "The last day.")
+
+        // The legal shape passes — a refusal that fires on everything is indistinguishable from a bug.
+        CalculatorRegistry.requireValidOutputs(fixture(listOf(start, end)))
+
+        io.kotest.assertions.throwables
+            .shouldThrow<IllegalArgumentException> {
+                CalculatorRegistry.requireValidOutputs(fixture(listOf(start, end), output = LogicalType.DATE))
+            }
+        io.kotest.assertions.throwables
+            .shouldThrow<IllegalArgumentException> { CalculatorRegistry.requireValidOutputs(fixture(listOf(start, start))) }
+        io.kotest.assertions.throwables
+            .shouldThrow<IllegalArgumentException> {
+                CalculatorRegistry.requireValidOutputs(fixture(listOf(start.copy(name = "Window Start"), end)))
+            }
     }
 
     private companion object {

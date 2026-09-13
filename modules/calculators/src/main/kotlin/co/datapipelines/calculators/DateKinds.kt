@@ -123,6 +123,8 @@ internal object DateKinds {
                     weekStart = Calendar.dayOfWeek(stringOr(values, "week_start", "monday"), "week_start"),
                 )
             },
+            periodBoundsKind(),
+            trailingPeriodsKind(),
             SimpleKind(
                 kind = "date_trunc",
                 displayName = "Truncate date",
@@ -350,6 +352,115 @@ internal object DateKinds {
                 Calendar.requireOneOf(stringOr(values, "mode", Calendar.MODE_CALENDAR), Calendar.MODES, "mode"),
                 Calendar.monthDay(stringOr(values, "fiscal_start", "01-01"), "fiscal_start"),
                 Calendar.dayOfWeek(stringOr(values, "week_start", "monday"), "week_start"),
+            )
+        }
+
+    /**
+     * `period_bounds` (121) — the containing period as ONE write of its two boundaries, where
+     * `period_start` + `period_end` are two nodes. The window semantics are [Calendar]'s own,
+     * reused whole: [Calendar.periodStart] and [Calendar.periodEnd] honour `mode`,
+     * `fiscal_start` and `week_start` exactly as the single-output kinds do, and nothing here
+     * re-implements a boundary.
+     */
+    private fun periodBoundsKind(): CalculatorKind =
+        SimpleKind(
+            kind = "period_bounds",
+            displayName = "Period bounds",
+            description = "The first and last day of the week, month, quarter or year containing a date.",
+            phrases = listOf("this quarter", "the current month", "month to date", "year to date", "this fiscal year"),
+            inputs =
+                listOf(
+                    input("date", DATE, "Any date inside the period."),
+                    unitInput(Calendar.PERIOD_UNITS),
+                    modeInput(),
+                    FISCAL_START.copy(required = false, defaultDescription = "01-01"),
+                    WEEK_START,
+                ),
+            output = null,
+            outputs =
+                listOf(
+                    CalculatorOutput("start", DATE, "The period's first day."),
+                    CalculatorOutput("end", DATE, "The period's last day."),
+                ),
+            example = example("date" to "2026-08-14", "unit" to "quarter", output = "start=2026-07-01, end=2026-09-30"),
+        ) { values ->
+            val date = date(values, "date")
+            val unit = Calendar.requireOneOf(string(values, "unit"), Calendar.PERIOD_UNITS, "unit")
+            val mode = Calendar.requireOneOf(stringOr(values, "mode", Calendar.MODE_CALENDAR), Calendar.MODES, "mode")
+            val fiscalStart = Calendar.monthDay(stringOr(values, "fiscal_start", "01-01"), "fiscal_start")
+            val weekStart = Calendar.dayOfWeek(stringOr(values, "week_start", "monday"), "week_start")
+            mapOf(
+                "start" to Calendar.periodStart(date, unit, mode, fiscalStart, weekStart),
+                "end" to Calendar.periodEnd(date, unit, mode, fiscalStart, weekStart),
+            )
+        }
+
+    /**
+     * `trailing_periods` (121) — the `count` COMPLETE periods immediately before the one
+     * containing `date`, again as one write: `start` is [Calendar.priorPeriodStart] `count`
+     * periods back, `end` the day before the containing period starts (the last day of the
+     * period one back) — [Calendar.periodStart] minus one day, so the same helper owns the
+     * boundary in every mode.
+     *
+     * `count` must be at least 1 — a trailing window of zero periods is empty, and an author
+     * who wrote one meant something else. Refused the catalog's way: a
+     * [CalculatorEvaluationException] naming the input, the same shape `percent_change`'s zero
+     * `previous` takes (the executor attaches `pipeline.node.calculator_failed`).
+     */
+    private fun trailingPeriodsKind(): CalculatorKind =
+        SimpleKind(
+            kind = "trailing_periods",
+            displayName = "Trailing periods",
+            description =
+                "The first day of the period `count` periods before the one containing a date, " +
+                    "and the last day of the period one back — the `count` complete periods just ended.",
+            phrases =
+                listOf(
+                    "last quarter",
+                    "previous month",
+                    "last week",
+                    "the last 4 quarters",
+                    "trailing twelve months",
+                    "the prior fiscal year",
+                ),
+            inputs =
+                listOf(
+                    input("date", DATE, "The date whose preceding periods the window covers."),
+                    unitInput(Calendar.PERIOD_UNITS),
+                    input(
+                        "count",
+                        INTEGER,
+                        "How many complete periods the window spans; 1 is the one just ended.",
+                        required = false,
+                        default = "1",
+                    ),
+                    modeInput(),
+                    FISCAL_START.copy(required = false, defaultDescription = "01-01"),
+                    WEEK_START,
+                ),
+            output = null,
+            outputs =
+                listOf(
+                    CalculatorOutput("start", DATE, "The window's first day."),
+                    CalculatorOutput("end", DATE, "The window's last day."),
+                ),
+            example = example("date" to "2026-08-14", "unit" to "quarter", "count" to "1", output = "start=2026-04-01, end=2026-06-30"),
+        ) { values ->
+            val date = date(values, "date")
+            val unit = Calendar.requireOneOf(string(values, "unit"), Calendar.PERIOD_UNITS, "unit")
+            val count = intOr(values, "count", 1)
+            if (count < 1) {
+                throw CalculatorEvaluationException(
+                    "count",
+                    "Input 'count' must be at least 1 — a trailing window of zero periods is empty.",
+                )
+            }
+            val mode = Calendar.requireOneOf(stringOr(values, "mode", Calendar.MODE_CALENDAR), Calendar.MODES, "mode")
+            val fiscalStart = Calendar.monthDay(stringOr(values, "fiscal_start", "01-01"), "fiscal_start")
+            val weekStart = Calendar.dayOfWeek(stringOr(values, "week_start", "monday"), "week_start")
+            mapOf(
+                "start" to Calendar.priorPeriodStart(date, unit, count, mode, fiscalStart, weekStart),
+                "end" to Calendar.periodStart(date, unit, mode, fiscalStart, weekStart).minusDays(1),
             )
         }
 

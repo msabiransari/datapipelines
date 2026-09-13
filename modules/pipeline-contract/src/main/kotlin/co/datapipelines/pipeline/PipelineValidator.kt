@@ -1,5 +1,8 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorRegistry
+
 /**
  * Runs every pipeline-contract §12 validation — step 2 of the §17.2 pipeline.
  *
@@ -53,6 +56,13 @@ class PipelineValidator(
      * unchanged; `web` passes the bound one.
      */
     private val nodeTimeoutMaxSeconds: Int = DEFAULT_NODE_TIMEOUT_MAX_SECONDS,
+    /**
+     * The calculator-catalog lookup (121) — the registry is a deployment constant, so production
+     * constructs this class unchanged; a test injects a fixture kind through the seam, exactly as
+     * [orgContext] above established. Threaded to the two rule groups that resolve kinds:
+     * [ReferenceRules] (the declared set) and [CalculatorRules] (the §12.10 verdicts).
+     */
+    private val calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
 ) {
     /**
      * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
@@ -67,11 +77,11 @@ class PipelineValidator(
         StructuralRules.check(pipeline, datasources, collector)
         DagRules.check(pipeline, collector)
         NodeTypeRules.check(pipeline, collector)
-        ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector)
+        ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector, calculatorKinds)
         ParameterRules.check(pipeline, collector)
         SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, collector)
         CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
-        CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector)
+        CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
         return collector.toResult()
     }
 

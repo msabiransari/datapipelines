@@ -96,6 +96,9 @@ class SseEventProjection(
             // value, and an author debugging a wrong quarter has nothing on screen to read.
             event.stats.contextKey?.let { put("context_key", it) }
             event.stats.contextValue?.let { put("context_value", it) }
+            // 121 D5: a multi-output node carries the whole set it wrote — present only then,
+            // so a single-output node's payload is byte-for-byte what it has always been.
+            event.stats.contextValues?.let { put("context_values", it) }
             // 078 A5: a calculator whose key the caller supplied was SKIPPED, not evaluated —
             // the payload says so, same conditional discipline (absent on every other node).
             event.stats.providedBy?.let { put("provided_by", it) }

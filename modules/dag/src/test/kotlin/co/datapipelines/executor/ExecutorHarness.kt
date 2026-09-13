@@ -28,6 +28,9 @@ class ExecutorHarness(
     subPipelineRunner: SubPipelineRunner? = null,
     /** The live-progress sink (108 §D) — wired by tests that observe it; NONE everywhere else. */
     progress: ExecutionProgress = ExecutionProgress.NONE,
+    /** The calculator-catalog lookup (121) — wired by tests that exercise a fixture kind. */
+    calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
+        co.datapipelines.calculators.CalculatorRegistry::find,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
@@ -55,6 +58,7 @@ class ExecutorHarness(
             metrics = metrics,
             auditSink = auditSink,
             subPipelineRunner = subPipelineRunner,
+            calculatorKinds = calculatorKinds,
         )
 
     override fun close() {

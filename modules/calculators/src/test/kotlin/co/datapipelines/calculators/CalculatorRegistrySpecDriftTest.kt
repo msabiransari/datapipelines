@@ -7,6 +7,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.time.LocalDate
 
 /**
  * Drift guard: the catalog in **docs/calculators.md §2** versus [CalculatorRegistry].
@@ -139,7 +140,42 @@ class CalculatorRegistrySpecDriftTest {
         }
     }
 
-    private fun render(value: Any?): String = value?.toString() ?: "null"
+    @Test
+    fun `the multi-output row shape renders - and its example check is not vacuous (121)`() {
+        // No multi-output kind is registered yet (the two period kinds land in 121 commit C), so
+        // the machinery's multi arm is proven on a fixture kind: the signature cell renders the
+        // braced set, and the evaluate-the-example check compares a rendered MAP against the
+        // documented answer — including failing when the map's values move.
+        CatalogFormat.signature(MULTI_FIXTURE) shouldBe "`date` DATE → {start DATE, end DATE}"
+        CatalogFormat.example(MULTI_FIXTURE) shouldBe "date=2026-08-14 → start=2026-08-01, end=2026-08-31"
+
+        render(MULTI_FIXTURE.evaluate(ExampleInputs.of(MULTI_FIXTURE))) shouldBe MULTI_FIXTURE.example.output
+
+        // The falsification, inline: a moved boundary must NOT equal the documented answer.
+        val moved =
+            SimpleKind(
+                kind = "fixture",
+                displayName = "Fixture",
+                description = "A fixture.",
+                phrases = listOf("fixture"),
+                inputs = MULTI_FIXTURE.inputs,
+                output = null,
+                example = MULTI_FIXTURE.example,
+                outputs = MULTI_FIXTURE.outputs,
+            ) { mapOf("start" to LocalDate.of(2026, 8, 2), "end" to LocalDate.of(2026, 8, 31)) }
+        (render(moved.evaluate(ExampleInputs.of(moved))) == moved.example.output) shouldBe false
+    }
+
+    /**
+     * The catalog's rendering of an evaluation result: a scalar prints itself; a multi-output
+     * kind's map prints `start=2026-04-01, end=2026-06-30` — insertion order, which the kind
+     * contract pins to the declared output order (121, so the rendering matches `example.output`).
+     */
+    private fun render(value: Any?): String =
+        when (value) {
+            is Map<*, *> -> value.entries.joinToString(", ") { (k, v) -> "$k=$v" }
+            else -> value?.toString() ?: "null"
+        }
 
     /** One parsed row: the three cells this test compares. */
     private data class DocumentedKind(
@@ -176,5 +212,25 @@ class CalculatorRegistrySpecDriftTest {
 
         /** `| \`kind\` | signature | description | phrases | example |` — five cells, none of them optional. */
         val ROW = Regex("^\\|\\s*`([a-z0-9_]+)`\\s*\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|\\s*$", RegexOption.MULTILINE)
+
+        /** The throwaway two-output fixture kind (121): month bounds, deterministic. */
+        val MULTI_FIXTURE =
+            SimpleKind(
+                kind = "fixture",
+                displayName = "Fixture",
+                description = "A fixture.",
+                phrases = listOf("fixture"),
+                inputs = listOf(input("date", co.datapipelines.typesystem.LogicalType.DATE, "The date.")),
+                output = null,
+                example = example("date" to "2026-08-14", output = "start=2026-08-01, end=2026-08-31"),
+                outputs =
+                    listOf(
+                        CalculatorOutput("start", co.datapipelines.typesystem.LogicalType.DATE, "The first day."),
+                        CalculatorOutput("end", co.datapipelines.typesystem.LogicalType.DATE, "The last day."),
+                    ),
+            ) { values ->
+                val date = values["date"] as LocalDate
+                mapOf("start" to date.withDayOfMonth(1), "end" to date.withDayOfMonth(date.lengthOfMonth()))
+            }
     }
 }

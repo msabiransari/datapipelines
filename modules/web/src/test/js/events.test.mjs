@@ -24,6 +24,7 @@ const CTX = {
     trips_by_borough: { id: "trips_by_borough", type: "DQL", source: "sample-trips", template: { id: "nyc/mobility/trips_by_borough", version: 2 }, output: { target: "tempdb", table: "trips_by_borough" } },
     fiscal_quarter: { id: "fiscal_quarter", type: "CALCULATOR", kind: "fiscal_quarter", context_key: "run_fiscal_quarter" },
     rainy_vs_dry: { id: "rainy_vs_dry", type: "PIPELINE", pipeline: { name: "nyc/mobility/rainy_vs_dry_ridership", version: 1 } },
+    window: { id: "window", type: "CALCULATOR", kind: "period_bounds", context_keys: { start: "window_start", end: "window_end" } },
   },
   outputText: (n) => (n.output && n.output.target === "tempdb" ? "tempdb." + n.output.table : "caller"),
 };
@@ -65,6 +66,14 @@ test("node_completed: rows → output for SQL, key = value for a calculator, chi
 
   const calc = ev.formatEvent("node_completed", { node_id: "fiscal_quarter", duration_ms: 1, context_key: "run_fiscal_quarter", context_value: "2026-Q3" }, CTX);
   assert.equal(calc.text, 'run_fiscal_quarter = "2026-Q3"');
+
+  // 121: a multi-output calculator — every key it wrote, one event line
+  const multi = ev.formatEvent(
+    "node_completed",
+    { node_id: "window", duration_ms: 3, context_values: { window_start: "2026-04-01", window_end: "2026-06-30" } },
+    CTX,
+  );
+  assert.equal(multi.text, 'window_start = "2026-04-01", window_end = "2026-06-30"');
 
   const child = ev.formatEvent("node_completed", { node_id: "rainy_vs_dry", duration_ms: 1310, rows_out: 2, child_execution_id: "a91f0c2e-0000" }, CTX);
   assert.equal(child.text, "child a91f0c2e completed · 2 rows");

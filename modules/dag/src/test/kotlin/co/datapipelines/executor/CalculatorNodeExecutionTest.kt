@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -120,6 +121,129 @@ class CalculatorNodeExecutionTest {
         }
 
     // ------------------------------------------------------------------ fixture
+
+    // ---- 121 D5: a multi-output node writes every key, once ----
+
+    @Test
+    fun `a multi-output node writes every key and a downstream SQL node binds them`() =
+        runBlocking<Unit> {
+            val result = executeMulti()
+
+            result.status shouldBe ExecutionStatus.SUCCESS
+
+            // The fixture kind bounds 2026-08-14's month: 08-01 through 08-31. One evaluation
+            // wrote BOTH keys, and both binds resolved to them in the same execution.
+            val ready = harnessEmitter!!.events.filterIsInstance<co.datapipelines.events.DataReady>().single()
+            ready.rows
+                .single()
+                .map { it.toString() } shouldBe listOf("2026-08-01", "2026-08-31")
+
+            val stats = result.nodeStats.single { it.nodeId == "window" }
+            stats.status shouldBe NodeStatus.SUCCESS
+            stats.contextKey shouldBe null
+            stats.contextValue shouldBe null
+            stats.contextValues shouldBe mapOf("window_start" to "2026-08-01", "window_end" to "2026-08-31")
+        }
+
+    @Test
+    fun `the resolved parameters carry every key a multi node wrote`() =
+        runBlocking<Unit> {
+            executeMulti()
+            val completed = harnessEmitter!!.events.filterIsInstance<co.datapipelines.events.PipelineCompleted>().single()
+
+            completed.contextSnapshot["window_start"] shouldBe java.time.LocalDate.of(2026, 8, 1)
+            completed.contextSnapshot["window_end"] shouldBe java.time.LocalDate.of(2026, 8, 31)
+        }
+
+    @Test
+    fun `a single-output node's stats stay byte-identical - no context_values key on the wire`() =
+        runBlocking<Unit> {
+            val result = execute()
+
+            // D5's additive discipline: context_values exists only for multi nodes, so a single
+            // node's serialized stats carry exactly the keys they always have.
+            ExecutorJson.write(result.nodeStats).shouldNotContain("context_values")
+            val multiResult = executeMulti()
+            ExecutorJson.write(multiResult.nodeStats).shouldContain("\"context_values\"")
+        }
+
+    @Test
+    fun `a multi-output kind that drops a declared output fails the node rather than half-writing`() =
+        runBlocking<Unit> {
+            // The registry's purity test holds every SHIPPED kind to the full key set; the
+            // write boundary re-checks it because the alternative is the design's whole enemy —
+            // a silently half-written window. This kind's evaluate drops `end`.
+            val failure =
+                runCatching {
+                    executeMulti(
+                        kinds = { name -> if (name == "broken_window") brokenWindow else WindowKindFixture.lookup(name) },
+                        nodeKind = "broken_window",
+                    )
+                }.exceptionOrNull()
+
+            val stats = harnessEmitter!!.events.filterIsInstance<co.datapipelines.events.NodeFailed>().single()
+            stats.error.code shouldBe "pipeline.node.calculator_failed"
+            stats.error.message.shouldContain("end")
+            failure shouldBe failure // the throw itself is the executor's ordinary fail-fast
+        }
+
+    /** A [WindowKindFixture] twin whose result drops the `end` output — the guard's target. */
+    private val brokenWindow: co.datapipelines.calculators.CalculatorKind =
+        object : co.datapipelines.calculators.CalculatorKind by WindowKindFixture {
+            override val kind = "broken_window"
+
+            override fun evaluate(values: Map<String, Any?>): Any =
+                mapOf("start" to (values["date"] as java.time.LocalDate).withDayOfMonth(1))
+        }
+
+    private suspend fun executeMulti(
+        kinds: (String) -> co.datapipelines.calculators.CalculatorKind? = WindowKindFixture.lookup,
+        nodeKind: String = WindowKindFixture.kind,
+    ): ExecutionResult {
+        val engine = Fixtures.templateEngine(mapOf(TEMPLATE_ID to "SELECT :window_start AS s, :window_end AS e"))
+        val harness =
+            ExecutorHarness(
+                templateEngine = engine,
+                config = ExecutorConfig(maxParallelNodes = 4, executionTimeoutSeconds = 60, orgContext = org),
+                calculatorKinds = kinds,
+            )
+        harnessEmitter = harness.emitter
+        return harness.use {
+            it.executor.execute(
+                Fixtures
+                    .request(
+                        Fixtures.pipeline(
+                            nodes =
+                                listOf(
+                                    windowNode(nodeKind),
+                                    Fixtures.node(
+                                        TEMPLATE_ID,
+                                        source = "tempdb",
+                                        output = NodeOutput.Caller,
+                                        dependsOn = listOf("window"),
+                                    ),
+                                ),
+                        ),
+                    ).copy(executionId = UUID.randomUUID()),
+            )
+        }
+    }
+
+    /** The fixture kind's node: `date` as a LITERAL, for the same reason as the single fixture's. */
+    private fun windowNode(nodeKind: String = WindowKindFixture.kind): Node =
+        Node(
+            id = "window",
+            description = "the run's window",
+            type = NodeType.CALCULATOR,
+            source = "",
+            template = TemplateRef(),
+            output = null,
+            dependsOn = emptyList(),
+            kind = nodeKind,
+            inputs = mapOf("date" to text(AS_OF.toString())),
+            contextKey = null,
+            contextKeys = mapOf("start" to "window_start", "end" to "window_end"),
+        )
 
     private fun expectedQuarter(): Int =
         CalculatorRegistry

@@ -76,7 +76,12 @@
       }
       case "node_completed": {
         duration = msText(p.duration_ms);
-        if (p.context_key) {
+        if (p.context_values) {
+          // 121: a multi-output node's completion names every key the one evaluation wrote.
+          text = Object.keys(p.context_values).map(function (k) {
+            return k + " = " + JSON.stringify(p.context_values[k]);
+          }).join(", ");
+        } else if (p.context_key) {
           text = p.context_key + " = " + JSON.stringify(p.context_value);
         } else if (p.child_execution_id) {
           text = "child " + shortId(p.child_execution_id) + " completed" + (rowsText(p.rows_out) ? " · " + rowsText(p.rows_out) : "");

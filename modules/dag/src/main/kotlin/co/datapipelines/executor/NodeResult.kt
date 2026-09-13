@@ -62,6 +62,13 @@ data class NodeResult(
     val contextKey: String? = null,
     val contextValue: String? = null,
     /**
+     * CALCULATOR nodes on a multi-output kind only (121 D5): every Context key the node wrote
+     * and the value it wrote, RENDERED AS TEXT for the same reason [contextValue] is text.
+     * Null on a single-output node — whose pair above stays the whole story, byte-identical to
+     * what it always was — and on every other node type.
+     */
+    val contextValues: Map<String, String?>? = null,
+    /**
      * CALCULATOR nodes only (078 A5): `"caller"` when the caller supplied the `context_key` at
      * execute time and the node was SKIPPED — the value travelled in the request, not from the
      * kind's evaluation. Null on a calculator that ran and on every other node type.
@@ -80,6 +87,7 @@ data class NodeResult(
             childExecutionId: UUID? = null,
             contextKey: String? = null,
             contextValue: String? = null,
+            contextValues: Map<String, String?>? = null,
             providedBy: String? = null,
         ): NodeResult =
             NodeResult(
@@ -94,6 +102,7 @@ data class NodeResult(
                 childExecutionId = childExecutionId,
                 contextKey = contextKey,
                 contextValue = contextValue,
+                contextValues = contextValues,
                 providedBy = providedBy,
             )
 
@@ -157,6 +166,14 @@ data class NodeStats(
     @field:JsonProperty("context_value") @get:JsonProperty("context_value") @param:JsonProperty("context_value")
     val contextValue: String? = null,
     /**
+     * CALCULATOR nodes on a multi-output kind only (121 D5): every Context key the node wrote
+     * and its value as text. Absent from the JSON otherwise (NON_NULL inclusion), the same
+     * additive discipline as the pair above — a single-output node's row is byte-identical to
+     * what it has always been.
+     */
+    @field:JsonProperty("context_values") @get:JsonProperty("context_values") @param:JsonProperty("context_values")
+    val contextValues: Map<String, String?>? = null,
+    /**
      * CALCULATOR nodes only (078 A5): `"caller"` when the caller supplied the `context_key` at
      * execute time and the node was skipped. Absent from the JSON otherwise (NON_NULL
      * inclusion), so existing consumers see no shape change.
@@ -178,6 +195,7 @@ data class NodeStats(
                 childExecutionId = result.childExecutionId,
                 contextKey = result.contextKey,
                 contextValue = result.contextValue,
+                contextValues = result.contextValues,
                 providedBy = result.providedBy,
             )
 

@@ -415,7 +415,9 @@
                 }).join(" · ")
               : "—",
           ]);
-          rows.push(["Writes", node.context_key || "—"]);
+          // 121: a multi-output node lists the MAPPING — each output → its key —
+          // where a single node lists the one key it writes.
+          rows.push(["Writes", self.calculatorWrites(node)]);
           var value = self.calculatorValue(node);
           rows.push(["Value", value !== null ? value : "—"]);
         } else if (type === "PIPELINE") {
@@ -503,7 +505,13 @@
             );
           });
           var value = self.calculatorValue(node);
-          lines.push(") → " + esc(node.context_key || "?") + (value !== null ? " = " + param(JSON.stringify(value)) : ""));
+          // 121: the multi shape writes the mapping the Details pane's Writes row lists;
+          // calculatorValue already renders each pair's value, so it needs no re-encoding.
+          var writes = node.context_keys
+            ? "{" + Object.keys(node.context_keys).sort().map(function (o) { return esc(o) + " → " + esc(node.context_keys[o]); }).join(", ") + "}"
+            : esc(node.context_key || "?");
+          var rendered = value !== null ? (node.context_keys ? " = " + param(value) : " = " + param(JSON.stringify(value))) : "";
+          lines.push(") → " + writes + rendered);
           return lines.join("\n");
         }
         if (type === "PIPELINE") {
@@ -759,7 +767,10 @@
        */
       outputText: function (node) {
         if (!node) return "—";
-        if (node.type === "CALCULATOR") return "context key " + (node.context_key || "—");
+        if (node.type === "CALCULATOR") {
+          if (node.context_keys) return "context keys " + Object.keys(node.context_keys).sort().map(function (o) { return node.context_keys[o]; }).join(", ");
+          return "context key " + (node.context_key || "—");
+        }
         if (node.type === "DML" || node.type === "DDL") return "side effect";
         if (!node.output) {
           return node.type === "DQL" ? "returns result to caller (default)" : "side effect";
@@ -799,11 +810,30 @@
         });
       },
 
+      /** What a CALCULATOR node writes — one key, or the whole output→key mapping (121). */
+      calculatorWrites: function (node) {
+        if (!node || node.type !== "CALCULATOR") return "—";
+        if (node.context_keys) {
+          // Sorted — body_json is JSONB, which does not preserve the author's key order.
+          return Object.keys(node.context_keys).sort().map(function (o) {
+            return o + " → " + node.context_keys[o];
+          }).join(" · ");
+        }
+        return node.context_key || "—";
+      },
+
       /** The value a CALCULATOR node computed in the last run, or null before one. */
       calculatorValue: function (node) {
         if (!node || node.type !== "CALCULATOR") return null;
         var value = this.nodeValues[node.id];
-        return value === undefined || value === null ? null : String(value);
+        if (value === undefined || value === null) return null;
+        // 121: a multi-output node's recorded value is the whole key set it wrote.
+        if (typeof value === "object") {
+          return Object.keys(value).map(function (k) {
+            return k + " = " + JSON.stringify(value[k]);
+          }).join(" · ");
+        }
+        return String(value);
       },
 
       /*

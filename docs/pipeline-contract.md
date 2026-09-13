@@ -255,7 +255,8 @@ Note: no `output` block. DML's side effect IS the output.
 | `parameters` | object | no | Child input bindings on a `PIPELINE` node: each key names a child declared parameter or a child calculator `context_key`; each value is a typed literal in the target's §6.3 wire encoding, or `"${ref}"` resolving against the parent's Context tiers (a parent parameter, a parent calculator `context_key`, an org/platform key) at the identical type. See §4.9. |
 | `kind` | string | CALCULATOR nodes only | The catalog calculator this node evaluates ([Calculators §2](calculators.md)). Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
 | `inputs` | object | CALCULATOR nodes only | The kind's inputs, by input name. A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
-| `context_key` | string | CALCULATOR nodes only | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `context_key` | string | CALCULATOR nodes on a single-output kind | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys`; forbidden on every other type. See §4.10. |
+| `context_keys` | object | CALCULATOR nodes on a multi-output kind | The Context key each of the kind's named outputs is written to, as `{output name: context key}` — every declared output mapped, each key per §6.1. XOR with `context_key`; forbidden on every other type. See §4.10. |
 | `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
 | `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
@@ -319,19 +320,35 @@ A pipeline whose entity is DISCARDED (every version discarded) still resolves ex
 }
 ```
 
-A CALCULATOR node evaluates one **pure catalog function** ([Calculators](calculators.md)) and writes ONE typed value into the execution Context under `context_key`. It runs no SQL, touches no database, and produces no table. Downstream nodes read the value the way they read any Context key — `:run_fiscal_quarter` in a template, `"$run_fiscal_quarter"` in another calculator's `inputs`.
+A CALCULATOR node evaluates one **pure catalog function** ([Calculators](calculators.md)) and writes typed values into the execution Context. It runs no SQL, touches no database, and produces no table. Downstream nodes read a value the way they read any Context key — `:run_fiscal_quarter` in a template, `"$run_fiscal_quarter"` in another calculator's `inputs`.
+
+The node writes **one value or a named set**, decided by the kind, never by the author. A **single-output** kind (most of the catalog) writes its one value under `context_key`, as above. A **multi-output** kind declares a set of named outputs (`period_bounds` declares `start` and `end`), and the node maps EVERY output to a Context key through `context_keys`:
+
+```json
+{
+  "id": "window",
+  "description": "The quarter this run reports on.",
+  "type": "CALCULATOR",
+  "kind": "period_bounds",
+  "inputs": {"date": "$current_date", "unit": "quarter"},
+  "context_keys": {"start": "window_start", "end": "window_end"},
+  "depends_on": []
+}
+```
 
 Field rules:
 
-- `kind` — required: a name in the registry. The catalog is additive and a `kind` never changes meaning, because a `kind` is written into bodies that are versioned, exported and promoted.
+- `kind` — required: a name in the registry. The catalog is additive and a `kind` never changes meaning, because a `kind` is written into bodies that are versioned, exported and promoted. The catalog entry says whether the kind is single- or multi-output.
 - `inputs` — required (an empty object is legal for a kind with only optional inputs). `"$name"` is a **reference** to a Context key; anything else is a literal typed against the kind's declared input type, which is what makes `"fiscal_start": "09-15"` a per-pipeline override with no config edit. An input the kind declares optional may be omitted, and the kind then applies its documented default.
-- `context_key` — required, per §6.1. It may shadow an org or platform key; it may **never** shadow a declared parameter (§12.10 `calculator_output_collision`), and no two nodes may write the same key.
+- `context_key` — required on a single-output kind, per §6.1. It may shadow an org or platform key; it may **never** shadow a declared parameter (§12.10 `calculator_output_collision`), and no two nodes may write the same key.
+- `context_keys` — required on a multi-output kind: an object mapping **every** declared output name to its Context key (`{"start": "window_start", "end": "window_end"}`). No partial mapping — a caller who needs one value still maps both, so no reader can bind a key the node never writes. Each mapped key obeys every rule `context_key` does: §6.1's name shape, no shadowing a declared parameter, one writer per key.
+- `context_key` XOR `context_keys` — never both, never neither, and the field must fit the kind's shape (`context_key` on a multi-output kind or `context_keys` on a single-output one is refused, §12.10 `calculator_output_shape_mismatch`).
 - `source`, `template`, `output` — **forbidden**, for the same reason `source`/`template` are forbidden on a PIPELINE node: this node is not the kind of thing they describe.
-- `depends_on` — unchanged, and load-bearing in a way it is not elsewhere: **sequencing is topology**. A reference to another node's `context_key`, and a SQL node binding `:that_key`, are valid only from a node that depends on the producer, directly or transitively (§12.10 `calculator_input_unordered`). Array order means nothing.
+- `depends_on` — unchanged, and load-bearing in a way it is not elsewhere: **sequencing is topology**. A reference to another node's key, and a SQL node binding `:that_key`, are valid only from a node that depends on the producer, directly or transitively (§12.10 `calculator_input_unordered`). Binding only ONE of a multi node's keys still requires the edge. Array order means nothing.
 
-At run time the node evaluates at its DAG position, writes its value, and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on its stats so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
+At run time the node evaluates at its DAG position, writes its value (once, every key on a multi-output kind), and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on a single node's stats (`context_values`, every key, on a multi node's) so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
 
-**The `context_key` is also an implicit optional execute input** (078, owner ruling 2026-09-05). A caller may supply it in the execute request's `parameters` object, typed by the kind's output — an ANY-output kind (`coalesce`, `if_null`, `map`) accepts any JSON scalar. Supplied, the node is **skipped**: it does not evaluate, the supplied value is what downstream nodes bind, and the node's stats carry `provided_by: "caller"` beside `context_key`/`context_value` so a run record shows where the value came from. Unsupplied (an explicit JSON `null` reads as unsupplied), the node runs and computes the value exactly as before. A supplied value that fails coercion is refused with `pipeline.execution.invalid_parameter_type` (§13.3), exactly like a declared parameter — to the caller there is no second kind of execute input.
+**Every key a calculator node writes is also an implicit optional execute input** (078, owner ruling 2026-09-05; extended to the named set 121). A caller may supply it in the execute request's `parameters` object, typed by the kind's output — an ANY-output kind (`coalesce`, `if_null`, `map`) accepts any JSON scalar. Supplied, the node is **skipped**: it does not evaluate, the supplied value is what downstream nodes bind, and the node's stats carry `provided_by: "caller"` so a run record shows where the value came from. Unsupplied (an explicit JSON `null` reads as unsupplied), the node runs and computes the value exactly as before. A supplied value that fails coercion is refused with `pipeline.execution.invalid_parameter_type` (§13.3), exactly like a declared parameter — to the caller there is no second kind of execute input. For a multi-output node the override is **all-or-nothing**: every key supplied and the node is skipped, none and it computes; a proper subset is refused before any node runs with `pipeline.execution.calculator_keys_partial` (§13.3).
 
 ### 4.11 `settings.timeout_seconds` — the node's own deadline
 
@@ -467,7 +484,7 @@ The Context is a **runtime in-memory map** — never serialized in the Pipeline 
 4. Executor overlays the resolved parameters onto the Context: `Map<String, Any?>` where keys are context keys and values are typed Kotlin objects (Date, BigDecimal, Boolean, String, etc.). A declared parameter that spells an org or platform key the same way **is** the override.
 5. For each node, in topological order:
    a. The template engine renders the node's template against the **current Context**, and the rendered SQL's `:key` binds resolve against it too.
-   b. A `CALCULATOR` node (§4.10) evaluates its kind and writes its `context_key` into the Context; every node that `depends_on` it, directly or transitively, sees the value.
+   b. A `CALCULATOR` node (§4.10) evaluates its kind once and writes every key it declares — its `context_key`, or each mapped `context_keys` value — into the Context; every node that `depends_on` it, directly or transitively, sees them.
    c. The rendered SQL executes against the node's `source`.
    d. Behavior depends on `type` and `output.target` (see §8).
 6. The caller node's ResultSet (the node resolving to `output.target: "caller"`, if any) is the pipeline's result. Pipelines with no caller node return execution stats only.
@@ -484,8 +501,8 @@ them spell a key the same way. Lowest precedence first:
 | 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
 | 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
 | 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
-| 4 | **execute-time inputs** | declared parameters (§6.3), and each `CALCULATOR` node's `context_key` as an implicit **optional** input (§4.10 — supplied → the node is skipped; unsupplied → the node runs) | the caller's `parameters` object |
-| 5 | **calculator outputs** | each `CALCULATOR` node's `context_key` (§4.10) | the node, at its DAG position |
+| 4 | **execute-time inputs** | declared parameters (§6.3), and every key a `CALCULATOR` node writes as an implicit **optional** input (§4.10 — supplied → the node is skipped; unsupplied → the node runs; a multi-output node's keys are all-or-nothing) | the caller's `parameters` object |
+| 5 | **calculator outputs** | every key a `CALCULATOR` node writes (§4.10 — one, or a multi-output kind's whole mapped set) | the node, at its DAG position |
 
 A calculator output may shadow an org or platform key; it may **never** shadow a declared
 parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
@@ -784,10 +801,11 @@ parameters are values and bind as `:name` (Templates §4.5); the message names b
 scan is AST-based (Templates §4.2 reasoning), honours macro-parameter and loop-variable
 shadowing, and no spelling hides a live interpolation from it (pinned against Freemarker
 2.3.34). The declared set is the pipeline's `parameters` block **including every calculator
-output key** (078 A1): a CALCULATOR node's `context_key` joins the set typed by its kind's
-output type, and is refused in one more position a plain parameter is not — a conditional's
-test (`<#if x??>`, `<#elseif x>`) — because a derived value gating SQL structure is the same
-hole as an interpolated one, one directive earlier.
+output key** (078 A1): every key a CALCULATOR node writes joins the set — a single node's
+`context_key` typed by its kind's output, each of a multi-output node's mapped keys typed by
+its own output (121) — and is refused in one more position a plain parameter is not — a
+conditional's test (`<#if x??>`, `<#elseif x>`) — because a derived value gating SQL structure
+is the same hole as an interpolated one, one directive earlier.
 
 ### 12.7 Parameter validations
 
@@ -833,16 +851,19 @@ The `CALCULATOR`-node rules (§4.10, calculators design §0.3). Every one of the
 
 | Code | Check |
 |---|---|
-| `pipeline.validation.calculator_node_incomplete` | A `CALCULATOR` node declares all three of `kind`, `inputs` and `context_key` |
-| `pipeline.validation.calculator_fields_on_non_calculator` | No other node type carries `kind`, `inputs` or `context_key` |
-| `pipeline.validation.calculator_node_has_sql_fields` | A `CALCULATOR` node carries no `template`, `source` or `output` — it runs no SQL and writes one Context key, not a table |
+| `pipeline.validation.calculator_node_incomplete` | A `CALCULATOR` node declares `kind` and `inputs` — a missing key mapping is reported by the shape verdicts below, which name both legal fields |
+| `pipeline.validation.calculator_fields_on_non_calculator` | No other node type carries `kind`, `inputs`, `context_key` or `context_keys` |
+| `pipeline.validation.calculator_node_has_sql_fields` | A `CALCULATOR` node carries no `template`, `source` or `output` — it runs no SQL and writes Context keys, not a table |
 | `pipeline.validation.calculator_unknown` | `kind` names a kind in the registry ([Calculators §2](calculators.md)) |
 | `pipeline.validation.calculator_input_missing` | Every input the kind declares `required` is present |
-| `pipeline.validation.calculator_input_unknown` | Every supplied input name is one the kind declares, and every `$reference` names a Context key something provides — an org or platform key, a declared parameter, or another node's `context_key` |
-| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding, and a `$reference` whose type the body decides (org/platform key, declared parameter, another calculator's output) must match it as well; a `LIST` input takes a JSON array |
-| `pipeline.validation.calculator_input_unordered` | A `$reference` to another node's `context_key` — and a SQL node binding `:that_key` — comes from a node that `depends_on` the producer, directly or transitively. Sequencing is topology, never array order |
-| `pipeline.validation.calculator_output_collision` | `context_key` collides with nothing: not a declared parameter (a calculator may shadow an org or platform key, never a parameter), and not another node's `context_key` — one writer per key per pipeline |
-| `pipeline.validation.calculator_output_name_invalid` | `context_key` matches §6.1's `[a-z_][a-z0-9_]*` |
+| `pipeline.validation.calculator_input_unknown` | Every supplied input name is one the kind declares, and every `$reference` names a Context key something provides — an org or platform key, a declared parameter, or another node's key |
+| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding, and a `$reference` whose type the body decides (org/platform key, declared parameter, another calculator's output — a multi-output node's key typed by its own output) must match it as well; a `LIST` input takes a JSON array |
+| `pipeline.validation.calculator_input_unordered` | A `$reference` to another node's key — and a SQL node binding `:that_key` — comes from a node that `depends_on` the producer, directly or transitively. Binding only one of a multi-output node's keys still requires the edge. Sequencing is topology, never array order |
+| `pipeline.validation.calculator_output_collision` | Every key a node writes collides with nothing: not a declared parameter (a calculator may shadow an org or platform key, never a parameter), and not another node's key — one writer per key per pipeline |
+| `pipeline.validation.calculator_output_name_invalid` | Every key a node writes — `context_key`, or each `context_keys` value — matches §6.1's `[a-z_][a-z0-9_]*` |
+| `pipeline.validation.calculator_output_shape_mismatch` | `context_key` XOR `context_keys`, and the field fits the kind: `context_keys` on a single-output kind, `context_key` on a multi-output kind, BOTH fields present, or neither — all refused. `details.reason` names which (`single_output_kind` / `multi_output_kind` / `both_fields` / `neither_field`) |
+| `pipeline.validation.calculator_output_unknown` | A `context_keys` entry names an output the kind does not declare. `details.known_outputs` lists the names it does |
+| `pipeline.validation.calculator_outputs_incomplete` | A declared output of a multi-output kind is not mapped in `context_keys` — no partial mapping, so no reader can bind a key the node never writes. `details.missing` lists the unmapped outputs |
 
 ---
 
@@ -871,6 +892,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.execution.not_found` | 404 | Pipeline id or version not found |
 | `pipeline.execution.parameter_required` | 400 | Required parameter missing from execution request |
 | `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type — also a calculator `context_key` supplied at execute time that fails coercion against its kind's output type (§4.10; an ANY-output key accepts any JSON scalar, a container is refused with this same code) |
+| `pipeline.execution.calculator_keys_partial` | 400 | The caller supplied a PROPER SUBSET of a multi-output node's keys (121, §4.10). Override is all-or-nothing per node: every key supplied and the node is skipped (`provided_by: "caller"` on its stats), none and it computes; some is refused before any node runs, with the same shape as `invalid_parameter_type`. `details` carries `supplied` and `missing` |
 | `pipeline.execution.aborted` | 500 | Execution aborted unexpectedly (executor error) |
 | `pipeline.execution.timeout` | 504 | Execution exceeded timeout |
 | `pipeline.execution.concurrency_limit` | 429 | Too many concurrent executions for this user |
@@ -1377,6 +1399,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v1.18 | 121 calculator multi-output | A CALCULATOR kind may declare a **named output set** (§4.10, both JSON shapes): a single-output kind writes its value under `context_key` exactly as before; a multi-output kind (the catalog says which) maps EVERY declared output through `context_keys` — never both fields, never neither, no partial mapping. §12.10 gains `calculator_output_shape_mismatch`, `calculator_output_unknown` (`details.known_outputs`) and `calculator_outputs_incomplete` (`details.missing`); §13.3 gains `pipeline.execution.calculator_keys_partial` — caller override of a multi node's keys is all-or-nothing, a proper subset refused before any node runs with the same shape as `invalid_parameter_type`. Every mapped key obeys every rule a single key always has (name, collision, ordering, the §12.6 guarded set, derived inputs) and is typed by its own output. Body-hash neutral: `context_keys` is absent on every stored single-output body and serializes back absent; a single node's stats row is byte-identical, a multi node's carries `context_values`. Additive per §15.2. |
 | 2026-09-11 | v1.17 | 118 learned semantic layer | New **§13.15 Learned semantics** — seven two-segment `semantics.*` codes (`kind_invalid`, `fact_invalid`, `ref_unresolved`, `evidence_refused`, `evidence_failed` — all 400; `duplicate` 409; `not_found` 404), landed with `PipelineErrorCodes.Semantics`, the `datasources` mirror `SemanticsErrorCodes` (the recorder lives below this module) and their `ApiErrorCatalog` rows; §13 rows 163 → 170. |
 | 2026-09-10 | v1.16 | 109 §B empty dialect properties | §13.8 gains `datasource.validation.property_empty` (400): a DECLARED dialect property carrying an empty, whitespace-only or null value is refused at register/update — and so at bootstrap, which saves through the same validator — instead of being stored as `""` (the `catalog.ref: ""` incident). The field names the key; a bootstrap field whose whole value is one `${VAR}` that resolves set-but-empty is OMITTED (the operator's off-switch), so the shipped defaults still boot. Additive per §15.2. |
 | 2026-09-10 | v1.15 | 109 §A lake view isolation | §13.8 gains two rows: `datasource.lake.table_unavailable` (502) — a pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20); `details` carry `table` and the recorded `last_error` — and `datasource.validation.lake_table_unreadable` (400) — the registration/import pre-flight refusal: the candidate table's view did not create or a one-row scan through it failed, refused BEFORE storing with the bounded engine error as the message. Additive per §15.2. |

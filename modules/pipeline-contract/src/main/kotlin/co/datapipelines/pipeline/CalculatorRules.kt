@@ -24,6 +24,15 @@ import java.util.UUID
  * up in testing: with four parallel slots and two nodes, it is right most of the time. The
  * refusal is `calculator_input_unordered`, and the fix an author makes is one array entry.
  *
+ * ## One key, or a named set (121)
+ *
+ * A kind is single-output and the node names its value with `context_key`, or multi-output and
+ * the node maps every declared output through `context_keys` — never both fields, never
+ * neither, every name known, none unmapped (`calculator_output_shape_mismatch` /
+ * `calculator_output_unknown` / `calculator_outputs_incomplete`). Each mapped key then obeys
+ * every rule a single key always has — name shape, collision, ordering, type resolution —
+ * because the checks below run per key over one derivation ([calculatorOutputEntries]).
+ *
  * ## Typing reaches through `$references`, not just literals
  *
  * A reference whose type the body decides is checked against the input's declared type exactly as
@@ -41,6 +50,7 @@ internal object CalculatorRules {
         templates: TemplateDryRenderer,
         workspaceId: UUID,
         into: FailureCollector,
+        kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
     ) {
         val writers = pipeline.nodes.filter { it.type == NodeType.CALCULATOR }
         // FIRST writer wins the key, so a duplicate is reported once — on the node that came
@@ -48,7 +58,7 @@ internal object CalculatorRules {
         // report the collision on the FIRST node and name the second, which reads backwards.
         val keyToWriter =
             writers
-                .mapNotNull { node -> node.contextKey?.takeIf { it.isNotBlank() }?.let { it to node.id } }
+                .flatMap { node -> writtenKeys(node).map { it to node.id } }
                 .groupBy({ it.first }, { it.second })
                 .mapValues { (_, ids) -> ids.first() }
         val ancestors = Ancestry.of(pipeline, keyToWriter.values)
@@ -56,13 +66,29 @@ internal object CalculatorRules {
 
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.CALCULATOR) {
-                checkCalculatorNode(index, node, pipeline, deploymentKeys, keyToWriter, ancestors, into)
+                checkCalculatorNode(index, node, pipeline, deploymentKeys, keyToWriter, ancestors, kinds, into)
             } else {
                 checkForeignFields(index, node, into)
                 checkSqlBindOrdering(index, node, templates, workspaceId, keyToWriter, ancestors, into)
             }
         }
     }
+
+    /**
+     * Every Context key [node] would write under either mapping shape — the shape verdicts are
+     * §12.10's, and this set exists so a key an author named is tracked for collision and
+     * ordering even while its mapping shape is being refused.
+     */
+    private fun writtenKeys(node: Node): List<String> =
+        buildList {
+            node.contextKey
+                ?.takeUnless { it.isBlank() }
+                ?.let(::add)
+            node.contextKeys
+                ?.values
+                ?.filter { it.isNotBlank() }
+                ?.let(::addAll)
+        }
 
     // ---- shape ----
 
@@ -76,6 +102,7 @@ internal object CalculatorRules {
                 if (node.kind != null) add("kind")
                 if (node.inputs != null) add("inputs")
                 if (node.contextKey != null) add("context_key")
+                if (node.contextKeys != null) add("context_keys")
             }
         if (present.isEmpty()) return
         into.add(
@@ -95,13 +122,15 @@ internal object CalculatorRules {
         deploymentKeys: Set<String>,
         keyToWriter: Map<String, String>,
         ancestors: Ancestry,
+        kinds: (String) -> CalculatorKind?,
         into: FailureCollector,
     ) {
         checkNoSqlFields(index, node, into)
-        val kind = checkKind(index, node, into)
-        checkContextKey(index, node, pipeline, keyToWriter, into)
+        val kind = checkKind(index, node, kinds, into)
+        checkContextKeys(index, node, pipeline, keyToWriter, into)
         if (kind == null) return
-        checkInputs(index, node, kind, pipeline, deploymentKeys, keyToWriter, ancestors, into)
+        checkOutputShape(index, node, kind, into)
+        checkInputs(index, node, kind, pipeline, deploymentKeys, keyToWriter, ancestors, kinds, into)
     }
 
     private fun checkNoSqlFields(
@@ -120,7 +149,7 @@ internal object CalculatorRules {
             Validation.CALCULATOR_NODE_HAS_SQL_FIELDS,
             "nodes[$index]",
             "CALCULATOR node '${node.id.truncateForError()}' declares ${present.joinToString()}; it runs no SQL " +
-                "and writes one Context key, so it carries none of them.",
+                "and writes only Context keys, so it carries none of them.",
             mapOf("node" to node.id.truncateForError(), "fields" to present),
         )
     }
@@ -128,26 +157,31 @@ internal object CalculatorRules {
     private fun checkKind(
         index: Int,
         node: Node,
+        kinds: (String) -> CalculatorKind?,
         into: FailureCollector,
     ): CalculatorKind? {
         val kind = node.kind
-        if (kind.isNullOrBlank() || node.inputs == null || node.contextKey.isNullOrBlank()) {
+        // A key mapping is `context_key` on a single-output kind or `context_keys` on a
+        // multi-output one; §12.10's shape verdicts below decide which fits the kind. What is
+        // missing HERE is kind or inputs — the fields no shape rule can substitute for.
+        val hasKeyMapping = !node.contextKey.isNullOrBlank() || node.contextKeys != null
+        if (kind.isNullOrBlank() || node.inputs == null) {
             val missing =
                 buildList {
                     if (kind.isNullOrBlank()) add("kind")
                     if (node.inputs == null) add("inputs")
-                    if (node.contextKey.isNullOrBlank()) add("context_key")
+                    if (!hasKeyMapping) add("context_key")
                 }
             into.add(
                 Validation.CALCULATOR_NODE_INCOMPLETE,
                 "nodes[$index]",
                 "CALCULATOR node '${node.id.truncateForError()}' is missing ${missing.joinToString()}; a calculator " +
-                    "node declares all three.",
+                    "node declares kind, inputs and a key mapping (context_key or context_keys).",
                 mapOf("node" to node.id.truncateForError(), "missing" to missing),
             )
             if (kind.isNullOrBlank()) return null
         }
-        return CalculatorRegistry.find(kind) ?: run {
+        return kinds(kind) ?: run {
             into.add(
                 Validation.CALCULATOR_UNKNOWN,
                 "nodes[$index].kind",
@@ -159,51 +193,195 @@ internal object CalculatorRules {
         }
     }
 
-    // ---- the output key ----
+    // ---- the output mapping (121: one key, or a named set) ----
 
-    private fun checkContextKey(
+    /**
+     * §12.10's shape verdicts: `context_key` XOR `context_keys` — never both, never neither —
+     * and the field that fits the KIND's shape. A single-output kind names its one value with
+     * `context_key`; a multi-output kind maps every declared output through `context_keys`
+     * (every name known, none unmapped).
+     */
+    private fun checkOutputShape(
+        index: Int,
+        node: Node,
+        kind: CalculatorKind,
+        into: FailureCollector,
+    ) {
+        val single = node.contextKey?.takeUnless { it.isBlank() }
+        val mapping = node.contextKeys
+        when {
+            single != null && mapping != null -> {
+                shapeMismatch(
+                    index,
+                    node,
+                    kind,
+                    "both_fields",
+                    "declares both context_key and context_keys. A node carries exactly one: context_key " +
+                        "on a single-output kind, context_keys on a multi-output one.",
+                    into,
+                )
+            }
+
+            single == null && mapping == null -> {
+                shapeMismatch(
+                    index,
+                    node,
+                    kind,
+                    "neither_field",
+                    "declares neither context_key nor context_keys. " + expectedShape(kind),
+                    into,
+                )
+            }
+
+            kind.outputs.isEmpty() && mapping != null -> {
+                shapeMismatch(
+                    index,
+                    node,
+                    kind,
+                    "single_output_kind",
+                    "maps its output with context_keys, but kind '${kind.kind}' writes ONE value. " + expectedShape(kind),
+                    into,
+                )
+            }
+
+            kind.outputs.isNotEmpty() && single != null -> {
+                shapeMismatch(
+                    index,
+                    node,
+                    kind,
+                    "multi_output_kind",
+                    "names one key with context_key, but kind '${kind.kind}' writes a named set. " + expectedShape(kind),
+                    into,
+                )
+            }
+
+            kind.outputs.isNotEmpty() && mapping != null -> {
+                checkOutputMapping(index, node, kind, mapping, into)
+            }
+        }
+    }
+
+    /** How the kind's mapping must read — the sentence every shape refusal ends with. */
+    private fun expectedShape(kind: CalculatorKind): String =
+        if (kind.outputs.isEmpty()) {
+            "Kind '${kind.kind}' is single-output: name its value with context_key."
+        } else {
+            "Kind '${kind.kind}' declares outputs ${kind.outputs.joinToString(", ") { it.name }}: " +
+                "map every one of them with context_keys."
+        }
+
+    private fun shapeMismatch(
+        index: Int,
+        node: Node,
+        kind: CalculatorKind,
+        reason: String,
+        what: String,
+        into: FailureCollector,
+    ) = into.add(
+        Validation.CALCULATOR_OUTPUT_SHAPE_MISMATCH,
+        "nodes[$index]",
+        "CALCULATOR node '${node.id.truncateForError()}' $what",
+        mapOf("node" to node.id.truncateForError(), "kind" to kind.kind, "reason" to reason),
+    )
+
+    /**
+     * The two mapping-completeness verdicts on a multi-output node whose shape is right: every
+     * name in the mapping is one the kind declares (`calculator_output_unknown`), and every
+     * declared output is mapped (`calculator_outputs_incomplete`) — no partial mapping, so a
+     * reader can never bind a half-written window.
+     */
+    private fun checkOutputMapping(
+        index: Int,
+        node: Node,
+        kind: CalculatorKind,
+        mapping: Map<String, String>,
+        into: FailureCollector,
+    ) {
+        val declared = kind.outputs.map { it.name }
+        mapping.keys.filter { it !in declared }.forEach { name ->
+            into.add(
+                Validation.CALCULATOR_OUTPUT_UNKNOWN,
+                "nodes[$index].context_keys",
+                "Kind '${kind.kind}' has no output '${name.truncateForError()}'; it declares ${declared.joinToString()}.",
+                mapOf(
+                    "node" to node.id.truncateForError(),
+                    "kind" to kind.kind,
+                    "output" to name.truncateForError(),
+                    "known_outputs" to declared,
+                ),
+            )
+        }
+        val missing = declared.filter { mapping[it].isNullOrBlank() }
+        if (missing.isNotEmpty()) {
+            into.add(
+                Validation.CALCULATOR_OUTPUTS_INCOMPLETE,
+                "nodes[$index].context_keys",
+                "Kind '${kind.kind}' output ${missing.joinToString()} is not mapped; every declared output must be — " +
+                    "a caller who needs one value still maps both, so no reader can bind a key the node never writes.",
+                mapOf("node" to node.id.truncateForError(), "kind" to kind.kind, "missing" to missing),
+            )
+        }
+    }
+
+    // ---- the output keys ----
+
+    /**
+     * Every mapped key obeys the same rules a single node's `context_key` always has (121: the
+     * mechanism is general — nothing about a key's checks changes because its kind writes more
+     * than one). The path names where the key was declared: `context_key`, or the
+     * `context_keys` entry's output name.
+     */
+    private fun checkContextKeys(
         index: Int,
         node: Node,
         pipeline: Pipeline,
         keyToWriter: Map<String, String>,
         into: FailureCollector,
     ) {
-        val key = node.contextKey?.takeUnless { it.isBlank() } ?: return
-        if (!ContextKeys.NAME.matches(key)) {
-            into.add(
-                Validation.CALCULATOR_OUTPUT_NAME_INVALID,
-                "nodes[$index].context_key",
-                "context_key '${key.truncateForError()}' must match ${ContextKeys.NAME.pattern} (§6.1) — " +
-                    "it is bound in SQL as :$key.",
-                mapOf("node" to node.id.truncateForError(), "context_key" to key.truncateForError()),
-            )
-            return
-        }
-        // A calculator MAY shadow an org or platform key (§0.2 tier 5). It may never shadow a
-        // declared PARAMETER: that is the caller's input, and silently overwriting one makes an
-        // execute request a lie about what ran.
-        if (pipeline.parameters.containsKey(key)) {
-            collision(index, node, key, "a declared parameter of the same name", "parameter", into)
-            return
-        }
-        val other = keyToWriter[key]
-        if (other != null && other != node.id) {
-            collision(index, node, key, "node '${other.truncateForError()}'", "node", into)
+        val declared =
+            buildList {
+                node.contextKey?.takeUnless { it.isBlank() }?.let { add("context_key" to it) }
+                node.contextKeys?.forEach { (output, key) ->
+                    if (key.isNotBlank()) add("context_keys.$output" to key)
+                }
+            }
+        declared.forEach { (field, key) ->
+            val path = "nodes[$index].$field"
+            if (!ContextKeys.NAME.matches(key)) {
+                into.add(
+                    Validation.CALCULATOR_OUTPUT_NAME_INVALID,
+                    path,
+                    "context key '${key.truncateForError()}' must match ${ContextKeys.NAME.pattern} (§6.1) — " +
+                        "it is bound in SQL as :$key.",
+                    mapOf("node" to node.id.truncateForError(), "context_key" to key.truncateForError()),
+                )
+                return@forEach
+            }
+            // A calculator MAY shadow an org or platform key (§0.2 tier 5). It may never shadow a
+            // declared PARAMETER: that is the caller's input, and silently overwriting one makes an
+            // execute request a lie about what ran.
+            if (pipeline.parameters.containsKey(key)) {
+                collision(node, path, key, "a declared parameter of the same name", "parameter", into)
+                return@forEach
+            }
+            val other = keyToWriter[key]
+            if (other != null && other != node.id) {
+                collision(node, path, key, "node '${other.truncateForError()}'", "node", into)
+            }
         }
     }
 
-    @Suppress("LongParameterList")
     private fun collision(
-        index: Int,
         node: Node,
+        path: String,
         key: String,
         what: String,
         kind: String,
         into: FailureCollector,
     ) = into.add(
         Validation.CALCULATOR_OUTPUT_COLLISION,
-        "nodes[$index].context_key",
-        "context_key '${key.truncateForError()}' is already written by $what — one writer per Context key.",
+        path,
+        "context key '${key.truncateForError()}' is already written by $what — one writer per Context key.",
         mapOf("node" to node.id.truncateForError(), "context_key" to key.truncateForError(), "collides_with" to kind),
     )
 
@@ -218,6 +396,7 @@ internal object CalculatorRules {
         deploymentKeys: Set<String>,
         keyToWriter: Map<String, String>,
         ancestors: Ancestry,
+        kinds: (String) -> CalculatorKind?,
         into: FailureCollector,
     ) {
         val supplied = node.inputs.orEmpty()
@@ -248,7 +427,7 @@ internal object CalculatorRules {
                     ),
                 )
             } else {
-                checkInputValue(index, node, kind, input, value, pipeline, deploymentKeys, keyToWriter, ancestors, into)
+                checkInputValue(index, node, kind, input, value, pipeline, deploymentKeys, keyToWriter, ancestors, kinds, into)
             }
         }
     }
@@ -264,6 +443,7 @@ internal object CalculatorRules {
         deploymentKeys: Set<String>,
         keyToWriter: Map<String, String>,
         ancestors: Ancestry,
+        kinds: (String) -> CalculatorKind?,
         into: FailureCollector,
     ) {
         val path = "nodes[$index].inputs.${input.name}"
@@ -275,7 +455,7 @@ internal object CalculatorRules {
         elements.forEach { element ->
             val reference = referenceIn(element)
             if (reference != null) {
-                checkReference(path, node, kind, input, reference, deploymentKeys, pipeline, keyToWriter, ancestors, into)
+                checkReference(path, node, kind, input, reference, deploymentKeys, pipeline, keyToWriter, ancestors, kinds, into)
             } else {
                 checkLiteral(path, node, kind, input, element, into)
             }
@@ -293,6 +473,7 @@ internal object CalculatorRules {
         pipeline: Pipeline,
         keyToWriter: Map<String, String>,
         ancestors: Ancestry,
+        kinds: (String) -> CalculatorKind?,
         into: FailureCollector,
     ) {
         // The reference's canonical type when the tier owning the key pins one: platform keys
@@ -330,7 +511,7 @@ internal object CalculatorRules {
                 }
             }
         }
-        checkReferenceType(path, node, kind, input, reference, declaredType, pipeline, keyToWriter, into)
+        checkReferenceType(path, node, kind, input, reference, declaredType, pipeline, keyToWriter, kinds, into)
     }
 
     /**
@@ -351,14 +532,15 @@ internal object CalculatorRules {
         declaredType: LogicalType?,
         pipeline: Pipeline,
         keyToWriter: Map<String, String>,
+        kinds: (String) -> CalculatorKind?,
         into: FailureCollector,
     ) {
         val inputType = input.type ?: return
         val referenceType =
             declaredType
                 ?: keyToWriter[reference]
-                    ?.let { writer -> pipeline.nodes.firstOrNull { it.id == writer }?.kind }
-                    ?.let { CalculatorRegistry.find(it)?.output }
+                    ?.let { writer -> pipeline.nodes.firstOrNull { it.id == writer } }
+                    ?.let { writer -> writer.kind?.let(kinds)?.let { kind -> outputTypeOf(writer, kind, reference) } }
                 ?: return
         if (referenceType != inputType) {
             typeMismatch(
@@ -372,6 +554,19 @@ internal object CalculatorRules {
             )
         }
     }
+
+    /**
+     * The type a reference to one of [writer]'s keys resolves to: the kind's output for a
+     * single-output node, the mapped output's own type for a multi-output one (121) — the same
+     * derivation [Pipeline.calculatorOutputs] uses, so the declared set and this check cannot
+     * disagree about what a key IS. Null when the key is unmapped or the kind pins no type:
+     * §12.10 owns the mapping verdict, and an ANY-typed value is typed only by the run.
+     */
+    private fun outputTypeOf(
+        writer: Node,
+        kind: CalculatorKind,
+        key: String,
+    ): LogicalType? = calculatorOutputEntries(writer, kind).firstOrNull { it.first == key }?.second
 
     private fun unordered(
         path: String,

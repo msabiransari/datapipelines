@@ -143,6 +143,134 @@ class CalculatorSurfaceE2eTest {
             .body("data.parameters.$CONTEXT_KEY.derived", org.hamcrest.Matchers.equalTo(true))
     }
 
+    // ---- 121: a multi-output node over the same real surface ----
+
+    @Test
+    @Order(4)
+    fun `a trailing_periods node writes both keys and the DQL binds them`() {
+        createTemplate(
+            "test/calc_window_rows.sql",
+            "H2",
+            "Calculator Window Rows",
+            "SELECT id, label FROM calc_window_days WHERE day_on >= :window_start AND day_on <= :window_end ORDER BY id",
+        )
+        windowPipelineId =
+            createPipeline(
+                "test/calc_window",
+                "Calculator Window",
+                listOf(
+                    mapOf(
+                        "id" to "window",
+                        "description" to "The quarter just ended, as one write of two keys",
+                        "type" to "CALCULATOR",
+                        "kind" to "trailing_periods",
+                        "inputs" to mapOf("date" to AS_OF, "unit" to "quarter"),
+                        "context_keys" to mapOf("start" to "window_start", "end" to "window_end"),
+                        "depends_on" to emptyList<String>(),
+                    ),
+                    mapOf(
+                        "id" to "fetch",
+                        "description" to "Days inside the window",
+                        "type" to "DQL",
+                        "source" to H2_DATASOURCE,
+                        "template" to mapOf("id" to "test/calc_window_rows.sql", "version" to 1),
+                        "output" to mapOf("target" to "caller"),
+                        "depends_on" to listOf("window"),
+                    ),
+                ),
+            )
+
+        val events = execute(windowPipelineId(), emptyMap())
+        events.last().first shouldBe "data_ready"
+        val executionId = events.last().second["execution_id"].asText()
+
+        // trailing_periods(2026-08-14, quarter, 1) = 2026-04-01 … 2026-06-30: the in-window rows
+        // and ONLY those — 2026-07-01 is one day past the window's end and must not appear.
+        assertWindowRows(executionId)
+
+        // The resolved parameters carry BOTH keys the one evaluation wrote.
+        val execution = executionGet(executionId)
+        execution["parameters"]["window_start"].asText() shouldBe WINDOW_START
+        execution["parameters"]["window_end"].asText() shouldBe WINDOW_END
+
+        val window = nodeStats(executionId).single { it["node_id"].asText() == "window" }
+        window["status"].asText() shouldBe "SUCCESS"
+        window["context_values"]["window_start"].asText() shouldBe WINDOW_START
+        window["context_values"]["window_end"].asText() shouldBe WINDOW_END
+        window["provided_by"] shouldBe null
+    }
+
+    @Test
+    @Order(5)
+    fun `both keys caller-supplied skips the node - same rows, provided_by caller`() {
+        val events =
+            execute(windowPipelineId(), mapOf("window_start" to WINDOW_START, "window_end" to WINDOW_END))
+        events.last().first shouldBe "data_ready"
+        val executionId = events.last().second["execution_id"].asText()
+
+        // The supplied window IS the computed one, so the rows are identical — what proves the
+        // provenance is the stats entry, exactly as the spec's override rule promises.
+        assertWindowRows(executionId)
+
+        val window = nodeStats(executionId).single { it["node_id"].asText() == "window" }
+        window["status"].asText() shouldBe "SUCCESS"
+        window["provided_by"].asText() shouldBe "caller"
+        window["context_values"]["window_start"].asText() shouldBe WINDOW_START
+        window["context_values"]["window_end"].asText() shouldBe WINDOW_END
+    }
+
+    @Test
+    @Order(6)
+    fun `one key supplied is refused with calculator_keys_partial before anything runs`() {
+        val response =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .body(mapper.writeValueAsString(mapOf("parameters" to mapOf("window_end" to WINDOW_END))))
+                .`when`()
+                .post("/api/v1/pipelines/${windowPipelineId()}/execute")
+
+        response.statusCode() shouldBe 400
+        val error = mapper.readTree(response.body().asString())["error"]
+        error["code"].asText() shouldBe "pipeline.execution.calculator_keys_partial"
+    }
+
+    private fun windowPipelineId(): String = requireNotNull(windowPipelineId) { "Order(4) creates the window pipeline this leg reads" }
+
+    /** `GET /executions/{id}` → `data`, parsed — the REST surface, not the DB. */
+    private fun executionGet(executionId: String): JsonNode {
+        val body =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/executions/$executionId")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .asString()
+        return mapper.readTree(body)["data"]
+    }
+
+    /** The window run's result rows are exactly the in-window `(id, label)` pairs, in `id` order. */
+    private fun assertWindowRows(executionId: String) {
+        val resultResponse =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/executions/$executionId/result")
+                .then()
+                .statusCode(200)
+                .extract()
+        resultResponse.jsonPath().getLong("data.total_rows") shouldBe WINDOW_ROWS.size.toLong()
+        val rows: List<List<Any?>> = resultResponse.jsonPath().get("data.rows")
+        rows.map { (it[0] as Number).toInt() } shouldContainExactly WINDOW_ROWS.map { it.first }
+        rows.map { it[1] } shouldContainExactly WINDOW_ROWS.map { it.second }
+    }
+
     // ------------------------------------------------------------ helpers
 
     private fun pipelineId(): String = requireNotNull(pipelineId) { "Order(1) creates the pipeline this leg reads" }
@@ -285,6 +413,15 @@ class CalculatorSurfaceE2eTest {
                 QUARTER_ONE_ROWS.forEach { (id, label) ->
                     statement.execute("INSERT INTO calc_quarters (id, label, quarter) VALUES ($id, '$label', 1)")
                 }
+                statement.execute(
+                    "CREATE TABLE calc_window_days (id INT PRIMARY KEY, label VARCHAR(255) NOT NULL, day_on DATE NOT NULL)",
+                )
+                WINDOW_ROWS.forEach { (id, label, day) ->
+                    statement.execute("INSERT INTO calc_window_days (id, label, day_on) VALUES ($id, '$label', '$day')")
+                }
+                OUTSIDE_WINDOW_ROWS.forEach { (id, label, day) ->
+                    statement.execute("INSERT INTO calc_window_days (id, label, day_on) VALUES ($id, '$label', '$day')")
+                }
             }
         }
     }
@@ -336,6 +473,22 @@ class CalculatorSurfaceE2eTest {
         /** `calc_quarters` rows by quarter, in `id` order — computed and supplied disagree by design. */
         private val QUARTER_FOUR_ROWS = listOf(1 to "q4-alpha", 2 to "q4-beta")
         private val QUARTER_ONE_ROWS = listOf(3 to "q1-gamma")
+
+        /** The computed window — trailing_periods(2026-08-14, quarter, 1), fixed by the same AS_OF. */
+        private const val WINDOW_START = "2026-04-01"
+        private const val WINDOW_END = "2026-06-30"
+
+        /** `calc_window_days` rows INSIDE the window, in `id` order; the 07-01 row must never appear. */
+        private val WINDOW_ROWS =
+            listOf(
+                Triple(10, "w-open", WINDOW_START),
+                Triple(11, "w-mid", "2026-05-20"),
+                Triple(12, "w-close", WINDOW_END),
+            )
+        private val OUTSIDE_WINDOW_ROWS = listOf(Triple(13, "w-after", "2026-07-01"), Triple(14, "w-before", "2026-03-31"))
+
+        /** Set by Order(4), read by the later legs — same pattern as [pipelineId]. */
+        private var windowPipelineId: String? = null
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 

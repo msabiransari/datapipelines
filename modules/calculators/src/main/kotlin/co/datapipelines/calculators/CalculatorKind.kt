@@ -26,7 +26,8 @@ import co.datapipelines.typesystem.LogicalType
  * unparseable format string, an unknown unit, a division by zero — is a
  * [CalculatorEvaluationException] naming the input, which the executor turns into
  * `pipeline.node.calculator_failed`. A kind never throws anything else, and never returns a
- * value whose type contradicts [output].
+ * value whose type contradicts [output] — or, for a multi-output kind, a map whose key set is
+ * not exactly [outputs]'s names.
  */
 interface CalculatorKind {
     /** The registry key an author writes as `"kind"`. Stable forever; the catalog is additive. */
@@ -58,8 +59,28 @@ interface CalculatorKind {
      * The canonical type of the value written to the node's `context_key` — or **null** for the
      * three kinds whose output type is whatever their input's was (`coalesce`, `if_null`,
      * `map`). Null reads as `ANY` in the catalog and in `calculators_list`.
+     *
+     * Null for a **multi-output** kind too ([outputs] non-empty): the kind then has no single
+     * output type, and each declared output carries its own. The pair distinguishes the two
+     * nulls — [outputs] empty with a null [output] is an ANY-output single kind; [outputs]
+     * non-empty is a multi kind.
      */
     val output: LogicalType?
+
+    /**
+     * The named output set of a **multi-output** kind (121, owner ruling 2026-09-12: the
+     * general mechanism, not a period special case) — empty for every single-output kind.
+     *
+     * The invariant [CalculatorRegistry] enforces at registration and `CalculatorRegistryTest`
+     * re-asserts over every kind: empty here means the kind writes ONE value to the node's
+     * `context_key` through [output], exactly as it always has; two or more entries means the
+     * kind writes a named set, the node maps each name to a context key through its
+     * `context_keys` block, and [output] is null. A one-entry set is refused — a single named
+     * output IS a single output, named by `context_key` like any other. Names are snake_case
+     * identifiers, unique within the kind, because they are what the node's `context_keys`
+     * object keys must equal.
+     */
+    val outputs: List<CalculatorOutput>
 
     /** One worked example — the row `calculators.md` prints and `calculators_get` returns. */
     val example: CalculatorExample
@@ -67,6 +88,11 @@ interface CalculatorKind {
     /**
      * Evaluates the kind. [values] holds every declared input by name; optional inputs the author
      * omitted are present and null.
+     *
+     * The return shape is fixed by [outputs]: a single-output kind returns the one scalar
+     * [output] types; a multi-output kind returns a `Map<String, Any?>` whose **key set equals
+     * the declared output names** — no missing key, no extra one (`CalculatorPurityTest` asserts
+     * the shape for every kind in the registry).
      *
      * @throws CalculatorEvaluationException the inputs are individually well-typed but jointly
      *   unusable — an unknown `unit`, a `format` that does not compile, a zero denominator.
@@ -129,6 +155,25 @@ data class CalculatorInput(
         LIST,
     }
 }
+
+/**
+ * One named output of a multi-output kind (121) — one entry of [CalculatorKind.outputs].
+ *
+ * [name] is the key the kind's `evaluate` result carries and the key a node's `context_keys`
+ * object maps FROM: `{"start": "window_start"}` writes the kind's `start` output to the Context
+ * as `window_start`. [type] is the output's canonical type, with the same null-means-ANY rule
+ * [CalculatorInput.type] has; it is what the validator types the mapped context key with, so a
+ * SQL node binding `:window_start` and a calculator referencing `$window_start` are checked
+ * against it exactly as they are against a single-output kind's [CalculatorKind.output].
+ */
+data class CalculatorOutput(
+    /** A snake_case identifier, unique within the kind. */
+    val name: String,
+    /** The canonical type of this output's values, or null when the kind does not pin one. */
+    val type: LogicalType?,
+    /** What it means, in the terms an author thinks in. */
+    val description: String,
+)
 
 /** The worked example a catalog row and `calculators_get` both print. */
 data class CalculatorExample(

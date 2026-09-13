@@ -1,6 +1,12 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorExample
+import co.datapipelines.calculators.CalculatorInput
+import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.calculators.CalculatorOutput
+import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
@@ -70,7 +76,52 @@ internal object Fixtures {
         pipelines: PipelineResolver = PipelineResolver { _, _, _ -> null },
         maxCompositionDepth: Int = 5,
         orgContext: OrgContext = OrgContext.DEFAULTS,
-    ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth, orgContext)
+        kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
+    ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth, orgContext, calculatorKinds = kinds)
+
+    /**
+     * The throwaway multi-output fixture kind (121): two DATE outputs, `start` and `end` — the
+     * shape the two real period kinds land with in their own commit. It lives here and not in
+     * `CalculatorRegistry` because the catalog is additive forever and documented per kind: a
+     * registered fixture would fail the drift guard the moment it shipped undocumented, and
+     * deleting it later would break the forever-rule. The [windowKinds] lookup is the seam
+     * `PipelineValidator.calculatorKinds` was added for.
+     */
+    val WINDOW_KIND: CalculatorKind =
+        object : CalculatorKind {
+            override val kind = "period_window"
+            override val displayName = "Period window"
+            override val description = "The first and last day of the window containing a date."
+            override val phrases = listOf("this window")
+            override val inputs = listOf(CalculatorInput("date", LogicalType.DATE, "The date whose window to bound."))
+            override val output: LogicalType? = null
+            override val outputs =
+                listOf(
+                    CalculatorOutput("start", LogicalType.DATE, "The window's first day."),
+                    CalculatorOutput("end", LogicalType.DATE, "The window's last day."),
+                )
+            override val example = CalculatorExample(mapOf("date" to "2026-08-14"), "start=2026-07-01, end=2026-09-30")
+
+            override fun evaluate(values: Map<String, Any?>): Any = mapOf("start" to values["date"], "end" to values["date"])
+        }
+
+    /** The registry plus [WINDOW_KIND] — the lookup a test hands to the validator seam. */
+    val windowKinds: (String) -> CalculatorKind? = { name -> if (name == WINDOW_KIND.kind) WINDOW_KIND else CalculatorRegistry.find(name) }
+
+    /** A CALCULATOR node on [WINDOW_KIND] with both outputs mapped, window-style. */
+    fun windowNode(
+        id: String = "window",
+        contextKeys: Map<String, String>? = mapOf("start" to "window_start", "end" to "window_end"),
+        dependsOn: List<String> = emptyList(),
+    ): Node =
+        calculatorNode(
+            id = id,
+            kind = WINDOW_KIND.kind,
+            inputs = mapOf("date" to ref("current_date")),
+            contextKey = null,
+            contextKeys = contextKeys,
+            dependsOn = dependsOn,
+        )
 
     /** A CALCULATOR node (§4.10) — the shape §12.10's rules are written against. */
     fun calculatorNode(
@@ -79,6 +130,7 @@ internal object Fixtures {
         inputs: Map<String, JsonNode>? =
             mapOf("date" to ref("current_date"), "fiscal_start" to ref("org_fiscal_start_date")),
         contextKey: String? = "run_fiscal_quarter",
+        contextKeys: Map<String, String>? = null,
         dependsOn: List<String> = emptyList(),
     ): Node =
         Node(
@@ -92,6 +144,7 @@ internal object Fixtures {
             kind = kind,
             inputs = inputs,
             contextKey = contextKey,
+            contextKeys = contextKeys,
         )
 
     /** A Context reference, as §0.3 spells one: a leading `$` then the key. */
