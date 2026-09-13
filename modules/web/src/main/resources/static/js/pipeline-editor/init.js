@@ -508,7 +508,7 @@
           // 121: the multi shape writes the mapping the Details pane's Writes row lists;
           // calculatorValue already renders each pair's value, so it needs no re-encoding.
           var writes = node.context_keys
-            ? "{" + Object.keys(node.context_keys).map(function (o) { return esc(o) + " → " + esc(node.context_keys[o]); }).join(", ") + "}"
+            ? "{" + Object.keys(node.context_keys).sort().map(function (o) { return esc(o) + " → " + esc(node.context_keys[o]); }).join(", ") + "}"
             : esc(node.context_key || "?");
           var rendered = value !== null ? (node.context_keys ? " = " + param(value) : " = " + param(JSON.stringify(value))) : "";
           lines.push(") → " + writes + rendered);
@@ -768,7 +768,7 @@
       outputText: function (node) {
         if (!node) return "—";
         if (node.type === "CALCULATOR") {
-          if (node.context_keys) return "context keys " + Object.keys(node.context_keys).map(function (o) { return node.context_keys[o]; }).join(", ");
+          if (node.context_keys) return "context keys " + Object.keys(node.context_keys).sort().map(function (o) { return node.context_keys[o]; }).join(", ");
           return "context key " + (node.context_key || "—");
         }
         if (node.type === "DML" || node.type === "DDL") return "side effect";
@@ -814,7 +814,8 @@
       calculatorWrites: function (node) {
         if (!node || node.type !== "CALCULATOR") return "—";
         if (node.context_keys) {
-          return Object.keys(node.context_keys).map(function (o) {
+          // Sorted — body_json is JSONB, which does not preserve the author's key order.
+          return Object.keys(node.context_keys).sort().map(function (o) {
             return o + " → " + node.context_keys[o];
           }).join(" · ");
         }

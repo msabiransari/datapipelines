@@ -110,14 +110,14 @@ test("a multi-output CALCULATOR node's Details: the mapping in Writes, every val
   editor.contextValues = { current_date: "2026-09-05" };
   editor.nodeValues = { window: { window_start: "2026-04-01", window_end: "2026-06-30" } };
   const map = Object.fromEntries(editor.detailsMeta(CALC_MULTI));
-  assert.equal(map.Writes, "start → window_start · end → window_end", "the mapping, output → key");
+  assert.equal(map.Writes, "end → window_end · start → window_start", "the mapping, output → key — sorted: JSONB does not preserve key order");
   assert.equal(map.Value, 'window_start = "2026-04-01" · window_end = "2026-06-30"', "every key the one evaluation wrote");
-  assert.equal(editor.outputText(CALC_MULTI), "context keys window_start, window_end");
+  assert.equal(editor.outputText(CALC_MULTI), "context keys window_end, window_start");
 
   // The evaluation pane: the call, the mapping in braces, the values unescaped and safe.
   const html = editor.definitionHtml(CALC_MULTI);
   assert.match(html, /period_bounds\(/);
-  assert.match(html, /\{start → window_start, end → window_end\} = <span class="pe-sql-tok-parameter">/);
+  assert.match(html, /\{end → window_end, start → window_start\} = <span class="pe-sql-tok-parameter">/);
 });
 
 test("a PIPELINE node's Details: child, parameter mapping, output, child execution id", () => {

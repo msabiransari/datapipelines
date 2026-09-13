@@ -340,9 +340,9 @@ test("a multi-output CALCULATOR node's card says what it writes - every key (121
   );
 
   const sourceFact = els[0].data.facts.find((f) => f.kind === "source");
-  assert.equal(sourceFact.text, "period_bounds → window_start, window_end", "one evaluation, both keys named");
+  assert.equal(sourceFact.text, "period_bounds → window_end, window_start", "one evaluation, both keys named — sorted: JSONB does not preserve key order");
   const card = g.buildCardHtml(els[0].data);
-  assert.match(card, /period_bounds → window_start, window_end/);
+  assert.match(card, /period_bounds → window_end, window_start/);
   assert.match(card, /class="pe-card-kind">calculator</, "still the calculator eyebrow and accent");
 });
 

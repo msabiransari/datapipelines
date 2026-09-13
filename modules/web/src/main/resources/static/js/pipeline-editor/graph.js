@@ -1247,8 +1247,11 @@
       // question a SQL node's source line does — what does this node work on, and
       // what does it leave behind. 121: a multi-output node says what it writes —
       // every key, `kind → window_start, window_end`; the mapping itself (which
-      // output feeds which key) is the Details pane's row.
-      var writes = n.context_keys ? Object.keys(n.context_keys).map(function (o) { return n.context_keys[o]; }) : [n.context_key || "?"];
+      // output feeds which key) is the Details pane's row. The keys are SORTED:
+      // body_json is JSONB, which does not preserve an object's insertion order,
+      // so the author's `{"start": …, "end": …}` comes back in storage order —
+      // a deterministic order beats one that flips with the persistence layer.
+      var writes = n.context_keys ? Object.keys(n.context_keys).sort().map(function (o) { return n.context_keys[o]; }) : [n.context_key || "?"];
       data.facts.push({ kind: "source", icon: "calculator", text: (n.kind || "?") + " → " + writes.join(", ") });
       var inputs = n.inputs ? Object.keys(n.inputs) : [];
       if (inputs.length) {
