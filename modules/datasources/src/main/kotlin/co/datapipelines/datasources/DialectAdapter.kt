@@ -55,6 +55,24 @@ interface DialectAdapter {
         get() = listOf("TABLE", "VIEW")
 
     /**
+     * §7A introspection (123 §A): whether the driver's catalog LISTING shows every table in a
+     * namespace regardless of the connection's grants. It decides what "the table is not in the
+     * listing" means when a table-addressed read resolves its target:
+     *
+     * - **true** — the catalog is complete: an absent table does not exist. pgjdbc's `getTables`
+     *   selects from `pg_catalog` and appends a `has_table_privilege` filter ONLY when
+     *   `hideUnprivilegedObjects` is set (it defaults to false and is set nowhere in this repo);
+     *   DuckDB, SQLite and H2 are embedded engines whose catalog is the database itself.
+     * - **false** — the catalog is privilege-filtered: MySQL's `information_schema`, Oracle's
+     *   `ALL_TABLES` and SQL Server's `sys.tables` list only what the login may see, so an
+     *   absent table may exist and merely be invisible — the refusal says "not found — it does
+     *   not exist, or this datasource's credentials cannot see it" rather than asserting
+     *   non-existence.
+     */
+    val introspectionCatalogIsComplete: Boolean
+        get() = true
+
+    /**
      * §7A introspection: schemas that belong to the engine, not the user — rows in these are
      * dropped from every introspection result (they would otherwise ride along on the `VIEW`
      * type and eat the tables cap). Declared **lowercase**; matching is case-insensitive,

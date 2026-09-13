@@ -25,15 +25,15 @@ import java.time.temporal.WeekFields
  * setting and `"fiscal_start": "09-15"` pins this pipeline's own, with no config edit and no
  * second authority. The conventions the fiscal kinds follow — a fiscal year is labelled by the
  * calendar year it STARTS in, `02-29` resolves to 02-28 in a non-leap year — live in [Calendar].
+ *
+ * The phrases are DISJOINT across kinds (123): the skill's kind lookup matches a question's words
+ * against them, and a phrase two kinds list forces a silent guess. The split follows what each
+ * kind returns — a bare period noun ("last quarter", "this quarter") is a WINDOW and belongs to
+ * the two-output kinds (`period_bounds`, `trailing_periods`); a single-output kind's phrases name
+ * its boundary explicitly ("the start of last quarter", "the end of this quarter"). The drift
+ * guard's disjointness arm enforces it registry-wide.
  */
 internal object DateKinds {
-    /**
-     * `period_start` and `period_end` answer the same containing-period phrases — the two
-     * boundaries of one window (120/R2: the everyday phrases the kinds answer, verbatim from the
-     * review that asked for them).
-     */
-    private val CONTAINING_PERIOD_PHRASES = listOf("this quarter", "month to date", "the current week", "start of the fiscal year")
-
     private val FISCAL_START =
         input("fiscal_start", STRING, "The fiscal year's first day as `MM-DD` — usually `\$org_fiscal_start_date`.")
 
@@ -85,14 +85,26 @@ internal object DateKinds {
                 kind = "period_start",
                 displayName = "Period start",
                 description = "The first day of the week, month, quarter or year containing a date.",
-                phrases = CONTAINING_PERIOD_PHRASES,
+                phrases =
+                    listOf(
+                        "the start of this quarter",
+                        "the first day of the current week",
+                        "the first day of the current month",
+                        "the start of the fiscal year",
+                    ),
                 exampleOutput = "2026-07-01",
             ) { date, unit, mode, fiscalStart, weekStart -> Calendar.periodStart(date, unit, mode, fiscalStart, weekStart) },
             periodKind(
                 kind = "period_end",
                 displayName = "Period end",
                 description = "The last day of the week, month, quarter or year containing a date.",
-                phrases = CONTAINING_PERIOD_PHRASES,
+                phrases =
+                    listOf(
+                        "the end of this quarter",
+                        "the last day of the current week",
+                        "the last day of the current month",
+                        "the end of the fiscal year",
+                    ),
                 exampleOutput = "2026-09-30",
             ) { date, unit, mode, fiscalStart, weekStart -> Calendar.periodEnd(date, unit, mode, fiscalStart, weekStart) },
             SimpleKind(
@@ -101,7 +113,13 @@ internal object DateKinds {
                 description =
                     "The first day of the period `offset` periods before the one containing a date — " +
                         "the anchor a period-over-period comparison filters from.",
-                phrases = listOf("last quarter", "previous month", "the quarter before last", "N periods ago"),
+                phrases =
+                    listOf(
+                        "the start of last quarter",
+                        "the first day of the previous month",
+                        "the quarter before last",
+                        "N periods ago",
+                    ),
                 inputs =
                     listOf(
                         input("date", DATE, "The date whose period the offset is counted back from."),

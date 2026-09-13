@@ -599,6 +599,23 @@ object PipelineErrorCodes {
         const val GRANT_REQUIRED = "datasource.grant_required"
 
         /**
+         * §13.8 (123 §A) — a table-addressed read (columns, table stats, preview rows) named a
+         * table the namespace's catalog listing does not contain (404). Where the dialect's
+         * catalog is complete the table does not exist; where it is privilege-filtered the table
+         * may only be invisible to the datasource's credentials — the message says which, and
+         * names the nearest listed table when one is close.
+         */
+        const val TABLE_NOT_FOUND = "datasource.table_not_found"
+
+        /**
+         * §13.8 (123 §A) — the table IS in the catalog listing but the read failed with a
+         * permission SQLSTATE: the datasource's credentials cannot read it (403). A table on a
+         * GRANTED datasource is not invisible — the listing already told the caller it exists —
+         * so, unlike [GRANT_REQUIRED], saying "exists, not for you" leaks nothing.
+         */
+        const val TABLE_FORBIDDEN = "datasource.table_forbidden"
+
+        /**
          * §13.8 (109 §A) — a pipeline node referenced a registered lake table whose connect-time
          * view creation is recorded as failed (`lake_tables.last_error`, V20): the table's view
          * is skipped on every connection, so the engine could only answer "table not found".

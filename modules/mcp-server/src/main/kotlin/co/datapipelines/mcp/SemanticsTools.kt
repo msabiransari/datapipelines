@@ -41,7 +41,9 @@ class SemanticsRecordTool(
                     "zone, a sample rate, a grain, what a coded value means, a join that holds, a trap — so the next " +
                     "session reads it beside the columns instead of probing again. Never record what introspection " +
                     "already returns (types, keys, comments). refs name the table(s) and column(s) the fact is about, " +
-                    "structurally; every ref is checked against the live schema and an unknown one is refused. Pass " +
+                    "structurally; every ref is checked against the live schema and an unknown one is refused. A lake " +
+                    "table's ref takes schema as ONE dotted namespace string " +
+                    "({\"schema\": \"lake.mart\", \"table\": \"events\"}), never a namespace array. Pass " +
                     "evidence_sql (the SELECT that showed the fact): it runs once, its first rows become " +
                     "evidence_summary, and the fact is stored as observed — without it the fact is only asserted. " +
                     "scope DATASOURCE is about the data and is shared with every workspace the datasource is granted " +

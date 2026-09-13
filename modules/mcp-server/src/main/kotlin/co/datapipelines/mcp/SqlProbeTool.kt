@@ -9,11 +9,13 @@ import co.datapipelines.datasources.SqlProbeParameter
 import co.datapipelines.datasources.SqlProbeParameterException
 import co.datapipelines.datasources.SqlProbeRefusalException
 import co.datapipelines.datasources.SqlProbeTimeoutException
+import co.datapipelines.datasources.isPermissionDenied
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import io.modelcontextprotocol.spec.McpSchema
+import java.sql.SQLException
 
 /**
  * The parameter `type` enum, restated in the schema below — DERIVED from [LogicalType], never
@@ -71,8 +73,9 @@ class SqlProbeTool(
                     "sound and only its staged input is absent; an error is a real H2 error (a syntax slip, a " +
                     "`VALUES` column named column1 where H2 says C1) found in milliseconds instead of a full run. " +
                     "On a timeout the error details carry wall_ms and the plan, " +
-                    "so the plan that explains the timeout survives it. The sql text never reaches the audit log — " +
-                    "only its SHA-256 and length are recorded.",
+                    "so the plan that explains the timeout survives it. A statement the database refuses " +
+                    "for lack of privilege on an existing table is datasource.table_forbidden. The sql text " +
+                    "never reaches the audit log — only its SHA-256 and length are recorded.",
             schema =
                 """
                 {
@@ -194,6 +197,17 @@ class SqlProbeTool(
                 cause = e,
             )
         } catch (e: SqlProbeExecutionException) {
+            // 123 §A: a probe failing with a permission SQLSTATE means a referenced object
+            // EXISTS but is unreadable — free SQL names no single table, so the message is
+            // the generic shape.
+            if ((e.cause as? SQLException)?.isPermissionDenied() == true) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
+                    message = "A referenced table exists but this datasource's credentials cannot read it.",
+                    details = mapOf("datasource" to name),
+                    cause = e,
+                )
+            }
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
                 message = "The database refused the statement: ${e.driverMessage}",

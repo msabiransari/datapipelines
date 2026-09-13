@@ -2,6 +2,7 @@ package co.datapipelines.datasources.semantics
 
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.datasources.SqlProbeExecutionException
@@ -152,7 +153,17 @@ class LearnedFactRecorder(
         val perTable =
             refs.groupBy { it.tableKey }.mapValues { (_, tableRefs) ->
                 val first = tableRefs.first()
-                val columns: List<ColumnInfo> = introspector.columns(datasource, first.table, first.schema)
+                val columns: List<ColumnInfo> =
+                    try {
+                        introspector.columns(datasource, first.table, first.schema)
+                    } catch (e: DatapipelinesException) {
+                        // 123 §A: an unknown table now REFUSES at the introspector; on the
+                        // record path an unresolvable ref is §3.1's ref_unresolved (the store
+                        // never starts stale) — the resolver's message, suggestion included,
+                        // is the honest refusal text. Any other code stays what it is.
+                        if (e.code != DatasourceErrorCodes.TABLE_NOT_FOUND) throw e
+                        refuseRef(first, e.message ?: "Table '${first.tableKey}' does not exist on datasource '${datasource.name}'.")
+                    }
                 if (columns.isEmpty()) refuseRef(first, "Table '${first.tableKey}' does not exist on datasource '${datasource.name}'.")
                 val names = columns.map { it.column.name }.toSet()
                 tableRefs.firstOrNull { it.column != null && it.column !in names }?.let { missing ->

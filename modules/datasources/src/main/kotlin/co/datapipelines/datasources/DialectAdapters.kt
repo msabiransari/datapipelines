@@ -179,6 +179,11 @@ class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgre
 
     override val introspectionSystemSchemas: Set<String> = setOf("pg_catalog", "information_schema")
 
+    // 123 §A: pgjdbc's getTables filters by has_table_privilege ONLY under
+    // hideUnprivilegedObjects (default false, set nowhere in this repo) — the catalog listing
+    // shows every table, so an absent one does not exist.
+    override val introspectionCatalogIsComplete: Boolean get() = true
+
     /** §7C: `pg_class` / `pg_stats` — the richest catalog statistics of the fleet. */
     override val tableStatsPlan: TableStatsPlan get() = TableStatsPlans.POSTGRES
 
@@ -189,6 +194,10 @@ class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgre
 class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
     // §4.2: Oracle has schemas (= users) and no catalogs at all — `getCatalogs()` is empty.
     override val namespaceShape: NamespaceShape = NamespaceShape.SCHEMA_ONLY
+
+    // 123 §A: ALL_TABLES lists only the tables the login has ANY privilege on — an absent
+    // table may exist and merely be invisible to the datasource's credentials.
+    override val introspectionCatalogIsComplete: Boolean get() = false
 
     // Datasources §7B: 12c+ `FETCH FIRST`, never `ROWNUM` (pre-sort assignment would preview
     // the wrong rows — the applyRowLimit KDoc on [DialectAdapter] records the decision).
@@ -228,6 +237,10 @@ class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
     // against a live SQL Server, and advertising a level the driver might not honour is exactly
     // the kind of unverified claim the shape exists to replace.
     override val namespaceShape: NamespaceShape = NamespaceShape.DATABASE_AND_SCHEMA
+
+    // 123 §A: sys.tables is permission-filtered (a login sees only what it has some grant on,
+    // per Microsoft's own documentation) — absence may mean invisible, not nonexistent.
+    override val introspectionCatalogIsComplete: Boolean get() = false
 
     // Datasources §7B: `[...]` brackets with `]]` escaping, and `TOP (n)` sits after SELECT —
     // the two shapes that make quoting and row-limiting whole-statement concerns.
@@ -276,6 +289,10 @@ class MysqlDialectAdapter : AbstractDialectAdapter(Dialect.MYSQL, "mysql") {
     // §4.2: `[schema]` — one level, arriving in the JDBC catalog. The SHAPE says so; the reader
     // consults no boolean.
     override val namespaceShape: NamespaceShape = NamespaceShape.SCHEMA_IN_CATALOG
+
+    // 123 §A: Connector/J reads information_schema, which is privilege-filtered — it lists
+    // only the tables the login has some privilege on, so absence may mean invisible.
+    override val introspectionCatalogIsComplete: Boolean get() = false
 
     // Datasources §7B: backtick quoting with `` doubling — ANSI_QUOTES is NOT assumed, since
     // the adapter cannot know a server's sql_mode.
@@ -581,6 +598,11 @@ class LakeDialectAdapter(
 
     /** §4.2: two BROWSABLE levels — `ATTACH` is allowed here, so catalogs are real. */
     override val namespaceShape: NamespaceShape = NamespaceShape.CATALOG_AND_SCHEMA
+
+    // 123 §A: the lake's table resolution runs through the REGISTRY branches (lakeColumns,
+    // lakeTableStats — datasource.lake_table_not_found), never this property; declared true
+    // because the underlying DuckDB catalog is complete, in case a JDBC-path read ever asks.
+    override val introspectionCatalogIsComplete: Boolean get() = true
 
     /** §3.4: the IAM chain (`none`) or an explicit key id + secret (`password`). */
     override val supportedCredentialKinds: Set<CredentialKind> = setOf(CredentialKind.NONE, CredentialKind.PASSWORD)

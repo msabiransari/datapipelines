@@ -21,15 +21,8 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   `/mcp`. REST lives at `/api/v1/**` with `DP-`-prefixed custom headers and a JSON
   envelope (`{"data": ...}` / `{"error": {code, user_message, details}}`).
 
-- **30 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
-  `pipelines_execute_node`, `pipelines_create`, `pipelines_update`, `templates_list`,
-  `templates_get`, `templates_used_by`, `templates_create`, `templates_render`,
-  `datasources_list`, `datasources_get`, `datasources_test`,
-  `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`,
-  `datasources_preview_rows`, `executions_list`,
-  `executions_get`, `executions_get_result`, `endpoints_create`, `endpoints_list`,
-  `endpoints_get`, `endpoints_delete`, `calculators_list`, `calculators_get`,
-  `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`.
+- **MCP tools:** the current catalog is the generated `references/tools.md` — rendered from
+  the shipped tools' own descriptions, so it cannot drift; `docs_list` says what is documented.
 
 - **3 prompts:** `analyze_pipeline` (read-only structural review of a pipeline),
   `create_pipeline_for_question` (ground a new pipeline's SQL in the introspection

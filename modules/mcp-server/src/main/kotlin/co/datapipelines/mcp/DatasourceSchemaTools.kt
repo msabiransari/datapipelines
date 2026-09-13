@@ -156,8 +156,9 @@ class DatasourcesGetColumnsTool(
                     "catalogs, which is why the namespace is worth passing. Each column carries `facts` when " +
                     "agents have recorded learned facts on it — a unit, a time zone, what a coded value means, a " +
                     "join, a caveat — with trust and evidence: read them before probing, and treat stale or " +
-                    "needs_review as a warning to re-verify, then record the superseding fact. Read-only, for " +
-                    "pipeline authoring.",
+                    "needs_review as a warning to re-verify, then record the superseding fact. An unknown table " +
+                    "is refused as datasource.table_not_found, naming the nearest listed table when one is " +
+                    "close. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -216,8 +217,9 @@ class DatasourcesGetTableStatsTool(
                     "Every number comes from the engine's own catalog (pg_class, information_schema, parquet " +
                     "footers) — never a scan of the table, so this is safe at any table size. When a dialect holds " +
                     "no catalog stats the stat fields are null and stats_source is \"none\" — probe an explicit " +
-                    "count with sql_probe if you need one. Read this before writing a predicate — an unindexed " +
-                    "filter on a large table is the timeout you will hit.",
+                    "count with sql_probe if you need one. An unknown table is refused as " +
+                    "datasource.table_not_found, naming the nearest listed table when one is close. Read this " +
+                    "before writing a predicate — an unindexed filter on a large table is the timeout you will hit.",
             schema =
                 """
                 {

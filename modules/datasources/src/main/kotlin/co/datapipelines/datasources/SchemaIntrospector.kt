@@ -17,9 +17,15 @@ import java.sql.ResultSetMetaData
  * Read-only by construction: `metaData` calls, plus statements that are themselves metadata
  * reads — [lakeColumns]'s zero-row scan and [tableStats]'s catalog queries (§7C, assembled in
  * [TableStatsReader]; this class is at the house size ceiling). An unknown datasource is the
- * catalogued `datasource.not_found` ([DatasourceErrorCodes.NOT_FOUND]); an unknown table/schema
- * filter matches nothing and returns empty — a filter for something that does not exist means
- * "no results", not an error (the same philosophy as `datasources_list`'s dialect filter).
+ * catalogued `datasource.not_found` ([DatasourceErrorCodes.NOT_FOUND]). The three states of a
+ * table-addressed read (123 §A) live in [TableResolver]: the table is PRESENT in the
+ * namespace's listing and the read proceeds (an existing table with zero readable columns is
+ * a valid EMPTY result); it is ABSENT and the read is refused with
+ * `datasource.table_not_found` (naming the nearest listed table when one is close); or the
+ * read itself fails with a permission SQLSTATE, classified as `datasource.table_forbidden` at
+ * the statement-executing boundaries. A schema/namespace FILTER on a listing keeps the old
+ * philosophy: matching nothing means "no results", not an error (the same philosophy as
+ * `datasources_list`'s dialect filter).
  *
  * `table`, `schema` and `namespace` filters are **exact-match identifiers, not LIKE patterns**:
  * `_` and `%` are escaped with the driver's [DatabaseMetaData.getSearchStringEscape], so a table
@@ -45,6 +51,9 @@ class SchemaIntrospector(
 ) {
     /** The §7C engine — same registry and lake ports as this reader. */
     private val statsReader = TableStatsReader(registry, lakeTables, lakeCache)
+
+    /** The 123 §A table resolution every table-addressed read passes through first. */
+    private val tableResolver = TableResolver()
 
     /**
      * §7A — the namespace listing, the entry point of the introspection flow (schemas → tables →
@@ -162,7 +171,7 @@ class SchemaIntrospector(
             // A filter deeper than the dialect's namespace names no real place: empty, not an
             // error, exactly like an unknown schema (Namespaces.route returns null for it).
             val routed = Namespaces.route(adapter.namespaceShape, filter, meta) ?: return@withMetaData TablesPage(emptyList(), false)
-            readTables(
+            tableResolver.readTables(
                 meta,
                 adapter,
                 routed.first,
@@ -203,7 +212,10 @@ class SchemaIntrospector(
         }
 
     /**
-     * §7A — one table's columns with canonical types; empty when the table does not exist.
+     * §7A — one table's columns with canonical types. The read first RESOLVES the table
+     * through [TableResolver] (123 §A): a table absent from the namespace's listing is
+     * refused with `datasource.table_not_found`; an existing table with zero readable
+     * columns is a valid empty result.
      *
      * Without a schema filter the read defaults to the **connection's current schema** (routed
      * per dialect exactly like an explicit filter): an unfiltered `getColumns` would merge the
@@ -240,21 +252,11 @@ class SchemaIntrospector(
         if (datasource.dialect == Dialect.LAKE) return lakeColumns(datasource, table, supplied)
         return withMetaData(datasource) { connection, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val shape = adapter.namespaceShape
             val exempt = datasource.introspectionIncludeSchemas.toSet()
-            // The flat-dialect exemption is STRUCTURAL, not driver-dependent: a flat dialect
-            // never consults the connection's current schema at all (R5 F3 — the old order was
-            // safe only because the vendored sqlite-jdbc hardcodes getSchema() = null; a future
-            // flat driver whose getSchema()/getCatalog() throws would have turned a working
-            // unfiltered read into a classified failure), so the current-namespace default —
-            // never the JDBC '' sentinel — applies only to dialects that HAVE a namespace.
-            val effectiveFilter =
-                supplied.ifEmpty { if (shape.isFlat) emptyList() else connection.currentNamespace(adapter, datasource.name) }
-            if (effectiveFilter.isEmpty() && !shape.isFlat) {
-                throw CurrentSchemaUnknownException(datasource.name)
-            }
-            val routed = Namespaces.route(shape, effectiveFilter, meta) ?: return@withMetaData emptyList()
-            meta.getColumns(routed.first, routed.second, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
+            val effectiveFilter = effectiveNamespace(connection, adapter, datasource, supplied)
+            val shape = adapter.namespaceShape
+            val resolved = tableResolver.resolve(meta, adapter, datasource, effectiveFilter, table) ?: return@withMetaData emptyList()
+            meta.getColumns(resolved.catalog, resolved.schemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
                         if (adapter.isSystemSchema(rs.namespaceOf(shape), exempt)) continue
@@ -263,6 +265,52 @@ class SchemaIntrospector(
                 }
             }
         }
+    }
+
+    /**
+     * The 123 §A table resolution as its own operation — the preview-rows surface calls this
+     * BEFORE building its SELECT, so an unknown table is refused by the module
+     * (`datasource.table_not_found`, the [TableResolver] three-state rule) rather than
+     * answered by the engine's own error text. Returns the [ResolvedTable] routing pair, or
+     * null where no JDBC resolution applies: a LAKE datasource (its registry branches keep
+     * their own semantics) or a filter deeper than the dialect's namespace.
+     */
+    fun resolveTable(
+        datasource: Datasource,
+        table: String,
+        schemaFilter: String? = null,
+        namespaceFilter: List<String>? = null,
+    ): ResolvedTable? {
+        val supplied = Namespaces.filterOf(namespaceFilter, schemaFilter)
+        if (datasource.dialect == Dialect.LAKE) return null
+        return withMetaData(datasource) { connection, meta, _ ->
+            val adapter = DialectAdapters.forDialect(datasource.dialect)
+            tableResolver.resolve(meta, adapter, datasource, effectiveNamespace(connection, adapter, datasource, supplied), table)
+        }
+    }
+
+    /**
+     * The columns/stats effective namespace (shared by [columns] and [resolveTable]): the
+     * caller's filter, else the connection's current namespace. The flat-dialect exemption is
+     * STRUCTURAL, not driver-dependent: a flat dialect never consults the connection's current
+     * schema at all (R5 F3 — the old order was safe only because the vendored sqlite-jdbc
+     * hardcodes getSchema() = null; a future flat driver whose getSchema()/getCatalog() throws
+     * would have turned a working unfiltered read into a classified failure), so the
+     * current-namespace default — never the JDBC '' sentinel — applies only to dialects that
+     * HAVE a namespace.
+     */
+    private fun effectiveNamespace(
+        connection: Connection,
+        adapter: DialectAdapter,
+        datasource: Datasource,
+        supplied: List<String>,
+    ): List<String> {
+        val shape = adapter.namespaceShape
+        val effective = supplied.ifEmpty { if (shape.isFlat) emptyList() else connection.currentNamespace(adapter, datasource.name) }
+        if (effective.isEmpty() && !shape.isFlat) {
+            throw CurrentSchemaUnknownException(datasource.name)
+        }
+        return effective
     }
 
     /**
@@ -320,21 +368,31 @@ class SchemaIntrospector(
      * §7C — one table's CATALOG statistics: the engine's own stored estimates and index
      * definitions, never a scan of the table (no `COUNT(*)`, no `COUNT(DISTINCT)` anywhere on
      * the path). A dialect with no catalog stats answers `stats_source: "none"` — a valid
-     * result, not an error; an unknown table answers empty stats (the §7A rule). The engine
+     * result, not an error. The read is table-addressed, so it first resolves the table
+     * (123 §A): an unknown table is `datasource.table_not_found`, and empty stats now mean
+     * exactly one thing — the table EXISTS and the catalog holds nothing for it. The engine
      * lives in [TableStatsReader]; this is the two-overload entry point the surfaces call.
      */
     fun tableStats(
         datasourceName: String,
         table: String,
         namespaceFilter: List<String>? = null,
-    ): TableStats = statsReader.tableStats(registry.get(datasourceName) ?: throw notFound(datasourceName), table, namespaceFilter)
+    ): TableStats = tableStats(registry.get(datasourceName) ?: throw notFound(datasourceName), table, namespaceFilter)
 
     /** §7C for an already-gated [datasource] — see [schemas]'s C3 note. */
     fun tableStats(
         datasource: Datasource,
         table: String,
         namespaceFilter: List<String>? = null,
-    ): TableStats = statsReader.tableStats(datasource, table, namespaceFilter)
+    ): TableStats {
+        // The LAKE branches keep their registry semantics (lake_table_not_found). A null
+        // resolution — a filter deeper than the dialect's namespace — is not a refusal:
+        // the reader's own too-deep rule still owns that empty answer.
+        if (datasource.dialect != Dialect.LAKE) {
+            resolveTable(datasource, table, namespaceFilter = namespaceFilter)
+        }
+        return statsReader.tableStats(datasource, table, namespaceFilter)
+    }
 
     /** One [ResultSetMetaData] row set, mapped exactly like [mapColumnRow] maps a `getColumns` row. */
     private fun mapResultSetColumns(
@@ -359,47 +417,6 @@ class SchemaIntrospector(
                 )
             ColumnInfo(mapped.column, sourceTypeName, mapped.warnings)
         }
-
-    /**
-     * The shared getTables walk. [maxRows] caps the iteration at cap+1 `next()` calls (the +1
-     * proves truncation); `null` walks everything.
-     */
-    private fun readTables(
-        meta: DatabaseMetaData,
-        adapter: DialectAdapter,
-        catalog: String?,
-        schemaPattern: String?,
-        maxRows: Int? = null,
-        exemptSchemas: Set<String> = emptySet(),
-    ): TablesPage {
-        val out = mutableListOf<TableInfo>()
-        var truncated = false
-        meta.getTables(catalog, schemaPattern, "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
-            // Two jumps on purpose: system-schema rows are skipped WITHOUT counting against
-            // the cap, and the cap+1-th USER row is the truncation proof — checking the cap
-            // before the system-row test would flag truncation on a trailing system row.
-            @Suppress("LoopWithTooManyJumpStatements")
-            while (rs.next()) {
-                val namespace = rs.namespaceOf(adapter.namespaceShape)
-                if (adapter.isSystemSchema(namespace, exemptSchemas)) continue
-                if (maxRows != null && out.size == maxRows) {
-                    truncated = true
-                    break
-                }
-                out.add(
-                    TableInfo(
-                        namespace,
-                        rs.getString("TABLE_NAME"),
-                        rs.getString("TABLE_TYPE"),
-                        // Blank remarks are absent (F8's rule): Connector/J reports REMARKS as
-                        // "" for every uncommented table — the wire contract is omitted-when-none.
-                        rs.getString("REMARKS").asNonBlankOrNull(),
-                    ),
-                )
-            }
-        }
-        return TablesPage(out, truncated)
-    }
 
     private fun mapColumnRow(
         rs: java.sql.ResultSet,
@@ -445,61 +462,6 @@ class SchemaIntrospector(
         datasource: Datasource,
         block: (Connection, DatabaseMetaData, Datasource) -> T,
     ): T = ConnectionLease.lease(registry, datasource) { block(it, it.metaData, datasource) }
-
-    /**
-     * [DialectAdapter.introspectionSystemSchemas]: exact names match case-insensitively; an
-     * entry ending in `*` matches by case-insensitive PREFIX (Oracle's versioned `apex_*`
-     * schemas). Null is never a system schema.
-     *
-     * [exemptSchemas] is the datasource's `introspection_include_schemas` allowlist (§3.3):
-     * a name listed there is NOT a system schema for this datasource, whatever the floor says —
-     * the escape hatch for the floors' one blind spot (a prefix entry like `apex_*` hides a
-     * customer's own APEX_REPORTING schema). Lowercase-exact, like the stored allowlist.
-     */
-    private fun DialectAdapter.isSystemSchema(
-        namespace: List<String>,
-        exemptSchemas: Set<String> = emptySet(),
-    ): Boolean {
-        val schema = namespace.lastOrNull() ?: return false
-        val lower = schema.lowercase()
-        if (exemptSchemas.isNotEmpty()) {
-            // §3.3 (087): an allowlist entry may be the bare schema — today's spelling — or the
-            // DOTTED namespace, which is the only way to exempt `a1.sales` while leaving
-            // `a2.sales` excluded. Both forms are matched here so the two spellings cannot mean
-            // different things on different code paths.
-            if (lower in exemptSchemas) return false
-            if (Namespaces.join(namespace).lowercase() in exemptSchemas) return false
-        }
-        val dotted = Namespaces.join(namespace).lowercase()
-        return introspectionSystemSchemas.any { entry ->
-            when {
-                // A prefix entry (Oracle's versioned `apex_*`) matches the schema level only.
-                entry.endsWith("*") -> lower.startsWith(entry.dropLast(1))
-
-                // A DOTTED floor entry names a whole namespace (087): DuckDB's engine catalogs
-                // hold a schema called `main`, and `main` alone is a perfectly ordinary user
-                // schema everywhere else — only `system.main` identifies the engine's own.
-                entry.contains(Namespaces.SEPARATOR) -> dotted == entry
-
-                else -> lower == entry
-            }
-        }
-    }
-
-    /**
-     * A result row's namespace, outermost first, in this dialect's own vocabulary: the owning
-     * catalog (when the shape has a real outer level) then the innermost level from whichever
-     * column carries it. Blank segments are dropped — the JDBC `""` sentinel means "objects
-     * without a catalog/schema", never a name.
-     */
-    private fun java.sql.ResultSet.namespaceOf(shape: NamespaceShape): List<String> =
-        listOfNotNull(
-            if (shape.hasOuterCatalog) getString("TABLE_CAT").asNonBlankOrNull() else null,
-            getString(shape.innermostResultColumn).asNonBlankOrNull(),
-        )
-
-    /** `getSchemas()`'s owning-catalog column, blank-sentinel-filtered. */
-    private fun java.sql.ResultSet.catalogOf(): String? = getString("TABLE_CATALOG").asNonBlankOrNull()
 
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(

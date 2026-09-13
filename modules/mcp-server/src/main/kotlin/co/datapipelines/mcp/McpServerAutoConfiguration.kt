@@ -150,7 +150,7 @@ class McpServerAutoConfiguration {
             DatasourcesGetTablesTool(introspector, datasources, factEnrichment),
             DatasourcesGetColumnsTool(introspector, datasources, factEnrichment),
             DatasourcesGetTableStatsTool(introspector, datasources),
-            DatasourcesPreviewRowsTool(datasources, sqlRunner),
+            DatasourcesPreviewRowsTool(datasources, sqlRunner, introspector),
             // 107 — the bounded probe, same inline-construction discipline as `sqlRunner`. The
             // staging MODE rides along so the tempdb scratch check parses like the real tempdb.
             SqlProbeTool(

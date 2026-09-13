@@ -2,9 +2,11 @@ package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -103,13 +105,18 @@ class TableStatsMysqlIntegrationTest {
     }
 
     @Test
-    fun `an unknown table answers empty stats against the named catalog, not an error`() {
-        val stats = introspector.tableStats(ds.name, "no_such_table")
+    fun `an unknown table is table_not_found with the privilege-filtered wording - not empty stats`() {
+        // 123 §A: MySQL's information_schema is privilege-filtered, so the refusal cannot
+        // assert non-existence — it says "not found — it does not exist, or the credentials
+        // cannot see it".
+        val thrown =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                introspector.tableStats(ds.name, "no_such_table")
+            }
 
         assertAll(
-            { stats.statsSource shouldBe "information_schema.tables" },
-            { stats.rowEstimate shouldBe null },
-            { stats.indexes shouldBe emptyList<IndexStats>() },
+            { thrown.code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND },
+            { thrown.message shouldContain "cannot see it" },
         )
     }
 

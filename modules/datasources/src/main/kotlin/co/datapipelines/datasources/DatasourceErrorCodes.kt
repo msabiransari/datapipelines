@@ -96,6 +96,21 @@ object DatasourceErrorCodes {
      */
     const val GRANT_REQUIRED = "datasource.grant_required"
 
+    /**
+     * 123 §A — a table-addressed read (columns, table stats, preview rows) named a table the
+     * namespace's catalog listing does not contain: 404. Raised by [SchemaIntrospector]'s table
+     * resolution; the message says whether the dialect's catalog is complete (the table does not
+     * exist) or privilege-filtered (it may only be invisible) and names the nearest listed table.
+     */
+    const val TABLE_NOT_FOUND = "datasource.table_not_found"
+
+    /**
+     * 123 §A — the table IS in the catalog listing but the read failed with a permission
+     * SQLSTATE: the datasource's credentials cannot read it — 403. Classified by
+     * `SqlProbeExceptions.isPermissionDenied`; raised only after table resolution said present.
+     */
+    const val TABLE_FORBIDDEN = "datasource.table_forbidden"
+
     /** The JDBC driver class for `dialect` is not on the classpath (§10.3) — a packaging state. */
     const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 

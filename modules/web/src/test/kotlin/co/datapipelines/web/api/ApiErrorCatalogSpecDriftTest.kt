@@ -180,8 +180,14 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.execution.calculator_keys_partial` (400 — a proper subset of a multi-output
          * node's keys), landed in the SAME commit-chain as its constant and its catalog row.
          * Re-derived from the document's own parse.
+         *
+         * 173 → 175 with 123 (a table that is not there says so): §13.8 gains
+         * `datasource.table_not_found` (404) and `datasource.table_forbidden` (403) — the
+         * three-state table resolution every table-addressed read surface applies — landed in
+         * the SAME commit as their constants (both sides of the datasources mirror) and their
+         * catalog rows. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 173
+        const val SECTION_13_ROW_COUNT = 175
 
         /**
          * §12's distinct validation codes.

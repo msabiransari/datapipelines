@@ -154,6 +154,9 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Datasource.LAKE_TABLE_NOT_FOUND,
                 // 112 — the grant refusal, same two-segment shape as its datasource siblings.
                 PipelineErrorCodes.Datasource.GRANT_REQUIRED,
+                // 123 — the introspector's table-level not-found/forbidden, same two-segment shape.
+                PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
+                PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
                 // 112 — the ROLE axis has no entity dimension: these are properties of the
                 // caller's membership, not of a thing they named (RBAC design §2).
                 PipelineErrorCodes.Auth.ROLE_REQUIRED,

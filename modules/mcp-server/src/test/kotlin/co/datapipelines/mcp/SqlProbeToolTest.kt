@@ -158,6 +158,22 @@ class SqlProbeToolTest {
         )
     }
 
+    @Test
+    fun `a permission refusal on a referenced table is table_forbidden - not a query failure`() {
+        // 123 §A: a probe failing with a permission SQLSTATE means a referenced object exists
+        // but is unreadable — 403. Free SQL names no single table, so the message is generic.
+        every { datasources.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns gated
+        every { probe.probe(any(), any(), any(), any(), any()) } throws
+            SqlProbeExecutionException("pg-prod", SQLException("ERROR: permission denied for table orders", "42501"))
+
+        val thrown = shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Datasource.TABLE_FORBIDDEN },
+            { (thrown.message ?: "") shouldBe "A referenced table exists but this datasource's credentials cannot read it." },
+        )
+    }
+
     /**
      * 2026-09-11 — `tempdb` is a syntax-and-names check against an empty scratch H2, never a
      * gated datasource read: the registry is not consulted and the real probe never runs. The

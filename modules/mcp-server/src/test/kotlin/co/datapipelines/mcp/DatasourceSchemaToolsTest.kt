@@ -434,6 +434,36 @@ class DatasourceSchemaToolsTest {
     }
 
     @Test
+    fun `the table_not_found refusal passes both table-addressed tools untouched`() {
+        // 123 §A: the module raises the refusal; the tools' `introspecting` boundary catches
+        // only the unreachable/current-schema families, so the code surfaces verbatim — web
+        // and MCP translate nothing (the code IS the same string).
+        val refusal =
+            DatapipelinesException(
+                code = PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
+                message = "Table 'orderrs' does not exist in namespace 'public'. Did you mean 'orders'?",
+                details = mapOf("datasource" to "pg-prod", "table" to "orderrs", "suggestion" to "orders"),
+            )
+        every { introspector.columns(any<Datasource>(), any(), any(), any()) } throws refusal
+        every { introspector.tableStats(any<Datasource>(), any(), any()) } throws refusal
+
+        assertAll(
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod"))
+                        .call(McpArguments(mapOf("name" to "pg-prod", "table" to "orderrs")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.TABLE_NOT_FOUND
+            },
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetTableStatsTool(introspector, gateRegistry("pg-prod"))
+                        .call(McpArguments(mapOf("name" to "pg-prod", "table" to "orderrs")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.TABLE_NOT_FOUND
+            },
+        )
+    }
+
+    @Test
     fun `a global or own-workspace datasource passes the visibility gate on every introspection tool`() {
         val registry =
             FakeDatasourceRegistry(

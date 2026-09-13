@@ -169,7 +169,10 @@ semantics; the question's words decide the window.
   defines itself (a `VALUES` column, an alias) has not. Use it before every full run.
   What the probe rung settles about the DATA — a unit, a time zone, a sample rate, what a
   coded value means — is a fact the next session should not re-probe: `semantics_record` it
-  with that SELECT as `evidence_sql` (SKILL.md, golden path step 1).
+  with that SELECT as `evidence_sql` (SKILL.md, golden path step 1). A LAKE table's ref
+  takes `schema` as the DOTTED namespace string — one `{"schema": "lake.mart", "table": "events"}`
+  segment, never a namespace array; the array shape is the `semantics.ref_unresolved` you
+  just met.
   **Stop-loss: three identical failures → stop and report.** A schema refusal is not
   your typo — re-introspect or hand back; a fourth identical call changes nothing.
 - **A table marked unavailable is broken at the lake, not by your query.** If
@@ -251,6 +254,7 @@ semantics; the question's words decide the window.
 |---|---|
 | State which learn-first calls you made for each datasource and each table before your first `templates_create` | Read a table you did not `_get_columns` and `_get_table_stats` |
 | Read description → schemas → tables → columns → stats → rows before the first line of SQL | Write SQL against a column, a unit, a time zone or a sample rate you assumed |
+| Read the listing — a not-found answer names the nearest table | Probe a table name you did not read from `datasources_get_tables` |
 | Write what you learned about the data into the description | Leave the next reader to re-probe what you already established |
 | After each source node runs, check its predicate/join key against the table's indexes (`datasources_get_table_stats`, `sql_probe`'s `plan.scan`) and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
 | Filter a lake table on its partition column, with literals, bound parameters, or an `IN` list | Filter on a sibling timestamp inside the files, or UNION date-range branches |
