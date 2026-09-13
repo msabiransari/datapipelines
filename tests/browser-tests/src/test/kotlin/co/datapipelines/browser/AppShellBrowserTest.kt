@@ -89,16 +89,33 @@ class AppShellBrowserTest : BrowserSuite() {
     fun `the document never scrolls vertically - main does`() {
         startTrace()
         signedIn("vscroll")
+        // The editors too: they are the screens whose panes are SIZED to the viewport, so
+        // they are where a few pixels of arithmetic drift shows first (the owner's report of
+        // 2026-09-13 was the pipeline editor). Seeded through the page's own session.
+        val fixture = "vscroll_" + generatedPassword("f").take(8).lowercase()
+        postJson(
+            "/api/v1/templates",
+            """{"id":"test/$fixture","type":"sql","dialect":"POSTGRES",""" +
+                """"display_name":"$fixture","description":"vscroll fixture","body":"SELECT 1"}""",
+        )
+        postJson(
+            "/api/v1/pipelines",
+            """{"name":"test/$fixture","display_name":"$fixture","description":"vscroll fixture",""" +
+                """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
+        )
+        val routes = appPages + listOf("/pipelines/${pipelineId("test/$fixture")}/editor", "/templates/editor?name=test/$fixture")
         val offenders = mutableListOf<String>()
-        listOf(1440 to 900, 1920 to 1080).forEach { (w, h) ->
+        // Two desktop sizes and one tall, narrow-ish window (the owner's portrait monitor).
+        listOf(1440 to 900, 1920 to 1080, 1636 to 1850).forEach { (w, h) ->
             page.setViewportSize(w, h)
-            appPages.forEach { route ->
+            routes.forEach { route ->
                 page.navigate("$baseUrl$route")
                 page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
                 val extra =
                     (page.evaluate("() => document.documentElement.scrollHeight - document.documentElement.clientHeight") as Number)
                         .toLong()
-                if (extra > 0) offenders += "$route at ${w}x$h: document ${extra}px taller than the viewport"
+                if (extra > 0) offenders += "$route at ${w}x$h: document ${extra}px taller than the viewport; ${overflowChain()}"
             }
         }
         offenders shouldBe emptyList()
@@ -111,6 +128,63 @@ class AppShellBrowserTest : BrowserSuite() {
                 .toLong()
         (mainOverflow > 0) shouldBe true
     }
+
+    /** Diagnostic for a failing run: every element (to depth 6) whose box ends below the viewport. */
+    private fun overflowChain(): String {
+        val chain =
+            page.evaluate(
+                """() => {
+              const ch = document.documentElement.clientHeight; const out = [];
+              const walk = (el, d) => {
+                if (d > 6) return;
+                const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+                if (r.bottom > ch + 0.5 && r.height > 0) out.push(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : '') + '[' + cs.position + ' top=' + Math.round(r.top) + ' bottom=' + Math.round(r.bottom) + ' h=' + Math.round(r.height) + ']');
+                for (const c of el.children) walk(c, d + 1);
+              };
+              walk(document.body, 0);
+              return out.join(' > ');
+            }""",
+            )
+        return chain.toString()
+    }
+
+    /** POSTs JSON through the page's own session (the 106 fixture pattern), asserting 201. */
+    private fun postJson(
+        url: String,
+        body: String,
+    ) {
+        val status =
+            page.evaluate(
+                """async (args) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const res = await fetch(args.url, {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json',
+                              'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : ''},
+                    body: args.body,
+                  });
+                  return res.status;
+                }""",
+                mapOf("url" to url, "body" to body),
+            )
+        (status as Number).toInt() shouldBe 201
+    }
+
+    /** The UUID of the named pipeline, read from the metadata DB (the seedLocalUser seam). */
+    private fun pipelineId(name: String): String =
+        java.sql.DriverManager
+            .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
+            .use { connection ->
+                connection
+                    .prepareStatement("SELECT p.id FROM pipelines p WHERE p.name = ? ORDER BY p.created_at DESC LIMIT 1")
+                    .use { statement ->
+                        statement.setString(1, name)
+                        statement.executeQuery().use { rs ->
+                            rs.next()
+                            rs.getString(1)
+                        }
+                    }
+            }
 
     private fun signedIn(slug: String): String {
         val user = seedLocalUser(uniqueEmail("$slug-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
@@ -262,7 +336,7 @@ class AppShellBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the avatar menu opens, closes on Escape and on an outside click`() {
+    fun `the avatar menu opens, closes on Escape, on an outside click and on choosing an item`() {
         startTrace()
         signedIn("menu")
         page.navigate("$baseUrl/dashboard")
@@ -286,6 +360,26 @@ class AppShellBrowserTest : BrowserSuite() {
                 .ClickOptions()
                 .setPosition(5.0, 5.0),
         )
+        awaitHidden()
+
+        // Choosing an item closes it (owner, 2026-09-13: "does not go away when we select
+        // an option"). A mode button is the case that stayed open the longest: its PATCH
+        // swaps nothing, so nothing else on the page ever moved. The choice still lands —
+        // the theme the button names is the theme the document wears afterwards.
+        page.locator("#app-avatar").click()
+        menu.waitFor()
+        val chosen = if (page.locator("html").getAttribute("data-theme") == "dark") "light" else "dark"
+        page.locator("#app-appearance [data-mode=$chosen]").click()
+        awaitHidden()
+        page.locator("html[data-theme=$chosen]").waitFor()
+        page.locator("#app-avatar").getAttribute("aria-expanded") shouldBe "false"
+
+        // Settings is a boosted navigation: only #app-main is swapped, so the menu in the
+        // top bar survived the trip and sat open over the new screen.
+        page.locator("#app-avatar").click()
+        menu.waitFor()
+        page.locator("#app-user-menu a[href='/settings']").click()
+        page.waitForURL("**/settings")
         awaitHidden()
     }
 

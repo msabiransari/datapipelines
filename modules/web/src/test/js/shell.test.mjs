@@ -372,6 +372,72 @@ test("the avatar menu opens, closes and reports its state through aria-expanded"
   assert.equal(avatar.attr("aria-expanded"), "false");
 });
 
+test("choosing an item in the avatar menu closes it — a mode, a swatch, Settings, Log out alike", () => {
+  // The owner (2026-09-13): "the top-right menu does not go away when we select an
+  // option". Closing was outside-click or Escape only: a click INSIDE .app-user never
+  // closed it, so a theme change left the menu hanging, and Settings — a boosted
+  // navigation that swaps only #app-main — left it open across the new screen.
+  // Driven through the REAL body click listener init() installs, not a helper.
+  const listeners = {};
+  globalThis.window = { location: { pathname: "/pipelines" }, localStorage: { setItem() {} }, addEventListener() {} };
+  const menu = mkEl({ hidden: false });
+  const avatar = mkEl({ "aria-expanded": "true" });
+  const byId = { "app-user-menu": menu, "app-avatar": avatar };
+  globalThis.document = {
+    readyState: "complete",
+    body: { addEventListener: (t, fn) => { listeners[t] = fn; } },
+    addEventListener() {},
+    documentElement: { classList: { toggle() {}, contains: () => false } },
+    getElementById: (id) => byId[id] ?? null,
+    querySelectorAll: () => [],
+  };
+  loadShell(); // init() runs at load and wires the click listener
+  const doc = globalThis.document;
+  // A target inside the menu answers closest() by role: an actionable item matches
+  // the selection selector; the identity block and the row labels do not.
+  const inMenu = (actionable) => ({
+    closest: (sel) => {
+      if (sel === "#app-avatar") return null;
+      if (sel === ".app-user") return {};
+      return actionable ? {} : null;
+    },
+  });
+  const click = (target) => listeners.click({ target, stopPropagation() {} });
+
+  // The identity block and a row label are not choices: the menu stays.
+  click(inMenu(false));
+  assert.equal(menu.hidden, false, "a click on the menu's own chrome keeps it open");
+
+  // Any actionable item closes it and hands focus back to the trigger (the WAI-ARIA
+  // menu contract — otherwise a keyboard user is left inside a hidden subtree).
+  click(inMenu(true));
+  assert.equal(menu.hidden, true, "choosing an item closes the menu");
+  assert.equal(avatar.attr("aria-expanded"), "false");
+  assert.equal(avatar.focused, true, "focus returns to the avatar");
+
+  // Outside click still closes; the avatar still toggles.
+  menu.hidden = false;
+  click({ closest: () => null });
+  assert.equal(menu.hidden, true, "an outside click closes it");
+  click({ closest: (sel) => (sel === "#app-avatar" ? {} : null) });
+  assert.equal(menu.hidden, false, "the avatar opens it");
+  delete globalThis.window;
+  delete globalThis.document;
+});
+
+test("menuSelection names the actionable items and nothing else", () => {
+  const shell = loadShell();
+  const hit = {};
+  assert.equal(shell.menuSelection({ closest: (sel) => (sel === shell.MENU_SELECTION ? hit : null) }), hit);
+  assert.equal(shell.menuSelection({ closest: () => null }), null);
+  assert.equal(shell.menuSelection(null), null);
+  // The selector covers every kind of choice the layout renders: menuitem links and the
+  // Log out button, the three menuitemradio mode buttons, and the palette swatches.
+  for (const part of ['[role="menuitem"]', '[role="menuitemradio"]', ".app-swatch"]) {
+    assert.ok(shell.MENU_SELECTION.includes("#app-user-menu " + part), part);
+  }
+});
+
 test("arrow keys move focus inside the menu, wrapping at both ends", () => {
   const shell = loadShell();
   const items = [mkEl({ role: "menuitem" }), mkEl({ role: "menuitem" }), mkEl({ role: "menuitem" })];

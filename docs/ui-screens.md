@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.41
+**Status:** v1.42
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-13 (124)
@@ -243,9 +243,12 @@ a search field **placeholder**, the light/dark toggle, and the avatar menu.
   The claim IS stored: `users.profile_picture_url`, written by `OidcSuccessHandler` through
   `UserRepository` on every login, and rendered on Settings since 025.
 - **The menu** carries the signed-in identity, Appearance, the theme swatches, Settings, API
-  keys and Log out (which keeps its POST form and `hx-boost="false"`). Escape and an outside
-  click close it; arrow keys move focus within it without activating anything; the trigger
-  carries `aria-expanded` and the popover `role="menu"`.
+  keys and Log out (which keeps its POST form and `hx-boost="false"`). Escape, an outside
+  click, and **choosing any item** (a mode, a swatch, Settings, API keys, Log out) close it,
+  with focus returned to the avatar; arrow keys move focus within it without activating
+  anything; the trigger carries `aria-expanded` and the popover `role="menu"`. (Until
+  2026-09-13 only Escape and an outside click closed it: a theme change left the menu hanging,
+  and Settings — a boosted swap of `#app-main` alone — carried it open onto the next screen.)
 
 **One theme preference, three views.** The design system ships ONE STYLESHEET PER LOOK, so
 `light`, `dark` and `auto` are three of the nine values `users.theme_preference` can take and
@@ -1435,6 +1438,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v1.42 | owner testing round, day 3 | §3.4 **the avatar menu closes on a choice.** It closed only on Escape and an outside click, so choosing a mode left it hanging over the page and Settings / API keys — boosted swaps of `#app-main` alone — carried it open onto the next screen (the settle path closes only the phone drawer). shell.js: any `[role="menuitem"]`, `[role="menuitemradio"]` or `.app-swatch` inside `#app-user-menu` closes the menu and returns focus to the avatar (`MENU_SELECTION`, unit-tested through the real body listener; `AppShellBrowserTest` chooses a mode and Settings and waits for `[hidden]`). The document-scroll guard now also walks both editors and a 1636×1850 window (owner report of a document scrollbar, 2026-09-13, not reproduced in the harness — see the ledger). |
 | 2026-09-13 | v1.41 | 124 site facts derived | **§4.15 — the site's numbers are derived, not typed** (owner ruling 2026-09-13: eight engines, not six — H2 is a legitimate engine, LAKE is dp-lake, tempdb implicit and never counted). New `SiteFacts` (engine count/list from `Dialect.entries`, tool counts from `McpToolCatalog`, calculator kinds, API-key kinds, learned-fact kinds/scopes, demo engine counts from the manifests) exposed to every template by `PublicPage.render`; `SitePages`/`SiteFaqs` titles, descriptions and answers are string templates over it, one `numberWord()` helper for prose. H2 and dp-lake gain `/mcp-server/{engine}` pages; `SiteEngineFactsGuardTest` tightened from containment to EQUALITY with `Dialect.entries`; new `SiteHandTypedCountsGuardTest` fails the build on a hand-typed count in any site template or `ui/site/` Kotlin file (red at base on 40 hits; green only when every count renders from `${facts…}`). |
 | 2026-09-13 | v1.40 | 122 viewer executes (owner testing round, day 2) | **The route caught up with the record.** D-R3 and §4.3e already gave the viewer a read-only pipeline editor with Execute; the route refused them at the door — `GET /pipelines/{id}/editor` was floored at `MUTATE_PIPELINES_TEMPLATES`, so the explorer's Open link (the only door to Execute) answered 403 `auth.scope.insufficient`. The floor is now `EXECUTE_PIPELINE` — the operation the screen exists to perform for its lowest role — so an `execute` key and a viewer session reach the page while a `read` key stays out; the template editor keeps the author floor (§4.7 note corrected to match). §4.3e states the Open route and the 114 read-only line; RoleVisibilityBrowserTest walks a viewer explorer → Open → Execute (zero ≥400 responses, terminal state reached) and JarSmokeE2eTest pins the key boundary (`execute` 200 / `read` 403) in one test. |
 | 2026-09-12 | v1.39 | owner testing round, day 2 | Two defects the owner saw everywhere a tree or a version list shows. §3.4 icons: **a leaf row keeps the chevron slot** (`template-tree.css .tpl-leaf` pads it; the guide's tick runs on to the file glyph), so a leaf's glyph and label sit level with a sibling folder's and one indent right of its parent's — before, the glyph sat IN the chevron slot and every leaf's label landed at its parent's x. §4.3b: **the ⋯ menu is a top-layer popover** (`popover="manual"` on `.tplx-vmenu-list`, placed by `lifecycle-dialog.js`'s pure `menuPlacement` — under the ⋯, above it when the viewport has no room below, clamped inside it) — it was `position: absolute` inside `.tplx-tabpanel`, which scrolls, so on a one-row list the open menu fell into the panel's scrollable overflow and never showed. `TreeIndentAndVersionMenuBrowserTest` pins both in both explorers (label offsets to the px; the menu's centre hit-tests to the menu). |

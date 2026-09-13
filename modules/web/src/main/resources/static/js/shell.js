@@ -704,6 +704,17 @@
     return !!(menu && !menu.hidden);
   }
 
+  /* The menu's CHOICES: the menuitem links and the Log out button, the three
+     menuitemradio mode buttons, and the palette swatches. Choosing any of them
+     closes the menu (owner, 2026-09-13: "it does not go away when we select an
+     option"). The identity block and the row labels are not choices. */
+  var MENU_SELECTION =
+    '#app-user-menu [role="menuitem"], #app-user-menu [role="menuitemradio"], #app-user-menu .app-swatch';
+
+  function menuSelection(target) {
+    return target && target.closest ? target.closest(MENU_SELECTION) : null;
+  }
+
   /* Arrow keys move within the menu, wrapping at both ends; Home/End jump. The
      menu's own buttons are htmx triggers, so moving focus must never activate
      one — this only calls focus(). */
@@ -852,8 +863,18 @@
     });
 
     /* 079 §B — the avatar menu. Opening is a click on the avatar; closing is
-       Escape, a click anywhere outside, or navigating. Arrow keys move within
-       it without activating anything. */
+       Escape, a click anywhere outside, or choosing an item. Arrow keys move
+       within it without activating anything.
+
+       Choosing closes (2026-09-13): the menu used to close only on an OUTSIDE
+       click, so a theme change left it hanging over the page, and Settings /
+       API keys — boosted navigations that swap only #app-main — left it open
+       across the new screen (nothing on the settle path touched it; only the
+       phone drawer closes there). htmx's own listener on the chosen button has
+       already fired by the time this bubbles to body, so hiding the menu here
+       cancels nothing: the PATCH, the boosted GET and the Log out POST all go.
+       Focus returns to the trigger, the WAI-ARIA menu contract — otherwise a
+       keyboard user is left inside a hidden subtree. */
     doc.body.addEventListener("click", function (evt) {
       var avatar = evt.target.closest && evt.target.closest("#app-avatar");
       if (avatar) {
@@ -861,8 +882,16 @@
         setMenuOpen(doc, !menuIsOpen(doc));
         return;
       }
-      if (menuIsOpen(doc) && !(evt.target.closest && evt.target.closest(".app-user"))) {
+      if (!menuIsOpen(doc)) return;
+      var inside = !!(evt.target.closest && evt.target.closest(".app-user"));
+      if (!inside) {
         setMenuOpen(doc, false);
+        return;
+      }
+      if (menuSelection(evt.target)) {
+        setMenuOpen(doc, false);
+        var trigger = doc.getElementById("app-avatar");
+        if (trigger && trigger.focus) trigger.focus();
       }
     });
     doc.addEventListener("keydown", function (evt) {
@@ -951,6 +980,8 @@
     applyTheme: applyTheme,
     setMenuOpen: setMenuOpen,
     menuIsOpen: menuIsOpen,
+    menuSelection: menuSelection,
+    MENU_SELECTION: MENU_SELECTION,
     moveMenuFocus: moveMenuFocus,
     MAIN_SELECTOR: MAIN_SELECTOR,
     SWAP_SPEC: SWAP_SPEC,
