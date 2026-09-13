@@ -54,7 +54,7 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "What actually arrives with the second source?",
-                "Four things: a question that crosses two engines, which needs a per-run scratch database to join " +
+                "Four things: a question that crosses engines, which needs a per-run scratch database to join " +
                     "in; credential sprawl, which stops when the server holds the credentials encrypted and the " +
                     "agent holds only a key; an API someone will ask for; and a version a person released behind " +
                     "it. Credential storage is docs/datasources.md §7.",

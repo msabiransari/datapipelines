@@ -5,6 +5,7 @@ plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     implementation(project(":modules:typesystem"))
+    implementation(project(":modules:calculators"))
     implementation(project(":modules:pipeline-contract"))
     implementation(project(":modules:templates"))
     implementation(project(":modules:datasources"))

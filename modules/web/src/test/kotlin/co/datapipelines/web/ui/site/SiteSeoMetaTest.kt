@@ -25,7 +25,7 @@ class SiteSeoMetaTest {
         // A sweep over an empty list passes every assertion below by checking nothing.
         SitePages.ALL shouldHaveAtLeastSize EXPECTED_PAGES
         SitePages.ENGINES.map { it.slug }.toSet() shouldBe
-            setOf("postgres", "sql-server", "mysql", "oracle", "sqlite", "duckdb")
+            setOf("postgres", "sql-server", "mysql", "oracle", "sqlite", "duckdb", "h2", "dp-lake")
     }
 
     @Test
@@ -150,7 +150,7 @@ class SiteSeoMetaTest {
             ?.let { CONTENT.find(it)?.groupValues?.get(1) }
 
     private companion object {
-        /** Two pillars + six engines + seven one-off cluster pages (089 added dp-lake). */
+        /** Two pillars + the engine pages + the one-off cluster pages (089 added dp-lake). */
         const val EXPECTED_PAGES = 15
         const val TITLE_MAX = 70
         const val DESCRIPTION_MAX = 155

@@ -88,12 +88,12 @@
   <section class="section" aria-labelledby="dd-nyc">
     <div class="container">
       <p class="kicker">Family one — <code>nyc</code>, version <span th:text="${demoNyc.version}">v7</span></p>
-      <h2 id="dd-nyc" class="ds-headline">NYC mobility: one question, three engines</h2>
+      <h2 id="dd-nyc" class="ds-headline" th:text="|NYC mobility: one question, ${facts.demoEngineCountWord('nyc')} engines|">NYC mobility: one question, three engines</h2>
       <div class="prose">
         <!-- claim: docs/deployment.md Appendix B — the nyc family row -->
         <p>
           The mobility family is the demo's founding question — <em>how do taxi and rideshare respond to
-          weather?</em> — answered across three engines on purpose: yellow-taxi trips live on
+          weather?</em> — answered across <span th:text="${facts.demoEngineCountWord('nyc')}">three</span> engines on purpose: yellow-taxi trips live on
           <strong>Postgres</strong>, NOAA daily weather on <strong>MySQL</strong>, and the TLC zones and rate
           reference tables on <strong>SQLite</strong>. A single pipeline joins all three, staging each source's
           rows in memory for the run. The window is <strong>2023-01 through 2024-12</strong>.

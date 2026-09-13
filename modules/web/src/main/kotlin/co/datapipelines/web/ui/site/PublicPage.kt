@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The three things every public page does identically (073), in one place so no page can
- * forget one: the SEO head model, the shared-cache header, and the tool count.
+ * forget one: the SEO head model, the shared-cache header, and the site's facts.
  *
  * The alternative — each controller setting five model attributes by hand — is how a page
  * ships with a missing canonical or a stale title. `SiteSeoMetaTest` sweeps every registry
@@ -35,7 +35,7 @@ object PublicPage {
         model: Model,
         response: HttpServletResponse,
         page: SitePage,
-        toolCount: Int,
+        facts: SiteFacts = SiteFacts.current(),
         faq: List<FaqEntry> = emptyList(),
     ): String {
         response.setHeader(
@@ -47,9 +47,9 @@ object PublicPage {
         model.addAttribute("canonicalUrl", page.canonical)
         model.addAttribute("ogImage", SITE_ORIGIN + DEFAULT_OG_IMAGE)
         model.addAttribute("currentSitePath", page.path)
-        model.addAttribute("toolCount", toolCount)
+        model.addAttribute("facts", facts)
         model.addAttribute("navPages", SitePages.NAV)
-        // Every page's footer links the six engine pages, so the registry — not seven
+        // Every page's footer links the engine pages, so the registry — not a row of
         // hand-written <li>s — is what the link graph is built from.
         model.addAttribute("engines", SitePages.ENGINES)
         // Site v2: the page's FAQ, rendered twice from one list — the visible <details> and

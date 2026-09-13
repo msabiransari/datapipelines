@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.ui.site.SiteFacts
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -23,8 +24,9 @@ class SiteControllerTest {
 
         controller.home(model, response) shouldBe "site/index"
 
-        model["toolCount"] shouldBe co.datapipelines.mcp.McpToolCatalog.NAMES.size
-        model["toolCount"] as Int shouldBeGreaterThan 0
+        val facts = model["facts"] as SiteFacts
+        facts.toolCount shouldBe co.datapipelines.mcp.McpToolCatalog.NAMES.size
+        facts.toolCount shouldBeGreaterThan 0
     }
 
     @Test

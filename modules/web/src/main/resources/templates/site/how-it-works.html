@@ -38,7 +38,7 @@
       <h2 id="hiw-mechanism" class="ds-headline">The whole mechanism in one paragraph</h2>
       <div class="prose">
         <!-- claim: docs/pipeline-contract.md §3.1 (a versioned JSON DAG of SQL nodes), docs/mcp-server.md §6 (authored over MCP against your real schemas) -->
-        <!-- claim: docs/datasources.md §4.1 (the eight engines), docs/staging.md §3 (an in-memory staging database that exists only for the run) -->
+        <!-- claim: docs/datasources.md §4.1 (the engine catalog), docs/staging.md §3 (an in-memory staging database that exists only for the run) -->
         <!-- claim: docs/versioning.md §3 (a release is immutable), docs/rest-api.md §19 (published as a GET endpoint) -->
         <p>
           A dataset here is a pipeline: a versioned JSON DAG of SQL nodes the agent authors over MCP against your
@@ -54,21 +54,21 @@
   <!-- ==================== MOVED FROM THE HOMEPAGE (115 §A.3) ==================== -->
 
   <!-- ============================ ENGINE STRIP ============================ -->
-  <!--/* 073: the six engine pages, one hop from the front door. This band is the site's
+  <!--/* 073: the engine pages, one hop from the front door. This band is the site's
        internal link graph as much as it is navigation — a searcher who arrived on
        "mysql mcp server" and a visitor who arrived here both need the same page.
        (Moved verbatim from the homepage by 115 §A.3.) */-->
   <section class="section engine-strip" aria-labelledby="engines-title">
     <div class="container">
-      <p class="kicker">One server, six engines</p>
+      <p class="kicker" th:text="|One server, ${facts.engineCountWord} engines|">One server, eight engines</p>
       <h2 id="engines-title" class="ds-headline">An MCP server for your SQL database</h2>
       <!-- claim: docs/datasources.md §4.1, docs/deployment.md §3.5 -->
-      <p class="section-lede">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, through one endpoint and one set of scoped keys. Each page has that engine's driver facts and a copy-paste client config.</p>
+      <p class="section-lede" th:text="|${facts.engines}, through one endpoint and one set of scoped keys. Each page has that engine's driver facts and a copy-paste client config.|">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, through one endpoint and one set of scoped keys. Each page has that engine's driver facts and a copy-paste client config.</p>
       <ul class="engine-links">
         <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
       </ul>
       <!-- claim: docs/datasources.md §4.1 (the LAKE row), §8C -->
-      <p class="engine-strip-more">The dialect catalog holds eight: those six, H2 &mdash; which is also the staging engine &mdash; and <code>LAKE</code>, which reads Parquet and Iceberg on S3 in place. <a th:href="@{/dp-lake}">That one is dp-lake &rarr;</a></p>
+      <p class="engine-strip-more">Every dialect has its page — H2 (also the staging engine) and dp-lake (<code>LAKE</code>: Parquet and Iceberg on S3 read in place) included. <a th:href="@{/dp-lake}">The dp-lake product page &rarr;</a></p>
       <p class="engine-strip-more"><a th:href="@{/mcp-server-for-sql-databases}">Start with the SQL MCP server overview &rarr;</a></p>
     </div>
   </section>
@@ -96,7 +96,7 @@
             <!-- claim: docs/mcp-server.md §4.1 -->
             <p>The MCP endpoint authenticates API keys only — <code>DP-API-Key</code> header or <code>Bearer dpk_…</code>. No cookies, no session roulette.</p>
             <!-- claim: docs/mcp-server.md §6.1 -->
-            <p>Exactly <span th:text="${toolCount}">30</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, publish endpoints, register lake tables, execute, inspect.</p>
+            <p>Exactly <span th:text="${facts.toolCount}">30</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, publish endpoints, register lake tables, execute, inspect.</p>
           </li>
           <li>
             <h3>Author as a JSON contract</h3>
@@ -118,7 +118,7 @@
         <figure class="how-figure">
           <svg class="diagram" viewBox="0 0 360 536" role="img" aria-labelledby="flow-title flow-desc">
             <title id="flow-title">Agent-to-engine flow</title>
-            <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and five more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (30 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
+            <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${facts.toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and the rest of the engine catalog through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (30 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and the rest of the engine catalog through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
             <defs>
               <marker id="dg-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
@@ -132,7 +132,7 @@
             <path class="dg-arrow" d="M180 72 V92" marker-end="url(#dg-arrowhead)"/>
 
             <rect class="dg-box-accent" x="30" y="96" width="300" height="56" rx="8"/>
-            <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 30 MCP tools</text>
+            <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${facts.toolCount} MCP tools|">/mcp — 30 MCP tools</text>
             <text class="dg-sub" x="180" y="138" font-size="11" text-anchor="middle">API-key-only: DP-API-Key or Bearer dpk_…</text>
 
             <path class="dg-arrow" d="M180 152 V172" marker-end="url(#dg-arrowhead)"/>
@@ -295,8 +295,8 @@
             <path d="M5 6v12a7 2.6 0 0 0 14 0V6M5 12a7 2.6 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="1.5"/>
           </svg>
           <!-- claim: docs/datasources.md §4.1 -->
-          <h3>Eight dialects, one contract</h3>
-          <p>PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite, H2 — and <code>LAKE</code>, object storage read in place. One pipeline contract over all of them.</p>
+          <h3 th:text="|${#strings.capitalize(facts.engineCountWord)} engines, one contract|">Eight engines, one contract</h3>
+          <p th:text="|${facts.engines} — dp-lake is object storage read in place. One pipeline contract over all of them.|">PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite, H2 — and LAKE, object storage read in place. One pipeline contract over all of them.</p>
           <!-- claim: docs/datasources.md §10, docs/deployment.md §3.5 -->
           <p>Oracle and MySQL drivers are opt-in for license reasons (<code>-Poracle</code>/<code>-Pmysql</code>, or drop the jar in <code>lib/</code>); a missing driver fails at save with <code>datasource.driver_not_loaded</code>. Everything else is in the published image, the DuckDB extensions included — a hardened deployment needs no egress to an extension repository.</p>
         </article>
@@ -503,7 +503,7 @@
         <figure class="shot">
           <!-- screenshot: the API section at /api-console — untouched capture from `./gradlew siteShots` (093 §C) -->
           <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/api-console.png}" width="1440" height="900" alt="The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads 30 tools and holds the connection JSON with a DP-API-Key header." loading="lazy">
+            <img th:src="@{/site/img/api-console.png}" width="1440" height="900" alt="The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads 30 tools and holds the connection JSON with a DP-API-Key header." th:alt="|The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads ${facts.toolCount} tools and holds the connection JSON with a DP-API-Key header.|" loading="lazy">
           </div>
           <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection — with the tool count read from the catalog at request time, exactly as this page reads it.</figcaption>
         </figure>
@@ -536,7 +536,7 @@
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p>Three kinds. A <code>user</code> key is an agent's key and a program's key — its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
+          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is an agent's key and a program's key — its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
           <p>The confinement is decided centrally, before any handler's annotation is read, so a new route cannot quietly become reachable to a scopeless key.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>

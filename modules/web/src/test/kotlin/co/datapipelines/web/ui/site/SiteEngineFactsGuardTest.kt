@@ -1,12 +1,13 @@
 package co.datapipelines.web.ui.site
 
+import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.io.File
 
 /**
  * The engine pages state driver facts; this reads the SPECS THOSE FACTS COME FROM and asserts
- * the six [SitePages.ENGINES] rows against them (073 §B).
+ * every [SitePages.ENGINES] row against them (073 §B, extended to equality in 124 §B).
  *
  * The pattern is 033/C5's four-way tool-count guard applied to a second set of transcribed
  * facts: a marketing page carrying a hand-copied driver coordinate is a claim that goes stale
@@ -22,11 +23,17 @@ class SiteEngineFactsGuardTest {
 
     @Test
     fun `both spec tables parsed, non-vacuously`() {
-        // Seven dialects in each table. A parse that silently found nothing would make every
-        // assertion below trivially true.
-        dialectCatalog.keys.size shouldBe DIALECTS
-        driverMatrix.keys.size shouldBe DIALECTS
-        dialectCatalog.keys.containsAll(SitePages.ENGINES.map { it.dialect }) shouldBe true
+        // One row per dialect in each table. A parse that silently found nothing would make
+        // every assertion below trivially true.
+        dialectCatalog.keys.size shouldBe Dialect.entries.size
+        driverMatrix.keys.size shouldBe Dialect.entries.size
+    }
+
+    @Test
+    fun `the engine pages are exactly the dialect catalog`() {
+        // 124 §B: EQUALITY, not containment — a ninth dialect cannot ship without its page,
+        // and a page cannot outlive its dialect.
+        SitePages.ENGINES.map { it.dialect }.toSet() shouldBe Dialect.entries.map { it.name }.toSet()
     }
 
     @Test
@@ -115,14 +122,5 @@ class SiteEngineFactsGuardTest {
         var dir: File? = File("").absoluteFile
         while (dir != null && !File(dir, "docs").isDirectory) dir = dir.parentFile
         return checkNotNull(dir) { "no ancestor of ${File("").absolutePath} holds a docs/ directory" }
-    }
-
-    private companion object {
-        /**
-         * POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE — H2 and LAKE have no engine
-         * page, but must parse. LAKE joined in 087 (the connector-seams round): the dialect and
-         * its adapter ship, the marketing page waits for the lake connector itself.
-         */
-        const val DIALECTS = 8
     }
 }

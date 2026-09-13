@@ -131,7 +131,7 @@ class SiteDemoDataTest {
         context.setVariable("canonicalUrl", SitePages.DEMO_DATA.canonical)
         context.setVariable("ogImage", SITE_ORIGIN + PublicPage.DEFAULT_OG_IMAGE)
         context.setVariable("currentSitePath", SitePages.DEMO_DATA.path)
-        context.setVariable("toolCount", 34)
+        context.setVariable("facts", SiteFacts.current(mapOf("nyc" to nyc.engineCount)))
         context.setVariable("navPages", emptyList<SitePage>())
         context.setVariable("engines", emptyList<EngineFacts>())
         context.setVariable("demoFamilies", families)

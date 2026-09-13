@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.mcp.McpToolCatalog
+import co.datapipelines.web.ui.site.SiteFacts
 import co.datapipelines.web.ui.site.SitePageRenderer
 import co.datapipelines.web.ui.site.SitePages
 import io.kotest.matchers.shouldBe
@@ -79,7 +80,7 @@ class SiteRenderTest {
         val view = SiteController().home(model, response)
 
         view shouldBe "site/index"
-        model["toolCount"] shouldBe McpToolCatalog.NAMES.size
+        (model["facts"] as SiteFacts).toolCount shouldBe McpToolCatalog.NAMES.size
         model["canonicalUrl"] shouldBe SitePages.HOME.canonical
         response.getHeader(HttpHeaders.CACHE_CONTROL) shouldBe "max-age=300, public"
     }
