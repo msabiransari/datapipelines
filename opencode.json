@@ -1,14 +1,3 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "datapipelines": {
-      "type": "remote",
-      "url": "http://localhost:8080/mcp",
-      "enabled": true,
-      "oauth": false,
-      "headers": {
-        "DP-API-Key": "{file:~/.config/opencode/datapipelines-api-key}"
-      }
-    }
-  }
+  "$schema": "https://opencode.ai/config.json"
 }
