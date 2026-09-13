@@ -38,7 +38,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 38 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 40 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -51,7 +51,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 38 tools of §6.1, in `tools/list` order. */
+    /** The 40 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -167,7 +167,11 @@ class McpServerAutoConfiguration {
             CalculatorsListTool(),
             CalculatorsGetTool(),
         ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService) +
-            SemanticsTools.all(datasources, semanticsService)
+            SemanticsTools.all(datasources, semanticsService) +
+            // 120 — the skill docs as tools: no collaborators at all, the 072 reasoning —
+            // the content is the packaged build artifact, read through the same SkillDocs
+            // loader the resources use.
+            DocsTools.all()
     }
 
     @Bean

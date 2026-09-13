@@ -59,6 +59,49 @@ object SkillDocs {
             ?.trim()
             ?: name
 
+    /**
+     * The skill's doc catalog as `docs_list` returns it (120/R3): `skill` first, then every
+     * reference in the order SKILL.md's own map lists them, carrying the map's one-line
+     * "open this when…" purposes.
+     *
+     * Parsed from the packaged [skill] bytes rather than kept as a second table, so the tools
+     * surface and the map the agent reads cannot be two things. A reference on disk with no
+     * map line, or a map line with no file, throws here — and is a `SkillDistributionTest`
+     * failure in the build, which asserts the same agreement in both directions.
+     */
+    val catalog: List<Entry> by lazy {
+        val mapped = MAP_LINE.findAll(skill).map { it.groupValues[1] to it.groupValues[2].trim() }.toList()
+        require(mapped.map { it.first }.toSet() == references.keys) {
+            "skill: SKILL.md's reference map and the packaged references disagree " +
+                "(map=${mapped.map { it.first }.sorted()}, files=${references.keys.sorted()})"
+        }
+        listOf(Entry(SKILL_NAME, heading(skill) ?: SKILL_NAME, SKILL_PURPOSE)) +
+            mapped.map { (name, purpose) -> Entry(name, title(name), purpose) }
+    }
+
+    /** One `docs_list` row: the name `docs_get` takes, the doc's own H1, and when to open it. */
+    data class Entry(
+        val name: String,
+        val title: String,
+        val purpose: String,
+    )
+
+    /** The core's name in [catalog] and as `docs_get`'s argument — the resource URI's own word. */
+    const val SKILL_NAME: String = "skill"
+
+    private const val SKILL_PURPOSE: String =
+        "The operating core — read it before authoring anything beyond a one-node pipeline."
+
+    /** `- **`references/<name>.md`** — <purpose>` — one line of SKILL.md's reference map. */
+    private val MAP_LINE = Regex("^- \\*\\*`references/([a-z0-9-]+)\\.md`\\*\\* — (.+?)\\s*$", RegexOption.MULTILINE)
+
+    private fun heading(markdown: String): String? =
+        markdown
+            .lineSequence()
+            .firstOrNull { it.startsWith("# ") }
+            ?.removePrefix("# ")
+            ?.trim()
+
     private fun loadReferences(): Map<String, String> =
         PathMatchingResourcePatternResolver(SkillDocs::class.java.classLoader)
             .getResources("classpath*:$CLASSPATH_DIR/references/*.md")

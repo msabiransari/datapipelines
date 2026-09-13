@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **38 tools**, in `tools/list` order.
+There are **40 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -503,3 +503,23 @@ Retire one learned fact with a reason — it stops being served beside the colum
 |---|---|---|---|
 | `id` | string | required | The fact's id, from semantics_list or an introspection response. |
 | `reason` | string | required | Why — one sentence, kept on the row and in the audit log. |
+
+## docs
+
+### `docs_list`
+
+Scope `read` · read-only
+
+The datapipelines skill's document catalog: the operating core (`skill`) first, then every reference in the order the skill's own map lists them, each with its title and a one-line purpose (when to open it). The same documents the datapipelines://docs/skill resources serve, for clients that fetch resources reluctantly or never. Read-only.
+
+No arguments.
+
+### `docs_get`
+
+Scope `read` · read-only
+
+One datapipelines skill document's full markdown: `name` is `skill` for the operating core or a reference name from docs_list. Returns {name, title, markdown} — the same bytes the datapipelines://docs/skill/<name> resource serves. An unknown name is refused with the catalogued names in the error detail. Read-only.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `name` | string | required | The document name: `skill` for the operating core, or a reference name from docs_list, e.g. authoring-playbook. |

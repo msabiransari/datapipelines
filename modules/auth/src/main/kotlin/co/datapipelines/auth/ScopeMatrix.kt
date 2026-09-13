@@ -214,7 +214,7 @@ object ScopeMatrix {
     }
 
     /**
-     * All 38 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 40 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
@@ -289,6 +289,10 @@ object ScopeMatrix {
             "semantics_record" to Scope.AUTHOR,
             "semantics_list" to Scope.READ,
             "semantics_retire" to Scope.AUTHOR,
+            // 120 — the skill docs as tools: the same property-of-the-build content as the
+            // calculator catalog, so the same floor (the 072 reasoning, two rows up).
+            "docs_list" to Scope.READ,
+            "docs_get" to Scope.READ,
         )
 
     /**
@@ -355,6 +359,10 @@ object ScopeMatrix {
             "semantics_record" to Capability.AUTHOR,
             "semantics_list" to Capability.VIEW,
             "semantics_retire" to Capability.AUTHOR,
+            // 120 — the skill docs as tools: the manual the deployment ships, a read any
+            // member may make (the calculators_list reasoning).
+            "docs_list" to Capability.VIEW,
+            "docs_get" to Capability.VIEW,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

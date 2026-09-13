@@ -248,6 +248,10 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Semantics.EVIDENCE_FAILED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Semantics.DUPLICATE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Semantics.NOT_FOUND to HttpStatus.NOT_FOUND,
+            // 120 §13.16 — a bare `mcp.` code with no family default (the semantics reasoning):
+            // the row is explicit. Emitted over MCP only; the status exists so the envelope's
+            // mapping stays total.
+            PipelineErrorCodes.Mcp.DOC_NOT_FOUND to HttpStatus.NOT_FOUND,
         )
 
     /**
