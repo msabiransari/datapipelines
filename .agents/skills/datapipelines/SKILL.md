@@ -324,7 +324,8 @@ here.
     kind whose phrases match the question's words, and when two kinds both fit, ask the person
     which one. A CALCULATOR node then writes the technical inputs into the execution Context,
     which downstream SQL binds as `:start_date` / `:end_date`
-    ([calculators.md](../../../docs/calculators.md)). Write the interpretation you chose into
+    ([calculators.md](../../../docs/calculators.md)); a kind may write several keys at once —
+    the catalog's `outputs` says which. Write the interpretation you chose into
     the pipeline's `description` in the question's own words, and name the window the same way
     in every template's `description`. The calculator's `context_key` is already an optional
     execute input — never also declare it as a parameter
