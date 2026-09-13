@@ -141,6 +141,12 @@ object ApiErrorCatalog {
             // absent table is a not-found. The validation family covers the five 400s.
             PipelineErrorCodes.Datasource.LAKE_TABLE_DUPLICATE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.LAKE_TABLE_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // 123 §A — the introspector's three-state table resolution: an absent table is a
+            // 404 the caller can fix (the message names the nearest listed table); a present
+            // table the credentials cannot read is a 403 — a table on a GRANTED datasource is
+            // not invisible, so unlike `grant_required` there is no enumeration oracle to defend.
+            PipelineErrorCodes.Datasource.TABLE_NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Datasource.TABLE_FORBIDDEN to HttpStatus.FORBIDDEN,
             // 109 §A — a node referenced a lake table whose connect-time view creation is
             // recorded as broken: the content a party behind us serves failed, like
             // `datasource_connection_failed`, so 502 and the WARN demotion below.
@@ -361,6 +367,10 @@ object ApiErrorCatalog {
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to
                 "We couldn't find that connection. It may have been deleted.",
+            PipelineErrorCodes.Datasource.TABLE_NOT_FOUND to
+                "That table isn't in this connection. Check the spelling against the table list.",
+            PipelineErrorCodes.Datasource.TABLE_FORBIDDEN to
+                "This connection's database user isn't allowed to read that table. Ask the database owner for access.",
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to
                 "A registered table on this data lake couldn't be read. The recorded reason is in the error details.",
             PipelineErrorCodes.Template.NOT_FOUND to
