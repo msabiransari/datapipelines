@@ -19,11 +19,16 @@
  *    [data-lifecycle-applied] marker riding with it is what closes the dialog — a refusal
  *    (Shape C, retargeted at #toast) never carries the marker, so an error cannot close
  *    over the dialog.
- * 5. MENUS. The version rows' ⋯ overflow menus close on Escape, on scroll, and when a
- *    dialog opens — and, open, they are PLACED: the list is a `popover="manual"` living in
- *    the top layer (the tab panel it sits in scrolls and used to clip it), so this script
- *    puts it under (or, out of room, above) its own ⋯ from the ⋯'s measured rect. The
- *    placement rule is pure and exported (`menuPlacement`) for `node --test`.
+ * 5. MENUS. The version rows' ⋯ overflow menus close on Escape and when a dialog opens —
+ *    and, open, they are PLACED: the list is a `popover="manual"` living in the top layer
+ *    (the tab panel it sits in scrolls and used to clip it), so this script puts it under
+ *    (or, out of room, above) its own ⋯ from the ⋯'s measured rect, and RE-places it on
+ *    every scroll and resize so it follows its ⋯; it closes only when the ⋯ itself has
+ *    scrolled out of sight. Closing on scroll instead was a defect: the browser delivers
+ *    `scroll` asynchronously, so the scroll-into-view that precedes a click on the ⋯ fired
+ *    AFTER the click had opened the menu and shut it again (every Playwright click on a ⋯
+ *    below the fold, LifecycleDialogBrowserTest, 2026-09-12). The placement rule is pure
+ *    and exported (`menuPlacement`) for `node --test`.
  */
 (function () {
   'use strict';
@@ -185,12 +190,27 @@
     placeMenu(details);
   }, true);
 
-  // A placed menu is pinned to the viewport, not to the row: any scroll or resize would
-  // leave it floating over the wrong thing, so it closes instead.
+  /**
+   * A placed menu is pinned to the viewport, not to the row, so a scroll or a resize moves
+   * the ⋯ out from under it: re-place every open menu against where its ⋯ is NOW, and close
+   * the ones whose ⋯ is no longer on screen (scrolled out of the panel or the viewport —
+   * the point at the ⋯'s centre no longer resolves to it or to its own menu).
+   */
+  function replaceOpenMenus() {
+    var menus = document.querySelectorAll('details.tplx-vmenu[open]');
+    Array.prototype.forEach.call(menus, function (m) {
+      var summary = m.querySelector('summary');
+      var r = summary ? summary.getBoundingClientRect() : null;
+      var hit = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+      if (hit && hit.closest && hit.closest('details.tplx-vmenu') === m) placeMenu(m);
+      else m.open = false;
+    });
+  }
+
   document.addEventListener('scroll', function () {
-    if (document.querySelector('details.tplx-vmenu[open]')) closeMenus();
+    if (document.querySelector('details.tplx-vmenu[open]')) replaceOpenMenus();
   }, true);
-  window.addEventListener('resize', closeMenus);
+  window.addEventListener('resize', replaceOpenMenus);
 
   document.addEventListener('click', function (event) {
     if (!event.target.closest) return;
