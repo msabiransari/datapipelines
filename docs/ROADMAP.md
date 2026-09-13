@@ -68,6 +68,28 @@ already covers golden paths 1–4, 7's page half, and 8–10.
 
 ---
 
+### 2.2 Owner backlog, 2026-09-12 (testing round, day 2)
+
+The owner's list from the release testing round, in his words, each routed to the row that
+already carries it or added here. "Full support" is his bar for every one: the feature is
+done when a customer can use it end to end from the browser, not when the contract exists.
+
+| Ask | Status on record | Where it lives |
+|---|---|---|
+| **Full implementation of the pipeline editor** — pipelines created, edited and saved WITHOUT an agent | Already listed (§2 *Pipeline CRUD and template CRUD in the UI*; §3.2 *UI pipeline edit mode*); restated 2026-09-12 as a must, not a candidate | ui-screens §4.7, pipeline-editor §11 |
+| **Full implementation of the template editor, per type** — one authoring surface per `TemplateType` (SQL/Freemarker today; JSONata and JavaScript once they exist), with Save | Already listed (§2 CRUD row); the per-type shape is new | ui-screens §4.7, template-hierarchy-design; the TRANSFORM-nodes design record for the two new types |
+| **Full support of JSONata** | Designed: `docs/superpowers/specs/2026-09-09-transform-nodes-design.md` (D-T1–D-T6; `com.dashjoin:jsonata` 0.9.10), prompt to write after the tag; O-1..O-5 open for the owner | §3.2 *Non-SQL node types* is superseded by that record |
+| **Full support of JavaScript, on GraalJS** | Designed in the same record (GraalJS polyglot isolate, `SandboxPolicy.UNTRUSTED`, pure functions v1) | same |
+| **Full support of the scheduler, INCLUDING a UI** | Design ratified (D49), prompt `092` written; the UI screen (schedules list, next runs, pause/resume, run history) is NOT in 092 — add it as 092's second round | §3.2 *Pipeline-level scheduling*; the public roadmap's "Scheduler" |
+| **Full support of dashboards** | Already listed (§2 *Result visualization & dashboards*); order after the scheduler per the dp-lake thesis: created by the agent, embedded in the customer's product, fed by released pipelines, filtered per viewer (embed RLS, D-T6) | §2 row; the public roadmap's "Dashboards" |
+| **Full support of report generation** | NEW. Templated reports (a document, not a chart) rendered over released pipelines' results on a schedule and delivered — email first. Design pending; depends on the scheduler and on email | this row |
+| **Full support of email** | Partly listed (§3.2 `output.target: email`; the public roadmap's "Email alerts"); the owner's bar is one email capability that serves alerts, report delivery and output targets alike, configured once | §3.2 row; this row |
+| **Audit-logs dashboard** | NEW. The audit log is written today (every MCP tool call, every lifecycle verb, `acting_via` for super admins) and read only by SQL; the ask is a screen: filter by actor / key / verb / entity / time, with the RBAC record's visibility rules (workspace admin sees the workspace, super admin sees all) | this row; observability §10 for the export side |
+
+Bug from the same list, tracked in the orchestration ledger (T240), not here: a viewer cannot
+open a pipeline, and Open is where Execute lives, while the RBAC record lets viewers execute —
+the editor route requires the mutate scope (096 §C), so execute needs a viewer-reachable entry.
+
 ## 3. v2 Features
 
 Larger feature work, multi-spec scope. Planned but not scheduled.
@@ -250,4 +272,5 @@ When something moves from ROADMAP into a shipped spec — or a spec-level decisi
 | 2026-08-07 | v1.1 | consistency campaign | Decision log seeded with D1–D15 outcomes (params_schema removal, unified result delivery, cancel-on-disconnect, DP- headers, no key fallback); v2 list gains UI edit mode, detached execution, pub/sub cancel fan-out, MCP progress/cancel. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-17 | v1.2 | pipeline composition | v2 §3.2 "Cross-pipeline calls" removed — shipped as the `PIPELINE` node type (design 2026-08-13-pipeline-node-type; pipeline-contract §4.9/§8.5/§12.9); decision-log row added; §3.10 distributed-tracing dependency note updated |
 | 2026-09-02 | v1.3 | UI authoring on the roadmap | §2 gains **Pipeline CRUD and template CRUD in the UI** (owner ruling R10: MCP/agents author for now; the editors are preview/release/discard-only and the template editor has never had a Save). §2's Parameterized SQL row marked SHIPPED (042). |
+| 2026-09-12 | v1.5 | owner backlog, testing round day 2 | New **§2.2** — the owner's nine asks from the release testing round, each routed to the row that already carries it (pipeline/template editors, dashboards, scheduling, email) or added (report generation, audit-logs dashboard, per-type template editor, scheduler UI); JSONata/JavaScript now point at the TRANSFORM-nodes design record. The viewer-cannot-execute bug is ledger T240, not a roadmap item. |
 | 2026-09-03 | v1.4 | browser-suite backlog | New §2.1: the browser suite's deferred golden paths 5–6 (editor + execute/SSE — buildable, the disabled Create button was an R10 relic) and 7's row half, plus the accessibility layer and the multi-browser / visual-regression extras. Source: TEST-GAP-2026-09.md. |

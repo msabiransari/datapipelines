@@ -209,42 +209,51 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 m.px("right") shouldBeLessThanOrEqual m.px("vw")
             }
 
-            // A scroll while the menu is open FOLLOWS the ⋯, it does not close the menu: the
-            // browser delivers `scroll` asynchronously, so the scroll-into-view that precedes
-            // a click on a ⋯ below the fold lands AFTER the click opened the menu — closing on
-            // scroll shut every such menu before its first item could be clicked
-            // (LifecycleDialogBrowserTest, 2026-09-12). The shell's scroller is <main>.
-            val after =
-                measure(
-                    """async () => {
-                      const list = document.querySelector('$panel .tplx-vmenu-list');
-                      const summary = list.closest('details').querySelector('summary');
-                      const before = { list: list.getBoundingClientRect().top, anchor: summary.getBoundingClientRect().top };
-                      const scroller = document.querySelector('main');
-                      scroller.scrollTop = 0;
-                      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-                      before.list = list.getBoundingClientRect().top; before.anchor = summary.getBoundingClientRect().top;
-                      scroller.scrollTop = 40;
-                      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-                      const moved = summary.getBoundingClientRect().top - before.anchor;
-                      return {
-                        scrolled: scroller.scrollTop,
-                        anchorMoved: moved,
-                        listMoved: list.getBoundingClientRect().top - before.list,
-                        open: list.closest('details').open,
-                        shown: list.matches(':popover-open'),
-                      };
-                    }""",
-                )
-            withClue("$screen: the scroller must actually have moved for this to test anything: $after") {
-                after.px("scrolled") shouldBeGreaterThanOrEqual 1.0
-                abs(after.px("anchorMoved")) shouldBeGreaterThanOrEqual 1.0
-            }
-            withClue("$screen: after a scroll the menu is still open, still shown, and moved WITH its ⋯: $after") {
-                after["open"] shouldBe true
-                after["shown"] shouldBe true
-                after.px("listMoved").shouldBeWithinOnePxOf(after.px("anchorMoved"), "$screen: menu follows the anchor")
-            }
+            assertMenuFollowsScroll(screen, panel)
+        }
+    }
+
+    /**
+     * A scroll while the menu is open FOLLOWS the ⋯, it does not close the menu: the browser
+     * delivers `scroll` asynchronously, so the scroll-into-view that precedes a click on a ⋯
+     * below the fold lands AFTER the click opened the menu — closing on scroll shut every such
+     * menu before its first item could be clicked (LifecycleDialogBrowserTest, 2026-09-12).
+     * The shell's scroller is <main>.
+     */
+    private fun assertMenuFollowsScroll(
+        screen: String,
+        panel: String,
+    ) {
+        val after =
+            measure(
+                """async () => {
+                  const list = document.querySelector('$panel .tplx-vmenu-list');
+                  const summary = list.closest('details').querySelector('summary');
+                  const before = { list: list.getBoundingClientRect().top, anchor: summary.getBoundingClientRect().top };
+                  const scroller = document.querySelector('main');
+                  scroller.scrollTop = 0;
+                  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                  before.list = list.getBoundingClientRect().top; before.anchor = summary.getBoundingClientRect().top;
+                  scroller.scrollTop = 40;
+                  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                  const moved = summary.getBoundingClientRect().top - before.anchor;
+                  return {
+                    scrolled: scroller.scrollTop,
+                    anchorMoved: moved,
+                    listMoved: list.getBoundingClientRect().top - before.list,
+                    open: list.closest('details').open,
+                    shown: list.matches(':popover-open'),
+                  };
+                }""",
+            )
+        withClue("$screen: the scroller must actually have moved for this to test anything: $after") {
+            after.px("scrolled") shouldBeGreaterThanOrEqual 1.0
+            abs(after.px("anchorMoved")) shouldBeGreaterThanOrEqual 1.0
+        }
+        withClue("$screen: after a scroll the menu is still open, still shown, and moved WITH its ⋯: $after") {
+            after["open"] shouldBe true
+            after["shown"] shouldBe true
+            after.px("listMoved").shouldBeWithinOnePxOf(after.px("anchorMoved"), "$screen: menu follows the anchor")
         }
     }
 }

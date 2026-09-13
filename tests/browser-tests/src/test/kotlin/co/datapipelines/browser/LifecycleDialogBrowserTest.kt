@@ -149,9 +149,16 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
      * toast may still be inside its 6s auto-dismiss window) and hands its text back. A
      * refusal shows up here too: the stack's full text rides the timeout message, so a
      * Shape C refusal names its code instead of just timing out.
+     *
+     * The baseline is counted BEFORE the action that earns the toast, never after: a local
+     * POST answers in ~30 ms, inside the click's own settle window, so a count taken after
+     * the click already included the new toast and the wait for "one more" ran out its 30 s
+     * while the toast auto-dismissed (traced at the 2026-09-12 gate: response done 38 ms into
+     * a 109 ms click, baseline taken 10 ms after it).
      */
-    private fun successToast(): String {
+    private fun successToastAfter(action: () -> Unit): String {
         val before = toastCount()
+        action()
         page.waitForFunction(
             "(n) => document.querySelectorAll('#toast .ds-toast').length > n",
             before,
@@ -209,8 +216,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         //      badge, and the pointer chip is the released number.
         val releaseDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
         releaseDialog.innerText() shouldContain "Releasing makes v"
-        releaseDialog.locator("button[type=submit]").click()
-        successToast() shouldContain "Released v1"
+        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released v1"
         badgeOf("test/lifecycle_probe") shouldBe "v1"
 
         // 2 — A draft over the release (§5.1 copy-on-write), then Discard the CURRENT release:
@@ -222,20 +228,19 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val discardDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v1")))
         discardDialog.innerText() shouldContain "v2 becomes current"
         shot("pipelines-discard-1280-light")
-        discardDialog.locator("button[type=submit]").click()
-        successToast() shouldContain "v2 is current now."
+        successToastAfter { discardDialog.locator("button[type=submit]").click() } shouldContain "v2 is current now."
 
         // 3 — Restore v1: below the pointer, so the pointer stays (§3.4) — the toast's words.
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Restore v1")).click()
-        page.locator("#px-dialog [data-lifecycle-dialog='pipeline-restore'] button[type=submit]").click()
-        successToast() shouldContain "the pointer stays at v2"
+        successToastAfter {
+            page.locator("#px-dialog [data-lifecycle-dialog='pipeline-restore'] button[type=submit]").click()
+        } shouldContain "the pointer stays at v2"
 
         // 4 — Switch to v1 (the row's Switch-to, when not current): endpoints follow.
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Switch to v1")).click()
         val switchDialog = page.locator("#px-dialog [data-lifecycle-dialog='pipeline-switch']")
         switchDialog.waitFor()
-        switchDialog.locator("button[type=submit]").click()
-        successToast() shouldContain "Switched to v1"
+        successToastAfter { switchDialog.locator("button[type=submit]").click() } shouldContain "Switched to v1"
 
         // 5 — Purge the draft v2, which IS the pointer: purge-of-current falls back (§3.5.2
         //      row 330), through the typed confirm the whole way.
@@ -245,8 +250,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         purgeDialog.innerText() shouldContain "cannot be undone"
         val typed = purgeDialog.locator("[data-confirm-input]")
         typed.fill("v2")
-        purgeDialog.locator("button[data-typed-confirm]").click()
-        successToast() shouldContain "Purged v2"
+        successToastAfter { purgeDialog.locator("button[data-typed-confirm]").click() } shouldContain "Purged v2"
         badgeOf("test/lifecycle_probe") shouldBe "v1"
 
         // 6 — The {D} shape's entity purge: a never-released pipeline, the NAME typed, the
@@ -278,8 +282,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
 
         val releaseDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
         releaseDialog.innerText() shouldContain "pin without a number"
-        releaseDialog.locator("button[type=submit]").click()
-        successToast() shouldContain "Released v1"
+        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released v1"
 
         // A draft over the release, then Discard the resolved release: the twin's fallback.
         openDraftOverReleaseTemplate("test/lifecycle_probe.sql")
@@ -287,20 +290,19 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         selectLeafOf("test/lifecycle_probe.sql")
         val discardDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v1")))
         shot("templates-discard-1280-light")
-        discardDialog.locator("button[type=submit]").click()
-        successToast() shouldContain "v2 is the resolved version now."
+        successToastAfter { discardDialog.locator("button[type=submit]").click() } shouldContain "v2 is the resolved version now."
 
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Restore v1")).click()
-        page.locator("#tx-dialog [data-lifecycle-dialog='template-restore'] button[type=submit]").click()
-        successToast() shouldContain "Restored v1"
+        successToastAfter {
+            page.locator("#tx-dialog [data-lifecycle-dialog='template-restore'] button[type=submit]").click()
+        } shouldContain "Restored v1"
 
         // The version purge through its typed confirm; the template stays (v1 remains).
         rowMenu("v2").locator("button", Locator.LocatorOptions().setHasText("Purge v2")).click()
         val purgeDialog = page.locator("#tx-dialog [data-lifecycle-dialog='template-purge']")
         purgeDialog.waitFor()
         purgeDialog.locator("[data-confirm-input]").fill("v2")
-        purgeDialog.locator("button[data-typed-confirm]").click()
-        successToast() shouldContain "Purged v2"
+        successToastAfter { purgeDialog.locator("button[data-typed-confirm]").click() } shouldContain "Purged v2"
 
         // The entity purge on a fresh {D} template: typed NAME, redirect, leaf gone.
         createDraftTemplate("test/lifecycle_chaff.sql")
