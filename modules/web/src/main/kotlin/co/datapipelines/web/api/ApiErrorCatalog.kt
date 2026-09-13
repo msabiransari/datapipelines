@@ -253,6 +253,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Semantics.KIND_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Semantics.FACT_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Semantics.REF_UNRESOLVED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Semantics.REF_MISMATCH to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Semantics.EVIDENCE_REFUSED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Semantics.EVIDENCE_FAILED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Semantics.DUPLICATE to HttpStatus.CONFLICT,

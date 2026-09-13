@@ -186,8 +186,13 @@ class ApiErrorCatalogSpecDriftTest {
          * three-state table resolution every table-addressed read surface applies — landed in
          * the SAME commit as their constants (both sides of the datasources mirror) and their
          * catalog rows. Re-derived from the document's own parse.
+         *
+         * 175 → 176 with 125 §B (a fact names real tables): §13.15 gains
+         * `semantics.ref_mismatch` (400 — the fact's text names a table its `refs` do not),
+         * landed in the SAME commit as its constants (both sides of the datasources mirror)
+         * and its catalog row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 175
+        const val SECTION_13_ROW_COUNT = 176
 
         /**
          * §12's distinct validation codes.

@@ -1059,6 +1059,13 @@ object PipelineErrorCodes {
         /** A ref does not resolve against live introspection: the table or the column is not there (§3.1). */
         const val REF_UNRESOLVED = "semantics.ref_unresolved"
 
+        /**
+         * The `fact`/`evidence_summary` text names a table the `refs` do not — an exact catalog
+         * spelling missing from `refs`, or a near-miss (edit distance ≤ 2) of one (125 §B);
+         * `details.token` and, for the near-miss, `details.suggestion`.
+         */
+        const val REF_MISMATCH = "semantics.ref_mismatch"
+
         /** `evidence_sql` is not a single read-only SELECT/WITH, or names a parameter — refused before any connection opens. */
         const val EVIDENCE_REFUSED = "semantics.evidence_refused"
 

@@ -7,6 +7,7 @@ import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.TableStats
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -58,6 +59,49 @@ class DatasourceTableStatsToolTest {
             { (payload["indexes"] as List<*>).single().let { (it as Map<*, *>)["name"] shouldBe "trips_pkey" } },
             { (payload["columns"] as List<*>).single().let { (it as Map<*, *>)["n_distinct"] shouldBe "812" } },
         )
+    }
+
+    @Test
+    fun `a lake table says its partition status out loud - the registered name, or an explicit null (125 B2)`() {
+        val lake = McpFixtures.datasource("events-lake", dialect = Dialect.LAKE)
+        every { datasources.getVisible("events-lake", McpFixtures.WORKSPACE_ID) } returns lake
+        val partitioned =
+            stats.copy(
+                indexes =
+                    listOf(
+                        IndexStats(
+                            "partition",
+                            listOf("event_date"),
+                            unique = false,
+                            primary = false,
+                            kind = IndexStats.INDEX_KIND_PARTITION,
+                        ),
+                    ),
+            )
+        every { introspector.tableStats(lake, "events_by_day", null) } returns partitioned
+        every { introspector.tableStats(lake, "events_archive", null) } returns stats.copy(indexes = emptyList())
+
+        val registered =
+            tool.call(McpArguments(mapOf("name" to "events-lake", "table" to "events_by_day")), ctx) as Map<*, *>
+        val unregistered =
+            tool.call(McpArguments(mapOf("name" to "events-lake", "table" to "events_archive")), ctx) as Map<*, *>
+
+        assertAll(
+            { registered["partition_column"] shouldBe "event_date" },
+            // The key is PRESENT with a null value — an absence an agent must not have to infer.
+            { unregistered.containsKey("partition_column") shouldBe true },
+            { unregistered["partition_column"] shouldBe null },
+        )
+    }
+
+    @Test
+    fun `a non-lake table carries no partition_column key`() {
+        every { datasources.getVisible("sample-trips", McpFixtures.WORKSPACE_ID) } returns gated
+        every { introspector.tableStats(gated, "trips", null) } returns stats
+
+        val payload = tool.call(McpArguments(mapOf("name" to "sample-trips", "table" to "trips")), ctx) as Map<*, *>
+
+        payload.containsKey("partition_column") shouldBe false
     }
 
     @Test

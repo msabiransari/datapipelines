@@ -97,7 +97,7 @@ class McpServerWiringTest {
                 mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
             ) +
             // 118 — the three learned-semantics tools, appended after the lake tools.
-            SemanticsTools.all(datasources, mockk<co.datapipelines.application.semantics.SemanticsService>()) +
+            SemanticsTools.all(datasources, mockk<co.datapipelines.application.semantics.SemanticsService>(), introspector) +
             // 120 — the two docs tools, appended after the semantics tools.
             DocsTools.all()
     }

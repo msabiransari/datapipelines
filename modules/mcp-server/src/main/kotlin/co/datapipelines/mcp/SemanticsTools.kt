@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.semantics.FactRef
 import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactScope
@@ -32,6 +33,7 @@ private val SCOPES: Set<String> = LearnedFactScope.entries.map { it.name }.toSet
 class SemanticsRecordTool(
     private val datasources: DatasourceRegistry,
     private val service: SemanticsService,
+    private val introspector: SchemaIntrospector,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -41,13 +43,18 @@ class SemanticsRecordTool(
                     "zone, a sample rate, a grain, what a coded value means, a join that holds, a trap — so the next " +
                     "session reads it beside the columns instead of probing again. Never record what introspection " +
                     "already returns (types, keys, comments). refs name the table(s) and column(s) the fact is about, " +
-                    "structurally; every ref is checked against the live schema and an unknown one is refused. A lake " +
+                    "structurally; every ref is checked against the live schema and an unknown one is refused. The " +
+                    "fact's text must agree with its refs: a table the text names but the refs do not carry — a " +
+                    "catalog table spelled exactly and missing from refs, or a near-miss of one — is refused as " +
+                    "semantics.ref_mismatch (the refusal names the nearest listed table). A lake " +
                     "table's ref takes schema as ONE dotted namespace string " +
                     "({\"schema\": \"lake.mart\", \"table\": \"events\"}), never a namespace array. Pass " +
                     "evidence_sql (the SELECT that showed the fact): it runs once, its first rows become " +
                     "evidence_summary, and the fact is stored as observed — without it the fact is only asserted. " +
-                    "scope DATASOURCE is about the data and is shared with every workspace the datasource is granted " +
-                    "to; scope WORKSPACE (definition, exclusion, preference) is this organisation's meaning and stays " +
+                    "scope DATASOURCE is about the data over the table's WHOLE window and is shared with every " +
+                    "workspace the datasource is granted to — an observation tied to one window belongs in the " +
+                    "pipeline description, not in a fact; scope WORKSPACE (definition, exclusion, preference) is " +
+                    "this organisation's meaning and stays " +
                     "here. To correct a stale or wrong fact, record the replacement with supersedes: the old one is " +
                     "retired as superseded. An identical live fact is refused as semantics.duplicate. Mutating.",
             schema =
@@ -106,7 +113,34 @@ class SemanticsRecordTool(
                 supersedes = args.uuid("supersedes"),
             )
         val gated = datasources.requireVisible(name, ctx)
+        checkFactNamesRefs(gated, command)
         return recording(name) { service.record(ctx.principal, gated, command, WriteSurface.MCP) }
+    }
+
+    /**
+     * 125 §B — the text/refs agreement refusal, BEFORE the service runs. The catalog listing is
+     * read best-effort: a datasource with no listing (an empty lake registry) or one that cannot
+     * be read right now skips the check — the recorder's own live ref resolution stays the
+     * authority on what exists, and it surfaces the unreachable datasource on its own.
+     */
+    private fun checkFactNamesRefs(
+        datasource: co.datapipelines.datasources.Datasource,
+        command: SemanticsService.RecordCommand,
+    ) {
+        val catalog =
+            try {
+                introspector.tables(datasource).tables.map { it.name }
+            } catch (
+                @Suppress("TooGenericExceptionCaught", "SwallowedException") e: Exception,
+            ) {
+                return
+            }
+        FactRefMismatchCheck.check(
+            datasource.name,
+            listOfNotNull(command.fact, command.evidenceSummary),
+            command.refs,
+            catalog,
+        )
     }
 
     private fun scopeOf(token: String): LearnedFactScope = LearnedFactScope.valueOf(token)
@@ -249,9 +283,10 @@ object SemanticsTools {
     fun all(
         datasources: DatasourceRegistry,
         service: SemanticsService,
+        introspector: SchemaIntrospector,
     ): List<McpTool> =
         listOf(
-            SemanticsRecordTool(datasources, service),
+            SemanticsRecordTool(datasources, service, introspector),
             SemanticsListTool(datasources, service),
             SemanticsRetireTool(service),
         )

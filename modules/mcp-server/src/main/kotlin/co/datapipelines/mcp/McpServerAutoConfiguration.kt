@@ -167,7 +167,7 @@ class McpServerAutoConfiguration {
             CalculatorsListTool(),
             CalculatorsGetTool(),
         ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService) +
-            SemanticsTools.all(datasources, semanticsService) +
+            SemanticsTools.all(datasources, semanticsService, introspector) +
             // 120 — the skill docs as tools: no collaborators at all, the 072 reasoning —
             // the content is the packaged build artifact, read through the same SkillDocs
             // loader the resources use.

@@ -205,6 +205,7 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Semantics.KIND_INVALID,
                 PipelineErrorCodes.Semantics.FACT_INVALID,
                 PipelineErrorCodes.Semantics.REF_UNRESOLVED,
+                PipelineErrorCodes.Semantics.REF_MISMATCH,
                 PipelineErrorCodes.Semantics.EVIDENCE_REFUSED,
                 PipelineErrorCodes.Semantics.EVIDENCE_FAILED,
                 PipelineErrorCodes.Semantics.DUPLICATE,
