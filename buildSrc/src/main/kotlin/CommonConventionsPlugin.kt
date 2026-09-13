@@ -110,7 +110,7 @@ class CommonConventionsPlugin : Plugin<Project> {
             add("implementation", platform(lib("jackson-bom")))
             add("testImplementation", platform(lib("jackson-bom")))
 
-            // SECURITY OVERRIDE (2026-08-15, GHSA-558v-64gr-wgg4): netty-bom 4.1.136.Final
+            // SECURITY OVERRIDE (2026-08-15, GHSA-558v-64gr-wgg4; bumped 2026-09-13 for three more): netty-bom at the `netty` version,
             // applied after the jackson override, same non-enforced-platform mechanism.
             // Netty comes in via Lettuce (spring-boot-starter-data-redis) and sits on
             // the production runtime classpath. Retirement condition is documented on
@@ -128,6 +128,17 @@ class CommonConventionsPlugin : Plugin<Project> {
                 for (configuration in listOf("implementation", "testImplementation")) {
                     constraints.add(configuration, lib(artifact)) {
                         because("GHSA-9xv2-5v5q-p794 / GHSA-gcx9-497g-6cp6 / GHSA-h3x4-894j-xpx5: tomcat-embed < 10.1.58")
+                    }
+                }
+            }
+            // SECURITY OVERRIDE (2026-09-13, GHSA-hjcp-jmpx-g3qm / GHSA-hf6x-8p5f-cgmf /
+            // GHSA-v3jc-474w-2wm6): httpcomponents 5 ships no BOM either; the three artifacts
+            // the test S3 client pulls transitively are held by the same constraint mechanism.
+            // Rationale + retirement condition on the `httpcomponents-*` entries in libs.versions.toml.
+            for (artifact in listOf("httpclient5", "httpcore5", "httpcore5-h2")) {
+                for (configuration in listOf("implementation", "testImplementation")) {
+                    constraints.add(configuration, lib(artifact)) {
+                        because("GHSA-hjcp-jmpx-g3qm / GHSA-hf6x-8p5f-cgmf / GHSA-v3jc-474w-2wm6: httpclient5 < 5.6.3, httpcore5 < 5.4.3")
                     }
                 }
             }

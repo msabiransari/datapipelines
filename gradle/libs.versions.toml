@@ -90,8 +90,23 @@ jackson = "2.21.5"
 # step). Netty arrives via Lettuce (spring-boot-starter-data-redis) and is on
 # the production runtime classpath, so this one is fixed, not ignored.
 # Applied as a BOM, same mechanism as the jackson override.
-# RETIRE when the Spring Boot BOM imports netty-bom >= 4.1.136.Final.
-netty = "4.1.136.Final"
+# RETIRE when the Spring Boot BOM imports netty-bom >= 4.1.137.Final.
+# 2026-09-13: moved 4.1.136 → 4.1.137.Final — GHSA-c4c3-7fpv-j4q5 (9.1, SNI routing bypass
+# via fragmented TLS ClientHello), GHSA-fccg-mwvh-qqg4 (6.9, quadratic pre-handshake work)
+# and GHSA-8c42-7qj2-3j46 (6.5, CORS cache poisoning) are all "< 4.1.137.Final" per OSV;
+# 4.1.137.Final verified on Maven Central (4.1.138 exists; smallest step, as before).
+netty = "4.1.137.Final"
+
+# httpcomponents 5 — GHSA-hjcp-jmpx-g3qm (httpclient5 < 5.6.3, connection leak on
+# Content-Encoding decode) and GHSA-hf6x-8p5f-cgmf / GHSA-v3jc-474w-2wm6 (httpcore5 and
+# httpcore5-h2 < 5.4.3, header-parsing memory exhaustion / unbounded HPACK header list).
+# Both arrive on the TEST runtime only (datasources, integration-tests — via the S3 test
+# client's transitive chain), so this is exposure of the test JVMs, not the product; the
+# vuln-scan gate counts lockfiles whichever classpath they sit on. No BOM ships, so the
+# three artifacts are held by constraints (the tomcat mechanism). Fixed versions verified
+# on Maven Central 2026-09-13. RETIRE when the transitive chain lands >= these on its own.
+httpcomponents-client5 = "5.6.3"
+httpcomponents-core5 = "5.4.3"
 
 # tomcat — GHSA-9xv2-5v5q-p794 (CVE-2026-65905), GHSA-gcx9-497g-6cp6 (CVE-2026-65182),
 # GHSA-h3x4-894j-xpx5 (CVE-2026-68525) — all three CRITICAL. Advisory API, verified
@@ -183,6 +198,10 @@ netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 tomcat-embed-core = { module = "org.apache.tomcat.embed:tomcat-embed-core", version.ref = "tomcat" }
 tomcat-embed-el = { module = "org.apache.tomcat.embed:tomcat-embed-el", version.ref = "tomcat" }
 tomcat-embed-websocket = { module = "org.apache.tomcat.embed:tomcat-embed-websocket", version.ref = "tomcat" }
+# SECURITY OVERRIDE — httpcomponents 5, applied as constraints (GHSA-hjcp-jmpx-g3qm / GHSA-hf6x-8p5f-cgmf / GHSA-v3jc-474w-2wm6)
+httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpcomponents-client5" }
+httpcore5 = { module = "org.apache.httpcomponents.core5:httpcore5", version.ref = "httpcomponents-core5" }
+httpcore5-h2 = { module = "org.apache.httpcomponents.core5:httpcore5-h2", version.ref = "httpcomponents-core5" }
 
 # --- Flyway — `app` module ONLY (module-structure §3.1 rule 2) ---------------
 # BOM-managed (11.7.2). Since Flyway 10 the Postgres support is a separate
