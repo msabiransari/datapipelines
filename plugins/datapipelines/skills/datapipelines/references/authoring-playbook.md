@@ -34,6 +34,18 @@ The mandatory read order, for **every** datasource a pipeline will touch:
    whether a numeric column is in the unit its name suggests, whether a timestamp is local
    or UTC (compare a known event; read the `remarks`; if nothing says, treat it as naive
    local and write that assumption down).
+
+   With NO description — the usual case; nobody fills table- and column-level detail into a
+   form — the surfaces still answer, one line each:
+   - A NAME: `_sample` marks a sample, `_daily`/`_monthly` a rollup, a `<subject>_<grain>`
+     compound the grain, `_ts` vs `_at` a timestamp style, a `unit` column beside a `value`
+     column per-row units, a `_meta` table metadata the datasource carries about itself.
+   - A TYPE: an engine `timestamp` without time zone in `source_type` is naive by
+     construction; a `TEXT` date in SQLite is text to cast, not a date.
+   - STATS: a date column's min/max is the data's window; a rollup's total against its
+     source's count is the sample-or-full answer.
+   - A PROBE: the `unit` column's distinct values, a code column's spread.
+
 6. **Write what you learned into the pipeline's description** — every fact the SQL relies on
    that the schema alone does not state (time zone, units, sampling, grain, partition
    column, window, what an enum value means). A reader who cannot see your probes must
@@ -42,8 +54,13 @@ The mandatory read order, for **every** datasource a pipeline will touch:
 Two facts you must establish before you touch a number: **is this table a sample or a
 census** (a hash-sampled feed compared to a full count as a share gives nonsense; if a
 sample rate is stated anywhere — description, remarks, a metadata table — scale by it; if
-none is stated, compare a sample only with itself, §4), and **what one row is** (§2 — a
-pre-aggregate summed at the wrong grain double-counts silently).
+none is stated, compare a sample only with itself, §4 — and record the unstated rate as the
+assumption it is: `semantics_record` WITHOUT evidence, so it lands as `asserted` for a human
+to verify), and **what one row is** (§2 — a pre-aggregate summed at the wrong grain
+double-counts silently).
+
+Copy an existing pipeline's SHAPE — staging, join placement, casts — never its window
+semantics; the question's words decide the window.
 
 ## 2. Read the schema like an analyst
 
@@ -72,12 +89,17 @@ pre-aggregate summed at the wrong grain double-counts silently).
 - **Parameters wear the question's vocabulary.** A question asked in quarters gets a
   `quarter` parameter (`2024-Q4`), not two raw dates as the only door. Technical inputs
   are *derived*: a CALCULATOR node turns the human parameter into the `start_date`/`end_date`
-  the SQL binds (`period_start`/`period_end` with `unit: quarter`; `prior_period` for "last";
-  see `templates.md` § Calculators). Two dates the caller already passes need no calculator.
+  the SQL binds — the kind comes from `calculators_list`, whose entries each list the phrases
+  they answer (see `templates.md` § Calculators). Two dates the caller already passes need no
+  calculator.
 - **"Today" is a decision, say which.** `$current_date` is right for a live, scheduled
   pipeline. For a fixed dataset — read its window from the stats or the description — an
   `as_of` (or window) parameter **defaulting to the data's last date** is right, or "last
-  quarter" resolves to an empty window next year. Write the choice into the description.
+  quarter" resolves to an empty window next year. A relative phrase is never yours to
+  interpret: read `calculators_list`, pick the kind whose `phrases` match the question's
+  words — asking the person when two kinds fit — then write the interpretation you chose
+  into the pipeline's description in the question's own words, and name the window the same
+  way in every template's description.
 - **Deployment knowledge comes from `$org_*` context keys** (fiscal start, week start,
   timezone, currency) — never a literal in a template.
 - **Read the table's stats and indexes before you write the predicate.**
@@ -227,6 +249,7 @@ pre-aggregate summed at the wrong grain double-counts silently).
 
 | Do | Don't |
 |---|---|
+| State which learn-first calls you made for each datasource and each table before your first `templates_create` | Read a table you did not `_get_columns` and `_get_table_stats` |
 | Read description → schemas → tables → columns → stats → rows before the first line of SQL | Write SQL against a column, a unit, a time zone or a sample rate you assumed |
 | Write what you learned about the data into the description | Leave the next reader to re-probe what you already established |
 | After each source node runs, check its predicate/join key against the table's indexes (`datasources_get_table_stats`, `sql_probe`'s `plan.scan`) and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
@@ -237,7 +260,8 @@ pre-aggregate summed at the wrong grain double-counts silently).
 | Load → `DDL` index on the join key → query, for large staged tables | Index small tables, or index before loading |
 | `depends_on` = the tables and context values a node reads | Chain nodes to "reduce load" |
 | Treat a timeout as "wrong place for this work" | Slice one scan into N parameterised copies |
-| Parameters in the question's words; calculators derive dates | Raw date pairs as the only interface to "last quarter" |
+| Look the phrase up in the catalog and say which reading you chose | Decide what "last quarter" means yourself |
+| Name the window the same way in the pipeline and every template | Three phrasings for one window |
 | Cast aggregates you ship (`::NUMERIC(14,2)`) | Trust the driver's guess at the scale |
 | Compare a sample within itself, or scale by a stated rate | Compare a sample to a census as a share |
 | Exclude the lookup's catch-all rows when the question names the real groups | Group by whatever the lookup contains |

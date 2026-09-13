@@ -137,6 +137,12 @@ leaves. `q` is a flat substring search across full paths. Use `prefix` to learn 
    rate, a grain, what a coded value means, a join that holds — call `semantics_record` with
    the probe you ran; when you re-verified a stale fact, record the superseding one. Never
    record what introspection already returns (types, keys, comments).
+
+   Before your first `templates_create`, state — in your reasoning or your reply — which of
+   these calls you made for EACH datasource and EACH table the SQL reads; a table you did
+   not `_get_columns` and `_get_table_stats` is a table you may not read. A description is
+   one person's words about the data, and most datasources have none; the catalog and the
+   rows are the data.
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
    will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
@@ -310,16 +316,26 @@ here.
 12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
-13. **Parameters wear the question's vocabulary; technical inputs are derived.** Declare the
-    parameter the PERSON asked in — a question asked in quarters takes `quarter` (`2024-Q4`),
-    not a `start_date`/`end_date` pair the caller has to compute. Derive the technical inputs
-    inside the pipeline with a CALCULATOR node (a `quarter_bounds`-style catalog function
-    writing `start_date`/`end_date` into the execution Context, which downstream SQL binds as
-    `:start_date` / `:end_date`) — see `calculators_list` and
-    [calculators.md](../../../docs/calculators.md). A raw date range as the ONLY door makes
-    every caller re-derive what the pipeline already knows, and every caller derive it slightly
-    differently. Both doors may exist: a derived Context key is an optional execute input, so
-    supplying `start_date` directly skips the calculator.
+13. **Parameters wear the question's vocabulary; technical inputs are derived.** An anchor
+    date is the door — defaulting to the data's last date for a fixed dataset, `$current_date`
+    for a live one — never a raw `start_date`/`end_date` pair as the ONLY door. **Any relative
+    time phrase in the question — "last", "this", "to date", "trailing", "N ago" — is resolved
+    by reading `calculators_list`:** each kind lists the everyday phrases it answers; pick the
+    kind whose phrases match the question's words, and when two kinds both fit, ask the person
+    which one. A CALCULATOR node then writes the technical inputs into the execution Context,
+    which downstream SQL binds as `:start_date` / `:end_date`
+    ([calculators.md](../../../docs/calculators.md)). Write the interpretation you chose into
+    the pipeline's `description` in the question's own words, and name the window the same way
+    in every template's `description`. The calculator's `context_key` is already an optional
+    execute input — never also declare it as a parameter
+    (`pipeline.validation.calculator_output_collision`).
+13½. **A number you did not measure is not a number.** Row counts, sample rates and windows
+    come from `datasources_get_table_stats`, a probe, or a metadata table — never estimated.
+    When the data cannot reveal a fact you depend on (a sample rate no table states, a time
+    zone no type states): write the assumption into the pipeline's `description`,
+    `semantics_record` it WITHOUT evidence so it lands as `asserted` for a human to verify,
+    and say which facts you derived and which you assumed. An assumption that moves the answer
+    by an order of magnitude: stop and ask first.
 14. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
     H2 fails to match the GROUP BY expression to the identical SELECT expression when it
     contains a parameter marker — `Column "x.amount" must be in the GROUP BY list`
@@ -350,32 +366,20 @@ here.
 
 ## References — open one when you need it
 
-Each line says when to open the file; none of them is required reading first.
-
-- **`references/pipeline-schema.md`** — writing or reading a pipeline body: the
-  `parameters` block's fields and types, and a minimal complete pipeline to copy.
-- **`references/node-types.md`** — wiring the DAG: what a node declares, the five node
-  types, and where a DQL node's rows go.
-- **`references/authoring-playbook.md`** — building anything non-trivial: how an expert
-  reads the question and the schema, shapes the DAG (push down, ship little, then index),
-  gets the numbers right, and finishes — with the Do/Don't table of real misses.
-- **`references/templates.md`** — writing SQL: what a template is, how library imports
-  work, and how a CALCULATOR node computes a value the SQL then binds.
-- **`references/naming.md`** — choosing where a new pipeline or template lives, or
-  explaining the folder rules to a human.
-- **`references/connecting.md`** — your first call against a deployment, a refusal for
-  scope or credential reasons, or a client with no MCP transport.
+- **`references/pipeline-schema.md`** — writing or reading a pipeline body.
+- **`references/node-types.md`** — wiring the DAG.
+- **`references/authoring-playbook.md`** — building anything non-trivial.
+- **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
+- **`references/naming.md`** — choosing where a new pipeline or template lives.
+- **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
 - **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.
-- **`references/endpoints.md`** — a released read-only pipeline has to answer a plain
-  HTTP GET.
-- **`references/error-codes.md`** — a tool answered `isError: true` and you need the
-  code's meaning and the response it calls for.
-- **`references/tools.md`** — every MCP tool with its arguments, scope and whether it
-  writes. Generated from the server's own catalog at build time, so it is never stale.
+- **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
+- **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response.
+- **`references/tools.md`** — every MCP tool, generated from the server's catalog at build time.
 
-The MCP resource `datapipelines://docs/skill/<name>` serves each of these, and a
-deployment serves them at `GET /skill/<name>.md`; inside a checkout they are files in
-`references/` beside this one.
+Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` and by the
+`docs_get` tool (`docs_list` names them), and a deployment serves them at
+`GET /skill/<name>.md`; inside a checkout they are files in `references/` beside this one.
 
 ## References (when working inside the repo)
 
