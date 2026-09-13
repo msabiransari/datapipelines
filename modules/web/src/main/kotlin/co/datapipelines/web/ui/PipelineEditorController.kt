@@ -30,10 +30,15 @@ class PipelineEditorController(
     // them separate — see the narrow-reads comment below.
     @Suppress("ThrowsCount")
     @GetMapping("/pipelines/{id}/editor")
-    // 096 §C: the editors render AUTHORING state (draft bodies, unreleased versions),
-    // so a read key has no business here — the floor is the mutation operation the
-    // screen exists to perform, not the read that paints it.
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    // The floor is the operation this screen exists to perform for its LOWEST role —
+    // EXECUTE (D-R3: viewers execute what they can read) — not the read that paints it
+    // and not authoring: an execute key and a viewer session both reach the page, a
+    // `read` key stays refused (read < execute, §7.5). 096 §C's concern is answered by
+    // 114 §A, not by the route: the AUTHORING state rendered here is read, never
+    // written — every authoring verb on the page is role-hidden (RoleVisibilityRenderTest)
+    // and every mutating call it can make is verb-guarded or viewer-level (122 §A.2).
+    // The template editor keeps the author floor: nothing a viewer may DO lives there.
+    @RequiredScope(ScopeMatrix.RestOperation.EXECUTE_PIPELINE)
     fun editor(
         @PathVariable id: UUID,
         model: Model,
