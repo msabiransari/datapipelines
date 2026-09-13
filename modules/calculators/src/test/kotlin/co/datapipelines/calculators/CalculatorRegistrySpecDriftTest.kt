@@ -114,8 +114,26 @@ class CalculatorRegistrySpecDriftTest {
     }
 
     @Test
+    fun `no phrase is claimed by two kinds - the disjointness floor`() {
+        // 123: the skill's lookup matches a question's words against these phrases, so a phrase
+        // two kinds list forces a silent guess between them (a bare period noun like "last
+        // quarter" sat on both prior_period and trailing_periods). Registry-side like the
+        // vacuity floor above — the phrases are split by what each kind RETURNS, and this arm is
+        // what keeps a future kind from re-sharing one.
+        val shared =
+            CalculatorRegistry.KINDS
+                .flatMap { kind -> kind.phrases.map { phrase -> phrase to kind.kind } }
+                .groupBy({ it.first }, { it.second })
+                .filterValues { claimants -> claimants.size > 1 }
+                .map { (phrase, claimants) -> "'$phrase' claimed by ${claimants.joinToString(", ")}" }
+        withClue("Phrases listed by more than one kind — the lookup would have to guess") {
+            shared.shouldBeEmpty()
+        }
+    }
+
+    @Test
     fun `every documented example actually evaluates to its documented answer`() {
-        // The strongest of the eight: the example is not just consistent between two files, it is
+        // The strongest arm: the example is not just consistent between two files, it is
         // TRUE. A kind whose behaviour changes fails here even if somebody dutifully updated both
         // the doc and the declaration to match the new (wrong) answer.
         val wrong =
