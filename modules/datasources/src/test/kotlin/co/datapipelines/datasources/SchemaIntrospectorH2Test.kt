@@ -4,6 +4,8 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -94,20 +96,62 @@ class SchemaIntrospectorH2Test {
     }
 
     @Test
-    fun `an unknown table returns an empty list, not an error`() {
+    fun `an unknown table is the catalogued table_not_found - not an empty list`() {
+        // 123 §A: a table-addressed read names a table the namespace's listing does not
+        // contain — the refusal replaces the old match-nothing rule. H2's catalog is
+        // COMPLETE, so absence means the table does not exist (no "or cannot see it").
         wireDatasource()
 
-        introspector.columns("h2-test", "no_such_table") shouldBe emptyList()
+        val thrown = shouldThrow<DatapipelinesException> { introspector.columns("h2-test", "no_such_table") }
+
+        assertAll(
+            { thrown.code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND },
+            { thrown.message shouldContain "no_such_table" },
+            { thrown.message shouldContain "does not exist" },
+            { (thrown.message ?: "") shouldNotContain "cannot see it" },
+            { thrown.details["table"] shouldBe "no_such_table" },
+        )
     }
 
     @Test
-    fun `an unknown schema filter matches nothing rather than failing`() {
+    fun `an unknown table names the nearest listed table - the did-you-mean line`() {
+        h2.createStatement().use { it.execute("CREATE TABLE hvfhs_companies (id INT)") }
+        wireDatasource()
+
+        val thrown = shouldThrow<DatapipelinesException> { introspector.columns("h2-test", "HVFHV_COMPANIES") }
+
+        assertAll(
+            { thrown.code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND },
+            { thrown.message shouldContain "Did you mean 'HVFHS_COMPANIES'?" },
+            { thrown.details["suggestion"] shouldBe "HVFHS_COMPANIES" },
+        )
+    }
+
+    @Test
+    fun `a VIEW resolves as present - the resolver uses the dialect's full introspection table types`() {
+        h2.createStatement().use { st ->
+            st.execute("CREATE TABLE base_t (id INT)")
+            st.execute("CREATE VIEW base_v AS SELECT id FROM base_t")
+        }
+        wireDatasource()
+
+        introspector.columns("h2-test", "BASE_V").map { it.column.name.uppercase() } shouldContainExactly listOf("ID")
+    }
+
+    @Test
+    fun `an unknown schema filter matches nothing for listings but refuses on a table-addressed read`() {
+        // The filter philosophy survives for LISTINGS (tables with an unknown schema filter
+        // is an empty page); a table-ADDRESSED read in that same schema names a table the
+        // namespace's listing cannot contain, so the table refusal applies.
         h2.createStatement().use { it.execute("CREATE TABLE orders (id INT PRIMARY KEY)") }
         wireDatasource()
 
         assertAll(
             { introspector.tables("h2-test", schemaFilter = "no_such_schema").tables shouldBe emptyList() },
-            { introspector.columns("h2-test", "orders", schemaFilter = "no_such_schema") shouldBe emptyList() },
+            {
+                shouldThrow<DatapipelinesException> { introspector.columns("h2-test", "orders", schemaFilter = "no_such_schema") }
+                    .code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND
+            },
         )
     }
 
@@ -180,13 +224,14 @@ class SchemaIntrospectorH2Test {
     }
 
     @Test
-    fun `columns excludes the driver's system schemas`() {
-        // INFORMATION_SCHEMA.TABLES is a real system table H2 reports; a columns read must not
-        // return its rows even when the schema is named explicitly (the house rule: unknown /
-        // system schema matches nothing).
+    fun `a system-schema table resolves as not-found - the exclusion makes it invisible`() {
+        // INFORMATION_SCHEMA.TABLES is a real system table H2 reports; the system-schema
+        // floor excludes it from every listing, so a columns read naming it resolves as
+        // absent — the 123 §A refusal, not the old empty list.
         wireDatasource()
 
-        introspector.columns("h2-test", "TABLES", schemaFilter = "INFORMATION_SCHEMA") shouldBe emptyList()
+        shouldThrow<DatapipelinesException> { introspector.columns("h2-test", "TABLES", schemaFilter = "INFORMATION_SCHEMA") }
+            .code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND
     }
 
     @Test

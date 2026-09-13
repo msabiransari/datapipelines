@@ -3,8 +3,10 @@ package co.datapipelines.mcp
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.OrderByTerm
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SqlExecutionException
 import co.datapipelines.datasources.SqlRunner
+import co.datapipelines.datasources.isPermissionDenied
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -12,7 +14,7 @@ import io.modelcontextprotocol.spec.McpSchema
 private const val LIMIT_DEFAULT = 50
 
 /**
- * `datasources_preview_rows` (mcp-server.md §6.2.19, datasources.md §7B — 037 D). Scope:
+ * `datasources_preview_rows` (mcp-server.md §6.2.19, datasources.md §7A — 037 D). Scope:
  * `author`, like every tool that returns live data from a datasource connection.
  *
  * The agent's blindness this closes: *"there is no way agent can see the sample data from the
@@ -25,10 +27,17 @@ private const val LIMIT_DEFAULT = 50
  * utility in this repo and this round does not build one; the quoting IS the boundary). An
  * `order_by` entry is a `{column, direction}` object, never a free `"col DESC"` string (D1) —
  * a free string is an injection vector the quoting would then have to untangle.
+ *
+ * The table is RESOLVED before any statement runs (123 §A): the module's
+ * [SchemaIntrospector.resolveTable] raises `datasource.table_not_found` for an unknown table
+ * (naming the nearest listed table), and a present-but-unreadable table — the SELECT refused
+ * with a permission SQLSTATE — is mapped to `datasource.table_forbidden` at the [runningQuery]
+ * boundary.
  */
 class DatasourcesPreviewRowsTool(
     private val datasources: DatasourceRegistry,
     private val runner: SqlRunner,
+    private val introspector: SchemaIntrospector,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -39,7 +48,9 @@ class DatasourcesPreviewRowsTool(
                     "Without order_by the top-N is engine-arbitrary; pass order_by to see a chosen end of the " +
                     "data, e.g. direction DESC for the newest or largest rows. Read-only (SELECT); readonly " +
                     "datasources are valid targets. Values arrive wire-encoded: BIGINTEGER and BIGDECIMAL as " +
-                    "strings, temporal as fixed-width ISO forms.",
+                    "strings, temporal as fixed-width ISO forms. An unknown table is refused as " +
+                    "datasource.table_not_found naming the nearest listed table; a table the datasource's " +
+                    "credentials cannot read is datasource.table_forbidden.",
             schema =
                 """
                 {
@@ -76,7 +87,9 @@ class DatasourcesPreviewRowsTool(
         val orderBy = parseOrderBy(args)
         val limit = args.int("limit", default = LIMIT_DEFAULT, min = 1, max = LIMIT_DEFAULT)
         val gated = datasources.requireVisible(name, ctx)
-        return runningQuery(name) {
+        return runningQuery(name, table) {
+            // 123 §A: the module raises the unknown-table refusal — never the tool.
+            introspector.resolveTable(gated, table, args.string("schema"))
             runner
                 .previewTable(gated, table, args.string("schema"), orderBy, limit)
                 .let { page ->
@@ -132,9 +145,16 @@ class DatasourcesPreviewRowsTool(
  * sanctions driver text; the executor's own B1 bound applies). The `introspecting` precedent in
  * [DatasourceSchemaTools] catches only the first — previewing DATA can also fail AT the
  * statement, and that failure must be an `isError` envelope, never a JSON-RPC -32603.
+ *
+ * 123 §A: when [table] is passed (the preview-rows surface), a refusal whose cause chain is a
+ * permission SQLSTATE ([isPermissionDenied]) is the catalogued `datasource.table_forbidden`
+ * instead — the module's table resolution already said the table exists, so a permission
+ * refusal can only mean the datasource's credentials cannot read it. Callers without a
+ * resolved table (the node-execution tool) keep the plain query-failure mapping.
  */
 internal fun <T> runningQuery(
     name: String,
+    table: String? = null,
     block: () -> T,
 ): T =
     try {
@@ -147,6 +167,14 @@ internal fun <T> runningQuery(
             cause = e,
         )
     } catch (e: SqlExecutionException) {
+        if (table != null && (e.cause as? java.sql.SQLException)?.isPermissionDenied() == true) {
+            throw co.datapipelines.typesystem.DatapipelinesException(
+                code = PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
+                message = "Table '$table' exists but this datasource's credentials cannot read it.",
+                details = mapOf("datasource" to name, "table" to table),
+                cause = e,
+            )
+        }
         throw co.datapipelines.typesystem.DatapipelinesException(
             code = PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
             message = "The database refused the statement: ${e.message}",

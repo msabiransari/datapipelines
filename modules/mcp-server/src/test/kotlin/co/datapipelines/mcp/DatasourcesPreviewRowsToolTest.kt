@@ -28,8 +28,17 @@ import org.junit.jupiter.api.assertAll
 class DatasourcesPreviewRowsToolTest {
     private val datasources = mockk<DatasourceRegistry>()
     private val runner = mockk<SqlRunner>()
-    private val tool = DatasourcesPreviewRowsTool(datasources, runner)
+    private val introspector = mockk<co.datapipelines.datasources.SchemaIntrospector>()
+    private val tool = DatasourcesPreviewRowsTool(datasources, runner, introspector)
     private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.AUTHOR)
+
+    /** The module's table resolution (123 §A) — present, by default, in every happy-path test. */
+    @org.junit.jupiter.api.BeforeEach
+    fun stubResolution() {
+        every { introspector.resolveTable(any(), any(), any(), any()) } returns
+            co.datapipelines.datasources
+                .ResolvedTable(null, "public")
+    }
 
     private val gated =
         co.datapipelines.datasources.Datasource(
@@ -193,6 +202,53 @@ class DatasourcesPreviewRowsToolTest {
                 tool.call(McpArguments(mapOf("name" to "sample-trips", "table" to "trips")), ctx)
             }
         refused.code shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED
+    }
+
+    @Test
+    fun `an unknown table surfaces the module's table_not_found verbatim - and no statement runs`() {
+        // 123 §A: the refusal is raised by the MODULE's resolveTable, never by the tool — the
+        // tool's only job is to not swallow it (runningQuery catches only the two query
+        // families, so a DatapipelinesException passes through untouched).
+        every { datasources.getVisible("sample-trips", McpFixtures.WORKSPACE_ID) } returns gated
+        every { introspector.resolveTable(gated, "tripz", null, null) } throws
+            DatapipelinesException(
+                code = PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
+                message = "Table 'tripz' does not exist in namespace 'public'. Did you mean 'trips'?",
+                details = mapOf("datasource" to "sample-trips", "table" to "tripz", "suggestion" to "trips"),
+            )
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("name" to "sample-trips", "table" to "tripz")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Datasource.TABLE_NOT_FOUND },
+            { thrown.details["suggestion"] shouldBe "trips" },
+            { verify(exactly = 0) { runner.previewTable(any(), any(), any(), any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `a present table the credentials cannot read is table_forbidden`() {
+        // Resolution said PRESENT (the catalog lists the table); the SELECT then failed with a
+        // permission SQLSTATE — 123 §A's third state, 403 rather than a query failure.
+        every { datasources.getVisible("sample-trips", McpFixtures.WORKSPACE_ID) } returns gated
+        every { runner.previewTable(gated, "trips", null, any(), any()) } throws
+            SqlExecutionException(
+                "sample-trips",
+                java.sql.SQLException("ERROR: permission denied for table trips", "42501"),
+            )
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("name" to "sample-trips", "table" to "trips")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Datasource.TABLE_FORBIDDEN },
+            { thrown.message shouldBe "Table 'trips' exists but this datasource's credentials cannot read it." },
+        )
     }
 }
 

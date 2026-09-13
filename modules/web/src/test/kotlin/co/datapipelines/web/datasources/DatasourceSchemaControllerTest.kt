@@ -229,6 +229,31 @@ class DatasourceSchemaControllerTest {
     }
 
     @Test
+    fun `columns on an unknown table surfaces the module's table_not_found - 404 via the catalog`() {
+        // 123 §A: the introspector's resolver raises the refusal and the `introspecting`
+        // boundary passes a DatapipelinesException through untouched — web translates
+        // nothing; the code IS the same string, and the status mapping is the catalog's.
+        every { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orderrs", null, null) } throws
+            DatapipelinesException(
+                code = PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
+                message = "Table 'orderrs' does not exist in namespace 'public'. Did you mean 'orders'?",
+                details = mapOf("datasource" to "pg-prod", "table" to "orderrs", "suggestion" to "orders"),
+            )
+
+        val thrown = shouldThrow<DatapipelinesException> { controller.columns("pg-prod", "orderrs", schema = null) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Datasource.TABLE_NOT_FOUND },
+            { thrown.details["suggestion"] shouldBe "orders" },
+            {
+                co.datapipelines.web.api.ApiErrorCatalog
+                    .statusFor(thrown.code) shouldBe
+                    org.springframework.http.HttpStatus.NOT_FOUND
+            },
+        )
+    }
+
+    @Test
     fun `a connection failure during introspection is the catalogued datasource_unreachable`() {
         // A customer DB being down is not a server error: the introspector's
         // DatasourceUnreachableException (its lease boundary wraps BOTH the SQLException lease
@@ -280,6 +305,9 @@ class DatasourceSchemaControllerTest {
         // the '' sentinel to JDBC and silently reporting zero columns for an existing table.
         val meta = mockk<java.sql.DatabaseMetaData>()
         every { meta.searchStringEscape } returns "\\"
+        // columns() now resolves the table first (123 §A): the listing must contain it.
+        io.mockk.every { meta.getTables("app", null, "%", any<Array<String>>()) } answers
+            { co.datapipelines.web.tablesResultSet("app", "orders", schemaColumn = "TABLE_CAT") }
         val columnsRs = mockk<java.sql.ResultSet>(relaxed = true)
         every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
         every { columnsRs.next() } returns false

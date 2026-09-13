@@ -46,6 +46,12 @@ internal class TableStatsReader(
     private val lakeTables: LakeTableCatalog,
     private val lakeCache: LakeIntrospectionCache,
 ) {
+    /**
+     * The JDBC-path entry point. The caller ([SchemaIntrospector.tableStats]) has already
+     * RESOLVED the table (123 §A — an unknown table never reaches here); empty stats from this
+     * reader therefore mean exactly one thing: the table EXISTS and the catalog holds nothing
+     * for it. The LAKE branch keeps its own registry semantics.
+     */
     fun tableStats(
         datasource: Datasource,
         table: String,

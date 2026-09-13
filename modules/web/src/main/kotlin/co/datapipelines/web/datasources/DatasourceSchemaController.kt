@@ -25,7 +25,11 @@ import org.springframework.web.bind.annotation.RestController
  * projections the MCP tools use, so the two surfaces cannot drift), nothing more. An unknown
  * datasource name propagates the introspector's catalogued
  * `datasource.not_found` to [co.datapipelines.web.api.ApiExceptionHandler] (HTTP 404), and an
- * unknown table/schema filter is the introspector's empty list — "no results", not an error.
+ * unknown schema/namespace FILTER on a listing is the introspector's empty list — "no
+ * results", not an error. A table-ADDRESSED read (the columns endpoint) follows the 123 §A
+ * three-state rule: a table absent from the namespace's listing is the module's
+ * `datasource.table_not_found` (HTTP 404, naming the nearest listed table when one is close),
+ * which the `introspecting` boundary passes through untouched — this layer translates nothing.
  *
  * Workspace visibility (workspaces design §5.3) is enforced BEFORE the introspector runs:
  * a datasource bound to another workspace is `datasource.not_found` here too — by-name
@@ -99,7 +103,12 @@ class DatasourceSchemaController(
         )
     }
 
-    /** §7A — one table's columns with canonical types; empty when the table does not exist. */
+    /**
+     * §7A — one table's columns with canonical types. The read is table-ADDRESSED (123 §A):
+     * a table absent from the namespace's listing is `404 datasource.table_not_found`,
+     * naming the nearest listed table when one is close; an existing table with zero
+     * readable columns is a valid empty result.
+     */
     @GetMapping("/{name}/tables/{table}/columns")
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun columns(

@@ -69,17 +69,14 @@ class TableStatsH2Test {
     }
 
     @Test
-    fun `an unknown table answers empty stats, not an error`() {
+    fun `an unknown table is the catalogued table_not_found - not empty stats`() {
+        // 123 §A: the stats read is table-addressed, so the resolver's refusal replaces the
+        // old empty-stats rule. Empty stats remain valid for a table that EXISTS (an engine
+        // with no catalog stats for it) — the first test's zero-column-stats case.
         wireDatasource()
 
-        val stats = introspector.tableStats("h2-stats", "NO_SUCH_TABLE")
-
-        assertAll(
-            { stats.statsSource shouldBe "h2_information_schema" },
-            { stats.rowEstimate shouldBe null },
-            { stats.indexes shouldBe emptyList<IndexStats>() },
-            { stats.columns shouldBe emptyList<ColumnStats>() },
-        )
+        shouldThrow<DatapipelinesException> { introspector.tableStats("h2-stats", "NO_SUCH_TABLE") }
+            .code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND
     }
 
     @Test

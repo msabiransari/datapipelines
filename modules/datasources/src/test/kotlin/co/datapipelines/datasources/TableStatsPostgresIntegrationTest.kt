@@ -2,12 +2,14 @@ package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldEndWith
 import io.kotest.matchers.string.shouldNotStartWith
 import io.mockk.every
@@ -126,14 +128,16 @@ class TableStatsPostgresIntegrationTest {
     }
 
     @Test
-    fun `an unknown table answers empty stats against the named catalog, not an error`() {
-        val stats = introspector.tableStats(ds.name, "task107_no_such_table")
+    fun `an unknown table is the catalogued table_not_found - not empty stats`() {
+        // 123 §A: pg_catalog is complete, so the refusal asserts non-existence.
+        val thrown =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                introspector.tableStats(ds.name, "task107_no_such_table")
+            }
 
         assertAll(
-            { stats.statsSource shouldBe "pg_class" },
-            { stats.rowEstimate shouldBe null },
-            { stats.indexes shouldBe emptyList<IndexStats>() },
-            { stats.columns shouldBe emptyList<ColumnStats>() },
+            { thrown.code shouldBe DatasourceErrorCodes.TABLE_NOT_FOUND },
+            { thrown.message shouldContain "does not exist" },
         )
     }
 }

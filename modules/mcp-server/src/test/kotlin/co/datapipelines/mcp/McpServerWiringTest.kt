@@ -77,7 +77,7 @@ class McpServerWiringTest {
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
             DatasourcesGetTableStatsTool(introspector, datasources),
-            DatasourcesPreviewRowsTool(datasources, co.datapipelines.datasources.SqlRunner(datasources)),
+            DatasourcesPreviewRowsTool(datasources, co.datapipelines.datasources.SqlRunner(datasources), introspector),
             SqlProbeTool(datasources, co.datapipelines.datasources.SqlProbe(datasources)),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
