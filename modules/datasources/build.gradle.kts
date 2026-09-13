@@ -75,3 +75,15 @@ dependencyLocking {
     ignoredDependencies.add("com.oracle.database.jdbc:ojdbc11")
     ignoredDependencies.add("com.mysql:mysql-connector-j")
 }
+
+// `DialectChecklistDriftTest` reads docs/datasources.md §15 at runtime. Declared as a task
+// input so an edit to the checklist re-runs the test on an INCREMENTAL build: without this,
+// Gradle served a cached green for a checklist that had lost a row (measured 2026-09-13 —
+// the guard only went red under --rerun-tasks). The gate forces every task anyway; this is
+// for the developer's targeted run, which is where a stale green does its damage.
+tasks.named<Test>("test") {
+    inputs
+        .file(rootProject.file("docs/datasources.md"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("dialectChecklistSpec")
+}

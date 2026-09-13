@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.25 (frozen contract — additive-only changes after this point)
+**Status:** v2.26 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-09-11
@@ -1485,10 +1485,67 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 ---
 
+## 15. Adding a dialect — the checklist
+
+Every engine touches the same places, and a new one is added by walking this list top to bottom,
+not by grepping for the last one. The **code inventory** below is mechanical:
+`DialectChecklistDriftTest` (`modules/datasources`) lists every main Kotlin source file under
+the modules tree that names three or more of the six customer engines (`POSTGRES`, `MYSQL`, `ORACLE`, `MSSQL`,
+`SQLITE`, `DUCKDB`) and fails when one of them is missing here — so a new switch point cannot
+appear without appearing in this section. The other tables are maintained by hand; the test
+checks only that every path they name still exists.
+
+### 15.1 Code — per-dialect switch points (mechanical)
+
+| File | What a new dialect needs there |
+|---|---|
+| `modules/typesystem/src/main/kotlin/co/datapipelines/typesystem/Dialect.kt` | the enum value (a reserved name leaves the reserved list — enums.md §3) |
+| `modules/typesystem/src/main/kotlin/co/datapipelines/typesystem/TypeMappers.kt` | the ingress type mapper — the tables in [Type System §5](type-system.md#5-source-to-canonical-mapping-tables), measured against the real driver first (084 §A) |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/DialectAdapter.kt` | the contract every adapter must satisfy — a new per-dialect fact is a property HERE first (`introspectionTableTypes`, `introspectionSystemSchemas`, `namespaceShape`, …), so the compiler refuses an adapter that forgets it |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/DialectAdapters.kt` | the adapter: JDBC URL grammar, read-only semantics, the §7A introspection properties, `test` semantics |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/JdbcDrivers.kt` | the driver pin (also `libs.versions.toml`, the lockfiles and dependency-verification metadata, and deployment.md §3.5's driver matrix) |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/RefusedPropertyKeys.kt` | the driver properties a customer may not set (§3.2) |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/SqlStatementClassifier.kt` | how the dialect's statements are classified read-only vs writing (§7B/§7C probes) |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/TableStatsPlans.kt` | the catalog-statistics plan (§7C) or an explicit `stats_source: "none"` |
+| `modules/datasources/src/main/kotlin/co/datapipelines/datasources/ExplainPlanParser.kt` | the `EXPLAIN` shape the probe summarises (§7B), or an explicit "no plan" |
+| `modules/web/src/main/kotlin/co/datapipelines/web/ui/site/SitePages.kt` | the marketing copy's engine count and list (the site says what ships; two pages state a count — keep them equal) |
+
+Also code, but guarded by the compiler rather than by this list: every exhaustive `when (dialect)`
+(`modules/dag` `NodeRunner`, staging, the H2 mappers) goes red on a new enum value — add the branch
+the compiler names, never an `else`.
+
+### 15.2 Storage, deployment and demo
+
+| Place | Why |
+|---|---|
+| `modules/app/src/main/resources/db/migration/` | the `CHECK (dialect IN (…))` constraints on `datasources` and `templates` list the dialects by name (V14, V16) — a NEW migration widens them; never edit a shipped one |
+| `deploy/compose.yml` | a demo service + loader if the demo ships data on the new engine; `deploy/sample-data/` bootstrap files and `selftest.sh` |
+| `docs/deployment.md` §3.5 | the JDBC driver matrix (what the image ships) |
+
+### 15.3 Docs and the skill
+
+| Place | What changes |
+|---|---|
+| `docs/datasources.md` §3 (dialect table, properties per dialect), §4 (namespace shape), §7A–§7C tables | the dialect's row in each |
+| `docs/type-system.md` §5 | the mapping table |
+| `docs/enums.md` | the dialect enum + reserved list |
+| `docs/rest-api.md`, `docs/mcp-server.md` §6.2, `docs/metadata-db.md`, `docs/templates.md` | wherever a dialect list is spelled out — grep the enum name |
+| `.agents/skills/datapipelines/SKILL.md`, `.agents/skills/datapipelines/references/templates.md` | the dialect lists the agent reads (`.agents/skills/datapipelines/references/tools.md` is generated — run `:modules:mcp-server:skillArtifacts`) |
+
+### 15.4 Tests that enumerate dialects
+
+`DialectEnumSchemaTest` (MCP schema), `DialectAdaptersTest`, `DialectRefusalSetsTest`,
+`TypeMappersTest`, `MappingTableReachabilityTest`, `FallbackTypeMapperTest`, `TableStatsPlanTest`,
+`PoolSettingsTest`, `DatasourcesTemplateRenderTest`, `DatasourceDetailRenderTest` — each iterates
+`Dialect.entries` and will exercise the new value; the per-dialect integration suites
+(`SchemaIntrospector*Test`, `SqlProbe*Test`, `TableStats*IntegrationTest`, the `DialectProbe`
+fixture) get their Testcontainers twin.
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v2.26 | adding-a-dialect checklist | **New §15 — the checklist for a new engine**, with its code inventory made MECHANICAL: `DialectChecklistDriftTest` lists every source file naming ≥3 of the six customer engines and fails when one is absent from §15.1, and checks that every path §15 names exists. Written because the places were spread over 084 §B and memory, and 123 adds two more per-dialect facts (catalog completeness, permission SQLSTATEs). Status line re-synced (it said v2.25 above rows that ended at v2.24). |
 | 2026-09-10 | v2.24 | 109 §B dialect properties on the wire, the empty refusal, the LISTING probe | **§3.2 gains `properties.dialect` on reads** — non-secret keys only, filtered through the same §5.6 classification that validates `properties.jdbc` — with the per-dialect shown/hidden contract TABLE (the written contract the MCP twin shapes against). **The empty rule**: a declared dialect property with an empty/whitespace/null value is refused at register/update with `datasource.validation.property_empty` (§13.8 of the pipeline contract), never stored as `""`; bootstrap omits a field whose whole value is one `${VAR}` resolving set-but-empty (the shipped `catalog.ref:` placeholder's production posture), so the shipped defaults boot, while a literal `""` fails the boot with the key named. **§8.1's probe LISTS for LAKE**: a metadata version read proves nothing about object storage — the probe now runs one `glob()` LIST over the datasource's registered root (the declared `file://` catalog.ref, else the common directory prefix of the registered tables) through the probe's own connection, so a bucket policy allowing GET but denying `s3:ListBucket` (the T176 shape) FAILS with the engine text plus the one-line grant-ListBucket hint; with no globbable root the metadata read stays the whole proof. §3.3's `properties` row names all three namespaces. |
 | 2026-09-04 | v2.19 | 068 key-provider seam | **§7.1 — the stored credential gains a leading KEY-VERSION byte** (`version ‖ nonce ‖ ciphertext ‖ tag`); the pre-versioning layout is refused, never guessed, and a one-off migration prefixed `0x01` onto every shipped row. New **§7.1.1 the key provider seam**: `KeyProvider`/`DataKey`, the three invariants, the shipped `env` provider and a pointer to the new [key-providers.md](key-providers.md) implementation guide. **§7.3 rewritten** — rotation is now lazy-safe (add a version, flip `encryption-key-current`, rows migrate on their next password write) with the one `get_byte` query that says when an old key can be retired, and an explicit statement that no rotation endpoint or CLI ships. §7.2's `password_encrypted` bullet records the layout. |
 | 2026-09-04 | v2.18 | two-family demo split | **§8A.5 new** — the DuckDB read-only open mode, probed against the pinned duckdb_jdbc 1.5.5.1: the URL-param form is silently ignored, the connection-Properties form (`properties.jdbc.access_mode: READ_ONLY`) is honored (writes refused, and a read-only open of a missing file fails at connect — so loaders place the file before registration). `access_mode` is not in the DUCKDB §5.6 refusal set. Used by the trade family's `sample-trade-us` bootstrap entry. |
