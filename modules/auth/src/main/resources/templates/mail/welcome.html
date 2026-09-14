@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title th:text="${reset} ? 'Your datapipelines password was reset' : 'Your datapipelines account'">Your datapipelines account</title>
+</head>
+<!--
+  137 — the welcome / password-reset mail (auth.md §5A.8). Mail has its own minimal inline
+  style and no site CSS: a mail client renders none of the product's tokens, and the one
+  thing this message must do is be legible in every client.
+-->
+<body style="margin:0;padding:24px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1f2933;background:#ffffff;">
+  <p th:if="${reset}">An administrator reset your password on datapipelines.</p>
+  <p th:unless="${reset}">An account was created for you on datapipelines.</p>
+  <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:16px 0;">
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Sign in at</td><td style="padding:4px 0;"><a th:href="${loginUrl}" th:text="${loginUrl}" style="color:#0b5cad;">https://example</a></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Login</td><td style="padding:4px 0;" th:text="${email}">you@example.com</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Password</td><td style="padding:4px 0;font-family:SFMono-Regular,Menlo,Consolas,monospace;font-size:16px;" th:text="${oneTimePassword}">XXXX-XXXX-XXXX</td></tr>
+  </table>
+  <p>This password works once: the first login asks you to choose a new password.</p>
+  <p style="color:#52606d;">Questions? Write to <a th:href="'mailto:' + ${replyTo}" th:text="${replyTo}" style="color:#0b5cad;">help@example.com</a>.</p>
+</body>
+</html>

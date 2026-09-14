@@ -31,6 +31,7 @@ class LocalAuthConfiguration {
         auditLogger: AuditLogger,
     ): LocalAdminSeeder = LocalAdminSeeder(userRepository, userService, secretHasher, authProperties, auditLogger)
 
+    @Suppress("LongParameterList") // the wiring bean — every parameter is an @Bean reference (019 precedent)
     @Bean
     fun localPasswordService(
         userRepository: UserRepository,
@@ -39,5 +40,7 @@ class LocalAuthConfiguration {
         authCache: AuthCache,
         auditLogger: AuditLogger,
         authProperties: AuthProperties,
-    ): LocalPasswordService = LocalPasswordService(userRepository, userService, secretHasher, authCache, auditLogger, authProperties)
+        mailNotices: MailNotices,
+    ): LocalPasswordService =
+        LocalPasswordService(userRepository, userService, secretHasher, authCache, auditLogger, authProperties, mailNotices)
 }

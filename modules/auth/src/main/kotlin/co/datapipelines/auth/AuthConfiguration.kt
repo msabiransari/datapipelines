@@ -162,6 +162,7 @@ class AuthConfiguration {
         clientAddressResolver: ClientAddressResolver,
     ): AuditLogoutHandler = AuditLogoutHandler(auditLogger, clientAddressResolver)
 
+    @Suppress("LongParameterList") // the wiring bean — every parameter is an @Bean reference (019 precedent)
     @Bean
     fun oidcSuccessHandler(
         userService: UserService,
@@ -170,8 +171,9 @@ class AuthConfiguration {
         authProperties: AuthProperties,
         workspaceService: WorkspaceService,
         clientAddressResolver: ClientAddressResolver,
+        mailNotices: MailNotices,
     ): OidcSuccessHandler =
-        OidcSuccessHandler(userService, jwtService, auditLogger, authProperties, workspaceService, clientAddressResolver)
+        OidcSuccessHandler(userService, jwtService, auditLogger, authProperties, workspaceService, clientAddressResolver, mailNotices)
 
     @Bean
     fun scopeInterceptor(

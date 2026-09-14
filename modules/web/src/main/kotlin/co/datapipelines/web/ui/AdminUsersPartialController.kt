@@ -4,6 +4,10 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
+import co.datapipelines.auth.MailKind
+import co.datapipelines.auth.MailProperties
+import co.datapipelines.auth.MailSend
+import co.datapipelines.auth.MailSendRepository
 import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
@@ -31,6 +35,14 @@ import java.util.UUID
  * one [AdminUsersBrowseModel] the page also renders through (097 §C). This controller built
  * its own `<tr>`s as Kotlin strings until then — the pattern 091 deleted for the API-key
  * table.
+ *
+ * ## What the screen shows when mail is on (137, auth.md §5A.8)
+ * With `datapipelines.mail` configured ([MailProperties.enabled]) the create and reset
+ * responses no longer carry the one-time password: it went to the user, and two copies of a
+ * credential are one too many. The notice says "Emailed to <address>" with the claim row's
+ * outcome — `sending…` (polled through [mailStatus] until terminal), `sent`, or `failed` with
+ * the error. With mail off, the password is shown exactly as before. One branch, in the
+ * `partials/admin-user-saved` template.
  */
 @Controller
 class AdminUsersPartialController(
@@ -38,6 +50,8 @@ class AdminUsersPartialController(
     private val localPasswordService: LocalPasswordService,
     private val browse: AdminUsersBrowseModel,
     private val workspaces: WorkspaceService,
+    private val mailProperties: MailProperties,
+    private val mailSends: MailSendRepository,
 ) {
     @GetMapping("/partials/admin/users")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
@@ -80,27 +94,106 @@ class AdminUsersPartialController(
         if (email.isBlank() || !email.contains('@')) {
             return refusedToast(HttpStatus.BAD_REQUEST, "User not created", "A valid email address is required")
         }
-        return when (val result = localPasswordService.createLocalUser(email, displayName, currentPrincipal().userId)) {
+        val requestedWorkspace = workspace.trim().ifEmpty { null }
+        val result = localPasswordService.createLocalUser(email, displayName, currentPrincipal().userId, requestedWorkspace)
+        return when (result) {
             is LocalPasswordService.CreateResult.EmailTaken -> {
                 refusedToast(HttpStatus.CONFLICT, "User not created", "An account with that email already exists")
             }
 
             is LocalPasswordService.CreateResult.Success -> {
-                // Shape A: the row prepends, the one-time password stays in its PERSISTENT
-                // inline notice (§5.1's hard rule), and the toast only POINTS at it.
-                saved(
-                    model,
-                    result.user,
-                    oneTimePassword = result.oneTimePassword,
-                    variant = "success",
-                    title = "Local user created",
-                    message =
-                        result.user.email +
-                            " — the one-time password is shown once on this screen; pass it to the user out-of-band." +
-                            membershipNote(result.user.email, workspace.trim(), author, promoter, admin),
-                )
+                val note = membershipNote(result.user.email, workspace.trim(), author, promoter, admin)
+                if (mailProperties.enabled) {
+                    // 137: the credential went to the user. The notice carries the send's outcome
+                    // (the claim row exists already — it is written on the request thread).
+                    saved(
+                        model,
+                        result.user,
+                        oneTimePassword = null,
+                        mailNotice =
+                            mailNotice(
+                                result.user,
+                                MailKind.WELCOME,
+                                mailSends.find(result.user.id, MailKind.WELCOME, result.user.id),
+                            ),
+                        variant = "success",
+                        title = "Local user created",
+                        message = result.user.email + " — the one-time password was emailed to them." + note,
+                    )
+                } else {
+                    // Shape A: the row prepends, the one-time password stays in its PERSISTENT
+                    // inline notice (§5.1's hard rule), and the toast only POINTS at it.
+                    saved(
+                        model,
+                        result.user,
+                        oneTimePassword = result.oneTimePassword,
+                        mailNotice = null,
+                        variant = "success",
+                        title = "Local user created",
+                        message =
+                            result.user.email +
+                                " — the one-time password is shown once on this screen; pass it to the user out-of-band." +
+                                note,
+                    )
+                }
             }
         }
+    }
+
+    /**
+     * 137: the outcome of one notice, for the admin screen — polled by the `admin-user-mail`
+     * fragment while the claim is still pending. Read-only and super-admin gated like every
+     * partial here; it reveals whether a mail went, never what it said.
+     */
+    @GetMapping("/partials/admin/users/{userId}/mail/{kind}")
+    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    fun mailStatus(
+        model: Model,
+        @PathVariable userId: UUID,
+        @PathVariable kind: String,
+        @RequestParam act: UUID,
+    ): Any {
+        requireAdmin()
+        val mailKind =
+            MailKind.entries.firstOrNull { it.wire == kind }
+                ?: return refusedToast(HttpStatus.BAD_REQUEST, "Unknown notice", "Unknown mail kind: $kind")
+        val user = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        model.addAttribute("mailNotice", mailNotice(user, mailKind, mailSends.find(userId, mailKind, act)))
+        return "partials/admin-user-mail :: notice"
+    }
+
+    /** What the notice fragment renders: the recipient, the state, the error, and the poll URL while pending. */
+    data class MailNoticeView(
+        val to: String,
+        val kind: String,
+        val status: String,
+        val error: String?,
+        /** Non-null while the send is still pending — the fragment polls it. */
+        val pollUrl: String?,
+    )
+
+    private fun mailNotice(
+        user: co.datapipelines.auth.User,
+        kind: MailKind,
+        claim: MailSend?,
+    ): MailNoticeView {
+        val status = claim?.status
+        return MailNoticeView(
+            to = user.email,
+            kind = kind.wire,
+            status =
+                when (status) {
+                    null -> "none"
+                    MailSend.Status.PENDING -> "sending"
+                    MailSend.Status.SENT -> "sent"
+                    MailSend.Status.FAILED -> "failed"
+                },
+            error = claim?.error,
+            pollUrl =
+                claim?.takeIf { it.status == MailSend.Status.PENDING }?.let {
+                    "/partials/admin/users/${user.id}/mail/${kind.wire}?act=${it.actId}"
+                },
+        )
     }
 
     /**
@@ -205,7 +298,15 @@ class AdminUsersPartialController(
         // Shape A: the row keeps its #user-row outerHTML swap; the toast names the
         // action and the user it happened to.
         val (title, outcome) = actionOutcome(action)
-        return saved(model, updated, oneTimePassword = null, variant = "success", title = title, message = "${updated.email} $outcome")
+        return saved(
+            model,
+            updated,
+            oneTimePassword = null,
+            mailNotice = null,
+            variant = "success",
+            title = title,
+            message = "${updated.email} $outcome",
+        )
     }
 
     /**
@@ -218,12 +319,14 @@ class AdminUsersPartialController(
         model: Model,
         user: co.datapipelines.auth.User,
         oneTimePassword: String?,
+        mailNotice: MailNoticeView?,
         variant: String,
         title: String,
         message: String,
     ): String {
         browse.fillRow(model, user)
         model.addAttribute("oneTimePassword", oneTimePassword)
+        model.addAttribute("mailNotice", mailNotice)
         model.addAttribute("toastVariant", variant)
         model.addAttribute("toastTitle", title)
         model.addAttribute("toastMessage", message)
@@ -250,10 +353,24 @@ class AdminUsersPartialController(
     ): Any {
         val oneTime = localPasswordService.resetPassword(userId, actor) ?: return ResponseEntity.notFound().build<String>()
         val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        if (mailProperties.enabled) {
+            // 137: the reset's claim is the LATEST password_reset row — claimed on this very
+            // request thread, so it is the one the reset above minted.
+            return saved(
+                model,
+                updated,
+                oneTimePassword = null,
+                mailNotice = mailNotice(updated, MailKind.PASSWORD_RESET, mailSends.latest(userId, MailKind.PASSWORD_RESET)),
+                variant = "info",
+                title = "Password reset",
+                message = "The new one-time password was emailed to ${updated.email}.",
+            )
+        }
         return saved(
             model,
             updated,
             oneTimePassword = oneTime,
+            mailNotice = null,
             variant = "info",
             title = "Password reset",
             message = "The one-time password is shown once on this screen — pass it to the user out-of-band.",

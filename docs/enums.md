@@ -435,6 +435,13 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 | `semantics.recorded` | One learned fact was recorded. `details` carries `fact_id`, `kind`, `scope`, `datasource`, `refs` (as `table.column` keys), `trust`, `via` (`mcp` \| `session` \| `api_key`), `evidence` (whether a probe backed it), and `supersedes` / `source_pipeline_id` when present — never the fact text or the evidence SQL. The row the §9 acceptance counts ("facts recorded per session") |
 | `semantics.retired` | One learned fact was retired (`semantics_retire`). `details` carries `fact_id`, `kind`, `scope`, `datasource`, `reason`, and `recorded_in_this_workspace` — false when a workspace admin retired a DATASOURCE fact another workspace established |
 
+**Mail audit events** (same `audit_log` table, defined in [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice); emitted by `MailNotifier` off the request thread, after the transport answered — 137):
+
+| Value | Trigger |
+|---|---|
+| `mail.sent` | The transport accepted a notice — the welcome / password-reset mail to a user or the "New user" notice to sys-ops. `details` carries `kind` (`welcome` \| `password_reset` \| `new_user`), `to`, `act_id` (the `mail_sends` claim's act) and `message_id` (the `Message-ID` it went out under). NEVER the body, NEVER the one-time password — the password exists in exactly one place, the message body handed to the transport |
+| `mail.failed` | The transport refused or failed a notice. `details` carries `kind`, `to`, `act_id` and `error` (the exception's class and message — a relay's refusal line, never a body). The `mail_sends` row carries the same error; the admin screen shows it |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -584,6 +591,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.10 | 137 mail notices | §15 gains the **mail audit events** sub-table: `mail.sent` / `mail.failed` (`MailAuditEvents`, drift-guarded by `MailAuditEventsSpecDriftTest`) — kind, recipients, act and Message-ID or error in `details`; never a body, never a password. |
 | 2026-09-09 | v1.9 | T202 node query timeout | §17's 504 row gains `pipeline.node.query_timeout`. |
 | 2026-09-08 | v1.8 | 091 keys | §8A `ApiKeyKind` gains **`server`** — the promotion peer's credential as a stored key (auth.md §7.7, V15). Three kinds now, and the note that a scopeless kind is refused everywhere off its own family, `/mcp` and the UI pages included. |
 | 2026-09-02 | v1.7 | 046 typed templates | New §6A `TemplateType` (`sql` \| `html`, template-hierarchy-design §5) beside `TemplateEngine` — a template's kind, chosen at create and immutable across versions; the cross-reference table gains its row. |

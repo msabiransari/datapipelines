@@ -90,7 +90,7 @@ Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context f
 
 | Module | Key log events |
 |---|---|
-| `auth` | login success/failure, key issuance/revocation (via audit log, not general log) |
+| `auth` | login success/failure, key issuance/revocation (via audit log, not general log); the §3.4B mail events |
 | `datasources` | datasource registered/updated/deleted, pool built/retired/reconciled, connection acquisition failures, and the §3.4A pool hard-close WARN |
 | `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings |
 | `dag` | execution started/completed/failed, node started/completed/failed, cancellation |
@@ -110,6 +110,20 @@ A datasource that is edited or deleted has its pool RETIRED, not closed on the s
 | INFO | `datasource.pool_reconcile_on_subscribe` | The invalidation channel was (re)subscribed and the reconcile ran | `channel`, `retired` |
 
 **The WARN is the one to alert on.** Every other line is the mechanism working. `pool_hard_closed` means a statement outlived `datapipelines.datasources.retire-ceiling-seconds` ([Configuration §3.26](configuration.md#326-datasource-pools)) — either a genuinely hung query, or a ceiling set below what this deployment's statements really take. It carries the number of connections it took down, which the matching `datapipelines.datasource.pool.hard_closed` counter deliberately does not (an unbounded tag value, §4.3).
+
+#### 3.4B The mail events (137)
+
+The notices of [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice) leave two kinds of trace: the AUDIT rows `mail.sent` / `mail.failed` ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), and these structured log lines. None carries an address beyond its domain, and none ever carries a body.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `mail.configured` / `mail.disabled` | Boot: which `MailSender` was wired — the transport (host, port, starttls, the from DOMAIN, the ops-to COUNT, whether a stream header is set) or the no-op | see When |
+| INFO | `mail.skipped` | Mail is not configured and a notice was asked for — one line per skipped send, the no-op sender's only output | `kind`, `domain` |
+| DEBUG | `mail.already_claimed` | A second attempt for one message identity found the claim row and stopped — the "never twice" rule working | `kind`, `user`, `act` |
+| **WARN** | **`mail.send_failed`** | **The transport refused or failed a notice; the same error is on the `mail_sends` row and in the `mail.failed` audit row** | `kind`, `user`, `error` |
+| WARN | `mail.dispatch_failed` | The pool task itself threw (a claim-row update failed, not the transport) | `kind`, `user`, `error` |
+
+**`send_failed` is the one to alert on** — a welcome mail that failed is a user who cannot log in until an admin resets. The admin screen shows the failure too; this line is for the operator who watches logs rather than screens.
 
 ### 3.5 Log destination
 
@@ -361,5 +375,6 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.6 | 137 mail notices | New **§3.4B the mail events**: `mail.configured` / `mail.disabled` at boot, `mail.skipped` (mail off), `mail.already_claimed`, and the WARNs `mail.send_failed` / `mail.dispatch_failed`; domains and counts only, never an address or a body. `docs-audit.sh` check C now extracts `mail.*` log events from this section and `mail.*` audit events from Enums §15, so a misspelt name fails the audit. |
 | 2026-08-05 | v1.0 draft | initial draft | Initial observability spec sketch — logs, metrics, traces, health, audit log |
 | 2026-08-07 | v1.1 draft | consistency campaign | Applied [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.14. **[M]** §6 health payload/paths realigned to the canonical [rest-api §11.1](rest-api.md#111-health-check) — root-level `/health`,`/ready`,`/info`, top-level `version`, snake_case components `{database, redis, h2_factory}`, `diskSpace` removed with rationale. **[M]** Stale metrics purged: `auth.login.attempts{outcome=locked}` dropped (OIDC-only, no local passwords, no lockout) with outcomes remapped to the auth §10.1 audit events; `datapipelines.http.server.requests` → `http.server.requests` (Spring Boot's own unprefixed metric) plus a rule on which metrics keep framework names. **[D9]** Result/SSE/idempotency metrics added: `result.bytes_written`, `result.writes{outcome}`, `result.cursor.reads{format,outcome}`, `result.expiries`, `result.size`, `sse.streams.active`, `sse.stream.duration{close_reason}`, `idempotency.cache.hits`, `idempotency.conflicts`. **[D7]** `executions.aborted{reason}` registered (matches dag-executor §15.3). **[M]** §8.1 `errors.total{class, method}` → `{domain}`, with §4.3 gaining the normative closed-set tag rule that forbids code-shape tags. **[M]** §9 rewritten as Configuration & Redaction: local YAML block deleted (config keys now referenced from [configuration.md §3.14](configuration.md#315-observability) per **D8**), redaction respecified as a non-optional two-layer mechanism (JSON-encoder field filter + `MessageConverter`) over an explicit sensitive-key list, plus §9.3 forbidding `jdbc_url`/credentials in error `details` across SSE, REST and MCP. **[D10]** `X-Correlation-Id` → `DP-Correlation-Id`. **[M]** Correlation propagation past the HTTP boundary made normative — echoed in every SSE event payload, `_meta` on MCP results ([mcp-server §6.3](mcp-server.md#63-tool-result-schema)). **[M]** Cross-ref fixed: audit log → [auth §10](auth.md#10-audit-log) (was §9). Draft status kept honest: dashboards/alerting/SLOs still to be elaborated, but §3.3, §4.1/§4.3, §6 and §9.2 are marked normative (§1). |

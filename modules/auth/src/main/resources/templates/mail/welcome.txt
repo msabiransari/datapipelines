@@ -1,0 +1,9 @@
+[# th:if="${reset}"]An administrator reset your password on datapipelines.[/][# th:unless="${reset}"]An account was created for you on datapipelines.[/]
+
+Sign in at: [(${loginUrl})]
+Login:      [(${email})]
+Password:   [(${oneTimePassword})]
+
+This password works once: the first login asks you to choose a new password.
+
+Questions? Write to [(${replyTo})].

@@ -150,7 +150,7 @@ class SystemActorProvisioningIntegrationTest {
         // Falsification: the two refusals above must be caused by the reserved identity, not by
         // a broken fixture that makes every reset return null.
         val service = service()
-        val ordinary = service.findOrCreateByEmail("bob@example.com", "Bob", null, "google", "bob-sub")
+        val ordinary = service.findOrCreateByEmail("bob@example.com", "Bob", null, "google", "bob-sub").user
         val passwords = passwordService(service)
 
         passwords.resetPassword(ordinary.id, actorId = ordinary.id) shouldNotBe null

@@ -21,6 +21,16 @@ class UserService(
     private val auditLogger: AuditLogger,
 ) {
     /**
+     * The §4.2 find-or-create's answer: the row, and whether THIS call inserted it. The
+     * OIDC callback reads [created] to send the sys-ops new-user notice on its create
+     * branch only (auth.md §5A.8) — a returning user's login sends nothing.
+     */
+    data class Provisioned(
+        val user: User,
+        val created: Boolean,
+    )
+
+    /**
      * Find-or-create by email (auth.md §4.2). On an existing account the OIDC
      * identity is (re)linked.
      *
@@ -29,6 +39,10 @@ class UserService(
      * (`auth.user.admin_revoked`) this path never re-grants it. Re-instating admin is
      * an explicit administrative operation ([grantAdmin]), not a side effect of
      * logging in.
+     *
+     * Returns [Provisioned] so the caller knows which branch ran: `created` is true exactly
+     * when this call's insert won. The loser of the two-replica first-login race (below)
+     * answers `created = false` — the winner's callback already announced the row.
      */
     fun findOrCreateByEmail(
         email: String,
@@ -36,20 +50,23 @@ class UserService(
         pictureUrl: String?,
         provider: String,
         providerSubject: String,
-    ): User {
+    ): Provisioned {
         val normalized = normalize(email)
         val existing = userRepository.findByEmail(normalized)
         if (existing != null) {
-            return linkIdentity(existing.id, displayName, pictureUrl, provider, providerSubject)
+            return Provisioned(linkIdentity(existing.id, displayName, pictureUrl, provider, providerSubject), created = false)
         }
 
         return try {
-            createUser(
-                normalizedEmail = normalized,
-                displayName = displayName,
-                pictureUrl = pictureUrl,
-                provider = provider,
-                providerSubject = providerSubject,
+            Provisioned(
+                createUser(
+                    normalizedEmail = normalized,
+                    displayName = displayName,
+                    pictureUrl = pictureUrl,
+                    provider = provider,
+                    providerSubject = providerSubject,
+                ),
+                created = true,
             )
         } catch (_: DuplicateKeyException) {
             // A user's two concurrent FIRST logins on different replicas both pass the
@@ -60,7 +77,7 @@ class UserService(
                 checkNotNull(userRepository.findByEmail(normalized)) {
                     "User $normalized lost the insert race but is absent on re-read"
                 }
-            return linkIdentity(winner.id, displayName, pictureUrl, provider, providerSubject)
+            Provisioned(linkIdentity(winner.id, displayName, pictureUrl, provider, providerSubject), created = false)
         }
     }
 

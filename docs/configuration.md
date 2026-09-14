@@ -432,7 +432,7 @@ Outbound mail (137, [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-
 
 **Cross-key rule:** mail on requires `datapipelines.auth.base-url` (§3.4) — the welcome mail carries the login URL, which is built from it and never from a request's origin ([Auth §5.2](auth.md#52-clientregistration-bean-built-at-startup)).
 
-**What the admin screen shows** follows from the derivation: with mail on, the create-user and reset-password actions no longer display the one-time password — it went to the user, and the screen says so with the send's outcome; with mail off they show it as before ([UI §4.12](ui-screens.md#412-admin-users)).
+**What the admin screen shows** follows from the derivation: with mail on, the create-user and reset-password actions no longer display the one-time password — it went to the user, and the screen says so with the send's outcome; with mail off they show it as before ([UI §4.12](ui-screens.md#412-admin-user-management-admin-scope-only)).
 
 ---
 

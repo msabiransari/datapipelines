@@ -3,6 +3,7 @@ package co.datapipelines.auth
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -28,6 +29,7 @@ class LocalPasswordServiceTest {
     private lateinit var audit: AuditLogger
     private lateinit var userService: UserService
     private lateinit var service: LocalPasswordService
+    private lateinit var notices: RecordingNotices
     private val hasher = Argon2SecretHasher()
 
     @BeforeAll
@@ -41,7 +43,8 @@ class LocalPasswordServiceTest {
         audit = AuditLogger(jdbc, ObjectMapper())
         val cache = AuthCache(AuthProperties())
         userService = UserService(users, cache, AuthProperties(), audit)
-        service = LocalPasswordService(users, userService, hasher, cache, audit, AuthProperties())
+        notices = RecordingNotices()
+        service = LocalPasswordService(users, userService, hasher, cache, audit, AuthProperties(), notices)
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
         jdbc.jdbcTemplate.execute("TRUNCATE audit_log")
     }
@@ -181,6 +184,50 @@ class LocalPasswordServiceTest {
     }
 
     @Test
+    fun `create hands the welcome and the new-user notice to the notifier, with the actor's email and the workspace`() {
+        val admin = users.insert("admin@company.com", "Admin", null, "google", "sub-admin", isAdmin = true)
+
+        val result = service.createLocalUser("New@Company.com", "New User", admin.id, workspace = "acme")
+
+        val created = (result as LocalPasswordService.CreateResult.Success)
+        notices.welcomes.single().let { (user, password) ->
+            user.id shouldBe created.user.id
+            password shouldBe created.oneTimePassword
+        }
+        notices.newUsers.single().let { (user, createdBy, workspace) ->
+            user.id shouldBe created.user.id
+            createdBy shouldBe "admin@company.com"
+            workspace shouldBe "acme"
+        }
+        notices.resets.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a refused create sends no notice`() {
+        localUser("a@company.com", OLD_PASSWORD)
+
+        service.createLocalUser("a@company.com", "Clone", ACTOR)
+        service.createLocalUser(UserService.SYSTEM_ACTOR_EMAIL, "System", ACTOR)
+
+        notices.welcomes.shouldBeEmpty()
+        notices.newUsers.shouldBeEmpty()
+    }
+
+    @Test
+    fun `reset hands the new one-time password to the notifier under a fresh act`() {
+        val user = localUser("a@company.com", OLD_PASSWORD)
+
+        val first = service.resetPassword(user.id, ACTOR).shouldNotBeNull()
+        val second = service.resetPassword(user.id, ACTOR).shouldNotBeNull()
+
+        notices.resets.map { it.second } shouldBe listOf(first, second)
+        notices.resets.map { it.first.id }.toSet() shouldBe setOf(user.id)
+        (notices.resets[0].third != notices.resets[1].third) shouldBe true
+        notices.welcomes.shouldBeEmpty()
+        notices.newUsers.shouldBeEmpty()
+    }
+
+    @Test
     fun `create through the one creation path still applies the bootstrap grant`() {
         // §4.4 fires at row creation on EVERY path — an admin who creates the
         // bootstrap address creates an admin, exactly as a first OIDC login would.
@@ -281,5 +328,35 @@ class LocalPasswordServiceTest {
         val ACTOR: UUID = UUID.randomUUID()
         const val OLD_PASSWORD = "the-old-password-1"
         const val NEW_PASSWORD = "the-new-password-1"
+    }
+}
+
+/** A REAL recording [MailNotices] — the suites read what the service handed over, never a strict mock. */
+internal class RecordingNotices : MailNotices {
+    val welcomes = mutableListOf<Pair<User, String>>()
+    val resets = mutableListOf<Triple<User, String, UUID>>()
+    val newUsers = mutableListOf<Triple<User, String, String?>>()
+
+    override fun welcome(
+        user: User,
+        oneTimePassword: String,
+    ) {
+        welcomes += user to oneTimePassword
+    }
+
+    override fun passwordReset(
+        user: User,
+        oneTimePassword: String,
+        resetId: UUID,
+    ) {
+        resets += Triple(user, oneTimePassword, resetId)
+    }
+
+    override fun newUser(
+        user: User,
+        createdBy: String,
+        workspace: String?,
+    ) {
+        newUsers += Triple(user, createdBy, workspace)
     }
 }

@@ -34,7 +34,9 @@ class UserServiceRaceTest {
 
         val result = service.findOrCreateByEmail(EMAIL, "Ada", null, "google", "sub-1")
 
-        result shouldBe winner
+        result.user shouldBe winner
+        // The loser of the race did not create the row — the winner's callback announces it.
+        result.created shouldBe false
         verify(exactly = 1) { users.updateIdentity(winner.id, "Ada", null, "google", "sub-1") }
     }
 

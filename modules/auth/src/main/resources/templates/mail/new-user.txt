@@ -1,0 +1,10 @@
+A new user was created on datapipelines.
+
+Email:      [(${email})][# th:if="${displayName != null}"]
+Name:       [(${displayName})][/]
+Provider:   [(${provider})]
+Created by: [(${createdBy})]
+Workspace:  [(${workspace != null} ? ${workspace} : 'none')]
+When:       [(${at})]
+
+Admin → Users: [(${adminUsersUrl})]

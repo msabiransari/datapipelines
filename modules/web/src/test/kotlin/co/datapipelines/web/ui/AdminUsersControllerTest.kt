@@ -4,6 +4,10 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
+import co.datapipelines.auth.MailKind
+import co.datapipelines.auth.MailProperties
+import co.datapipelines.auth.MailSend
+import co.datapipelines.auth.MailSendRepository
 import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
@@ -139,8 +143,27 @@ class AdminUsersPartialControllerTest {
     private val userService = mockk<UserService>()
     private val localPasswordService = mockk<LocalPasswordService>()
     private val workspaceService = mockk<WorkspaceService>(relaxed = true)
+    private val mailSends = mockk<MailSendRepository>()
     private val partialController =
-        AdminUsersPartialController(userService, localPasswordService, AdminUsersBrowseModel(userService), workspaceService)
+        AdminUsersPartialController(
+            userService,
+            localPasswordService,
+            AdminUsersBrowseModel(userService),
+            workspaceService,
+            MailProperties(),
+            mailSends,
+        )
+
+    /** The same controller with mail ON (137): the credential goes to the user, not the screen. */
+    private val mailOnController =
+        AdminUsersPartialController(
+            userService,
+            localPasswordService,
+            AdminUsersBrowseModel(userService),
+            workspaceService,
+            MailProperties(host = "smtp.example.com", from = "dp@example.com"),
+            mailSends,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -209,7 +232,17 @@ class AdminUsersPartialControllerTest {
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
             ).withRoles()
         model.asMap().forEach { (k, v) -> context.setVariable(k, v) }
-        return engine.process(view, context)
+        // A `template :: fragment` view name (the mail-status partial) renders that fragment alone,
+        // as Spring's Thymeleaf view resolver would.
+        val fragment = view.substringAfter(" :: ", missingDelimiterValue = "").trim()
+        return if (fragment.isEmpty()) {
+            engine.process(
+                view,
+                context,
+            )
+        } else {
+            engine.process(view.substringBefore(" :: ").trim(), setOf(fragment), context)
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -297,7 +330,7 @@ class AdminUsersPartialControllerTest {
     @Test
     fun `create local user with the optional workspace also adds the membership - one act, no invitation`() {
         authenticate()
-        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId, "acme") } returns
             LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
         every {
             workspaceService.addMember(
@@ -334,7 +367,7 @@ class AdminUsersPartialControllerTest {
     @Test
     fun `create local user whose optional workspace add is refused keeps the user row and says so`() {
         authenticate()
-        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId, "gone") } returns
             LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
         // The controller passes sampleUser()'s email — the freshly created row's.
         every { workspaceService.addMember(any(), "gone", "user@example.com", any()) } throws
@@ -440,5 +473,105 @@ class AdminUsersPartialControllerTest {
         html shouldContain "hx-swap-oob=\"beforeend:#toast\""
         val toastBody = html.substringAfter("beforeend:#toast")
         toastBody shouldNotContain "WXYZ-2345-ABCD" // the secret stays in the inline notice only
+    }
+
+    // ---- 137: what the screen shows when mail is ON --------------------------------
+
+    private fun claim(
+        kind: MailKind,
+        status: MailSend.Status,
+        actId: UUID = userId,
+    ) = MailSend(
+        id = UUID.randomUUID(),
+        userId = userId,
+        kind = kind,
+        actId = actId,
+        recipient = "user@example.com",
+        claimedAt = Instant.EPOCH,
+        sentAt = if (status == MailSend.Status.SENT) Instant.EPOCH else null,
+        messageId = if (status == MailSend.Status.SENT) "<m@dp>" else null,
+        error = if (status == MailSend.Status.FAILED) "MailSendException: relay refused" else null,
+    )
+
+    @Test
+    fun `with mail on, create shows emailed-to with the claim's outcome and never the password`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+        every { mailSends.find(userId, MailKind.WELCOME, userId) } returns claim(MailKind.WELCOME, MailSend.Status.SENT)
+
+        val html = render(mailOnController.createLocalUser(model, "new@example.com", "New"))
+
+        html shouldNotContain "ABCD-EFGH-JKLM"
+        html shouldContain "admin-notice"
+        html shouldContain "Emailed to"
+        html shouldContain "user@example.com"
+        html shouldContain "sent"
+        html shouldNotContain "hx-get" // terminal: no poll
+        val toastBody = html.substringAfter("beforeend:#toast")
+        toastBody shouldNotContain "ABCD-EFGH-JKLM"
+    }
+
+    @Test
+    fun `with mail on, a pending claim polls the mail-status partial and a failed one shows the error`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+        every { mailSends.find(userId, MailKind.WELCOME, userId) } returns claim(MailKind.WELCOME, MailSend.Status.PENDING)
+
+        val pending = render(mailOnController.createLocalUser(model, "new@example.com", "New"))
+
+        pending shouldContain "hx-get=\"/partials/admin/users/$userId/mail/welcome?act=$userId\""
+        pending shouldContain "sending"
+        pending shouldNotContain "ABCD-EFGH-JKLM"
+
+        every { mailSends.find(userId, MailKind.WELCOME, userId) } returns claim(MailKind.WELCOME, MailSend.Status.FAILED)
+        every { userService.snapshot(userId) } returns sampleUser()
+        model.clear()
+        val failed = render(mailOnController.mailStatus(model, userId, "welcome", userId))
+
+        failed shouldContain "failed"
+        failed shouldContain "relay refused"
+        failed shouldNotContain "hx-get"
+    }
+
+    @Test
+    fun `with mail on, reset shows the LATEST reset's outcome, not the password`() {
+        authenticate()
+        every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
+        every { userService.snapshot(userId) } returns sampleUser()
+        val resetId = UUID.randomUUID()
+        every { mailSends.latest(userId, MailKind.PASSWORD_RESET) } returns
+            claim(MailKind.PASSWORD_RESET, MailSend.Status.PENDING, actId = resetId)
+
+        val html = render(mailOnController.toggle(model, userId, "reset-password"))
+
+        html shouldNotContain "WXYZ-2345-ABCD"
+        html shouldContain "Emailed to"
+        html shouldContain "hx-get=\"/partials/admin/users/$userId/mail/password_reset?act=$resetId\""
+    }
+
+    @Test
+    fun `with mail off, create and reset show the password exactly as before`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+
+        val html = render(partialController.createLocalUser(model, "new@example.com", "New"))
+
+        html shouldContain "ABCD-EFGH-JKLM"
+        html shouldNotContain "Emailed to"
+    }
+
+    @Test
+    fun `the mail-status partial for an unknown claim says nothing was sent and does not poll`() {
+        authenticate()
+        every { mailSends.find(userId, MailKind.WELCOME, userId) } returns null
+        every { userService.snapshot(userId) } returns sampleUser()
+
+        val html = render(mailOnController.mailStatus(model, userId, "welcome", userId))
+
+        html shouldContain "no send was recorded"
+        html shouldNotContain "hx-get"
     }
 }

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title th:text="'New user: ' + ${email} + ' (' + ${provider} + ')'">New user</title>
+</head>
+<!-- 137 — the sys-ops "New user" notice (auth.md §5A.8). Never a credential; own inline style. -->
+<body style="margin:0;padding:24px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1f2933;background:#ffffff;">
+  <p>A new user was created on datapipelines.</p>
+  <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:16px 0;">
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Email</td><td style="padding:4px 0;" th:text="${email}">you@example.com</td></tr>
+    <tr th:if="${displayName != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Name</td><td style="padding:4px 0;" th:text="${displayName}">Ada</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Provider</td><td style="padding:4px 0;" th:text="${provider}">local</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Created by</td><td style="padding:4px 0;" th:text="${createdBy}">admin@example.com</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Workspace</td><td style="padding:4px 0;" th:text="${workspace != null} ? ${workspace} : 'none'">none</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">When</td><td style="padding:4px 0;" th:text="${at}">2026-01-01T00:00:00Z</td></tr>
+  </table>
+  <p><a th:href="${adminUsersUrl}" th:text="${adminUsersUrl}" style="color:#0b5cad;">https://example/admin/users</a></p>
+</body>
+</html>

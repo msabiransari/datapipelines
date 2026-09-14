@@ -110,13 +110,14 @@ class BootstrapActorProvisioningIntegrationTest {
         val actor = service.provisionBootstrapActor()
 
         val linked =
-            service.findOrCreateByEmail(
-                email = "Sample-Admin@Example.COM",
-                displayName = "Alice Admin",
-                pictureUrl = "https://pictures.example.com/alice",
-                provider = "google",
-                providerSubject = "google-sub-1",
-            )
+            service
+                .findOrCreateByEmail(
+                    email = "Sample-Admin@Example.COM",
+                    displayName = "Alice Admin",
+                    pictureUrl = "https://pictures.example.com/alice",
+                    provider = "google",
+                    providerSubject = "google-sub-1",
+                ).user
 
         linked.id shouldBe actor.id
         linked.provider shouldBe "google"
@@ -140,13 +141,14 @@ class BootstrapActorProvisioningIntegrationTest {
         service.findOrCreateByEmail(ADMIN_EMAIL, "Alice Admin", null, "google", "google-sub-1")
 
         val relogin =
-            service.findOrCreateByEmail(
-                ADMIN_EMAIL,
-                "A. Admin (work)",
-                "https://pictures.example.com/new",
-                "google",
-                "google-sub-1",
-            )
+            service
+                .findOrCreateByEmail(
+                    ADMIN_EMAIL,
+                    "A. Admin (work)",
+                    "https://pictures.example.com/new",
+                    "google",
+                    "google-sub-1",
+                ).user
 
         relogin.displayName shouldBe "A. Admin (work)"
         relogin.profilePictureUrl shouldBe "https://pictures.example.com/new"
@@ -158,7 +160,7 @@ class BootstrapActorProvisioningIntegrationTest {
         val service = service(bootstrapAdmin = null)
         service.findOrCreateByEmail("bob@example.com", "Bob", null, "google", "bob-sub")
 
-        val relogin = service.findOrCreateByEmail("bob@example.com", "Robert", null, "okta", "bob-okta")
+        val relogin = service.findOrCreateByEmail("bob@example.com", "Robert", null, "okta", "bob-okta").user
 
         relogin.displayName shouldBe "Robert"
         relogin.provider shouldBe "okta"
@@ -170,7 +172,7 @@ class BootstrapActorProvisioningIntegrationTest {
     @Test
     fun `the admin logging in BEFORE registration is the same single grant - provisioning then adds nothing`() {
         val service = service()
-        val fromLogin = service.findOrCreateByEmail(ADMIN_EMAIL, "Alice Admin", null, "google", "google-sub-1")
+        val fromLogin = service.findOrCreateByEmail(ADMIN_EMAIL, "Alice Admin", null, "google", "google-sub-1").user
         fromLogin.isAdmin shouldBe true
         adminGrantedEvents() shouldBe 1
 
