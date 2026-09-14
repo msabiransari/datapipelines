@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.11 (frozen contract — additive-only changes after this point)
+**Status:** v1.12 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-09-11
+**Last updated:** 2026-09-14
 
 ---
 
@@ -215,7 +215,7 @@ built-in would invite the belief that interpolation is now safe.
 ### 5.1 Rules
 
 - Versions are integers, monotonically increasing per template id.
-- Each version is immutable — `body`, `imports`, `dialect`, `engine` cannot be changed once stored.
+- A **RELEASED** (or DISCARDED) version is immutable — `body`, `imports`, `dialect`, `engine` cannot be changed once released; no write path touches a non-draft row's content, and the entity purge is refused unless the sole version is a DRAFT. The **sole DRAFT is overwritten in place** by `templates_update` / `PUT /templates` (117, §5.3): same id, same version number, new content and a new `body_hash`; `templates_purge_draft` deletes it. The render caches key on content, not on `{id, version}` alone (132, §8.3) — a draft you updated is the body that renders and runs next, on every instance, without a restart.
 - Deleting a template (soft delete) does not affect existing versions. Pipelines referencing deleted templates' versions continue to work until those pipelines are explicitly modified. **The delete is refused with `409 template.in_use` while any pipeline version pins any version of the template** (§5.4) — the refusal names who blocks; it does not change delete semantics.
 - Versions never reused, never renumbered.
 
@@ -417,8 +417,10 @@ There is no per-template type-check step: the context is the pipeline's paramete
 ### 8.3 Performance and caching
 
 - Parsed templates are cached in memory after first render. Cache capacity is `datapipelines.templates.cache-size` — see [Configuration §3.9](configuration.md#39-templates). This doc does not restate the default.
-- Cache key: `{template_id, version, resolved import closure versions}`.
-- Cache invalidated on template update by construction: a new version is a new cache key; the old entry remains valid for in-flight executions, which is exactly the immutability guarantee (§5.1).
+- Two cache tiers, both per workspace engine and both keyed on **content**, not on `{id, version}` alone (132):
+  - the resolved-version cache (`RepositoryTemplateRegistry`) holds only **non-DRAFT** rows — a RELEASED or DISCARDED version can never change, so an entry can never go stale; a **DRAFT is re-read on every lookup** (one indexed row read, ≈0.15 ms on a local Postgres, paid only while the version is a draft and edited) and is cached from the read that first sees it RELEASED;
+  - the parsed-template cache (`InterruptibleConfiguration`) is keyed `{id}@{version}#{body_hash}` — a draft overwritten in place changes its hash, misses, and is parsed afresh; a released version's hash never changes, so it keeps hitting. The loader's `lastModified` is the row's write stamp (`updated_at`, else `created_at`), so Freemarker's own staleness check would see the change too.
+- Invalidation is therefore by construction on every instance: nothing is evicted on write, no cross-instance bus is needed — another instance simply reads the draft's row too. An old entry remains valid for in-flight executions (an evicted or superseded tree is unshared). Before 132 both tiers were keyed on `{id}@{version}` under the pre-117 premise that every stored version is immutable; after the first render of a draft, every later `templates_render` and execution silently ran that first body until a restart.
 - Render itself is fast (<10ms typical for templates up to ~5KB body). The `render-timeout-ms` guard (§4.3) exists for pathological bodies, not for the normal path.
 
 ### 8.4 Named-parameter binding at execution (v1.6, 042)
@@ -660,6 +662,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.12 | 132 draft cache | §5.1's immutability rule is now exact: a RELEASED/DISCARDED version is immutable, the sole DRAFT is overwritten in place (117) and purged. §8.3 rewritten: both render-cache tiers key on content — the registry caches non-DRAFT rows only and re-reads a draft on every lookup; the parsed-template cache keys on `{id}@{version}#{body_hash}`; the loader's `lastModified` is the row's write stamp; invalidation is by construction on every instance, no bus. Fixes the 2026-09-14 acceptance defect where a rendered-then-updated draft kept rendering and executing its first body. |
 | 2026-09-11 | v1.11 | 117 templates_update | §5.3 gains the MCP twin: `templates_update` ([MCP §6.2.36](mcp-server.md#6236-templates_update)) — the same parse-only validation and the same `TemplateDraftService.write` the REST PUT makes, the `If-Match` hash carried as the required `expected_hash` argument, and the type-immutability refusal named on every surface. §9's CRUD table names the twin. `templates_purge_draft` is explicitly not the edit verb. |
 | 2026-09-08 | v1.10 | 099 draft-first (D55) | §5.2's lifecycle: **create lands version 1 as a DRAFT** (`POST /templates`, `templates_create`, the editor), `templates.current_version` is null until a human releases, and the release step is now shown in the sequence. A DRAFT pipeline may pin a DRAFT template version while iterating — unchanged; the pipeline's RELEASE is still what requires released pins (versioning §6). The import path (promotion, the seeders) lands RELEASED. |
 | 2026-09-06 | v1.10 | 078 contract gaps | §7.2's interpolation scan: the declared set gains every calculator output key (a CALCULATOR node's `context_key`, typed by its kind's output type), refused inside `${}` with `template.validation.parameter_interpolated` like a declared parameter — and additionally in a conditional's test (`<#if x??>`, `<#elseif x>`), because a derived value gating SQL structure is the same hole one directive earlier. Declared parameters in directive tests stay legal (042 B1 unchanged). Additive. |
