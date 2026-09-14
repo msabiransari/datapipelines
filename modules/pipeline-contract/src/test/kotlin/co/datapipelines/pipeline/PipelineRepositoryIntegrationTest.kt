@@ -1068,6 +1068,109 @@ class PipelineRepositoryIntegrationTest {
         }
     }
 
+    /**
+     * The race the test above may or may not win, forced: a raw connection holds the WINNER's
+     * draft row in an uncommitted transaction; the repository's first-write on another
+     * connection reads no committed draft, computes the same version number and blocks on the
+     * primary key until the holder commits — then its INSERT fails, and [mappingDraftRace]
+     * must turn that into `pipeline.version.conflict` carrying the winner's hash. Synchronised
+     * on the LOCK (Postgres reports the waiting backend), never on time: the branch runs on a
+     * 2-vCPU runner exactly as on a 96-thread box. T263 (2026-09-14): the racing test above
+     * serialises on CI every time, so this catch block was covered here and never there —
+     * 2512/2675 lines against a floor of 94%.
+     */
+    @Test
+    fun `a first-write that loses the draft race maps to version_conflict with the winner's hash - deterministically`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val winnerJson = serializer.write(v1.copy(description = "the winner's draft"))
+        val loserJson = serializer.write(v1.copy(description = "the loser's draft"))
+        val holder = dataSource().connection
+        holder.autoCommit = false
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val winnerHash = holdUncommittedDraft(holder, record.id, winnerJson)
+            val loser =
+                pool.submit<Throwable?> {
+                    runCatching {
+                        PipelineRepository(NamedParameterJdbcTemplate(dataSource()))
+                            .createDraft(WORKSPACE_ID, record.id, loserJson, v1Detail.bodyHash, owner, WriteSurface.SESSION)
+                    }.exceptionOrNull()
+                }
+            awaitLockWaiter(loser)
+            holder.commit()
+            val conflict = loser.get(CONCURRENCY_TIMEOUT_SECONDS, TimeUnit.SECONDS).shouldBeInstanceOf<DatapipelinesException>()
+            conflict.code shouldBe PipelineErrorCodes.Versioning.VERSION_CONFLICT
+            conflict.details["current_body_hash"] shouldBe winnerHash
+            conflict.details["current_status"] shouldBe "DRAFT"
+            countRows("pipeline_versions") shouldBe 2
+        } finally {
+            pool.shutdownNow()
+            runCatching { holder.rollback() }
+            holder.close()
+        }
+    }
+
+    /** Inserts the winner's DRAFT (version 2) on [holder] WITHOUT committing; returns its stored hash. */
+    private fun holdUncommittedDraft(
+        holder: java.sql.Connection,
+        pipelineId: UUID,
+        bodyJson: String,
+    ): String {
+        holder
+            .prepareStatement(
+                """
+                INSERT INTO pipeline_versions
+                    (pipeline_id, version, body_json, body_hash, status, created_by, updated_by, updated_at, created_via, updated_via)
+                VALUES (?, 2, CAST(? AS jsonb), encode(sha256(convert_to(CAST(? AS jsonb)::text, 'UTF8')), 'hex'),
+                        'DRAFT', ?, ?, NOW(), 'session', 'session')
+                """.trimIndent(),
+            ).use { ps ->
+                ps.setObject(1, pipelineId)
+                ps.setString(2, bodyJson)
+                ps.setString(3, bodyJson)
+                ps.setObject(4, owner)
+                ps.setObject(5, owner)
+                ps.executeUpdate()
+            }
+        return holder.prepareStatement("SELECT body_hash FROM pipeline_versions WHERE pipeline_id = ? AND version = 2").use { ps ->
+            ps.setObject(1, pipelineId)
+            ps.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1)
+            }
+        }
+    }
+
+    /**
+     * Waits until Postgres reports a backend blocked on a lock in this database — the loser,
+     * queued behind the holder. Polled from its OWN connection: inside an open transaction
+     * `pg_stat_activity` is a snapshot frozen for the transaction's life, so a poll on the
+     * holder's connection never sees the loser arrive (measured: a 30 s wait with the loser
+     * blocked the whole time and the view reporting nothing). A loser that finishes BEFORE
+     * blocking is the diagnosis, not a timeout: its outcome is reported.
+     */
+    private fun awaitLockWaiter(loser: java.util.concurrent.Future<Throwable?>) {
+        val deadline = System.currentTimeMillis() + CONCURRENCY_TIMEOUT_SECONDS * 1000
+        dataSource().connection.use { watcher ->
+            while (lockWaiters(watcher) == 0) {
+                if (loser.isDone) throw AssertionError("the loser finished before blocking on the winner's row: ${loser.get()}")
+                if (System.currentTimeMillis() > deadline) throw AssertionError("the loser never blocked on the winner's row")
+                Thread.sleep(LOCK_POLL_MILLIS)
+            }
+        }
+    }
+
+    /** Backends in this database currently waiting on a lock, read on [watcher] — a fresh snapshot per call outside any transaction. */
+    private fun lockWaiters(watcher: java.sql.Connection): Int =
+        watcher.createStatement().use { st ->
+            st
+                .executeQuery("SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'")
+                .use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+        }
+
     @Test
     fun `the draft service takes the write branch, checks names early, and maps stale bases to conflicts`() {
         val service = PipelineDraftService(repository, AuthoringGuard(true))
@@ -1512,6 +1615,7 @@ class PipelineRepositoryIntegrationTest {
 
         /** Generous: the assertion is about the outcome, not about how fast Postgres is. */
         const val CONCURRENCY_TIMEOUT_SECONDS = 30L
+        const val LOCK_POLL_MILLIS = 20L
     }
 }
 
