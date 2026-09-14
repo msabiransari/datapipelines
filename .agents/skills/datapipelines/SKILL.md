@@ -376,11 +376,16 @@ here.
 
 ## References — open one when you need it
 
-- **`references/pipeline-schema.md`** — writing or reading a pipeline body · **`references/node-types.md`** — wiring the DAG.
-- **`references/authoring-playbook.md`** — building anything non-trivial · **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
-- **`references/naming.md`** — choosing where a new pipeline or template lives · **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
-- **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database · **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
-- **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response · **`references/tools.md`** — every MCP tool, generated from the server's catalog at build time.
+- **`references/pipeline-schema.md`** — writing or reading a pipeline body.
+- **`references/node-types.md`** — wiring the DAG.
+- **`references/authoring-playbook.md`** — building anything non-trivial.
+- **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
+- **`references/naming.md`** — choosing where a new pipeline or template lives.
+- **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
+- **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.
+- **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
+- **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response.
+- **`references/tools.md`** — every MCP tool, generated from the server's catalog at build time.
 
 Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` and by the
 `docs_get` tool (`docs_list` names them), and a deployment serves them at
