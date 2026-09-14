@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/msabiransari/datapipelines/discussions
+    about: Ask a question, or think out loud about an idea, in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/msabiransari/datapipelines/security/advisories/new
+    about: Report a vulnerability privately — never as a public issue.
+  - name: Documentation
+    url: https://datapipelines.co/docs
+    about: The operations manual and the specifications, rendered from the version you run.

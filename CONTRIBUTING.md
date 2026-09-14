@@ -43,7 +43,24 @@ deliberately simple governance model:
 
 ## Proposing larger changes
 
-Open an issue first describing the problem and the intended approach.
+Open an issue first describing the problem and the intended approach — the
+[bug report](https://github.com/msabiransari/datapipelines/issues/new?template=bug_report.yml)
+and [feature request](https://github.com/msabiransari/datapipelines/issues/new?template=feature_request.yml)
+forms structure it, and questions and half-formed ideas belong in
+[Discussions](https://github.com/msabiransari/datapipelines/discussions).
 Significant surface changes (new endpoints, MCP tools, pipeline contract
 fields) are spec-first in this project — expect the discussion to start at
 the `docs/` level, not the code level.
+
+## Reporting during the beta
+
+The project is in public beta: the safety properties (lifecycle, keys and
+scopes, purge/discard/restore, promotion) are gated, and what a beta
+population finds is everything else. The reports that help most carry one of:
+
+- **a failing test** — or the exact steps that reproduce it on the demo stack;
+- **a correlation id** — the failed execution's `error.correlation_id`, the id
+  in the UI's error toast, or the one in the REST error envelope, so the run
+  can be found in the audit log;
+- **the pipeline JSON with secrets removed** — names and structure help;
+  passwords, connection strings and API keys never do.

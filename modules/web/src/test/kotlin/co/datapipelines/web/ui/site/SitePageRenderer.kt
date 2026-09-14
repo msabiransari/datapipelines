@@ -185,6 +185,10 @@ object SitePageRenderer {
         context.setVariable("publicOrigin", isPublicOrigin(serverName))
         context.setVariable("githubStars", GITHUB_STARS)
         context.setVariable("contactEmail", CONTACT_EMAIL)
+        // 127 — the same three the live advice adds for the beta line and the bug form.
+        context.setVariable("releaseStage", RELEASE_STAGE)
+        context.setVariable("releaseStageCta", RELEASE_STAGE_CTA)
+        context.setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
         return engine.process(view, context)
     }
 

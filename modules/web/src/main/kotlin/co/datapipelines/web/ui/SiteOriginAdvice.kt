@@ -2,6 +2,9 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.web.ui.site.CONTACT_EMAIL
 import co.datapipelines.web.ui.site.GITHUB_STARS
+import co.datapipelines.web.ui.site.RELEASE_STAGE
+import co.datapipelines.web.ui.site.RELEASE_STAGE_CTA
+import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import co.datapipelines.web.ui.site.isPublicOrigin
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
@@ -35,4 +38,16 @@ class SiteOriginAdvice {
 
     @ModelAttribute("contactEmail")
     fun contactEmail(): String = CONTACT_EMAIL
+
+    // 127 — the beta line (hero and site footer) and the "Report a problem" bug-form URL
+    // (the avatar menu, the docs index header) ride the same advice, so site chrome and
+    // app chrome read one constant and no template types a URL.
+    @ModelAttribute("releaseStage")
+    fun releaseStage(): String = RELEASE_STAGE
+
+    @ModelAttribute("releaseStageCta")
+    fun releaseStageCta(): String = RELEASE_STAGE_CTA
+
+    @ModelAttribute("reportProblemUrl")
+    fun reportProblemUrl(): String = REPORT_PROBLEM_URL
 }

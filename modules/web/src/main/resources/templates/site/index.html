@@ -92,6 +92,10 @@
           <p class="eyebrow">Open source · runs on your servers · your data stays where it is</p>
           <h1 id="hero-title" class="ds-display">Show your customers their data. No data team required.</h1>
           <p class="hero-sub">Describe the dataset in a sentence. An AI agent builds it against your real databases, you check the numbers, and your app calls the API — today. Embeddable dashboards ship next month.</p>
+          <!--/* 127 §B.1: the release stage, rendered from the ONE constant (SitePages.RELEASE_STAGE)
+               — never typed into a page; the CTA points at the FAQ's support section. */-->
+          <p class="install-label"><span th:text="${releaseStage}">Public beta — self-hosted, AGPL, actively developed.</span>
+            <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a></p>
           <div class="install">
             <!-- claim: docs/deployment.md Appendix A (the reference compose ./app.sh brings up),
                  docs/deployment.md Appendix B (the demo quickstart), docs/deployment.md §10 (free, AGPL-3.0) -->

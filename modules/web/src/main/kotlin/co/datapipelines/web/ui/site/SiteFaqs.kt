@@ -412,6 +412,42 @@ object SiteFaqs {
             ),
         )
 
+    /**
+     * 127 §B.3 — the beta's three report paths, one entry each, so every kind of report has
+     * exactly one home. The URLs render from the constants beside `CONTACT_EMAIL`
+     * ([REPORT_PROBLEM_URL], [DISCUSSIONS_URL], [ADVISORY_URL]) — never typed, so the links
+     * the whole project offers cannot drift apart. The footer links this group's anchor.
+     */
+    val SUPPORT: List<FaqEntry> =
+        listOf(
+            FaqEntry(
+                "Something broke — where do I report it?",
+                "Open a bug report on GitHub: $REPORT_PROBLEM_URL. The form asks for the version (your " +
+                    "deployment's /health build hash or the image tag), the surface it happened on, and the " +
+                    "correlation id from the failed execution, the error toast or the REST envelope — so the " +
+                    "report arrives carrying what a fix needs. What helps most during the beta is in " +
+                    "CONTRIBUTING.md; the scope the beta covers is docs/ROADMAP.md §2.2.",
+                "docs/ROADMAP.md §2.2",
+            ),
+            FaqEntry(
+                "Where do I ask a question or float an idea?",
+                "GitHub Discussions: $DISCUSSIONS_URL. Questions about running it, ideas that are not yet " +
+                    "feature requests, and show-and-tell all belong there — a concrete defect is a bug report " +
+                    "and a formed proposal is a feature request, both one click away on the same page. What is " +
+                    "already being built is the roadmap's known limitations, docs/ROADMAP.md §2.2, so check " +
+                    "there first.",
+                "docs/ROADMAP.md §2.2",
+            ),
+            FaqEntry(
+                "How do I report a security problem?",
+                "Privately, never as a public issue: open a private security advisory at $ADVISORY_URL, or " +
+                    "email the contact address in the footer if the advisory flow is not an option. What is in " +
+                    "scope and what reporters are asked is SECURITY.md in the repository, and the security " +
+                    "model a report is checked against is docs/auth.md.",
+                "docs/auth.md §8",
+            ),
+        )
+
     /** Every group, in reading order — the `/faq` page opens with the buyer's questions (115). */
     val ALL: List<Pair<String, List<FaqEntry>>> =
         listOf(
@@ -423,5 +459,6 @@ object SiteFaqs {
             "Tableau" to TABLEAU,
             "Pricing" to PRICING,
             "The semantic layer" to SEMANTIC_LAYER,
+            "Support and feedback" to SUPPORT,
         )
 }

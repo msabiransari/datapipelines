@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.43
+**Status:** v1.44
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-13 (124)
+**Last updated:** 2026-09-13 (127)
 
 ---
 
@@ -243,8 +243,13 @@ a search field **placeholder**, the light/dark toggle, and the avatar menu.
   The claim IS stored: `users.profile_picture_url`, written by `OidcSuccessHandler` through
   `UserRepository` on every login, and rendered on Settings since 025.
 - **The menu** carries the signed-in identity, Appearance, the theme swatches, Settings, API
-  keys and Log out (which keeps its POST form and `hx-boost="false"`). Escape, an outside
-  click, and **choosing any item** (a mode, a swatch, Settings, API keys, Log out) close it,
+  keys, **Report a problem** and Log out (which keeps its POST form and `hx-boost="false"`).
+  Report a problem (127) is the one external choice: the GitHub bug form, `target="_blank"
+  rel="noopener"`, never boosted, its URL read off the same `SitePages` constant the site
+  renders from (surfaced to every template by `SiteOriginAdvice`) — the app tab never
+  navigates. Escape, an outside
+  click, and **choosing any item** (a mode, a swatch, Settings, API keys, Report a problem,
+  Log out) close it,
   with focus returned to the avatar; arrow keys move focus within it without activating
   anything; the trigger carries `aria-expanded` and the popover `role="menu"`. (Until
   2026-09-13 only Escape and an outside click closed it: a theme change left the menu hanging,
@@ -1138,6 +1143,8 @@ Content: the packaged `docs/*.md` set (the exclusion policy — `docs/superpower
 
 **Two chromes, one body (073).** An anonymous request renders `docs/index-public` / `docs/doc-public` — the marketing header and footer, an SEO head (`<title>` = the doc's H1 + " — datapipelines.co docs", a meta description taken from the doc's first real paragraph, a canonical at `https://datapipelines.co/docs/{slug}`, `og:` tags and breadcrumbs) and no link into the signed-in app. A signed-in request keeps `docs/index` / `docs/doc` in the application chrome, unchanged: making the docs public must not evict a logged-in reader to the marketing site. `DocsController` chooses on the `authenticated` model attribute `UiWorkspaceAdvice` already fills, so there is one definition of "is there a principal". The meta description skips each spec's `**Status:** …` metadata block by design — it describes the file's bookkeeping, not its subject.
 
+The signed-in index's page header carries the app's second **Report a problem** link (127 — the first is §3.4's avatar-menu item): the same bug-form URL from the same constant, a new tab.
+
 ---
 
 ### 4.17 Promotion (055)
@@ -1438,6 +1445,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-13 | v1.44 | 127 beta feedback setup | §3.4 **the avatar menu gains "Report a problem"** — the GitHub bug form, `target="_blank" rel="noopener"`, the fourth `menuitem` between API keys and Log out, its URL read off the new `SitePages.REPORT_PROBLEM_URL` constant through `SiteOriginAdvice` (no template types it); the v1.42 close-on-choice rule covers it, and `AppShellBrowserTest` pins the item count, the arrow-key order, the new tab and the app tab not navigating. §4.16's signed-in docs index header carries the same link from the same constant. The lucide sprite gains the `bug` glyph (manifest subset + sha recorded). The public side is §4.15-adjacent: the beta line renders from `SitePages.RELEASE_STAGE` on the hero and in the site footer, `/roadmap` gains the known-limitations section (docs/ROADMAP.md §2.2 read the other way), and `/faq` gains the "Support and feedback" group the footer links as `#support-and-feedback`. |
 | 2026-09-13 | v1.43 | owner testing round, day 3 — the scrollbar | §5.1 **the skeleton never lands on body, and never in the history snapshot.** The owner's `/dashboard` document scrollbar (R11): `document.body`'s last child was a `.app-target-skeleton` row, static, 64 px past the viewport. Root cause: a boosted navigation's htmx target is `<body>` at `beforeRequest` (shell.js retargets at `beforeSwap`), so a navigation slower than the 150 ms arm appended the row to body — outside the `100dvh` shell; htmx snapshotted the page for history with the row in it (the snapshot is taken during the swap, before `afterRequest` removes the live one), and Back restored it as markup no tracker owned. `AppShellBrowserTest`'s guard could not see it: it measures plain loads, never a boosted-then-Back path. Fix in shell.js: `swapTargetFor` resolves a boosted request to `#app-main` at BOTH ends; `htmx:beforeHistorySave` strips live skeletons and busy marks; `htmx:historyRestore` and `pageshow` purge orphans (heals caches poisoned before the fix). Pinned: four `shell.test.mjs` cases through the real listeners; `ShellBusyBrowserTest` holds a boosted GET past the arm, asserts the row is inside main, settles, goes Back, and asserts no skeleton, no body busy mark and a zero-overflow document. |
 | 2026-09-13 | v1.42 | owner testing round, day 3 | §3.4 **the avatar menu closes on a choice.** It closed only on Escape and an outside click, so choosing a mode left it hanging over the page and Settings / API keys — boosted swaps of `#app-main` alone — carried it open onto the next screen (the settle path closes only the phone drawer). shell.js: any `[role="menuitem"]`, `[role="menuitemradio"]` or `.app-swatch` inside `#app-user-menu` closes the menu and returns focus to the avatar (`MENU_SELECTION`, unit-tested through the real body listener; `AppShellBrowserTest` chooses a mode and Settings and waits for `[hidden]`). The document-scroll guard now also walks both editors and a 1636×1850 window (owner report of a document scrollbar, 2026-09-13, not reproduced in the harness — see the ledger). |
 | 2026-09-13 | v1.41 | 124 site facts derived | **§4.15 — the site's numbers are derived, not typed** (owner ruling 2026-09-13: eight engines, not six — H2 is a legitimate engine, LAKE is dp-lake, tempdb implicit and never counted). New `SiteFacts` (engine count/list from `Dialect.entries`, tool counts from `McpToolCatalog`, calculator kinds, API-key kinds, learned-fact kinds/scopes, demo engine counts from the manifests) exposed to every template by `PublicPage.render`; `SitePages`/`SiteFaqs` titles, descriptions and answers are string templates over it, one `numberWord()` helper for prose. H2 and dp-lake gain `/mcp-server/{engine}` pages; `SiteEngineFactsGuardTest` tightened from containment to EQUALITY with `Dialect.entries`; new `SiteHandTypedCountsGuardTest` fails the build on a hand-typed count in any site template or `ui/site/` Kotlin file (red at base on 40 hits; green only when every count renders from `${facts…}`). |

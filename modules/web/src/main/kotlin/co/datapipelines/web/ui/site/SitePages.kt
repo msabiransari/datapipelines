@@ -33,6 +33,37 @@ const val GITHUB_STARS: Int = 0
  */
 const val CONTACT_EMAIL: String = "datapipelines.co@gmail.com"
 
+/**
+ * The project's GitHub addresses (127 §B.3) — the ONE spelling of each, beside
+ * [CONTACT_EMAIL] for the same reason: a support link typed into a template drifts, and
+ * the drift guard for a URL is the constant every render reads. The beta's three report
+ * paths (the bug form, Discussions, the private advisory flow) and the repo address the
+ * README-equivalents on the site point at all render from these.
+ */
+const val REPO_URL: String = "https://github.com/msabiransari/datapipelines"
+
+/** The issue tracker — questions and ideas go to [DISCUSSIONS_URL], vulnerabilities to [ADVISORY_URL]. */
+const val ISSUES_URL: String = "$REPO_URL/issues"
+
+/** The bug report ISSUE FORM — what "Report a problem" opens everywhere the app and the site offer it. */
+const val REPORT_PROBLEM_URL: String = "$ISSUES_URL/new?template=bug_report.yml"
+
+/** Questions and ideas (a GitHub repo switch the owner flips — the handback lists it). */
+const val DISCUSSIONS_URL: String = "$REPO_URL/discussions"
+
+/** The private vulnerability-reporting flow (likewise an owner-side repo switch). */
+const val ADVISORY_URL: String = "$REPO_URL/security/advisories/new"
+
+/**
+ * The release stage, in the one sentence every page that says it renders (127 §B.1): the
+ * homepage hero and the site footer. A string the templates read — never typed into a
+ * page, so the day the beta ends the wording changes HERE and nowhere else.
+ */
+const val RELEASE_STAGE: String = "Public beta — self-hosted, AGPL, actively developed."
+
+/** The call to action that follows [RELEASE_STAGE], linking to the support section on `/faq`. */
+const val RELEASE_STAGE_CTA: String = "Report what breaks."
+
 /** The host of [SITE_ORIGIN], without the scheme — what a request's server name is compared against. */
 val SITE_ORIGIN_HOST: String = SITE_ORIGIN.removePrefix("https://")
 

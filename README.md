@@ -8,6 +8,25 @@ discover your datasources, ground themselves in real schemas, author
 pipelines, run them, and read results — through the same governed, scoped
 API humans use.
 
+## Status
+
+**Public beta (September 2026).** The safety properties are production-standard
+— the pipeline lifecycle (draft, human release, immutable versions), API keys
+and the role-based scope matrix, purge/discard/restore, and promotion between
+deployments are all gated. What a beta population finds is the breadth: UI
+paths and agent behaviour on unusual data.
+
+- **Known limitations** — [the roadmap's list](https://datapipelines.co/roadmap#known-limitations)
+  (source: [`docs/ROADMAP.md` §2.2](docs/ROADMAP.md)).
+- **Bugs** — [open a bug report](https://github.com/msabiransari/datapipelines/issues/new?template=bug_report.yml);
+  the version from `/health` and the correlation id from the failed run make it actionable.
+- **Questions and ideas** — [GitHub Discussions](https://github.com/msabiransari/datapipelines/discussions).
+- **Security** — [a private advisory](https://github.com/msabiransari/datapipelines/security/advisories/new),
+  never a public issue ([SECURITY.md](SECURITY.md)).
+
+Licensed **AGPL-3.0** ([LICENSE](LICENSE)); contributors sign the one-time
+[CLA](CLA.md).
+
 ## What it does
 
 - **Declarative pipelines** — a pipeline is a JSON document: nodes, edges,
