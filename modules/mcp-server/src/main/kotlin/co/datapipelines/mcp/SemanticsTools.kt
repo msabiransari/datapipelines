@@ -44,9 +44,9 @@ class SemanticsRecordTool(
                     "session reads it beside the columns instead of probing again. Never record what introspection " +
                     "already returns (types, keys, comments). refs name the table(s) and column(s) the fact is about, " +
                     "structurally; every ref is checked against the live schema and an unknown one is refused. The " +
-                    "fact's text must agree with its refs: a table the text names but the refs do not carry — a " +
-                    "catalog table spelled exactly and missing from refs, or a near-miss of one — is refused as " +
-                    "semantics.ref_mismatch (the refusal names the nearest listed table). A lake " +
+                    "fact's text must agree with its refs: a catalog table the text names but refs omit is ADDED to " +
+                    "the stored refs for you (refs_added in the result names what was added); a near-miss of a listed " +
+                    "table is refused as semantics.ref_mismatch (the refusal names the nearest listed table). A lake " +
                     "table's ref takes schema as ONE dotted namespace string " +
                     "({\"schema\": \"lake.mart\", \"table\": \"events\"}), never a namespace array. Pass " +
                     "evidence_sql (the SELECT that showed the fact): it runs once, its first rows become " +
@@ -113,35 +113,54 @@ class SemanticsRecordTool(
                 supersedes = args.uuid("supersedes"),
             )
         val gated = datasources.requireVisible(name, ctx)
-        checkFactNamesRefs(gated, command)
-        return recording(name) { service.record(ctx.principal, gated, command, WriteSurface.MCP) }
+        val refsAdded = checkFactNamesRefs(gated, command)
+        val effective =
+            if (refsAdded.isEmpty()) {
+                command
+            } else {
+                command.copy(refs = command.refs + refsAdded)
+            }
+        val stored = recording(name) { service.record(ctx.principal, gated, effective, WriteSurface.MCP) }
+        return if (refsAdded.isEmpty()) stored else stored + ("refs_added" to refsAdded.map(::addedRefWire))
     }
 
     /**
-     * 125 §B — the text/refs agreement refusal, BEFORE the service runs. The catalog listing is
-     * read best-effort: a datasource with no listing (an empty lake registry) or one that cannot
-     * be read right now skips the check — the recorder's own live ref resolution stays the
-     * authority on what exists, and it surfaces the unreachable datasource on its own.
+     * 125 §B, kinded by 129 §B — the text/refs agreement check, BEFORE the service runs. The
+     * catalog listing is read best-effort: a datasource with no listing (an empty lake registry)
+     * or one that cannot be read right now skips the check — the recorder's own live ref
+     * resolution stays the authority on what exists, and it surfaces the unreachable datasource
+     * on its own. The returned refs — a catalog table the text names exactly and no ref carries,
+     * with the namespace the catalog reports and no column — are APPENDED to the stored refs;
+     * a near-miss throws the catalogued refusal.
      */
     private fun checkFactNamesRefs(
         datasource: co.datapipelines.datasources.Datasource,
         command: SemanticsService.RecordCommand,
-    ) {
-        val catalog =
+    ): List<FactRef> {
+        val tables =
             try {
-                introspector.tables(datasource).tables.map { it.name }
+                introspector.tables(datasource).tables
             } catch (
                 @Suppress("TooGenericExceptionCaught", "SwallowedException") e: Exception,
             ) {
-                return
+                return emptyList()
             }
-        FactRefMismatchCheck.check(
-            datasource.name,
-            listOfNotNull(command.fact, command.evidenceSummary),
-            command.refs,
-            catalog,
-        )
+        val missing =
+            FactRefMismatchCheck.check(
+                datasource.name,
+                listOfNotNull(command.fact, command.evidenceSummary),
+                command.refs,
+                tables.map { it.name },
+            )
+        return missing.map { name ->
+            val info = tables.first { it.name.equals(name, ignoreCase = true) }
+            FactRef(schema = info.namespace.joinToString(".").ifEmpty { null }, table = info.name, column = null)
+        }
     }
+
+    /** The added ref as it rides the result's `refs_added` — the same `{schema, table, column}` shape `refs` uses. */
+    private fun addedRefWire(ref: FactRef): Map<String, String?> =
+        mapOf("schema" to ref.schema, "table" to ref.table, "column" to ref.column)
 
     private fun scopeOf(token: String): LearnedFactScope = LearnedFactScope.valueOf(token)
 
