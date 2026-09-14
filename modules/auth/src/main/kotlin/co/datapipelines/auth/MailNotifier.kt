@@ -213,6 +213,15 @@ class MailNotifier(
             is SendOutcome.Sent -> {
                 sends.markSent(claim, outcome.messageId)
                 audit.log(MailAuditEvents.SENT, userId = userId, details = base + ("message_id" to outcome.messageId))
+                log.info(
+                    "event=mail.accepted kind={} domain={} message_id={}",
+                    message.kind.wire,
+                    message.to
+                        .map(MailMessage::domainOf)
+                        .distinct()
+                        .joinToString(","),
+                    outcome.messageId,
+                )
             }
 
             is SendOutcome.Failed -> {
