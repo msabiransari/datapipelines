@@ -264,11 +264,9 @@ here.
    the text names exactly and `refs` omit is ADDED for you (`refs_added` in the response), a
    near-miss is refused with the nearest name (`semantics.ref_mismatch`) — and a DATASOURCE-scope
    fact is table-wide: "in Q4 only A and B carry rows" is a pipeline description's job, not a fact's. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
-   `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours. When the question
-   leaves a rule to you — what counts as rainy, active, churned, late — the rule you chose is a
-   `definition`: record it with the probe that showed the distribution you chose over, and —
-   before choosing — read the listing's facts: a `definition` an earlier pipeline recorded is
-   the one to reuse.
+   `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours. A rule the
+   question leaves to you (what counts as rainy, active, late) is a `definition` — rule 13 says
+   when to record one and when to reuse one an earlier pipeline recorded.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
    `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous
