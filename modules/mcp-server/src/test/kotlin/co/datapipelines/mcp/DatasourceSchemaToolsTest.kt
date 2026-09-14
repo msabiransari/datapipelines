@@ -118,6 +118,58 @@ class DatasourceSchemaToolsTest {
         )
     }
 
+    /**
+     * 126 §B — a LAKE table's partition status rides on the LISTING, not only on the stats read:
+     * the registered table's column by name, an explicit null for the unpartitioned one (one file
+     * every read scans whole). The lookup is per (namespace, table) — an unpartitioned table must
+     * never inherit a partitioned sibling's column.
+     */
+    @Test
+    fun `126 - get_tables on a LAKE datasource states each table's partition status`() {
+        val lake = McpFixtures.datasource(name = "lake-one", dialect = co.datapipelines.typesystem.Dialect.LAKE)
+        val registry = FakeDatasourceRegistry(listOf(lake))
+        val catalog =
+            co.datapipelines.datasources.LakeTableCatalog {
+                listOf(
+                    co.datapipelines.datasources
+                        .LakeRegisteredTable(listOf("sales"), "orders_by_day", "parquet", "s3://b/orders/", partitionColumn = "order_date"),
+                    co.datapipelines.datasources
+                        .LakeRegisteredTable(listOf("sales"), "events", "parquet", "s3://b/events/part-0.parquet"),
+                )
+            }
+        val real = SchemaIntrospector(registry, catalog)
+
+        val payload =
+            DatasourcesGetTablesTool(real, registry)
+                .call(McpArguments(mapOf("name" to "lake-one")), authorCtx)
+
+        @Suppress("UNCHECKED_CAST")
+        val tables = (payload as Map<String, Any?>)["tables"] as List<Map<String, Any?>>
+        assertAll(
+            { tables[0]["name"] shouldBe "orders_by_day" },
+            { tables[0]["partition_column"] shouldBe "order_date" },
+            { tables[1]["name"] shouldBe "events" },
+            // Present and null, never absent and never the sibling's column.
+            { tables[1].containsKey("partition_column") shouldBe true },
+            { tables[1]["partition_column"] shouldBe null },
+        )
+    }
+
+    /** 126 §B — `partition_column` is a LAKE-only key; every other dialect's entries are unchanged. */
+    @Test
+    fun `126 - a non-lake datasource's table entries carry no partition key`() {
+        val page = TablesPage(listOf(TableInfo(listOf("public"), "orders", "TABLE")), truncated = false)
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, null) } returns page
+
+        val payload =
+            DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod"))
+                .call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+
+        @Suppress("UNCHECKED_CAST")
+        val tables = (payload as Map<String, Any?>)["tables"] as List<Map<String, Any?>>
+        tables.single().containsKey("partition_column") shouldBe false
+    }
+
     @Test
     fun `an unknown datasource is the catalogued not-found on every introspection tool`() {
         // A real introspector over a registry that knows no such name — the true failure path.

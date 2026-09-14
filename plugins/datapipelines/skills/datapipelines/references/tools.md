@@ -202,7 +202,7 @@ Hard-delete a template that has NEVER been released: the only version is a DRAFT
 
 Scope `read` · read-only
 
-List the datasources GRANTED to the key's pinned workspace. Visibility is the grant: a datasource registered elsewhere and not granted to this workspace is ABSENT, not hidden, and there is no such thing as a global datasource. Returns name, dialect, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, and connection metadata — never passwords.
+List the datasources GRANTED to the key's pinned workspace. Visibility is the grant: a datasource registered elsewhere and not granted to this workspace is ABSENT, not hidden, and there is no such thing as a global datasource. This is the learn-first read: every entry carries name, dialect, description, the readonly flag, the workspace that REGISTERED it (omitted for an instance-level one), granted:true, connection metadata — never passwords — AND `facts`, the datasource-wide learned facts earlier sessions recorded (its time window, whether it is a sample), each with `trust` and evidence — read them before you assume coverage. `datasources_get` is the same payload for ONE datasource — the refresh to call after recording facts with semantics_record.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -242,7 +242,7 @@ List the namespaces of a registered datasource by reading its live JDBC metadata
 
 Scope `author` · read-only
 
-List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. A table carries `facts` when agents have recorded table-level learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact marked stale or needs_review is a warning, not a truth. Read-only, for pipeline authoring.
+List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. A table carries `facts` when agents have recorded table-level learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact marked stale or needs_review is a warning, not a truth. For a LAKE datasource each table carries `partition_column` — a name means the table is hive-partitioned on it and a filter on that column prunes files; `null` means one unpartitioned file, every read scans it, and no filter prunes. Read-only, for pipeline authoring.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

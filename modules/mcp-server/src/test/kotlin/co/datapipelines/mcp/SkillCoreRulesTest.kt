@@ -86,6 +86,16 @@ class SkillCoreRulesTest {
         assertClause("never claims about your own process")
     }
 
+    /**
+     * 126 §A.3 — step 1's first sentence makes the listing the learn-first read: the facts
+     * arrive on the call the agent already makes, so "call `datasources_get` for every
+     * datasource" has nothing left to instruct.
+     */
+    @Test
+    fun `step 1 starts with the listing - the facts ride the call the agent already makes`() {
+        assertClause("`datasources_list` is your first call and your first read")
+    }
+
     /** Finds [clause] somewhere in SKILL.md and fails naming the line when absent. */
     private fun assertClause(clause: String) {
         val found = lines.indexOfFirst { it.contains(clause) }

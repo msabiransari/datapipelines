@@ -1,7 +1,11 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.auth.Scope
+import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.TableInfo
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -116,6 +120,56 @@ class DatasourceToolsTest {
             { get shouldNotContain "bound to another workspace" },
         )
     }
+
+    /**
+     * 126 §A — the listing is the learn-first read: every entry carries `facts`, the SAME array
+     * `datasources_get` serves for that datasource, and an empty store yields `facts: []`, never
+     * an absent key — "nothing recorded" and "not served" must read differently.
+     */
+    @Test
+    fun `126 - the listing carries each datasource's facts, empty array when none recorded`() {
+        val recorded = listOf(mapOf("kind" to "window", "fact" to "data covers 2024 only", "trust" to "observed"))
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
+            listOf(
+                McpFixtures.datasource(),
+                McpFixtures.datasource(name = "lake-one", dialect = Dialect.LAKE),
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val rows =
+            DatasourcesListTool(registry, enrichmentReturning(recorded))
+                .call(McpArguments(emptyMap()), readCtx) as List<Map<String, Any?>>
+
+        assertAll(
+            { rows[0]["facts"] shouldBe recorded },
+            { rows[1].containsKey("facts") shouldBe true },
+            { rows[1]["facts"] shouldBe emptyList<Map<String, Any?>>() },
+        )
+    }
+
+    /** Every listed datasource gets its own enrichment read — per datasource, no cache. */
+    private fun enrichmentReturning(recorded: List<Map<String, Any?>>): FactEnrichment =
+        object : FactEnrichment {
+            override fun forDatasource(
+                readerWorkspaceId: UUID,
+                datasource: Datasource,
+            ): List<Map<String, Any?>> = if (datasource.name == "pg-prod") recorded else emptyList()
+
+            override fun forTables(
+                readerWorkspaceId: UUID,
+                datasource: Datasource,
+                tables: List<TableInfo>,
+                complete: Boolean,
+            ): Map<String, List<Map<String, Any?>>> = emptyMap()
+
+            override fun forColumns(
+                readerWorkspaceId: UUID,
+                datasource: Datasource,
+                table: String,
+                namespace: List<String>?,
+                columns: List<ColumnInfo>,
+            ): Map<String, List<Map<String, Any?>>> = emptyMap()
+        }
 
     @Test
     fun `list pushes the dialect filter down to the registry`() {

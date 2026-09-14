@@ -97,7 +97,10 @@ class DatasourcesGetTablesTool(
                     "The listing spans namespaces — pass each table's reported `namespace` array to " +
                     "datasources_get_columns. A table carries `facts` when agents have recorded table-level " +
                     "learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact " +
-                    "marked stale or needs_review is a warning, not a truth. Read-only, for pipeline authoring.",
+                    "marked stale or needs_review is a warning, not a truth. For a LAKE datasource each table " +
+                    "carries `partition_column` — a name means the table is hive-partitioned on it and a filter " +
+                    "on that column prunes files; `null` means one unpartitioned file, every read scans it, " +
+                    "and no filter prunes. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -135,7 +138,23 @@ class DatasourcesGetTablesTool(
                     complete =
                         namespace == null && schema == null && !page.truncated,
                 )
-            page.toWireMap(byTable)
+            val wire = page.toWireMap(byTable)
+            // 126 §B — a LAKE table states its partition status on the LISTING, not only on the
+            // stats read the agent may skip: the registered column's name, or an explicit null
+            // (one unpartitioned file). Non-lake dialects carry no such key. Read from the same
+            // registry row the stats payload resolves, so the two cannot disagree. The wire's
+            // tables are page.tables in order (TablesPage.toWireMap maps in place).
+            if (gated.dialect == Dialect.LAKE) {
+                @Suppress("UNCHECKED_CAST")
+                val wireTables = wire.getValue("tables") as List<Map<String, Any?>>
+                val augmented =
+                    page.tables.zip(wireTables).map { (info, entry) ->
+                        entry + ("partition_column" to introspector.lakePartitionColumn(gated, info.name, info.namespace))
+                    }
+                wire + ("tables" to augmented)
+            } else {
+                wire
+            }
         }
     }
 }

@@ -143,7 +143,7 @@ class McpServerAutoConfiguration {
             TemplatesRenderTool(templates, templateEngines),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
             TemplatesPurgeDraftTool(templates, usage, authoring),
-            DatasourcesListTool(datasources),
+            DatasourcesListTool(datasources, factEnrichment),
             DatasourcesGetTool(datasources, factEnrichment),
             DatasourcesTestTool(datasources),
             DatasourcesGetSchemasTool(introspector, datasources),

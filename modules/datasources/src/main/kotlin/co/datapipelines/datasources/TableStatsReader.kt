@@ -265,6 +265,20 @@ internal class TableStatsReader(
         }
     }
 
+    /**
+     * 126 §B — the partition fact `datasources_get_tables` serves per listed LAKE table: the
+     * registered row's partition column, or null when the row has none. The caller passes the
+     * listing's OWN (namespace, table) pair — every table in that listing IS a registry row,
+     * so a null here means exactly one thing: unpartitioned, one file every read scans whole.
+     * The same registry row [lakeTableStats] resolves, so the listing and the §7C stats
+     * payload cannot disagree about a table's partition status.
+     */
+    fun lakePartitionColumn(
+        datasource: Datasource,
+        table: String,
+        namespace: List<String>,
+    ): String? = resolveLakeTable(datasource, table, namespace)?.partitionColumn
+
     /** The registry row for (namespace, table), resolving the unfiltered single-namespace rule. */
     private fun resolveLakeTable(
         datasource: Datasource,

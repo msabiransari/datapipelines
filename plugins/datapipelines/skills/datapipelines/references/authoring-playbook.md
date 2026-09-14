@@ -17,20 +17,26 @@ assumption that survives into your SQL must have been checked against them.
 
 The mandatory read order, for **every** datasource a pipeline will touch:
 
-1. `datasources_get` — the description (grain, sampling, units, window, time zone, if the
-   registrant wrote them), the dialect, and the connection facts. It does NOT list tables:
-   a lake's registered tables come from `datasources_get_tables`, and their partition
-   status from `datasources_get_table_stats` (step 4).
+1. `datasources_list` — your first call and your first read: every granted datasource's
+   description (grain, sampling, units, window, time zone, if the registrant wrote them),
+   dialect and connection facts, AND the datasource-wide `facts` earlier sessions recorded.
+   `datasources_get` is the same payload for one datasource — the refresh after you
+   `semantics_record`. Neither lists tables: a lake's registered tables come from
+   `datasources_get_tables`, whose entries state partition status for a lake table (step 2).
 2. `datasources_get_schemas` → `datasources_get_tables(namespace)` — every table, with its
-   `remarks`. Read the names as an analyst would (§2), then confirm.
+   `remarks`; on a LAKE datasource each entry also carries `partition_column` (a name means
+   the table is hive-partitioned on it and a filter on that column prunes files; `null`
+   means one unpartitioned file every read scans whole — filter pushdown inside a file is
+   not pruning). Read the names as an analyst would (§2), then confirm.
 3. `datasources_get_columns(table, namespace)` for every table the SQL will read — canonical
    types, nullability, `remarks`. **Never write SQL against a column you have not seen
    listed.** A column name you recall from another deployment is a guess.
 4. `datasources_get_table_stats(table)` — row estimate, indexes, per-column bounds, from the
    catalog (never a scan). The bounds tell you the data's window and whether a timestamp
    column carries dates or date-times; the indexes tell you which predicates will be cheap.
-   For a lake table this is also the ONE read that states partition status: a registered
-   partition column reports as `partition_column` (and an index entry of kind `partition`);
+   For a lake table the stats still state partition status out loud (the listing's
+   `partition_column` already told you): a registered partition column reports as
+   `partition_column` (and an index entry of kind `partition`);
    `partition_column: null` means the table is one unpartitioned file that every read
    scans whole — filter pushdown inside a file is not pruning, whatever the plan shows.
 5. `sql_probe` — a few rows of every table you will filter or join on, and the distinct
