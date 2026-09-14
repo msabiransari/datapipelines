@@ -88,6 +88,18 @@ class SpringMailSenderTest {
         return ""
     }
 
+    /** Pins the transport's own behaviour (MimeMessage folds a CRLF in a subject) — the reason the sender adds no guard of its own. */
+    @Test
+    fun `a line break in the subject cannot start a second header`() {
+        val transport = CapturingJavaMailSender()
+
+        SpringMailSender(properties, transport).send(message.copy(subject = "New user: eve@x\r\nBcc: attacker@evil.example (local)"))
+
+        val mime = transport.sent.single()
+        mime.subject shouldBe "New user: eve@x Bcc: attacker@evil.example (local)"
+        mime.getHeader("Bcc") shouldBe null
+    }
+
     @Test
     fun `a transport failure is returned as Failed, never thrown`() {
         val outcome = SpringMailSender(properties, CapturingJavaMailSender(fail = true)).send(message)

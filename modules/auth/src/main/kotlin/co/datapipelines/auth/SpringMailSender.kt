@@ -34,6 +34,9 @@ class SpringMailSender(
                 setFrom(InternetAddress(from))
                 setReplyTo(InternetAddress(replyTo))
                 setTo(message.to.map { InternetAddress(it) }.toTypedArray())
+                // The subject carries an email and a provider name (the new-user notice). A line
+                // break in either cannot start a second header: MimeMessage folds it on the way
+                // out — pinned by SpringMailSenderTest rather than re-implemented here.
                 setSubject(message.subject)
                 setText(message.text, message.html)
                 message.headers.forEach { (name, value) -> mime.setHeader(name, value) }
