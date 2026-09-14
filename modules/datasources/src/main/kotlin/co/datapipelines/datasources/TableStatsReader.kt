@@ -231,15 +231,25 @@ internal class TableStatsReader(
     /**
      * §7C for a LAKE datasource — the lakeColumns twin: the registry is the catalog, and the
      * same single-namespace resolution applies to the unfiltered read (exactly one registered
-     * namespace resolves there; several refuse with [CurrentSchemaUnknownException]; an
-     * unregistered table is empty stats, never an error).
+     * namespace resolves there; several refuse with [CurrentSchemaUnknownException]). An
+     * unregistered table is refused with `datasource.lake_table_not_found` naming the nearest
+     * registered table ([lakeTableNotFound], 135 §B / T273) — before 135 it answered
+     * `stats_source: "none"` with success, indistinguishable from a registered table the
+     * catalog holds nothing for. A REGISTERED table with nothing to report (iceberg, an empty
+     * footer set) still answers empty stats: empty is valid when the table exists.
      */
     private fun lakeTableStats(
         datasource: Datasource,
         table: String,
         filter: List<String>,
     ): TableStats {
-        val registered = resolveLakeTable(datasource, table, filter) ?: return emptyStats(STATS_SOURCE_NONE)
+        val namespace = lakeNamespace(datasource, filter)
+        val inNamespace = lakeTables.registeredTables(datasource.name).filter { it.namespace == namespace }
+        val registered =
+            inNamespace.firstOrNull { it.name == table }
+                // A too-deep filter names no registry namespace: refused under the filter's own
+                // spelling, with nothing to suggest.
+                ?: throw lakeTableNotFound(datasource, namespace ?: filter, table, inNamespace.map { it.name })
         val partitionIndexes =
             listOfNotNull(
                 registered.partitionColumn?.let {
@@ -285,6 +295,21 @@ internal class TableStatsReader(
         table: String,
         filter: List<String>,
     ): LakeRegisteredTable? {
+        val effective = lakeNamespace(datasource, filter) ?: return null
+        return lakeTables
+            .registeredTables(datasource.name)
+            .firstOrNull { it.namespace == effective && it.name == table }
+    }
+
+    /**
+     * The namespace a lake read addresses: the filter, else the single registered namespace
+     * (several refuse with [CurrentSchemaUnknownException]). Null when no namespace can be
+     * addressed — nothing is registered, or the filter is deeper than a lake namespace goes.
+     */
+    private fun lakeNamespace(
+        datasource: Datasource,
+        filter: List<String>,
+    ): List<String>? {
         val effective =
             filter.ifEmpty {
                 val namespaces = lakeTables.registeredTables(datasource.name).map { it.namespace }.distinct()
@@ -294,10 +319,7 @@ internal class TableStatsReader(
                     else -> throw CurrentSchemaUnknownException(datasource.name)
                 }
             }
-        if (effective.size > MAX_LAKE_NAMESPACE_SEGMENTS) return null
-        return lakeTables
-            .registeredTables(datasource.name)
-            .firstOrNull { it.namespace == effective && it.name == table }
+        return effective.takeIf { it.size <= MAX_LAKE_NAMESPACE_SEGMENTS }
     }
 
     /**

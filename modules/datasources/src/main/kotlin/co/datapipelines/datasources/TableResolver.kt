@@ -28,8 +28,12 @@ import java.sql.DatabaseMetaData
  *    statement-executing boundaries (preview rows, `sql_probe`). A permission error on an
  *    absent table cannot happen, so translating only after resolution said present is sound.
  *
- * The LAKE dialect is deliberately out of scope: its registry branches (`lakeColumns`,
- * `lakeTableStats`) keep their own semantics and `datasource.lake_table_not_found`.
+ * The LAKE dialect resolves against its REGISTRY, not JDBC metadata, so its branches
+ * (`lakeColumns`, `lakeTableStats`) do not pass through [resolve] — but since 135 §B (T273)
+ * they refuse an unregistered name the same way, through [lakeTableNotFound]: the catalogued
+ * `datasource.lake_table_not_found` (404) carrying the same `suggestion` rule. Before 135 an
+ * unregistered lake table answered `[]` / empty stats with success, and an agent's typo read
+ * as "a table with no columns" until its probe failed.
  */
 internal class TableResolver {
     /**
@@ -147,6 +151,38 @@ data class ResolvedTable(
     /** The JDBC schemaPattern argument (escaped exact-match, like every true pattern argument). */
     val schemaPattern: String?,
 )
+
+/**
+ * 135 §B (T273) — the LAKE twin of [TableResolver]'s absent state: [table] is not registered
+ * in [namespace] on [datasource], and [candidates] are the names registered THERE (the same
+ * scope the JDBC rule suggests from — the namespace's own listing). The registry is complete
+ * by construction, so the message asserts "not registered" without the privilege-filtered
+ * hedge; the suggestion is [nearestTableName]'s rule, unrestated.
+ */
+internal fun lakeTableNotFound(
+    datasource: Datasource,
+    namespace: List<String>,
+    table: String,
+    candidates: List<String>,
+): DatapipelinesException {
+    val place = if (namespace.isEmpty()) "datasource '${datasource.name}'" else "namespace '${Namespaces.join(namespace)}'"
+    val suggestion = nearestTableName(table, candidates)
+    return DatapipelinesException(
+        code = DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND,
+        message =
+            buildString {
+                append("Table '$table' is not registered in $place.")
+                suggestion?.let { append(" Did you mean '$it'?") }
+            },
+        details =
+            buildMap {
+                put("datasource", datasource.name)
+                put("table", table)
+                put("namespace", Namespaces.join(namespace))
+                suggestion?.let { put("suggestion", it) }
+            },
+    )
+}
 
 /**
  * The nearest listed name to [requested], or null when nothing is close: a case-folded equal

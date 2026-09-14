@@ -16,6 +16,8 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -96,6 +98,17 @@ private const val UPDATE_ID_ARG_DESC =
     "Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). " +
         "Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, " +
         "so the id cannot change — an unknown id is the catalogued template.not_found."
+
+/**
+ * §6.2.36 — the update tool's `dialect` description (135 §C / T276). The dialect is a property
+ * of the template the id names: absent, it is inherited from the working version; present, it
+ * must agree with it.
+ */
+private const val UPDATE_DIALECT_DESC =
+    "Optional on update: omit it and the working version's dialect is inherited. When present it must be the " +
+        "dialect the template already has — a different one is refused with template.validation.dialect_invalid " +
+        "(a template pinned by pipeline nodes cannot change engine; create a new template instead). Never " +
+        "present for an html template."
 
 /** §6.2.36 — the `expected_hash` description, the §4.2 precondition's agent-facing wording. */
 private const val EXPECTED_HASH_DESC =
@@ -243,6 +256,16 @@ class TemplatesCreateTool(
  * There is deliberately no `confirm_new_root` argument: the update names a template that
  * already exists and cannot mint a folder, so the argument would advertise a decision this
  * tool cannot take (094's create-only rule).
+ *
+ * `dialect` is OPTIONAL here (135 §C / T276): the working version already carries it, so an
+ * absent one is inherited before validation — three acceptance-run updates were refused
+ * `dialect_invalid` for omitting a field the draft already had, and each was resent with that
+ * same value. A present dialect must equal the established one; a different one is refused
+ * with the same catalogued code, `details` naming both, BEFORE validation or any write — the
+ * template's pipeline nodes pin it against a source of the established dialect, so an update
+ * re-targeting it is a new template wearing an old id. The REST PUT (§8.4) still requires the
+ * field and does not compare it; only the MCP surface resolves it, so the shared write keeps
+ * receiving a complete draft.
  */
 class TemplatesUpdateTool(
     private val templates: TemplateRepository,
@@ -260,7 +283,8 @@ class TemplatesUpdateTool(
                     "released; a human releases it from the UI. On template.version.conflict someone modified it " +
                     "after you loaded it: re-read with templates_get, rebase, retry; never retry blindly. The body " +
                     "takes the same fields as templates_create, and the template's type is fixed at creation — an " +
-                    "update naming a different type is refused with template.validation.type_immutable. " +
+                    "update naming a different type is refused with template.validation.type_immutable. dialect is " +
+                    "optional: omitted, the working version's is inherited; a different one is refused. " +
                     "templates_purge_draft is for a template that was a mistake, not for editing one.",
             schema = SCHEMA,
         )
@@ -277,6 +301,11 @@ class TemplatesUpdateTool(
             args
                 .enumString("type", TemplateType.WIRE_VALUES.toSet(), TemplateType.SQL.wire)
                 ?.let { TemplateType.fromWire(it)!! }
+        // 135 §C: the dialect is the template's, read from the same working version the
+        // service writes against (D55 — between creation and first release there is no
+        // released projection). Read after the required arguments, so a protocol error
+        // still costs no database read.
+        val working = templates.findWorking(workspaceId, id) ?: throw McpNotFound.template(id)
         val draft =
             TemplateDraft(
                 id = id,
@@ -285,7 +314,7 @@ class TemplatesUpdateTool(
                 // Null is legal only for html — the validator's type/dialect consistency pair
                 // refuses a missing dialect on sql and a present one on html, with the same
                 // catalogued codes the REST surface raises.
-                dialect = args.dialect("dialect"),
+                dialect = inheritedDialect(id, args.dialect("dialect"), working.dialect),
                 displayName = args.requiredString("display_name"),
                 description = args.requiredString("description"),
                 imports = parseImports(args),
@@ -326,6 +355,31 @@ class TemplatesUpdateTool(
         return node
     }
 
+    /**
+     * The 135 §C resolution: [supplied] absent → [established]; equal → itself; different from
+     * a non-null established dialect → `template.validation.dialect_invalid` naming both. A
+     * supplied dialect on an html template (established null) passes through to the
+     * validator's own `dialect_not_allowed` refusal.
+     */
+    private fun inheritedDialect(
+        id: String,
+        supplied: Dialect?,
+        established: Dialect?,
+    ): Dialect? {
+        if (supplied == null) return established
+        if (established != null && supplied != established) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.DIALECT_INVALID,
+                message =
+                    "Template '$id' is a '${established.wire}' template; the update names '${supplied.wire}'. " +
+                        "A template's dialect is fixed by the version you are editing — omit dialect to inherit it, " +
+                        "or create a new template for another engine.",
+                details = mapOf("template_id" to id, "dialect" to supplied.wire, "established_dialect" to established.wire),
+            )
+        }
+        return supplied
+    }
+
     private companion object {
         val SCHEMA =
             """
@@ -340,7 +394,7 @@ class TemplatesUpdateTool(
                   "description": "Template engine. v1 supports freemarker only."
                 },
                 "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "$TYPE_FIELD_DESC"},
-                "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$DIALECT_FIELD_DESC"},
+                "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$UPDATE_DIALECT_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},
                 "imports": {

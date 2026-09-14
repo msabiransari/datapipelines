@@ -241,12 +241,83 @@ class TemplatesUpdateToolTest {
         )
     }
 
+    /**
+     * 135 §C (T276) — three sightings in one day: an update sent without `dialect` was refused
+     * `template.validation.dialect_invalid` and the agent resent with the dialect the draft
+     * already had. The dialect is a property of the template the id names, so an absent one
+     * is INHERITED from the working version; the validator then sees a complete draft.
+     */
+    @Test
+    fun `an update without dialect inherits the working version's dialect`() {
+        val validated = slot<TemplateDraft>()
+        every { validator.validateOrThrow(capture(validated), McpFixtures.WORKSPACE_ID) } answers { firstArg() }
+        every { templates.findWorking(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns stored(version = 1)
+        every { templates.findDraftDetail(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns null
+        every {
+            templates.createDraft(McpFixtures.WORKSPACE_ID, "test/revenue.sql", any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
+        } returns draftDetail(2, PipelineVersionStatus.DRAFT)
+        every { templates.findVersion(McpFixtures.WORKSPACE_ID, "test/revenue.sql", 2) } returns stored()
+
+        val payload = updateTool().call(args - "dialect", ctx) as com.fasterxml.jackson.databind.node.ObjectNode
+
+        assertAll(
+            // The draft the validator and the write received carries the STORED dialect —
+            // the validator's "dialect is required unless html" rule sees a complete draft.
+            { validated.captured.dialect shouldBe Dialect.POSTGRES },
+            { payload["status"].asText() shouldBe "DRAFT" },
+            { payload["dialect"].asText() shouldBe "POSTGRES" },
+        )
+    }
+
+    @Test
+    fun `an update naming the dialect the draft already has is the ordinary write`() {
+        val validated = slot<TemplateDraft>()
+        every { validator.validateOrThrow(capture(validated), McpFixtures.WORKSPACE_ID) } answers { firstArg() }
+        every { templates.findWorking(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns stored(version = 1)
+        every { templates.findDraftDetail(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns null
+        every {
+            templates.createDraft(McpFixtures.WORKSPACE_ID, "test/revenue.sql", any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
+        } returns draftDetail(2, PipelineVersionStatus.DRAFT)
+        every { templates.findVersion(McpFixtures.WORKSPACE_ID, "test/revenue.sql", 2) } returns stored()
+
+        val payload = updateTool().call(args + mapOf("dialect" to "POSTGRES"), ctx) as com.fasterxml.jackson.databind.node.ObjectNode
+
+        assertAll(
+            { validated.captured.dialect shouldBe Dialect.POSTGRES },
+            { payload["draft"]["version"].asInt() shouldBe 2 },
+        )
+    }
+
+    @Test
+    fun `an update naming a DIFFERENT dialect is refused before anything is validated or written`() {
+        // A pipeline node pins this template against a source of the established dialect; a
+        // template re-targeted at another engine is a new template, not an edit of this one.
+        every { templates.findWorking(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns stored(version = 1)
+
+        val error =
+            shouldThrow<DatapipelinesException> {
+                updateTool().call(args + mapOf("dialect" to "H2"), ctx)
+            }
+
+        assertAll(
+            { error.code shouldBe PipelineErrorCodes.Template.DIALECT_INVALID },
+            { error.details["dialect"] shouldBe "H2" },
+            { error.details["established_dialect"] shouldBe "POSTGRES" },
+            { error.details["template_id"] shouldBe "test/revenue.sql" },
+        )
+        verify(exactly = 0) { validator.validateOrThrow(any(), any()) }
+        verify(exactly = 0) { templates.createDraft(any(), any(), any(), any(), any(), any()) }
+    }
+
     @Test
     fun `update refuses with the catalogued code when authoring is disabled`() {
         // versioning §5.5: the guard lives in the service both surfaces share — a promotion
         // receiver's agent gets the same refusal through the tool as through the REST PUT
         // (which also validates first, then refuses at the write).
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        // 135 §C: the tool reads the working version for the dialect before it validates; the
+        // guard still fires at the write, exactly where REST's does.
+        every { templates.findWorking(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns stored(version = 1)
         val hardened = TemplatesUpdateTool(templates, TemplateDraftService(templates, AuthoringGuard(false)), validator)
 
         val error = shouldThrow<DatapipelinesException> { hardened.call(args, ctx) }

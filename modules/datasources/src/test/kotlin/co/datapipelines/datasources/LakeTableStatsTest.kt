@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
@@ -145,16 +146,27 @@ class LakeTableStatsTest {
         )
     }
 
+    /** 135 §B (T273) — the stats twin of the columns refusal: an unregistered name is a 404, never `stats_source: none`. */
     @Test
-    fun `an unregistered table answers empty stats, never an error`() {
-        val (introspector, ds) = introspectorOver(emptyList())
+    fun `an unregistered table is refused as lake_table_not_found, naming the nearest registered table`() {
+        val rows =
+            listOf(
+                LakeRegisteredTable(listOf("nyc"), "trips_by_day", "parquet", "s3://b/a.parquet"),
+                LakeRegisteredTable(listOf("nyc"), "stations", "parquet", "s3://b/s.parquet"),
+            )
+        val (introspector, ds) = introspectorOver(rows)
 
-        val stats = introspector.tableStats(ds, "ghost")
+        val typo = shouldThrow<DatapipelinesException> { introspector.tableStats(ds, "trips_by_dya") }
+        val wild = shouldThrow<DatapipelinesException> { introspector.tableStats(ds, "weather") }
+        val nothing = shouldThrow<DatapipelinesException> { introspectorOver(emptyList()).first.tableStats(ds, "ghost") }
 
         assertAll(
-            { stats.statsSource shouldBe "none" },
-            { stats.rowEstimate shouldBe null },
-            { stats.indexes shouldBe emptyList<IndexStats>() },
+            { typo.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
+            { typo.details["suggestion"] shouldBe "trips_by_day" },
+            { typo.details["namespace"] shouldBe "nyc" },
+            { wild.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
+            { wild.details.containsKey("suggestion") shouldBe false },
+            { nothing.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
         )
     }
 
