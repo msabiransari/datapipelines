@@ -270,7 +270,7 @@ class PipelinePartialControllerTest {
         // The REGISTRY decides what is a datasource; `pg` resolves, so it is rendered with its
         // dialect. A name it cannot resolve is left out rather than linked to nothing.
         val registry =
-            co.datapipelines.pipeline.DatasourceRegistry { name ->
+            co.datapipelines.pipeline.DatasourceRegistry { name, _ ->
                 if (name == "pg") co.datapipelines.pipeline.DatasourceFacts(co.datapipelines.typesystem.Dialect.POSTGRES) else null
             }
         val detailController =

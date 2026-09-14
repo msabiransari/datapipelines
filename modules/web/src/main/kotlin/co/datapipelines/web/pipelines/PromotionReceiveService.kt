@@ -12,8 +12,6 @@ import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.slf4j.LoggerFactory
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
-import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.transaction.support.TransactionTemplate
 
 /**
@@ -75,19 +73,25 @@ class PromotionReceiveService(
         // environment-local — a promotion must never mint one.
         endpointPromotion.refuseIfKeysMissing(batch.endpoints, workspace.id, batch.workspace)
 
-        withActiveWorkspace(workspace) {
-            transactionTemplate.executeWithoutResult {
-                if (batch.templates.isNotEmpty()) {
-                    templateImportService.import(templatesPayload(batch), workspace.id, actor.id)
-                }
-                batch.pipelines.forEach { pipeline ->
-                    pipelineImportService.import(pipeline.toString(), workspace.id, actor.id)
-                }
-                // AFTER the pipelines: an endpoint over a pipeline this same batch is bringing
-                // must find it already stored. Republishing an unchanged endpoint is a no-op
-                // rather than a conflict, so a re-push is idempotent like every other entry.
-                batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
+        // The import services take the TARGET workspace explicitly, and since 134 so does
+        // everything beneath them: the datasource port `PipelineValidator` resolves a node's
+        // `source` through takes the workspace as an argument, so a workspace-BOUND
+        // datasource on the receiver resolves for the batch's workspace. Before 134 that port
+        // read the ACTIVE workspace off the thread-local principal — which the promotion
+        // credential does not pin — and this block stamped the batch's workspace onto the
+        // principal for the duration of the import; found by the two-deployment E2E, which
+        // registers its datasource workspace-bound and still guards this path.
+        transactionTemplate.executeWithoutResult {
+            if (batch.templates.isNotEmpty()) {
+                templateImportService.import(templatesPayload(batch), workspace.id, actor.id)
             }
+            batch.pipelines.forEach { pipeline ->
+                pipelineImportService.import(pipeline.toString(), workspace.id, actor.id)
+            }
+            // AFTER the pipelines: an endpoint over a pipeline this same batch is bringing
+            // must find it already stored. Republishing an unchanged endpoint is a no-op
+            // rather than a conflict, so a re-push is idempotent like every other entry.
+            batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
         }
 
         // R7: the promoted rows are stamped with the system actor, and WHERE they came from is
@@ -127,8 +131,9 @@ class PromotionReceiveService(
      * The system actor as a principal for the duration of the import.
      *
      * The promotion credential pins no workspace (§10.6), but publishing resolves its pipeline
-     * and writes its row against one — so the batch's target workspace is stamped here, the same
-     * value [withActiveWorkspace] stamps for the import services' datasource resolution.
+     * and writes its row against one — so the batch's target workspace is stamped here, on the
+     * principal handed to [EndpointPromotion.apply] as an ARGUMENT (never installed in the
+     * security context: the import path reads no ambient principal since 134).
      */
     private fun promotionPrincipal(
         actor: co.datapipelines.auth.User,
@@ -147,40 +152,6 @@ class PromotionReceiveService(
             workspaceName = workspace.name,
             workspace = workspace,
         )
-
-    /**
-     * Stamps the batch's target workspace onto the promotion principal for the duration of
-     * [block], then restores whatever was there.
-     *
-     * The import services take `workspaceId` explicitly — but not everything on the write path
-     * does. `contractDatasourceRegistry` (the port `PipelineValidator` asks "is this datasource
-     * registered?") resolves through **the principal's ACTIVE workspace**, and falls back to
-     * GLOBAL-ONLY visibility when there is none. The promotion credential pins no workspace, so
-     * without this every workspace-BOUND datasource on the receiver read as unregistered and
-     * the whole batch was refused `pipeline.import.missing_datasource` — found by the
-     * two-deployment E2E, and by nothing smaller: a single-context test shares one principal
-     * and never sees it.
-     *
-     * The payload's workspace is the honest value here: it is the one the import writes into,
-     * resolved by name against this deployment's own rows, and it is restored on the way out so
-     * nothing leaks into the request's later handling.
-     */
-    private fun <T> withActiveWorkspace(
-        workspace: WorkspaceContext,
-        block: () -> T,
-    ): T {
-        val context = SecurityContextHolder.getContext()
-        val previous = context.authentication
-        val principal = previous?.principal as? AuthenticatedPrincipal
-        if (principal == null) return block()
-        context.authentication =
-            UsernamePasswordAuthenticationToken(principal.copy(workspace = workspace), null, previous.authorities)
-        return try {
-            block()
-        } finally {
-            context.authentication = previous
-        }
-    }
 
     /**
      * §10.1 D7 — promotion into an authoring-enabled deployment is refused.

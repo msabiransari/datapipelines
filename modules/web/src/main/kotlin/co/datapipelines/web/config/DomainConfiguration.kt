@@ -34,7 +34,6 @@ import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
@@ -302,15 +301,32 @@ class DomainConfiguration {
      * readonly flag, from the same registry lookup — so `pipeline.validation.datasource_readonly`
      * fires at save time on every write-shaped use of a flagged datasource.
      *
-     * ## Workspace-scoped since the surfaces slice (design §5.3)
+     * ## Workspace-scoped, and the workspace is an ARGUMENT (design §5.3; 134)
      *
-     * Save-time validation resolves the datasource through the CALLER'S ACTIVE WORKSPACE:
-     * `getVisibleLive(name, activeWorkspace)` — a pipeline in workspace A cannot silently
-     * reference a datasource bound to workspace B. The D9 example seeder runs at login on a
-     * thread whose principal is not yet [AuthenticatedPrincipal]; for that principal-less
-     * path the resolver falls back to GLOBAL-ONLY visibility, which is exactly the seeder's
-     * world (D9: seeded example datasources are global). A future bound-datasource example
-     * would fail loudly at seeding rather than pass validation invisibly.
+     * Save-time validation resolves the datasource through the WORKSPACE THE PIPELINE IS
+     * SAVED INTO: `getVisibleLive(name, workspaceId)` — owned or granted — so a pipeline in
+     * workspace A cannot silently reference a datasource bound to workspace B. The workspace
+     * arrives as the port's parameter, threaded from `PipelineValidator.validate(pipeline,
+     * workspaceId)`; every save path passes what it already holds — REST the principal's
+     * active workspace, an MCP tool the workspace pinned on `McpToolContext`'s principal,
+     * promotion receive the batch's target workspace, the D9 seeder the workspace it seeds.
+     *
+     * Until 134 this adapter read the workspace off `SecurityContextHolder` — the Spring
+     * Security thread-local. An MCP tool call runs on the SDK's `boundedElastic` scheduler
+     * thread (`McpStatelessServerFeatures.AsyncToolSpecification.fromSync`, `immediateExecution`
+     * unset), where that thread-local is EMPTY (measured: REST resolved on
+     * `http-nio-…-exec-N` with the key's principal, MCP on `boundedElastic-1` with `auth=null`),
+     * so every pipeline saved over MCP validated as "no principal" and could see only
+     * owner-less datasources: a customer's own database was `unknown_datasource` over MCP and
+     * `201` over REST for the same body. The acceptance run never hit it because the demo
+     * datasources are owner-less + granted. A domain port must not depend on which thread it
+     * is called on; the executor never did (`ExecuteRequest.workspaceId` →
+     * `getVisible(name, ctx.workspaceId)`), which is why execution over MCP worked while save
+     * did not. Guard: `McpSaveWorkspaceDatasourceE2eTest`.
+     *
+     * `workspaceId == null` is a caller that genuinely has no workspace (none in production
+     * today — the validator's is non-null): it sees GLOBAL (owner-less) datasources only,
+     * because with no workspace there is no grant to consult (D-R7).
      *
      * ## Live reads, not cached (044 F4)
      *
@@ -324,13 +340,11 @@ class DomainConfiguration {
      */
     @Bean
     fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
-        ContractDatasourceRegistry { name ->
-            val principal =
-                runCatching { currentPrincipal() }.getOrNull()
+        ContractDatasourceRegistry { name, workspaceId ->
             val facts =
-                when (val workspaceId = principal?.workspace?.id) {
-                    // No workspace on the principal: only a datasource no workspace OWNS can
-                    // be reached, because there is no grant to consult (D-R7).
+                when (workspaceId) {
+                    // No workspace: only a datasource no workspace OWNS can be reached, because
+                    // there is no grant to consult (D-R7).
                     null -> registry.getLive(name)?.takeIf { it.ownerWorkspaceId == null }
 
                     else -> registry.getVisibleLive(name, workspaceId)

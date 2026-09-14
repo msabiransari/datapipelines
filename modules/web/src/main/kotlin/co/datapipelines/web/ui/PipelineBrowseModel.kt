@@ -267,7 +267,7 @@ class PipelineBrowseModel(
         // The "Settings" table is gone (106): the staging engine is a chip, because one row of
         // one column was a table pretending to be a section.
         model.addAttribute("stagingEngine", body?.settings?.tempdb?.engine)
-        model.addAttribute("datasourceRows", datasourceRows(body))
+        model.addAttribute("datasourceRows", datasourceRows(body, workspaceId))
         model.addAttribute("templatePins", templatePins(body))
         model.addAttribute("createdBy", actorName(record.ownerId))
         // "via UI / MCP / API" is NOT rendered: nothing audits pipeline CREATE with the surface
@@ -406,11 +406,15 @@ class PipelineBrowseModel(
      * The datasources the working body touches, with the dialect each speaks.
      *
      * The REGISTRY decides what is a datasource: `tempdb` is the reserved literal and never a
-     * registered name (§4.8), and a name the registry cannot resolve in this environment is
+     * registered name (§4.8), and a name the registry cannot resolve FROM THIS WORKSPACE is
      * left out rather than rendered as a link to nothing (§11.2 — a body is portable, a
-     * registry is per-environment).
+     * registry is per-environment; visibility is per-workspace, design §5.3, and the page's
+     * workspace is passed rather than read off the thread — 134).
      */
-    private fun datasourceRows(body: Pipeline?): List<DatasourceRowView> {
+    private fun datasourceRows(
+        body: Pipeline?,
+        workspaceId: UUID,
+    ): List<DatasourceRowView> {
         if (body == null) return emptyList()
         val names =
             body.nodes.flatMap { node ->
@@ -422,7 +426,7 @@ class PipelineBrowseModel(
         return names
             .distinct()
             .sorted()
-            .mapNotNull { name -> datasources.describe(name)?.let { DatasourceRowView(name, it.dialect) } }
+            .mapNotNull { name -> datasources.describe(name, workspaceId)?.let { DatasourceRowView(name, it.dialect) } }
     }
 
     /** The template versions the working body pins — `id@version`, deduplicated, in body order. */

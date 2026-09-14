@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import java.util.UUID
 
 /**
  * pipeline-contract §12.1 — structural validations, plus the §11.4 portability scan.
@@ -13,13 +14,14 @@ internal object StructuralRules {
     fun check(
         pipeline: Pipeline,
         datasources: DatasourceRegistry,
+        workspaceId: UUID,
         into: FailureCollector,
     ) {
         checkSchemaVersion(pipeline, into)
         checkName(pipeline, into)
         checkNodeIdentifiers(pipeline, into)
         checkOutputTables(pipeline, into)
-        EnvPortabilityRule.check(pipeline, datasources, into)
+        EnvPortabilityRule.check(pipeline, datasources, workspaceId, into)
     }
 
     private fun checkSchemaVersion(

@@ -66,15 +66,16 @@ class PipelineValidator(
 ) {
     /**
      * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
-     * the pipeline is being saved into: its template and PIPELINE-node references resolve
-     * there (design 2026-08-16-workspaces §3 — cross-workspace references do not exist in v1).
+     * the pipeline is being saved into: its template, PIPELINE-node and datasource references
+     * resolve there (design 2026-08-16-workspaces §3 — cross-workspace references do not exist
+     * in v1; datasources since 134, see [DatasourceRegistry.describe]).
      */
     fun validate(
         pipeline: Pipeline,
         workspaceId: java.util.UUID,
     ): ValidationResult {
         val collector = FailureCollector()
-        StructuralRules.check(pipeline, datasources, collector)
+        StructuralRules.check(pipeline, datasources, workspaceId, collector)
         DagRules.check(pipeline, collector)
         NodeTypeRules.check(pipeline, collector)
         ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector, calculatorKinds)
