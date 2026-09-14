@@ -5,6 +5,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 private const val HTTP_BAD_REQUEST = 400
 private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
+private const val HTTP_NOT_FOUND = 404
 private const val HTTP_TOO_MANY_REQUESTS = 429
 
 /**
@@ -77,10 +78,13 @@ object AuthErrorCodes {
     const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
 
     /**
-     * 403 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
-     * A 403 rather than the members' 404: a key's workspace is pinned at issuance, so the
-     * holder already knows the workspace exists and there is no oracle to protect — telling
-     * them the truth is what lets an operator act.
+     * 404 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
+     * The same status a member gets: the owner ruled (2026-09-14) that a deactivated
+     * workspace answers not-found on EVERY surface, keys included — deactivation must not
+     * become a signal anywhere. The code stays distinct from `workspace.not_found` because
+     * the holder is a member of that workspace by construction (keys are issued by members
+     * and pinned there), so it reveals nothing the holder did not already know — and it is
+     * what an operator greps the audit log and the catalogue for.
      */
     const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
 
@@ -387,7 +391,9 @@ class KeyScopeUnavailableException(
     )
 
 /**
- * The key's pinned workspace is deactivated (D-R10). The key is otherwise valid and stays
+ * The key's pinned workspace is deactivated (D-R10). A 404, like every other surface of a
+ * deactivated workspace (the owner's 2026-09-14 ruling — deactivation must not become a
+ * signal anywhere). The key is otherwise valid and stays
  * valid — reactivating the workspace restores it, which is the whole point of "deactivate,
  * never delete".
  */
@@ -395,7 +401,7 @@ class KeyWorkspaceInactiveException(
     workspace: String,
 ) : AuthException(
         AuthErrorCodes.KEY_WORKSPACE_INACTIVE,
-        HTTP_FORBIDDEN,
+        HTTP_NOT_FOUND,
         "The workspace '$workspace' this key is pinned to is deactivated",
         "This API key's workspace has been deactivated. Contact an administrator.",
         details = mapOf("workspace" to workspace),

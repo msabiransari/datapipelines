@@ -54,8 +54,10 @@ object WorkspaceErrorCodes {
      * 404 — the workspace is DEACTIVATED (D-R10). A member selecting it gets this, not a
      * distinct code: to a member a deactivated workspace and a workspace that never existed
      * must look the same, or deactivation becomes a signal. A KEY pinned to it gets
-     * [AuthErrorCodes.KEY_WORKSPACE_INACTIVE] instead — the pin already proves existence, so
-     * there is nothing left to hide and an operator needs the truth.
+     * [AuthErrorCodes.KEY_WORKSPACE_INACTIVE] at the same 404 — the owner ruled
+     * (2026-09-14) that a deactivated workspace answers not-found on every surface; the
+     * code stays distinct only because the holder already knows the workspace exists and an
+     * operator greps for it.
      */
     const val INACTIVE = "workspace.inactive"
 
