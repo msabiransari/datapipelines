@@ -84,6 +84,11 @@ private const val TYPE_FIELD_DESC =
     "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes " +
         "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."
 
+/** §6.2.36 — `type` on an UPDATE: inherited from the working version when absent (136 §D / T289b). */
+private const val UPDATE_TYPE_FIELD_DESC =
+    "Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is " +
+        "inherited; stated, it must equal it (template.validation.type_immutable otherwise)."
+
 /** §6.2.8 — the `dialect` description, stating the type/dialect rule (046 §10). */
 private const val DIALECT_FIELD_DESC =
     "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html " +
@@ -263,9 +268,10 @@ class TemplatesCreateTool(
  * same value. A present dialect must equal the established one; a different one is refused
  * with the same catalogued code, `details` naming both, BEFORE validation or any write — the
  * template's pipeline nodes pin it against a source of the established dialect, so an update
- * re-targeting it is a new template wearing an old id. The REST PUT (§8.4) still requires the
- * field and does not compare it; only the MCP surface resolves it, so the shared write keeps
- * receiving a complete draft.
+ * re-targeting it is a new template wearing an old id. Since 136 §D the REST PUT (§8.4)
+ * resolves both the same way, so the shared write keeps receiving a complete draft from either
+ * surface; and `type` is inherited here too (T289b) — it used to default to `sql`, so an html
+ * template updated without `type` was refused `type_immutable` for a field it never changed.
  */
 class TemplatesUpdateTool(
     private val templates: TemplateRepository,
@@ -283,9 +289,9 @@ class TemplatesUpdateTool(
                     "released; a human releases it from the UI. On template.version.conflict someone modified it " +
                     "after you loaded it: re-read with templates_get, rebase, retry; never retry blindly. The body " +
                     "takes the same fields as templates_create, and the template's type is fixed at creation — an " +
-                    "update naming a different type is refused with template.validation.type_immutable. dialect is " +
-                    "optional: omitted, the working version's is inherited; a different one is refused. " +
-                    "templates_purge_draft is for a template that was a mistake, not for editing one.",
+                    "update naming a different type is refused with template.validation.type_immutable. type and " +
+                    "dialect are optional: omitted, the working version's are inherited; a different dialect is " +
+                    "refused. templates_purge_draft is for a template that was a mistake, not for editing one.",
             schema = SCHEMA,
         )
 
@@ -297,20 +303,19 @@ class TemplatesUpdateTool(
         // §9.6: the name travels HERE and nowhere else — the update has no path, no other id.
         val id = args.requiredString("id")
         val expectedHash = args.requiredString("expected_hash")
-        val type =
-            args
-                .enumString("type", TemplateType.WIRE_VALUES.toSet(), TemplateType.SQL.wire)
-                ?.let { TemplateType.fromWire(it)!! }
+        val suppliedType = args.enumString("type", TemplateType.WIRE_VALUES.toSet())?.let { TemplateType.fromWire(it)!! }
         // 135 §C: the dialect is the template's, read from the same working version the
         // service writes against (D55 — between creation and first release there is no
         // released projection). Read after the required arguments, so a protocol error
-        // still costs no database read.
+        // still costs no database read. 136 §D (T289b): `type` is inherited the same way —
+        // it no longer defaults to `sql`, which sent every html update to `type_immutable`;
+        // a stated type still goes to the service's own immutability refusal.
         val working = templates.findWorking(workspaceId, id) ?: throw McpNotFound.template(id)
         val draft =
             TemplateDraft(
                 id = id,
                 engine = args.enumString("engine", setOf(Template.FREEMARKER_ENGINE), Template.FREEMARKER_ENGINE)!!,
-                type = type,
+                type = suppliedType ?: working.type,
                 // Null is legal only for html — the validator's type/dialect consistency pair
                 // refuses a missing dialect on sql and a present one on html, with the same
                 // catalogued codes the REST surface raises.
@@ -393,7 +398,7 @@ class TemplatesUpdateTool(
                   "type": "string", "enum": ["freemarker"], "default": "freemarker",
                   "description": "Template engine. v1 supports freemarker only."
                 },
-                "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "$TYPE_FIELD_DESC"},
+                "type": {"type": "string", "enum": ["sql", "html"], "description": "$UPDATE_TYPE_FIELD_DESC"},
                 "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$UPDATE_DIALECT_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},

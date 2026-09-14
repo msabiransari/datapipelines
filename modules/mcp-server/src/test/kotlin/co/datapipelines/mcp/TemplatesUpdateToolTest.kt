@@ -4,6 +4,7 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
@@ -266,6 +267,40 @@ class TemplatesUpdateToolTest {
             { validated.captured.dialect shouldBe Dialect.POSTGRES },
             { payload["status"].asText() shouldBe "DRAFT" },
             { payload["dialect"].asText() shouldBe "POSTGRES" },
+        )
+    }
+
+    /**
+     * 136 §D (T289b) — `type` used to DEFAULT to `sql`, so an html template updated without
+     * `type` was refused `type_immutable` for a field the agent never changed. It is inherited
+     * from the working version the way 135 inherits the dialect; a stated one still reaches the
+     * service's own immutability check (the arm above).
+     */
+    @Test
+    fun `an update without type inherits the working version's type - an html template stays html`() {
+        val validated = slot<TemplateDraft>()
+        val html =
+            stored(version = 1, body = "<p>\${x}</p>").copy(id = "test/card.html", type = TemplateType.HTML, dialect = null)
+        every { validator.validateOrThrow(capture(validated), McpFixtures.WORKSPACE_ID) } answers { firstArg() }
+        every { templates.findWorking(McpFixtures.WORKSPACE_ID, "test/card.html") } returns html
+        every { templates.findDraftDetail(McpFixtures.WORKSPACE_ID, "test/card.html") } returns null
+        every {
+            templates.createDraft(McpFixtures.WORKSPACE_ID, "test/card.html", any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
+        } returns draftDetail(2, PipelineVersionStatus.DRAFT)
+        every { templates.findVersion(McpFixtures.WORKSPACE_ID, "test/card.html", 2) } returns
+            html.copy(version = 2, body = "<p>\${y}</p>", status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v2")
+
+        val payload =
+            updateTool().call(
+                McpArguments(args.rawMap() - "dialect" + mapOf("id" to "test/card.html", "body" to "<p>\${y}</p>")),
+                ctx,
+            ) as com.fasterxml.jackson.databind.node.ObjectNode
+
+        assertAll(
+            { validated.captured.type shouldBe TemplateType.HTML },
+            { validated.captured.dialect shouldBe null },
+            { payload["type"].asText() shouldBe "html" },
+            { payload["status"].asText() shouldBe "DRAFT" },
         )
     }
 
