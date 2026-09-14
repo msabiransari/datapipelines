@@ -346,12 +346,15 @@ class McpSaveWorkspaceDatasourceE2eTest {
                     statement.execute(
                         """
                         INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
-                            ('$ADMIN_USER_ID', 'e2e-134-default@datapipelines.test', 'E2E 134 Default', 'test', 'e2e-134-default-sub', TRUE, TRUE),
-                            ('$FOREIGN_USER_ID', 'e2e-134-foreign@datapipelines.test', 'E2E 134 Foreign', 'test', 'e2e-134-foreign-sub', TRUE, FALSE)
+                            ('$ADMIN_USER_ID', 'e2e-134-default@datapipelines.test', 'E2E 134 Default', 'test',
+                             'e2e-134-default-sub', TRUE, TRUE),
+                            ('$FOREIGN_USER_ID', 'e2e-134-foreign@datapipelines.test', 'E2E 134 Foreign', 'test',
+                             'e2e-134-foreign-sub', TRUE, FALSE)
                         """.trimIndent(),
                     )
                     statement.execute(
-                        "INSERT INTO workspaces (id, name, display_name) VALUES ('$FOREIGN_WORKSPACE_ID', 'lane134-other', 'Lane 134 other')",
+                        "INSERT INTO workspaces (id, name, display_name)" +
+                            " VALUES ('$FOREIGN_WORKSPACE_ID', 'lane134-other', 'Lane 134 other')",
                     )
                     // The foreign key's issuer must be able to act in its pinned workspace (D-R12).
                     statement.execute(

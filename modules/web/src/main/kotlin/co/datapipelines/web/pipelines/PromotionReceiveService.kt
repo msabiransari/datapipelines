@@ -75,8 +75,8 @@ class PromotionReceiveService(
 
         // The import services take the TARGET workspace explicitly, and since 134 so does
         // everything beneath them: the datasource port `PipelineValidator` resolves a node's
-        // `source` through takes the workspace as an argument, so a workspace-BOUND
-        // datasource on the receiver resolves for the batch's workspace. Before 134 that port
+        // `source` through takes the workspace as an ARGUMENT, so a workspace-BOUND datasource
+        // on the receiver resolves for the batch's workspace. Before 134 that port
         // read the ACTIVE workspace off the thread-local principal — which the promotion
         // credential does not pin — and this block stamped the batch's workspace onto the
         // principal for the duration of the import; found by the two-deployment E2E, which
