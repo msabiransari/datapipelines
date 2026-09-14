@@ -204,6 +204,42 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `lookupVersion carries the status, the content hash and the write stamp the caches key on`() {
+        // 132: the engine's registry decides cacheability by status, the parsed-template cache
+        // keys on body_hash and the loader reports updated_at — all three ride the version
+        // record, and a column the mapper silently dropped would put the old defect back with
+        // every unit test green. Asserted against the same rows the write paths return.
+        val created = repository.create(workspaceId, draft(body = "SELECT 1"), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
+        val asDraft = checkNotNull(repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1))
+        asDraft.status shouldBe PipelineVersionStatus.DRAFT
+        asDraft.isDraft shouldBe true
+        asDraft.bodyHash shouldBe created.bodyHash
+        asDraft.updatedAt.shouldNotBeNull()
+
+        val overwritten =
+            checkNotNull(
+                repository.writeDraft(
+                    workspaceId,
+                    "test/fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    created.bodyHash,
+                    actor,
+                    WriteSurface.SESSION,
+                ),
+            )
+        val afterWrite = checkNotNull(repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1))
+        withClue("same key, new content: the hash is the identity the parsed-template cache must see move") {
+            afterWrite.body shouldBe "SELECT 2"
+            afterWrite.bodyHash shouldBe overwritten.bodyHash
+            afterWrite.bodyHash shouldNotBe asDraft.bodyHash
+            afterWrite.lastModified shouldBe checkNotNull(overwritten.updatedAt)
+        }
+
+        repository.releaseDraft(workspaceId, "test/fetch_orders.sql", overwritten.bodyHash, actor).shouldNotBeNull()
+        checkNotNull(repository.lookupVersion(workspaceId, "test/fetch_orders.sql", 1)).status shouldBe PipelineVersionStatus.RELEASED
+    }
+
+    @Test
     fun `existsId reflects whether any version exists`() {
         repository.existsId(workspaceId, "test/fetch_orders.sql") shouldBe false
         repository.createReleased(workspaceId, draft(), actor)

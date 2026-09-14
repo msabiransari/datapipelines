@@ -7,11 +7,25 @@ import java.util.UUID
  * A [TemplateRegistry] backed by [TemplateRepository], with an in-memory cache of resolved
  * versions, **bound to exactly one workspace** at construction.
  *
- * Caching is sound because a version is immutable (templates.md §5.1): once `id@version` has
- * been read it can be held forever, and a new version is a different key rather than a mutation
- * of this one. Only *positive* lookups are cached — a null could later become a real version
- * (the row is created), so caching absence would hide a just-saved template from the next
- * render.
+ * ## What is cached, and why that is a theorem rather than a policy (132)
+ *
+ * Only a **non-DRAFT** positive lookup enters the cache. A RELEASED or DISCARDED version is
+ * immutable (templates.md §5.1): no repository statement writes the content fields of a
+ * non-DRAFT row, discard/restore move status only, and the entity purge (101) is refused
+ * unless the sole version is a DRAFT — so an entry, once admitted, can never disagree with
+ * the database, whatever happens to the template afterwards. A DRAFT is the one mutable key:
+ * `templates_update` / `PUT /templates` overwrite it in place (117) and `templates_purge_draft`
+ * deletes it, both without changing `id@version`. Before 132 the LRU cached it like any other
+ * row and every render after the first served the first body (the 2026-09-14 acceptance
+ * run); now a draft is re-read on every lookup — one indexed row read, paid only while the
+ * version is a draft and edited, and cached from the read that first sees it RELEASED.
+ * Invalidation-on-write was the alternative; it would have to enumerate every write path
+ * (overwrite, purge, entity purge, the promotion paths) and reach every other instance's
+ * caches over a bus, and be wrong the moment one path was missed. This needs no bus: another
+ * instance simply reads the row too.
+ *
+ * Only *positive* lookups are cached — a null could later become a real version (the row is
+ * created), so caching absence would hide a just-saved template from the next render.
  *
  * ## Workspace binding (T24)
  *
@@ -43,7 +57,7 @@ class RepositoryTemplateRegistry(
         val key = "$id@$version"
         cache[key]?.let { return it }
         val resolved = repository.lookupVersion(workspaceId, id, version) ?: return null
-        cache[key] = resolved
+        if (!resolved.isDraft) cache[key] = resolved
         return resolved
     }
 

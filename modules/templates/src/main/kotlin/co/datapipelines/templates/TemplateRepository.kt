@@ -1136,9 +1136,15 @@ class TemplateRepository(
               AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
             """.trimIndent()
 
+        /**
+         * The engine's record. `status`, `body_hash` and `updated_at` ride along since 132:
+         * the registry caches by status (a DRAFT is re-read), the parsed-template cache keys
+         * on the hash, and the loader reports the stamp as last-modified.
+         */
         private const val SELECT_VERSION =
             "SELECT t.name AS template_id, v.version, v.engine, v.type, v.dialect, v.is_library, " +
-                "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by " +
+                "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by, " +
+                "v.status, v.body_hash, v.updated_at " +
                 "FROM template_versions v JOIN templates t ON t.id = v.template_id"
 
         /** The one-draft partial unique index (versioning §3.3, V6). */
@@ -1664,6 +1670,9 @@ class TemplateRepository(
                     body = rs.getString("body"),
                     createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                     createdBy = rs.getObject("created_by", UUID::class.java),
+                    status = PipelineVersionStatus.fromWire(rs.getString("status")),
+                    bodyHash = rs.getString("body_hash"),
+                    updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
                 )
             }
     }

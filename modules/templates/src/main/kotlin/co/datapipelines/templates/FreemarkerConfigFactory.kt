@@ -51,10 +51,10 @@ object FreemarkerConfigFactory {
      * @param cacheSize parsed-template cache entries (`datapipelines.templates.cache-size`,
      *   configuration.md §3.9).
      */
-    fun create(
+    internal fun create(
         loader: RegistryTemplateLoader,
         cacheSize: Int,
-    ): Configuration = renderConfiguration(loader, cacheSize)
+    ): InterruptibleConfiguration = renderConfiguration(loader, cacheSize)
 
     /**
      * The `html` render configuration (046, template-hierarchy-design §6): identical hardening
@@ -73,10 +73,10 @@ object FreemarkerConfigFactory {
      * and the save-time [ForbiddenConstructScanner] are shared with `sql`, because imports are
      * type-agnostic (§6) and the forbidden-construct contract is engine-level, not type-level.
      */
-    fun createHtml(
+    internal fun createHtml(
         loader: RegistryTemplateLoader,
         cacheSize: Int,
-    ): Configuration =
+    ): InterruptibleConfiguration =
         renderConfiguration(loader, cacheSize).apply {
             outputFormat = HTMLOutputFormat.INSTANCE
             autoEscapingPolicy = Configuration.ENABLE_IF_SUPPORTED_AUTO_ESCAPING_POLICY
@@ -97,10 +97,11 @@ object FreemarkerConfigFactory {
     private fun renderConfiguration(
         loader: RegistryTemplateLoader,
         cacheSize: Int,
-    ): Configuration =
-        InterruptibleConfiguration(PINNED_VERSION, cacheSize).apply {
-            // 1. Templates come only from the registry, keyed "id@version". No file/classpath loader.
-            templateLoader = loader
+    ): InterruptibleConfiguration =
+        InterruptibleConfiguration(PINNED_VERSION, cacheSize, loader).apply {
+            // 1. Templates come only from the registry, keyed "id@version". No file/classpath
+            //    loader — the configuration takes the loader itself, because it resolves a
+            //    name's content identity through it before deciding whether to parse (132).
             localizedLookup = false
 
             harden()

@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -9,12 +10,16 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ThreadPoolExecutor
@@ -367,6 +372,96 @@ class TemplateEngineTest {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------ 132: a draft is a mutable key
+
+    /**
+     * The unit twin of `TemplatesUpdateGoldenPathE2eTest`'s warm-cache case: a REAL
+     * [RepositoryTemplateRegistry] (the LRU that pinned the old body) over a fake repository
+     * whose row is mutated between renders — exactly what `templates_update` does to the sole
+     * DRAFT (117): same id, same version number, new content.
+     */
+    private class MutableRow(
+        initial: TemplateVersion,
+    ) {
+        val repository = mockk<TemplateRepository>()
+        val workspaceId: UUID = UUID.randomUUID()
+
+        @Volatile
+        var stored: TemplateVersion? = initial
+
+        init {
+            every { repository.lookupVersion(workspaceId, any(), any()) } answers { stored?.takeIf { it.id == secondArg() } }
+        }
+
+        fun registry(cacheSize: Int = 50) = RepositoryTemplateRegistry(repository, cacheSize, workspaceId)
+    }
+
+    private fun draft(
+        id: String,
+        body: String,
+        imports: List<TemplateImport> = emptyList(),
+        isLibrary: Boolean = false,
+    ): TemplateVersion =
+        TemplateFixtures.version(id, body = body, imports = imports, isLibrary = isLibrary, status = PipelineVersionStatus.DRAFT)
+
+    @Test
+    fun `a draft overwritten in place renders its NEW body on the next render - both caches are warm`() {
+        val row = MutableRow(draft("test/wip.sql", "SELECT 1 AS marker"))
+        val e = TemplateEngine(row.registry(), 50, 5_000, 1_000_000).also { engines += it }
+        val ref = TemplateRef("test/wip.sql", 1)
+
+        // Render BEFORE the update — the acceptance run's step 1. Both caches now hold body 1.
+        render(e, ref, emptyMap()) shouldBe "SELECT 1 AS marker"
+        row.stored = draft("test/wip.sql", "SELECT 2 AS marker")
+
+        withClue("the second render must be the overwritten body, not the one the caches pinned") {
+            render(e, ref, emptyMap()) shouldBe "SELECT 2 AS marker"
+        }
+        withClue("the parsed-template cache keys on content: two bodies, two trees, one key") {
+            e.parsedTemplates shouldBe 2
+        }
+    }
+
+    @Test
+    fun `a draft LIBRARY overwritten in place is re-imported by a main template whose own tree is cached`() {
+        // Imports resolve at RENDER time, so the main's cached tree asks the loader for the
+        // library on every render — and must get the library's current content.
+        val lib = draft("test/lib.sql", "<#macro m>one</#macro>", isLibrary = true)
+        val main = draft("test/main.sql", "<@d.m/>", imports = listOf(TemplateImport("test/lib.sql", 1, "d")))
+        val row = MutableRow(lib)
+        every { row.repository.lookupVersion(row.workspaceId, "test/main.sql", 1) } returns main
+        val e = TemplateEngine(row.registry(), 50, 5_000, 1_000_000).also { engines += it }
+
+        render(e, TemplateRef("test/main.sql", 1), emptyMap()) shouldBe "one"
+        row.stored = draft("test/lib.sql", "<#macro m>two</#macro>", isLibrary = true)
+
+        render(e, TemplateRef("test/main.sql", 1), emptyMap()) shouldBe "two"
+    }
+
+    @Test
+    fun `a released version is read once and its parsed tree reused - the cost regression guard`() {
+        val row = MutableRow(TemplateFixtures.version("test/rel.sql", body = "SELECT 1"))
+        val e = TemplateEngine(row.registry(), 50, 5_000, 1_000_000).also { engines += it }
+
+        repeat(3) { render(e, TemplateRef("test/rel.sql", 1), emptyMap()) shouldBe "SELECT 1" }
+
+        verify(exactly = 1) { row.repository.lookupVersion(row.workspaceId, "test/rel.sql", 1) }
+        e.parsedTemplates shouldBe 1
+    }
+
+    @Test
+    fun `a version without a content hash renders correctly and is never cached`() {
+        // Fail-safe: no identity means no cache entry (a parse per load), never a wrong body.
+        val row = MutableRow(draft("test/nohash.sql", "SELECT 1").copy(bodyHash = ""))
+        val e = TemplateEngine(row.registry(), 50, 5_000, 1_000_000).also { engines += it }
+
+        render(e, TemplateRef("test/nohash.sql", 1), emptyMap()) shouldBe "SELECT 1"
+        row.stored = draft("test/nohash.sql", "SELECT 2").copy(bodyHash = "")
+        render(e, TemplateRef("test/nohash.sql", 1), emptyMap()) shouldBe "SELECT 2"
+
+        e.parsedTemplates shouldBe 0
     }
 
     private fun awaitActiveRendersToDrain(engine: TemplateEngine): Boolean {
