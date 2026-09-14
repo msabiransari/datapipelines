@@ -101,15 +101,28 @@ semantics; the question's words decide the window.
 - **Check the grain of every pre-aggregate** before summing it: a per-zone-per-day table
   summed over a month is fine; joined to a daily table it must be joined on the day, not
   the month.
+- **A place the question names that has a sensor AT it is answered by that sensor.** When
+  the question names a site — an airport, a plant, a store, a port — and the data has a
+  station, a meter or a device located at that site, the site's measure is that one station's
+  reading, not an average over the stations nearby. The average is a different measure: it
+  smooths the very difference the question asks about (real miss: two sites averaged over
+  five stations disagreed with their own stations by more than 2 °C on the top day, and the answer named
+  the wrong site). Probe the station table for the site's name or coordinates first; when
+  no station sits at the site, the nearest one — or the average — is a choice, and you say so.
+  Either way the station choice is recorded: a `preference` fact (or a `definition` when it
+  defines the measure), with the probe that listed the stations as its evidence — a rule you
+  chose for the answer's grain is recorded with the same care as the threshold you chose for
+  its filter, and the next pipeline over the same sites reads it before choosing its own.
 - **Exclude what the question excludes.** A lookup table often carries catch-all rows —
   `Unknown`, `N/A`, an out-of-area entry — beside the values the question means; "each
   region" means the regions, not the catch-alls. Look at the distinct values of the grouping
   column before you group by it, and write the exclusion into the description.
 - **Parameters wear the question's vocabulary.** A question asked in quarters gets a
   `quarter` parameter (`2024-Q4`), not two raw dates as the only door. A question that names
-  a period — "2024", "Q3", "last month" — gets that period's parameter (`year`, `quarter`,
-  an anchor date): the calculator or in-dialect date math derives the bounds; two raw dates
-  are an INPUT to a template, never the door of a pipeline. Technical inputs
+  a period — "2024", "Q3", "last month", "2023 to 2024" — gets that period's parameter
+  (`year`, `quarter`, `base_year`/`comp_year`, an anchor date): the calculator or in-dialect
+  date math derives the bounds; two raw dates are an INPUT to a template, never the door of a
+  pipeline. Technical inputs
   are *derived*: a CALCULATOR node turns the human parameter into the `start_date`/`end_date`
   the SQL binds — the kind comes from `calculators_list`, whose entries each list the phrases
   they answer (see `templates.md` § Calculators). Two dates the caller already passes need no
@@ -332,6 +345,19 @@ parameter or write literals and keep the computing node for the labels — and s
 the description (§3). The same wall holds inside a probe: a `zones` lookup on the SQLite
 datasource cannot be joined inside a Postgres probe — bind the ids or stage both.
 
+### 6.5 In tempdb, an aggregate you join to is a NODE, not a CTE
+
+H2 inlines a `WITH` clause as a view — it does not materialise it — so a CTE that ranks or
+aggregates a staged table and is then JOINED to another table is recomputed for every probe
+of the join: the whole aggregate, once per outer row. A statement that finishes in under a
+second when the aggregate is its own table burned a full 60 s statement timeout in this shape
+(measured: 0.8 s materialised vs `pipeline.node.query_timeout` inlined, same data). The tell
+on the failed node's stack: a `queryGroup` inside a `queryGroup`, reached through a
+`RegularQueryExpressionIndex` — H2's name for the inlined view being probed as an index.
+Stage the aggregate as its own tempdb node (`output: tempdb`, the ranked or grouped rows only)
+and join it in the NEXT node; the DAG is the materialisation H2 will not do for you. The same
+rule reaches a derived table in the `FROM` clause when it aggregates and is joined.
+
 ## Do / Don't, in one screen
 
 | Do | Don't |
@@ -343,6 +369,10 @@ datasource cannot be joined inside a Postgres probe — bind the ids or stage bo
 | After each source node runs, check its predicate/join key against the table's indexes (`datasources_get_table_stats`, `sql_probe`'s `plan.scan`) and put the `CREATE INDEX` suggestion in the handback | Report "the node was slow" and leave the operator to guess |
 | Filter a lake table on its partition column, with literals, bound parameters, or an `IN` list | Filter on a sibling timestamp inside the files, or UNION date-range branches |
 | Join the lookup; answer with names | Print a code and call it an answer |
+| `templates_list {"q": "<table>"}` before creating a lookup template; pin the one that exists | Mint a second copy of a lookup another pipeline already pins |
+| `templates_render` every template you create, including one created after the pipeline exists | Let the next `pipelines_execute` be a new template's first render |
+| Answer a named site from the station AT it; record the station choice as a fact | Average the stations near a site and report it as the site's reading |
+| Stage a ranked or grouped tempdb result as its own node, then join it (§6.5) | Join to a CTE over a staged table inside one H2 statement |
 | Infer table roles from `*_companies`, `*_by_day`, `*_sample` when no description exists — then confirm with the columns | Ignore a table because nothing described it, or trust the name alone |
 | Aggregate and filter at the source; ship the answer's grain | Stage raw rows into H2 and aggregate there |
 | Load → `DDL` index on the join key → query, for large staged tables | Index small tables, or index before loading |

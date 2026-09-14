@@ -86,10 +86,57 @@ class SkillCoreRulesTest {
         assertClause("never claims about your own process")
     }
 
-    /** 129 §A.1 — a period question gets that period's parameter; the raw dates ride inside, not in front. */
+    /**
+     * 129 §A.1 put the sentence in; 135 §A.1 moved it to the FRONT. Two of four acceptance
+     * pipelines (2026-09-14) opened with raw `start_date`/`end_date` doors for "2024" and
+     * "2023 to 2024" while the clause sat LAST in rule 13 — presence passed and did not stop
+     * the miss, so this is a POSITION pin: the clause must begin inside the first
+     * [RULE_OPENING_CHARS] characters of rule 13's body (the text after its bold title, lines
+     * joined by one space) and before the anchor-date prose (`calculators_list`) that used to
+     * open the rule.
+     */
     @Test
-    fun `two raw dates are an input to a template, never the door of a pipeline - 129 A1`() {
-        assertClause("never the door of a pipeline")
+    fun `two raw dates are an input to a template, never the door of a pipeline - 129 A1, opening since 135 A1`() {
+        val body = ruleThirteenBody()
+        val at = body.indexOf(DOOR_CLAUSE)
+        withClue("rule 13 lost the clause \"$DOOR_CLAUSE\"") { (at >= 0) shouldBe true }
+        withClue("rule 13 no longer OPENS with the period case: \"$DOOR_CLAUSE\" begins at $at, past $RULE_OPENING_CHARS") {
+            (at < RULE_OPENING_CHARS) shouldBe true
+        }
+        val anchorProse = body.indexOf("calculators_list")
+        withClue("the period case must precede the anchor-date prose that opened rule 13 before 135") {
+            (anchorProse > at) shouldBe true
+        }
+    }
+
+    /** 135 §A.2 — six sightings: lookups and pinned templates' tables read only through probes. */
+    @Test
+    fun `step 1 counts a lookup, and a pinned template's tables, as tables the SQL reads - 135 A2`() {
+        assertClause("a LOOKUP is a table the SQL reads")
+    }
+
+    /** 135 §A.3 — three copies of one lookup template in one workspace by the end of the run. */
+    @Test
+    fun `step 2 finds the lookup template before minting it - 135 A3`() {
+        assertClause("PIN what exists")
+    }
+
+    /** 135 §A.4 — a template created after the pipeline exists ran without a render, twice. */
+    @Test
+    fun `step 3 renders a template created mid-loop before the next execute - 135 A4`() {
+        assertClause("the run is not its render")
+    }
+
+    /** 135 §A.5 — a handback named a server mechanism the agent could not see (the cause was a cache). */
+    @Test
+    fun `rule 13½ never names the server's mechanism - 135 A5`() {
+        assertClause("never name the server's mechanism")
+    }
+
+    /** 135 §A.8 — the reuse half of 129 §A.2, stated in step 1 where the listing is read. */
+    @Test
+    fun `step 1 reads definition facts as rules earlier pipelines chose - 135 A8`() {
+        assertClause("rules earlier pipelines chose")
     }
 
     /** 129 §A.2 — the reuse half: a definition an earlier pipeline recorded is the one to reuse. */
@@ -134,6 +181,18 @@ class SkillCoreRulesTest {
             .map { (i, line) -> i + 1 to line }
     }
 
+    /**
+     * Rule 13's BODY as one string: the lines joined by a single space, with the `13. ` prefix
+     * and the bold title (the rule's name, a fixed ~80 characters) removed — so the opening
+     * window measures the rule's text, not its heading.
+     */
+    private fun ruleThirteenBody(): String {
+        val joined = ruleThirteen().joinToString(" ") { it.second.trim() }
+        val titleEnd = joined.indexOf("**", joined.indexOf("**") + 2)
+        require(titleEnd > 0) { "rule 13 no longer opens with a bold title" }
+        return joined.substring(titleEnd + 2).trimStart()
+    }
+
     /** Whole-word for identifier-shaped names (`prior_period` inside `prior_periods` must not match). */
     private fun wordBounded(
         line: String,
@@ -143,6 +202,10 @@ class SkillCoreRulesTest {
     private companion object {
         /** The kind the pre-120 rule 13 invented — asserted absent alongside the real ones. */
         const val QUARTER_BOUNDS = "quarter_bounds"
+
+        /** 135 §A.1 — the clause that must OPEN rule 13, and the window it must begin inside. */
+        const val DOOR_CLAUSE = "never the door of a pipeline"
+        const val RULE_OPENING_CHARS = 300
 
         /** A best-practices rule header: `13. `, `13½. `, `14. ` — numbered and half-numbered forms. */
         val RULE_START = Regex("^[0-9]+[½0-9]*\\. ")

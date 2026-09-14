@@ -118,7 +118,9 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    it carries the description, the dialect and the `facts` earlier sessions recorded (window,
    sampling, units) — read them before you touch a table. Then, for EVERY datasource the pipeline
    will touch: `datasources_get_schemas` → `datasources_get_tables(namespace)` → `datasources_get_columns(table,
-   namespace)` for every table the SQL will read, each with its reported `namespace` array →
+   namespace)` for every table the SQL will read — a LOOKUP is a table the SQL reads, and so is
+   a table a template you PIN reads; `_get_columns` and `_get_table_stats` on each, before the
+   first `templates_create` — each with its reported `namespace` array →
    `datasources_get_table_stats` → `sql_probe` a few rows and the distinct values of every column you
    will filter, group or join by. A lake table with `partition_column: null` in the listing has
    nothing to prune on — filter pushdown inside a file is not pruning. Descriptions and `remarks`
@@ -131,7 +133,9 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    table's (grain, caveats), `_get_columns` each column's (units, time zones, what a coded value
    means, joins) — what earlier sessions recorded, each with its `trust` and evidence. `observed` or
    `verified` with evidence saves you the probe; `stale` or `needs_review` is a warning, not a truth —
-   re-verify it. `datasources_get` is the same facts for one datasource — the refresh after you `semantics_record`.
+   re-verify it. `kind: definition` facts on the listing are rules earlier pipelines chose — read
+   them before you choose yours. `datasources_get` is the same facts for one datasource — the
+   refresh after you `semantics_record`.
 
    **Record what you learned, with the query that showed it.** After you have established a
    fact about the data that introspection could not tell you — a unit, a time zone, a sample
@@ -141,9 +145,7 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
 
    Before your first `templates_create`, state — in your reasoning or your reply — which of
    these calls you made for EACH datasource and EACH table the SQL reads; a table you did
-   not `_get_columns` and `_get_table_stats` is a table you may not read. A description is
-   one person's words about the data, and most datasources have none; the catalog and the
-   rows are the data.
+   not `_get_columns` and `_get_table_stats` is a table you may not read.
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
    will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
@@ -154,17 +156,20 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
-   (the description is the only discoverability mechanism for parameters). **To change a
-   draft template, read its `body_hash` with `templates_get` and call `templates_update`** —
-   it writes the DRAFT the same way `pipelines_update` writes a pipeline's. `templates_purge_draft`
+   (the description is the only discoverability mechanism for parameters). Before
+   `templates_create` of a lookup or reference table — zones, calendars, stations, code lists —
+   `templates_list {"q": "<table>"}` and PIN what exists; a narrowed variant (a region dropped,
+   a year fixed) is a `WHERE` in the consumer or a parameter, not a new template. **To change a
+   draft template, read its `body_hash` with `templates_get` and call `templates_update`** — it
+   writes the DRAFT the same way `pipelines_update` writes a pipeline's. `templates_purge_draft`
    is for a template that should not exist, not for editing one, and it is refused once a
    pipeline pins the template.
 3. **Preview the SQL.** `templates_render` with a representative context — save-time
    validation is parse-only, so this is your check that the SQL is actually what you
-   meant. This is mandatory before step 4 for anything non-trivial. Every template the
-   pipeline pins — the tempdb ones included: a `sql_probe {"name": "tempdb"}` checks
-   syntax and names, `templates_render` checks what the Freemarker actually emits, and
-   they are not the same check.
+   meant. This is mandatory before step 4 for anything non-trivial — including one you create
+   after the pipeline exists; the run is not its render. Every template the pipeline pins — the
+   tempdb ones included: a `sql_probe {"name": "tempdb"}` checks syntax and names,
+   `templates_render` checks what the Freemarker actually emits, and they are not the same check.
 4. **Create the pipeline.** `pipelines_create` with `parameters` declared (types +
    required/defaults — remember `DECIMAL` needs `precision`; `required: true` and
    `default` are exclusive — a parameter with a default is optional by definition), nodes
@@ -260,16 +265,12 @@ on 2026-09-02 (T85): the answer was in the event all along.
 ## Best practices (trouble-free authoring)
 
 **Read `references/authoring-playbook.md` before building anything with more than two
-nodes** — the judgment between the golden path's steps: read the question's grain first,
-join the lookups and answer with display names, infer table roles from naming when nothing
-is described, aggregate at the source and ship the answer's grain, index a large staged
-table only after loading it, filter a lake table on the partition column its stats report
-(a table with no `partition` index has none; never a sibling timestamp inside the files or
-a UNION of ranges), analyse every source node's predicate against the table's indexes
-after it runs and put the `CREATE INDEX` suggestion in your handback, keep `depends_on` to
-data flow, treat a timeout as work in the wrong place, cast what you ship across engines,
-never compare a sample to a census, validate one number independently, and stop at the
-draft. Each of those is a mistake an agent made here.
+nodes** — the judgment between the golden path's steps: the question's grain, the lookups and
+display names, table roles from naming, aggregating at the source, indexing a staged table
+after loading it, filtering a lake table on its partition column, the `CREATE INDEX`
+suggestion in your handback, `depends_on` as data flow, a timeout as work in the wrong place,
+casting across engines, sample vs census, one independent number, stopping at the draft. Its
+Do/Don't table is one screen; each row is a mistake an agent made here.
 
 1. **Render before you create.** `templates_render` with representative values catches
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
@@ -316,12 +317,15 @@ draft. Each of those is a mistake an agent made here.
 12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
-13. **Parameters wear the question's vocabulary; technical inputs are derived.** An anchor
-    date is the door — `$current_date` for a live one; for a fixed dataset, the data's last date
-    for a "this period" phrase but **the day AFTER the data's last date for a "last N periods"
-    phrase** — those kinds resolve the complete periods before the one CONTAINING the anchor
-    (data ends 2026-06-30: "last quarter" anchors `2026-07-01` → 2026-04-01..2026-06-30;
-    `2026-06-30` → Q1) — never a raw `start_date`/`end_date` pair as the ONLY door. **Any relative
+13. **Parameters wear the question's vocabulary; technical inputs are derived.** A question
+    that names a period — "2024", "Q3", "last month", "2023 to 2024" — gets that period's
+    parameter (`year`, `quarter`, `base_year`/`comp_year`, an anchor date), and the calculator
+    or in-dialect date math derives the bounds; two raw dates are an INPUT to a template,
+    never the door of a pipeline. A relative phrase's door is an anchor date — `$current_date`
+    for a live one; for a fixed dataset, the data's last date for a "this period" phrase but
+    **the day AFTER the data's last date for a "last N periods" phrase** — those kinds resolve
+    the complete periods before the one CONTAINING the anchor (data ends 2026-06-30: "last
+    quarter" anchors `2026-07-01` → 2026-04-01..2026-06-30; `2026-06-30` → Q1). **Any relative
     time phrase in the question — "last", "this", "to date", "trailing", "N ago" — is resolved
     by reading `calculators_list`:** each kind lists the everyday phrases it answers; pick the
     kind whose phrases match the question's words, and when two kinds both fit, ask the person
@@ -332,16 +336,12 @@ draft. Each of those is a mistake an agent made here.
     the pipeline's `description` in the question's own words, and name the window the same way
     in every template's `description`. The calculator's `context_key` is already an optional
     execute input — never also declare it as a parameter
-    (`pipeline.validation.calculator_output_collision`).
-    A question that names a period — "2024", "Q3", "last month" — gets that period's
-    parameter (`year`, `quarter`, an anchor date): the calculator or in-dialect date math
-    derives the bounds; two raw dates are an INPUT to a template,
-    never the door of a pipeline. When the question leaves a threshold or a rule to you — what counts as rainy,
-    active, churned, late — write the rule you chose into the description AND record it as a
-    `definition` fact on the workspace, with the probe that showed the distribution you chose
-    over; before choosing, read the listing's facts — a `definition` an earlier pipeline
-    recorded is the one to reuse, so two pipelines in one workspace never answer "rainy" two
-    ways.
+    (`pipeline.validation.calculator_output_collision`). When the question leaves a threshold
+    or a rule to you — what counts as rainy, active, churned, late — write the rule you chose
+    into the description AND record it as a `definition` fact on the workspace, with the probe
+    that showed the distribution you chose over; before choosing, read the listing's facts — a
+    `definition` an earlier pipeline recorded is the one to reuse, so two pipelines in one
+    workspace never answer "rainy" two ways.
 13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come
     from `datasources_get_table_stats`, a probe, or a metadata table — never estimated. **A claim
     about the DATA is a probe you ran or a registry line you read:** partition layout from the
@@ -352,6 +352,9 @@ draft. Each of those is a mistake an agent made here.
     month is empty — is named only after the probe that shows it (`ORDER BY <measure> DESC
     LIMIT 5` finds an outlier in one call; a join to the flag you suspect shows whether it
     correlates), and never names a mechanism — "the generator", "the feed" — you have not seen.
+    That includes the PLATFORM: when a tool behaves unexpectedly, report what you observed and
+    what you did about it; never name the server's mechanism — you cannot see it, and a wrong
+    mechanism in a handback becomes somebody's wrong fix.
     **And a description carries data facts and the interpretation you chose —
     never claims about your own process:** "validated", "reproduced", "checked" go in your reply —
     a description outlives the validation, and it is an exemplar the next agent copies. When the
