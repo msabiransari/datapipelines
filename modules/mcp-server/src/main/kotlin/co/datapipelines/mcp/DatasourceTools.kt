@@ -71,9 +71,19 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
         put("pool", PoolSettings.wire(this@toMcpMetadata, DialectAdapters.forDialect(dialect)))
     }
 
-/** `datasources_list` (mcp-server.md §6.2.10). Scope: `read`. */
+/**
+ * `datasources_list` (mcp-server.md §6.2.10). Scope: `read`.
+ *
+ * Since 126 §A each entry also carries `facts` — the SAME datasource-wide learned facts
+ * `datasources_get` serves, built by the same [FactEnrichment.forDatasource] (stored facts, no
+ * connection opened — the 118 rule). The listing is the call every agent makes first, so the
+ * learn-first facts ride on it rather than waiting for a `datasources_get` the agent may skip.
+ * One enrichment read per listed datasource; no cache. An empty store yields `facts: []`, never
+ * an absent key: "nothing recorded" and "not served" must read differently.
+ */
 class DatasourcesListTool(
     private val datasources: DatasourceRegistry,
+    private val facts: FactEnrichment = FactEnrichment.NONE,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -81,9 +91,13 @@ class DatasourcesListTool(
             description =
                 "List the datasources GRANTED to the key's pinned workspace. Visibility is the grant: a " +
                     "datasource registered elsewhere and not granted to this workspace is ABSENT, not hidden, " +
-                    "and there is no such thing as a global datasource. Returns name, dialect, the workspace " +
-                    "that REGISTERED it (omitted for an instance-level one), granted:true, and connection " +
-                    "metadata — never passwords.",
+                    "and there is no such thing as a global datasource. This is the learn-first read: every " +
+                    "entry carries name, dialect, description, the readonly flag, the workspace that " +
+                    "REGISTERED it (omitted for an instance-level one), granted:true, connection metadata — " +
+                    "never passwords — AND `facts`, the datasource-wide learned facts earlier sessions " +
+                    "recorded (its time window, whether it is a sample), each with `trust` and evidence — " +
+                    "read them before you assume coverage. `datasources_get` is the same payload for ONE " +
+                    "datasource — the refresh to call after recording facts with semantics_record.",
             schema =
                 """
                 {
@@ -112,7 +126,9 @@ class DatasourcesListTool(
         val filter = args.string("dialect")
         if (filter != null && Dialect.entries.none { it.wire == filter }) return emptyList<Map<String, Any?>>()
         val workspaceId = ctx.principal.requireWorkspace().id
-        return datasources.listVisible(filter?.let { Dialect.fromWire(it) }, workspaceId).map { it.toMcpMetadata() }
+        return datasources.listVisible(filter?.let { Dialect.fromWire(it) }, workspaceId).map {
+            it.toMcpMetadata() + ("facts" to facts.forDatasource(workspaceId, it))
+        }
     }
 }
 

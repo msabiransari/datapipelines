@@ -110,25 +110,26 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    with `details.existing_roots` listing what already exists. `test/` never needs it.
    Everything you create in the steps below goes under the prefix you settle on here — and it
    cannot be moved later.
-1. **Learn before you assume.** You know nothing about a datasource until you have read
-   it — not its time zone, not its units, not whether a table is a sample or a census, not
-   what a coded value means. For EVERY datasource the pipeline will touch, in this order:
-   `datasources_get` (the description, the dialect, the grants and connection facts — no
-   table list) → `datasources_get_schemas` → `datasources_get_tables(namespace)` →
-   `datasources_get_columns(table, namespace)` for every table the SQL will read, passing
-   each table's reported `namespace` array through → `datasources_get_table_stats` →
-   `sql_probe` a few rows and the distinct values of every column you will filter, group
-   or join by. Descriptions and `remarks` are one input, written by a person; **the columns
-   and the rows are the ground truth** — never write SQL against a column, a unit, a time
-   zone or a sample rate you have not seen. Write what you learned into the pipeline's
-   description. `references/authoring-playbook.md` §1 is the full procedure.
+1. **Learn before you assume.** You know nothing about a datasource until you have read it —
+   not its time zone, not its units, not whether a table is a sample or a census, not what a coded
+   value means. `datasources_list` is your first call and your first read: for every granted datasource
+   it carries the description, the dialect and the `facts` earlier sessions recorded (window,
+   sampling, units) — read them before you touch a table. Then, for EVERY datasource the pipeline
+   will touch: `datasources_get_schemas` → `datasources_get_tables(namespace)` → `datasources_get_columns(table,
+   namespace)` for every table the SQL will read, each with its reported `namespace` array →
+   `datasources_get_table_stats` → `sql_probe` a few rows and the distinct values of every column you
+   will filter, group or join by. A lake table with `partition_column: null` in the listing has
+   nothing to prune on — filter pushdown inside a file is not pruning. Descriptions and `remarks`
+   are one input, written by a person; **the columns and the rows are the ground truth** — never
+   write SQL against a column, a unit, a time zone or a sample rate you have not seen. Write what
+   you learned into the pipeline's description. `references/authoring-playbook.md` §1 is the full procedure.
 
-   **Read the `facts` that arrive with the schema, before you probe.** `datasources_get`
-   carries the datasource-wide learned facts (its time window, whether it is a sample),
-   `_get_tables` each table's (grain, caveats), `_get_columns` each column's (units, time zones,
-   what a coded value means, joins) — what earlier sessions learned and recorded, each with its
-   `trust` and the evidence that showed it. A fact marked `observed` or `verified` with evidence
-   saves you the probe; one marked `stale` or `needs_review` is a warning, not a truth — re-verify it.
+   **Read the `facts` that arrive with the listings, before you probe.** `datasources_list` carries
+   the datasource-wide learned facts (its time window, whether it is a sample), `_get_tables` each
+   table's (grain, caveats), `_get_columns` each column's (units, time zones, what a coded value
+   means, joins) — what earlier sessions recorded, each with its `trust` and evidence. `observed` or
+   `verified` with evidence saves you the probe; `stale` or `needs_review` is a warning, not a truth —
+   re-verify it. `datasources_get` is the same facts for one datasource — the refresh after you `semantics_record`.
 
    **Record what you learned, with the query that showed it.** After you have established a
    fact about the data that introspection could not tell you — a unit, a time zone, a sample

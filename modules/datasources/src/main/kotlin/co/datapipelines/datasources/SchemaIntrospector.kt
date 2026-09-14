@@ -394,6 +394,19 @@ class SchemaIntrospector(
         return statsReader.tableStats(datasource, table, namespaceFilter)
     }
 
+    /**
+     * 126 §B — a LAKE table's registered partition column, read from the same registry row
+     * the §7C stats engine resolves ([TableStatsReader.lakePartitionColumn]), so the
+     * `datasources_get_tables` listing and the stats payload state ONE partition status.
+     * The caller passes the listing's exact (namespace, table) pair; meaningful only for a
+     * LAKE datasource — non-lake dialects have no registry rows and no such concept.
+     */
+    fun lakePartitionColumn(
+        datasource: Datasource,
+        table: String,
+        namespace: List<String>,
+    ): String? = statsReader.lakePartitionColumn(datasource, table, namespace)
+
     /** One [ResultSetMetaData] row set, mapped exactly like [mapColumnRow] maps a `getColumns` row. */
     private fun mapResultSetColumns(
         meta: ResultSetMetaData,
