@@ -263,13 +263,12 @@ here.
    names every table the `fact` text names, spelled as the catalog spells it** — a catalog table
    the text names exactly and `refs` omit is ADDED for you (`refs_added` in the response), a
    near-miss is refused with the nearest name (`semantics.ref_mismatch`) — and a DATASOURCE-scope
-   fact is table-wide: "in Q4 only A and B carry rows" belongs in a pipeline description, not a
-   fact. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
+   fact is table-wide: "in Q4 only A and B carry rows" is a pipeline description's job, not a fact's. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
    `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours. When the question
    leaves a rule to you — what counts as rainy, active, churned, late — the rule you chose is a
-   `definition`: record it with the probe that showed the distribution you chose over, and read
-   the listing's facts before choosing — a `definition` an earlier pipeline recorded is the one
-   to reuse.
+   `definition`: record it with the probe that showed the distribution you chose over, and —
+   before choosing — read the listing's facts: a `definition` an earlier pipeline recorded is
+   the one to reuse.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
    `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous
