@@ -99,6 +99,52 @@ a {
    Layout primitives
    -------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+   FLOW — two blocks of text never touch (owner, 2026-09-14; ledger T266).
+
+   base.css's universal reset zeroes every margin, and this file spaces blocks one selector at a
+   time: a section headline (119 §A.1), a card's body, a button row, a footnote. Any pair
+   nobody named got nothing — measured over all 27 site pages at 1280px with the same
+   walk SiteRhythmBrowserTest now runs: 90 pairs of block siblings, at least one of them
+   text (p, blockquote, pre, list, table, heading, figure), rendered at a 0px gap. 57 were
+   paragraphs inside .prose sitting on each other; the rest were a container's direct
+   children — a heading on a paragraph, a code block on a heading, a table on a button row.
+
+   The remedy is a DEFAULT, not 90 rules: every sibling after the first, in the three
+   containers that carry running text, gets the body token. Its weight is ONE class
+   (.container / .prose / .split) and it sits here, before every component rule, so any
+   rule below of equal or greater weight still wins — a .btn-row's --space-8, a
+   .how-footnote's --space-8, the section-head token. Measured after: 0 tight pairs, and
+   the only gap that moved was a 12px figure gap becoming this token.
+
+   Two deliberate exceptions and two named pairs follow. The kicker keeps its 8px to the
+   headline below it (its own margin-bottom; the headline's default is zeroed). A
+   .feature-group is a flex column whose margins do not collapse, so a blanket default
+   doubled its heading gap — only its two stacked .prose blocks get the token. A blockquote
+   before a .fact-list inside .split, and a .prose before a .shot figure, carried their own
+   zero and are named. */
+.container > * + *,
+.prose > * + *,
+.split > :where(div) > * + * {
+  margin-top: var(--space-4);
+}
+
+.feature-group > .prose + .prose {
+  margin-top: var(--space-4);
+}
+
+.kicker + * {
+  margin-top: 0;
+}
+
+.split blockquote + .fact-list {
+  margin-top: var(--space-4);
+}
+
+.prose + .shot {
+  margin-top: var(--space-4);
+}
+
 .container {
   width: 100%;
   max-width: var(--container-xl);

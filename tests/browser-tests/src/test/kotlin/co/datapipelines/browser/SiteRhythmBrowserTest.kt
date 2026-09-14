@@ -55,6 +55,43 @@ class SiteRhythmBrowserTest : BrowserSuite() {
         withClue("card padding / row-stretch offenders") { offenders.shouldBeEmpty() }
     }
 
+    /**
+     * (f) — **no two blocks of text touch, on any page the site links, at both widths.** The
+     * owner's screenshots (2026-09-14): a paragraph on a button row, a quote on a box, a code
+     * block on a paragraph, two paragraphs with no gap — 90 such pairs across the 27 pages,
+     * every one at 0px, because the reset zeroes margins and the stylesheet spaced blocks one
+     * selector at a time. The pages are DISCOVERED from the header and footer of `/`, so a
+     * page added to the site is measured the day it is linked. The walk: every block-level
+     * element's block-level children in RENDERED order (a phone hero puts the strip above the
+     * figure with `order`; row-flex and grid parents skipped — their gap is the gap property),
+     * adjacent pairs where at least one is a text block, rendered gap < 8px.
+     */
+    @Test
+    fun `no two blocks of text touch on any linked page at both widths`() {
+        startTrace()
+        page.navigate("$baseUrl/")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        @Suppress("UNCHECKED_CAST")
+        val routes = (page.evaluate(LINKED_ROUTES_JS) as List<String>).distinct().sorted()
+        withClue("route discovery is non-vacuous") { (routes.size >= MIN_LINKED_ROUTES) shouldBe true }
+        val offenders = mutableListOf<String>()
+        var pairsSeen = 0L
+        viewports.forEach { (w, h) ->
+            page.setViewportSize(w, h)
+            routes.forEach { route ->
+                page.navigate("$baseUrl$route")
+                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+                @Suppress("UNCHECKED_CAST")
+                val result = page.evaluate(TIGHT_PAIRS_JS) as Map<String, Any>
+                pairsSeen += (result["pairs"] as Number).toLong()
+                @Suppress("UNCHECKED_CAST")
+                (result["tight"] as List<String>).forEach { offenders += "$route at ${w}x$h: $it" }
+            }
+        }
+        withClue("the walk measured something") { (pairsSeen > 0) shouldBe true }
+        withClue("block siblings touching (< 8px)") { offenders.shouldBeEmpty() }
+    }
+
     @Test
     fun `the proof strip is above the fold and no page scrolls sideways`() {
         startTrace()
@@ -202,6 +239,42 @@ class SiteRhythmBrowserTest : BrowserSuite() {
 
     private companion object {
         const val TOLERANCE = 1.0
+        const val MIN_LINKED_ROUTES = 20
+
+        /** Same-origin paths the header and footer of `/` link, fragments stripped, `/login` excluded (the app, not the site). */
+        private const val LINKED_ROUTES_JS =
+            """() => Array.from(document.querySelectorAll('header a[href], footer a[href]'))
+                 .map(a => a.getAttribute('href') || '')
+                 .filter(h => h.startsWith('/') && !h.startsWith('//'))
+                 .map(h => h.split('#')[0].split('?')[0])
+                 .filter(h => h && h !== '/login' && !h.startsWith('/docs'))
+                 .concat(['/'])"""
+
+        /** Adjacent block siblings inside <main>, at least one a text block, rendered closer than 8px. */
+        private const val TIGHT_PAIRS_JS =
+            """() => {
+                 const TEXTY = new Set(['P','BLOCKQUOTE','PRE','UL','OL','TABLE','H1','H2','H3','H4','FIGURE','DL']);
+                 const main = document.querySelector('main') || document.body; const tight = []; let pairs = 0;
+                 const isBlock = el => ['block','flex','grid','table','list-item'].includes(getComputedStyle(el).display) && el.getBoundingClientRect().height > 0;
+                 for (const el of main.querySelectorAll('*')) {
+                   if (!isBlock(el)) continue;
+                   const cs = getComputedStyle(el);
+                   if (cs.display === 'flex' && cs.flexDirection.startsWith('row')) continue;
+                   if (cs.display === 'grid') continue;
+                   const kids = Array.from(el.children).filter(k => { const c = getComputedStyle(k); return c.position !== 'absolute' && c.position !== 'fixed' && isBlock(k); }).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+                   for (let i = 1; i < kids.length; i++) {
+                     const a = kids[i - 1], b = kids[i];
+                     if (!(TEXTY.has(a.tagName) || TEXTY.has(b.tagName))) continue;
+                     pairs++;
+                     const gap = b.getBoundingClientRect().top - a.getBoundingClientRect().bottom;
+                     if (gap < 8) {
+                       const name = x => x.tagName + (x.className ? '.' + String(x.className).trim().split(/\s+/)[0] : '');
+                       tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + Math.round(gap) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
+                     }
+                   }
+                 }
+                 return { pairs: pairs, tight: tight };
+               }"""
         const val DESKTOP_GAP = 24.0
         const val PHONE_GAP = 20.0
         const val LEDE_GAP = 16.0
