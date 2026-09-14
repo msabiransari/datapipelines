@@ -10,7 +10,7 @@ import java.util.UUID
 
 /**
  * The three notices the product sends (auth.md §5A.8) — the `mail_sends.kind` closed list
- * (`chk_mail_sends_kind`, V27) and the template family under `templates/mail/`.
+ * (`chk_mail_sends_kind`, V27) and the template family under `mail-templates/`.
  */
 enum class MailKind(
     /** The stored value and the audit `kind`. */

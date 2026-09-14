@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 
 /**
- * The two notice families under `templates/mail/` (auth.md §5A.8), rendered by the real
+ * The two notice families under `mail-templates/` (auth.md §5A.8), rendered by the real
  * engine in both parts: the welcome / reset mail carries the login URL, the login (the email),
  * the one-time password, the first-login sentence and the human to write to; the new-user
  * notice carries who, how, by whom, where and when — and NEVER a password.
@@ -37,6 +37,12 @@ class MailTemplatesTest {
         }
         welcome.text shouldNotContain "<"
         welcome.html shouldStartWith "<!DOCTYPE html>"
+    }
+
+    @Test
+    fun `a rendered mail's toString never carries a body`() {
+        welcome.toString() shouldNotContain "ABCD-EFGH-JKLM"
+        welcome.toString() shouldContain "Your datapipelines account"
     }
 
     @Test

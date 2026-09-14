@@ -7,12 +7,17 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import java.time.Instant
 import java.util.Locale
 
-/** A rendered notice: the subject and both bodies — the plain part and the html part. */
+/**
+ * A rendered notice: the subject and both bodies — the plain part and the html part. The
+ * bodies may carry a one-time password, so [toString] names the subject and the sizes only.
+ */
 data class RenderedMail(
     val subject: String,
     val text: String,
     val html: String,
-)
+) {
+    override fun toString(): String = "RenderedMail(subject=$subject, text=${text.length} chars, html=${html.length} chars)"
+}
 
 /** What the sys-ops "New user" notice says (auth.md §5A.8). Never a password. */
 data class NewUserNotice(
@@ -31,11 +36,13 @@ data class NewUserNotice(
 )
 
 /**
- * The two notice families under `templates/mail/` (auth.md §5A.8), rendered with a
+ * The two notice families under `mail-templates/` (auth.md §5A.8), rendered with a
  * [SpringTemplateEngine] of this module's own — one for the `.html` parts, one for the `.txt`
  * parts in Thymeleaf's TEXT mode. Not `web`'s MVC engine and not a bean of that type: a
- * domain module renders mail, and an engine that resolved `templates/mail/` from the site's
- * resolver chain would be the coupling this module's fence exists to keep out.
+ * domain module renders mail, and an engine that resolved these from the site's resolver
+ * chain would be the coupling this module's fence exists to keep out. Deliberately NOT under
+ * `templates/`: `web`'s template audits sweep every html under the templates classpath root and would apply the
+ * app's typography and htmx rules to mail markup that has its own inline style by design.
  *
  * Every value reaches a template pre-formatted (an `Instant` as its ISO string), so the
  * templates carry no dialect beyond the standard one; the html part escapes through
@@ -111,6 +118,6 @@ class MailTemplates {
         }
 
     private companion object {
-        const val TEMPLATE_PREFIX = "templates/mail/"
+        const val TEMPLATE_PREFIX = "mail-templates/"
     }
 }
