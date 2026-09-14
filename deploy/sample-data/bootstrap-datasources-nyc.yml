@@ -27,6 +27,9 @@ datasources:
       NYC TLC yellow-taxi trips and their daily and monthly rollups, 2023-01
       through 2024-12. Facts the data cannot reveal — the sample rate, the time
       zone, the money unit — are rows in the _sample_meta table.
+      trip_distance_mi carries TLC's raw outliers (96 rows ≥ 100 mi in 2024, one of
+      331,688 mi); the nyc/ templates filter `0 < trip_distance_mi < 100 AND
+      0 < total_amount < 1000` — apply it before any per-mile metric.
     dialect: POSTGRES
     jdbc_url: jdbc:postgresql://postgres:5432/dp_sample_trips
     credential:

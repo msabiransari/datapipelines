@@ -195,8 +195,16 @@ class SemanticsToolsTest {
         )
     }
 
+    /**
+     * 129 §B — the four arms of text/refs agreement through the real tool: (1) a catalog
+     * table the text names exactly and refs omit is ACCEPTED, the ref added with the
+     * catalog's namespace and no column, `refs_added` telling the agent; (2) a near-miss is
+     * REFUSED before the service runs, naming the nearest listed table; (3) an exact table
+     * the refs carry is accepted with nothing added; (4) prose with underscores is accepted
+     * with nothing added.
+     */
     @Test
-    fun `a fact whose text names a table its refs do not is refused before the service runs - 125 B`() {
+    fun `text and refs agree in four arms - exact-missing is added for you, a near-miss is refused - 129 B`() {
         val catalog =
             listOf(
                 TableInfo(listOf("public"), "orders", "TABLE", null),
@@ -205,8 +213,13 @@ class SemanticsToolsTest {
         every { service.record(any(), any(), any(), any()) } returns mapOf("id" to "f1")
         val tool = recordTool(catalog)
 
-        // The misspelling, with CORRECT refs: the text lies, the refusal names the nearest listed table.
-        val misspelled =
+        val exactMissing =
+            tool.call(
+                McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
+                McpFixtures.ctx(Scope.AUTHOR),
+            ) as Map<*, *>
+
+        val nearMiss =
             shouldThrow<DatapipelinesException> {
                 tool.call(
                     McpArguments(recordArgs() + ("fact" to "order_itemz joins to orders on order_id")),
@@ -214,17 +227,7 @@ class SemanticsToolsTest {
                 )
             }
 
-        // A listed table spelled exactly but absent from refs: same code, no "did you mean".
-        val exact =
-            shouldThrow<DatapipelinesException> {
-                tool.call(
-                    McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
-                    McpFixtures.ctx(Scope.AUTHOR),
-                )
-            }
-
-        // The same fact spelled as the refs spell it, and a fact whose underscores are prose: both reach the service.
-        val spelledRight =
+        val exactPresent =
             tool.call(
                 McpArguments(
                     recordArgs() +
@@ -234,21 +237,54 @@ class SemanticsToolsTest {
                         ),
                 ),
                 McpFixtures.ctx(Scope.AUTHOR),
-            )
+            ) as Map<*, *>
+
         val proseUnderscores =
             tool.call(
                 McpArguments(recordArgs() + ("fact" to "amount is a row_count-weighted average, closing at the as_of date")),
                 McpFixtures.ctx(Scope.AUTHOR),
-            )
+            ) as Map<*, *>
 
         assertAll(
-            { misspelled.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
-            { misspelled.message shouldContain "did you mean 'order_items'" },
-            { exact.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
-            { (spelledRight as Map<*, *>)["id"] shouldBe "f1" },
-            { (proseUnderscores as Map<*, *>)["id"] shouldBe "f1" },
-            { verify(exactly = 2) { service.record(any(), any(), any(), any()) } },
+            { exactMissing["id"] shouldBe "f1" },
+            {
+                exactMissing["refs_added"] shouldBe
+                    listOf(mapOf("schema" to "public", "table" to "order_items", "column" to null))
+            },
+            { nearMiss.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
+            { nearMiss.message shouldContain "did you mean 'order_items'" },
+            { exactPresent["id"] shouldBe "f1" },
+            { exactPresent["refs_added"] shouldBe null },
+            { proseUnderscores["id"] shouldBe "f1" },
+            { proseUnderscores["refs_added"] shouldBe null },
+            { verify(exactly = 3) { service.record(any(), any(), any(), any()) } },
         )
+    }
+
+    @Test
+    fun `the added ref rides the STORED refs - the catalog's namespace, no column - 129 B`() {
+        val catalog =
+            listOf(
+                TableInfo(listOf("public"), "orders", "TABLE", null),
+                TableInfo(listOf("public"), "order_items", "TABLE", null),
+            )
+        every { service.record(any(), any(), any(), any()) } returns mapOf("id" to "f1")
+
+        recordTool(catalog).call(
+            McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
+            McpFixtures.ctx(Scope.AUTHOR),
+        )
+
+        verify(exactly = 1) {
+            service.record(
+                any(),
+                any(),
+                match {
+                    it.refs == listOf(FactRef(null, "orders", "amount"), FactRef("public", "order_items", null))
+                },
+                any(),
+            )
+        }
     }
 
     @Test

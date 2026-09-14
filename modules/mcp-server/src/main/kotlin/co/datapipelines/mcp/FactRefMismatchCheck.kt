@@ -5,18 +5,20 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 
 /**
- * 125 §B — `semantics_record` refuses a fact whose text names a table its `refs` do not.
+ * 125 §B, kinded by 129 §B — the text/refs agreement check over a recorded fact's wording.
  *
  * The learned-fact store checks every REF against live introspection (`semantics.ref_unresolved`),
  * but nothing checked the other direction until the audited acceptance runs: an agent recorded a
  * fact whose `fact` text named a table that does not exist (a typo) while its `refs` were right,
  * and the store kept the lie — the next session reads the text, not the refs. This is the other
  * direction: every identifier-shaped token of the `fact` (and a caller-given `evidence_summary`)
- * is compared against the datasource's catalog listing, and a token that names a listed table
- * without being one of the `refs` — a catalog table spelled exactly but missing from `refs`, or a
- * near-miss within an edit distance of [MAX_DISTANCE] of one — refuses the record as
- * `semantics.ref_mismatch`. A token the `refs` DO carry is text/refs agreement; whether that ref
- * then resolves is the recorder's `semantics.ref_unresolved`, not this check.
+ * is compared against the datasource's catalog listing, and a token that NEAR-MISSES a listed
+ * table — within an edit distance of [MAX_DISTANCE], without being one — refuses the record as
+ * `semantics.ref_mismatch`, naming the nearest table. A token that case-fold IS a listed table
+ * but that no ref carries is not a lie to refuse: the caller ADDS it to the stored refs, and
+ * [check] returns it (in the catalog's spelling) so the tool can. A token the `refs` DO carry is
+ * text/refs agreement; whether that ref then resolves is the recorder's
+ * `semantics.ref_unresolved`, not this check.
  *
  * Prose is deliberately not parsed: a token is a CANDIDATE only when it is `[a-z0-9_]{4,}` AND
  * contains an underscore or case-fold-matches a listed table, and a candidate that matches nothing
@@ -28,6 +30,10 @@ import co.datapipelines.typesystem.DatapipelinesException
  * The check runs only when the datasource HAS a catalog listing: a lake with an empty registry
  * (or a listing read that fails — the recorder's own ref check surfaces the unreachable
  * datasource) skips it.
+ *
+ * 129 owner ruling: the exact-missing arm used to refuse, and the refusal taxed ordinary prose —
+ * every table in a workspace of common nouns (trips, zones, stations) tripped it. On an exact
+ * match, ADD the ref and accept; refuse only the near-miss the check was built for.
  */
 internal object FactRefMismatchCheck {
     private val TOKEN = Regex("[a-z0-9_]{4,}")
@@ -36,68 +42,79 @@ internal object FactRefMismatchCheck {
     private const val MAX_DISTANCE = 2
 
     /**
-     * Throws the catalogued refusal on the first offending token of [texts]; returns normally when
-     * every table the texts name is in [refs] (or the token is prose). [catalogTables] is the
-     * datasource's listing as `datasources_get_tables` reports it; an empty listing skips the
-     * check entirely.
+     * Returns the listed tables the texts name exactly but [refs] do not carry — the refs the
+     * caller adds before storing, in the catalog's spelling, deduplicated in first-seen order —
+     * and throws the catalogued refusal on the first NEAR-MISS token of [texts]. [catalogTables]
+     * is the datasource's listing as `datasources_get_tables` reports it; an empty listing skips
+     * the check entirely.
      */
     fun check(
         datasource: String,
         texts: List<String>,
         refs: List<FactRef>,
         catalogTables: List<String>,
-    ) {
-        if (catalogTables.isEmpty()) return
-        val refTables = refs.mapTo(mutableSetOf()) { it.table.lowercase() }
-        val catalogLower = catalogTables.map { it.lowercase() }
-        val hit =
-            texts.firstNotNullOfOrNull { text ->
-                TOKEN
-                    .findAll(text.lowercase())
-                    .map { it.value }
-                    .firstNotNullOfOrNull { token -> offense(datasource, token, refTables, catalogTables, catalogLower) }
+    ): List<String> {
+        if (catalogTables.isEmpty()) return emptyList()
+        val state = State(refs, catalogTables)
+        val missing = linkedSetOf<String>()
+        for (text in texts) {
+            for (token in TOKEN.findAll(text.lowercase()).map { it.value }) {
+                state.classify(datasource, token)?.let { missing += it }
             }
-        hit?.let { throw it }
+        }
+        return missing.toList()
     }
 
-    /**
-     * The refusal one [token] earns, or null when it is prose (no listed table within
-     * [MAX_DISTANCE]), text/refs agreement (a wrong REF is the recorder's `ref_unresolved`,
-     * not this check), or a listed table the refs carry.
-     */
-    private fun offense(
-        datasource: String,
-        token: String,
-        refTables: Set<String>,
+    /** The catalog-backed half of [check]: one token's verdict, and the near-miss refusal. */
+    private class State(
+        refs: List<FactRef>,
         catalogTables: List<String>,
-        catalogLower: List<String>,
-    ): DatapipelinesException? {
-        val exactIndex = catalogLower.indexOf(token)
-        val nearest = catalogTables.minByOrNull { levenshtein(token, it.lowercase()) }
-        val nearestDistance = nearest?.let { levenshtein(token, it.lowercase()) } ?: Int.MAX_VALUE
-        return when {
-            // A listed table, spelled as the catalog spells it: refused only when no ref carries it.
-            exactIndex >= 0 && token !in refTables -> {
-                mismatch(datasource, token, suggestion = null, listedAs = catalogTables[exactIndex])
-            }
+    ) {
+        private val refTables = refs.mapTo(mutableSetOf()) { it.table.lowercase() }
+        private val catalogTables: List<String> = catalogTables
+        private val catalogLower = catalogTables.map { it.lowercase() }
 
-            // Prose: an exact match the refs carry, a plain word (no underscore), or nothing close.
-            exactIndex >= 0 || '_' !in token || nearestDistance > MAX_DISTANCE -> {
-                null
-            }
+        /**
+         * The table to ADD for [token], or null when it is prose (no listed table within
+         * [MAX_DISTANCE]), text/refs agreement (a wrong REF is the recorder's
+         * `ref_unresolved`, not this check), or a listed table the refs carry. Throws the
+         * catalogued refusal when [token] near-misses a listed table.
+         */
+        fun classify(
+            datasource: String,
+            token: String,
+        ): String? {
+            val exactIndex = catalogLower.indexOf(token)
+            return when {
+                // A listed table, spelled as the catalog spells it: the caller adds the ref,
+                // unless a ref already carries it (agreement).
+                exactIndex >= 0 && token !in refTables -> {
+                    catalogTables[exactIndex]
+                }
 
-            // A token the refs carry is text/refs agreement — a wrong REF is the recorder's job.
-            token in refTables -> {
-                null
-            }
+                // Prose: an exact match the refs carry, or a plain word (no underscore).
+                exactIndex >= 0 || '_' !in token -> {
+                    null
+                }
 
-            else -> {
-                mismatch(
-                    datasource,
-                    token,
-                    suggestion = requireNotNull(nearest) { "within MAX_DISTANCE implies a nearest table" },
-                    listedAs = null,
-                )
+                // A token the refs carry is text/refs agreement — a wrong REF is the
+                // recorder's job (`ref_unresolved`), not a near-miss to refuse.
+                token in refTables -> {
+                    null
+                }
+
+                else -> {
+                    val nearest = catalogTables.minByOrNull { levenshtein(token, it.lowercase()) }
+                    val nearestDistance = nearest?.let { levenshtein(token, it.lowercase()) } ?: Int.MAX_VALUE
+                    if (nearestDistance <= MAX_DISTANCE) {
+                        throw mismatch(
+                            datasource,
+                            token,
+                            requireNotNull(nearest) { "within MAX_DISTANCE implies a nearest table" },
+                        )
+                    }
+                    null
+                }
             }
         }
     }
@@ -105,29 +122,20 @@ internal object FactRefMismatchCheck {
     private fun mismatch(
         datasource: String,
         token: String,
-        suggestion: String?,
-        listedAs: String?,
-    ): DatapipelinesException {
-        val message =
-            if (suggestion != null) {
-                "The fact names '$token', which is not a table here; did you mean '$suggestion'? " +
-                    "Name the tables the fact is about in refs and spell them as the catalog does."
-            } else {
-                "The fact names '$token', which is a table on datasource '$datasource' but is not one of this fact's refs. " +
-                    "Name the tables the fact is about in refs and spell them as the catalog does."
-            }
-        return DatapipelinesException(
+        suggestion: String,
+    ): DatapipelinesException =
+        DatapipelinesException(
             code = PipelineErrorCodes.Semantics.REF_MISMATCH,
-            message = message,
+            message =
+                "The fact names '$token', which is not a table here; did you mean '$suggestion'? " +
+                    "Name the tables the fact is about in refs and spell them as the catalog does.",
             details =
-                buildMap {
-                    put("datasource", datasource)
-                    put("token", token)
-                    suggestion?.let { put("suggestion", it) }
-                    listedAs?.let { put("table", it) }
-                },
+                mapOf(
+                    "datasource" to datasource,
+                    "token" to token,
+                    "suggestion" to suggestion,
+                ),
         )
-    }
 
     /** Classic two-row Levenshtein, the datasources module's own copy made module-local. */
     private fun levenshtein(

@@ -7,14 +7,14 @@ import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 
 /**
- * 125 §B — the tokenizer half of the `semantics.ref_mismatch` refusal: what counts as a table
- * reference in free text and what stays prose. The MCP-level arm (through the real tool, with a
- * catalog listing) is in [SemanticsToolsTest].
+ * 125 §B, kinded by 129 §B — the tokenizer half of the `semantics.ref_mismatch` check: what
+ * counts as a table reference in free text and what stays prose, which table the tool ADDS on an
+ * exact match, and which near-miss it refuses. The MCP-level arms (through the real tool, with a
+ * catalog listing) are in [SemanticsToolsTest].
  */
 class FactRefMismatchCheckTest {
     private val catalog = listOf("orders", "order_items", "customers")
@@ -40,26 +40,27 @@ class FactRefMismatchCheckTest {
     }
 
     @Test
-    fun `a listed table spelled exactly but missing from refs refuses - no did-you-mean`() {
-        val thrown =
-            shouldThrow<DatapipelinesException> {
-                FactRefMismatchCheck.check("warehouse", listOf("customers carry the credit limit that orders.amount eats"), refs, catalog)
-            }
-        assertAll(
-            { thrown.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
-            { thrown.message shouldContain "'customers'" },
-            { thrown.message shouldNotContain "did you mean" },
-            { thrown.details["token"] shouldBe "customers" },
-        )
+    fun `a listed table spelled exactly but missing from refs is returned as the ref to add - not refused`() {
+        val missing =
+            FactRefMismatchCheck.check(
+                "warehouse",
+                listOf("customers carry the credit limit that orders.amount eats"),
+                refs,
+                catalog,
+            )
+        missing shouldBe listOf("customers")
     }
 
     @Test
-    fun `a case-folded exact match is the exact arm - case is not a misspelling`() {
-        val thrown =
-            shouldThrow<DatapipelinesException> {
-                FactRefMismatchCheck.check("warehouse", listOf("CUSTOMERS carry the credit limit"), refs, catalog)
-            }
-        thrown.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH
+    fun `every exact-missing table is returned once, in first-seen order, in the catalog's spelling`() {
+        val missing =
+            FactRefMismatchCheck.check(
+                "warehouse",
+                listOf("CUSTOMERS and order_items, then customers again over the whole window"),
+                refs,
+                catalog,
+            )
+        missing shouldBe listOf("customers", "order_items")
     }
 
     @Test
@@ -80,6 +81,19 @@ class FactRefMismatchCheckTest {
             { thrown.message shouldContain "did you mean 'order_items'" },
             { thrown.details["suggestion"] shouldBe "order_items" },
         )
+    }
+
+    @Test
+    fun `an exact-missing token never rides a refused record - the near-miss arm wins`() {
+        shouldThrow<DatapipelinesException> {
+            // `customers` would be a legal add, but `order_itemz` is a lie — the record is refused whole.
+            FactRefMismatchCheck.check(
+                "warehouse",
+                listOf("customers carry the limits order_itemz claims to join"),
+                refs,
+                catalog,
+            )
+        }.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH
     }
 
     @Test
@@ -105,16 +119,14 @@ class FactRefMismatchCheckTest {
 
     @Test
     fun `the evidence_summary is scanned too`() {
-        val thrown =
-            shouldThrow<DatapipelinesException> {
-                FactRefMismatchCheck.check(
-                    "warehouse",
-                    listOf("amount is in cents", "seen in customers over the whole window"),
-                    refs,
-                    catalog,
-                )
-            }
-        thrown.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH
+        val missing =
+            FactRefMismatchCheck.check(
+                "warehouse",
+                listOf("amount is in cents", "seen in customers over the whole window"),
+                refs,
+                catalog,
+            )
+        missing shouldBe listOf("customers")
     }
 
     @Test
