@@ -1,5 +1,7 @@
 package co.datapipelines.mcp
 
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -30,6 +32,32 @@ class SkillDistributionTest {
         // whole point of references/ is that the core does not grow back. 400 is the cap the
         // build enforces; 300 is the target the split landed at.
         lines.size shouldBeLessThanOrEqual MAX_SKILL_LINES
+    }
+
+    @Test
+    fun `no prose line of SKILL_md folds past the readable column`() {
+        // 131 §A.3 — the 400-line cap is met by CHOOSING, never by folding: a 1,300-char
+        // paragraph on one line satisfies the count and defeats the purpose (it costs the
+        // same tokens and reads worse). Exempt: the YAML front matter (the description is
+        // one line by the format's own rule, pinned above), fenced code blocks, and table
+        // rows — none of those is prose a wrapper can reflow.
+        val lines = File(repoSkill, "SKILL.md").readLines()
+        val offenders = mutableListOf<String>()
+        var inFrontMatter = false
+        var inFence = false
+        lines.forEachIndexed { index, line ->
+            val n = index + 1
+            when {
+                n == 1 && line == "---" -> inFrontMatter = true
+                inFrontMatter && line == "---" -> inFrontMatter = false
+                inFrontMatter -> Unit
+                line.trimStart().startsWith("```") -> inFence = !inFence
+                inFence || line.trimStart().startsWith("|") -> Unit
+                line.length > MAX_SKILL_LINE_CHARS ->
+                    offenders += "SKILL.md:$n (${line.length} chars): ${line.take(80)}…"
+            }
+        }
+        withClue(offenders.joinToString("\n")) { offenders.shouldBeEmpty() }
     }
 
     @Test
@@ -160,6 +188,9 @@ class SkillDistributionTest {
     private companion object {
         /** 095 §A/§E — the format's guidance is ~500 lines; the core is capped well under it. */
         const val MAX_SKILL_LINES = 400
+
+        /** 131 §A.3 — the line cap is met by choosing, never by folding a paragraph onto one line. */
+        const val MAX_SKILL_LINE_CHARS = 200
 
         /** 095 §C1/§E — every client injects this into every session. */
         const val MAX_INSTRUCTIONS_BYTES = 4096

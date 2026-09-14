@@ -20,9 +20,29 @@ path** — see *Folders* below), `display_name`, `description`, `parameters` (ty
 map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on
 create.
 
-**Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT (`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later save is draft-first too: the first save after a release opens a DRAFT (copy-on-write), later saves overwrite that one draft in place. DRAFT → RELEASED is a human step, with no exception — including on creation. A save whose body is identical to the released one is a no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"` with no draft pointer; that is success, not an error. Your updates are NOT published until a human releases the draft from the UI — **leave the draft for a human to release** (by design, D4; there is no release tool and that absence is deliberate). Version RETIREMENT is human too (101): a human may **discard** a released version (reversible — restore brings it back), **purge** a draft (irreversible — the row and its executions go), or **switch** the pointer a pipeline's dependents run; there are no tools for those either, by the same rule. Pipeline nodes pin template versions immutably; updating a template does not change existing pipelines until you update the node reference. Drafts are executable — running your own draft is the expected test loop.
+**Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT
+(`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later
+save is draft-first too: the first save after a release opens a DRAFT (copy-on-write), later
+saves overwrite that one draft in place. DRAFT → RELEASED is a human step, with no
+exception — including on creation. A save whose body is identical to the released one is a
+no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"`
+with no draft pointer; that is success, not an error. Your updates are NOT published until
+a human releases the draft from the UI — **leave the draft for a human to release** (by
+design, D4; there is no release tool and that absence is deliberate). Version RETIREMENT is
+human too (101): a human may **discard** a released version (reversible — restore brings it
+back), **purge** a draft (irreversible — the row and its executions go), or **switch** the
+pointer a pipeline's dependents run; there are no tools for those either, by the same rule.
+Pipeline nodes pin template versions immutably; updating a template does not change
+existing pipelines until you update the node reference. Drafts are executable — running
+your own draft is the expected test loop.
 
-**In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the statement, while the interpolated form puts it inside the SQL string. Pipeline save refuses the old form with `template.validation.parameter_interpolated`. `${}` stays for **structure** — table names, dynamic `IN` lists, `ORDER BY` fragments — which you keep safe yourself (never interpolate a caller-supplied value there). Bound values need no quoting: `BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
+**In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are
+never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the
+statement, while the interpolated form puts it inside the SQL string. Pipeline save refuses
+the old form with `template.validation.parameter_interpolated`. `${}` stays for
+**structure** — table names, dynamic `IN` lists, `ORDER BY` fragments — which you keep safe
+yourself (never interpolate a caller-supplied value there). Bound values need no quoting:
+`BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
 
 **Dialects** — eight: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE. Templates are
 dialect-specific; a node's template dialect must match what its `source` can execute. `LAKE`
@@ -142,7 +162,9 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
 3. **Preview the SQL.** `templates_render` with a representative context — save-time
    validation is parse-only, so this is your check that the SQL is actually what you
    meant. This is mandatory before step 4 for anything non-trivial. Every template the
-   pipeline pins — the tempdb ones included: a `sql_probe {"name": "tempdb"}` checks syntax and names, `templates_render` checks what the Freemarker actually emits, and they are not the same check.
+   pipeline pins — the tempdb ones included: a `sql_probe {"name": "tempdb"}` checks
+   syntax and names, `templates_render` checks what the Freemarker actually emits, and
+   they are not the same check.
 4. **Create the pipeline.** `pipelines_create` with `parameters` declared (types +
    required/defaults — remember `DECIMAL` needs `precision`; `required: true` and
    `default` are exclusive — a parameter with a default is optional by definition), nodes
@@ -241,19 +263,18 @@ on 2026-09-02 (T85): the answer was in the event all along.
 nodes** — the judgment between the golden path's steps: read the question's grain first,
 join the lookups and answer with display names, infer table roles from naming when nothing
 is described, aggregate at the source and ship the answer's grain, index a large staged
-table only after loading it, filter a lake table on the partition column its stats report (a table
-with no `partition` index has none; never a sibling timestamp inside the files or a UNION of ranges), analyse every source node's predicate against the
-table's indexes after it runs and put the `CREATE INDEX` suggestion in your handback, keep
-`depends_on` to data flow, treat a timeout as work in the
-wrong place, cast what you ship across engines, never compare a sample to a census, validate
-one number independently, and stop at the draft. Each of those is a mistake an agent made
-here.
+table only after loading it, filter a lake table on the partition column its stats report
+(a table with no `partition` index has none; never a sibling timestamp inside the files or
+a UNION of ranges), analyse every source node's predicate against the table's indexes
+after it runs and put the `CREATE INDEX` suggestion in your handback, keep `depends_on` to
+data flow, treat a timeout as work in the wrong place, cast what you ship across engines,
+never compare a sample to a census, validate one number independently, and stop at the
+draft. Each of those is a mistake an agent made here.
 
 1. **Render before you create.** `templates_render` with representative values catches
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
 2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
    + credential questions immediately.
-2½. **Learned facts are shared memory — keep them honest.** A fact you record with
 2½. **Learned facts are shared memory — keep them honest.** A fact you record with
    `evidence_sql` is `observed`; without it, only `asserted` — except a `definition`, `exclusion`
    or `preference`, which is a choice and lands `asserted` until a person confirms it. Two facts
@@ -263,7 +284,8 @@ here.
    names every table the `fact` text names, spelled as the catalog spells it** — a catalog table
    the text names exactly and `refs` omit is ADDED for you (`refs_added` in the response), a
    near-miss is refused with the nearest name (`semantics.ref_mismatch`) — and a DATASOURCE-scope
-   fact is table-wide: "in Q4 only A and B carry rows" is a pipeline description's job, not a fact's. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
+   fact is table-wide: "in Q4 only A and B carry rows" is a pipeline description's job, not a
+   fact's. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
    `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours. A rule the
    question leaves to you (what counts as rainy, active, late) is a `definition` — rule 13 says
    when to record one and when to reuse one an earlier pipeline recorded.
@@ -338,38 +360,10 @@ here.
     evidence so it lands as `asserted` for a human to verify — that record, not your reply, is what
     the next session finds — and say in the reply which facts you derived and which you assumed. An
     assumption that moves the answer by an order of magnitude: stop and ask first.
-14. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
-    H2 fails to match the GROUP BY expression to the identical SELECT expression when it
-    contains a parameter marker — `Column "x.amount" must be in the GROUP BY list`
-    (SQLState 90016), a lie that sends you chasing the wrong fix. Compute the classified
-    value in a derived table (`FROM (SELECT CASE ... :threshold ... END AS bucket ...) x`)
-    and `GROUP BY x.bucket` — a plain column always matches. Measured on H2 2.3.232.
-15. **Never divide DECIMAL by DECIMAL in H2 (tempdb) — cast to DOUBLE first.**
-    H2's DECIMAL arithmetic collapses result scale (a `DECIMAL(·,2)/DECIMAL(·,0)` division
-    can come back scale-0): `SUM(distance)/SUM(seconds)*3600` returned **0** where the
-    true answer was ~12, and `100.0 * part / whole` rounded to one decimal. Cast every
-    ratio operand: `CAST(SUM(x) AS DOUBLE) / NULLIF(CAST(SUM(y) AS DOUBLE), 0)`.
-    Verified empirically against the pinned driver 2.3.232 — plain DECIMAL gave 2448.00
-    where DOUBLE gave the correct 2456.81.
-16. **H2 (tempdb) names `VALUES` columns `C1, C2, …` — not `column1`.** Postgres and DuckDB
-    call a `VALUES` row's columns `column1…`; H2 2.x calls them `C1…`, so `SELECT column1
-    FROM (VALUES (0),(1))` fails at execution with `Column "column1" not found` after every
-    other node ran green. Dialect-safe form: alias the derived table's columns —
-    `FROM (VALUES (0),(1)) AS t(hr)` — or spell a small spine as `SELECT 0 AS hr UNION ALL
-    SELECT 1 …`. H2 has no schema to introspect, so check every tempdb statement with
-    `sql_probe {"name": "tempdb"}` (an empty engine: syntax and self-contained errors
-    surface in milliseconds; "table not found" means the statement parsed) before you pay a
-    full DAG run to find out — passing `parameters` for every `:name` the statement binds
-    (else `invalid_params`; tempdb checks syntax and names, not values, so any representative
-    value of the right type will do). And `rows` is a reserved word on MySQL and DuckDB —
-    alias a count `AS n`, never `AS rows`.
-17. **A source node sees only its own datasource.** Its SQL runs on that engine; staged
-    tables are visible only to `source: "tempdb"` nodes, and no engine reads another. To
-    filter a source by a set computed elsewhere, bind a parameter or write literals and keep
-    the computing node for the labels — and say so in the description
-    (`references/authoring-playbook.md` §3). The same wall holds inside a probe: a `zones`
-    lookup on the SQLite datasource cannot be joined inside a Postgres probe — bind the ids
-    or stage both.
+14. **Engine quirks** — a `:bind` inside an H2 GROUP BY, DECIMAL ÷ DECIMAL in H2, H2's
+    `C1…` `VALUES` columns, `rows` on MySQL/DuckDB, the one-datasource wall for source
+    nodes and probes: `references/authoring-playbook.md` §6, read it before your first
+    tempdb node.
 
 ## References — open one when you need it
 
@@ -390,8 +384,13 @@ Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` 
 
 ## References (when working inside the repo)
 
-- `docs/pipeline-contract.md` — pipeline/node JSON schema, validation rules, error catalog §13 · `docs/templates.md` — Freemarker rules, versioning, library templates
-- `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C) · `docs/type-system.md` — canonical types and wire encodings
-- `docs/mcp-server.md` — the MCP surface (tools, prompts, transport) · `docs/rest-api.md` — REST endpoints, SSE, result cursor, and §19's published endpoints: the path grammar, the read-only rule, the status table
-- `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6), key kinds and the hierarchical binding rule (§7.7) · `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe) · `docs/versioning.md` — the draft/release lifecycle, the hash-precondition protocol, why agents never release
+- `docs/pipeline-contract.md` — pipeline/node JSON schema, validation rules, error catalog §13
+- `docs/templates.md` — Freemarker rules, versioning, library templates
+- `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
+- `docs/type-system.md` — canonical types and wire encodings
+- `docs/mcp-server.md` — the MCP surface (tools, prompts, transport)
+- `docs/rest-api.md` — REST endpoints, SSE, result cursor, and §19's published endpoints: the path grammar, the read-only rule, the status table
+- `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6), key kinds and the hierarchical binding rule (§7.7)
+- `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
+- `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
+- `docs/versioning.md` — the draft/release lifecycle, the hash-precondition protocol, why agents never release
