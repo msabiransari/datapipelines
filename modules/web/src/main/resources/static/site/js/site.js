@@ -1,6 +1,7 @@
-/* datapipelines.co — theme toggle + copy-to-clipboard only.
+/* datapipelines.co — theme toggle, header menus + copy-to-clipboard only.
    The site is fully readable without this file: auto.css
-   handles theming via prefers-color-scheme. */
+   handles theming via prefers-color-scheme, and the header's
+   menus are <details>, which open and close on their own. */
 (function () {
   'use strict';
 
@@ -81,6 +82,65 @@
       link.media = 'all';
     }
   );
+
+  /* ------------------------------------------------------
+     Header menus (130 §A.1)
+     Both header menus — the Product disclosure and the
+     phone menu — are <details>: open/close, a focusable
+     summary and Enter/Space come from the element. This
+     adds the three things it lacks: Escape closes and puts
+     focus back on the summary, a click outside closes, and
+     only one of them is open at a time. Scoped to the
+     header — the FAQ <details> on the page keep their own
+     behaviour.
+     ------------------------------------------------------ */
+  var headerMenus = Array.prototype.slice.call(
+    document.querySelectorAll('.site-header details')
+  );
+
+  function closeMenu(menu, refocus) {
+    if (!menu.open) {
+      return;
+    }
+    menu.open = false;
+    if (refocus) {
+      var summary = menu.querySelector('summary');
+      if (summary) {
+        summary.focus();
+      }
+    }
+  }
+
+  headerMenus.forEach(function (menu) {
+    menu.addEventListener('toggle', function () {
+      if (!menu.open) {
+        return;
+      }
+      headerMenus.forEach(function (other) {
+        if (other !== menu) {
+          closeMenu(other, false);
+        }
+      });
+    });
+  });
+
+  if (headerMenus.length) {
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      headerMenus.forEach(function (menu) {
+        closeMenu(menu, true);
+      });
+    });
+    document.addEventListener('click', function (event) {
+      headerMenus.forEach(function (menu) {
+        if (!menu.contains(event.target)) {
+          closeMenu(menu, false);
+        }
+      });
+    });
+  }
 
   /* ------------------------------------------------------
      Copy-to-clipboard on code blocks

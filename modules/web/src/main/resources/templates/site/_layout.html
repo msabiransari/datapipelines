@@ -85,12 +85,37 @@
            a STATIC star count (no runtime fetch — the CSP forbids third-party requests),
            an AGPL-3.0 chip sits beside it, and the last item's LABEL is a fact about the
            host: on datapipelines.co a visitor is invited to the live demo, on a customer's
-           own deployment the same route is how their people sign in. -->
+           own deployment the same route is how their people sign in.
+           130 (owner R13, 2026-09-14): the differentiator pages were footer-only; a Product
+           DISCLOSURE (the APG disclosure-navigation pattern — a <details>, never role="menu",
+           which is for application action menus) leads the row and carries the seven. Escape,
+           click-outside and one-open-at-a-time live in site.js; open/close, focus and
+           Enter/Space are the element's own. The seven items are the ones in SiteHeaderMenu
+           BrowserTest's registry-derived list — a page dropped from SitePages fails there.
+           FAQ and Roadmap left this row for it (owner, 2026-09-14; both stay in the phone
+           menu and the footer's Project column). The row's budget is the container's 1152px
+           content box at BOTH 1280 and 1440 (--container-xl caps it), and it is spent
+           silently: a two-line "Theme: Auto" fits inside the 2.75rem item height, so the
+           header never grew when the row overflowed — it crushed the toggle and the brand
+           icon instead. Measured with a three-digit star count and the toggle at its widest
+           label: the row on 119's header was already 14px over; Product added 90px; FAQ
+           and Roadmap freed 143px. SiteHeaderMenuBrowserTest (c) holds the row's
+           max-content width under the box, which is the check that sees the crush. -->
+      <details class="nav-menu">
+        <summary>Product</summary>
+        <nav class="nav-panel" aria-label="Product">
+          <a th:href="@{/semantic-layer}">Semantic layer</a>
+          <a th:href="@{/dp-lake}">dp-lake</a>
+          <a th:href="@{/federated-query}">Federated query</a>
+          <a th:href="@{/text-to-sql-agent}">Text-to-SQL agent</a>
+          <a th:href="@{/mcp-tools}">MCP tools</a>
+          <a th:href="@{/demo-data}">Demo data</a>
+          <a th:href="@{/security}">Security</a>
+        </nav>
+      </details>
       <a th:href="@{/how-it-works}">How it works</a>
       <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
       <a th:href="@{/published-api}">API</a>
-      <a th:href="@{/roadmap}">Roadmap</a>
-      <a th:href="@{/faq}">FAQ</a>
       <a th:href="@{/docs}">Docs</a>
       <a th:href="@{/pricing}">Pricing</a>
       <a class="nav-github" href="https://github.com/msabiransari/datapipelines">
@@ -105,8 +130,22 @@
           <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>
         </svg>
       </summary>
-      <nav class="menu" aria-label="Primary mobile">
+      <nav class="nav-panel" aria-label="Primary mobile">
         <a th:href="@{/how-it-works}">How it works</a>
+        <!--/* 130 §A.3: the same seven as a labelled GROUP. The label is a <p>, not an <h2>:
+             the header sits outside the document outline, and an h2 here would be the first
+             heading a screen reader's heading list offers on EVERY page — before the h1. The
+             group's aria-labelledby is what gives the label its weight (announced on entry). */-->
+        <div class="nav-group" role="group" aria-labelledby="nav-product-heading">
+          <p class="menu-heading" id="nav-product-heading">Product</p>
+          <a th:href="@{/semantic-layer}">Semantic layer</a>
+          <a th:href="@{/dp-lake}">dp-lake</a>
+          <a th:href="@{/federated-query}">Federated query</a>
+          <a th:href="@{/text-to-sql-agent}">Text-to-SQL agent</a>
+          <a th:href="@{/mcp-tools}">MCP tools</a>
+          <a th:href="@{/demo-data}">Demo data</a>
+          <a th:href="@{/security}">Security</a>
+        </div>
         <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
         <a th:href="@{/published-api}">API</a>
         <a th:href="@{/tableau}">Tableau</a>

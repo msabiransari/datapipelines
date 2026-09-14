@@ -167,8 +167,13 @@ class SiteV2GuardsTest {
         val MAPPER = ObjectMapper()
         val LD_JSON = Regex("""<script type="application/ld\+json">(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
 
-        /** One visible FAQ entry: the summary and the answer paragraph the fragment renders. */
-        val DETAILS = Regex("""<details[^>]*>\s*<summary>(.*?)</summary>\s*<p>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
+        /**
+         * One visible FAQ entry: the summary and the answer paragraph the fragment renders. The
+         * question is matched WITHOUT a lazy run across tags: since 130 the header carries a
+         * `<details>` of its own (the Product disclosure — its summary is followed by a `<nav>`,
+         * not a `<p>`), and a `(.*?)` from that summary would run on to the first FAQ entry.
+         */
+        val DETAILS = Regex("""<details[^>]*>\s*<summary>([^<]*)</summary>\s*<p>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
 
         /** One tool row on /mcp-tools: the name, then its first status chip (the scope). */
         val TOOL_ROW = Regex("""<li>\s*<code>([a-z_]+)</code>\s*<span class="status">([^<]*)</span>""")
