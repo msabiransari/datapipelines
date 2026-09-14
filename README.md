@@ -10,7 +10,7 @@ API humans use.
 
 ## Status
 
-**Public beta (September 2026).** The safety properties are production-standard
+**Public beta since September 15, 2026.** The safety properties are production-standard
 — the pipeline lifecycle (draft, human release, immutable versions), API keys
 and the role-based scope matrix, purge/discard/restore, and promotion between
 deployments are all gated. What a beta population finds is the breadth: UI
