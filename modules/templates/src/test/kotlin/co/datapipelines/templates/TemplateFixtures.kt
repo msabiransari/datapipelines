@@ -1,8 +1,10 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import java.io.File
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -39,6 +41,12 @@ internal object TemplateFixtures {
             engine = engine,
         )
 
+    /**
+     * [bodyHash] defaults to a real SHA-256 over the content fields, so two fixtures with
+     * different bodies never share an identity by accident — the engine's parsed-template
+     * cache keys on it (132), and a fixture without one would make a stale-render test
+     * vacuous. It need not equal the database's expression; it needs to be distinct per content.
+     */
     fun version(
         id: String,
         version: Int = 1,
@@ -47,6 +55,9 @@ internal object TemplateFixtures {
         imports: List<TemplateImport> = emptyList(),
         body: String = "SELECT 1",
         type: TemplateType = TemplateType.SQL,
+        status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+        bodyHash: String = contentHash(imports, body),
+        updatedAt: Instant? = null,
     ): TemplateVersion =
         TemplateVersion(
             id = id,
@@ -58,7 +69,19 @@ internal object TemplateFixtures {
             body = body,
             createdAt = Instant.EPOCH,
             createdBy = ACTOR,
+            status = status,
+            bodyHash = bodyHash,
+            updatedAt = updatedAt,
         )
+
+    private fun contentHash(
+        imports: List<TemplateImport>,
+        body: String,
+    ): String =
+        MessageDigest
+            .getInstance("SHA-256")
+            .digest("$imports\u0000$body".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     /** Walks up from the working directory to locate a repo file, like `typesystem`'s fixture. */
     fun repoFile(relativePath: String): File {

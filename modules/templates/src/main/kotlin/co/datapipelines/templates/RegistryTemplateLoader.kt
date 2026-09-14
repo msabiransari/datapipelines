@@ -20,8 +20,28 @@ import java.io.StringReader
  * The stored [TemplateVersion.body] never contains an import directive (D12). This loader
  * prepends a synthesized `<#import "{id}@{version}" as {alias}>` line per [TemplateImport],
  * so when Freemarker parses the prologue it asks *this same loader* for each library key,
- * resolving the closure transitively. The prologue depends only on the immutable version, so
- * the effective source is itself immutable and safe for Freemarker to cache.
+ * resolving the closure transitively. The prologue depends only on the version's `imports`,
+ * which the row's `body_hash` covers, so the effective source is a function of that hash.
+ *
+ * ## Content identity, not key identity (132)
+ *
+ * A `"{id}@{version}"` key is **not** immutable: the sole DRAFT is overwritten in place by
+ * `templates_update` (117) and deleted by `templates_purge_draft`. Every [Source] this loader
+ * hands out therefore carries the row's [Source.identity] (`body_hash`) and its
+ * [Source.lastModified], and [InterruptibleConfiguration] keys its parsed-template cache on
+ * `name#identity` rather than on the name — so a re-read draft with a new hash is a cache
+ * miss and a fresh parse, while a RELEASED version keeps hitting. [getLastModified] reports
+ * the real stamp for the same reason: a constant told Freemarker's own staleness check the
+ * source could never change.
+ *
+ * ## The pinned source
+ *
+ * [InterruptibleConfiguration] has to know a name's identity BEFORE it decides whether to
+ * parse, and the parse — `Configuration.getTemplate` — asks this loader for the source again
+ * on the same thread. Two registry reads per miss is one too many for a draft (a row read
+ * each), and worse, a draft overwritten BETWEEN the two reads would be cached under the
+ * first read's hash with the second read's tree. [withPinned] closes both: the source the
+ * configuration resolved is the source the parse gets, verbatim, on that thread only.
  *
  * ## The prologue fails closed
  *
@@ -36,18 +56,78 @@ class RegistryTemplateLoader(
     private val registry: TemplateRegistry,
 ) : TemplateLoader {
     /**
-     * One resolved source: the [key] Freemarker asked for and the effective FTL
-     * ([prologue][synthesizePrologue] + body) it will parse.
+     * One resolved source: the [key] Freemarker asked for, the effective FTL
+     * ([prologue][synthesizePrologue] + body) it will parse, and the row's content [identity]
+     * (`body_hash`, blank when the row carries none) with its [lastModified] stamp.
      */
-    private data class Source(
+    internal data class Source(
         val key: String,
+        val parsedKey: Pair<String, Int>,
         val effectiveSource: String,
+        val identity: String,
+        val lastModified: Long,
     )
 
-    override fun findTemplateSource(name: String): Any? {
+    private val pinned = ThreadLocal<Source?>()
+
+    override fun findTemplateSource(name: String): Any? = source(name)
+
+    /**
+     * The typed resolution behind [findTemplateSource]: the [pinned] source when it names this
+     * key (see the class KDoc), else one registry lookup.
+     */
+    internal fun source(name: String): Source? {
         val key = parseKey(name) ?: return null
+        pinned.get()?.takeIf { it.parsedKey == key }?.let { return it }
         val stored = registry.lookup(key.first, key.second) ?: return null
-        return Source(name, synthesizePrologue(stored.imports) + stored.body)
+        return sourceOf(name, key, stored)
+    }
+
+    /**
+     * The [Source] for a version the caller has ALREADY resolved under [name] — so
+     * [TemplateEngine], which looks the version up to pick a configuration, can pin it and
+     * spare the configuration its own lookup. Null when [name] is not a well-formed key for
+     * [stored] (a mismatch is a programming error upstream; refusing is the fail-closed shape).
+     */
+    internal fun sourceOf(
+        name: String,
+        stored: TemplateVersion,
+    ): Source? {
+        val key = parseKey(name)?.takeIf { it.first == stored.id && it.second == stored.version } ?: return null
+        return sourceOf(name, key, stored)
+    }
+
+    private fun sourceOf(
+        name: String,
+        key: Pair<String, Int>,
+        stored: TemplateVersion,
+    ): Source =
+        Source(
+            key = name,
+            parsedKey = key,
+            effectiveSource = synthesizePrologue(stored.imports) + stored.body,
+            identity = stored.bodyHash,
+            lastModified = stored.lastModified.toEpochMilli(),
+        )
+
+    /**
+     * Runs [block] with [source] as THE answer for its key on this thread — so a parse the
+     * caller starts after resolving [source] is guaranteed to parse exactly that content, and
+     * costs no second registry read. Nests (the engine pins around a load, the configuration
+     * pins the same source around the parse); the previous pin is restored on exit,
+     * exceptional or not.
+     */
+    internal fun <T> withPinned(
+        source: Source,
+        block: () -> T,
+    ): T {
+        val previous = pinned.get()
+        pinned.set(source)
+        try {
+            return block()
+        } finally {
+            if (previous == null) pinned.remove() else pinned.set(previous)
+        }
     }
 
     /**
@@ -82,17 +162,15 @@ class RegistryTemplateLoader(
     ): Reader = StringReader((templateSource as Source).effectiveSource)
 
     /**
-     * A constant timestamp: every version is immutable (templates.md §5.1), so its source
-     * never changes and Freemarker's cache never needs to reload it. A new version is a new
-     * key, not a modification of this one.
+     * The row's write stamp (a draft's last overwrite, else its creation), so a Freemarker-side
+     * cache comparing it would reload an overwritten draft. Until 132 this was a constant on
+     * the premise that every version is immutable — the sole DRAFT is not (templates.md §5.1).
      */
-    override fun getLastModified(templateSource: Any?): Long = IMMUTABLE_TIMESTAMP
+    override fun getLastModified(templateSource: Any?): Long = (templateSource as Source).lastModified
 
     override fun closeTemplateSource(templateSource: Any?) = Unit
 
     private companion object {
-        const val IMMUTABLE_TIMESTAMP = 0L
-
         /**
          * @throws IOException if any entry is not a plain `{id, version, alias}` triple. Freemarker
          *   surfaces a loader `IOException` as a render failure, which is the fail-closed outcome:

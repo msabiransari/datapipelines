@@ -4,11 +4,13 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 import java.io.IOException
+import java.time.Instant
 
 /**
  * [RegistryTemplateLoader] is the containment boundary of templates.md §4.3: the **only** way a
@@ -76,6 +78,31 @@ class RegistryTemplateLoaderTest {
         withClue("the refusal must not echo the attacker's alias back into logs") {
             (thrown.message ?: "") shouldNotContain "PWNED"
         }
+    }
+
+    @Test
+    fun `lastModified is the version's write stamp, not a constant - a draft overwrite moves it`() {
+        // Freemarker's own staleness check compares this value; a constant told any cache the
+        // source could never change, which the in-place draft overwrite (117) made untrue (132).
+        val written = Instant.parse("2026-09-14T14:27:06Z")
+        val overwritten = Instant.parse("2026-09-14T14:34:40Z")
+        val registry = InMemoryTemplateRegistry()
+        val draftLoader = RegistryTemplateLoader(registry)
+
+        registry.put(TemplateFixtures.version("test/wip.sql", body = "SELECT 1", updatedAt = written))
+        val first = draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1"))
+        registry.put(TemplateFixtures.version("test/wip.sql", body = "SELECT 2", updatedAt = overwritten))
+        val second = draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1"))
+
+        first shouldBe written.toEpochMilli()
+        second shouldBe overwritten.toEpochMilli()
+    }
+
+    @Test
+    fun `lastModified falls back to created_at on a row that was never a draft`() {
+        val source = loader.findTemplateSource("test/lib.sql@1")
+
+        loader.getLastModified(source) shouldBe library.createdAt.toEpochMilli()
     }
 
     private fun readerText(source: Any?): String = loader.getReader(source, "UTF-8").readText()

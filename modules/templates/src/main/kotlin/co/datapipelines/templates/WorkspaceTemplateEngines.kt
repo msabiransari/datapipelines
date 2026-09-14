@@ -13,9 +13,10 @@ import java.util.UUID
  * than beside it.
  *
  * Template names are unique only per workspace (metadata-db §4.8), so the render path's two
- * cache tiers — this registry's resolved-version LRU and Freemarker's parsed-template cache
- * (keyed by the loader's `"{id}@{version}"` name, see [InterruptibleConfiguration]) — are
- * only sound when the workspace is part of their identity. It is, structurally: each
+ * cache tiers — this registry's resolved-version LRU (non-drafts only, 132) and the
+ * parsed-template cache (keyed by the loader's `"{id}@{version}"` name plus the row's content
+ * hash, see [InterruptibleConfiguration]) — are only sound when the workspace is part of
+ * their identity. It is, structurally: each
  * workspace gets its own registry and its own engine (whose Freemarker `Configuration` is
  * per-instance), so no key anywhere needs the workspace appended and no cross-workspace
  * cache hit is representable.

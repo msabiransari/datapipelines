@@ -89,13 +89,28 @@ data class Template(
 }
 
 /**
- * One immutable `template_versions` row — the persistence-facing per-version record
- * (metadata-db §4.9).
+ * One `template_versions` row — the persistence-facing per-version record (metadata-db §4.9).
  *
  * [TemplateEngine] and [LibraryResolver] resolve imports at an exact `{id, version}` against
  * this shape: it carries the [body], the [imports] array, and the [isLibrary] flag that
- * import validation checks, all pinned to one version. A version is never updated in place
- * (templates.md §5.1), so a [TemplateVersion] is safe to cache indefinitely by its [key].
+ * import validation checks, all pinned to one version.
+ *
+ * ## Which rows are immutable (templates.md §5.1, since 117/132)
+ *
+ * A RELEASED or DISCARDED version is never written again: no statement in
+ * [TemplateRepository] targets the content fields of a non-DRAFT row, and the entity purge
+ * (101) is refused unless the sole version is a DRAFT. The **DRAFT** is the one mutable key —
+ * `templates_update` / `PUT /templates` overwrite it IN PLACE (same id, same version number,
+ * new content), and `templates_purge_draft` deletes it. So a [TemplateVersion] is safe to
+ * cache by its [key] exactly when [status] is not [PipelineVersionStatus.DRAFT]; a draft
+ * must be re-read on every lookup ([RepositoryTemplateRegistry]), and the parsed-template
+ * cache keys on [bodyHash] rather than on the key alone ([InterruptibleConfiguration]).
+ *
+ * [bodyHash] is the row's `body_hash` — the SHA-256 the database computes over the
+ * version-owned fields (`engine`, `dialect`, `is_library`, `imports`, `body`), i.e. over
+ * everything the effective Freemarker source depends on. Two rows with equal hashes parse to
+ * the same tree; a draft overwrite always changes it. [updatedAt] is the draft's last write
+ * stamp (null on rows that were never a draft) — what the loader reports as `lastModified`.
  *
  * [type] (046) selects which of the engine's two Freemarker configurations the version
  * renders through ([TemplateEngine]); [dialect] is null exactly when the type is `html`.
@@ -111,7 +126,21 @@ data class TemplateVersion(
     val body: String,
     val createdAt: Instant,
     val createdBy: UUID,
+    /** Defaulted RELEASED so the pre-132 constructors keep compiling — and keep their immutable reading. */
+    val status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    /**
+     * The row's content hash (versioning §4). Blank only on a hand-built instance; the engine
+     * treats a blank hash as "no identity" and never caches the parsed tree (parses every load).
+     */
+    val bodyHash: String = "",
+    val updatedAt: Instant? = null,
 ) {
     /** The registry lookup key, `"{id}@{version}"`. */
     val key: String get() = "$id@$version"
+
+    /** True for the one mutable status — the row a write can overwrite or delete in place. */
+    val isDraft: Boolean get() = status == PipelineVersionStatus.DRAFT
+
+    /** The stamp a loader reports as last-modified: the draft's last write, else the row's creation. */
+    val lastModified: Instant get() = updatedAt ?: createdAt
 }

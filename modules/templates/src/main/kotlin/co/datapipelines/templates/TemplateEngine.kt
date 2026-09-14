@@ -79,7 +79,10 @@ class TemplateRenderException(
  * can send an `html` body through the escaping-free configuration by forgetting to ask.
  * The loader itself is type-blind (it resolves `{name}@{version}` regardless of type), and a
  * version's key only ever loads through one of the two configurations because the type is
- * immutable per template (§5.3) — the two caches cannot disagree about a key.
+ * immutable per template (§5.3) — the two caches cannot disagree about a key. What a key
+ * holds CAN change — the sole DRAFT is overwritten in place (templates.md §5.1, 117) — which
+ * is why the registry re-reads a draft on every lookup and the parsed-template cache keys on
+ * the row's content hash (132); see [RepositoryTemplateRegistry] and [InterruptibleConfiguration].
  *
  * Both configurations share the watchdog pool and the render budget below; nothing about the
  * guards is per-type.
@@ -109,9 +112,16 @@ class TemplateEngine(
 ) : Closeable {
     private val loader: RegistryTemplateLoader = RegistryTemplateLoader(registry)
 
-    private val sqlConfiguration: Configuration = FreemarkerConfigFactory.create(loader, cacheSize)
+    private val sqlConfiguration: InterruptibleConfiguration = FreemarkerConfigFactory.create(loader, cacheSize)
 
-    private val htmlConfiguration: Configuration = FreemarkerConfigFactory.createHtml(loader, cacheSize)
+    private val htmlConfiguration: InterruptibleConfiguration = FreemarkerConfigFactory.createHtml(loader, cacheSize)
+
+    /**
+     * Parsed trees held across both configurations — the assertion surface for the 132
+     * contract: a released version is parsed once and reused, an overwritten draft is parsed
+     * again under its new content hash, a hash-less row is never held at all.
+     */
+    internal val parsedTemplates: Int get() = sqlConfiguration.parsedTemplates + htmlConfiguration.parsedTemplates
 
     private val workers =
         ThreadPoolExecutor(
@@ -218,16 +228,22 @@ class TemplateEngine(
         maxOutputChars: Long,
     ): String {
         // 046 §6: the version's type picks the configuration. The lookup rides the registry's
-        // resolved-version LRU (one map hit once warm), and a null version falls through to the
-        // sql configuration so the loader's TemplateNotFoundException — and the NotFound
-        // classification that turns it into template_not_found — is preserved exactly as it was.
-        val configuration =
-            if (registry.lookup(ref.id, ref.version)?.type == TemplateType.HTML) {
-                htmlConfiguration
+        // resolved-version LRU (one map hit once warm; a DRAFT is a row read, 132), and a null
+        // version falls through to the sql configuration so the loader's
+        // TemplateNotFoundException — and the NotFound classification that turns it into
+        // template_not_found — is preserved exactly as it was.
+        val version = registry.lookup(ref.id, ref.version)
+        val configuration = if (version?.type == TemplateType.HTML) htmlConfiguration else sqlConfiguration
+        // The version just read is pinned through the load, so the configuration's own
+        // identity check and (on a miss) the parse consume it rather than reading the row
+        // again — one row read per draft render, none per released one (measured in 132).
+        val pinned = version?.let { loader.sourceOf(ref.key, it) }
+        val template =
+            if (pinned == null) {
+                configuration.getTemplate(ref.key)
             } else {
-                sqlConfiguration
+                loader.withPinned(pinned) { configuration.getTemplate(ref.key) }
             }
-        val template = configuration.getTemplate(ref.key)
         val buffer = BoundedWriter(StringBuilder(), maxOutputChars)
         template.process(normalizedContext, buffer)
         return buffer.output()

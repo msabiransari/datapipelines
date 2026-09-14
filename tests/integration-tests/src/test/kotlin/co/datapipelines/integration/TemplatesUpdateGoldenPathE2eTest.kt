@@ -54,10 +54,17 @@ import java.util.UUID
  * 7. **a human releases** over REST — the verb no tool has;
  * 8. **the next write opens a NEW draft** — copy-on-write (§5.1), version 2;
  * 9. **an update carrying the OLD hash** is the catalogued `template.version.conflict` —
- *    the precondition, not a polite warning.
+ *    the precondition, not a polite warning;
+ * 10. **(132) the update is what renders AND runs once the caches are warm** — the shape the
+ *    2026-09-14 acceptance run had and case 6 could not see, because case 6 never rendered
+ *    BEFORE the update: render → update → render → execute a pipeline pinning `@1` → update
+ *    → render → execute, in ONE method so nothing between the legs empties a cache. Before
+ *    132 both render caches were keyed on `id@version` and held the first body for the life
+ *    of the workspace engine; every later `templates_render` and `pipelines_execute` ran it.
  *
- * No datasource is needed: the template bodies are plain SQL with nothing to render against,
- * so the suite adds no container beyond the module's shared Postgres and Redis.
+ * Cases 1–9 need no datasource: their bodies are plain SQL with nothing to render against.
+ * Case 10 executes, so it registers an in-JVM H2 (`DB_CLOSE_DELAY=-1`) — no container beyond
+ * the module's shared Postgres and Redis.
  */
 @SpringBootTest(
     classes = [co.datapipelines.DatapipelinesApplication::class],
@@ -263,8 +270,176 @@ class TemplatesUpdateGoldenPathE2eTest {
         }
     }
 
+    @Test
+    @Order(10)
+    fun `a draft updated after it was rendered is what renders and runs next - both caches were warm`() {
+        // Step 1 — create, then RENDER: the leg the 117 case never had. This is what parked the
+        // first body in the registry LRU and the parsed-template cache.
+        val (created, createError) = callTool(10, "templates_create", cacheArgs(CACHE_BODY_V1, expectedHash = null))
+        withClue("create must succeed: $created") { createError shouldBe false }
+        val hash1 = created["body_hash"].asText()
+        renderCacheTemplate(11, version = null) shouldBe CACHE_BODY_V1
+
+        // Step 2 — the update the agent made (same v1 draft, new body).
+        val (updated, updateError) = callTool(12, "templates_update", cacheArgs(CACHE_BODY_V2, expectedHash = hash1))
+        withClue("update must succeed: $updated") { updateError shouldBe false }
+        val hash2 = updated["body_hash"].asText()
+        updated["version"].asInt() shouldBe 1
+
+        // Step 3 — the render the acceptance run saw return the OLD body, versionless and @1.
+        withClue("templates_render (working version) after the update must be the new body") {
+            renderCacheTemplate(13, version = null) shouldBe CACHE_BODY_V2
+        }
+        withClue("templates_render version=1 after the update must be the new body") {
+            renderCacheTemplate(14, version = 1) shouldBe CACHE_BODY_V2
+        }
+
+        // Step 4 — a pipeline pinning @1 EXECUTES; the column alias only the new body emits is
+        // the proof of which body ran, and the row value doubles it.
+        registerH2Datasource()
+        val (pipeline, pipelineError) =
+            callTool(
+                15,
+                "pipelines_create",
+                mapOf(
+                    "name" to CACHE_PIPELINE,
+                    "display_name" to "Draft cache golden path",
+                    "description" to "Pins the draft template at version 1 while it is edited.",
+                    "nodes" to
+                        listOf(
+                            mapOf(
+                                "id" to "rows",
+                                "type" to "DQL",
+                                "source" to H2_DATASOURCE,
+                                "description" to "Runs whatever the pinned draft says right now",
+                                "template" to mapOf("id" to CACHE_TEMPLATE_ID, "version" to 1),
+                                "depends_on" to emptyList<String>(),
+                            ),
+                        ),
+                ),
+            )
+        withClue("pipeline create must succeed: $pipeline") { pipelineError shouldBe false }
+        val pipelineId = pipeline["id"].asText()
+        assertExecutedBody(executeCachePipeline(16, pipelineId), alias = "marker_v2", value = 2)
+
+        // Step 5 — a second iteration of the same loop: update → render → execute.
+        val (again, againError) = callTool(17, "templates_update", cacheArgs(CACHE_BODY_V3, expectedHash = hash2))
+        withClue("second update must succeed: $again") { againError shouldBe false }
+        withClue("the second iteration's render") { renderCacheTemplate(18, version = null) shouldBe CACHE_BODY_V3 }
+        assertExecutedBody(executeCachePipeline(19, pipelineId), alias = "marker_v3", value = 3)
+    }
+
+    private fun cacheArgs(
+        body: String,
+        expectedHash: String?,
+    ): Map<String, Any?> =
+        buildMap {
+            put("id", CACHE_TEMPLATE_ID)
+            expectedHash?.let { put("expected_hash", it) }
+            put("dialect", "H2")
+            put("display_name", "Draft cache golden path")
+            put("description", "Expects: nothing (plain SQL).")
+            put("body", body)
+        }
+
+    /** `templates_render` on the cache template — versionless (working version) or pinned. */
+    private fun renderCacheTemplate(
+        id: Int,
+        version: Int?,
+    ): String {
+        val arguments =
+            buildMap {
+                put("id", CACHE_TEMPLATE_ID)
+                version?.let { put("version", it) }
+                put("context", emptyMap<String, String>())
+            }
+        val result = mcp(id, "tools/call", mapOf("name" to "templates_render", "arguments" to arguments))
+        withClue("render must succeed: ${result["content"][0]["text"].asText()}") { result.path("isError").asBoolean(false) shouldBe false }
+        return mapper.readTree(result["content"][0]["text"].asText()).asText()
+    }
+
+    private fun executeCachePipeline(
+        id: Int,
+        pipelineId: String,
+    ): JsonNode {
+        val (payload, isError) = callTool(id, "pipelines_execute", mapOf("id" to pipelineId, "parameters" to emptyMap<String, Any>()))
+        withClue("execute must succeed: $payload") { isError shouldBe false }
+        payload["status"].asText() shouldBe "SUCCESS"
+        return payload
+    }
+
+    /** The executed body is identified by the column alias only it emits, and by its literal. */
+    private fun assertExecutedBody(
+        payload: JsonNode,
+        alias: String,
+        value: Int,
+    ) {
+        withClue("the pipeline pinning @1 must run the draft's CURRENT body: $payload") {
+            // H2 folds an unquoted alias to upper case; the identity is the name, not its case.
+            payload["schema"].map { it["name"].asText().lowercase() } shouldBe listOf(alias)
+            payload["rows"][0][0].asInt() shouldBe value
+        }
+    }
+
+    /**
+     * Registered GLOBAL (owner-less) and GRANTED to the key's workspace — the shape the demo
+     * datasources the acceptance run used have. A workspace-OWNED datasource is refused
+     * by `pipelines_create` over MCP with `pipeline.validation.unknown_datasource` while the
+     * identical body lands over REST — measured while writing this case (132 handback, out of
+     * its fence): the contract registry adapter reads the principal off
+     * `SecurityContextHolder`, which the MCP tool call does not carry (its principal travels
+     * in the transport context), so only owner-less datasources resolve there.
+     */
+    private fun registerH2Datasource() {
+        // The in-memory database exists once a connection has opened it; DB_CLOSE_DELAY keeps it.
+        DriverManager.getConnection(H2_JDBC_URL, H2_USER, H2_PASSWORD).use { it.createStatement().execute("SELECT 1") }
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .body(
+                """
+                {"name": "$H2_DATASOURCE", "display_name": "Draft cache H2", "dialect": "H2", "global": true,
+                 "jdbc_url": "$H2_JDBC_URL", "username": "$H2_USER", "password": "$H2_PASSWORD"}
+                """.trimIndent(),
+            ).`when`()
+            .post("/api/v1/datasources")
+            .then()
+            .statusCode(201)
+        // The grant is a session-only super-admin verb (D-R7) — no key can make it — so the
+        // row is seeded the way the users and keys are.
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement(
+                    "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) VALUES (?, ?, ?)" +
+                        " ON CONFLICT (datasource_name, workspace_id) DO NOTHING",
+                ).use { ps ->
+                    ps.setString(1, H2_DATASOURCE)
+                    ps.setObject(2, UUID.fromString(WORKSPACE_ID))
+                    ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
+                    ps.executeUpdate()
+                }
+        }
+    }
+
     companion object {
         private const val TEMPLATE_ID = "test/tpl_update_e2e.sql"
+
+        /** Case 10's own template, pipeline and datasource — created inside the case, warm from its first render. */
+        private const val CACHE_TEMPLATE_ID = "test/tpl_cache_e2e.sql"
+        private const val CACHE_PIPELINE = "test/tpl_cache_e2e"
+        private const val H2_DATASOURCE = "h2-tpl-cache"
+
+        /** The seeded key's workspace — the well-known default (`V4`). */
+        private const val WORKSPACE_ID = "defa0000-0000-0000-0000-000000000001"
+        private const val H2_JDBC_URL = "jdbc:h2:mem:tplcachedb;DB_CLOSE_DELAY=-1"
+        private const val H2_USER = "sa"
+        private const val H2_PASSWORD = "sa"
+
+        /** Each body emits an alias only it has, so the executed column list names the body that ran. */
+        private const val CACHE_BODY_V1 = "SELECT 1 AS marker_v1"
+        private const val CACHE_BODY_V2 = "SELECT 2 AS marker_v2"
+        private const val CACHE_BODY_V3 = "SELECT 3 AS marker_v3"
         private const val IF_MATCH = "If-Match"
 
         /** Plain SQL, no interpolation: render is the identity, so the body IS the proof. */
@@ -337,7 +512,7 @@ class TemplatesUpdateGoldenPathE2eTest {
                 connection
                     .prepareStatement(
                         "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                            " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
+                            " VALUES (?, ?, ?, ?, ?, '$WORKSPACE_ID')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
                         ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
