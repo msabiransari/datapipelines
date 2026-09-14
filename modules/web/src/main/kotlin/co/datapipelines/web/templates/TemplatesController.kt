@@ -7,12 +7,14 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
@@ -221,6 +223,17 @@ class TemplatesController(
      * release copies to a draft, later writes overwrite it in place. Requires the `If-Match`
      * hash precondition; the response is the draft version's projection plus its draft pointer.
      * The template's name travels in the body's `id` field (§9.6), never in the path.
+     *
+     * `dialect` and `type` are OPTIONAL here (136 §D / T289a, the REST half of 135 §C): the
+     * working version already carries both, so an absent one is inherited before the body is
+     * bound — an update that omitted `dialect` was refused `dialect_invalid`, and one that
+     * omitted `type` on an html template was refused `type_immutable`, for fields the draft
+     * already had. A present `dialect` must equal the established one; a different one is
+     * refused with the same catalogued `dialect_invalid`, `details` naming both, BEFORE
+     * validation or any write — before 136 the REST PUT silently wrote the changed dialect. A
+     * present `type` still goes to the draft service's `type_immutable`. The inheritance runs
+     * only when the body names an `id` the workspace can see; an unknown id keeps its
+     * `template.not_found` from the write, exactly as before.
      */
     @PutMapping
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -230,7 +243,9 @@ class TemplatesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
+        val tree = MAPPER.readTree(body)
+        if (tree is ObjectNode) inheritFromWorking(tree, workspaceId)
+        val draft = validator.validateOrThrow(bindOrThrow(tree), workspaceId)
         val id =
             draft.id ?: throw ApiException(
                 PipelineErrorCodes.Template.ID_INVALID,
@@ -489,6 +504,61 @@ class TemplatesController(
         val version: Int,
         val context: Map<String, Any?>,
     )
+
+    /** [TemplateDeserializer.readOrThrow] for a tree already parsed (and possibly completed by [inheritFromWorking]). */
+    private fun bindOrThrow(tree: JsonNode): co.datapipelines.templates.TemplateDraft =
+        when (val outcome = deserializer.fromTree(tree)) {
+            is TemplateDeserializationOutcome.Parsed -> outcome.draft
+            is TemplateDeserializationOutcome.Rejected -> throw TemplateValidationException(outcome.result)
+        }
+
+    /**
+     * 136 §D / T289a — the working version's `dialect` and `type` folded into an update body
+     * that omitted them; a `dialect` that differs from the established one refused, naming
+     * both. Mirrors `TemplatesUpdateTool`'s resolution, on the tree the deserializer binds so
+     * the shared write keeps receiving a complete draft. A body with no textual `id`, or an id
+     * the workspace cannot see, is left untouched — the existing refusals downstream own those.
+     */
+    private fun inheritFromWorking(
+        tree: ObjectNode,
+        workspaceId: java.util.UUID,
+    ) {
+        val id =
+            tree
+                .get("id")
+                ?.takeIf { it.isTextual }
+                ?.asText()
+                ?.takeIf { it.isNotBlank() } ?: return
+        val working = templates.findWorking(workspaceId, id) ?: return
+        if (!tree.has("type")) tree.put("type", working.type.wire)
+        val supplied = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
+        val established = working.dialect
+        // A supplied token that is no dialect at all is the deserializer's own `dialect_invalid`
+        // ("not one of …"); only a KNOWN, different one is the fixed-dialect refusal.
+        val parsed = supplied?.let { token -> Dialect.entries.firstOrNull { it.wire == token } }
+        // An html body (inherited or stated) declares no dialect — never fold one in: a
+        // stated `html` on a sql template stays the draft service's `type_immutable`.
+        val html = tree.get("type")?.takeIf { it.isTextual }?.asText() == TemplateType.HTML.wire
+        when {
+            !tree.has("dialect") && established != null && !html -> {
+                tree.put("dialect", established.wire)
+            }
+
+            parsed != null && established != null && parsed != established -> {
+                throw ApiException(
+                    PipelineErrorCodes.Template.DIALECT_INVALID,
+                    "Template '$id' is a '${established.wire}' template; the update names '${parsed.wire}'. " +
+                        "A template's dialect is fixed by the version you are editing — omit dialect to inherit it, " +
+                        "or create a new template for another engine.",
+                    mapOf(
+                        "template_id" to id,
+                        "dialect" to parsed.wire,
+                        "established_dialect" to established.wire,
+                    ),
+                )
+            }
+        }
+    }
 
     /** The `{"name": ...}` field of a release/discard body — the §9.6 addressing form. */
     private fun nameOf(body: String): String = nameOf(objectOf(body))

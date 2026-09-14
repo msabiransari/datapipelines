@@ -262,7 +262,7 @@ internal class StubDatasources(
     /** Workspace-blind by design: the stub answers by name; scoping is the `web` adapter's job (134). */
     override fun describe(
         name: String,
-        workspaceId: java.util.UUID?,
+        workspaceId: java.util.UUID,
     ): DatasourceFacts? = dialects[name]?.let { DatasourceFacts(it, name in readonly) }
 }
 

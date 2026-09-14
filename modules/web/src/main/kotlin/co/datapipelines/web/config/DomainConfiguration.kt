@@ -324,13 +324,13 @@ class DomainConfiguration {
      * `getVisible(name, ctx.workspaceId)`), which is why execution over MCP worked while save
      * did not. Guard: `McpSaveWorkspaceDatasourceE2eTest`.
      *
-     * `workspaceId == null` is a caller that genuinely has no workspace (none in production
-     * today — the validator's is non-null): it sees GLOBAL (owner-less) datasources only,
-     * because with no workspace there is no grant to consult (D-R7).
+     * The scope is non-null (136 §C / T285): every save is workspace-scoped, a promotion
+     * included — it saves into the TARGET workspace — so the port has no workspace-less
+     * caller and this bean has no owner-less branch; `null` never meant "global" here.
      *
      * ## Live reads, not cached (044 F4)
      *
-     * Both resolution paths read the LIVE row, past the §6.3 metadata cache — the same row
+     * The resolution reads the LIVE row, past the §6.3 metadata cache — the same row
      * the executor's live backstop answers from. A row-level flag flip (manual SQL or a
      * restore, the D10 channel) never crosses the registry save boundary that invalidates the
      * cache, so a cached read here opened a window where saves validated against a stale flag
@@ -341,15 +341,9 @@ class DomainConfiguration {
     @Bean
     fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
         ContractDatasourceRegistry { name, workspaceId ->
-            val facts =
-                when (workspaceId) {
-                    // No workspace: only a datasource no workspace OWNS can be reached, because
-                    // there is no grant to consult (D-R7).
-                    null -> registry.getLive(name)?.takeIf { it.ownerWorkspaceId == null }
-
-                    else -> registry.getVisibleLive(name, workspaceId)
-                }
-            facts?.let { DatasourceFacts(it.dialect, it.isReadonly) }
+            // Every save is workspace-scoped, promotion included (136 §C / T285): the
+            // visibility read is the grant predicate, and there is no workspace-less branch.
+            registry.getVisibleLive(name, workspaceId)?.let { DatasourceFacts(it.dialect, it.isReadonly) }
         }
 
     /**

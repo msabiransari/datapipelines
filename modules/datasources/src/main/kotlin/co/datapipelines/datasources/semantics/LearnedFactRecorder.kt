@@ -21,7 +21,12 @@ import java.util.UUID
  * In order, each a refusal before anything is written:
  *
  *  1. the kind is in the closed list AND belongs to the requested scope (`semantics.kind_invalid`);
- *  2. the fact text, the ref count and the summary length are inside their windows (`semantics.fact_invalid`);
+ *  2. the fact text, the ref count and the summary length are inside their windows (`semantics.fact_invalid`)
+ *     — the ref floor is SCOPE-AWARE (136 §B / T278): a DATASOURCE-scope fact names at least one
+ *     table (a unit without a column is meaningless), a WORKSPACE-scope one may name none — a
+ *     rule that spans datasources ("busiest day = A + B combined") is bound to the datasource it
+ *     is recorded against, for visibility and for the listing, and carries no table; a table of
+ *     ANOTHER datasource its text names is prose here, never a ref to resolve;
  *  3. every ref resolves against LIVE introspection (`semantics.ref_unresolved`) — one column read
  *     per referenced table, whose result is also the table's [SchemaFingerprint] (§3.2), so the
  *     store never starts stale and the drift check has something to compare against;
@@ -70,7 +75,7 @@ class LearnedFactRecorder(
         request: Request,
     ): LearnedFact {
         val kind = kindOf(request)
-        validateShape(request)
+        validateShape(request, kind)
         val fingerprint = resolveRefs(datasource, request.refs)
         val workspaceId = if (request.scope == LearnedFactScope.WORKSPACE) request.recordedIn else null
         repository.findDuplicate(request.scope, workspaceId, datasource.name, kind, request.refs, request.fact)?.let { existing ->
@@ -124,15 +129,23 @@ class LearnedFactRecorder(
         return kind
     }
 
-    private fun validateShape(request: Request) {
+    private fun validateShape(
+        request: Request,
+        kind: LearnedFactKind,
+    ) {
         val fact = request.fact.trim()
         when {
             fact.length !in FACT_MIN_LENGTH..FACT_MAX_LENGTH -> {
                 refuseShape("fact", "fact must be $FACT_MIN_LENGTH–$FACT_MAX_LENGTH characters.")
             }
 
-            request.refs.isEmpty() -> {
-                refuseShape("refs", "At least one ref {table, column?} is required.")
+            // 136 §B: only a DATASOURCE-scope kind needs a table to be about.
+            request.refs.isEmpty() && kind.scope == LearnedFactScope.DATASOURCE -> {
+                refuseShape(
+                    "refs",
+                    "At least one ref {table, column?} is required for a DATASOURCE-scope kind ('${kind.wire}'); " +
+                        "only a WORKSPACE-scope rule (definition, exclusion, preference) may carry none.",
+                )
             }
 
             (request.evidenceSummary?.length ?: 0) > SUMMARY_MAX_LENGTH -> {
@@ -150,7 +163,12 @@ class LearnedFactRecorder(
         message: String,
     ): Nothing = throw DatapipelinesException(SemanticsErrorCodes.FACT_INVALID, message, mapOf("field" to field))
 
-    /** §3.1 + §3.2 in one pass: one column read per referenced table validates its refs and yields its digest. */
+    /**
+     * §3.1 + §3.2 in one pass: one column read per referenced table validates its refs and
+     * yields its digest. No refs (a WORKSPACE rule, 136 §B) reads nothing and stores the empty
+     * fingerprint — there is no table shape for the drift check to compare against, and
+     * [LearnedFactDrift] answers `unchanged` for a fact with no ref on the table just read.
+     */
     private fun resolveRefs(
         datasource: Datasource,
         refs: List<FactRef>,

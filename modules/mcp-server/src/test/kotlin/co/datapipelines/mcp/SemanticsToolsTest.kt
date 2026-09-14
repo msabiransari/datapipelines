@@ -261,6 +261,54 @@ class SemanticsToolsTest {
         )
     }
 
+    /**
+     * 136 §B / T278 — `refs` is OPTIONAL at the tool: absent, the command carries the empty
+     * list. A WORKSPACE rule that spans datasources reaches the service with no refs (the
+     * scope-aware floor is the recorder's, not restated here); a table of ANOTHER datasource
+     * its text names is prose — the check reads only THIS datasource's catalog, so a name
+     * that is neither listed nor a near-miss adds nothing and refuses nothing; a table of
+     * THIS datasource named exactly is still added as a ref, and a near-miss still refused.
+     */
+    @Test
+    fun `refs may be absent - a WORKSPACE rule spanning datasources is passed through with none - 136 B`() {
+        val catalog = listOf(TableInfo(listOf("public"), "taxi_trips", "TABLE", null))
+        val commands = mutableListOf<SemanticsService.RecordCommand>()
+        every { service.record(any(), any(), capture(commands), any()) } returns mapOf("id" to "r1")
+        val tool = recordTool(catalog)
+        val rule =
+            mapOf(
+                "scope" to "WORKSPACE",
+                "datasource" to "warehouse",
+                "kind" to "definition",
+                "fact" to "busiest day = taxi trips + rideshare_rides COMBINED, by pickup date",
+            )
+
+        val otherDatasourceTableIsProse = tool.call(McpArguments(rule), McpFixtures.ctx(Scope.AUTHOR)) as Map<*, *>
+        val ownTableIsAdded =
+            tool.call(
+                McpArguments(rule + ("fact" to "busiest day = taxi_trips + rideshare_rides COMBINED, by pickup date")),
+                McpFixtures.ctx(Scope.AUTHOR),
+            ) as Map<*, *>
+        val ownNearMissIsRefused =
+            shouldThrow<DatapipelinesException> {
+                tool.call(
+                    McpArguments(rule + ("fact" to "busiest day = taxi_tripz + rideshare_rides COMBINED, by pickup date")),
+                    McpFixtures.ctx(Scope.AUTHOR),
+                )
+            }
+
+        assertAll(
+            { otherDatasourceTableIsProse["id"] shouldBe "r1" },
+            { otherDatasourceTableIsProse["refs_added"] shouldBe null },
+            { commands[0].refs shouldBe emptyList() },
+            { commands[0].scope shouldBe LearnedFactScope.WORKSPACE },
+            { ownTableIsAdded["refs_added"] shouldBe listOf(mapOf("schema" to "public", "table" to "taxi_trips", "column" to null)) },
+            { commands[1].refs shouldBe listOf(FactRef("public", "taxi_trips", null)) },
+            { ownNearMissIsRefused.code shouldBe PipelineErrorCodes.Semantics.REF_MISMATCH },
+            { verify(exactly = 2) { service.record(any(), any(), any(), any()) } },
+        )
+    }
+
     @Test
     fun `the added ref rides the STORED refs - the catalog's namespace, no column - 129 B`() {
         val catalog =

@@ -124,36 +124,55 @@ class DatasourceToolsTest {
     /**
      * 126 §A — the listing is the learn-first read: every entry carries `facts`, the SAME array
      * `datasources_get` serves for that datasource, and an empty store yields `facts: []`, never
-     * an absent key — "nothing recorded" and "not served" must read differently.
+     * an absent key — "nothing recorded" and "not served" must read differently. 136 §A: the
+     * same for `definitions`, the workspace's rules, from the same one read; `datasources_get`
+     * carries the identical pair.
      */
     @Test
-    fun `126 - the listing carries each datasource's facts, empty array when none recorded`() {
+    fun `126 and 136 - the listing and the get carry each datasource's facts and definitions, empty arrays when none`() {
         val recorded = listOf(mapOf("kind" to "window", "fact" to "data covers 2024 only", "trust" to "observed"))
+        val rules = listOf(mapOf("kind" to "definition", "fact" to "rainy = precipitation_mm > 0.2", "trust" to "asserted"))
         every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
             listOf(
                 McpFixtures.datasource(),
                 McpFixtures.datasource(name = "lake-one", dialect = Dialect.LAKE),
             )
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
+        val enrichment = enrichmentReturning(recorded, rules)
 
         @Suppress("UNCHECKED_CAST")
-        val rows =
-            DatasourcesListTool(registry, enrichmentReturning(recorded))
-                .call(McpArguments(emptyMap()), readCtx) as List<Map<String, Any?>>
+        val rows = DatasourcesListTool(registry, enrichment).call(McpArguments(emptyMap()), readCtx) as List<Map<String, Any?>>
+
+        @Suppress("UNCHECKED_CAST")
+        val one = DatasourcesGetTool(registry, enrichment).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
 
         assertAll(
             { rows[0]["facts"] shouldBe recorded },
+            { rows[0]["definitions"] shouldBe rules },
             { rows[1].containsKey("facts") shouldBe true },
             { rows[1]["facts"] shouldBe emptyList<Map<String, Any?>>() },
+            { rows[1].containsKey("definitions") shouldBe true },
+            { rows[1]["definitions"] shouldBe emptyList<Map<String, Any?>>() },
+            { one["facts"] shouldBe recorded },
+            { one["definitions"] shouldBe rules },
         )
     }
 
     /** Every listed datasource gets its own enrichment read — per datasource, no cache. */
-    private fun enrichmentReturning(recorded: List<Map<String, Any?>>): FactEnrichment =
+    private fun enrichmentReturning(
+        recorded: List<Map<String, Any?>>,
+        rules: List<Map<String, Any?>> = emptyList(),
+    ): FactEnrichment =
         object : FactEnrichment {
-            override fun forDatasource(
+            override fun forListing(
                 readerWorkspaceId: UUID,
                 datasource: Datasource,
-            ): List<Map<String, Any?>> = if (datasource.name == "pg-prod") recorded else emptyList()
+            ): FactEnrichment.DatasourceBlocks =
+                if (datasource.name == "pg-prod") {
+                    FactEnrichment.DatasourceBlocks(recorded, rules)
+                } else {
+                    FactEnrichment.DatasourceBlocks.EMPTY
+                }
 
             override fun forTables(
                 readerWorkspaceId: UUID,

@@ -202,9 +202,40 @@ class LearnedFactRecorderTest {
         }.code shouldBe SemanticsErrorCodes.KIND_INVALID
     }
 
+    /**
+     * 136 §B / T278 — a WORKSPACE rule may span datasources ("busiest day = A + B combined"),
+     * so it may name no table: stored with empty refs and the empty fingerprint, bound to the
+     * datasource it was recorded against, `asserted`. A table of ANOTHER datasource its text
+     * names is prose — nothing here resolves it, so nothing refuses it.
+     */
     @Test
-    fun `the fact window, an empty ref list and an over-long summary are shape refusals`() {
+    fun `a WORKSPACE rule may carry no refs - stored empty, bound to the datasource, never resolved`() {
+        val stored =
+            recorder.record(
+                datasource,
+                request(
+                    scope = LearnedFactScope.WORKSPACE,
+                    kind = "definition",
+                    fact = "busiest day = orders + rideshare_trips COMBINED, by pickup date",
+                    refs = emptyList(),
+                ),
+            )
+
+        assertAll(
+            { stored.refs shouldBe emptyList() },
+            { stored.schemaFingerprint shouldBe "" },
+            { stored.datasourceName shouldBe datasource.name },
+            { stored.workspaceId shouldBe workspace },
+            { stored.trust shouldBe LearnedFactTrust.ASSERTED },
+            // Read back through the visibility predicate: the row is served, refs still empty.
+            { repository.findVisibleByDatasource(datasource.name, workspace).single().refs shouldBe emptyList() },
+        )
+    }
+
+    @Test
+    fun `the fact window, an empty ref list on a DATASOURCE kind and an over-long summary are shape refusals`() {
         shouldThrow<DatapipelinesException> { recorder.record(datasource, request(fact = "short")) }.details["field"] shouldBe "fact"
+        // 136 §B: the ref floor is DATASOURCE-scope only — a unit without a column is meaningless.
         shouldThrow<DatapipelinesException> { recorder.record(datasource, request(refs = emptyList())) }.details["field"] shouldBe "refs"
         shouldThrow<DatapipelinesException> {
             recorder.record(datasource, request(evidenceSummary = "x".repeat(301)))

@@ -26,11 +26,11 @@ class DatasourceScopeThreadingTest {
 
     /** Answers every name as Postgres and records who asked for what, from where. */
     private class RecordingDatasources : DatasourceRegistry {
-        val lookups = mutableListOf<Pair<String, UUID?>>()
+        val lookups = mutableListOf<Pair<String, UUID>>()
 
         override fun describe(
             name: String,
-            workspaceId: UUID?,
+            workspaceId: UUID,
         ): DatasourceFacts? {
             lookups += name to workspaceId
             return DatasourceFacts(Dialect.POSTGRES)

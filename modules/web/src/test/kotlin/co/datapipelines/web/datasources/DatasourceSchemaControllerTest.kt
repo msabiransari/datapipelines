@@ -104,10 +104,10 @@ class DatasourceSchemaControllerTest {
         val asked = mutableListOf<String>()
         val enrichment =
             object : co.datapipelines.application.semantics.FactEnrichment {
-                override fun forDatasource(
+                override fun forListing(
                     readerWorkspaceId: java.util.UUID,
                     datasource: Datasource,
-                ) = emptyList<Map<String, Any?>>()
+                ) = co.datapipelines.application.semantics.FactEnrichment.DatasourceBlocks.EMPTY
 
                 override fun forTables(
                     readerWorkspaceId: java.util.UUID,

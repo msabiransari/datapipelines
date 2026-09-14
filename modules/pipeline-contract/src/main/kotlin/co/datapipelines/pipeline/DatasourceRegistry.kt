@@ -40,23 +40,24 @@ fun interface DatasourceRegistry {
      * which thread it is called on; this is the shape the executor already had
      * (`ExecuteRequest.workspaceId`), which is why execution worked while save did not.
      *
-     * `null` is a caller that GENUINELY has no workspace — not "I did not look it up". Such a
-     * caller sees owner-less datasources only (workspaces D-R7: with no workspace there is no
-     * grant to consult). No production caller passes it today; the validator's own
-     * `workspaceId` is non-null.
+     * The scope is NON-NULL (136 §C / T285): every save is workspace-scoped — a promotion
+     * saves into the target workspace like any other write — so there is no caller that
+     * "genuinely has no workspace", and the D-R7 owner-less branch a nullable parameter
+     * implied was dead code that a future caller could have reached by passing `null` for
+     * "I did not look it up". The validator's own `workspaceId` is non-null; so is this.
      *
      * The reserved literal `"tempdb"` is never passed here — it is not a datasource (§4.8),
      * and a registry that answers for it would let a pipeline shadow the staging database.
      */
     fun describe(
         name: String,
-        workspaceId: UUID?,
+        workspaceId: UUID,
     ): DatasourceFacts?
 
     /** [describe] narrowed to the dialect — the existence question every `dialectOf` caller asked. */
     fun dialectOf(
         name: String,
-        workspaceId: UUID?,
+        workspaceId: UUID,
     ): Dialect? = describe(name, workspaceId)?.dialect
 
     companion object {

@@ -179,7 +179,8 @@ class DatasourcesGetColumnsTool(
                     "join, a caveat — with trust and evidence: read them before probing, and treat stale or " +
                     "needs_review as a warning to re-verify, then record the superseding fact. An unknown table " +
                     "is refused as datasource.table_not_found, naming the nearest listed table when one is " +
-                    "close. Read-only, for pipeline authoring.",
+                    "close; a LAKE datasource answers datasource.lake_table_not_found for a table its registry " +
+                    "does not carry. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -243,8 +244,10 @@ class DatasourcesGetTableStatsTool(
                     "footers) — never a scan of the table, so this is safe at any table size. When a dialect holds " +
                     "no catalog stats the stat fields are null and stats_source is \"none\" — probe an explicit " +
                     "count with sql_probe if you need one. An unknown table is refused as " +
-                    "datasource.table_not_found, naming the nearest listed table when one is close. Read this " +
-                    "before writing a predicate — an unindexed filter on a large table is the timeout you will hit.",
+                    "datasource.table_not_found, naming the nearest listed table when one is close; a LAKE " +
+                    "datasource answers datasource.lake_table_not_found for a table its registry does not carry. " +
+                    "Read this before writing a predicate — an unindexed filter on a large table is the timeout " +
+                    "you will hit.",
             schema =
                 """
                 {

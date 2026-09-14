@@ -29,6 +29,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
@@ -255,6 +256,10 @@ class TemplatesControllerTest {
     fun `update requires If-Match, writes the draft branch, and 404s on an unknown id`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        // 136 §D: the update reads the working version to inherit dialect/type; an unknown id
+        // has none and the write's own not-found stays the answer.
+        every { repository.findWorking(any(), "test/fetch_orders.sql") } returns template()
+        every { repository.findWorking(any(), "nope.sql") } returns null
 
         // §4.2: no If-Match, no participation in the protocol at all — a 400, not a conflict.
         val missing = shouldThrow<ApiException> { controller.update(null, updateBody) }
@@ -298,6 +303,8 @@ class TemplatesControllerTest {
 
         val thrown = shouldThrow<ApiException> { controller.update("hash-v2", createBody) }
         thrown.code shouldBe PipelineErrorCodes.Template.ID_INVALID
+        // No id, no working-version read: the inheritance never ran.
+        verify(exactly = 0) { repository.findWorking(any(), any()) }
         thrown.details["reason"] shouldBe "id_missing"
     }
 
@@ -441,6 +448,59 @@ class TemplatesControllerTest {
                 ).data
         stored.type shouldBe TemplateType.HTML
         stored.dialect shouldBe null
+    }
+
+    /**
+     * 136 §D / T289a — the REST half of 135 §C: `dialect` omitted is inherited from the working
+     * version before the body is bound (the deserializer would otherwise refuse
+     * `dialect_invalid` for a field the draft already had); `type` omitted is inherited the
+     * same way (an html template updated without `type` was `type_immutable`). What reaches
+     * the validator — and so the shared write — is the COMPLETE draft.
+     */
+    @Test
+    fun `update inherits the working version's dialect and type when the body omits them - 136 D`() {
+        authenticate()
+        val bound = mutableListOf<co.datapipelines.templates.TemplateDraft>()
+        every { validator.validateOrThrow(capture(bound), any()) } answers { firstArg() }
+        every { repository.findWorking(any(), "test/fetch_orders.sql") } returns template()
+        every { repository.findWorking(any(), "test/card.html") } returns
+            template().copy(id = "test/card.html", type = TemplateType.HTML, dialect = null, body = "<p>x</p>")
+        val written = TemplateVersionDetail("x", 2, PipelineVersionStatus.DRAFT, "hash-v2", Instant.EPOCH, userId)
+        every { drafts.write(any(), any(), any(), "hash-v1", userId, WriteSurface.SESSION) } returns written
+        every { repository.findVersion(any(), "test/fetch_orders.sql", 2) } returns template(2)
+        every { repository.findVersion(any(), "test/card.html", 2) } returns
+            template(2).copy(id = "test/card.html", type = TemplateType.HTML, dialect = null)
+
+        controller.update("hash-v1", """{"id":"test/fetch_orders.sql","display_name":"F","description":"d","body":"SELECT 1"}""")
+        controller.update("hash-v1", """{"id":"test/card.html","display_name":"C","description":"d","body":"<p>y</p>"}""")
+
+        assertAll(
+            { bound[0].dialect shouldBe Dialect.POSTGRES },
+            { bound[0].type shouldBe TemplateType.SQL },
+            { bound[1].type shouldBe TemplateType.HTML },
+            { bound[1].dialect shouldBe null },
+        )
+    }
+
+    /** 136 §D / T289a — a DIFFERENT dialect is refused naming both, before validation or any write (135 §C's MCP refusal, on REST). */
+    @Test
+    fun `update refuses a dialect that differs from the working version's, before any write - 136 D`() {
+        authenticate()
+        every { repository.findWorking(any(), "test/fetch_orders.sql") } returns template()
+
+        val thrown =
+            shouldThrow<ApiException> {
+                controller.update("hash-v1", updateBody.replace("\"dialect\":\"POSTGRES\"", "\"dialect\":\"MYSQL\""))
+            }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.DIALECT_INVALID },
+            { thrown.details["dialect"] shouldBe "MYSQL" },
+            { thrown.details["established_dialect"] shouldBe "POSTGRES" },
+            { thrown.details["template_id"] shouldBe "test/fetch_orders.sql" },
+            { verify(exactly = 0) { validator.validateOrThrow(any(), any()) } },
+            { verify(exactly = 0) { drafts.write(any(), any(), any(), any(), any(), any()) } },
+        )
     }
 
     @Test

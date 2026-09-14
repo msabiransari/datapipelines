@@ -178,6 +178,12 @@ semantics; the question's words decide the window.
   join `depends_on` the index (`pipeline-contract.md §16.4`). Order is load → index → query:
   indexing a filled table is one pass; loading into an indexed one pays per row. Do not index
   small tables (< ~10k rows) or tables read once in a scan.
+- **The staged-lookup index, as a named pattern.** A staged lookup you join a large staged
+  table to gets a `DDL` node `CREATE INDEX … ON <staged>(<join key>)` between its staging node
+  and the join — one template per index, pinned like any other node's; the order is the
+  load → index → query rule of the bullet above. 60 s → 5 s was the measured difference on a
+  2M-row join in one acceptance run: the join was the whole budget until the key it probed
+  had an index.
 - **`depends_on` is data flow, nothing else.** A node depends on the nodes whose tables or
   context values it reads. Never add an edge to serialise work "to reduce load" or "avoid
   contention" — you make the critical path longer and hide the real problem. Independent
@@ -271,6 +277,12 @@ semantics; the question's words decide the window.
   when the description, a remark or a metadata table states it — or compare *within-mode*
   ratios (a rate computed inside the sample against the same rate inside the census) — a
   ratio of a sample to itself is unbiased. Say which you did in the description.
+- **A ratio's denominator is the rows that CAN carry the numerator.** When a component is
+  recorded only for a subset — card tips, app tips, a fee some rows carry — the ratio's
+  DENOMINATOR is that subset: card tips over card fares, not over all fares. One acceptance
+  run's tip rate was 18.98% over every fare and 23.83% over card-paid fares for the same
+  cell; the first number is the cash share in disguise. Say which denominator you used in
+  the description, beside the window.
 - **Ties and exclusions are part of the answer.** `RANK()` can return two rows for one
   group on a tie — say so in the description or use `ROW_NUMBER()` with a stated
   tie-break. Filters like `distance > 0 AND distance < 100` are assumptions; write them into

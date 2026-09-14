@@ -102,6 +102,9 @@ class FlywayMigrationIntegrationTest {
                 "24|workspace invitations|true",
                 // 118 — the learned semantic layer's store (metadata-db §4.18).
                 "25|learned facts|true",
+                // 136 §B — chk_learned_facts_refs re-created scope-aware: a WORKSPACE rule may
+                // carry no refs. Same constraint name, so the CHECK inventory below does not move.
+                "26|learned facts workspace rule refs|true",
             )
     }
 
@@ -209,6 +212,24 @@ class FlywayMigrationIntegrationTest {
             "SELECT confdeltype FROM pg_constraint WHERE conrelid = 'learned_facts'::regclass AND contype = 'f'" +
                 " AND confrelid IN ('datasources'::regclass, 'pipelines'::regclass) ORDER BY confrelid::regclass::text",
         ) { it.getString(1) } shouldContainExactly listOf("c", "n")
+    }
+
+    /**
+     * 136 §B (V26) — the ref floor is scope-aware in the database too: the re-created
+     * `chk_learned_facts_refs` keeps the array half and applies `≥ 1` to a DATASOURCE fact
+     * only, so a WORKSPACE rule that spans datasources may store `[]`. Proven by its
+     * definition text, the V25 way — the recorder's own suite proves the INSERT binds.
+     */
+    @Test
+    fun `V26 lets a WORKSPACE rule carry no refs while a DATASOURCE fact still needs one`() {
+        val definition =
+            query(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_learned_facts_refs'",
+            ) { it.getString(1) }.single()
+
+        definition shouldContain "jsonb_typeof(refs_json) = 'array'::text"
+        definition shouldContain "scope = 'WORKSPACE'::text"
+        definition shouldContain "jsonb_array_length(refs_json) >= 1"
     }
 
     @Test
@@ -637,8 +658,9 @@ class FlywayMigrationIntegrationTest {
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
                 // 118 (V25) — learned_facts: the closed kind list, the kind↔scope rule, the
-                // fact/summary length windows, refs ≥ 1, the trust set, the write surface, the
-                // scope↔workspace rule and the retired stamp (learned-semantic-layer §3/§4/§5).
+                // fact/summary length windows, refs ≥ 1 (V26: for a DATASOURCE fact; a WORKSPACE
+                // rule may carry none), the trust set, the write surface, the scope↔workspace
+                // rule and the retired stamp (learned-semantic-layer §3/§4/§5).
                 "chk_learned_facts_fact_length",
                 "chk_learned_facts_kind",
                 "chk_learned_facts_kind_scope",
