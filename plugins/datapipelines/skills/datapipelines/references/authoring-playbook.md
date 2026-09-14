@@ -106,7 +106,10 @@ semantics; the question's words decide the window.
   region" means the regions, not the catch-alls. Look at the distinct values of the grouping
   column before you group by it, and write the exclusion into the description.
 - **Parameters wear the question's vocabulary.** A question asked in quarters gets a
-  `quarter` parameter (`2024-Q4`), not two raw dates as the only door. Technical inputs
+  `quarter` parameter (`2024-Q4`), not two raw dates as the only door. A question that names
+  a period — "2024", "Q3", "last month" — gets that period's parameter (`year`, `quarter`,
+  an anchor date): the calculator or in-dialect date math derives the bounds; two raw dates
+  are an INPUT to a template, never the door of a pipeline. Technical inputs
   are *derived*: a CALCULATOR node turns the human parameter into the `start_date`/`end_date`
   the SQL binds — the kind comes from `calculators_list`, whose entries each list the phrases
   they answer (see `templates.md` § Calculators). Two dates the caller already passes need no
@@ -151,6 +154,11 @@ semantics; the question's words decide the window.
   `SUM(x) GROUP BY key` ships a thousand rows; the same node without the `GROUP BY` shipped
   tens of thousands into H2 to join a few hundred lookup rows. Push filters down too — on a
   lake table, the `WHERE` on the partition column is what makes the read prune.
+- **Before you divide, look at MIN/MAX of every column you divide by.** A per-mile, per-rider
+  or per-second ratio inherits every lie in its denominator: one absurd distance or one
+  zero row collapses the average for everyone. One catalog-stats or probe read of the bounds
+  tells you whether the denominator needs a range filter — and the filter you choose is an
+  interpretation: write it into the description (§4).
 - **Then, and only then, index.** If a staged table is still large *and* a downstream node
   joins or filters it by a key, add a `DDL` node between the staging node and the join:
   `CREATE INDEX IF NOT EXISTS ix_stg_x_key ON stg_x(key)`, `depends_on` the stager, the

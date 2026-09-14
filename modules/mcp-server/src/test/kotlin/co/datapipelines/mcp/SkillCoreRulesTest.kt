@@ -86,6 +86,18 @@ class SkillCoreRulesTest {
         assertClause("never claims about your own process")
     }
 
+    /** 129 §A.1 — a period question gets that period's parameter; the raw dates ride inside, not in front. */
+    @Test
+    fun `two raw dates are an input to a template, never the door of a pipeline - 129 A1`() {
+        assertClause("never the door of a pipeline")
+    }
+
+    /** 129 §A.2 — the reuse half: a definition an earlier pipeline recorded is the one to reuse. */
+    @Test
+    fun `a definition an earlier pipeline recorded is the one to reuse - 129 A2`() {
+        assertClause("is the one to reuse")
+    }
+
     /**
      * 126 §A.3 — step 1's first sentence makes the listing the learn-first read: the facts
      * arrive on the call the agent already makes, so "call `datasources_get` for every

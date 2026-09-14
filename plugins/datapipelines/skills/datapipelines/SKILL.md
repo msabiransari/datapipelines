@@ -20,29 +20,9 @@ path** — see *Folders* below), `display_name`, `description`, `parameters` (ty
 map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on
 create.
 
-**Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT
-(`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later save
-is draft-first too: the first save after a release opens a DRAFT (copy-on-write), later saves
-overwrite that one draft in place. DRAFT → RELEASED is a human step, with no exception —
-including on creation. A save whose body is identical to the released one is a no-op — nothing
-opens, no version number burns, and the response says `status: "RELEASED"` with no draft
-pointer; that is success, not an error. Your updates are NOT published until a human releases
-the draft from the UI — **leave the draft for a human to release** (by design, D4; there is no
-release tool and that absence is deliberate). Version RETIREMENT is human too (101): a human may
-**discard** a released version (reversible — restore brings it back), **purge** a draft
-(irreversible — the row and its executions go), or **switch** the pointer a pipeline's
-dependents run; there are no tools for those either, by the same rule. Pipeline nodes pin
-template versions immutably; updating a template does not change existing pipelines until you
-update the node reference. Drafts are executable — running your own draft is the expected test
-loop.
+**Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT (`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later save is draft-first too: the first save after a release opens a DRAFT (copy-on-write), later saves overwrite that one draft in place. DRAFT → RELEASED is a human step, with no exception — including on creation. A save whose body is identical to the released one is a no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"` with no draft pointer; that is success, not an error. Your updates are NOT published until a human releases the draft from the UI — **leave the draft for a human to release** (by design, D4; there is no release tool and that absence is deliberate). Version RETIREMENT is human too (101): a human may **discard** a released version (reversible — restore brings it back), **purge** a draft (irreversible — the row and its executions go), or **switch** the pointer a pipeline's dependents run; there are no tools for those either, by the same rule. Pipeline nodes pin template versions immutably; updating a template does not change existing pipelines until you update the node reference. Drafts are executable — running your own draft is the expected test loop.
 
-**In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are
-never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the
-statement, while the interpolated form puts it inside the SQL string. Pipeline save refuses
-the old form with `template.validation.parameter_interpolated`. `${}` stays for **structure**
-— table names, dynamic `IN` lists, `ORDER BY` fragments — which you keep safe yourself (never
-interpolate a caller-supplied value there). Bound values need no quoting: `BETWEEN :start_date
-AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
+**In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the statement, while the interpolated form puts it inside the SQL string. Pipeline save refuses the old form with `template.validation.parameter_interpolated`. `${}` stays for **structure** — table names, dynamic `IN` lists, `ORDER BY` fragments — which you keep safe yourself (never interpolate a caller-supplied value there). Bound values need no quoting: `BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
 
 **Dialects** — eight: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE. Templates are
 dialect-specific; a node's template dialect must match what its `source` can execute. `LAKE`
@@ -107,7 +87,9 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    Reuse a root. **A new root is refused until you confirm it: ask the person first, then pass
    `confirm_new_root: true`** — `pipelines_create` and `templates_create` answer
    `pipeline.validation.new_root_requires_confirmation` / `template.validation.new_root_requires_confirmation`
-   with `details.existing_roots` listing what already exists. `test/` never needs it.
+   with `details.existing_roots` listing what already exists. `test/` never needs it, and when the
+   person has named the folder, pass `confirm_new_root: true` on the FIRST create — the
+   confirmation is theirs, already given.
    Everything you create in the steps below goes under the prefix you settle on here — and it
    cannot be moved later.
 1. **Learn before you assume.** You know nothing about a datasource until you have read it —
@@ -159,10 +141,12 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    pipeline pins the template.
 3. **Preview the SQL.** `templates_render` with a representative context — save-time
    validation is parse-only, so this is your check that the SQL is actually what you
-   meant. This is mandatory before step 4 for anything non-trivial.
+   meant. This is mandatory before step 4 for anything non-trivial. Every template the
+   pipeline pins — the tempdb ones included: a `sql_probe {"name": "tempdb"}` checks syntax and names, `templates_render` checks what the Freemarker actually emits, and they are not the same check.
 4. **Create the pipeline.** `pipelines_create` with `parameters` declared (types +
-   required/defaults — remember `DECIMAL` needs `precision`), nodes referencing the
-   template `{id, version}`, `depends_on` wiring, and `output` blocks for
+   required/defaults — remember `DECIMAL` needs `precision`; `required: true` and
+   `default` are exclusive — a parameter with a default is optional by definition), nodes
+   referencing the template `{id, version}`, `depends_on` wiring, and `output` blocks for
    staging/write-back. Save-time validation dry-renders every template against the
    declared parameters and rejects anything that would not run. **Create lands v1 as a
    DRAFT** — executable immediately, and not published: `current_version` comes back null and
@@ -270,15 +254,22 @@ here.
 2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
    + credential questions immediately.
 2½. **Learned facts are shared memory — keep them honest.** A fact you record with
+2½. **Learned facts are shared memory — keep them honest.** A fact you record with
    `evidence_sql` is `observed`; without it, only `asserted` — except a `definition`, `exclusion`
    or `preference`, which is a choice and lands `asserted` until a person confirms it. Two facts
    of one kind on the same column are both served, flagged `conflict` — a reader decides, the
    store never picks. To correct one, record the replacement with `supersedes` (the old one
-   retires as `superseded`); `semantics_retire` alone is for a fact that is simply wrong. **Every
-   table the `fact` text names must be in `refs`, spelled as the catalog spells it** (a near-miss
-   is `semantics.ref_mismatch`), and a DATASOURCE-scope fact is table-wide: "in Q4 only A and B
-   carry rows" belongs in a pipeline description, not a fact. A DATASOURCE fact is visible to every
-   workspace the datasource is granted to; a `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours.
+   retires as `superseded`); `semantics_retire` alone is for a fact that is simply wrong. **`refs`
+   names every table the `fact` text names, spelled as the catalog spells it** — a catalog table
+   the text names exactly and `refs` omit is ADDED for you (`refs_added` in the response), a
+   near-miss is refused with the nearest name (`semantics.ref_mismatch`) — and a DATASOURCE-scope
+   fact is table-wide: "in Q4 only A and B carry rows" belongs in a pipeline description, not a
+   fact. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
+   `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours. When the question
+   leaves a rule to you — what counts as rainy, active, churned, late — the rule you chose is a
+   `definition`: record it with the probe that showed the distribution you chose over, and read
+   the listing's facts before choosing — a `definition` an earlier pipeline recorded is the one
+   to reuse.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
    `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous
@@ -323,13 +314,26 @@ here.
     in every template's `description`. The calculator's `context_key` is already an optional
     execute input — never also declare it as a parameter
     (`pipeline.validation.calculator_output_collision`).
+    A question that names a period — "2024", "Q3", "last month" — gets that period's
+    parameter (`year`, `quarter`, an anchor date): the calculator or in-dialect date math
+    derives the bounds; two raw dates are an INPUT to a template,
+    never the door of a pipeline. When the question leaves a threshold or a rule to you — what counts as rainy,
+    active, churned, late — write the rule you chose into the description AND record it as a
+    `definition` fact on the workspace, with the probe that showed the distribution you chose
+    over; before choosing, read the listing's facts — a `definition` an earlier pipeline
+    recorded is the one to reuse, so two pipelines in one workspace never answer "rainy" two
+    ways.
 13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come
     from `datasources_get_table_stats`, a probe, or a metadata table — never estimated. **A claim
     about the DATA is a probe you ran or a registry line you read:** partition layout from the
     stats read (no `partition` index = one unpartitioned file, whatever the plan's pushdown shows);
     a column's values over the WHOLE table from a whole-table probe, never a lookup or a
     description; "census, not sample" from a reconciled count or an `asserted` record. **And a
-    description carries data facts and the interpretation you chose —
+    cause is a claim too:** the REASON for a number you noticed — why a ratio collapsed, why a
+    month is empty — is named only after the probe that shows it (`ORDER BY <measure> DESC
+    LIMIT 5` finds an outlier in one call; a join to the flag you suspect shows whether it
+    correlates), and never names a mechanism — "the generator", "the feed" — you have not seen.
+    **And a description carries data facts and the interpretation you chose —
     never claims about your own process:** "validated", "reproduced", "checked" go in your reply —
     a description outlives the validation, and it is an exemplar the next agent copies. When the
     data cannot reveal a fact you depend on (a sample rate no table states, a time zone no type
@@ -360,25 +364,23 @@ here.
     surface in milliseconds; "table not found" means the statement parsed) before you pay a
     full DAG run to find out — passing `parameters` for every `:name` the statement binds
     (else `invalid_params`; tempdb checks syntax and names, not values, so any representative
-    value of the right type will do).
+    value of the right type will do). And `rows` is a reserved word on MySQL and DuckDB —
+    alias a count `AS n`, never `AS rows`.
 17. **A source node sees only its own datasource.** Its SQL runs on that engine; staged
     tables are visible only to `source: "tempdb"` nodes, and no engine reads another. To
     filter a source by a set computed elsewhere, bind a parameter or write literals and keep
     the computing node for the labels — and say so in the description
-    (`references/authoring-playbook.md` §3).
+    (`references/authoring-playbook.md` §3). The same wall holds inside a probe: a `zones`
+    lookup on the SQLite datasource cannot be joined inside a Postgres probe — bind the ids
+    or stage both.
 
 ## References — open one when you need it
 
-- **`references/pipeline-schema.md`** — writing or reading a pipeline body.
-- **`references/node-types.md`** — wiring the DAG.
-- **`references/authoring-playbook.md`** — building anything non-trivial.
-- **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
-- **`references/naming.md`** — choosing where a new pipeline or template lives.
-- **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
-- **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.
-- **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
-- **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response.
-- **`references/tools.md`** — every MCP tool, generated from the server's catalog at build time.
+- **`references/pipeline-schema.md`** — writing or reading a pipeline body · **`references/node-types.md`** — wiring the DAG.
+- **`references/authoring-playbook.md`** — building anything non-trivial · **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
+- **`references/naming.md`** — choosing where a new pipeline or template lives · **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
+- **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database · **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
+- **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response · **`references/tools.md`** — every MCP tool, generated from the server's catalog at build time.
 
 Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` and by the
 `docs_get` tool (`docs_list` names them), and a deployment serves them at
@@ -386,15 +388,8 @@ Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` 
 
 ## References (when working inside the repo)
 
-- `docs/pipeline-contract.md` — pipeline/node JSON schema, validation rules, error catalog §13
-- `docs/rest-api.md` §19 — published endpoints: the path grammar, the read-only rule, the status table
-- `docs/auth.md` §7.7 — key kinds and the hierarchical binding rule
-- `docs/templates.md` — Freemarker rules, versioning, library templates
-- `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
-- `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
-- `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (tools, prompts, transport)
-- `docs/rest-api.md` — REST endpoints, SSE, result cursor
-- `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
-- `docs/type-system.md` — canonical types and wire encodings
-- `docs/versioning.md` — the draft/release lifecycle, the hash-precondition protocol, why agents never release
+- `docs/pipeline-contract.md` — pipeline/node JSON schema, validation rules, error catalog §13 · `docs/templates.md` — Freemarker rules, versioning, library templates
+- `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C) · `docs/type-system.md` — canonical types and wire encodings
+- `docs/mcp-server.md` — the MCP surface (tools, prompts, transport) · `docs/rest-api.md` — REST endpoints, SSE, result cursor, and §19's published endpoints: the path grammar, the read-only rule, the status table
+- `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6), key kinds and the hierarchical binding rule (§7.7) · `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
+- `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe) · `docs/versioning.md` — the draft/release lifecycle, the hash-precondition protocol, why agents never release
