@@ -80,29 +80,53 @@ class RegistryTemplateLoader(
         val key = parseKey(name) ?: return null
         pinned.get()?.takeIf { it.parsedKey == key }?.let { return it }
         val stored = registry.lookup(key.first, key.second) ?: return null
-        return Source(
+        return sourceOf(name, key, stored)
+    }
+
+    /**
+     * The [Source] for a version the caller has ALREADY resolved under [name] — so
+     * [TemplateEngine], which looks the version up to pick a configuration, can pin it and
+     * spare the configuration its own lookup. Null when [name] is not a well-formed key for
+     * [stored] (a mismatch is a programming error upstream; refusing is the fail-closed shape).
+     */
+    internal fun sourceOf(
+        name: String,
+        stored: TemplateVersion,
+    ): Source? {
+        val key = parseKey(name)?.takeIf { it.first == stored.id && it.second == stored.version } ?: return null
+        return sourceOf(name, key, stored)
+    }
+
+    private fun sourceOf(
+        name: String,
+        key: Pair<String, Int>,
+        stored: TemplateVersion,
+    ): Source =
+        Source(
             key = name,
             parsedKey = key,
             effectiveSource = synthesizePrologue(stored.imports) + stored.body,
             identity = stored.bodyHash,
             lastModified = stored.lastModified.toEpochMilli(),
         )
-    }
 
     /**
      * Runs [block] with [source] as THE answer for its key on this thread — so a parse the
      * caller starts after resolving [source] is guaranteed to parse exactly that content, and
-     * costs no second registry read. Cleared on exit, exceptional or not.
+     * costs no second registry read. Nests (the engine pins around a load, the configuration
+     * pins the same source around the parse); the previous pin is restored on exit,
+     * exceptional or not.
      */
     internal fun <T> withPinned(
         source: Source,
         block: () -> T,
     ): T {
+        val previous = pinned.get()
         pinned.set(source)
         try {
             return block()
         } finally {
-            pinned.remove()
+            if (previous == null) pinned.remove() else pinned.set(previous)
         }
     }
 

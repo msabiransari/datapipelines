@@ -232,13 +232,18 @@ class TemplateEngine(
         // version falls through to the sql configuration so the loader's
         // TemplateNotFoundException — and the NotFound classification that turns it into
         // template_not_found — is preserved exactly as it was.
-        val configuration =
-            if (registry.lookup(ref.id, ref.version)?.type == TemplateType.HTML) {
-                htmlConfiguration
+        val version = registry.lookup(ref.id, ref.version)
+        val configuration = if (version?.type == TemplateType.HTML) htmlConfiguration else sqlConfiguration
+        // The version just read is pinned through the load, so the configuration's own
+        // identity check and (on a miss) the parse consume it rather than reading the row
+        // again — one row read per draft render, none per released one (measured in 132).
+        val pinned = version?.let { loader.sourceOf(ref.key, it) }
+        val template =
+            if (pinned == null) {
+                configuration.getTemplate(ref.key)
             } else {
-                sqlConfiguration
+                loader.withPinned(pinned) { configuration.getTemplate(ref.key) }
             }
-        val template = configuration.getTemplate(ref.key)
         val buffer = BoundedWriter(StringBuilder(), maxOutputChars)
         template.process(normalizedContext, buffer)
         return buffer.output()

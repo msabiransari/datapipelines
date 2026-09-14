@@ -452,6 +452,18 @@ class TemplateEngineTest {
     }
 
     @Test
+    fun `a draft costs exactly one row read per render - the engine's lookup is pinned through the load`() {
+        // The measured cost (132 handback): the configuration's identity check and the parse
+        // both consume the version the engine already read, so a second read never happens.
+        val row = MutableRow(draft("test/wip.sql", "SELECT 1"))
+        val e = TemplateEngine(row.registry(), 50, 5_000, 1_000_000).also { engines += it }
+
+        repeat(3) { render(e, TemplateRef("test/wip.sql", 1), emptyMap()) shouldBe "SELECT 1" }
+
+        verify(exactly = 3) { row.repository.lookupVersion(row.workspaceId, "test/wip.sql", 1) }
+    }
+
+    @Test
     fun `a version without a content hash renders correctly and is never cached`() {
         // Fail-safe: no identity means no cache entry (a parse per load), never a wrong body.
         val row = MutableRow(draft("test/nohash.sql", "SELECT 1").copy(bodyHash = ""))
