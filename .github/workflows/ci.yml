@@ -101,6 +101,12 @@ jobs:
           EOF
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         run: ./gradlew build ktlintCheck detekt -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
+      # koverVerify writes only verify.err; the line-level XML the artifact below needs comes from
+      # the report task, run AFTER the build so a failed verification still leaves the report
+      # (`--continue`-free: this step runs whether the build step passed or not).
+      - name: write the coverage XML reports
+        if: always()
+        run: ./gradlew koverXmlReport --offline -q || true
       # The coverage and test-result XML, kept for a week, pass or fail: a coverage floor
       # that holds on the dev box and fails here (2026-09-14: pipeline-contract at 93.9065
       # against 94, the same 373 tests, 17 lines fewer covered) can only be diagnosed
