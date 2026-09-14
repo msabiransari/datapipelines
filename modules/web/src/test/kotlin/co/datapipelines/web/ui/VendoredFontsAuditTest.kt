@@ -14,12 +14,13 @@ import java.security.MessageDigest
  * 079 §G — the vendored webfonts, audited from the CLASSPATH rather than recalled.
  *
  * The app names "Inter" and "JetBrains Mono" in every theme's font stack but shipped
- * neither file, so it rendered in whatever a visitor's machine happened to have. The two
- * families are now vendored under the two `static/vendor/fonts` directories, from the
- * projects' own GitHub release assets, and this audit is the guard on that arrangement.
- * (A glob written into a KDoc opens a NESTED block comment — Kotlin nests them — so the
- * directories are spelled out here rather than learning that again.) Four claims, each of
- * which has a way of quietly becoming false:
+ * neither file, so it rendered in whatever a visitor's machine happened to have. The
+ * families are now vendored under `static/vendor/fonts` (Inter and JetBrains Mono in
+ * 079, Manrope for the site in 093, IBM Plex Mono — the site's 133 display face — in
+ * 133), from the projects' own release assets, and this audit is the guard on that
+ * arrangement. (A glob written into a KDoc opens a NESTED block comment — Kotlin nests
+ * them — so the directories are spelled out here rather than learning that again.)
+ * Four claims, each of which has a way of quietly becoming false:
  *
  *  1. **Every file the manifest declares is on the classpath.** A `.gitignore` rule, a
  *     partial `git add`, or a resource-filtering change drops a binary silently — the page
@@ -70,21 +71,31 @@ class VendoredFontsAuditTest {
             .associate { it.groupValues[1] to it.groupValues[2] }
     }
 
-    private val declared: Map<String, String> = declaredHashes("inter") + declaredHashes("jetbrains-mono") + declaredHashes("manrope")
+    private val declared: Map<String, String> =
+        declaredHashes("inter") + declaredHashes("jetbrains-mono") + declaredHashes("manrope") + declaredHashes("ibm-plex-mono")
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     @Test
-    fun `the manifest declares the three families and every file this round vendored`() {
+    fun `the manifest declares the four families and every file this round vendored`() {
         // Non-vacuity: a parse that stopped matching would make every assertion below pass
-        // by auditing nothing. Both families, and the exact file set, are named here.
+        // by auditing nothing. All four families, and the exact file set, are named here.
         declared.keys.sorted() shouldContainExactly
             listOf(
+                "vendor/fonts/ibm-plex-mono/OFL.txt",
+                "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-500-normal.woff2",
+                "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2",
+                "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2",
+                "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-500-normal.woff2",
+                "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-600-normal.woff2",
+                "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2",
                 "vendor/fonts/inter/InterVariable-Italic.woff2",
                 "vendor/fonts/inter/InterVariable.woff2",
                 "vendor/fonts/inter/OFL.txt",
                 "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2",
                 "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2",
+                "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2",
+                "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Regular.woff2",
                 "vendor/fonts/jetbrains-mono/OFL.txt",
                 "vendor/fonts/manrope/OFL.txt",
                 "vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2",
@@ -116,7 +127,7 @@ class VendoredFontsAuditTest {
 
     @Test
     fun `each family ships the OFL text, not an empty placeholder`() {
-        listOf("inter", "jetbrains-mono").forEach { dir ->
+        listOf("inter", "jetbrains-mono", "manrope", "ibm-plex-mono").forEach { dir ->
             val licence =
                 resolver
                     .getResource("classpath:static/vendor/fonts/$dir/OFL.txt")
@@ -166,9 +177,11 @@ class VendoredFontsAuditTest {
         // Relative, never absolute: app.css is served at /css/app.css, so `../vendor/...`
         // survives a non-root context path. An absolute `/vendor/...` would 404 there —
         // the same trap partials/theme-swap.html documents for the theme stylesheet.
+        // The JetBrainsMonoSite-* subsets are the SITE's files (site-fonts-mono.css) —
+        // the app keeps the full faces, so they are excluded here.
         (declaredHashes("inter") + declaredHashes("jetbrains-mono"))
             .keys
-            .filter { it.endsWith(".woff2") }
+            .filter { it.endsWith(".woff2") && !it.contains("JetBrainsMonoSite") }
             .forEach { path -> css shouldContain "url(\"../${path}\")" }
         css.split("@font-face").size - 1 shouldBe EXPECTED_FACES
         // Every face declares `optional` (090 §B, was 079's `swap`): text must never be
@@ -184,17 +197,17 @@ class VendoredFontsAuditTest {
     }
 
     /**
-     * Site v2: the marketing site declares ITS faces (Manrope for display and body, JetBrains
-     * Mono for code) in site.css — served at /site/css/, hence the `../../` — under the same
-     * `optional` policy. The app keeps Inter; the two sheets never load together.
+     * Site v2: the marketing site declares ITS faces in site.css — Manrope for body
+     * (optional, the 090 §B policy: a late face must not reflow) and, since 133, IBM
+     * Plex Mono for DISPLAY (h1–h3, kickers, strip values) at `swap` — the owner's
+     * ruling overrides the optional policy for the display face only, because the h1
+     * is the LCP element and an invisible headline is worse than a swapped one. The
+     * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the
+     * SITE-ONLY latin subsets, 39 KB vs 186 KB). The app keeps Inter; the two sheets
+     * never load together.
      */
     @Test
     fun `site css declares the marketing faces against the vendored files`() {
-        // 111 §C split the declarations across two sheets: Manrope (the body/LCP face) stays
-        // in site.css, whose bytes ride the critical chain via site-chrome.css; the two
-        // JetBrains Mono faces moved to site-fonts-mono.css, which loads LATE (media="print",
-        // flipped by site.js) so their 184 KB never blocks first paint. Both sheets must keep
-        // pointing at the vendored files, and the mono faces must NOT sneak back into site.css.
         val site =
             resolver
                 .getResource("classpath:static/site/css/site.css")
@@ -212,18 +225,23 @@ class VendoredFontsAuditTest {
             .keys
             .filter { it.endsWith(".woff2") }
             .forEach { path -> site shouldContain "url(\"../../${path}\")" }
+        declaredHashes("ibm-plex-mono")
+            .keys
+            .filter { it.endsWith(".woff2") }
+            .forEach { path -> site shouldContain "url(\"../../${path}\")" }
         site.split("@font-face").size - 1 shouldBe EXPECTED_SITE_FACES
-        site.split("font-display: optional;").size - 1 shouldBe EXPECTED_SITE_FACES
+        // The display policy, split exactly along the ruling: Manrope optional, Plex swap.
+        site.split("font-display: optional;").size - 1 shouldBe EXPECTED_SITE_OPTIONAL_FACES
+        site.split("font-display: swap;").size - 1 shouldBe EXPECTED_SITE_SWAP_FACES
 
         declaredHashes("jetbrains-mono")
             .keys
-            .filter { it.endsWith(".woff2") }
+            .filter { it.endsWith("Site-Regular.woff2") || it.endsWith("Site-Medium.woff2") }
             .forEach { path -> mono shouldContain "url(\"../../${path}\")" }
         mono.split("@font-face").size - 1 shouldBe EXPECTED_MONO_FACES
         mono.split("font-display: optional;").size - 1 shouldBe EXPECTED_MONO_FACES
 
         site shouldNotContain "JetBrainsMono"
-        site shouldNotContain "font-display: swap;"
         mono shouldNotContain "font-display: swap;"
     }
 
@@ -242,7 +260,15 @@ class VendoredFontsAuditTest {
 
         /** The app-side sheet still declares all four faces (the app keeps Inter; the two sheets never load together). */
         const val EXPECTED_FACES = 4
-        const val EXPECTED_SITE_FACES = 2
+
+        /** site.css: 2 Manrope + 6 IBM Plex Mono (500/600/700 × latin/latin-ext). */
+        const val EXPECTED_SITE_FACES = 8
+
+        /** The Manrope pair keeps the 090 §B `optional` policy. */
+        const val EXPECTED_SITE_OPTIONAL_FACES = 2
+
+        /** The Plex display faces carry the 133 `swap` ruling. */
+        const val EXPECTED_SITE_SWAP_FACES = 6
         const val EXPECTED_MONO_FACES = 2
         const val MIN_LICENCE_CHARS = 3_000
         const val MIN_SWEPT_SOURCES = 30

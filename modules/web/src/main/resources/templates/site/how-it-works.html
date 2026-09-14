@@ -76,7 +76,7 @@
   <!-- ============================ HOW IT WORKS ============================ -->
   <!--/* Moved verbatim from the homepage by 115 §A.3 — the agent loop, its diagram and its
        demo-scale footnote. The tool count still renders from the compile-time catalog. */-->
-  <section class="section" id="how-it-works" aria-labelledby="how-title">
+  <section class="section band" id="how-it-works" aria-labelledby="how-title">
     <div class="container">
       <p class="kicker">The agent loop</p>
       <h2 id="how-title" class="ds-headline">How it works</h2>
@@ -267,24 +267,6 @@
         </div>
       </div>
 
-      <div class="shots">
-        <figure class="shot">
-          <!-- screenshot: the /templates explorer, tree expanded two levels with a leaf selected — untouched capture from `./gradlew siteShots` (070 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/template-explorer.png}" width="1440" height="900" alt="The templates screen: a tree on the left with the nyc folder holding 22 templates, expanded into lake (5), lib (1), mobility (11), reference (3) and weather (2), and mobility expanded again to show its eleven templates, each with a sql badge and a dialect badge reading H2 or POSTGRES. Below nyc sit the test (1) and trade (8) folders. On the right, the selected template nyc/mobility/od_matrix.sql with its description and a versions table showing v1, RELEASED, in use by 1 pipeline." loading="lazy">
-          </div>
-          <figcaption>The template explorer. A template's name <em>is</em> its path, so the browser is a tree — one server-side query per level, versions on the right.</figcaption>
-        </figure>
-        <figure class="shot">
-          <!-- screenshot: the shared zone template's version list with its in-use count — untouched capture from `./gradlew siteShots` (070 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/template-used-by.png}" width="1440" height="900" alt="The templates screen with nyc/reference/sample_zones.sql selected. Its description reads: reads the 265-row zone lookup from the sample-reference SQLite datasource. Its versions table shows version v1, status RELEASED, and an IN USE column reading 5 pipelines." loading="lazy">
-          </div>
-          <figcaption>Used-by, before you change anything: <code>nyc/reference/sample_zones.sql</code> v1 is pinned by five pipelines. Delete is refused while that number is not zero.</figcaption>
-        </figure>
-      </div>
-
-
       <div class="feature-group">
         <h3 class="group-title">Run</h3>
         <div class="features-grid ds-stagger-children">
@@ -374,16 +356,6 @@
         </article>
 
         </div>
-      </div>
-
-      <div class="shots">
-        <figure class="shot">
-          <!-- screenshot: the pipelines explorer in the DARK theme, driven through the settings select — untouched capture from `./gradlew siteShots` (093 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/shell-dark.png}" width="1440" height="900" alt="The pipelines explorer in the dark theme. The sidebar carries the workspace switcher and the Build, Operate and Organisation groups; the tree shows the nyc folder expanded into mobility with its seven pipelines, each with a v1 badge, and the test and trade folders below it. The right pane reads: select a pipeline." loading="lazy">
-          </div>
-          <figcaption>Where a run starts: the pipelines explorer, a folder tree over the same 2&ndash;10-segment names an agent authors under. Shown in dark, because the theme is the account's own setting rather than a media query — one toggle in the top bar, remembered per user.</figcaption>
-        </figure>
       </div>
 
 
@@ -487,25 +459,12 @@
 
       <div class="shots">
         <figure class="shot">
-          <!-- screenshot: the /executions history with successes, failures and a composed child run — untouched capture from `./gradlew siteShots` (070 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/executions.png}" width="1440" height="900" alt="The execution history screen, newest first, with filters for pipeline, status and date range. Rows carry the pipeline&#39;s display name above its full path, the version, a status pill, the start time, the duration in milliseconds, the row count and the trigger. Both outcomes are here: Success rows for nyc/mobility/taxi_vs_rideshare at 12 rows and nyc/mobility/weather_sensitivity_by_borough at 29, and Failed rows for test/probe/trip_probe with a dash where the row count would be. Every row reads REST under Via." loading="lazy">
-          </div>
-          <figcaption>Execution history across both outcomes, newest first — with what started each run in the last column. A composed pipeline's child run is listed in its own right, linked back to the parent that spawned it.</figcaption>
+          <figcaption>The run, recorded: the agent's steps with their row counts and timings, then the rows themselves — which is how an agent checks its own work instead of asserting it.</figcaption>
+          <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
         </figure>
         <figure class="shot">
-          <!-- screenshot: execution detail of a real SUCCESS run of the seeded nyc/mobility/weather_sensitivity_by_borough pipeline — untouched capture from `./gradlew siteShots` (093 §C). 098 §G moved it here from the hero, where the editor now sits: this shot is about what an execution RECORDS, which is what this card claims. -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/execution-result.png}" width="1440" height="900" alt="Execution detail for Weather sensitivity by borough, version 1: a SUCCESS badge, a duration, a correlation ID and Triggered via REST. A node-stats table lists the five nodes — stage_daily_by_zone, stage_daily_weather, stage_zones, stage_calendar and weather_sensitivity — each with its row count and duration. Below, the result: the rows themselves, with borough, weather, day type, days, trip count, trips per day and revenue per trip." loading="lazy">
-          </div>
-          <figcaption>The same run, recorded: per-node row counts, then the rows themselves — which is how an agent checks its own work instead of asserting it.</figcaption>
-        </figure>
-        <figure class="shot">
-          <!-- screenshot: the API section at /api-console — untouched capture from `./gradlew siteShots` (093 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/api-console.png}" width="1440" height="900" alt="The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads 30 tools and holds the connection JSON with a DP-API-Key header." th:alt="|The API section. An API keys card lists two keys: reporting-endpoint, kind endpoint, reach /nyc/**, and analytics-agent, kind user, reach read — each with its dpk_ prefix, created and last-used cells and a Revoke action. Below it, Published endpoints shows one live row, GET /api/x/nyc/revenue-by-borough serving nyc/mobility/revenue_by_borough v1 with a 30 s timeout, and a note that call counts are not recorded anywhere in this system. Beside it the MCP server card reads ${facts.toolCount} tools and holds the connection JSON with a DP-API-Key header.|" loading="lazy">
-          </div>
           <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection — with the tool count read from the catalog at request time, exactly as this page reads it.</figcaption>
+          <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
         </figure>
       </div>
 
@@ -538,7 +497,7 @@
           <h3>A key has a kind, and the kind decides its reach</h3>
           <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is an agent's key and a program's key — its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
-          <p>The confinement is decided centrally, before any handler's annotation is read, so a new route cannot quietly become reachable to a scopeless key.</p>
+          <p>The confinement is decided centrally, before any handler's annotation is read — a new route cannot become quietly reachable to a scopeless key.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
@@ -551,9 +510,9 @@
           </svg>
           <!-- claim: docs/mcp-server.md §6.2.22 -->
           <h3>The agent never sees a credential</h3>
-          <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that mints a key: a credential passed through a tool call transits the agent's context, its transcript and whatever the client logs. A person adds the datasource in the UI, and the agent uses it <em>by name</em>.</p>
+          <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that mints a key: a credential through a tool call transits the agent's context and transcript. A person adds the datasource in the UI; the agent uses it <em>by name</em>.</p>
           <!-- claim: docs/mcp-server.md §6.2.22, docs/datasources.md §3.4 -->
-          <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns, preview rows — enough to author a pipeline without ever being handed a password.</p>
+          <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns, preview rows — enough to author without a password.</p>
           <a class="card-link" th:href="@{/docs/mcp-server}">Read the spec &rarr;</a>
         </article>
 
@@ -606,23 +565,6 @@
         </div>
       </div>
 
-      <div class="shots">
-        <figure class="shot">
-          <!-- screenshot: the workspaces screen with two workspaces and the navbar switcher — untouched capture from `./gradlew siteShots` (070 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/workspaces.png}" width="1440" height="900" alt="The workspaces screen. A create form at the top, a note that the provisioning mode on this server is auto-per-user, then a table listing two workspaces — admin, marked active, and analytics-team — each with the viewer&#39;s role of owner and Switch and Delete actions. Below, a members table per workspace with an add-by-email field. A workspace switcher sits at the top of the sidebar." loading="lazy">
-          </div>
-          <figcaption>Workspaces, with the navbar switcher. Every request resolves exactly one workspace, and all authored content is scoped to it.</figcaption>
-        </figure>
-        <figure class="shot">
-          <!-- screenshot: the key-minting modal, Kind → Scope → Name → Expiry → Bindings — untouched capture from `./gradlew siteShots` (093 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/keys.png}" width="1440" height="900" alt="The New API key modal over the API section. Its fields run in order: Kind, as three radio cards reading Agent / API key, Published-endpoint key and Promotion server key; Scope, a select showing read — list and inspect, runs nothing; Name, with a hint that names are not unique and the prefix is what identifies a key; and Expiry, a select defaulting to Never. The bindings picker is absent, because the selected kind is the scoped one." loading="lazy">
-          </div>
-          <figcaption>Minting a key asks Kind first, because the kind decides what the rest of the form means. Scope and bindings appear only for the kinds that have them.</figcaption>
-        </figure>
-      </div>
-
 
       <p class="features-pointer">Charts and dashboards are next — <a th:href="@{/roadmap}">see the roadmap</a>.</p>
     </div>
@@ -631,7 +573,7 @@
   <!-- ============================ SECURITY ============================ -->
   <!--/* Moved verbatim from the homepage by 115 §A.3 — the security teaser. The full page
        is /security. */-->
-  <section class="section" id="security" aria-labelledby="sec-title">
+  <section class="section band" id="security" aria-labelledby="sec-title">
     <div class="container">
       <p class="kicker">Your infra, your rules</p>
       <h2 id="sec-title" class="ds-headline">Security &amp; self-hosting</h2>
@@ -692,7 +634,7 @@
   <!-- ============================ FAQ ============================ -->
   <!--/* 115 §A.3: the most engineering-shaped existing list — SiteFaqs.APIS_AND_OPERATIONS,
        passed by the controller. No new entries. */-->
-  <section class="section" id="faq" aria-labelledby="faq-title">
+  <section class="section band" id="faq" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Questions engineers ask</p>
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The operational questions')}"></div>

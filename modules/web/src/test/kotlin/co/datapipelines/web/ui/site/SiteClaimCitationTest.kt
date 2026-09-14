@@ -31,10 +31,15 @@ class SiteClaimCitationTest {
 
     @Test
     fun `the sweep sees every site template`() {
-        // Non-vacuity: the homepage plus eight cluster templates. A resolver that stopped
-        // matching would pass every check below by having nothing to check.
+        // Non-vacuity: the homepage plus the cluster templates and the two 133 demo
+        // partials. A resolver that stopped matching would pass every check below by
+        // having nothing to check.
         templates.keys.sorted() shouldBe
             listOf(
+                "_demo-api.html",
+                "_demo-console.html",
+                "_demo-dag.html",
+                "_demo-datasources.html",
                 "add-mcp-server.html",
                 "ai-data-pipeline.html",
                 "compare-airflow.html",

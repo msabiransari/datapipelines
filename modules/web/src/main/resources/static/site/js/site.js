@@ -1,7 +1,9 @@
 /* datapipelines.co — theme toggle, header menus + copy-to-clipboard only.
    The site is fully readable without this file: auto.css
-   handles theming via prefers-color-scheme, and the header's
-   menus are <details>, which open and close on their own. */
+   handles theming via prefers-color-scheme, the header's
+   menus are <details>, which open and close on their own,
+   and the saved-theme restore runs INLINE in the head (133)
+   so this file loads `defer`red, off the critical chain. */
 (function () {
   'use strict';
 
@@ -10,8 +12,13 @@
      Swaps the dp-theme stylesheet between auto / light /
      dark. All theme files open on :root (027: dark.css was
      re-vendored to match its siblings), so the swap alone
-     activates the theme; the data-theme attribute is kept
-     as harmless belt-and-braces for dark.
+     activates the theme. 133: the SITE's palette is the
+     `--site-*` three-state layer in site.css, driven by the
+     data-theme attribute — 'light' sets it explicitly (the
+     dark media query is guarded by :not([data-theme="light"])),
+     'dark' sets it, 'auto' removes it. The swap sheet stays
+     for the design-system `--_*` values. Default on a first
+     visit is LIGHT (owner ruling 2026-09-14).
      ------------------------------------------------------ */
   var STORAGE_KEY = 'dp-site-theme';
   var THEME_DIR = '/vendor/design-system/themes/';
@@ -20,39 +27,44 @@
   var toggle = document.querySelector('[data-theme-toggle]');
 
   function label(mode) {
-    return 'Theme: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+    return mode.charAt(0).toUpperCase() + mode.slice(1);
   }
 
   function applyTheme(mode) {
     if (!themeLink) {
       return;
     }
-    /* 111 §C: auto's values ride the site-chrome bundle, so auto DISABLES the swap
-       sheet (no fetch, no render-blocking request) instead of re-pointing it. */
-    if (mode === 'auto') {
-      themeLink.disabled = true;
-    } else {
+    /* 111 §C: the swap sheet stays DISABLED unless it has something to say.
+       auto's values ride the site-chrome bundle; light is the bundle's bare
+       :root since 133 (the site palette's three states live in site.css, and
+       the bridged semantic tokens mean no `--_*` read remains for the sheet
+       to answer) — enabling light.css here cost the default first visit a
+       render-blocking fetch for zero visible change (Lighthouse 133: / at 94).
+       Only dark still points the sheet, for the design-system `--_*` values. */
+    if (mode === 'dark') {
       themeLink.disabled = false;
       themeLink.setAttribute('href', THEME_DIR + mode + '.css');
-    }
-    if (mode === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark');
     } else {
+      themeLink.disabled = true;
+    }
+    if (mode === 'auto') {
       document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', mode);
     }
     if (toggle) {
-      toggle.textContent = label(mode);
+      toggle.querySelector('[data-theme-label]').textContent = label(mode);
     }
   }
 
-  var current = 'auto';
+  var current = 'light';
   try {
     var saved = window.localStorage.getItem(STORAGE_KEY);
     if (MODES.indexOf(saved) !== -1) {
       current = saved;
     }
   } catch (err) {
-    /* localStorage unavailable — stay on auto */
+    /* localStorage unavailable — stay on the default */
   }
   applyTheme(current);
 
@@ -70,18 +82,33 @@
   }
 
   /* ------------------------------------------------------
-     Late stylesheets (111 §C)
+     Late stylesheets (111 §C, re-measured 133)
      The mono faces ship in a media="print" sheet so their
-     bytes stay off the render-blocking chain; this flips it
-     to "all". Runs before first paint on a normal parse,
-     because this script sits at the end of the body.
+     186 KB stays off the render-blocking chain; this flips it
+     to "all" — but on `load`, not at parse time. A flip that
+     lands before first paint makes the pending sheet render-
+     relevant again and first paint waits ~1.05s for the two
+     faces under the throttled harness (the bimodal FCP that
+     kept /how-it-works under the Lighthouse floor). Flipping
+     on load keeps first paint free of the faces in every
+     connection class: fast ones still get the real face, slow
+     ones keep the fallback — the trade font-display: optional
+     already makes for late arrivals.
      ------------------------------------------------------ */
-  Array.prototype.forEach.call(
-    document.querySelectorAll('link[data-late-style]'),
-    function (link) {
-      link.media = 'all';
-    }
-  );
+  function flipLateStyles() {
+    Array.prototype.forEach.call(
+      document.querySelectorAll('link[data-late-style]'),
+      function (link) {
+        link.media = 'all';
+      }
+    );
+  }
+
+  if (document.readyState === 'complete') {
+    flipLateStyles();
+  } else {
+    window.addEventListener('load', flipLateStyles);
+  }
 
   /* ------------------------------------------------------
      Header menus (130 §A.1)
@@ -143,11 +170,24 @@
   }
 
   /* ------------------------------------------------------
-     Copy-to-clipboard on code blocks
+     The header's hairline (133): it appears only once the
+     page has scrolled, so the top of every page is clean.
+     ------------------------------------------------------ */
+  var siteHeader = document.querySelector('.site-header');
+  if (siteHeader) {
+    var onScroll = function () {
+      siteHeader.classList.toggle('scrolled', window.scrollY > 8);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+
+  /* ------------------------------------------------------
+     Copy-to-clipboard on code blocks and the install chip
      Buttons ship with the `hidden` attribute; they appear
      only when this script runs.
      ------------------------------------------------------ */
-  var blocks = document.querySelectorAll('.code-block');
+  var blocks = document.querySelectorAll('.code-block, .install');
   Array.prototype.forEach.call(blocks, function (block) {
     var btn = block.querySelector('.copy-btn');
     var code = block.querySelector('code');

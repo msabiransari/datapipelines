@@ -135,7 +135,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="gd-why">
+  <section class="section band" aria-labelledby="gd-why">
     <div class="container">
       <p class="kicker">Why this shape</p>
       <h2 id="gd-why" class="ds-headline">Governance is a release step, not a permission matrix</h2>
@@ -170,17 +170,19 @@
       <div class="shots">
         <figure class="shot">
           <figcaption>A datasource with the read-only flag set — the agent sees the schema, never the credential.</figcaption>
-          <div class="shot-placeholder" data-shot="datasources" style="--shot-ratio: 16 / 10"><b>[shot: datasources]</b>datasources list · the demo's engines + the lake · 1440×900</div>
+          <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
         </figure>
-        <figure class="shot">
-          <figcaption>The Release dialog — the human step, with the draft's pins and what the release changes.</figcaption>
-          <div class="shot-placeholder" data-shot="release-dialog" style="--shot-ratio: 16 / 10"><b>[shot: release-dialog]</b>Release dialog · 1280×800</div>
-        </figure>
+      </div>
+      <div class="prose">
+        <!-- claim: docs/versioning.md §3 -->
+        <p>The release itself stays a person's step: the draft carries its pins until a human releases it — the
+          home page's pipeline shows the same state, a DRAFT bar waiting on that one decision, and then the
+          endpoint answers as that version forever.</p>
       </div>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="gd-next">
+  <section class="section band" aria-labelledby="gd-next">
     <div class="container">
       <h2 id="gd-next" class="ds-headline">Run it on the demo first</h2>
       <!-- claim: docs/deployment.md §Appendix B -->

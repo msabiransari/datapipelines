@@ -67,8 +67,9 @@ class SiteCssBundleParityTest {
             source.contains("vendor/design-system/base.css") shouldBe false
             source.contains("vendor/design-system/motion.css") shouldBe false
             // The theme swap sheet stays a separate link AFTER the bundle, but DISABLED:
-            // auto's values ride the bundle, site.js enables the link only for light/dark,
-            // so the swap sheet never costs a render-blocking request.
+            // auto's values ride the bundle and light is the bundle's bare :root since
+            // 133, so site.js enables the link only for dark, and the swap sheet never
+            // costs a render-blocking request on the default (light) first visit.
             source.contains("""themes/auto.css}" disabled""") shouldBe true
             // The mono faces ride the late sheet, off the critical chain.
             source.contains("site-fonts-mono.css") shouldBe true

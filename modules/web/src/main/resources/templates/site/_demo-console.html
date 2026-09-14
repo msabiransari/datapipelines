@@ -1,0 +1,38 @@
+<!--/*
+  133 §B.1 — the console: the product SHOWN, not described. A dark panel with a title
+  bar: the sentence, the agent's steps, the result table, the endpoint line. Every
+  number renders from SiteFacts' demo block (the pipeline-0 acceptance result, ledger
+  T272) — SiteHandTypedCountsGuardTest's demo arm fails a digit typed into this file,
+  and the element fallbacks stay digit-free for the same reason. Reused wherever a
+  page shows the demo run.
+*/-->
+<!-- claim: docs/deployment.md Appendix B — the demo showcase pipeline this session runs -->
+<div class="console" th:fragment="console(demo)" aria-label="The product: a sentence, the agent's steps, and the result" xmlns:th="http://www.thymeleaf.org">
+  <div class="console-bar"><i></i><i></i><i></i><span>workspace: demo · agent session</span></div>
+  <div class="console-body">
+    <p class="console-prompt"><span class="you">you &rsaquo;</span> <span class="q" th:text="${demo.question}">The sentence.</span></p>
+    <div class="console-steps">
+      <ul>
+        <li th:each="s, st : ${demo.steps}" th:classappend="${st.last} ? 'live'" th:text="${s}">A step.</li>
+      </ul>
+    </div>
+    <div class="console-result">
+      <table>
+        <thead>
+          <tr><th>borough</th><th>top company</th><th class="num">trips</th><th class="num">borough trips</th><th class="num">share</th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${demo.rows}">
+            <td th:text="${r.borough}">Borough</td>
+            <td th:text="${r.topCompany}">Company</td>
+            <td class="num" th:text="${r.trips}">—</td>
+            <td class="num" th:text="${r.boroughTrips}">—</td>
+            <td class="num share" th:text="${r.share}">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="console-endpoint"><b>GET</b> <code th:text="${demo.endpoint}">…</code> <span>· after release · key scoped to /demo</span></p>
+    <p class="console-src">from the demo workspace — a real result, not a promise</p>
+  </div>
+</div>

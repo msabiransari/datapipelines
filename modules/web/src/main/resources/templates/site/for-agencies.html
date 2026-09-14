@@ -70,7 +70,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="ag-agent">
+  <section class="section band" aria-labelledby="ag-agent">
     <div class="container">
       <p class="kicker">The first draft, automated</p>
       <h2 id="ag-agent" class="ds-headline">The agent does the first draft of every client's pipeline</h2>
@@ -88,7 +88,7 @@
       </div>
       <figure class="shot">
         <figcaption>The agent's session on a new client's sources: schemas read, the draft iterated, the run checked — the same ritual for every engagement.</figcaption>
-        <div class="shot-placeholder" data-shot="mcp-session" style="--shot-ratio: 16 / 10"><b>[shot: mcp-session]</b>Claude Code session · a new client's schema · draft pipeline · 1440×900</div>
+        <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
     </div>
   </section>
@@ -127,7 +127,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="ag-release">
+  <section class="section band" aria-labelledby="ag-release">
     <div class="container">
       <p class="kicker">Sign-off with a version number</p>
       <h2 id="ag-release" class="ds-headline">A release per client, with a version you can name in the invoice itself</h2>
@@ -177,13 +177,13 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="ag-shot">
+  <section class="section band" aria-labelledby="ag-shot">
     <div class="container">
       <p class="kicker">What it looks like</p>
       <h2 id="ag-shot" class="ds-headline">The client's endpoint, the key, the version</h2>
       <figure class="shot">
-        <figcaption>The API section: one published endpoint per client, the version each serves, and the key bound to each path — the roster, read at a glance.</figcaption>
-        <div class="shot-placeholder" data-shot="api-console" style="--shot-ratio: 16 / 10"><b>[shot: api-console]</b>API section · published endpoints · keys by path · 1440×900</div>
+        <figcaption>The API section: one published endpoint per client, the version each serves, and the key bound to each path — the roster, read at a glance. The panel here is the demo workspace's own endpoint, rendered from the same recorded run the home page shows, so what a client receives is never a mock-up.</figcaption>
+        <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
       </figure>
       <div class="prose">
         <!-- claim: docs/auth.md §10 -->
@@ -210,7 +210,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="ag-next">
+  <section class="section band" aria-labelledby="ag-next">
     <div class="container">
       <h2 id="ag-next" class="ds-headline">Pilot it on one real client this week</h2>
       <!-- claim: docs/deployment.md §Appendix B -->

@@ -103,20 +103,31 @@ class SiteSeoMetaTest {
         var images = 0
         val bad =
             rendered.flatMap { (page, html) ->
-                IMG.findAll(html).mapNotNull { tag ->
+                (
+                    IMG.findAll(html).map { it.value } +
+                        SVG_IMG.findAll(html).map { it.value }
+                ).mapNotNull { tag ->
                     images++
                     val alt =
                         ALT
-                            .find(tag.value)
+                            .find(tag)
                             ?.groupValues
                             ?.get(1)
                             ?.trim()
-                    if (alt.isNullOrBlank() || alt.length < MIN_ALT_CHARS) "${page.path}: ${tag.value.take(80)}" else null
+                    // An SVG image may name itself by reference instead (aria-labelledby).
+                    val labelledBy = LABELLED_BY.find(tag) != null
+                    if ((alt.isNullOrBlank() || alt.length < MIN_ALT_CHARS) && !labelledBy) {
+                        "${page.path}: ${tag.take(80)}"
+                    } else {
+                        null
+                    }
                 }
             }
         bad shouldBe emptyList()
-        // Non-vacuity: the homepage alone carries ten screenshots. Zero images means the
-        // sweep stopped seeing <img> tags, and this test would pass by checking nothing.
+        // Non-vacuity: 133 §B.3 replaced every raster capture with a rendered component —
+        // the site's images are now the inline SVGs (the DAG on five pages, the how-it-works
+        // flow diagram). Zero matches means the sweep lost the markup, not that the site
+        // has no images to name.
         check(images >= MIN_IMAGES) { "the alt sweep saw only $images images across the site" }
     }
 
@@ -155,7 +166,7 @@ class SiteSeoMetaTest {
         const val TITLE_MAX = 70
         const val DESCRIPTION_MAX = 155
         const val MIN_ALT_CHARS = 20
-        const val MIN_IMAGES = 8
+        const val MIN_IMAGES = 5
         const val BRAND_CARD = "https://datapipelines.co/site/brand/og-1200x630.png"
 
         val TITLE = Regex("""<title>(.*?)</title>""", RegexOption.DOT_MATCHES_ALL)
@@ -163,7 +174,9 @@ class SiteSeoMetaTest {
         val CONTENT = Regex("""content="([^"]*)"""")
         val HEADING = Regex("""<h([1-6])[\s>]""")
         val IMG = Regex("""<img\b[^>]*>""")
-        val ALT = Regex("""\balt="([^"]*)"""")
+        val SVG_IMG = Regex("""<svg\b[^>]*role="img"[^>]*>""")
+        val ALT = Regex("""\b(?:alt|aria-label)="([^"]*)"""")
+        val LABELLED_BY = Regex("""\baria-labelledby="""")
         val ASSET_TAG = Regex("""<(?:link|script|img)\b[^>]*>""")
         val ATTR = Regex("""\b(?:href|src)="([^"]*)"""")
     }

@@ -42,6 +42,12 @@ data class SiteFacts(
      * pages never state the number).
      */
     val demoEngineCounts: Map<String, Int> = emptyMap(),
+    /**
+     * The demo showcase behind the hero console and the product slab's DAG (133 §B) — see
+     * [DemoShowcase]. A constant, not a lookup: the run is a recorded acceptance result,
+     * reproduced from the bucket, and the site presents it as exactly that.
+     */
+    val demo: DemoShowcase = DEMO_SHOWCASE,
 ) {
     /** The read-only majority of the tool surface. */
     val readToolCount: Int get() = toolCount - mutatingToolCount
@@ -101,3 +107,109 @@ fun numberWord(n: Int): String = WORDS.getOrElse(n - 1) { error("numberWord cove
 
 private val WORDS: List<String> =
     listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
+
+/**
+ * The demo showcase the home page shows instead of a screenshot (133 §B): the pipeline-0
+ * acceptance result — `demo/top_company_by_borough`, executed 2026-09-14 on the published
+ * sample set, reproduced from the bucket (ledger T272). It is a real run's record, marked
+ * "from the demo workspace" wherever it renders — a result, never a promise.
+ *
+ * ONE constant block feeds the hero console, the product slab's DAG, and any page that
+ * reuses those partials, so the site states one run; a number typed into a template
+ * instead fails the demo arm of `SiteHandTypedCountsGuardTest`. EWR is omitted from the
+ * console's table (the panel shows the five boroughs); the answer node counts every row.
+ */
+data class DemoShowcase(
+    /** The sentence the visitor asked, verbatim. */
+    val question: String,
+    /** The agent's four steps; the LAST renders as the live ("left for a human") step. */
+    val steps: List<String>,
+    /** The result table the draft produced — the five boroughs, EWR omitted from the panel. */
+    val rows: List<DemoRow>,
+    /** The endpoint the pipeline answers on after release, with its example parameter. */
+    val endpoint: String,
+    /** The three source nodes of the DAG: what was read, with its own fact underneath. */
+    val sources: List<DemoNode>,
+    /** The two H2 staging nodes, with row counts and timings. */
+    val stages: List<DemoNode>,
+    /** The answer node: the rows the caller gets. */
+    val answer: DemoNode,
+    /** The bar under the DAG: the draft, its version, and what happens next. */
+    val releaseLine: String,
+    /** The pipeline's path — what a released version serves. */
+    val pipelinePath: String,
+    /** The released-so-far version label of the run of record. */
+    val version: String,
+    /** The reach of the endpoint key guarding the published path. */
+    val keyReach: String,
+    /** The demo workspace's datasource roster, as the datasources panel lists it. */
+    val datasources: List<DemoDatasource>,
+) {
+    /** One console row: a borough, its top company, and the two counts with the share. */
+    data class DemoRow(
+        val borough: String,
+        val topCompany: String,
+        val trips: String,
+        val boroughTrips: String,
+        val share: String,
+    )
+
+    /** One DAG node: its name and the fact line under it (row count and timing where timed). */
+    data class DemoNode(
+        val name: String,
+        val detail: String,
+    )
+
+    /** One datasource roster row: the name, what it is, and the access the agent gets. */
+    data class DemoDatasource(
+        val name: String,
+        val kind: String,
+        val access: String,
+    )
+}
+
+/**
+ * The run of record (133 §B.1): `demo/top_company_by_borough` v1, executed 2026-09-14 on the
+ * published sample set, reproduced from the bucket — ledger T272.
+ */
+val DEMO_SHOWCASE =
+    DemoShowcase(
+        question = "Which rideshare company carried the most trips in each borough last quarter?",
+        steps =
+            listOf(
+                "read the datasource facts, columns and stats — hvfhv_zone_day is a census at zone × day × company",
+                "resolved \"last quarter\" from the data's last day — Q4 2024",
+                "rendered 3 templates, ran the draft: 4 nodes · 763 ms",
+                "draft demo/top_company_by_borough v1 — left for a human to release",
+            ),
+        rows =
+            listOf(
+                DemoShowcase.DemoRow("Manhattan", "Uber", "17,660,839", "23,669,163", "74.62%"),
+                DemoShowcase.DemoRow("Brooklyn", "Uber", "11,946,362", "16,057,699", "74.40%"),
+                DemoShowcase.DemoRow("Queens", "Uber", "9,786,602", "12,847,231", "76.18%"),
+                DemoShowcase.DemoRow("Bronx", "Uber", "6,078,750", "7,572,899", "80.27%"),
+                DemoShowcase.DemoRow("Staten Island", "Uber", "715,593", "918,360", "77.92%"),
+            ),
+        endpoint = "/api/x/demo/top-company-by-borough?anchor_date=2025-01-01",
+        sources =
+            listOf(
+                DemoShowcase.DemoNode("sample-lake · Parquet on S3", "hvfhv_zone_day · 377k rows"),
+                DemoShowcase.DemoNode("sample-reference · SQLite", "zones · 265 rows"),
+                DemoShowcase.DemoNode("calculator · trailing_periods", "anchor 2025-01-01 → Q4 2024"),
+            ),
+        stages =
+            listOf(
+                DemoShowcase.DemoNode("stage_company_zone", "523 rows · 482 ms"),
+                DemoShowcase.DemoNode("stage_zones", "263 rows · 204 ms"),
+            ),
+        answer = DemoShowcase.DemoNode("answer", "6 rows · caller"),
+        releaseLine = "demo/top_company_by_borough · v1 · awaiting a human release · then GET /api/x/demo/…",
+        pipelinePath = "demo/top_company_by_borough",
+        version = "v1",
+        keyReach = "/demo/**",
+        datasources =
+            listOf(
+                DemoShowcase.DemoDatasource("sample-lake", "Parquet on S3, read in place", "read-only ✓"),
+                DemoShowcase.DemoDatasource("sample-reference", "SQLite", "read-only ✓"),
+            ),
+    )

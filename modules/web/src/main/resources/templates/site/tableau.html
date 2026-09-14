@@ -65,7 +65,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="tb-two">
+  <section class="section band" aria-labelledby="tb-two">
     <div class="container">
       <p class="kicker">Two columns, honestly</p>
       <h2 id="tb-two" class="ds-headline">What ships today, and what is October 2026</h2>
@@ -133,18 +133,20 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="tb-shots">
+  <section class="section band" aria-labelledby="tb-shots">
     <div class="container">
       <p class="kicker">What it looks like</p>
       <h2 id="tb-shots" class="ds-headline">The dataset behind the chart, as the reviewer sees it</h2>
       <div class="shots">
         <figure class="shot">
           <figcaption>The pipeline an agent authored across four sources, in the editor, with the result dock open.</figcaption>
-          <div class="shot-placeholder" data-shot="editor-hero" style="--shot-ratio: 16 / 10"><b>[shot: editor-hero]</b>pipeline editor · demo graph · Results dock · 1600×1000</div>
+          <div class="dag-embed">
+            <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
+          </div>
         </figure>
         <figure class="shot">
           <figcaption>The published endpoint in the API console — the URL Tableau reads, the key bound to its path.</figcaption>
-          <div class="shot-placeholder" data-shot="api-console" style="--shot-ratio: 16 / 10"><b>[shot: api-console]</b>API section · one published endpoint · 1440×900</div>
+          <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
         </figure>
       </div>
     </div>
@@ -157,7 +159,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="tb-next">
+  <section class="section band" aria-labelledby="tb-next">
     <div class="container">
       <h2 id="tb-next" class="ds-headline">Try the shipped half on your own databases</h2>
       <!-- claim: docs/deployment.md §Appendix B -->

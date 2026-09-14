@@ -85,7 +85,7 @@
   </section>
 
   <!-- ============================ FAMILY: NYC ============================ -->
-  <section class="section" aria-labelledby="dd-nyc">
+  <section class="section band" aria-labelledby="dd-nyc">
     <div class="container">
       <p class="kicker">Family one — <code>nyc</code>, version <span th:text="${demoNyc.version}">v7</span></p>
       <h2 id="dd-nyc" class="ds-headline" th:text="|NYC mobility: one question, ${facts.demoEngineCountWord('nyc')} engines|">NYC mobility: one question, three engines</h2>
@@ -222,7 +222,7 @@
   </section>
 
   <!-- ============================ FAMILY: LAKE ============================ -->
-  <section class="section" aria-labelledby="dd-lake">
+  <section class="section band" aria-labelledby="dd-lake">
     <div class="container">
       <p class="kicker">Family three — <code>lake</code>, version <span th:text="${demoLake.version}">v1</span></p>
       <h2 id="dd-lake" class="ds-headline">dp-lake: the rideshare census, read in place</h2>
@@ -346,7 +346,7 @@
   </section>
 
   <!-- ============================ LICENCE ============================ -->
-  <section class="section" aria-labelledby="dd-licence">
+  <section class="section band" aria-labelledby="dd-licence">
     <div class="container">
       <p class="kicker">Licence and attribution</p>
       <h2 id="dd-licence" class="ds-headline">Every source, and the terms it ships under</h2>
@@ -412,7 +412,7 @@
   </section>
 
   <!-- ============================ FAQ ============================ -->
-  <section class="section" id="faq" aria-labelledby="faq-title">
+  <section class="section band" id="faq" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Questions about the data</p>
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'About the demo data')}"></div>

@@ -60,7 +60,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="connect-title">
+  <section class="section band" aria-labelledby="connect-title">
     <div class="container">
       <p class="kicker">Copy, paste, done</p>
       <h2 id="connect-title" class="ds-headline">Connect your agent</h2>
@@ -119,7 +119,7 @@
       <h2 id="register-title" class="ds-headline">
         A <span th:text="${engine.displayName}">engine</span> datasource, read-only, credentials encrypted
       </h2>
-      <div class="features-grid">
+      <div class="features-grid features-grid--two">
         <article class="card">
           <!-- claim: docs/datasources.md §5.7 -->
           <h3>The read-only flag refuses writes</h3>
@@ -144,7 +144,7 @@
     </div>
   </section>
 
-  <section class="section" th:if="${engine.demo != null}" aria-labelledby="demo-title">
+  <section class="section band" th:if="${engine.demo != null}" aria-labelledby="demo-title">
     <div class="container">
       <p class="kicker">Working example</p>
       <h2 id="demo-title" class="ds-headline">A seeded pipeline that reads this engine</h2>
@@ -174,7 +174,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="faq-title">
+  <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/deployment.md §3.5 — does the driver ship in the image -->
