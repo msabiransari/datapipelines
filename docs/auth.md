@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.16 (revised — see Change Log)
+**Status:** v2.17 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-09-13
+**Last updated:** 2026-09-14
 
 ---
 
@@ -1090,6 +1090,8 @@ CSRF exemption is scoped by **credential type, never by path**: a request is exe
 
 `/mcp` is CSRF-exempt (no cookie auth) and enforces the same scope matrix (§7.6) per tool.
 
+The filter chain authenticates on the servlet thread and the MCP layer carries the principal forward in the transport context (`McpToolContext`), because the MCP SDK runs each tool handler on its own scheduler thread — `SecurityContextHolder` is **empty** there. Code reachable from a tool therefore takes the principal and the workspace as arguments and never reads the thread-local; a `@Bean` adapter that did (the save-time datasource lookup, until 134) silently validated every MCP save as "no principal" ([MCP Server §4.1](mcp-server.md#41-auth-model)). Filters, interceptors and MVC controllers run on the request thread and may keep reading it.
+
 ---
 
 ## 9. Auth Errors
@@ -1444,6 +1446,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v2.17 | 134 MCP save sees workspace datasources | §8.5: the principal reaches an MCP tool through the transport context, not the thread — the SDK's scheduler thread has an empty `SecurityContextHolder`, so anything reachable from a tool takes principal and workspace as arguments (the save-time datasource port did not, and every MCP save saw owner-less datasources only). No matrix change. |
 | 2026-09-13 | v2.16 | 122 viewer executes | §7.6: no matrix row changed — the round re-floored a PAGE route. The pipeline editor (`GET /pipelines/{id}/editor`) declares `EXECUTE_PIPELINE` instead of `MUTATE_PIPELINES_TEMPLATES`: D-R3 says viewers execute, the §4.3e table already gave the viewer's editor an Execute verb, and the author floor refused the viewer before any of it was reachable (the owner's 2026-09-12 report). The template editor keeps the author floor. New paragraph after the UI-screens one states the page-route reasoning; the read key's "everything except the editors" property is unchanged (read < execute). Status line had drifted a version behind the rows (119-style); now current. |
 | 2026-09-11 | v2.14 | 117 templates_update | §7.6 MCP table: `templates_update` joins the `author`/`author` row (34 → 35 tools) — the template mirror of `pipelines_update`, the draft write REST `PUT /templates` already gates. Both `ScopeMatrixSpecDriftTest` counts (scope and capability) moved 34 → 35 in the same commit. |
 | 2026-09-11 | v2.15 | 118 learned semantic layer | §7.6 MCP table 35 → **38** tools: `semantics_list` joins the `read`/`view` row; a new `semantics_record` / `semantics_retire` row on `author`/`author` (recording is an authoring act, D-S8; the DATASOURCE-scope grant requirement is the §5.3 gate — not-found otherwise; the cross-workspace retire rule needs the workspace-admin role, enforced in the service). §10's event registry (enums.md §15) gains `semantics.recorded` / `semantics.retired`. |
