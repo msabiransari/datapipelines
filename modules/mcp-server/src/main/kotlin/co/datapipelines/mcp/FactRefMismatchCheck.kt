@@ -55,41 +55,68 @@ internal object FactRefMismatchCheck {
         catalogTables: List<String>,
     ): List<String> {
         if (catalogTables.isEmpty()) return emptyList()
-        val refTables = refs.mapTo(mutableSetOf()) { it.table.lowercase() }
-        val catalogLower = catalogTables.map { it.lowercase() }
+        val state = State(refs, catalogTables)
         val missing = linkedSetOf<String>()
         for (text in texts) {
             for (token in TOKEN.findAll(text.lowercase()).map { it.value }) {
-                val exactIndex = catalogLower.indexOf(token)
-                when {
-                    // A listed table, spelled as the catalog spells it: the caller adds the ref,
-                    // unless a ref already carries it (agreement).
-                    exactIndex >= 0 && token !in refTables -> missing += catalogTables[exactIndex]
-
-                    // Prose: an exact match the refs carry, a plain word (no underscore), or
-                    // nothing close.
-                    exactIndex >= 0 || '_' !in token -> Unit
-
-                    // A token the refs carry is text/refs agreement — a wrong REF is the
-                    // recorder's job (`ref_unresolved`), not a near-miss to refuse.
-                    token in refTables -> Unit
-
-                    else -> {
-                        val nearest =
-                            catalogTables.minByOrNull { levenshtein(token, it.lowercase()) }
-                        val nearestDistance = nearest?.let { levenshtein(token, it.lowercase()) } ?: Int.MAX_VALUE
-                        if (nearestDistance <= MAX_DISTANCE) {
-                            throw mismatch(
-                                datasource,
-                                token,
-                                requireNotNull(nearest) { "within MAX_DISTANCE implies a nearest table" },
-                            )
-                        }
-                    }
-                }
+                state.classify(datasource, token)?.let { missing += it }
             }
         }
         return missing.toList()
+    }
+
+    /** The catalog-backed half of [check]: one token's verdict, and the near-miss refusal. */
+    private class State(
+        refs: List<FactRef>,
+        catalogTables: List<String>,
+    ) {
+        private val refTables = refs.mapTo(mutableSetOf()) { it.table.lowercase() }
+        private val catalogTables: List<String> = catalogTables
+        private val catalogLower = catalogTables.map { it.lowercase() }
+
+        /**
+         * The table to ADD for [token], or null when it is prose (no listed table within
+         * [MAX_DISTANCE]), text/refs agreement (a wrong REF is the recorder's
+         * `ref_unresolved`, not this check), or a listed table the refs carry. Throws the
+         * catalogued refusal when [token] near-misses a listed table.
+         */
+        fun classify(
+            datasource: String,
+            token: String,
+        ): String? {
+            val exactIndex = catalogLower.indexOf(token)
+            return when {
+                // A listed table, spelled as the catalog spells it: the caller adds the ref,
+                // unless a ref already carries it (agreement).
+                exactIndex >= 0 && token !in refTables -> {
+                    catalogTables[exactIndex]
+                }
+
+                // Prose: an exact match the refs carry, or a plain word (no underscore).
+                exactIndex >= 0 || '_' !in token -> {
+                    null
+                }
+
+                // A token the refs carry is text/refs agreement — a wrong REF is the
+                // recorder's job (`ref_unresolved`), not a near-miss to refuse.
+                token in refTables -> {
+                    null
+                }
+
+                else -> {
+                    val nearest = catalogTables.minByOrNull { levenshtein(token, it.lowercase()) }
+                    val nearestDistance = nearest?.let { levenshtein(token, it.lowercase()) } ?: Int.MAX_VALUE
+                    if (nearestDistance <= MAX_DISTANCE) {
+                        throw mismatch(
+                            datasource,
+                            token,
+                            requireNotNull(nearest) { "within MAX_DISTANCE implies a nearest table" },
+                        )
+                    }
+                    null
+                }
+            }
+        }
     }
 
     private fun mismatch(

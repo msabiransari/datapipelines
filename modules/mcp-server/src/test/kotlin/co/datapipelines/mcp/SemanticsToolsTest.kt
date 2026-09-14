@@ -195,6 +195,14 @@ class SemanticsToolsTest {
         )
     }
 
+    /**
+     * 129 §B — the four arms of text/refs agreement through the real tool: (1) a catalog
+     * table the text names exactly and refs omit is ACCEPTED, the ref added with the
+     * catalog's namespace and no column, `refs_added` telling the agent; (2) a near-miss is
+     * REFUSED before the service runs, naming the nearest listed table; (3) an exact table
+     * the refs carry is accepted with nothing added; (4) prose with underscores is accepted
+     * with nothing added.
+     */
     @Test
     fun `text and refs agree in four arms - exact-missing is added for you, a near-miss is refused - 129 B`() {
         val catalog =
@@ -205,15 +213,12 @@ class SemanticsToolsTest {
         every { service.record(any(), any(), any(), any()) } returns mapOf("id" to "f1")
         val tool = recordTool(catalog)
 
-        // Arm 1 — exact-missing: accepted, the ref added for you (the catalog's namespace, no
-        // column), and `refs_added` tells the agent what happened.
         val exactMissing =
             tool.call(
                 McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
                 McpFixtures.ctx(Scope.AUTHOR),
             ) as Map<*, *>
 
-        // Arm 2 — near-miss: refused before the service runs, the nearest listed table named.
         val nearMiss =
             shouldThrow<DatapipelinesException> {
                 tool.call(
@@ -222,7 +227,6 @@ class SemanticsToolsTest {
                 )
             }
 
-        // Arm 3 — exact-present: accepted, nothing added.
         val exactPresent =
             tool.call(
                 McpArguments(
@@ -235,7 +239,6 @@ class SemanticsToolsTest {
                 McpFixtures.ctx(Scope.AUTHOR),
             ) as Map<*, *>
 
-        // Arm 4 — prose with underscores: accepted, nothing added.
         val proseUnderscores =
             tool.call(
                 McpArguments(recordArgs() + ("fact" to "amount is a row_count-weighted average, closing at the as_of date")),
@@ -256,7 +259,22 @@ class SemanticsToolsTest {
             { proseUnderscores["refs_added"] shouldBe null },
             { verify(exactly = 3) { service.record(any(), any(), any(), any()) } },
         )
-        // The stored refs carry the added ref beside the caller's own — only that one call.
+    }
+
+    @Test
+    fun `the added ref rides the STORED refs - the catalog's namespace, no column - 129 B`() {
+        val catalog =
+            listOf(
+                TableInfo(listOf("public"), "orders", "TABLE", null),
+                TableInfo(listOf("public"), "order_items", "TABLE", null),
+            )
+        every { service.record(any(), any(), any(), any()) } returns mapOf("id" to "f1")
+
+        recordTool(catalog).call(
+            McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
+            McpFixtures.ctx(Scope.AUTHOR),
+        )
+
         verify(exactly = 1) {
             service.record(
                 any(),
