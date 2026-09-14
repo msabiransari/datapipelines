@@ -11,6 +11,7 @@ import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.datasources.testEncryptor
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -133,6 +134,53 @@ class LearnedFactRecorderTest {
                 ),
             )
         given.evidenceSummary shouldBe "two rows, wall-clock values"
+    }
+
+    /**
+     * C.2 (owner, 2026-09-13): a `definition`, `exclusion` or `preference` is a CHOICE the
+     * workspace made. Evidence can show the distribution the choice was made over — never that
+     * the workspace chose it — so those three land `asserted` whatever they carry, and the
+     * evidence is still run and stored (it informs the human's confirm; `verified` stays
+     * reachable only through that). The same SQL on a data kind is `observed`; a data kind
+     * without it is `asserted`. Five rows, one per case the ruling names.
+     */
+    @Test
+    fun `a choice lands asserted whatever evidence it carries - only a fact about the data can be observed`() {
+        val evidence = "SELECT amount_cents FROM orders ORDER BY id"
+        val choices = listOf("definition", "exclusion", "preference")
+
+        val choicesWithEvidence =
+            choices.map { kind ->
+                kind to
+                    recorder.record(
+                        datasource,
+                        request(
+                            scope = LearnedFactScope.WORKSPACE,
+                            kind = kind,
+                            fact = "$kind: amounts count in cents",
+                            evidenceSql = evidence,
+                        ),
+                    )
+            }
+        val dataWithEvidence = recorder.record(datasource, request(kind = "unit", evidenceSql = evidence))
+        val dataWithout = recorder.record(datasource, request(kind = "format", fact = "amount_cents is a whole number of cents"))
+
+        val choiceRows: List<() -> Unit> =
+            choicesWithEvidence.map { (kind, stored) ->
+                {
+                    withClue(kind) {
+                        stored.trust shouldBe LearnedFactTrust.ASSERTED
+                        // The evidence ran and is kept — the choice is asserted, not unevidenced.
+                        stored.evidenceSql shouldBe evidence
+                        stored.evidenceSummary shouldBe "AMOUNT_CENTS=1250 | AMOUNT_CENTS=300"
+                    }
+                }
+            }
+        assertAll(
+            *choiceRows.toTypedArray(),
+            { withClue("unit with evidence") { dataWithEvidence.trust shouldBe LearnedFactTrust.OBSERVED } },
+            { withClue("format without evidence") { dataWithout.trust shouldBe LearnedFactTrust.ASSERTED } },
+        )
     }
 
     @Test
