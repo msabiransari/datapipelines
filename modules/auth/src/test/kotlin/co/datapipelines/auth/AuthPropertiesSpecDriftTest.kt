@@ -43,6 +43,13 @@ class AuthPropertiesSpecDriftTest {
         documented.getValue("datapipelines.workspaces.member-datasources-enabled") shouldBe props.memberDatasourcesEnabled.toString()
     }
 
+    @Test
+    fun `mail property defaults match configuration-md section 3-27`() {
+        val props = MailProperties()
+        documented.getValue("datapipelines.mail.port") shouldBe props.port.toString()
+        documented.getValue("datapipelines.mail.starttls") shouldBe props.starttls.toString()
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables:

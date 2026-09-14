@@ -221,6 +221,17 @@ services:
       # compose-env-audit.sh's IMAGE_DEFAULT_VARS; set the variable in deploy/secrets.env
       # to point at a self-populated directory instead.
       DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:-/opt/duckdb/extensions}
+      # 137 — outbound mail (configuration.md §3.27). Mail is ON exactly when HOST and FROM
+      # are both set; there is no flag. Any SMTP server; Postmark's endpoint is one.
+      DATAPIPELINES_MAIL_HOST: ${DATAPIPELINES_MAIL_HOST:-}
+      DATAPIPELINES_MAIL_PORT: ${DATAPIPELINES_MAIL_PORT:-587}
+      DATAPIPELINES_MAIL_USERNAME: ${DATAPIPELINES_MAIL_USERNAME:-}
+      DATAPIPELINES_MAIL_PASSWORD: ${DATAPIPELINES_MAIL_PASSWORD:-}
+      DATAPIPELINES_MAIL_STARTTLS: ${DATAPIPELINES_MAIL_STARTTLS:-true}
+      DATAPIPELINES_MAIL_FROM: ${DATAPIPELINES_MAIL_FROM:-}
+      DATAPIPELINES_MAIL_REPLY_TO: ${DATAPIPELINES_MAIL_REPLY_TO:-}
+      DATAPIPELINES_MAIL_OPS_TO: ${DATAPIPELINES_MAIL_OPS_TO:-}
+      DATAPIPELINES_MAIL_MESSAGE_STREAM: ${DATAPIPELINES_MAIL_MESSAGE_STREAM:-}
       #
       # THE TWO POSTURE-DEPENDENT KEYS, and the one place in this file that is NOT a
       # `${VAR:-default}` pass-through (081 §B). Their default IS the posture, and it is

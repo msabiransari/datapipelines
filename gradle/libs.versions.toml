@@ -168,6 +168,16 @@ spring-boot-starter-thymeleaf = { module = "org.springframework.boot:spring-boot
 spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+# 137 — the welcome / new-user notices (auth.md §5A.8). BOM-managed: the starter pulls
+# jakarta.mail-api + the Angus implementation at the BOM's versions. `auth` renders the
+# two notices with a SpringTemplateEngine of its own (HTML + TEXT modes, no MVC view
+# layer in a domain module), so the Spring integration artifact — already on the build
+# through `web`'s starter — is declared as its own alias rather than the MVC starter.
+# thymeleaf-spring6, not bare thymeleaf: the bare engine's `${}` is OGNL, and its POM
+# drags ognl + javassist onto the production runtime; the Spring integration EXCLUDES
+# ognl and evaluates with SpringEL, which is what `web` already runs.
+spring-boot-starter-mail = { module = "org.springframework.boot:spring-boot-starter-mail" }
+thymeleaf-spring6 = { module = "org.thymeleaf:thymeleaf-spring6" }
 
 # --- Kotlin / coroutines -----------------------------------------------------
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }

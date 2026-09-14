@@ -386,3 +386,29 @@ datapipelines:
   # deployment's datasources carry their own longer query_timeout_seconds.
   datasources:
     retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS:}
+  # 137 — outbound mail (configuration.md §3.27, auth.md §5A.8): the welcome / password-reset
+  # mail to a local user and the new-user notice to sys-ops. Appended after the whole
+  # datapipelines: tree, like the block above (a block inserted mid-tree reparents its
+  # followers silently — MISTAKES.md, the YAML entry).
+  #
+  # THERE IS NO `enabled` KEY. Mail is on exactly when `host` AND `from` are both set — a
+  # flag that could disagree with the fields it summarises is the YAML-boolean trap. The
+  # half-configured shapes (host without from, from without host, ops-to without host, mail
+  # on without auth.base-url) refuse startup naming the field (§7). Any SMTP server works;
+  # Postmark's SMTP endpoint is one such server, and `message-stream` is its optional
+  # X-PM-Message-Stream header — set, it rides every message; empty, nothing is added.
+  # `starttls` is REQUIRED-not-opportunistic and the hardened posture refuses `false`.
+  mail:
+    host: ${DATAPIPELINES_MAIL_HOST:}
+    port: ${DATAPIPELINES_MAIL_PORT:587}
+    username: ${DATAPIPELINES_MAIL_USERNAME:}
+    password: ${DATAPIPELINES_MAIL_PASSWORD:}
+    starttls: ${DATAPIPELINES_MAIL_STARTTLS:true}
+    # A bare address or `Display Name <address>`; half of "enabled".
+    from: ${DATAPIPELINES_MAIL_FROM:}
+    # Reply-To on every message; empty = `from`.
+    reply-to: ${DATAPIPELINES_MAIL_REPLY_TO:}
+    # The sys-ops sink for the new-user notice — one address or a comma list. Empty = no
+    # new-user notices even with mail on.
+    ops-to: ${DATAPIPELINES_MAIL_OPS_TO:}
+    message-stream: ${DATAPIPELINES_MAIL_MESSAGE_STREAM:}

@@ -30,6 +30,10 @@ dependencies {
     testImplementation(libs.awssdk.s3)
     testImplementation(libs.awssdk.url.connection.client)
     testImplementation(libs.rest.assured)
+    // 137: the mail E2E reads the GreenMail box over IMAP with Jakarta Mail. `app` exposes
+    // nothing as `api`, so the starter (the same BOM-managed artifact `auth` sends with) is
+    // declared here explicitly — the jackson precedent below.
+    testImplementation(libs.spring.boot.starter.mail)
     // The SSE stream's `data:` payloads are parsed as JSON; app exposes its own
     // dependencies as `implementation`, so jackson is declared explicitly here (same
     // catalog alias app's tests already use).

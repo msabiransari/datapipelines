@@ -177,6 +177,9 @@ SECRET_VARS = {
     "DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH",
     "DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY",
     "DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY",
+    # 137 — the SMTP credentials (for Postmark both are the server token).
+    "DATAPIPELINES_MAIL_USERNAME",
+    "DATAPIPELINES_MAIL_PASSWORD",
 }
 # THIS DEPLOYMENT'S OWN VALUES: not secret, but the product cannot pick them, so they
 # have no tracked default either. They sit beside the secrets in secrets.env.example.
@@ -184,6 +187,12 @@ IDENTITY_VARS = {
     "DATAPIPELINES_AUTH_BASE_URL",
     "DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL",
     "DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL",
+    # 137 — the mail server and addresses are this deployment's own (configuration.md §3.27).
+    "DATAPIPELINES_MAIL_HOST",
+    "DATAPIPELINES_MAIL_FROM",
+    "DATAPIPELINES_MAIL_REPLY_TO",
+    "DATAPIPELINES_MAIL_OPS_TO",
+    "DATAPIPELINES_MAIL_MESSAGE_STREAM",
 }
 
 # defaults.env values that deliberately differ from application.yml's shipped default,
