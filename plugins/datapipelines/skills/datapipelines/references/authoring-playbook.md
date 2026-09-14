@@ -266,8 +266,7 @@ semantics; the question's words decide the window.
   from a direct query on the source, compared to the pipeline's row. Row counts agreeing
   between two versions of *your* pipeline proves consistency, not correctness.
 - H2 specifics that bite: no `:bind` inside a `GROUP BY` expression; cast DECIMAL ratio
-  operands to DOUBLE; `VALUES` rows are named `C1, C2…` — or alias them (`SKILL.md` Best
-  practices 14–16).
+  operands to DOUBLE; `VALUES` rows are named `C1, C2…` — or alias them (§6.1–6.3).
 
 ## 5. Finish like a professional
 
@@ -285,6 +284,53 @@ semantics; the question's words decide the window.
   the partition column, `partitions_scanned`/`partitions_total` from `sql_probe`'s plan*.
   The operator reads the handback; that line is how a slow pipeline becomes a fast one
   without a rewrite.
+
+## 6. Engine quirks you will meet
+
+(SKILL.md's rules 14–17 live here since 131 — a ledger row or handback citing "rule 14",
+"rule 15", "rule 16" or "rule 17" means §6.1, §6.2, §6.3 and §6.4 respectively.)
+
+### 6.1 A bind inside GROUP BY (H2)
+
+Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).
+H2 fails to match the GROUP BY expression to the identical SELECT expression when it
+contains a parameter marker — `Column "x.amount" must be in the GROUP BY list`
+(SQLState 90016), a lie that sends you chasing the wrong fix. Compute the classified
+value in a derived table (`FROM (SELECT CASE ... :threshold ... END AS bucket ...) x`)
+and `GROUP BY x.bucket` — a plain column always matches. Measured on H2 2.3.232.
+
+### 6.2 DECIMAL ÷ DECIMAL in H2
+
+Never divide DECIMAL by DECIMAL in H2 (tempdb) — cast to DOUBLE first.
+H2's DECIMAL arithmetic collapses result scale (a `DECIMAL(·,2)/DECIMAL(·,0)` division
+can come back scale-0): `SUM(distance)/SUM(seconds)*3600` returned **0** where the
+true answer was ~12, and `100.0 * part / whole` rounded to one decimal. Cast every
+ratio operand: `CAST(SUM(x) AS DOUBLE) / NULLIF(CAST(SUM(y) AS DOUBLE), 0)`.
+Verified empirically against the pinned driver 2.3.232 — plain DECIMAL gave 2448.00
+where DOUBLE gave the correct 2456.81.
+
+### 6.3 H2 names `VALUES` columns `C1, C2, …` — and `rows` is reserved on MySQL/DuckDB
+
+H2 (tempdb) names `VALUES` columns `C1, C2, …` — not `column1`. Postgres and DuckDB
+call a `VALUES` row's columns `column1…`; H2 2.x calls them `C1…`, so `SELECT column1
+FROM (VALUES (0),(1))` fails at execution with `Column "column1" not found` after every
+other node ran green. Dialect-safe form: alias the derived table's columns —
+`FROM (VALUES (0),(1)) AS t(hr)` — or spell a small spine as `SELECT 0 AS hr UNION ALL
+SELECT 1 …`. H2 has no schema to introspect, so check every tempdb statement with
+`sql_probe {"name": "tempdb"}` (an empty engine: syntax and self-contained errors
+surface in milliseconds; "table not found" means the statement parsed) before you pay a
+full DAG run to find out — passing `parameters` for every `:name` the statement binds
+(else `invalid_params`; tempdb checks syntax and names, not values, so any representative
+value of the right type will do). And `rows` is a reserved word on MySQL and DuckDB —
+alias a count `AS n`, never `AS rows`.
+
+### 6.4 A source node sees only its own datasource
+
+Its SQL runs on that engine; staged tables are visible only to `source: "tempdb"` nodes,
+and no engine reads another. To filter a source by a set computed elsewhere, bind a
+parameter or write literals and keep the computing node for the labels — and say so in
+the description (§3). The same wall holds inside a probe: a `zones` lookup on the SQLite
+datasource cannot be joined inside a Postgres probe — bind the ids or stage both.
 
 ## Do / Don't, in one screen
 

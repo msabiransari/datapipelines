@@ -210,7 +210,11 @@ object ApiErrorCatalog {
             // a missing row here would resolve to the catalog's 500 for an unknown code.
             co.datapipelines.auth.AuthErrorCodes.ROLE_REQUIRED to HttpStatus.FORBIDDEN,
             co.datapipelines.auth.AuthErrorCodes.KEY_ISSUER_ROLE_LOST to HttpStatus.FORBIDDEN,
-            co.datapipelines.auth.AuthErrorCodes.KEY_WORKSPACE_INACTIVE to HttpStatus.FORBIDDEN,
+            // 131 §B — the owner ruled 2026-09-14 that a deactivated workspace answers
+            // not-found on every surface, keys included; the code stays
+            // `auth.key_workspace_inactive` because the holder already knows the workspace
+            // exists and an operator greps for it.
+            co.datapipelines.auth.AuthErrorCodes.KEY_WORKSPACE_INACTIVE to HttpStatus.NOT_FOUND,
             // The credential making the request is fine; the requested scope is not one keys
             // have (O-2) — a 400, like `auth.api_key.expiry_invalid` and for the same reason.
             co.datapipelines.auth.AuthErrorCodes.KEY_SCOPE_UNAVAILABLE to HttpStatus.BAD_REQUEST,

@@ -1114,7 +1114,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.role_required` | 403 | Principal lacks the required CAPABILITY in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` / `details.held` |
 | `auth.key_issuer_role_lost` | 403 | The key was valid; its issuer no longer holds the capability (§7.4). Retrying with this key will never work — a new key from somebody who still holds the role is the fix |
 | `auth.key_scope_unavailable` | 400 | Issuance requested `admin`, which keys may no longer hold (§7.5) |
-| `auth.key_workspace_inactive` | 403 | The key's pinned workspace is deactivated (§11A); reactivating it restores the key |
+| `auth.key_workspace_inactive` | 404 | The key's pinned workspace is deactivated (§11A); reactivating it restores the key |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
 | `auth.promotion.key_invalid` | 401 | The promotion peer's pre-shared server key was absent, malformed, or did not match — and the same code when the receiver has no key configured, so promotion-disabled is indistinguishable from wrong-key ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
@@ -1354,7 +1354,7 @@ A deactivated workspace is not selectable by a super admin either: [§11A.3](#11
 
 1. it cannot be selected — the switcher hides it, and `DP-Workspace` naming it answers 404 like a non-membership;
 2. its published endpoints answer 404;
-3. API keys pinned to it are refused with `auth.key_workspace_inactive` (403 — the pin already proves the workspace exists, so there is nothing left to hide and an operator needs the truth);
+3. API keys pinned to it are refused with `auth.key_workspace_inactive` (404 — a deactivated workspace answers not-found on every surface, D-R10 as ruled 2026-09-14);
 4. its schedules do not fire (the scheduler consults `WorkspaceLiveness`);
 5. a super admin's listing shows it greyed with the date.
 

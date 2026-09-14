@@ -269,6 +269,56 @@ class WorkspaceIsolationIntegrationTest {
             .body("error.code", org.hamcrest.Matchers.equalTo("workspace.not_found"))
     }
 
+    // ---------------------------------------------------------------- deactivation (D-R10)
+
+    @Test
+    fun `a key pinned to a deactivated workspace is 404 auth_key_workspace_inactive on REST and MCP - and reactivation restores it`() {
+        // 131 §B (T222, the owner's 2026-09-14 ruling): a deactivated workspace answers
+        // not-found on EVERY surface, keys included — 112 had made keys the 403 exception
+        // ("the pin proves existence"), and the ruling is that the design's 404 rule holds
+        // everywhere. The CODE stays `auth.key_workspace_inactive`: the holder is a member
+        // of that workspace by construction (keys are issued by members and pinned there),
+        // so it reveals nothing, and it is what an operator greps the audit log for.
+        //
+        // A FRESH key, seeded here and never validated before, so no AuthCache entry can
+        // serve this test a pre-deactivation world.
+        ensureSeeded()
+        seedKey(GLOBEX_INACTIVE_KEY, WS_GLOBEX)
+        setDeactivated(WS_GLOBEX, true)
+        try {
+            // (i) REST
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, GLOBEX_INACTIVE_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/pipelines")
+                .then()
+                .statusCode(404)
+                .body("error.code", org.hamcrest.Matchers.equalTo("auth.key_workspace_inactive"))
+
+            // (ii) MCP — the refusal is the HTTP status on the POST itself: the key fails
+            // auth's ApiKeyFilter on the security chain, and McpAuthFilter writes the
+            // stashed exception's envelope before any JSON-RPC handling happens.
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, GLOBEX_INACTIVE_KEY.plaintext)
+                .contentType(ContentType.JSON)
+                .accept("application/json, text/event-stream")
+                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")
+                .`when`()
+                .post("/mcp")
+                .then()
+                .statusCode(404)
+                .body("error.code", org.hamcrest.Matchers.equalTo("auth.key_workspace_inactive"))
+        } finally {
+            setDeactivated(WS_GLOBEX, false)
+        }
+
+        // (iii) D-R10's "deactivate, never delete" — the KDoc's promise is that
+        // reactivation restores the very same key.
+        pipelines(GLOBEX_INACTIVE_KEY.plaintext).map { it["id"] } shouldContain PIPE_GLOBEX
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private fun pipelines(key: String): List<Map<String, String>> =
@@ -345,6 +395,9 @@ class WorkspaceIsolationIntegrationTest {
 
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
+
+        /** Pinned to globex but seeded only by the deactivation test — a key no other test validates. */
+        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", arrayOf("read", "execute", "author"), ownerId = BOB)
 
         /**
          * Mints the session JWT exactly as `JwtService.issue` does (HS256, `iss`, iat/exp,
@@ -545,6 +598,40 @@ class WorkspaceIsolationIntegrationTest {
                     }
                     ps.executeBatch()
                 }
+        }
+
+        /** One key, seeded by the test that needs it (a fresh key carries no AuthCache entry). */
+        private fun seedKey(
+            key: E2eAuth.SeededKey,
+            workspaceId: String,
+        ) {
+            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection
+                    .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
+                    .use { ps ->
+                        ps.setString(1, key.id)
+                        ps.setObject(2, UUID.fromString(key.ownerId))
+                        ps.setString(3, key.name)
+                        ps.setString(4, key.hash)
+                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.setObject(6, UUID.fromString(workspaceId))
+                        ps.executeUpdate()
+                    }
+            }
+        }
+
+        /** D-R10's reversible switch, flipped directly — the surface under test is the keys', not the admin verb's. */
+        private fun setDeactivated(
+            workspaceId: String,
+            deactivated: Boolean,
+        ) {
+            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "UPDATE workspaces SET deactivated_at = ${if (deactivated) "NOW()" else "NULL"} WHERE id = '$workspaceId'",
+                    )
+                }
+            }
         }
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
