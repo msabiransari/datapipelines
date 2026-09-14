@@ -133,10 +133,15 @@ class SkillCoreRulesTest {
         assertClause("never name the server's mechanism")
     }
 
-    /** 135 §A.8 — the reuse half of 129 §A.2, stated in step 1 where the listing is read. */
+    /**
+     * 135 §A.8 — the reuse half of 129 §A.2, stated in step 1 where the listing is read; 136
+     * §A.3 names the block the server now carries (`definitions`) and closes with the verb the
+     * acceptance run's agent lacked: never re-choose.
+     */
     @Test
-    fun `step 1 reads definition facts as rules earlier pipelines chose - 135 A8`() {
-        assertClause("rules earlier pipelines chose")
+    fun `step 1 reads the listing's definitions as rules earlier pipelines chose, never re-choose - 135 A8, 136 A3`() {
+        assertClause("`definitions` on the listing are rules earlier pipelines chose")
+        assertClause("never re-choose")
     }
 
     /** 135 §C — `templates_update` without `dialect` was refused three times in one day. */

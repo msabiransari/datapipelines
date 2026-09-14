@@ -133,9 +133,9 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    table's (grain, caveats), `_get_columns` each column's (units, time zones, what a coded value
    means, joins) — what earlier sessions recorded, each with its `trust` and evidence. `observed` or
    `verified` with evidence saves you the probe; `stale` or `needs_review` is a warning, not a truth —
-   re-verify it. `kind: definition` facts on the listing are rules earlier pipelines chose — read
-   them before you choose yours. `datasources_get` is the same facts for one datasource — the
-   refresh after you `semantics_record`.
+   re-verify it. `definitions` on the listing are rules earlier pipelines chose — read them before
+   you choose yours, and reuse or supersede, never re-choose. `datasources_get` is the same facts
+   for one datasource — the refresh after you `semantics_record`.
 
    **Record what you learned, with the query that showed it.** After you have established a
    fact about the data that introspection could not tell you — a unit, a time zone, a sample
@@ -287,9 +287,10 @@ Do/Don't table is one screen; each row is a mistake an agent made here.
    near-miss is refused with the nearest name (`semantics.ref_mismatch`) — and a DATASOURCE-scope
    fact is table-wide: "in Q4 only A and B carry rows" is a pipeline description's job, not a
    fact's. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
-   `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours. A rule the
-   question leaves to you (what counts as rainy, active, late) is a `definition` — rule 13 says
-   when to record one and when to reuse one an earlier pipeline recorded.
+   `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours — and a rule the
+   question leaves to you (what counts as rainy, active, late) is a `definition`; rule 13 says
+   when to record one and when to reuse one. A `definition` that spans datasources carries no
+   `refs` — record it once, against the datasource the question is mostly about.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
    `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous

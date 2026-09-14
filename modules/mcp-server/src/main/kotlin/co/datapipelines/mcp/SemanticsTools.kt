@@ -54,14 +54,17 @@ class SemanticsRecordTool(
                     "scope DATASOURCE is about the data over the table's WHOLE window and is shared with every " +
                     "workspace the datasource is granted to — an observation tied to one window belongs in the " +
                     "pipeline description, not in a fact; scope WORKSPACE (definition, exclusion, preference) is " +
-                    "this organisation's meaning and stays " +
-                    "here. To correct a stale or wrong fact, record the replacement with supersedes: the old one is " +
+                    "this organisation's meaning and stays here — and a WORKSPACE rule may carry NO refs: a rule " +
+                    "that spans datasources ('busiest day = A + B combined') is recorded once, against the " +
+                    "datasource the question is mostly about, and names no table; a DATASOURCE fact always " +
+                    "names at least one (a unit without a column is meaningless — semantics.fact_invalid). " +
+                    "To correct a stale or wrong fact, record the replacement with supersedes: the old one is " +
                     "retired as superseded. An identical live fact is refused as semantics.duplicate. Mutating.",
             schema =
                 """
                 {
                   "type": "object",
-                  "required": ["scope", "datasource", "kind", "fact", "refs"],
+                  "required": ["scope", "datasource", "kind", "fact"],
                   "additionalProperties": false,
                   "properties": {
                     "scope": {"type": "string", "enum": ["DATASOURCE", "WORKSPACE"], "description": "DATASOURCE: a fact about the data, visible wherever the datasource is granted. WORKSPACE: this organisation's meaning, visible here only."},
@@ -70,7 +73,6 @@ class SemanticsRecordTool(
                     "fact": {"type": "string", "minLength": 8, "maxLength": 1000, "description": "The fact, in one or two sentences, specific enough to act on: 'value is already in the unit named by unit_col', 'pickup_ts is naive local time (America/New_York)'."},
                     "refs": {
                       "type": "array",
-                      "minItems": 1,
                       "items": {
                         "type": "object",
                         "required": ["table"],
@@ -81,7 +83,7 @@ class SemanticsRecordTool(
                           "column": {"type": "string", "description": "Column name exactly as datasources_get_columns returned it. Omit for a table-grain fact (grain, window, sampling, a table-level caveat)."}
                         }
                       },
-                      "description": "The object(s) the fact is about. One ref for a column fact, two for a join, a column-less ref for a table-grain fact."
+                      "description": "The object(s) the fact is about. One ref for a column fact, two for a join, a column-less ref for a table-grain fact. Required (at least one) for a DATASOURCE kind; a WORKSPACE rule that spans datasources omits it."
                     },
                     "evidence_sql": {"type": "string", "description": "ONE read-only SELECT/WITH that shows the fact (no :parameters). Runs once at record time under the sql_probe rules; a statement that fails refuses the record."},
                     "evidence_summary": {"type": "string", "maxLength": 300, "description": "What the evidence showed, in your words. Defaults to the probe's first rows."},
@@ -131,7 +133,11 @@ class SemanticsRecordTool(
      * resolution stays the authority on what exists, and it surfaces the unreachable datasource
      * on its own. The returned refs — a catalog table the text names exactly and no ref carries,
      * with the namespace the catalog reports and no column — are APPENDED to the stored refs;
-     * a near-miss throws the catalogued refusal.
+     * a near-miss throws the catalogued refusal. A no-refs WORKSPACE rule (136 §B) runs the same
+     * check against the SAME catalog — the datasource it is recorded against: a table of that
+     * datasource its text names exactly is added as a ref, a near-miss is refused; a table of
+     * ANOTHER datasource is prose here (no listing of it is read), which is what lets one rule
+     * name both sides.
      */
     private fun checkFactNamesRefs(
         datasource: co.datapipelines.datasources.Datasource,
@@ -164,10 +170,14 @@ class SemanticsRecordTool(
 
     private fun scopeOf(token: String): LearnedFactScope = LearnedFactScope.valueOf(token)
 
-    /** `refs` → [FactRef]s. Shape faults are `-32602`; an empty array reaches the service as `semantics.fact_invalid`. */
+    /**
+     * `refs` → [FactRef]s. Shape faults are `-32602`. An ABSENT `refs` is the empty list (136 §B):
+     * legal for a WORKSPACE rule, and for a DATASOURCE kind it reaches the recorder as
+     * `semantics.fact_invalid` — the one scope-aware floor, stated once, in the recorder.
+     */
     private fun refsOf(args: McpArguments): List<FactRef> {
-        val raw =
-            args.rawMap()["refs"] as? List<*> ?: throw McpArguments.invalidParams("refs must be an array of {schema?, table, column?}.")
+        val present = args.rawMap()["refs"] ?: return emptyList()
+        val raw = present as? List<*> ?: throw McpArguments.invalidParams("refs must be an array of {schema?, table, column?}.")
         return raw.map { entry -> refOf(entry) }
     }
 

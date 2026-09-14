@@ -92,6 +92,29 @@ class LearnedFactDriftTest {
         LearnedFactDrift.againstColumns(other, "EVENTS", null, columns()).trust shouldBe LearnedFactTrust.OBSERVED
     }
 
+    /**
+     * 136 §B — a WORKSPACE rule with NO refs (T278) has nothing to drift against: both checks
+     * answer `unchanged` whatever the table did — `againstColumns` returns early on an empty
+     * `refsOn`, `againstTables` finds no table missing from an empty ref list — so a rule that
+     * spans datasources is never marked stale by a listing it names no table of.
+     */
+    @Test
+    fun `a rule with no refs is never stale - neither check has a table to compare`() {
+        val rule =
+            factOn("READING").copy(
+                scope = LearnedFactScope.WORKSPACE,
+                workspaceId = UUID.randomUUID(),
+                kind = LearnedFactKind.DEFINITION,
+                refs = emptyList(),
+                schemaFingerprint = "",
+                trust = LearnedFactTrust.ASSERTED,
+            )
+        h2.createStatement().use { it.execute("ALTER TABLE events DROP COLUMN reading") }
+
+        LearnedFactDrift.againstColumns(rule, "EVENTS", null, columns()).trust shouldBe LearnedFactTrust.ASSERTED
+        LearnedFactDrift.againstTables(rule, emptySet()).trust shouldBe LearnedFactTrust.ASSERTED
+    }
+
     private fun columns() = introspector.columns(datasource, "EVENTS")
 
     /** A fact "recorded" now: its fingerprint is what live introspection says at this moment. */

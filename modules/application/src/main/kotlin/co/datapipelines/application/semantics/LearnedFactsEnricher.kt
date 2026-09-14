@@ -7,16 +7,18 @@ import co.datapipelines.datasources.semantics.LearnedFact
 import co.datapipelines.datasources.semantics.LearnedFactDrift
 import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactRepository
+import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.datasources.semantics.LearnedFactTrust
 import co.datapipelines.pipeline.PipelineRepository
 import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
- * Design §7.2 / D-S7 — the facts, MERGED into the metadata surface. The three introspection
- * responses (`datasources_get`, `_get_tables`, `_get_columns` and their REST twins) call one of
- * the three methods below with what they just read and attach the answer inline, so the fact is
- * where the agent is already looking and there is no separate "query the memory" step to forget.
+ * Design §7.2 / D-S7 — the facts, MERGED into the metadata surface. The listing and the three
+ * introspection responses (`datasources_list`, `datasources_get`, `_get_tables`, `_get_columns`
+ * and their REST twins) call one of the methods below with what they just read and attach the
+ * answer inline, so the fact is where the agent is already looking and there is no separate
+ * "query the memory" step to forget.
  *
  * Two things happen on the way that a plain read would not do, both deliberate:
  *
@@ -35,11 +37,38 @@ import java.util.UUID
  * with `conflict: true`. Nothing picks a winner.
  */
 interface FactEnrichment {
-    /** `datasources_get` — the datasource-wide kinds (`window`, `sampling`). No columns in hand: served as stored. */
+    /**
+     * The two per-datasource blocks `datasources_list` and `datasources_get` carry (136 §A):
+     * [facts], the datasource-wide kinds (`window`, `sampling`), and [definitions], every
+     * WORKSPACE-scope fact (`definition`, `exclusion`, `preference`) visible to the reader that
+     * names this datasource — with refs or with none (136 §B). Both are served as stored (no
+     * columns in hand), newest last, from ONE store read.
+     *
+     * A rule used to reach the agent only on the table or column its refs named, buried among
+     * units and codes in a columns listing, and the acceptance run's agent defined "rainy" its
+     * own way beside the workspace's recorded rule (T287): a rule is read BEFORE the tables are
+     * chosen, so it rides the listing — the call every agent makes first.
+     */
+    data class DatasourceBlocks(
+        val facts: List<Map<String, Any?>>,
+        val definitions: List<Map<String, Any?>>,
+    ) {
+        companion object {
+            val EMPTY = DatasourceBlocks(emptyList(), emptyList())
+        }
+    }
+
+    /** `datasources_list` / `datasources_get` — both blocks of [DatasourceBlocks], one store read. */
+    fun forListing(
+        readerWorkspaceId: UUID,
+        datasource: Datasource,
+    ): DatasourceBlocks
+
+    /** The REST `GET /datasources/{name}` twin — the datasource-wide kinds only, as [forListing] serves them. */
     fun forDatasource(
         readerWorkspaceId: UUID,
         datasource: Datasource,
-    ): List<Map<String, Any?>>
+    ): List<Map<String, Any?>> = forListing(readerWorkspaceId, datasource).facts
 
     /**
      * `datasources_get_tables` — per listed table, its TABLE-grain facts (a ref with no column)
@@ -69,10 +98,10 @@ interface FactEnrichment {
         /** No facts anywhere — the wiring for a context without the store (tests of the bare tools). */
         val NONE: FactEnrichment =
             object : FactEnrichment {
-                override fun forDatasource(
+                override fun forListing(
                     readerWorkspaceId: UUID,
                     datasource: Datasource,
-                ): List<Map<String, Any?>> = emptyList()
+                ): DatasourceBlocks = DatasourceBlocks.EMPTY
 
                 override fun forTables(
                     readerWorkspaceId: UUID,
@@ -99,15 +128,23 @@ class LearnedFactsEnricher(
 ) : FactEnrichment {
     private val log = LoggerFactory.getLogger(LearnedFactsEnricher::class.java)
 
-    override fun forDatasource(
+    override fun forListing(
         readerWorkspaceId: UUID,
         datasource: Datasource,
+    ): FactEnrichment.DatasourceBlocks {
+        // One read; the visibility predicate already keeps another workspace's rules out.
+        val visible = repository.findVisibleByDatasource(datasource.name, readerWorkspaceId)
+        return FactEnrichment.DatasourceBlocks(
+            facts = asStored(visible.filter { it.kind in LearnedFactKind.DATASOURCE_WIDE }, readerWorkspaceId),
+            definitions = asStored(visible.filter { it.scope == LearnedFactScope.WORKSPACE }, readerWorkspaceId),
+        )
+    }
+
+    /** Served as stored — no columns in hand, so the verdict is the row's own trust and drift. */
+    private fun asStored(
+        facts: List<LearnedFact>,
+        readerWorkspaceId: UUID,
     ): List<Map<String, Any?>> {
-        val facts =
-            repository.findVisibleByDatasource(datasource.name, readerWorkspaceId).filter {
-                it.kind in
-                    LearnedFactKind.DATASOURCE_WIDE
-            }
         val conflicts = conflictsAmong(facts)
         return facts.map {
             render(

@@ -75,10 +75,14 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
  * `datasources_list` (mcp-server.md §6.2.10). Scope: `read`.
  *
  * Since 126 §A each entry also carries `facts` — the SAME datasource-wide learned facts
- * `datasources_get` serves, built by the same [FactEnrichment.forDatasource] (stored facts, no
- * connection opened — the 118 rule). The listing is the call every agent makes first, so the
- * learn-first facts ride on it rather than waiting for a `datasources_get` the agent may skip.
- * One enrichment read per listed datasource; no cache. An empty store yields `facts: []`, never
+ * `datasources_get` serves — and since 136 §A `definitions`: every WORKSPACE-scope rule
+ * (`definition`, `exclusion`, `preference`) visible to the reader that names the datasource,
+ * with refs or with none. Both blocks come from one [FactEnrichment.forListing] read (stored
+ * facts, no connection opened — the 118 rule). The listing is the call every agent makes
+ * first, so the learn-first facts AND the rules earlier pipelines chose ride on it rather than
+ * waiting for a `datasources_get` the agent may skip — or a columns listing where a rule sat
+ * buried among units and codes and was never read as a rule (T287). One enrichment read per
+ * listed datasource; no cache. An empty store yields `facts: []` and `definitions: []`, never
  * an absent key: "nothing recorded" and "not served" must read differently.
  */
 class DatasourcesListTool(
@@ -96,7 +100,10 @@ class DatasourcesListTool(
                     "REGISTERED it (omitted for an instance-level one), granted:true, connection metadata — " +
                     "never passwords — AND `facts`, the datasource-wide learned facts earlier sessions " +
                     "recorded (its time window, whether it is a sample), each with `trust` and evidence — " +
-                    "read them before you assume coverage. `datasources_get` is the same payload for ONE " +
+                    "read them before you assume coverage — AND `definitions`, this workspace's rules " +
+                    "(definition, exclusion, preference) earlier pipelines chose on this datasource: a " +
+                    "definition is a rule an earlier pipeline chose; read it before you choose yours, and reuse " +
+                    "or supersede it, never re-choose. `datasources_get` is the same payload for ONE " +
                     "datasource — the refresh to call after recording facts with semantics_record.",
             schema =
                 """
@@ -127,7 +134,7 @@ class DatasourcesListTool(
         if (filter != null && Dialect.entries.none { it.wire == filter }) return emptyList<Map<String, Any?>>()
         val workspaceId = ctx.principal.requireWorkspace().id
         return datasources.listVisible(filter?.let { Dialect.fromWire(it) }, workspaceId).map {
-            it.toMcpMetadata() + ("facts" to facts.forDatasource(workspaceId, it))
+            it.toMcpMetadata() + blocks(facts.forListing(workspaceId, it))
         }
     }
 }
@@ -143,9 +150,12 @@ class DatasourcesGetTool(
             description =
                 "Get metadata for a single datasource GRANTED to the key's pinned workspace: name, dialect, " +
                     "JDBC URL, the workspace that REGISTERED it (omitted for an instance-level one), " +
-                    "granted:true, readonly flag, pool settings, and `facts` — the datasource-wide learned facts " +
+                    "granted:true, readonly flag, pool settings, `facts` — the datasource-wide learned facts " +
                     "agents recorded (its time window, whether it is a sample) — read them before you assume " +
-                    "coverage. Credentials are never returned. A datasource that is not granted to this workspace " +
+                    "coverage — and `definitions`, this workspace's rules (definition, exclusion, preference) " +
+                    "earlier pipelines chose on this datasource: a definition is a rule an earlier pipeline " +
+                    "chose; read it before you choose yours. Credentials are never returned. A datasource that " +
+                    "is not granted to this workspace " +
                     "resolves as not-found — the same answer a name that exists nowhere gets, so nothing about it " +
                     "can be probed.",
             schema =
@@ -166,11 +176,19 @@ class DatasourcesGetTool(
     ): Any {
         val name = args.requiredString("name")
         val gated = datasources.requireVisible(name, ctx)
-        // 118 (design §7.2): the datasource-wide facts (window, sampling), served as stored —
-        // this read opens no connection, so there is nothing to recompute drift against.
-        return gated.toMcpMetadata() + ("facts" to facts.forDatasource(ctx.principal.requireWorkspace().id, gated))
+        // 118 (design §7.2): the datasource-wide facts (window, sampling) and, since 136 §A, the
+        // workspace's rules — served as stored: this read opens no connection, so there is
+        // nothing to recompute drift against.
+        return gated.toMcpMetadata() + blocks(facts.forListing(ctx.principal.requireWorkspace().id, gated))
     }
 }
+
+/**
+ * The two learned-fact keys of the per-datasource shape (§6.2.10/§6.2.11, 118 + 136 §A) — one
+ * spelling for both tools, always present: an empty store is `[]` under each, never an absent key.
+ */
+private fun blocks(blocks: FactEnrichment.DatasourceBlocks): Map<String, Any?> =
+    mapOf("facts" to blocks.facts, "definitions" to blocks.definitions)
 
 /**
  * `datasources_test` (mcp-server.md §6.2.12). Scope: `author` — testing a connection opens a real

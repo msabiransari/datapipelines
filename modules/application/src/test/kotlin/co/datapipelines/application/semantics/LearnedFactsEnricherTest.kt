@@ -5,6 +5,7 @@ import co.datapipelines.datasources.TableInfo
 import co.datapipelines.datasources.semantics.FactRef
 import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactRepository
+import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.datasources.semantics.LearnedFactTrust
 import co.datapipelines.datasources.semantics.SchemaFingerprint
 import co.datapipelines.pipeline.PipelineRepository
@@ -134,8 +135,13 @@ class LearnedFactsEnricherTest {
         )
     }
 
+    /**
+     * 136 §A (T287) — the listing's two blocks from ONE read: `facts` is window/sampling as
+     * before; `definitions` is every WORKSPACE-scope rule — with a column ref, with no refs
+     * (136 §B) — newest last, conflicts flagged; a DATASOURCE-scope `unit` is in neither.
+     */
     @Test
-    fun `the datasource-wide block carries window and sampling only, served as stored`() {
+    fun `the datasource-wide block carries window and sampling only, and definitions every workspace rule - served as stored`() {
         val window =
             SemanticsFixtures.fact(
                 kind = LearnedFactKind.WINDOW,
@@ -143,10 +149,41 @@ class LearnedFactsEnricherTest {
                 text = "2024-01-01 → 2025-12-31",
             )
         val unit = SemanticsFixtures.fact()
-        every { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME) } returns listOf(window, unit)
+        val rainyOnColumn =
+            SemanticsFixtures.fact(
+                scope = LearnedFactScope.WORKSPACE,
+                kind = LearnedFactKind.DEFINITION,
+                refs = listOf(FactRef(null, "observations", "precipitation_mm")),
+                text = "rainy = precipitation_mm > 0.2",
+                trust = LearnedFactTrust.ASSERTED,
+            )
+        val combinedNoRefs =
+            SemanticsFixtures.fact(
+                scope = LearnedFactScope.WORKSPACE,
+                kind = LearnedFactKind.EXCLUSION,
+                refs = emptyList(),
+                text = "busiest day counts orders and returns COMBINED",
+                trust = LearnedFactTrust.ASSERTED,
+            )
+        every { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME) } returns
+            listOf(window, unit, rainyOnColumn, combinedNoRefs)
 
-        enricher.forDatasource(SemanticsFixtures.ACME, SemanticsFixtures.warehouse).map { it["kind"] } shouldContainExactly listOf("window")
-        verify(exactly = 0) { repository.markTrust(any(), any()) }
+        val blocks = enricher.forListing(SemanticsFixtures.ACME, SemanticsFixtures.warehouse)
+
+        assertAll(
+            { blocks.facts.map { it["kind"] } shouldContainExactly listOf("window") },
+            { blocks.definitions.map { it["id"] } shouldContainExactly listOf(rainyOnColumn.id.toString(), combinedNoRefs.id.toString()) },
+            { blocks.definitions.map { it["kind"] } shouldContainExactly listOf("definition", "exclusion") },
+            { blocks.definitions.map { it["trust"] } shouldContainExactly listOf("asserted", "asserted") },
+            { blocks.definitions.none { it.containsKey("conflict") } shouldBe true },
+            // The REST twin still reads the facts half through the same one read.
+            {
+                enricher.forDatasource(SemanticsFixtures.ACME, SemanticsFixtures.warehouse).map { it["kind"] } shouldContainExactly
+                    listOf("window")
+            },
+            { verify(exactly = 2) { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME) } },
+            { verify(exactly = 0) { repository.markTrust(any(), any()) } },
+        )
     }
 
     @Test

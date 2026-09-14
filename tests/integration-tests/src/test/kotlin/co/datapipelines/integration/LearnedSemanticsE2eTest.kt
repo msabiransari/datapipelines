@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.restassured.RestAssured.given
@@ -39,7 +40,10 @@ import java.util.UUID
  *  3. the audit log holds `semantics.recorded` with the kind and never the fact text;
  *  4. the column is RENAMED in the source: the next introspection serves the fact `stale`,
  *     writes that on the row, and shows it beside the table's listing; a column ADDED makes a
- *     fact on a surviving column `needs_review`; the superseding fact retires the old one.
+ *     fact on a surviving column `needs_review`; the superseding fact retires the old one;
+ *  5. (136 §A/§B) a WORKSPACE `definition` on a column and a WORKSPACE rule with NO refs both
+ *     ride the listing's `definitions` block (and `datasources_get`'s) for acme, newest last;
+ *     the DATASOURCE `unit` is not there; globex, on the same datasource, sees neither rule.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -63,7 +67,8 @@ class LearnedSemanticsE2eTest {
         readFromTheOtherWorkspace(factId)
         auditRowCounts(factId)
         val onUnit = driftMarks(factId)
-        supersede(factId, onUnit)
+        val replacement = supersede(factId, onUnit)
+        definitionsOnTheListing(replacement)
     }
 
     /** 1 — probe, record with evidence and the pipeline link, read back beside the column. */
@@ -203,7 +208,7 @@ class LearnedSemanticsE2eTest {
     private fun supersede(
         factId: String,
         onUnit: String,
-    ) {
+    ): String {
         val replacement =
             mcp(
                 ALICE_KEY.plaintext,
@@ -231,6 +236,62 @@ class LearnedSemanticsE2eTest {
         val onCelsius = served.first { it["name"].asText() == "value_celsius" }["facts"]
         onCelsius.map { it["id"].asText() } shouldContainExactly listOf(replacement["id"].asText())
         onCelsius[0]["trust"].asText() shouldBe "observed"
+        return replacement["id"].asText()
+    }
+
+    /**
+     * 5 — 136 §A (T287) + §B (T278): a rule is on the LISTING, where the agent looks before it
+     * chooses tables. One definition with a column ref, one rule with no refs at all (a rule
+     * that spans datasources names no table; `refs` omitted from the call); both in that
+     * datasource's `definitions` on `datasources_list` and on `datasources_get`, newest last;
+     * `facts` keeps its datasource-wide meaning (neither rule is there) and the DATASOURCE
+     * `unit` is not in `definitions`; globex — same datasource, other workspace — sees neither.
+     */
+    private fun definitionsOnTheListing(unitId: String) {
+        val rainy =
+            mcp(
+                ALICE_KEY.plaintext,
+                "semantics_record",
+                mapOf(
+                    "scope" to "WORKSPACE",
+                    "datasource" to DATASOURCE,
+                    "kind" to "definition",
+                    "fact" to "warm = value_celsius above 20.0, measured at the station itself",
+                    "refs" to listOf(mapOf("table" to "readings", "column" to "value_celsius")),
+                ),
+            )
+        val combined =
+            mcp(
+                ALICE_KEY.plaintext,
+                "semantics_record",
+                mapOf(
+                    "scope" to "WORKSPACE",
+                    "datasource" to DATASOURCE,
+                    "kind" to "definition",
+                    "fact" to "busiest station = north + south COMBINED, whichever feed reported it",
+                ),
+            )
+        assertAll(
+            { rainy["trust"].asText() shouldBe "asserted" },
+            { combined["refs"].size() shouldBe 0 },
+            { combined.has("refs_added") shouldBe false },
+        )
+
+        val listed = mcp(ALICE_KEY.plaintext, "datasources_list", emptyMap()).first { it["name"].asText() == DATASOURCE }
+        val one = mcp(ALICE_KEY.plaintext, "datasources_get", mapOf("name" to DATASOURCE))
+        val globex = mcp(BOB_KEY.plaintext, "datasources_get", mapOf("name" to DATASOURCE))
+        println("event=semantics.e2e.datasources_list payload=${mapper.writeValueAsString(listed)}")
+        val expected = listOf(rainy["id"].asText(), combined["id"].asText())
+        assertAll(
+            { listed["definitions"].map { it["id"].asText() } shouldContainExactly expected },
+            { listed["definitions"].map { it["kind"].asText() } shouldContainExactly listOf("definition", "definition") },
+            { listed["facts"].map { it["id"].asText() } shouldBe emptyList() },
+            { listed["definitions"].map { it["id"].asText() } shouldNotContain unitId },
+            { one["definitions"].map { it["id"].asText() } shouldContainExactly expected },
+            { globex["definitions"].size() shouldBe 0 },
+            { globex.has("definitions") shouldBe true },
+            { auditRows("semantics.recorded").size shouldBe 5 },
+        )
     }
 
     // ------------------------------------------------------------------ the wire
