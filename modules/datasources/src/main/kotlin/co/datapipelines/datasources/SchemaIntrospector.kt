@@ -324,33 +324,29 @@ class SchemaIntrospector(
      * The unfiltered default is the search-path rule's twin ([LakeViewStatements]): with
      * EXACTLY ONE registered namespace the table is resolved there; with several, the read
      * cannot pick one and fails with [CurrentSchemaUnknownException] — the caller passes an
-     * explicit namespace, the same recovery as the JDBC path. An unregistered table is empty,
-     * never an error (the §7A rule). Cached per (namespace, table) in [lakeCache] — on S3 the
-     * zero-row scan is a footer read over the network.
+     * explicit namespace, the same recovery as the JDBC path. An unregistered table — a name
+     * no registry row carries in the effective namespace, a namespace nothing is registered
+     * under, a registry with no rows at all — is refused with `datasource.lake_table_not_found`
+     * naming the nearest registered table ([lakeTableNotFound], 135 §B / T273); before 135 it
+     * answered `[]` with success, and a misspelt name read as "a table with no columns". A
+     * REGISTERED table with no columns still answers `[]` — empty is valid when the table
+     * exists. Cached per (namespace, table) in [lakeCache] — on S3 the zero-row scan is a
+     * footer read over the network.
      */
     private fun lakeColumns(
         datasource: Datasource,
         table: String,
         filter: List<String>,
     ): List<ColumnInfo> {
-        val effective =
-            filter.ifEmpty {
-                val namespaces = lakeTables.registeredTables(datasource.name).map { it.namespace }.distinct()
-                when (namespaces.size) {
-                    // No registered tables: the table cannot exist — empty, like an unknown table.
-                    0 -> return emptyList()
-
-                    1 -> namespaces.single()
-
-                    else -> throw CurrentSchemaUnknownException(datasource.name)
-                }
-            }
+        val rows = lakeTables.registeredTables(datasource.name)
+        // A null namespace (nothing registered) matches no row: refused by name, with no
+        // namespace to name and no candidate to suggest.
+        val effective = filter.ifEmpty { lakeSingleNamespace(datasource, rows) }
+        val inNamespace = rows.filter { it.namespace == effective }
         val registered =
-            lakeTables
-                .registeredTables(datasource.name)
-                .firstOrNull { it.namespace == effective && it.name == table }
-                ?: return emptyList()
-        val qualifier = (effective + table).joinToString(Namespaces.SEPARATOR.toString())
+            inNamespace.firstOrNull { it.name == table }
+                ?: throw lakeTableNotFound(datasource, effective.orEmpty(), table, inNamespace.map { it.name })
+        val qualifier = (registered.namespace + registered.name).joinToString(Namespaces.SEPARATOR.toString())
         return lakeCache.get(datasource.name, "columns", qualifier) {
             ConnectionLease.lease(registry, datasource) { connection ->
                 val adapter = DialectAdapters.forDialect(datasource.dialect)
@@ -361,6 +357,22 @@ class SchemaIntrospector(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * The unfiltered lake read's namespace: the single registered one; null when nothing is
+     * registered; [CurrentSchemaUnknownException] when several are (the search-path twin).
+     */
+    private fun lakeSingleNamespace(
+        datasource: Datasource,
+        rows: List<LakeRegisteredTable>,
+    ): List<String>? {
+        val namespaces = rows.map { it.namespace }.distinct()
+        return when (namespaces.size) {
+            0 -> null
+            1 -> namespaces.single()
+            else -> throw CurrentSchemaUnknownException(datasource.name)
         }
     }
 
@@ -385,9 +397,10 @@ class SchemaIntrospector(
         table: String,
         namespaceFilter: List<String>? = null,
     ): TableStats {
-        // The LAKE branches keep their registry semantics (lake_table_not_found). A null
-        // resolution — a filter deeper than the dialect's namespace — is not a refusal:
-        // the reader's own too-deep rule still owns that empty answer.
+        // The LAKE branch resolves against the registry inside the reader and raises its own
+        // lake_table_not_found (135 §B). On the JDBC path a null resolution — a filter deeper
+        // than the dialect's namespace — is not a refusal: the reader's own too-deep rule
+        // still owns that empty answer.
         if (datasource.dialect != Dialect.LAKE) {
             resolveTable(datasource, table, namespaceFilter = namespaceFilter)
         }

@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
@@ -169,12 +170,68 @@ class LakeSchemaIntrospectorTest {
         val pool = ConnectionPoolManager.buildHikariPool(ds, LakeViewStatements.forTables(single, adapter))
         val (introspector, _) = introspectorOver(single, pool = pool)
 
+        // One registered namespace: the unfiltered read resolves there (the search_path
+        // rule's twin).
+        introspector.columns(ds, "trips").map { it.column.name } shouldContainExactly listOf("id", "label", "fare")
+    }
+
+    /**
+     * 135 §B (T273): an unregistered name is REFUSED, never `[]` with success. An agent that
+     * misspelt a table got an empty column list, read it as "no columns", and learned of the
+     * typo only when its probe failed — the JDBC path had refused the same read since 123 §A.
+     */
+    @Test
+    fun `an unregistered table is refused as lake_table_not_found - a wild name carries no suggestion`() {
+        val (introspector, ds) = introspectorOver(listOf(zoneDay, trips))
+
+        val error =
+            shouldThrow<DatapipelinesException> {
+                introspector.columns(ds, "ghost", namespaceFilter = listOf("nyc", "mobility"))
+            }
+
         assertAll(
-            // One registered namespace: the unfiltered read resolves there (the search_path
-            // rule's twin).
-            { introspector.columns(ds, "trips").map { it.column.name } shouldContainExactly listOf("id", "label", "fare") },
-            // An unregistered table is empty, never an error.
-            { introspector.columns(ds, "ghost", namespaceFilter = listOf("nyc", "mobility")) shouldBe emptyList() },
+            { error.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
+            { error.details["table"] shouldBe "ghost" },
+            { error.details["namespace"] shouldBe "nyc.mobility" },
+            { error.details["datasource"] shouldBe ds.name },
+            { error.details.containsKey("suggestion") shouldBe false },
+        )
+    }
+
+    @Test
+    fun `a near-miss names the registered table - TableResolver's rule, case-fold then edit distance`() {
+        val (introspector, ds) = introspectorOver(listOf(zoneDay, trips))
+
+        val namespace = listOf("nyc", "mobility")
+        // One substituted letter (the acceptance run's typo shape) — within the distance cap.
+        val typo = shouldThrow<DatapipelinesException> { introspector.columns(ds, "hvfhs_zone_day", namespaceFilter = namespace) }
+        // A case-folded equal beats any edit distance.
+        val cased = shouldThrow<DatapipelinesException> { introspector.columns(ds, "HVFHV_TRIPS", namespaceFilter = namespace) }
+
+        assertAll(
+            { typo.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
+            { typo.details["suggestion"] shouldBe "hvfhv_zone_day" },
+            {
+                typo.message shouldBe
+                    "Table 'hvfhs_zone_day' is not registered in namespace 'nyc.mobility'. Did you mean 'hvfhv_zone_day'?"
+            },
+            { cased.details["suggestion"] shouldBe "hvfhv_trips" },
+        )
+    }
+
+    @Test
+    fun `a filter naming a namespace with no registrations is refused, not empty`() {
+        val (introspector, ds) = introspectorOver(listOf(zoneDay))
+
+        val error =
+            shouldThrow<DatapipelinesException> {
+                introspector.columns(ds, "hvfhv_zone_day", namespaceFilter = listOf("nowhere"))
+            }
+
+        assertAll(
+            { error.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
+            { error.details["namespace"] shouldBe "nowhere" },
+            { error.details.containsKey("suggestion") shouldBe false },
         )
     }
 
@@ -186,10 +243,15 @@ class LakeSchemaIntrospectorTest {
     }
 
     @Test
-    fun `unfiltered columns on a tableless registry are empty`() {
+    fun `unfiltered columns on a tableless registry are refused - nothing is registered, so nothing exists`() {
         val (introspector, ds) = introspectorOver(emptyList())
 
-        introspector.columns(ds, "anything") shouldBe emptyList()
+        val error = shouldThrow<DatapipelinesException> { introspector.columns(ds, "anything") }
+
+        assertAll(
+            { error.code shouldBe DatasourceErrorCodes.LAKE_TABLE_NOT_FOUND },
+            { error.details["namespace"] shouldBe "" },
+        )
     }
 
     // ---------------------------------------------------------- the cache seam
