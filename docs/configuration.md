@@ -412,6 +412,28 @@ How long a **retired** connection pool may keep connections out before it is clo
 
 **Why the default is derived rather than a number.** The ceiling and the node query timeout are the same fact seen twice: a deployment that raises `node-query-timeout-seconds` to 600 and leaves a literal `90` here would start hard-closing pools out from under statements that are still legitimately running, and nothing would tell it. Deriving makes the two move together; an explicit value opts out.
 
+### 3.27 Mail
+
+Outbound mail (137, [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)) — the SMTP server this deployment sends its two notices through: the **welcome / password-reset mail** to a local user (the login URL and the one-time password) and the **"New user" notice** to sys-ops (no password). Any SMTP server: traditional host, port, username, password. Postmark's SMTP endpoint is one such server, and its message-stream header is the only vendor-shaped knob.
+
+**Mail is enabled exactly when it is configured — there is no `enabled` key.** Mail is on iff `host` AND `from` are both set. A flag that could disagree with the fields it summarises is the YAML-boolean trap the house has already logged; "configured" is the only honest definition of "on" for an outbound adapter. Every half-configured shape refuses startup naming the field (§7).
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.mail.host` | (none) | SMTP host. Empty = mail off |
+| `datapipelines.mail.port` | `587` | SMTP port — the submission port (RFC 6409) every STARTTLS-capable server listens on |
+| `datapipelines.mail.username` | (none) | SMTP username. Empty = the relay takes no credentials. Postmark: the server token |
+| `datapipelines.mail.password` | (none) | SMTP password. Never logged, never in the properties' `toString`. Postmark: the server token |
+| `datapipelines.mail.starttls` | `true` | STARTTLS on the submission connection — **required, not opportunistic**: `true` refuses a server that does not upgrade rather than falling back to plaintext. The `hardened` posture refuses `false` (§3.23, §7) |
+| `datapipelines.mail.from` | (none) | The sender — a bare address or `Display Name <address>`. Half of "enabled" |
+| `datapipelines.mail.reply-to` | (none) | `Reply-To` on every message — the human a user writes back to. Empty = `from` |
+| `datapipelines.mail.ops-to` | (none) | The sys-ops sink for the "New user" notice — one address or a comma list. Empty = no new-user notices, even with mail on. Set without `host` = refused (a sink nobody can reach is a misconfiguration, not a preference) |
+| `datapipelines.mail.message-stream` | (none) | Postmark's `X-PM-Message-Stream` header. Set = added to every message; empty = nothing is added |
+
+**Cross-key rule:** mail on requires `datapipelines.auth.base-url` (§3.4) — the welcome mail carries the login URL, which is built from it and never from a request's origin ([Auth §5.2](auth.md#52-clientregistration-bean-built-at-startup)).
+
+**What the admin screen shows** follows from the derivation: with mail on, the create-user and reset-password actions no longer display the one-time password — it went to the user, and the screen says so with the send's outcome; with mail off they show it as before ([UI §4.12](ui-screens.md#412-admin-user-management-admin-scope-only)).
+
 ---
 
 ## 4. Precedence
@@ -631,6 +653,18 @@ datapipelines:
   # (a bare jar has nothing bundled); the shipped image exports the variable itself.
   duckdb:
     extension-directory: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:}
+
+  # §3.27 — outbound mail. NO `enabled` key: on exactly when host AND from are set.
+  mail:
+    host: ${DATAPIPELINES_MAIL_HOST:}
+    port: ${DATAPIPELINES_MAIL_PORT:587}
+    username: ${DATAPIPELINES_MAIL_USERNAME:}
+    password: ${DATAPIPELINES_MAIL_PASSWORD:}
+    starttls: ${DATAPIPELINES_MAIL_STARTTLS:true}
+    from: ${DATAPIPELINES_MAIL_FROM:}
+    reply-to: ${DATAPIPELINES_MAIL_REPLY_TO:}
+    ops-to: ${DATAPIPELINES_MAIL_OPS_TO:}
+    message-stream: ${DATAPIPELINES_MAIL_MESSAGE_STREAM:}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -716,6 +750,7 @@ On startup, the app validates:
 - **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
+- **Mail (§3.27, 137):** `datapipelines.mail.host` and `datapipelines.mail.from` are set together or not at all — one without the other refuses startup naming the missing one; `datapipelines.mail.ops-to` without `host` is refused (a sink nobody can reach); mail on (both set) without `datapipelines.auth.base-url` is refused (the welcome mail's login URL); `port` is a port in `1..65535`; `from` is an address (a bare address or `Display Name <address>`). Under the **`hardened` posture**, with mail on: `starttls` must be `true`, and `username` set requires `password` set — each refusal naming the variable and the posture. The SMTP password is carried as PRESENCE only; no violation ever prints it.
 - **The boot line (§3.23):** `event=config.posture env=<env> posture=<posture> authoring=<on|off> demo=<families>` is logged once (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
 
 The validator's own test suite must assert that the documented laptop setup (`deploy/env/defaults.env` + `deploy/secrets.env`, §6) passes the **production** rules — so a broken local value gets fixed at the data, never by weakening the check.
@@ -728,6 +763,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.18 | 137 mail notices | New **§3.27 Mail**: `datapipelines.mail.host` / `port` (587) / `username` / `password` / `starttls` (true, required-not-opportunistic) / `from` / `reply-to` (empty = from) / `ops-to` (comma list) / `message-stream` (Postmark's optional header). **No `enabled` key — mail is on exactly when `host` and `from` are both set.** §5 template block appended after `duckdb:`; §7 gains the shape rules (host↔from, ops-to without host, mail on without `auth.base-url`, port range, from is an address) and the two `hardened` refusals (`starttls` must be true; a username needs a password) — checks 23 and 24 |
 | 2026-09-08 | v1.17 | 091 keys | **§3.19: `datapipelines.deployment.promotion.server-key` is DEPRECATED** in favour of a `server`-kind API key ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) — mintable by an admin on the API screen, expiring, revocable, rotatable without a restart, and visible in the key list. Both credentials are accepted for one release; the configured value is compared FIRST (so a deployment that has not migrated pays no database read) and its presence raises one WARN at boot. §7 gains that rule (check 23). Fail-closed is unchanged and now has two halves: no configured value AND no live `server` key ⇒ every push refused. |
 | 2026-09-07 | v1.16 | 089 dp-lake §D extension bundling | New **§3.25 DuckDB extension directory (dp-lake)**: `datapipelines.duckdb.extension-directory` (`DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY`, default empty). Set — as the shipped image does via the Dockerfile, which now bundles `httpfs`/`aws`/`iceberg`/`avro` for DuckDB core v1.5.5 for the build's architecture (linux_amd64 or linux_arm64 via `TARGETARCH`, +108 MB uncompressed, ~39 MB at build) — lake connections `SET extension_directory` and emit bare `LOAD`s, never an `INSTALL`, so a hardened dp-lake deployment needs no egress to `extensions.duckdb.org`. Unset keeps the INSTALL+LOAD behavior developer machines rely on. §5 template block appended after `demo:` |
 | 2026-09-07 | v1.15 | 089 dp-lake phases B–D | New **§3.24 Lake datasource engine limits (dp-lake)**: the `properties.dialect.memory_limit` / `threads` / `temp_directory` datasource properties (datasource-row keys, NOT `datapipelines.*` env keys — validated per key at save), the default memory limit (25 % of the container's memory as the cgroup-aware JVM reports it, hard-capped at 4 GiB, floored at 64 MiB), and the always-on `preserve_insertion_order = false`. Phases B/C add no operator keys: per-table views and registry-backed introspection are behavior, not configuration |

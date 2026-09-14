@@ -70,6 +70,7 @@ datasources ──1:N── lake_tables (datasource_id references the datasource
 datasources ──1:N── learned_facts (datasource_name references the NAME primary key, ON DELETE CASCADE — §4.18)
 workspaces  ──1:N── learned_facts (workspace_id: the WORKSPACE-scope binding; recorded_in: provenance — §4.18)
 learned_facts ──1:N── learned_facts (supersedes — the drift history, §4.18)
+users ──1:N── mail_sends (the claim row behind every notice sent about or to the user, ON DELETE CASCADE — §4.19)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -760,6 +761,32 @@ CREATE INDEX idx_learned_facts_workspace ON learned_facts (workspace_id) WHERE w
 - **Never hard-deleted by users (D-S11).** `retired` is a state and `chk_learned_facts_retired` ties it to its stamp; `supersedes` links the history. The one cascade is the datasource's own delete (the object is gone). A purged source pipeline only detaches — `ON DELETE SET NULL` — because the fact outlives the pipeline that learned it.
 - **No expression index over `refs_json`.** The design sketched `(datasource_name, (refs_json->0->>'table'))`; it would index only the FIRST ref of a multi-ref fact and serve none of the reads that ship (every read is per datasource, then narrowed to a table in the reader over a set that is hundreds of rows at most). The honest index is the datasource one.
 
+### 4.19 `mail_sends`
+
+**The claim row behind every notice the product sends** (V27, round 137; [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)). One row per MESSAGE IDENTITY `(user, kind, act)`, inserted BEFORE the transport is touched with `ON CONFLICT DO NOTHING`: whoever inserts the row sends; a retry, a double-submit or a second instance finds it and does not. The welcome mail carries a one-time password and must never go twice — this table is what makes that a database fact rather than a hope.
+
+```sql
+CREATE TABLE mail_sends (
+    id          UUID        PRIMARY KEY,
+    user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind        TEXT        NOT NULL,                                  -- welcome | password_reset | new_user
+    act_id      UUID        NOT NULL,                                  -- the user's own id for the once-per-user kinds; a fresh id per reset
+    recipient   TEXT        NOT NULL,                                  -- the To list as sent (a comma list for the ops sink)
+    claimed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent_at     TIMESTAMPTZ,                                           -- the transport accepted it
+    message_id  TEXT,                                                  -- the Message-ID it went out under
+    error       TEXT,                                                  -- the exception's class + message; never a body
+    CONSTRAINT uq_mail_sends_message UNIQUE (user_id, kind, act_id),
+    CONSTRAINT chk_mail_sends_kind CHECK (kind IN ('welcome', 'password_reset', 'new_user'))
+);
+```
+
+**Notes:**
+- **A row proves an ATTEMPT, not a delivery.** `claimed_at` is the claim; `sent_at`/`message_id` land when the transport accepted the message, `error` when it did not. The status is derived: neither stamp = `PENDING` (the send has not returned — or the process died between commit and send, which the admin screen then shows), `sent_at` = `SENT`, `error` = `FAILED`. Rows are never cleaned up: they are what the admin screen reads back and what an operator greps.
+- **`act_id` is the message's act.** The user's own id for `welcome` and `new_user` (once per user, ever), a fresh id per `password_reset` — two resets mint two credentials and two mails, and the screen reads the LATEST reset by `claimed_at`.
+- **The claim rides the caller's transaction.** `MailSendRepository.tryClaim` runs on the request thread inside whatever metadata transaction is open, so a rolled-back creation claims nothing; the send itself is an after-commit task on a bounded pool.
+- **Nothing here is a credential.** The body is never stored; the one-time password exists in exactly one place, the message handed to the transport (`MailNotifierIntegrationTest` greps `row_to_json(mail_sends)` for it).
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -822,6 +849,8 @@ CREATE INDEX idx_learned_facts_workspace ON learned_facts (workspace_id) WHERE w
 | `learned_facts` | `learned_facts_pkey` | via PK | Lookup by id (`semantics_retire`, `supersedes`) |
 | `learned_facts` | `idx_learned_facts_datasource` | explicit | Every read is per datasource: the introspection enrichment, the listing, the drift check ([§4.18](#418-learned_facts)) |
 | `learned_facts` | `idx_learned_facts_workspace` | explicit (partial) | A workspace's own WORKSPACE facts; partial because DATASOURCE facts carry no workspace ([§4.18](#418-learned_facts)) |
+| `mail_sends` | `mail_sends_pkey` | via PK | The claim's id — what `markSent` / `markFailed` update |
+| `mail_sends` | `uq_mail_sends_message` | via UNIQUE | One claim per message identity `(user_id, kind, act_id)` — the "never twice" rule; doubles as the per-user read the admin screen makes ([§4.19](#419-mail_sends)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -867,6 +896,7 @@ table and the test's expected-table list in the same commit.
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
+| `mail_sends` | derived | MailSend | — | — | The claim rows behind the notices THIS deployment sent about ITS users (§4.19) — a record of local sends, not authored, and meaningless beside another environment's `users` |
 | `lake_tables` | environment-local | LakeTable | — | — | Rows point at an environment-local [`datasources`](#410-datasources) row and at bucket locations whose credentials never leave the deployment; the registry is rebuilt on the target from its own manifest import, exactly as the datasource itself is re-registered there |
 
 ---
@@ -1131,6 +1161,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.19 | V27 migration (137 mail notices) | New **§4.19 `mail_sends`** — the claim row behind every notice ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)): one row per message identity `(user_id, kind, act_id)` (`uq_mail_sends_message`), `chk_mail_sends_kind` over the closed list, `claimed_at` / `sent_at` / `message_id` / `error`; a row proves an attempt, never a delivery, and is never cleaned up. §5 gains its two constraint-backed indexes; the ERD gains `users ──1:N── mail_sends`. Eighteen tables. |
 | 2026-08-05 | v1.0 | initial draft | Complete metadata DB schema: 10 tables (users, api_keys, audit_log, pipelines, pipeline_versions, pipeline_executions, execution_events, templates, template_versions, datasources), indexes, ERD, NamedParameterJdbcTemplate data access pattern, Flyway strategy, maintenance jobs |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.10](SPEC-REVIEW-2026-08.md#210-metadata-dbmd). Established as sole DDL authority (D4): `_json` suffix rule stated in §2 and applied (`audit_log.details` → `details_json`); `TIMESTAMPTZ` confirmed everywhere. `datasources` (§4.10) absorbed the datasources.md reconciliation — `description` nullable, `name` CHECK (63 chars + `^[a-z0-9_-]+$`), new `query_timeout_seconds` column with CHECK, soft-delete partial index, `properties_json` documented as the hikari/jdbc passthrough (D7). `params_schema` deleted from `template_versions` (D3); `is_library` moved from `templates` to `template_versions` (version-scoped per D12); `idx_templates_active` added. `users` gained `updated_at` + `theme_preference TEXT NULL` (NULL = follow the deployment default `datapipelines.ui.theme`; stored preference, not session state — ui-screens §2.12.4), with the per-request `is_active` cache note (D13); `templates` gained `updated_at`; `updated_at` maintenance rule stated (app-set, no triggers). `pipeline_executions` gained the composite FK to `pipeline_versions(pipeline_id, version)`, dropped `result_delivery` (D9), gained `result_row_count`. `execution_events`: redundant `idx_events_execution` dropped, UNIQUE constraint named. §5 regenerated from §4 with constraint-backed indexes under their real names (phantom `uq_users_email` / `uq_pipelines_name` removed) plus a deliberately-absent list. §6.1 `create()` rewritten as working single-CTE SQL + a real `RowMapper` whose result is returned; §6.2 conventions extended. §8 renamed "Operational Jobs" and fully parameterized from config keys (D8) — no interval literals. New §9 stating idempotency keys, results, the 1-hour event log, and cancel flags are Redis-only (D9/D7). Broken link `pipeline-contract §15.3` → §17.3 fixed; terminal-node language replaced by the caller-node model (D1) |
 | 2026-08-15 | v1.2 | V2 migration | §4.10 `datasources` gains `introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]'` (migration V2) — the §7A introspection allowlist of datasources.md §3.3; `[]` and absent are the same behavior. |

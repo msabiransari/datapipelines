@@ -56,9 +56,10 @@ This is normative. Everything the posture means is here.
 | Loopback metadata database / Redis | allowed | **refused** at boot |
 | Session cookie `Secure` (`DATAPIPELINES_AUTH_COOKIE_SECURE`) | derived from `DATAPIPELINES_AUTH_BASE_URL`'s scheme — an explicit `http://` drops the flag so local login works | **on** |
 | OIDC | optional | **required unless `DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true`** — an explicit acknowledgement, which is logged |
+| Outbound mail, when configured (`DATAPIPELINES_MAIL_*`, [Configuration §3.27](configuration.md#327-mail)) | STARTTLS may be off (a laptop's local mail sink) | **`DATAPIPELINES_MAIL_STARTTLS` must be `true`, and a `DATAPIPELINES_MAIL_USERNAME` needs a `DATAPIPELINES_MAIL_PASSWORD`** — refused at boot; inert while mail is unconfigured |
 | Boot line | `event=config.posture env=<env> posture=development authoring=on demo=nyc,trade` | same shape |
 
-Two rows are **defaults** you can override (authoring, cookie `Secure`); four are **refusals** you cannot. A refusal names the variable and the posture in its message, so the log line tells you which line of which file to change.
+Two rows are **defaults** you can override (authoring, cookie `Secure`); five are **refusals** you cannot. A refusal names the variable and the posture in its message, so the log line tells you which line of which file to change.
 
 The refusals exist because a deployment that asked for the hardened stance and quietly got a relaxed one is worse than a deployment that did not start.
 
@@ -350,6 +351,7 @@ To evaluate the product instead, on a laptop, the whole thing is one line — `.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-09-14 | v1.3 | §2: the posture table gains the outbound-mail row (137) — under `hardened`, with mail configured, STARTTLS must be on and a username needs a password; inert while mail is unconfigured. Five refusals now. |
 | 2026-09-08 | v1.2 | §2: what authoring OFF means for versions — every draft-creating write is refused, so a hardened receiver holds no drafts at all and the execute default (versioning §7.2, D56) is a RELEASED version by construction rather than by convention. |
 | 2026-09-07 | v1.2 | **The `lake` demo family.** §5: a third family with no loader — nothing downloads; dp-lake reads the published objects in place over HTTPS at query time, so it needs egress to S3 (or a configured mirror) whenever a lake query runs. The hardened refusal is unchanged. |
 | 2026-09-06 | v1.1 | **One settings file.** `deploy/env/defaults.env` (tracked) and `deploy/secrets.env` (git-ignored) are the whole loader story, in that order, everywhere; `deploy/secrets.env.example` is the template and the list of every variable name. The five files 075 shipped (`laptop.env`, `demo.env`, `example.env`, `posture/development.env`, `posture/hardened.env`) are deleted, and with them the laptop's load-order inversion. The posture's two default rows now live ONLY in the profile ymls, with compose passing them in the valueless form. §3, §4 and §9 rewritten. |

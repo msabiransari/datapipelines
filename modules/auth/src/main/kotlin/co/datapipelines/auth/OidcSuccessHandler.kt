@@ -42,6 +42,8 @@ class OidcSuccessHandler(
     private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
     private val clientAddressResolver: ClientAddressResolver,
+    /** The §5A.8 new-user notice on the CREATE branch only; [MailNotices.NONE] is for test slices. */
+    private val mailNotices: MailNotices = MailNotices.NONE,
 ) : SimpleUrlAuthenticationSuccessHandler() {
     override fun onAuthenticationSuccess(
         request: HttpServletRequest,
@@ -77,7 +79,7 @@ class OidcSuccessHandler(
             return
         }
 
-        val user =
+        val (user, created) =
             userService.findOrCreateByEmail(
                 email = email,
                 displayName = displayName,
@@ -96,6 +98,12 @@ class OidcSuccessHandler(
         // else first membership, else the freshly provisioned personal workspace
         // (auto-per-user only; the hook is a no-op in the other modes).
         val activeWorkspace = workspaceService.workspaceForLogin(user, email)
+        // §5A.8: sys-ops hears about a FIRST social login — the branch that inserted the row,
+        // which `findOrCreateByEmail` reports as `created`. A returning user sends nothing.
+        // After the workspace resolution, so the notice can name where the account landed.
+        if (created) {
+            mailNotices.newUser(user, createdBy = "self-service via $registrationId", workspace = activeWorkspace?.name)
+        }
 
         response.addCookie(sessionCookie(jwtService.issue(user, activeWorkspace?.name, LoginMethod.OIDC)))
         userService.updateLastLogin(user.id)

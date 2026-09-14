@@ -143,9 +143,14 @@ class UserAdminIntegrationTest {
 
     @Test
     fun `emails are stored and matched lowercase so provider casing cannot fork a row`() {
-        val created = service.findOrCreateByEmail("Alice@Company.COM", "Alice", null, "keycloak", "sub-1")
-        val again = service.findOrCreateByEmail("ALICE@company.com", "Alice Wang", null, "okta", "sub-2")
+        val first = service.findOrCreateByEmail("Alice@Company.COM", "Alice", null, "keycloak", "sub-1")
+        val second = service.findOrCreateByEmail("ALICE@company.com", "Alice Wang", null, "okta", "sub-2")
+        val created = first.user
+        val again = second.user
 
+        // The create branch is reported exactly once — the §5A.8 new-user notice keys on it.
+        first.created shouldBe true
+        second.created shouldBe false
         again.id shouldBe created.id
         created.email shouldBe "alice@company.com"
         jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Int::class.java) shouldBe 1

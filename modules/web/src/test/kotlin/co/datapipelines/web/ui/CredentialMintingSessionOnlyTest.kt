@@ -64,6 +64,8 @@ class CredentialMintingSessionOnlyTest {
             localPasswordService,
             AdminUsersBrowseModel(userService),
             mockk<WorkspaceService>(relaxed = true),
+            co.datapipelines.auth.MailProperties(),
+            mockk<co.datapipelines.auth.MailSendRepository>(),
         )
     private val model = org.springframework.ui.ExtendedModelMap()
     private val settings =
@@ -126,7 +128,7 @@ class CredentialMintingSessionOnlyTest {
 
         // The decisive assertion: the service is never reached, so no credential is minted
         // and nothing lands in the response body for the key holder to read.
-        verify(exactly = 0) { localPasswordService.createLocalUser(any(), any(), any()) }
+        verify(exactly = 0) { localPasswordService.createLocalUser(any(), any(), any(), any()) }
     }
 
     @Test
@@ -167,7 +169,7 @@ class CredentialMintingSessionOnlyTest {
     @Test
     fun `an OIDC admin session drives every one of those operations`() {
         authenticateAs(AuthMethod.OIDC)
-        every { localPasswordService.createLocalUser(any(), any(), any()) } returns
+        every { localPasswordService.createLocalUser(any(), any(), any(), any()) } returns
             LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-IJKL")
         every { localPasswordService.resetPassword(any(), any()) } returns "MNOP-QRST-UVWX"
         every { localPasswordService.disableLocalAccess(any(), any()) } returns true

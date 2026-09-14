@@ -11,12 +11,15 @@ import java.util.UUID
  * and the user-administration operations (create local user, reset, disable
  * local access, unlock).
  *
- * There are **no email flows** — the product has no SMTP. A forgotten password
- * means an admin resets it here: a new random one-time credential under the
- * same forced-change rule as the config seed (§5A.2/§5A.4). Every mutation
- * evicts the liveness/user cache immediately (the forced-change gate reads
- * `must_change_password` through it) and audits with the actor, never any
- * credential material.
+ * There is **no self-service email flow** (no "forgot password" link): a forgotten
+ * password means an admin resets it here — a new random one-time credential under
+ * the same forced-change rule as the config seed (§5A.2/§5A.4). Since 137 the
+ * credential an admin mints is MAILED to the user when mail is configured
+ * (§5A.8, [MailNotices]) — the welcome at creation, the reset mail at a reset —
+ * and sys-ops hears about every creation; with mail off the admin screen shows
+ * the password as before. Every mutation evicts the liveness/user cache
+ * immediately (the forced-change gate reads `must_change_password` through it)
+ * and audits with the actor, never any credential material.
  */
 class LocalPasswordService(
     private val userRepository: UserRepository,
@@ -25,6 +28,8 @@ class LocalPasswordService(
     private val authCache: AuthCache,
     private val auditLogger: AuditLogger,
     private val authProperties: AuthProperties,
+    /** The two §5A.8 hook points hand the credential and the creation here; [MailNotices.NONE] is for test slices only. */
+    private val mailNotices: MailNotices = MailNotices.NONE,
 ) {
     private val log = LoggerFactory.getLogger(LocalPasswordService::class.java)
 
@@ -139,11 +144,17 @@ class LocalPasswordService(
      * (`must_change_password = TRUE`). Routes through the single §4.4 creation
      * path via [UserService.createLocalAccount] — the bootstrap grant semantics
      * are identical to every other creation path.
+     *
+     * The §5A.8 hook point: once the row, the credential and the audit row exist,
+     * the welcome mail (the password) and the new-user notice (never the password)
+     * are handed to [MailNotices]. [workspace] is the one the admin asked for in the
+     * same act — the notice names it; the membership itself is the caller's.
      */
     fun createLocalUser(
         email: String,
         displayName: String,
         actorId: UUID,
+        workspace: String? = null,
     ): CreateResult {
         val normalized = email.trim().lowercase()
         // auth.md §4.5: the system service account holds this address and has no credential;
@@ -167,8 +178,13 @@ class LocalPasswordService(
             userId = user.id,
             details = mapOf("actor" to actorId.toString(), "email" to normalized, "method" to "local"),
         )
+        mailNotices.welcome(user, oneTime)
+        mailNotices.newUser(user, createdBy = actorLabel(actorId), workspace = workspace?.trim()?.takeIf { it.isNotEmpty() })
         return CreateResult.Success(user, oneTime)
     }
+
+    /** The acting admin's email for the sys-ops notice; the id when the row is gone (never for a live actor). */
+    private fun actorLabel(actorId: UUID): String = userRepository.findById(actorId)?.email ?: actorId.toString()
 
     /**
      * Admin: reset a password — a new random one-time credential,
@@ -192,6 +208,8 @@ class LocalPasswordService(
             userId = userId,
             details = mapOf("actor" to actorId.toString(), "email" to user.email),
         )
+        // §5A.8: a reset is its own act — two resets mint two credentials and two mails.
+        mailNotices.passwordReset(user, oneTime, resetId = UUID.randomUUID())
         return oneTime
     }
 

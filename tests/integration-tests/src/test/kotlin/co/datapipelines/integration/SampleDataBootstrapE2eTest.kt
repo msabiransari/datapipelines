@@ -349,6 +349,8 @@ class SampleDataBootstrapE2eTest {
                     String::class.java,
                     String::class.java,
                 ).invoke(userService, email, "Demo User", null, "google", "sub-${UUID.randomUUID()}")
+                // 137: findOrCreateByEmail answers Provisioned(user, created) — unwrap the row.
+                .let { provisioned -> provisioned.javaClass.getMethod("getUser").invoke(provisioned) }
         val userId = user.javaClass.getMethod("getId").invoke(user) as UUID
 
         val workspaceService = context.getBean("workspaceService")

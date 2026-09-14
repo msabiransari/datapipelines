@@ -1,5 +1,7 @@
 package co.datapipelines.integration
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -8,6 +10,7 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.response.Response
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -30,7 +33,10 @@ import java.util.Base64
  *  4. the self-service change (the §7.6 `CHANGE_OWN_PASSWORD` partial, CSRF
  *     double-submit) releases the gate;
  *  5. the admin creates a local user, whose one-time password walks the same
- *     forced-change path — the whole feature in one narrative, no email anywhere.
+ *     forced-change path — the whole feature in one narrative, no email anywhere:
+ *     this context configures NO mail (137), so the password is on the admin screen,
+ *     the no-op sender logs its one INFO line, and nothing is claimed
+ *     (`MailNoticesE2eTest` is the mail-ON twin).
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -112,22 +118,40 @@ class LocalAdminSeedE2eTest {
 
     /** (5) — the admin creates a local user, whose one-time password walks the same forced-change path. */
     private fun adminCreatesUserWhoWalksTheSamePath(adminLogin: LoginResponse) {
+        val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
         val createResponse =
-            given()
-                .port(port)
-                .cookie("dp_session", adminLogin.sessionCookie())
-                .cookie("dp_csrf", adminLogin.csrfToken)
-                .header("DP-CSRF-Token", adminLogin.csrfToken)
-                .contentType(ContentType.URLENC)
-                .formParam("email", CREATED_EMAIL)
-                .formParam("displayName", "Created User")
-                .`when`()
-                .post("/partials/admin/users")
+            try {
+                given()
+                    .port(port)
+                    .cookie("dp_session", adminLogin.sessionCookie())
+                    .cookie("dp_csrf", adminLogin.csrfToken)
+                    .header("DP-CSRF-Token", adminLogin.csrfToken)
+                    .contentType(ContentType.URLENC)
+                    .formParam("email", CREATED_EMAIL)
+                    .formParam("displayName", "Created User")
+                    .`when`()
+                    .post("/partials/admin/users")
+            } finally {
+                logger.detachAppender(appender)
+            }
         createResponse.statusCode shouldBe 200
+        // Mail OFF (137): the password is on the screen, the no-op sender said so ONCE at INFO with
+        // the kind and the domain only, and no claim row exists.
+        val html = createResponse.body().asString()
+        html shouldNotContain "Emailed to"
+        val skipped = appender.list.filter { it.formattedMessage.contains("event=mail.skipped") }
+        skipped.size shouldBe 1
+        skipped.single().level.toString() shouldBe "INFO"
+        skipped.single().formattedMessage shouldContain "kind=welcome"
+        skipped.single().formattedMessage shouldContain "domain=datapipelines.test"
+        skipped.single().formattedMessage shouldNotContain CREATED_EMAIL
         val oneTime =
-            checkNotNull(ONE_TIME_PASSWORD.find(createResponse.body().asString())) {
+            checkNotNull(ONE_TIME_PASSWORD.find(html)) {
                 "no one-time password in the create response"
             }.groupValues[1]
+        appender.list.forEach { it.formattedMessage shouldNotContain oneTime }
 
         val userLogin = postLogin(CREATED_EMAIL, oneTime)
         userLogin.statusCode shouldBe 302
@@ -166,6 +190,17 @@ class LocalAdminSeedE2eTest {
                         rs.next() shouldBe true
                         rs.getBoolean("must_change_password") shouldBe false
                         rs.getString("provider") shouldBe "local"
+                    }
+                }
+            // Mail off claims nothing (137): an unconfigured deployment leaves no trace of notices
+            // it could not send.
+            connection
+                .prepareStatement("SELECT COUNT(*) FROM mail_sends m JOIN users u ON u.id = m.user_id WHERE u.email = ?")
+                .use { ps ->
+                    ps.setString(1, CREATED_EMAIL)
+                    ps.executeQuery().use { rs ->
+                        rs.next() shouldBe true
+                        rs.getInt(1) shouldBe 0
                     }
                 }
         }

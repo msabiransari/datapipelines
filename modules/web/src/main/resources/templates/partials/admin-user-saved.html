@@ -9,11 +9,17 @@
     auto-dismisses after 6s, may POINT at a one-time secret and nothing more.
   -->
   <th:block th:replace="~{partials/admin-user-row :: row}"></th:block>
+  <!-- 137: ONE branch. Mail off — the password, as ever. Mail on — where it went and whether. -->
   <div th:if="${oneTimePassword != null}" id="admin-notice" hx-swap-oob="true"
        class="app-alert app-alert-warning u-mb-md">
     One-time password for <span th:text="${userRow.email}">ada@example.com</span>:
     <strong class="u-mono" th:text="${oneTimePassword}">hunter2</strong>
     — shown ONCE; pass it to the user out-of-band. They must set a new password at first login (auth.md §5A.4).
   </div>
+  <!-- Two blocks, not one: th:replace outranks th:if on a single element (precedence 100 vs 300),
+       so the fragment would be evaluated for a null notice. -->
+  <th:block th:if="${mailNotice != null}">
+    <th:block th:replace="~{partials/admin-user-mail :: notice}"></th:block>
+  </th:block>
   <div th:replace="~{partials/toast-oob :: oob(${toastVariant}, ${toastTitle}, ${toastMessage})}"></div>
 </th:block>

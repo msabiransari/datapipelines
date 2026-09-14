@@ -40,7 +40,8 @@ class BootstrapAdminTest {
         val result = service.findOrCreateByEmail("admin@company.com", "Admin", null, "kc", "sub")
 
         isAdmin.captured.shouldBeTrue()
-        result.isAdmin.shouldBeTrue()
+        result.user.isAdmin.shouldBeTrue()
+        result.created.shouldBeTrue()
         verify(exactly = 1) { auditLogger.log("auth.user.admin_granted", any(), any(), any(), any(), any()) }
     }
 
@@ -84,7 +85,8 @@ class BootstrapAdminTest {
 
         val result = service.findOrCreateByEmail("admin@company.com", "Admin", null, "kc", "sub")
 
-        result.isAdmin.shouldBeFalse()
+        result.user.isAdmin.shouldBeFalse()
+        result.created.shouldBeFalse()
         // The §4.4 path fires only at row creation — it never re-grants on a later login.
         verify(exactly = 0) { repo.grantAdmin(any()) }
         verify(exactly = 0) { auditLogger.log("auth.user.admin_granted", any(), any(), any(), any(), any()) }

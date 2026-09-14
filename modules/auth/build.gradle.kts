@@ -19,6 +19,13 @@ dependencies {
     // Same shape as :modules:dag's ExecutorMetrics, and an existing catalog alias, so no new
     // artifact enters the build.
     implementation(libs.micrometer.core)
+    // 137 — the outbound mail adapter of this module's own flows (auth.md §5A.8): the
+    // welcome / password-reset mail to the user and the new-user notice to sys-ops. The
+    // starter is the JavaMailSender + Jakarta Mail; thymeleaf-spring6 (the engine with
+    // SpringEL, not the MVC starter — this is a domain module) renders the text and html
+    // parts from resources/templates/mail. Both BOM-managed; no OGNL (see the catalog note).
+    implementation(libs.spring.boot.starter.mail)
+    implementation(libs.thymeleaf.spring6)
 
     // DEVIATION from §5.7's external-dep list (reported to orchestrator): the §8.1
     // SecurityConfig / ScopeInterceptor code the spec mandates compiles against Spring

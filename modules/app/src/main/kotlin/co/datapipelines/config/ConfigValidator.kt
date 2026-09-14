@@ -54,9 +54,9 @@ class ConfigValidator(
          * 24 until RBAC round 1, which removed THREE checks with the behaviour they read — the
          * provisioning-mode value check, the open-join/mode agreement check and the
          * examples-file/mode cross-key rule — and added one that refuses both removed keys by
-         * name.
+         * name. 24 since 137 added the two mail rules (`MailRules`).
          */
-        internal const val CHECK_COUNT = 22
+        internal const val CHECK_COUNT = 24
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -120,6 +120,9 @@ class ConfigValidator(
             checkStagingBudgetPressure(snapshot, warnings)
             checkRedisAuthWarning(snapshot, warnings)
             checkOrgSettings(snapshot, violations)
+            // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
+            MailRules.checkMailShape(snapshot, violations)
+            MailRules.checkMailHardened(snapshot, violations)
             return ValidationReport(violations, warnings)
         }
 
@@ -782,8 +785,7 @@ class ConfigValidator(
                 // §3.19 promotion (055). The base-url is an ordinary value; both keys are
                 // bearer secrets and are carried as PRESENCE only — the §7 report is logged.
                 promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
-                promotionTargetKeySet =
-                    !environment.getProperty("datapipelines.deployment.promotion.target.server-key").isNullOrBlank(),
+                promotionTargetKeySet = !environment.getProperty("datapipelines.deployment.promotion.target.server-key").isNullOrBlank(),
                 promotionServerKeySet =
                     !environment.getProperty("datapipelines.deployment.promotion.server-key").isNullOrBlank(),
                 // §3.21 (calculators design §0.1) — org facts. Raw strings so a malformed value
@@ -804,6 +806,24 @@ class ConfigValidator(
                 deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
                 authAllowLocalOnly =
                     environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
+                mail = mailSnapshot(environment),
+            )
+
+        /**
+         * §3.27 (137) — the mail block. Raw strings so a bad port or a `starttls` typo becomes a
+         * NAMED violation; the password is PRESENCE only. `auth.base-url` rides along for the
+         * cross-key rule (the welcome mail's login URL) — auth owns its semantics.
+         */
+        private fun mailSnapshot(environment: Environment): MailSnapshot =
+            MailSnapshot(
+                authBaseUrl = environment.getProperty("datapipelines.auth.base-url"),
+                host = environment.getProperty("datapipelines.mail.host"),
+                port = environment.getProperty("datapipelines.mail.port"),
+                username = environment.getProperty("datapipelines.mail.username"),
+                passwordSet = !environment.getProperty("datapipelines.mail.password").isNullOrBlank(),
+                starttls = environment.getProperty("datapipelines.mail.starttls"),
+                from = environment.getProperty("datapipelines.mail.from"),
+                opsTo = environment.getProperty("datapipelines.mail.ops-to"),
             )
 
         /**
@@ -988,6 +1008,8 @@ internal data class ConfigSnapshot(
     val deploymentName: String? = null,
     /** §3.4 (075) — the explicit acknowledgement that a hardened deployment has no OIDC. */
     val authAllowLocalOnly: Boolean = false,
+    /** §3.27 (137) — the mail block, its own value so the snapshot builder stays readable. */
+    val mail: MailSnapshot = MailSnapshot(),
 ) {
     override fun toString() =
         "ConfigSnapshot(" +
@@ -1031,7 +1053,29 @@ internal data class ConfigSnapshot(
             "posture=$posture, " +
             "demo=$demo, " +
             "deploymentName=$deploymentName, " +
-            "authAllowLocalOnly=$authAllowLocalOnly)"
+            "authAllowLocalOnly=$authAllowLocalOnly, " +
+            "mail=$mail)"
+}
+
+/**
+ * §3.27 (137) — `datapipelines.mail.*` as the validator sees it. Raw strings, so a bad value is
+ * a NAMED violation rather than a binder crash; `enabled` is DERIVED (host and from both set),
+ * never a flag. The password is PRESENCE only — a §7 violation is a logged line — and the
+ * derived `toString` therefore never carries it.
+ */
+internal data class MailSnapshot(
+    /** §3.4 — read here only for the cross-key rule (the welcome mail's login URL); auth owns it. */
+    val authBaseUrl: String? = null,
+    val host: String? = null,
+    val port: String? = null,
+    val username: String? = null,
+    val passwordSet: Boolean = false,
+    val starttls: String? = null,
+    val from: String? = null,
+    val opsTo: String? = null,
+) {
+    /** Mail is on exactly when [host] and [from] are set — the §3.27 derivation, spelled once here. */
+    val enabled: Boolean get() = !host.isNullOrBlank() && !from.isNullOrBlank()
 }
 
 /** One `datapipelines.auth.oidc.providers[]` entry (auth.md §11.1), bound by relaxed binding. */

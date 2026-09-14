@@ -1,0 +1,21 @@
+<th:block xmlns:th="http://www.thymeleaf.org">
+  <!--
+    137 — the notice the admin screen shows when mail is ON (auth.md §5A.8, ui-screens §4.12):
+    the credential went to the user, so the screen says WHERE and WHETHER, never WHAT. The same
+    `#admin-notice` box the one-time password used to fill, and it stays persistent inline.
+
+    While the send is pending the box polls its own outcome (hx-get on the mail-status partial,
+    every 2 s, swapping itself) and stops on a terminal state — a terminal render carries no
+    hx-get at all, so a sent or failed notice never asks again.
+  -->
+  <div th:fragment="notice" id="admin-notice" hx-swap-oob="true"
+       th:class="${mailNotice.status == 'failed'} ? 'app-alert app-alert-danger u-mb-md' : 'app-alert app-alert-info u-mb-md'"
+       th:attr="hx-get=${mailNotice.pollUrl},hx-trigger=${mailNotice.pollUrl != null} ? 'load delay:2s' : null,hx-swap=${mailNotice.pollUrl != null} ? 'outerHTML' : null">
+    <th:block th:switch="${mailNotice.status}">
+      <span th:case="'sending'">Emailed to <span th:text="${mailNotice.to}">ada@example.com</span> — sending…</span>
+      <span th:case="'sent'">Emailed to <span th:text="${mailNotice.to}">ada@example.com</span> — sent. The first login asks them to choose a new password (auth.md §5A.4).</span>
+      <span th:case="'failed'">Emailed to <span th:text="${mailNotice.to}">ada@example.com</span> — <strong>failed</strong>: <span th:text="${mailNotice.error}">relay refused</span>. Reset the password to send again once the relay is fixed.</span>
+      <span th:case="*">No send was recorded for <span th:text="${mailNotice.to}">ada@example.com</span> (no send was recorded — the claim row is absent).</span>
+    </th:block>
+  </div>
+</th:block>

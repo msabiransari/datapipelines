@@ -34,9 +34,10 @@ class ConfigValidatorCheckCountTest {
     }
 
     /**
-     * BOTH rule files. 075 lifted the four posture rules into `PostureRules.kt` (the
-     * companion had outgrown the build's own size guard); counting only `ConfigValidator.kt`
-     * would then have let four checks leave the number the boot line quotes without a word.
+     * EVERY rule file. 075 lifted the four posture rules into `PostureRules.kt` (the
+     * companion had outgrown the build's own size guard) and 137 the two mail rules into
+     * `MailRules.kt`; counting only `ConfigValidator.kt` would then have let those checks
+     * leave the number the boot line quotes without a word.
      */
     private fun checkFunctionNames(): List<String> =
         RULE_FILES
@@ -60,6 +61,8 @@ class ConfigValidatorCheckCountTest {
             listOf(
                 "modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator.kt",
                 "modules/app/src/main/kotlin/co/datapipelines/config/PostureRules.kt",
+                // 137 — the two §3.27 mail rules, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt",
             )
     }
 }

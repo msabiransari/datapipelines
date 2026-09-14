@@ -105,7 +105,53 @@ class FlywayMigrationIntegrationTest {
                 // 136 §B — chk_learned_facts_refs re-created scope-aware: a WORKSPACE rule may
                 // carry no refs. Same constraint name, so the CHECK inventory below does not move.
                 "26|learned facts workspace rule refs|true",
+                // 137 — mail_sends: the claim row behind every notice (metadata-db §4.19).
+                "27|mail sends|true",
             )
+    }
+
+    /**
+     * 137 (V27) — the claim table: one row per message identity `(user, kind, act)`, the
+     * closed kind list checked, the user FK cascading. The UNIQUE is what makes "the welcome
+     * mail carrying a password never goes twice" a database fact — proven by a second INSERT
+     * being refused, the V17 rule (a constraint that parses but does not bind is invisible to
+     * a text assertion).
+     */
+    @Test
+    fun `V27 claims one row per user, kind and act, and refuses a kind outside the closed list`() {
+        val userId = UUID.randomUUID()
+        val actId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) " +
+                        "VALUES ('$userId', 'v27-$userId@datapipelines.test', 'V27', 'local', 'v27-$userId')",
+                )
+                statement.execute(
+                    "INSERT INTO mail_sends (id, user_id, kind, act_id, recipient) " +
+                        "VALUES ('${UUID.randomUUID()}', '$userId', 'welcome', '$actId', 'v27@datapipelines.test')",
+                )
+                val duplicate =
+                    shouldThrow<SQLException> {
+                        statement.execute(
+                            "INSERT INTO mail_sends (id, user_id, kind, act_id, recipient) " +
+                                "VALUES ('${UUID.randomUUID()}', '$userId', 'welcome', '$actId', 'v27@datapipelines.test')",
+                        )
+                    }
+                duplicate.message.orEmpty() shouldContain "uq_mail_sends_message"
+                val badKind =
+                    shouldThrow<SQLException> {
+                        statement.execute(
+                            "INSERT INTO mail_sends (id, user_id, kind, act_id, recipient) VALUES " +
+                                "('${UUID.randomUUID()}', '$userId', 'newsletter', '${UUID.randomUUID()}', 'v27@datapipelines.test')",
+                        )
+                    }
+                badKind.message.orEmpty() shouldContain "chk_mail_sends_kind"
+                // The row proves an attempt: claimed now, nothing else stamped yet.
+                statement.execute("DELETE FROM users WHERE id = '$userId'")
+            }
+        }
+        query("SELECT COUNT(*) FROM mail_sends WHERE user_id = '$userId'") { it.getInt(1) }.single() shouldBe 0
     }
 
     @Test
@@ -489,7 +535,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the seventeen tables of metadata-db §4`() {
+    fun `creates exactly the eighteen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -513,6 +559,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
+                // 137 (V27) — the mail claim rows.
+                "mail_sends",
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
@@ -576,6 +624,9 @@ class FlywayMigrationIntegrationTest {
                 "learned_facts.idx_learned_facts_datasource",
                 "learned_facts.idx_learned_facts_workspace",
                 "learned_facts.learned_facts_pkey",
+                // 137 (V27) — one claim per message identity (user, kind, act).
+                "mail_sends.mail_sends_pkey",
+                "mail_sends.uq_mail_sends_message",
                 "pipeline_executions.idx_executions_correlation",
                 "pipeline_executions.idx_executions_heartbeat",
                 "pipeline_executions.idx_executions_pipeline",
@@ -671,6 +722,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_learned_facts_summary_length",
                 "chk_learned_facts_trust",
                 "chk_learned_facts_via",
+                // 137 (V27) — mail_sends.kind is the closed welcome | password_reset | new_user list.
+                "chk_mail_sends_kind",
                 // 101 (V19): discard stamps — both NULL unless DISCARDED, a stamp when it is.
                 "chk_pipeline_versions_discard_stamps",
                 "chk_pipeline_versions_status",
