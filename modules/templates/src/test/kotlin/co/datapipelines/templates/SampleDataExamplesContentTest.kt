@@ -253,7 +253,7 @@ class SampleDataExamplesContentTest {
             flush()
         }
         check(facts.isNotEmpty()) { "no datasources parsed from $BOOTSTRAP_PATHS — the demo model is empty" }
-        return DatasourceRegistry { facts[it] }
+        return DatasourceRegistry { name, _ -> facts[name] }
     }
 
     private companion object {

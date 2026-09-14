@@ -48,11 +48,11 @@ internal object ReferenceRules {
                 // §12.9 (CompositionRules) owns a PIPELINE node's references: it carries no
                 // source and no template to resolve. Its `output` block, when §12.9 permits one,
                 // is a standard §4.7 block, so a datasource target is still registry-checked here.
-                checkOutputDatasource(index, node, datasources, into)
+                checkOutputDatasource(index, node, datasources, workspaceId, into)
                 return@forEachIndexed
             }
-            val sourceDialect = checkSource(index, node, datasources, pipeline, into)
-            checkOutputDatasource(index, node, datasources, into)
+            val sourceDialect = checkSource(index, node, datasources, workspaceId, pipeline, into)
+            checkOutputDatasource(index, node, datasources, workspaceId, into)
             checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, calculatorKeys.keys, into)
         }
     }
@@ -70,6 +70,7 @@ internal object ReferenceRules {
         index: Int,
         node: Node,
         datasources: DatasourceRegistry,
+        workspaceId: java.util.UUID,
         pipeline: Pipeline,
         into: FailureCollector,
     ): Dialect? =
@@ -79,7 +80,7 @@ internal object ReferenceRules {
             }
 
             is NodeSource.Datasource -> {
-                val facts = datasources.describe(source.name)
+                val facts = datasources.describe(source.name, workspaceId)
                 if (facts == null) {
                     into.add(
                         Validation.UNKNOWN_DATASOURCE,
@@ -117,12 +118,13 @@ internal object ReferenceRules {
         index: Int,
         node: Node,
         datasources: DatasourceRegistry,
+        workspaceId: java.util.UUID,
         into: FailureCollector,
     ) {
         val output = node.output as? NodeOutput.Datasource ?: return
         if (output.datasource.isBlank()) return
         val facts =
-            datasources.describe(output.datasource) ?: run {
+            datasources.describe(output.datasource, workspaceId) ?: run {
                 into.add(
                     Validation.UNKNOWN_DATASOURCE,
                     "nodes[$index].output.datasource",

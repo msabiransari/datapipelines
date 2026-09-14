@@ -827,7 +827,7 @@ class VersionLifecycleModelTest {
         val guard = AuthoringGuard(authoring)
         val validator =
             PipelineValidator(
-                DatasourceRegistry { name -> if (name == "pg") DatasourceFacts(co.datapipelines.typesystem.Dialect.H2) else null },
+                DatasourceRegistry { name, _ -> if (name == "pg") DatasourceFacts(co.datapipelines.typesystem.Dialect.H2) else null },
                 PermissiveTemplates,
                 PipelineResolver { _, _, _ -> null },
                 5,

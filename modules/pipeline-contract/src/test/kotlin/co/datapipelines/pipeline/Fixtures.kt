@@ -259,7 +259,11 @@ internal class StubDatasources(
         ),
     private val readonly: Set<String> = emptySet(),
 ) : DatasourceRegistry {
-    override fun describe(name: String): DatasourceFacts? = dialects[name]?.let { DatasourceFacts(it, name in readonly) }
+    /** Workspace-blind by design: the stub answers by name; scoping is the `web` adapter's job (134). */
+    override fun describe(
+        name: String,
+        workspaceId: java.util.UUID?,
+    ): DatasourceFacts? = dialects[name]?.let { DatasourceFacts(it, name in readonly) }
 }
 
 /**

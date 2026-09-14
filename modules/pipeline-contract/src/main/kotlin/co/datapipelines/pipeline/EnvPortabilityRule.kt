@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import java.util.UUID
 
 /**
  * pipeline-contract §11.4 / §12.1 — `forbidden_env_specific_value`.
@@ -22,14 +23,15 @@ internal object EnvPortabilityRule {
     fun check(
         pipeline: Pipeline,
         datasources: DatasourceRegistry,
+        workspaceId: UUID,
         into: FailureCollector,
     ) {
         pipeline.nodes.forEachIndexed { index, node ->
             scan(node.id, "nodes[$index].id", into)
-            if (!isRegistryReference(node.source, datasources)) {
+            if (!isRegistryReference(node.source, datasources, workspaceId)) {
                 scan(node.source, "nodes[$index].source", into)
             }
-            scanOutput(index, node, datasources, into)
+            scanOutput(index, node, datasources, workspaceId, into)
         }
         scanSettings(pipeline.settings, into)
     }
@@ -38,6 +40,7 @@ internal object EnvPortabilityRule {
         index: Int,
         node: Node,
         datasources: DatasourceRegistry,
+        workspaceId: UUID,
         into: FailureCollector,
     ) {
         when (val output = node.output) {
@@ -46,7 +49,7 @@ internal object EnvPortabilityRule {
             }
 
             is NodeOutput.Datasource -> {
-                if (!isRegistryReference(output.datasource, datasources)) {
+                if (!isRegistryReference(output.datasource, datasources, workspaceId)) {
                     scan(output.datasource, "nodes[$index].output.datasource", into)
                 }
                 scan(output.table, "nodes[$index].output.table", into)
@@ -69,11 +72,12 @@ internal object EnvPortabilityRule {
         }
     }
 
-    /** `tempdb` is the reserved literal, not a datasource; anything the registry knows is a name. */
+    /** `tempdb` is the reserved literal, not a datasource; anything the registry knows FROM THIS WORKSPACE is a name. */
     private fun isRegistryReference(
         value: String,
         datasources: DatasourceRegistry,
-    ): Boolean = value == NodeSource.TEMPDB_LITERAL || datasources.dialectOf(value) != null
+        workspaceId: UUID,
+    ): Boolean = value == NodeSource.TEMPDB_LITERAL || datasources.dialectOf(value, workspaceId) != null
 
     private fun scan(
         value: String,
