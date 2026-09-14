@@ -173,6 +173,7 @@
         <ul>
           <li><a th:href="@{/docs}">Documentation</a></li>
           <li><a th:href="@{/faq}">FAQ</a></li>
+          <li><a th:href="@{/faq#support-and-feedback}">Support</a></li>
           <li><a th:href="@{/roadmap}">Roadmap</a></li>
           <li><a th:href="@{/pricing}">Pricing — free and open source</a></li>
           <li><a href="https://github.com/msabiransari/datapipelines">GitHub</a></li>
@@ -184,7 +185,10 @@
       </div>
     </nav>
     <div class="footer-inner">
-      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br>&copy; 2026 datapipelines.co</p>
+      <!--/* 127 §B.1: the beta line rides the footer of every page, from the same
+           SitePages.RELEASE_STAGE constant the hero renders — the wording changes in one
+           place. The support link targets the FAQ's "Support and feedback" anchor. */-->
+      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br><span th:text="${releaseStage}">Public beta — self-hosted, AGPL, actively developed.</span> <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a><br>&copy; 2026 datapipelines.co</p>
     </div>
   </div>
 </footer>

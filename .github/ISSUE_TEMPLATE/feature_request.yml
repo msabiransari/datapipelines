@@ -1,0 +1,24 @@
+name: Feature request
+description: Something you wish datapipelines.co did.
+title: "[feature]: "
+labels: ["enhancement", "beta-feedback"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: The outcome you want
+      description: What does it look like when this is solved?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: The workaround today
+      description: How do you do it now, if at all?

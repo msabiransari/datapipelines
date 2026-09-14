@@ -394,6 +394,55 @@ class AppShellBrowserTest : BrowserSuite() {
             )
     }
 
+    /**
+     * 127 §C — "Report a problem" in the avatar menu: the fourth `menuitem`, in arrow-key
+     * order between API keys and Log out, opening the bug form in a NEW tab (the app tab
+     * never navigates) and closing the menu under the v1.42 close-on-choice rule.
+     *
+     * The item COUNT is the guard's falsification leg: drop the `menuitem` role from the
+     * new link and this goes red. Arrow-key order matters because shell.js walks the
+     * `[role="menuitem"]` set — End must land on Log out and ArrowUp on the new link.
+     */
+    @Test
+    fun `Report a problem opens the bug form in a new tab and closes the menu`() {
+        startTrace()
+        signedIn("report")
+        page.navigate("$baseUrl/dashboard")
+
+        page.locator("#app-avatar").click()
+        page.locator("#app-user-menu").waitFor()
+
+        val items = page.locator("#app-user-menu [role='menuitem']")
+        items.count() shouldBe 4
+        items.nth(0).innerText() shouldContain "Settings"
+        items.nth(1).innerText() shouldContain "API keys"
+        items.nth(2).innerText() shouldContain "Report a problem"
+        items.nth(3).innerText() shouldContain "Log out"
+
+        page.keyboard().press("End")
+        page.evaluate("() => document.activeElement.textContent").toString() shouldContain "Log out"
+        page.keyboard().press("ArrowUp")
+        page.evaluate("() => document.activeElement.textContent").toString() shouldContain "Report a problem"
+
+        val report = page.locator("#app-user-menu a", Page.LocatorOptions().setHasText("Report a problem"))
+        report.getAttribute("href") shouldBe "https://github.com/msabiransari/datapipelines/issues/new?template=bug_report.yml"
+
+        val popup = page.waitForPopup { report.click() }
+        // The DESTINATION is asserted, not the load: github.com answers an anonymous
+        // issues/new with a login bounce whose return_to encodes the form's URL — decode
+        // before comparing, so the check holds on-line (redirect) and off (about:blank
+        // would fail here, as it should).
+        val landed = java.net.URLDecoder.decode(popup.url(), Charsets.UTF_8)
+        landed shouldContain "github.com"
+        landed shouldContain "/msabiransari/datapipelines/issues/new"
+        landed shouldContain "template=bug_report.yml"
+        popup.close()
+
+        awaitHidden()
+        page.locator("#app-avatar").getAttribute("aria-expanded") shouldBe "false"
+        page.url() shouldContain "/dashboard"
+    }
+
     @Test
     fun `the mode toggle swaps the theme stylesheet and data-theme without a reload`() {
         startTrace()

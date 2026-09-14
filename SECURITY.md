@@ -2,8 +2,13 @@
 
 ## Reporting a vulnerability
 
-Email **datapipelines.co@gmail.com** with the subject `Security: <short description>`. Do not
-open a public issue for a vulnerability.
+**First choice: [open a private security advisory](
+https://github.com/msabiransari/datapipelines/security/advisories/new).** It stays private
+until a fix ships, and the conversation happens in one place. Do not open a public issue
+for a vulnerability.
+
+If the advisory flow is not an option for you, email
+**datapipelines.co@gmail.com** with the subject `Security: <short description>`.
 
 Include what you can of: the release tag or commit (`git describe` on the checkout you run), the surface (REST, MCP, the UI, a datasource driver, the deployment scripts), steps
 to reproduce, and the impact you believe it has. A minimal reproduction is worth more than a

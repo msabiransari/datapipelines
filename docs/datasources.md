@@ -1550,6 +1550,7 @@ the compiler names, never an `else`.
 | `docs/enums.md` | the dialect enum + reserved list |
 | `docs/rest-api.md`, `docs/mcp-server.md` §6.2, `docs/metadata-db.md`, `docs/templates.md` | wherever a dialect list is spelled out — grep the enum name |
 | `.agents/skills/datapipelines/SKILL.md`, `.agents/skills/datapipelines/references/templates.md` | the dialect lists the agent reads (`.agents/skills/datapipelines/references/tools.md` is generated — run `:modules:mcp-server:skillArtifacts`) |
+| `.github/ISSUE_TEMPLATE/bug_report.yml` | the bug form's **engine dropdown** lists the eight wire names BY HAND (127) — there is no mechanical guard for a YAML file (the drift test above reaches only Kotlin under `modules/`), so a new dialect adds its wire name there or the form offers a list the API would refuse |
 
 ### 15.4 Tests that enumerate dialects
 

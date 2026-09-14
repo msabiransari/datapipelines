@@ -43,7 +43,9 @@
   <section class="section" aria-label="Questions by topic">
     <div class="container">
       <div class="faq-group" th:each="g : ${faqGroups}">
-        <h2 class="ds-headline" th:text="${g.first}">Topic</h2>
+        <!--/* 127 §B.3: each group heading carries a slug anchor, so the footer and the beta
+             line can link straight to "Support and feedback" (/faq#support-and-feedback). */-->
+        <h2 class="ds-headline" th:text="${g.first}" th:id="${#strings.toLowerCase(#strings.replace(g.first, ' ', '-'))}">Topic</h2>
         <div class="faq">
           <th:block th:each="e, st : ${g.second}">
             <details th:open="${st.index == 0}">

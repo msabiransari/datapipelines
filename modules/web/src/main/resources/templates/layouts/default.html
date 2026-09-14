@@ -410,6 +410,11 @@
           <div class="app-menu-sep"></div>
           <a th:href="@{/settings}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#settings"></use></svg>Settings</a>
           <a th:href="@{/api-console}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#key"></use></svg>API keys</a>
+          <!-- 127 §C: one "Report a problem" for the whole app — the bug form, in a NEW tab
+               (external, never boosted), the URL read off the same SitePages constant the site
+               renders from (surfaced by SiteOriginAdvice). Choosing it closes the menu under the
+               v1.42 rule like every other choice; the app tab stays put. -->
+          <a th:href="${reportProblemUrl}" role="menuitem" target="_blank" rel="noopener"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#bug"></use></svg>Report a problem</a>
 
           <div class="app-menu-sep"></div>
           <form th:action="@{/logout}" method="post" class="app-logout-form" hx-boost="false">

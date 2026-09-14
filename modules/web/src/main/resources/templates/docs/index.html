@@ -9,6 +9,11 @@
       <!-- 033: the docs ship in the jar — this index always matches the running version. -->
       <p class="app-page-sub">The operations manual and specifications for the version you are running.</p>
     </div>
+    <!-- 127 §C: the docs screen's own route to the bug form — the same SitePages constant the
+         avatar menu reads (via SiteOriginAdvice), a new tab, never boosted. -->
+    <div class="app-page-actions">
+      <a th:href="${reportProblemUrl}" target="_blank" rel="noopener" class="ds-button ds-button-secondary"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#bug"></use></svg>Report a problem</a>
+    </div>
   </div>
 
   <section th:each="group : ${groups}" class="u-mb-lg">

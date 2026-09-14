@@ -83,6 +83,48 @@
     </div>
   </section>
 
+  <!--/* 127 §B.2 — the beta's known limitations: the SAME rows the bands below carry, read
+       the other way. Feature names only, never counts (SiteHandTypedCountsGuardTest); every
+       line links the roadmap row that carries it (docs/ROADMAP.md §2.2, the owner backlog).
+       The sentence above the list says what IS at production standard, so the list reads as
+       scope, not as warning. */-->
+  <!-- claim: docs/ROADMAP.md §2.2 — the owner backlog the limitations derive from -->
+  <section class="section" aria-labelledby="rm-limits" id="known-limitations">
+    <div class="container">
+      <p class="kicker"><span class="status">Public beta</span></p>
+      <h2 id="rm-limits" class="ds-headline">Known limitations</h2>
+      <p class="section-lede">
+        At production standard today: the pipeline lifecycle (draft, human release, immutable versions),
+        API keys and the role-based scope matrix, purge, discard and restore, and promotion between
+        deployments. What follows is <em>scope</em>, not warning — each line is a roadmap row, linked,
+        with where it lands on this page.
+      </p>
+      <ul>
+        <li><strong>No in-browser pipeline or template authoring without an agent</strong> — the editors
+          preview, execute, release and discard; authoring is MCP-first today.
+          <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No scheduler, and no scheduler UI</strong> — the design is ratified and lands next
+          month (below). <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No JSONata or JavaScript transform nodes yet</strong> — designed, next month.
+          <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No dashboards or report generation yet</strong> — the API a report or a dashboard
+          would read ships today; the surfaces do not. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No email delivery yet</strong> — alerts, report delivery and email output targets
+          all wait on it. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No audit-log screen yet</strong> — the audit log is written on every call and read
+          by SQL today; the filter screen is on the backlog. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>The v2 band is design-stage</strong> — nested types, conditional execution, per-node
+          retries, SSO and the rest of <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §3</a> are decided
+          direction, not shipped product.</li>
+      </ul>
+      <p class="how-footnote">
+        Found something that is not on this list?
+        <a th:href="${reportProblemUrl}">Report what breaks</a> — the bug form asks for the version and
+        the correlation id, so a fix starts from evidence.
+      </p>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="rm-next">
     <div class="container">
       <p class="kicker"><span class="status">Next month · October 2026</span></p>

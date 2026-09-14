@@ -107,7 +107,8 @@
       "folder-open",
       "file-code",
       "file",
-      "menu"
+      "menu",
+      "bug"
     ],
     "note": "059 — subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 §B: the sprite now covers EVERY icon the app references — the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
     "license_file": "vendor/icons/LICENSE.lucide",
@@ -152,7 +153,8 @@
       "folder-open": "c011afb630321d63649bb2d7ff510cb5a4e2979c1f6e86a6f1c6d28ff62856e3",
       "file-code": "23703e1c1fcf4000354bb9bd1852344a5dc76bf87747238c1e1bb2d932f6844e",
       "file": "fe93aa65c1fbfc2d00b3c1d59ce3da94fd2245716e694128688d6c50adc0768e",
-      "menu": "8a1841a0766152e1165ce5c401e29e15c170e71df3a9d9c8ad5e96322052e1c9"
+      "menu": "8a1841a0766152e1165ce5c401e29e15c170e71df3a9d9c8ad5e96322052e1c9",
+      "bug": "111a60d1747fcc7671bf7afdd8334ba815fe1d99b7d764fdb72caed8611e20d9"
     }
   },
   "htmx": {

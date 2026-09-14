@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -233,6 +234,45 @@ class ShellRenderTest {
         html shouldContain "class=\"app-logout-form\" hx-boost=\"false\""
     }
 
+    /**
+     * 127 §C — the avatar menu's choices, pinned at the render: exactly the four `menuitem`s
+     * in arrow-key order (Settings, API keys, Report a problem, Log out), and the new one
+     * opens the bug form in a NEW tab (external, never boosted) with the URL the SitePages
+     * constant spells. Removing the `menuitem` role from the new link turns the count red —
+     * that is the guard's falsification leg.
+     */
+    @Test
+    fun `the avatar menu carries Report a problem between API keys and Log out`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+
+        val items = Regex("""role="menuitem"""").findAll(html).toList()
+        items.size shouldBe 4
+
+        val report = html.indexOf(">Report a problem</a>")
+        (report > 0) shouldBe true
+        (html.indexOf(">API keys</a>") < report) shouldBe true
+        (report < html.indexOf(">Log out</button>")) shouldBe true
+        html shouldContain "href=\"$REPORT_PROBLEM_URL\" role=\"menuitem\" target=\"_blank\" rel=\"noopener\""
+        // The new tab is the contract: no hx-boost on an external target.
+        Regex("""href="$REPORT_PROBLEM_URL[^"]*"[^>]*hx-boost""").containsMatchIn(html) shouldBe false
+    }
+
+    /** 127 §C — the docs index header carries the same link, from the same constant. */
+    @Test
+    fun `the docs index header links the bug form in a new tab`() {
+        val html =
+            engine.process(
+                "docs/index",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("groups", emptyList<Any>())
+                },
+            )
+
+        html shouldContain "href=\"$REPORT_PROBLEM_URL\" target=\"_blank\" rel=\"noopener\" class=\"ds-button ds-button-secondary\""
+        html shouldContain ">Report a problem</a>"
+    }
+
     @Test
     fun `login and the OIDC redirect are full navigations`() {
         val html = engine.process("login", webContext().apply { fillLogin() })
@@ -319,6 +359,8 @@ class ShellRenderTest {
         setVariable("activeTheme", "saas")
         setVariable("authenticated", true)
         setVariable("currentPath", "/pipelines")
+        // 127 — SiteOriginAdvice's attribute at runtime; the render tests set it by hand.
+        setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
     }
 
     private fun webContext(): WebContext =
