@@ -83,7 +83,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="demo-title">
+  <section class="section band" aria-labelledby="demo-title">
     <div class="container">
       <p class="kicker">The demo</p>
       <h2 id="demo-title" class="ds-headline">Half a billion rideshare trips, read in place</h2>
@@ -110,11 +110,8 @@
       </p>
       <div class="shots">
         <figure class="shot">
-          <!-- screenshot: the sample-lake datasource's dp-catalog registry — untouched capture from `./gradlew siteShots` (093 §C) -->
-          <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-            <img th:src="@{/site/img/datasource-lake.png}" width="1440" height="900" alt="The sample-lake datasource page: a LAKE badge, the name sample-lake, and a description of the NYC high-volume for-hire trip data read in place from Parquet on S3. Below it, the registered-tables tree — the nyc namespace holding mobility, holding four tables: hvfhs_companies, hvfhv_trips, hvfhv_trips_sample and hvfhv_zone_day, each with a parquet badge, and hvfhv_trips additionally with a pickup_date partition badge." loading="lazy">
-          </div>
           <figcaption>dp-catalog on the demo's own lake datasource. Four registered tables, each with its format and — where it has one — its partition column. Read-only on this screen: registration is REST or <code>lake_tables_*</code>.</figcaption>
+          <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
         </figure>
       </div>
     </div>
@@ -148,7 +145,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="faq-title">
+  <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'dp-lake, in three questions')}"></div>

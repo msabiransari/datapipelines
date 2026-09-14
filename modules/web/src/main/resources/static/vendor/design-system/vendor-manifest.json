@@ -205,16 +205,20 @@
     "files": [
       "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2",
       "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2",
-      "vendor/fonts/jetbrains-mono/OFL.txt"
+      "vendor/fonts/jetbrains-mono/OFL.txt",
+      "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Regular.woff2",
+      "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2"
     ],
     "sha256": {
       "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2": "a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2",
       "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2": "086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353",
-      "vendor/fonts/jetbrains-mono/OFL.txt": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+      "vendor/fonts/jetbrains-mono/OFL.txt": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad",
+      "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Regular.woff2": "80e093820f466580395458bb33dcf744df49585cf93acd6f74520a60387d53a6",
+      "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2": "4a752d6e3a3edb4615952b4a813cae005c600fd17f810fec2217fd81cd34db43"
     },
     "source": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
     "license": "OFL-1.1",
-    "note": "079 §G — weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/."
+    "note": "079 §G — weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/. 133: JetBrainsMonoSite-* are site-only latin subsets (39 KB total vs 184) — the marketing pages render authored English code only, and the full 184 KB pair in the late sheet cost ~1.05s of FCP under the throttled Lighthouse harness. The app keeps the full faces."
   },
   "manrope": {
     "package": "@fontsource-variable/manrope",
@@ -233,5 +237,30 @@
     "license": "OFL-1.1",
     "license_file_upstream": "LICENSE",
     "note": "Site v2 (2026-09-09) — the marketing site's display/body face (direction B). Variable weight axis, latin + latin-ext subsets from the pinned fontsource package (upstream sharanda/manrope's GitHub API answered 404 on 2026-09-09, so the npm package is the pinned, hash-recorded source). Vendored verbatim; the app keeps Inter. No Google Fonts, no CDN."
+  },
+  "ibm-plex-mono": {
+    "package": "google/fonts ofl/ibmplexmono (Google Fonts css2 subsets)",
+    "version": "v20",
+    "files": [
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-500-normal.woff2",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-500-normal.woff2",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-600-normal.woff2",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2",
+      "vendor/fonts/ibm-plex-mono/OFL.txt"
+    ],
+    "sha256": {
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-500-normal.woff2": "01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-500-normal.woff2": "6bb06407c97584b0867a959e05e8874693bfeb8c317de190811c51598f2d99ea",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2": "0d1f0b8d0722224e32e9f28261bdc86c79115be73444ae5eceb73976a1bcdf83",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-600-normal.woff2": "32057cf50dd14bdb21a2c93766c4a2c43e4abe688ea3922df3203cac7751a98b",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2": "4f84d86cfd060f4ded334358ff8a4c81d4db2ed5addd568359d693f44a87765a",
+      "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2": "5b9b81f54dd69635c7adcaacd4c4545a73fe4809c528e22734b238a83a74135f",
+      "vendor/fonts/ibm-plex-mono/OFL.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+    },
+    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700 (woff2 UA), licence https://github.com/google/fonts/raw/main/ofl/ibmplexmono/OFL.txt",
+    "license": "OFL-1.1",
+    "note": "133 — the marketing site display face (owner ruling 2026-09-14, the mock's plexmono preset): h1-h3, kickers, proof-strip values. Weights 500/600/700, latin + latin-ext subsets. font-display: swap per the 133 ruling (the h1 is the LCP element)."
   }
 }

@@ -38,11 +38,14 @@ class SiteRenderTest {
         // loads disabled and the site sheet rides inside the bundle.
         html shouldContain "href=\"/site/css/site-chrome.css\""
         html shouldContain "href=\"/vendor/design-system/themes/auto.css\""
-        // 115: the hero shows the ARTIFACT — the sentence and its result — as placeholder slots
-        // until the owner's captures land. No mocked dashboard, ever: none exists until next
-        // month, and a stale or invented product shot is a false claim.
-        html shouldContain "data-shot=\"sentence-to-result\""
-        html shouldContain "data-shot=\"artifact-result\""
+        // 133 §B: the hero shows the ARTIFACT as a rendered console — the real demo run from
+        // SiteFacts' demo block (the sentence, the steps, the result table) — and the dark
+        // product slab carries the run's DAG. No placeholder, no mocked dashboard, ever: none
+        // exists until next month, and a stale or invented product shot is a false claim.
+        html shouldContain "class=\"console\""
+        html shouldContain "Which rideshare company carried the most trips in each borough last quarter?"
+        html shouldContain "class=\"dag\""
+        html shouldContain "stage_company_zone"
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.
         html shouldContain "href=\"/login\""
@@ -67,7 +70,9 @@ class SiteRenderTest {
         html shouldContain "<span>$count</span> tools cover the full lifecycle"
         html shouldContain "/mcp — $count MCP tools"
         html shouldContain "($count tools)"
-        html shouldContain "src=\"/site/img/execution-result.png\""
+        // 133 §B.3: the run is a rendered console and the endpoint a rendered panel now —
+        // the pre-v2 captures left with the placeholders; the siteShots round re-shoots later.
+        html shouldContain "class=\"console\""
         html shouldNotContain " th:"
         html shouldNotContain ("\${")
     }

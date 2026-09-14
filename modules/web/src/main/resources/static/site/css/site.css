@@ -1,12 +1,34 @@
 /* ============================================================
-   SITE STYLES — datapipelines.co marketing site (v2, "Console")
+   SITE STYLES — datapipelines.co marketing site (v3, the 133 re-skin)
    A layer over the vendored design system: every spacing, radius,
-   motion and surface value references its tokens. The site adds
-   exactly one identity of its own — the amber accent and the
-   Manrope / JetBrains Mono faces — declared ONCE in the block
-   below and referenced everywhere else. Theme is a stylesheet
-   swap (site.js), so every rule here must read in light, dark
-   and auto; the accent is chosen to hold on both grounds.
+   motion and surface value references its tokens.
+
+   THE DESIGN LAYER (owner ruling 2026-09-14; the approved mock is
+   notes/2026-09-14-site-reskin-mock.html in the orchestration store —
+   its tokens, type, spacing, components and motion are the spec):
+   - Palette: the `--site-*` token set below, in THREE states — bare
+     :root is LIGHT (the new default on a first visit), a dark media
+     query guarded by :not([data-theme="light"]) is Auto, and
+     [data-theme="dark"] is the explicit dark. site.js drives the
+     attribute; the design system's themes/*.css keep defining only
+     `--_*` (the APP reads those), and the bridge block below points
+     every semantic token the SITE layer reads at the site palette,
+     so the site never colours itself from the app's theme values.
+   - Type: IBM Plex Mono (vendored, 500/600/700) is the DISPLAY face —
+     h1–h3, kickers, proof-strip values, brand. Manrope stays the body
+     face ("everything mono" was seen and rejected); JetBrains Mono
+     stays for code and the console — Plex is for what the page SAYS,
+     JetBrains for what the product RUNS, so the two monos never share
+     one block.
+   - Sections are inset SLABS, not rules: no .section border anywhere;
+     a section is open on the ground or a `.band` slab (the `--site-band`
+     tone, 28px radius, inset margin, 1px edge) — one `.dark` slab (the
+     panel tone) per page at most, the home page's product band.
+   - Depth and motion: cards rest on `--site-shadow` and lift on hover;
+     the hero copy, the console and its result rows rise in a stagger;
+     the DAG's two answer edges flow. Every element rests VISIBLE — an
+     entrance is a keyframe that plays, never an opacity: 0 parked on an
+     observer — and prefers-reduced-motion turns all of it off.
    ============================================================ */
 
 /* JetBrains Mono is NOT declared here: its two faces (400, 500) live in
@@ -18,7 +40,11 @@
 /* --------------------------------------------------------
    Faces — self-hosted (VendoredFontsAuditTest: no font host,
    ever). Relative URLs: this file is served at /site/css/.
-   `optional` like app.css: a late face must never reflow.
+   Manrope (body) keeps `optional`: a late body face must never
+   reflow. IBM Plex Mono (display) is `swap` per the 133 ruling —
+   the h1 is the LCP element and a fallback headline showing for a
+   beat beats an invisible one; the two weights above the fold
+   (700, 600) are preloaded in the layout.
    -------------------------------------------------------- */
 
 @font-face {
@@ -39,29 +65,218 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* IBM Plex Mono — the display face (133 §A.2), vendored OFL like its
+   neighbours. Three weights, latin + latin-ext; ~87 KB total. */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../../vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../../vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../../vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../../vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../../vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../../vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 /* --------------------------------------------------------
-   Site identity tokens — the ONE place the site departs from
-   the design system's palette. Amber reads on the dark ground
-   (contrast 9.6:1 on --_surface-page) and on the light one
-   (the -ink variant carries text on amber).
+   Site palette — the 133 mock's `--site-*` tokens, THREE states
+   exactly as the design system states themes: bare :root = LIGHT
+   (the default on a first visit, owner ruling 2026-09-14), the
+   dark media query guarded by :not([data-theme="light"]) = Auto
+   following the OS, and [data-theme="dark"] = the explicit choice.
+   site.js owns the attribute. The band tone is the slab floor: two
+   steps from the ground, deep enough to hold on a weak monitor.
+   These blocks are the ONLY places hex literals live — every rule
+   below resolves colour through a token.
    -------------------------------------------------------- */
 
 :root {
   --site-font-sans: "Manrope", var(--font-sans);
   --site-font-mono: "JetBrains Mono", var(--font-mono);
-  --site-accent: #e39b1a;
-  --site-accent-hover: #f2b13a;
-  --site-accent-ink: #14110a;
-  --site-accent-soft: rgba(227, 155, 26, 0.16);
-  --site-accent-line: rgba(227, 155, 26, 0.38);
-  --site-glow: radial-gradient(70% 60% at 50% 0%, rgba(227, 155, 26, 0.22), transparent 72%);
-  --site-tracking-display: -0.03em;
+  --site-font-display: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --site-ground: #F5F7FA;
+  --site-surface: #FFFFFF;
+  --site-surface-2: #EDF1F5;
+  --site-band: #DFE6EE;
+  --site-ink: #101820;
+  --site-ink-2: #3D4A57;
+  --site-muted: #66737F;
+  --site-hair: #D6DDE4;
+  --site-hair-2: #C3CCD6;
+  --site-accent: #C4740A;
+  --site-accent-ink: #8C5206;
+  --site-accent-btn-ink: #1A1204;
+  --site-accent-soft: #FBEFD9;
+  --site-panel: #0B1420;
+  --site-panel-2: #12203A;
+  --site-panel-ink: #E8EEF5;
+  --site-panel-muted: #8FA0B3;
+  --site-panel-hair: #24344B;
+  --site-good: #1E8A5A;
+  --site-good-panel: #4FCB8B;
+  --site-shadow: 0 1px 2px rgba(16, 24, 32, .05), 0 8px 24px -12px rgba(16, 24, 32, .18);
+  --site-shadow-lift: 0 2px 4px rgba(16, 24, 32, .06), 0 18px 40px -16px rgba(16, 24, 32, .28);
+  --site-glow: radial-gradient(60% 50% at 30% 0%, rgba(240, 163, 43, .16), transparent 70%);
+  color-scheme: light;
+
+  /* Compat aliases the pre-133 component rules read. */
+  --site-accent-hover: #B26A09;
+  --site-accent-line: color-mix(in srgb, var(--site-accent) 38%, transparent);
+  --site-tracking-display: -0.035em;
   --site-measure: 62ch;
-  /* 119 §A.1: the ONE head→body gap every section shares — 20px on a phone, 24px from
-     48rem up (the media query below moves the token, nothing else restate it). */
-  --site-gap-head: var(--space-5);
-    /* 119 §A.5: the hero shot may never push the proof strip out of the fold. */
-  --site-hero-max: min(44vh, 620px);
+  /* 119 §A.1's ONE head→body gap, moved to the mock's .head measure
+     (clamp 28 → 44px); SiteRhythmBrowserTest's constants hold the two
+     viewport readings (44px at 1440, 28px at 390). */
+  --site-gap-head: clamp(28px, 4vw, 44px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --site-ground: #0B1119;
+    --site-surface: #121B26;
+    --site-surface-2: #17222F;
+    --site-band: #182635;
+    --site-ink: #EEF2F6;
+    --site-ink-2: #C3CCD6;
+    --site-muted: #91A0AF;
+    --site-hair: #263241;
+    --site-hair-2: #33415270;
+    --site-accent: #F0A32B;
+    --site-accent-ink: #F7C36B;
+    --site-accent-soft: #2A2110;
+    --site-panel: #070B10;
+    --site-panel-2: #0F1826;
+    --site-panel-ink: #E8EEF5;
+    --site-panel-muted: #8FA0B3;
+    --site-panel-hair: #22314A;
+    --site-good: #4FCB8B;
+    --site-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+    --site-shadow-lift: 0 2px 4px rgba(0, 0, 0, .5), 0 22px 44px -16px rgba(0, 0, 0, .8);
+    --site-glow: radial-gradient(60% 50% at 30% 0%, rgba(240, 163, 43, .14), transparent 70%);
+    color-scheme: dark;
+
+    --site-accent-hover: #F5B344;
+  }
+}
+
+:root[data-theme="dark"] {
+  --site-ground: #0B1119;
+  --site-surface: #121B26;
+  --site-surface-2: #17222F;
+  --site-band: #182635;
+  --site-ink: #EEF2F6;
+  --site-ink-2: #C3CCD6;
+  --site-muted: #91A0AF;
+  --site-hair: #263241;
+  --site-hair-2: #33415270;
+  --site-accent: #F0A32B;
+  --site-accent-ink: #F7C36B;
+  --site-accent-soft: #2A2110;
+  --site-panel: #070B10;
+  --site-panel-2: #0F1826;
+  --site-panel-ink: #E8EEF5;
+  --site-panel-muted: #8FA0B3;
+  --site-panel-hair: #22314A;
+  --site-good: #4FCB8B;
+  --site-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+  --site-shadow-lift: 0 2px 4px rgba(0, 0, 0, .5), 0 22px 44px -16px rgba(0, 0, 0, .8);
+  --site-glow: radial-gradient(60% 50% at 30% 0%, rgba(240, 163, 43, .14), transparent 70%);
+  color-scheme: dark;
+
+  --site-accent-hover: #F5B344;
+}
+
+/* --------------------------------------------------------
+   The bridge: every design-system SEMANTIC the site layer reads
+   resolves through the site palette. themes/*.css keep owning the
+   `--_*` concrete values (the APP's layouts read those — untouched
+   in 133); the swap sheet's `:root` rules come later in the cascade
+   than this file's, so the site must not read them — and after this
+   block it does not. Cascade: tokens.css's mappings sit earlier in
+   the same bundle, so these win for site pages only.
+   -------------------------------------------------------- */
+
+:root {
+  --surface-page: var(--site-ground);
+  --surface-default: var(--site-surface);
+  --surface-raised: var(--site-surface);
+  --surface-overlay: var(--site-surface);
+  --surface-inset: var(--site-surface-2);
+  --surface-hover: var(--site-surface-2);
+  --surface-active: var(--site-band);
+
+  --text-primary: var(--site-ink);
+  --text-secondary: var(--site-ink-2);
+  --text-muted: var(--site-muted);
+  --text-tertiary: var(--site-muted);
+  --text-link: var(--site-accent-ink);
+  --text-link-hover: var(--site-accent);
+
+  --border-default: var(--site-hair-2);
+  --border-hover: var(--site-muted);
+  --border-focus: var(--site-accent);
+  --border-subtle: var(--site-hair);
+
+  --accent-info: var(--site-accent-ink);
+  --accent-info-bg: var(--site-accent-soft);
+  --accent-success: var(--site-good);
+  --accent-success-bg: color-mix(in srgb, var(--site-good) 12%, var(--site-surface));
+  --accent-warning: var(--site-accent-ink);
+  --accent-warning-bg: var(--site-accent-soft);
+
+  --focus-ring: var(--site-accent);
+
+  --shadow-sm: var(--site-shadow);
+  --shadow-md: var(--site-shadow);
+  --shadow-lg: var(--site-shadow-lift);
+  --shadow-xl: var(--site-shadow-lift);
+
+  /* The mock's body measure: 17/1.6. The rem root stays 16px. */
+  --text-base: 1.0625rem;
 }
 
 html {
@@ -70,17 +285,45 @@ html {
 
 body {
   font-family: var(--site-font-sans);
+  line-height: 1.6;
 }
 
+/* The display face is Plex Mono for what the page SAYS (133 §A.2):
+   headlines, kickers, strip values. `balance` is the orphan fix —
+   the scale never shrinks to fit. */
 h1, h2, h3, h4,
 .ds-display, .ds-headline {
-  font-family: var(--site-font-sans);
-  letter-spacing: var(--site-tracking-display);
+  font-family: var(--site-font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
-h1 { font-weight: 800; }
-h2, h3 { font-weight: var(--weight-bold); }
+h1,
+.ds-display {
+  font-size: clamp(2.6rem, 5.2vw, 4.4rem);
+  line-height: 1.02;
+  letter-spacing: var(--site-tracking-display);
+}
+
+h2,
+.ds-headline {
+  font-size: clamp(1.9rem, 3vw, 2.6rem);
+  line-height: 1.1;
+}
+
+h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* Cluster page heroes are not the home hero: long buyer titles at the
+   mock's 4.4rem ceiling would wall of text. One damped variant. */
+.page-hero .ds-display {
+  font-size: clamp(2rem, 3.6vw, 3rem);
+  line-height: 1.06;
+}
 
 code, pre, kbd, .mono {
   font-family: var(--site-font-mono);
@@ -90,9 +333,38 @@ a {
   color: var(--text-link);
 }
 
+/* T271: a prose link reads as a link without its colour — underline,
+   offset, everywhere running text carries one. Nav, button, card and
+   site-map links keep their own affordances (the mock's hover rule). */
+.prose a,
+.section-lede a,
+.fact-list a,
+.fact-list-plain a,
+.split a,
+.demo-note a,
+.features-pointer a,
+.how-footnote a,
+.oss-cla a,
+.hero-note a,
+.card p a,
+.engine-strip-more a,
+.footer-note a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Muted prose is fine until it sits inside a code chip's inset fill — there
+   the quiet pair drops under 4.5:1 (Lighthouse 133), so the chip steps up. */
+.how-footnote code,
+.demo-note code,
+.features-pointer code,
+.footer-note code {
+  color: var(--site-ink-2);
+}
+
 ::selection {
   background: var(--site-accent);
-  color: var(--site-accent-ink);
+  color: var(--site-accent-btn-ink);
 }
 
 /* --------------------------------------------------------
@@ -161,21 +433,64 @@ html {
   .container {
     padding-inline: var(--space-6);
   }
-
-  :root {
-    --site-gap-head: var(--space-6);
-  }
 }
 
 .section {
-  padding-block: var(--space-12);
-  border-top: var(--space-px) solid var(--border-subtle);
+  padding-block: clamp(56px, 8vw, 104px);
 }
 
-@media (min-width: 48rem) {
-  .section {
-    padding-block: var(--space-16);
-  }
+/* 133 §A.3 — sections are inset SLABS, never rules (the ten full-width
+   1px border-tops the owner called ugly are gone; a section is open on
+   the ground or a slab). The band slab: the --site-band tone two steps
+   from the ground, a 28px radius, inset by the page margin, a 1px edge,
+   20px between adjacent slabs. Cards on a slab keep the RAISED surface —
+   never the slab tone — so the hierarchy reads ground < slab < card. */
+.section.band,
+.section.dark {
+  margin-inline: clamp(8px, 2vw, 28px);
+  border-radius: 28px;
+}
+
+.section.band {
+  background: var(--site-band);
+  border: var(--space-px) solid color-mix(in srgb, var(--site-hair-2) 70%, transparent);
+  /* T271: the mock's muted is fine on the ground but 3.9:1 on the band —
+     quiet text on a slab steps up to ink-2 (Lighthouse 133, color-contrast). */
+  --text-muted: var(--site-ink-2);
+}
+
+.section.band + .section.band,
+.section.dark + .section.band,
+.section.band + .section.dark {
+  margin-top: var(--space-5);
+}
+
+/* ONE dark slab per page at most (home: the product band). Same shape as
+   the band, the panel tone; its text re-points at the panel inks. */
+.section.dark {
+  background: var(--site-panel);
+  border: var(--space-px) solid var(--site-panel-hair);
+  color: var(--site-panel-ink);
+}
+
+.section.dark h2,
+.section.dark h3 {
+  color: var(--site-panel-ink);
+}
+
+.section.dark .kicker {
+  color: var(--site-accent);
+}
+
+.section.dark .section-lede,
+.section.dark .prose p,
+.section.dark .prose li,
+.section.dark .demo-note {
+  color: var(--site-panel-muted);
+}
+
+.section.dark a {
+  color: var(--site-accent);
 }
 
 /* 119 §A.1 — one rule for the gap between a section's headline and its body. Before this
@@ -214,14 +529,34 @@ html {
   line-height: var(--leading-relaxed);
 }
 
+/* 133 §A.2 — the kicker is the section opener: a 28px 2px rule plus a
+   Plex Mono 700 line in accent-ink, the same everywhere (the mock's
+   .head). The rule draws itself in on load (motion block at the foot). */
 .kicker {
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-wide);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2-5);
+  font-family: var(--site-font-display);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .1em;
   text-transform: uppercase;
-  color: var(--site-accent);
-  margin-bottom: var(--space-2);
+  color: var(--site-accent-ink);
+  margin-bottom: var(--space-3-5);
+}
+
+.kicker::before {
+  content: "";
+  width: 28px;
+  height: 2px;
+  background: currentColor;
+  opacity: .8;
+  flex: none;
+}
+
+/* A kicker that is only a wrapper for a status pill carries no rule. */
+.kicker:has(> .status:only-child)::before {
+  content: none;
 }
 
 /* The eyebrow pill above a hero title: mono, amber-lined, one line of fact. */
@@ -230,10 +565,12 @@ html {
   align-items: center;
   gap: var(--gap-xs);
   padding: var(--space-1) var(--space-3);
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  color: var(--site-accent);
+  font-family: var(--site-font-display);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--site-accent-ink);
   background: var(--site-accent-soft);
   border: var(--space-px) solid var(--site-accent-line);
   border-radius: var(--radius-pill);
@@ -287,12 +624,22 @@ code {
    Header + navigation
    -------------------------------------------------------- */
 
+/* 133: the header floats over the page — translucent ground with a
+   backdrop blur; the hairline appears only once the page has scrolled
+   (site.js toggles .scrolled), so the top of every page is clean. */
 .site-header {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
-  background: var(--surface-page);
-  border-bottom: var(--space-px) solid var(--border-subtle);
+  background: color-mix(in srgb, var(--site-ground) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: var(--space-px) solid transparent;
+  transition: border-color var(--duration-slow) var(--ease-out);
+}
+
+.site-header.scrolled {
+  border-bottom-color: var(--site-hair);
 }
 
 .header-inner {
@@ -308,8 +655,10 @@ code {
   gap: var(--gap-sm);
   margin-inline-end: auto;
   min-height: 2.75rem;
-  font-weight: var(--weight-semibold);
+  font-family: var(--site-font-display);
+  font-weight: 700;
   font-size: var(--text-base);
+  letter-spacing: -0.02em;
   color: var(--text-primary);
 }
 
@@ -324,17 +673,28 @@ code {
   color: var(--site-accent);
 }
 
+/* The theme cycle (Auto / Light / Dark) — a quiet pill with the sun
+   glyph; the short label keeps the 130 header-row budget intact. */
 .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
   min-height: 2.75rem;
   padding-inline: var(--space-3);
   font-size: var(--text-sm);
   color: var(--text-secondary);
-  background: var(--surface-default);
-  border: var(--space-px) solid var(--border-default);
+  background: none;
+  border: var(--space-px) solid var(--border-subtle);
   border-radius: var(--radius-pill);
   cursor: pointer;
+  white-space: nowrap;
   transition: color var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out);
+}
+
+.theme-toggle svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 .theme-toggle:hover {
@@ -423,7 +783,7 @@ code {
   font-family: var(--site-font-mono);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
-  color: var(--site-accent);
+  color: var(--site-accent-ink);
 }
 
 /* 119 §C.1 — the licence chip beside the GitHub link: one glance answers "free?", and it
@@ -437,7 +797,7 @@ code {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-wide);
-  color: var(--site-accent);
+  color: var(--site-accent-ink);
   background: var(--site-accent-soft);
   border: var(--space-px) solid var(--site-accent-line);
   border-radius: var(--radius-pill);
@@ -445,7 +805,7 @@ code {
 }
 
 .nav-chip:hover {
-  color: var(--site-accent-hover);
+  color: var(--site-accent);
   text-decoration: none;
 }
 
@@ -544,112 +904,131 @@ code {
 }
 
 /* --------------------------------------------------------
-   Hero
+   Hero (133 §A/B) — the mock's two-column grid: the copy rises in
+   a stagger on the left, the console (the product, shown) on the
+   right, the proof strip spanning beneath. The amber glow sits
+   behind everything; nothing here is centred any more.
    -------------------------------------------------------- */
 
 .hero {
-  padding-block: var(--space-12) var(--space-12);
-  background: var(--site-glow);
+  position: relative;
+  padding-block: clamp(40px, 8vw, 96px) clamp(40px, 6vw, 72px);
+  overflow: hidden;
 }
 
-@media (min-width: 48rem) {
-  .hero {
-    padding-block: var(--space-20) var(--space-16);
-  }
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--site-glow);
+  pointer-events: none;
+}
+
+.hero .container {
+  position: relative;
 }
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--gap-xl);
+  /* The console needs ~55% to hold its five-column result without clipping
+     (measured at 1440: the share column scrolled out at 1.05fr/1fr). */
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
 }
 
-@media (min-width: 64rem) {
+@media (max-width: 63.99rem) {
   .hero-grid {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
+.hero-copy {
+  display: grid;
+  gap: var(--space-6);
+  justify-items: start;
+}
+
+/* 119 §A.8(d) holds by single digits at 390 (measured 862px of the 844px
+   fold before this trim): the phone hero tightens its own rhythm, never
+   the type scale. */
+@media (max-width: 47.99rem) {
+  .hero-copy {
+    gap: var(--space-5);
+  }
+}
+
+.hero-copy h1 {
+  max-width: 16ch;
+}
+
 .hero-sub {
-  margin-top: var(--space-4);
   max-width: 36rem;
-  font-size: var(--text-lg);
-  line-height: var(--leading-relaxed);
+  font-size: 1.15rem;
+  line-height: 1.55;
   color: var(--text-secondary);
 }
 
 .hero-note {
-  margin-top: var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
-.hero .btn-row {
-  margin-top: var(--space-6);
+.hero-note b {
+  color: var(--text-secondary);
+  font-weight: var(--weight-semibold);
 }
 
-/* 119 §C.2 — the hero's primary CTA is the install itself: a copyable one-liner using the
-   same .code-block/.copy-btn pair every other block uses (site.js already wires it — no
-   new clipboard JS). It is a real <button>, not an <a> styled as a button. */
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* 119 §C.2's install, restyled as the mock's dark chip: the one-liner
+   in panel tones with its copy button attached — a real <button>. */
 .install {
-  margin-top: var(--space-6);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3-5);
+  padding: var(--space-2-5) var(--space-2-5) var(--space-2-5) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--site-panel);
+  color: var(--site-panel-ink);
+  font-family: var(--site-font-mono);
+  font-size: .9rem;
+  font-weight: var(--weight-medium);
+  line-height: 1;
 }
 
-.install .code-block {
-  margin-top: 0;
-  max-width: 24rem;
-  margin-inline: auto;
+.install code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+}
+
+.install .copy-btn {
+  position: static;
+  min-height: 2rem;
+  min-width: 0;
+  padding-inline: var(--space-2-5);
+  font-size: .8rem;
+  font-weight: var(--weight-semibold);
+  color: var(--site-panel-ink);
+  background: var(--site-panel-2);
+  border: var(--space-px) solid var(--site-panel-hair);
+  border-radius: var(--radius-base);
+}
+
+.install .copy-btn:hover {
+  background: var(--site-panel-hair);
+  color: var(--site-panel-ink);
+  border-color: var(--site-panel-hair);
 }
 
 .install-label {
-  margin-top: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.hero-shot {
-  margin: 0;
-}
-
-.hero-shot img {
-  display: block;
-  width: 100%;
-  height: auto;
-  /* 119 §A.5: 753px of hero pushed the proof strip out of a 1000px viewport. The box
-     clamps; object-fit letterboxes the raster inside it instead of stretching. */
-  max-height: var(--site-hero-max);
-  object-fit: contain;
-  border-radius: var(--radius-lg);
-  border: var(--space-px) solid var(--border-default);
-  background: var(--surface-inset);
-  box-shadow: var(--shadow-xl, var(--shadow-lg));
-}
-
-/* Centred hero (home, hubs): the title as the thesis, the product below it. */
-.hero-center {
-  text-align: center;
-}
-.hero-center .hero-sub {
-  margin-inline: auto;
-  max-width: 40rem;
-}
-.hero-center .btn-row {
-  justify-content: center;
-}
-.hero-center h1 {
-  margin-top: var(--space-4);
-  margin-inline: auto;
-  max-width: 20ch;
-  font-size: clamp(var(--text-3xl), 5vw, calc(var(--text-4xl) * 1.35));
-  line-height: var(--leading-tight);
-}
-.hero-center .hero-shot {
-  margin-top: var(--space-10);
-}
-
-.hero-shot figcaption {
-  margin-top: var(--space-3);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
@@ -671,28 +1050,35 @@ code {
   gap: var(--gap-sm);
   min-height: 2.75rem;
   padding-inline: var(--space-5);
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
-  border: var(--space-px) solid transparent;
-  border-radius: var(--radius-md);
-  transition: background-color var(--duration-fast) var(--ease-out),
+  font-size: .95rem;
+  font-weight: var(--weight-semibold);
+  border: var(--space-px) solid var(--border-default);
+  border-radius: var(--radius-pill);
+  transition: transform var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out),
+              background-color var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
 
 .btn:hover {
   text-decoration: none;
+  transform: translateY(-2px);
+  box-shadow: var(--site-shadow);
 }
 
 .btn-primary {
   background: var(--site-accent);
-  color: var(--site-accent-ink);
+  color: var(--site-accent-btn-ink);
+  border-color: var(--site-accent);
   font-weight: var(--weight-bold);
 }
 
 .btn-primary:hover {
   background: var(--site-accent-hover);
-  color: var(--site-accent-ink);
+  color: var(--site-accent-btn-ink);
+  border-color: var(--site-accent-hover);
+  box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--site-accent) 70%, transparent);
 }
 
 .btn-primary code {
@@ -703,13 +1089,12 @@ code {
 }
 
 .btn-secondary {
-  background: var(--surface-default);
+  background: var(--site-surface);
   color: var(--text-primary);
   border-color: var(--border-default);
 }
 
 .btn-secondary:hover {
-  background: var(--surface-hover);
   color: var(--text-primary);
   border-color: var(--border-hover);
 }
@@ -925,16 +1310,21 @@ code {
   }
 }
 
+/* 133 §A.4 — depth: a card rests on the site shadow and lifts on hover
+   (shadow-lift + -3px). On a slab it keeps the RAISED surface, never the
+   slab tone. Radius is the mock's 16px card corner. */
 .card {
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
   padding: var(--space-5);
-  background: var(--surface-default);
-  border: var(--space-px) solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  background: var(--site-surface);
+  border: var(--space-px) solid var(--site-hair);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--site-shadow);
   transition: border-color var(--duration-fast) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out);
+              transform var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out);
 }
 
 @media (min-width: 64rem) {
@@ -943,7 +1333,9 @@ code {
   }
 }
 .card:hover {
-  border-color: var(--site-accent-line);
+  border-color: var(--site-hair-2);
+  transform: translateY(-3px);
+  box-shadow: var(--site-shadow-lift);
 }
 .card h3 {
   font-size: var(--text-lg);
@@ -967,43 +1359,37 @@ code {
   color: var(--text-secondary);
 }
 
-/* 119 §A.8(d): the hero must hand the fold to the proof strip. On a phone the hero
-   stacks — copy, then numbers, then picture (a 224px shot cannot sit above the numbers
-   and the fold). On desktop the copy column now carries the install CTA too, so the
-   stacked order cannot fit copy + shot + strip inside a 1000px fold: the hero returns to
-   its two-column grid (thesis left, product right) with the strip spanning beneath. */
-@media (max-width: 47.99rem) {
-  .hero-center .container {
+/* 119 §A.8(d) kept through 133: the hero must hand the fold to the proof
+   strip. On a phone the hero stacks — copy, then the numbers, then the
+   console (the product panel cannot sit between the buyer and the proof,
+   exactly as the shot could not). `display: contents` lets the grid's two
+   children join the flex order without a wrapper change. */
+.hero .strip {
+  margin-top: clamp(28px, 4vw, 48px);
+}
+
+@media (max-width: 63.99rem) {
+  .hero .hero-flow {
     display: flex;
     flex-direction: column;
   }
 
-  .hero-center .strip {
+  .hero .hero-grid {
+    display: contents;
+  }
+
+  .hero-copy {
+    order: 1;
+  }
+
+  .hero .strip {
     order: 2;
     margin-top: var(--space-6);
   }
 
-  .hero-center .hero-shot {
+  .hero .console {
     order: 3;
-    margin-top: var(--space-6);
-  }
-}
-
-@media (min-width: 64rem) {
-  .hero-center .container {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    column-gap: var(--gap-xl);
-    align-items: center;
-  }
-
-  .hero-center .hero-shot {
-    margin-top: 0;
-  }
-
-  .hero-center .strip {
-    grid-column: 1 / -1;
-    margin-top: var(--space-4);
+    margin-top: var(--space-8);
   }
 }
 
@@ -1024,14 +1410,15 @@ code {
 }
 
 /* 119 §A.4 — the group label is a chapter heading, not a table caption: the kicker
-   treatment (mono, amber, tracked), real space above and below, and no rule hugging it. */
+   treatment (133: the display face, accent-ink, tracked), real space above and below,
+   and no rule hugging it. */
 .group-title {
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-wide);
+  font-family: var(--site-font-display);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .1em;
   text-transform: uppercase;
-  color: var(--site-accent);
+  color: var(--site-accent-ink);
   margin-top: var(--space-8);
   margin-bottom: 0;
   padding-bottom: 0;
@@ -1097,13 +1484,6 @@ code {
   color: var(--text-primary);
 }
 
-/* 115: the "before" column lists pains — a check mark on "a chart that is wrong the
-   first time" reads as endorsement. The pain variant marks each line with a cross. */
-.fact-list--pain li::before {
-  content: "\00d7";
-  color: var(--text-tertiary);
-}
-
 /* 115: four outcome cards on the home page — three-up leaves the fourth alone on its
    own row; two-by-two at tablet, four-up at desktop. */
 @media (min-width: 40rem) {
@@ -1115,6 +1495,14 @@ code {
 @media (min-width: 64rem) {
   .features-grid--four {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* 133: four text-heavy cards (the comparison and engine grids) — 3+1 strands the
+   fourth as an orphan and four-up crushes the prose; two-by-two from tablet up. */
+@media (min-width: 40rem) {
+  .features-grid--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1165,31 +1553,6 @@ code {
   border-radius: var(--radius-lg);
   background: var(--surface-inset);
   box-shadow: var(--shadow-lg);
-}
-
-/* A screenshot slot the owner has not shot yet: same frame, same ratio, a
-   mono label naming the capture (data-shot) — the page never reflows when
-   the image arrives, and a reviewer sees exactly what will be there. */
-.shot-placeholder {
-  display: grid;
-  place-items: center;
-  aspect-ratio: var(--shot-ratio, 16 / 10);
-  /* 119 §A.5: the hero placeholder's ratio box clamps exactly like a real image would,
-     so the fold behaviour is true before the capture lands, not only after. */
-  max-height: var(--site-hero-max);
-  padding: var(--space-6);
-  border: var(--space-px) dashed var(--site-accent-line);
-  border-radius: var(--radius-lg);
-  background: var(--surface-inset);
-  color: var(--text-muted);
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  text-align: center;
-}
-.shot-placeholder b {
-  display: block;
-  color: var(--site-accent);
-  margin-bottom: var(--space-2);
 }
 
 .shot-scroll:focus-visible {
@@ -1325,100 +1688,105 @@ code {
 }
 
 /* --------------------------------------------------------
-   Proof strip — four facts under the hero, mono keys, bold values.
+   Proof strip (133 §A.2) — the facts under the hero, one raised
+   container with hairline dividers; the labels and values are the
+   display face (Plex Mono is for what the page SAYS — and these
+   numbers are the page's thesis).
    -------------------------------------------------------- */
 
 .strip {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--gap-md);
-  padding-block: var(--space-6);
-  border-top: var(--space-px) solid var(--border-subtle);
-  border-bottom: var(--space-px) solid var(--border-subtle);
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--site-surface);
+  border: var(--space-px) solid var(--site-hair);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--site-shadow);
+  overflow: hidden;
+}
+
+.strip > div {
+  display: grid;
+  gap: var(--space-1-5);
+  align-content: start;
+  padding: var(--space-5) var(--space-6);
+  border-top: var(--space-px) solid var(--site-hair);
+}
+
+.strip > div:first-child {
+  border-top: 0;
 }
 
 @media (min-width: 48rem) {
+  .strip,
+  .strip--five {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .strip > div {
+    border-top: 0;
+    border-inline-start: var(--space-px) solid var(--site-hair);
+  }
+
+  .strip > div:nth-child(3n + 1) {
+    border-inline-start: 0;
+  }
+
+  .strip > div:nth-child(n + 4) {
+    border-top: var(--space-px) solid var(--site-hair);
+  }
+}
+
+/* 119 §C.3: the strip's fifth cell (price) — five-up at desktop, stacked
+   triples below. */
+@media (min-width: 64rem) {
   .strip {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  /* 119 §C.3: the strip's fifth cell (price) — five-up at desktop, stacked pairs below. */
   .strip--five {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
-}
 
-/* The fifth cell's small print under its value: mono, quiet, one line of fact. */
-.strip-sub {
-  display: block;
-  margin-top: var(--space-1);
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-wide);
-  color: var(--text-secondary);
-}
+  .strip > div,
+  .strip > div:nth-child(n + 4) {
+    border-top: 0;
+    border-inline-start: var(--space-px) solid var(--site-hair);
+  }
 
-.strip-k {
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--site-accent);
-}
-
-.strip-v {
-  margin-top: var(--space-1);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--site-tracking-display);
-}
-
-.strip-v b {
-  font-size: var(--text-2xl);
-  margin-inline-end: var(--space-2);
-}
-
-/* --------------------------------------------------------
-   Story — the three numbered beats (ask → draft → release).
-   Numbers carry information: it IS a sequence.
-   -------------------------------------------------------- */
-
-.story {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--gap-md);
-  margin-top: var(--space-8);
-}
-
-@media (min-width: 48rem) {
-  .story {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .strip > div:first-child {
+    border-inline-start: 0;
   }
 }
 
-.story-step {
-  padding: var(--space-5);
-  background: var(--surface-default);
-  border: var(--space-px) solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+.strip-k {
+  font-family: var(--site-font-display);
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--site-muted);
 }
 
-.story-n {
-  font-family: var(--site-font-mono);
-  font-size: var(--text-xs);
-  color: var(--site-accent);
-  margin-bottom: var(--space-2);
+.strip-v {
+  font-family: var(--site-font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--site-ink);
 }
 
-.story-step h3 {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-lg);
-}
-
-.story-step p {
-  margin: 0;
-  color: var(--text-secondary);
+/* The value's small print: the body face, quiet, one line of fact. */
+.strip-v small,
+.strip-sub {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--site-font-sans);
+  font-size: .8rem;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+  line-height: 1.3;
+  color: var(--site-muted);
 }
 
 /* --------------------------------------------------------
@@ -1511,7 +1879,7 @@ code {
 
 .status-shipped {
   border-color: var(--site-accent-line);
-  color: var(--site-accent);
+  color: var(--site-accent-ink);
   background: var(--site-accent-soft);
 }
 
@@ -1965,4 +2333,617 @@ code {
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
+}
+
+/* ============================================================
+   133 — THE PRODUCT COMPONENTS AND THE MOTION LAYER
+   The console (B.1) and the DAG (B.2) are the product SHOWN, fed
+   by SiteFacts' demo block; the compare and the family rows are
+   the mock's home-page structures. Every colour below is a token.
+   ============================================================ */
+
+/* --------------------------------------------------------
+   The console — a dark panel with a title bar: the sentence, the
+   agent's steps, the result, the endpoint line. Panel tokens in
+   BOTH themes (the product is dark on a light page and on a dark
+   one). Plex is for what the page says, JetBrains for what the
+   product runs — this panel is all JetBrains.
+   -------------------------------------------------------- */
+
+.console {
+  position: relative;
+  background: var(--site-panel);
+  color: var(--site-panel-ink);
+  border: var(--space-px) solid var(--site-panel-hair);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--site-shadow-lift);
+  overflow: hidden;
+}
+
+/* Inside any panel context the good tone must hold on the PANEL, not the
+   page: light's good is 4.26:1 there (Lighthouse 133) — the panel tone holds 8:1. */
+.console,
+.dag-embed,
+.section.dark {
+  --site-good: var(--site-good-panel);
+}
+
+.console-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3-5);
+  border-bottom: var(--space-px) solid var(--site-panel-hair);
+  font-family: var(--site-font-mono);
+  font-size: .78rem;
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  color: var(--site-panel-muted);
+}
+
+.console-bar i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--site-panel-hair);
+}
+
+.console-bar span {
+  margin-inline-start: var(--space-2);
+}
+
+.console-body {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-6);
+}
+
+.console-prompt {
+  font-family: var(--site-font-mono);
+  font-size: .92rem;
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+}
+
+.console-prompt .you {
+  color: var(--site-panel-muted);
+}
+
+.console-prompt .q {
+  color: var(--site-panel-ink);
+  border-inline-end: 2px solid var(--site-accent);
+  padding-inline-end: 2px;
+}
+
+.console-steps {
+  display: grid;
+  gap: var(--space-1-5);
+  font-family: var(--site-font-mono);
+  font-size: .8rem;
+  line-height: 1.4;
+  color: var(--site-panel-muted);
+}
+
+.console-steps ul {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1-5);
+}
+
+.console-steps li {
+  list-style: none;
+  display: flex;
+  gap: var(--space-2-5);
+  align-items: baseline;
+}
+
+.console-steps li::before {
+  content: "\2713";
+  color: var(--site-good);
+  font-weight: 700;
+}
+
+.console-steps li.live::before {
+  content: "\25CF";
+  color: var(--site-accent);
+}
+
+.console-result {
+  border: var(--space-px) solid var(--site-panel-hair);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  overflow-x: auto;
+}
+
+.console-result table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--site-font-mono);
+  font-size: .8rem;
+  font-weight: var(--weight-medium);
+  line-height: 1.35;
+}
+
+.console-result th {
+  text-align: start;
+  font-weight: var(--weight-medium);
+  color: var(--site-panel-muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--space-px) solid var(--site-panel-hair);
+  background: var(--site-panel-2);
+  letter-spacing: .04em;
+  font-size: .7rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.console-result td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--space-px) solid var(--site-panel-hair);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.console-result tr:last-child td {
+  border-bottom: 0;
+}
+
+.console-result .num {
+  text-align: end;
+}
+
+.console-result .share {
+  color: var(--site-accent-ink);
+}
+
+.section.dark .console-result .share,
+.console .share {
+  color: var(--site-accent);
+}
+
+.console-endpoint {
+  display: flex;
+  gap: var(--space-2-5);
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--site-font-mono);
+  font-size: .78rem;
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  color: var(--site-panel-muted);
+}
+
+.console-endpoint b {
+  color: var(--site-good);
+  font-weight: var(--weight-semibold);
+}
+
+.console-endpoint code,
+.console-result code {
+  background: var(--site-panel-2);
+  color: var(--site-panel-ink);
+}
+
+/* The provenance line: a real result from the demo workspace, never a promise. */
+.console-src {
+  font-family: var(--site-font-mono);
+  font-size: .72rem;
+  color: var(--site-panel-muted);
+}
+
+/* --------------------------------------------------------
+   The DAG (B.2) — the pipeline the agent built, as inline SVG on
+   the dark product slab; the notes column says why the numbers can
+   go in front of a customer.
+   -------------------------------------------------------- */
+
+.dag-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr);
+  gap: clamp(28px, 5vw, 64px);
+  align-items: center;
+}
+
+@media (max-width: 63.99rem) {
+  .dag-wrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Narrow screens: the diagram keeps its label size and scrolls inside
+   its own box — the page never scrolls sideways for a picture. */
+.dag-scroll {
+  overflow-x: auto;
+}
+
+@media (max-width: 47.99rem) {
+  .dag {
+    min-width: 620px;
+  }
+}
+
+.dag {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* The DAG off the dark slab (133 §B.3): on a light page it sits inside a
+   panel of its own — the same tones, framed. */
+.dag-embed {
+  background: var(--site-panel);
+  border: var(--space-px) solid var(--site-panel-hair);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--site-shadow-lift);
+  padding: var(--space-5);
+}
+
+/* The HTTP verb inside a panel table (the endpoint roster). */
+.console-verb {
+  color: var(--site-good);
+  font-weight: var(--weight-semibold);
+}
+
+.console-result .access {
+  color: var(--site-good);
+}
+
+.dag text {
+  font-family: var(--site-font-mono);
+  font-size: 12.5px;
+  fill: var(--site-panel-ink);
+}
+
+.dag .lbl {
+  fill: var(--site-panel-muted);
+  font-size: 11px;
+  letter-spacing: .06em;
+}
+
+.dag .node {
+  fill: var(--site-panel-2);
+  stroke: var(--site-panel-hair);
+  stroke-width: 1;
+}
+
+.dag .node.hot {
+  stroke: var(--site-accent);
+}
+
+.dag .edge {
+  stroke: var(--site-panel-hair);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.dag .flow {
+  stroke: var(--site-accent);
+  stroke-width: 1.5;
+  fill: none;
+  stroke-dasharray: 4 6;
+  animation: dag-flow 1.6s linear infinite;
+}
+
+@keyframes dag-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.dag .pill {
+  fill: var(--site-accent);
+}
+
+.dag .pill-t {
+  fill: var(--site-accent-btn-ink);
+  font-weight: 700;
+  font-family: var(--site-font-display);
+  font-size: 10px;
+}
+
+/* The release line is the longest text in the figure; one step down keeps
+   it inside the bar. */
+.dag .rel {
+  font-size: 11.5px;
+}
+
+.dag-notes {
+  display: grid;
+  gap: var(--space-5);
+  justify-items: start;
+}
+
+/* The dark slab's h2 is nested in the notes column, so the section-level head-gap
+   rule cannot reach it; the same token applies here on top of the column's own gap. */
+.dag-notes h2 + .row {
+  margin-top: calc(var(--site-gap-head) - var(--space-5));
+}
+
+.dag-notes .row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.dag-notes .row p {
+  color: var(--site-panel-muted);
+}
+
+.dag-notes .row b {
+  display: block;
+  color: var(--site-panel-ink);
+  font-weight: var(--weight-semibold);
+}
+
+.dag-notes .n {
+  font-family: var(--site-font-display);
+  font-size: .75rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--site-accent);
+  border: var(--space-px) solid var(--site-panel-hair);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+}
+
+.dag-notes > p {
+  color: var(--site-panel-muted);
+}
+
+.dag-notes a {
+  color: var(--site-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* --------------------------------------------------------
+   Before / after (the mock's .compare) — the buyer's ticket on the
+   left, the sentence on the right, an arrow between. The "after"
+   column wears the accent-soft wash.
+   -------------------------------------------------------- */
+
+.compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+@media (max-width: 47.99rem) {
+  .compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compare .compare-arrow {
+    transform: rotate(90deg);
+    padding: var(--space-1-5) 0;
+  }
+}
+
+.compare .col {
+  background: var(--site-surface);
+  border: var(--space-px) solid var(--site-hair);
+  border-radius: var(--radius-xl);
+  padding: var(--space-7);
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  box-shadow: var(--site-shadow);
+}
+
+.compare .col.after {
+  border-color: color-mix(in srgb, var(--site-accent) 45%, var(--site-hair));
+  background: linear-gradient(180deg, var(--site-accent-soft), var(--site-surface) 55%);
+}
+
+.compare .compare-arrow {
+  display: grid;
+  place-items: center;
+  color: var(--site-muted);
+  font-size: 1.4rem;
+}
+
+.compare .quote {
+  font-family: var(--site-font-display);
+  font-size: 1.15rem;
+  /* 600, not the mock's 500: the 500's file otherwise joins the critical
+     download window (Lighthouse 133) for one decorative weight. Vendored
+     but unused, it never downloads. */
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--site-ink);
+}
+
+.compare .col.after .quote {
+  font-weight: 700;
+}
+
+/* The ticket lines: a square bullet, muted until the point lands. */
+.ticket {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2-5);
+}
+
+.ticket li {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  color: var(--site-ink-2);
+}
+
+.ticket li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--site-hair-2);
+  flex: none;
+  transform: translateY(-1px);
+}
+
+.ticket li:last-child {
+  color: var(--site-ink);
+  font-weight: var(--weight-semibold);
+}
+
+/* The dated promise, in panel tones like the console it previews. */
+.receipt {
+  font-family: var(--site-font-mono);
+  font-size: .8rem;
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  background: var(--site-panel);
+  color: var(--site-panel-ink);
+  padding: var(--space-3) var(--space-3-5);
+  border-radius: var(--radius-lg);
+}
+
+.receipt span {
+  color: var(--site-panel-muted);
+}
+
+/* --------------------------------------------------------
+   Family rows (the mock's .fam) — the demo families as name / one
+   sentence / command rows on a hairline grid.
+   -------------------------------------------------------- */
+
+.fam {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fam .row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding-top: var(--space-3-5);
+  border-top: var(--space-px) solid var(--site-hair);
+}
+
+.fam .row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.fam .name {
+  font-family: var(--site-font-display);
+  font-weight: 700;
+  color: var(--site-ink);
+}
+
+.fam .row code {
+  white-space: nowrap;
+}
+
+@media (max-width: 47.99rem) {
+  .fam .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+}
+
+/* --------------------------------------------------------
+   The 133 motion layer — entrances only, every element rests
+   VISIBLE. Nothing here waits on an observer: the keyframes play
+   on load and end at rest. Reduced motion turns all of it off
+   (the design system's global zeroing already does; the DAG flow
+   gets its own off switch per the mock).
+   -------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-copy > * {
+    animation: site-rise .7s var(--ease-out) both;
+  }
+
+  .hero-copy > *:nth-child(2) { animation-delay: .08s; }
+  .hero-copy > *:nth-child(3) { animation-delay: .16s; }
+  .hero-copy > *:nth-child(4) { animation-delay: .24s; }
+  .hero-copy > *:nth-child(5) { animation-delay: .32s; }
+
+  .hero .console {
+    animation: site-rise .8s .2s var(--ease-out) both;
+  }
+
+  .console-result tbody tr {
+    animation: site-row-in .5s var(--ease-out) both;
+  }
+
+  .console-result tbody tr:nth-child(1) { animation-delay: .75s; }
+  .console-result tbody tr:nth-child(2) { animation-delay: .9s; }
+  .console-result tbody tr:nth-child(3) { animation-delay: 1.05s; }
+  .console-result tbody tr:nth-child(4) { animation-delay: 1.2s; }
+  .console-result tbody tr:nth-child(5) { animation-delay: 1.35s; }
+
+  .console-steps li {
+    animation: site-row-in .4s var(--ease-out) both;
+  }
+
+  .console-steps li:nth-child(2) { animation-delay: .25s; }
+  .console-steps li:nth-child(3) { animation-delay: .45s; }
+  .console-steps li:nth-child(4) { animation-delay: .6s; }
+
+  /* The kicker's rule draws itself in. */
+  .kicker::before {
+    animation: site-rule .6s var(--ease-out) both;
+    transform-origin: left;
+  }
+
+  .console-prompt .q {
+    animation: site-caret 1s steps(1) 6;
+  }
+}
+
+@keyframes site-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes site-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes site-rule {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes site-caret {
+  50% {
+    border-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dag .flow {
+    animation: none;
+  }
 }

@@ -74,11 +74,11 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="fa-cost">
+  <section class="section band" aria-labelledby="fa-cost">
     <div class="container">
       <p class="kicker">The cost of a copy</p>
       <h2 id="fa-cost" class="ds-headline">What the nightly copy adds — and what answering in place removes</h2>
-      <div class="features-grid">
+      <div class="features-grid features-grid--two">
         <article class="card">
           <!-- claim: docs/staging.md §3 -->
           <h3>Freshness</h3>
@@ -136,7 +136,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="fa-choose">
+  <section class="section band" aria-labelledby="fa-choose">
     <div class="container">
       <p class="kicker">The short version</p>
       <h2 id="fa-choose" class="ds-headline">Choose by the job in front of you</h2>
@@ -171,7 +171,7 @@
       <h2 id="fa-shot" class="ds-headline">The answer, where the copy would have been</h2>
       <figure class="shot">
         <figcaption>The demo lake pipeline <code>nyc/mobility/taxi_vs_rideshare</code> mid-run — each source read in place, the join staged, the result in the results dock. No warehouse between them.</figcaption>
-        <div class="shot-placeholder" data-shot="execution-result" style="--shot-ratio: 16 / 10"><b>[shot: execution-result]</b>execution detail · node table · staged join result · 1440×900</div>
+        <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
       <div class="prose">
         <!-- claim: docs/deployment.md §Appendix B -->
@@ -185,7 +185,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="faq-title">
+  <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/staging.md §3 — does datapipelines copy my data -->

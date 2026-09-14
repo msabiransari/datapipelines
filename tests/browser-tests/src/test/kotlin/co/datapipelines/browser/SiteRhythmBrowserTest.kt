@@ -13,8 +13,9 @@ import org.junit.jupiter.api.Test
  * spacing defects that round found were only visible as computed geometry:
  *
  *  - **(a)** every `.section` h2 → next-element gap equals the one head→body token
- *    (`--site-gap-head`: 24px desktop / 20px phone, ± 1px) — the rule that replaced the
- *    five different gaps the measurement found (0, 16, 20, 24 and 32px);
+ *    (`--site-gap-head`: the 133 mock's clamp — 44px at 1440 / 28px at 390, ± 1px) —
+ *    the rule that replaced the five different gaps the measurement found (0, 16, 20,
+ *    24 and 32px);
  *  - **(b)** every `.card` carries the token padding (24px from 64rem, 20px below);
  *  - **(c)** on `/how-it-works` no two cards sharing a grid row differ in height by more
  *    than 40% unless both are ≤ 260px — the stretch is gone (`align-items: start`) AND the
@@ -275,8 +276,8 @@ class SiteRhythmBrowserTest : BrowserSuite() {
                  }
                  return { pairs: pairs, tight: tight };
                }"""
-        const val DESKTOP_GAP = 24.0
-        const val PHONE_GAP = 20.0
+        const val DESKTOP_GAP = 44.0
+        const val PHONE_GAP = 28.0
         const val LEDE_GAP = 16.0
         const val DESKTOP_CARD_PADDING = 24.0
         const val PHONE_CARD_PADDING = 20.0

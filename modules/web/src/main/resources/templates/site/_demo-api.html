@@ -1,0 +1,28 @@
+<!--/*
+  133 §B.3 — the published-endpoint panel: what the API section shows for the demo
+  workspace, rendered as a component instead of a screenshot. Same rule as the console
+  and the DAG: every value with a number in it renders from SiteFacts' demo block, and
+  SiteHandTypedCountsGuardTest's demo arm sweeps this file for a typed digit.
+*/-->
+<!-- claim: docs/rest-api.md §19 — a published endpoint serves a released version;
+     docs/auth.md §7.7 — the endpoint key is bound to the path -->
+<div class="console" th:fragment="api(demo)" aria-label="The published endpoint: the URL, the version it serves, and the key bound to its path" xmlns:th="http://www.thymeleaf.org">
+  <div class="console-bar"><i></i><i></i><i></i><span>workspace: demo · API</span></div>
+  <div class="console-body">
+    <div class="console-result">
+      <table>
+        <thead>
+          <tr><th>endpoint</th><th>serves</th><th>key reach</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b class="console-verb">GET</b> <code th:text="${demo.endpoint}">…</code></td>
+            <td><span th:text="${demo.pipelinePath}">…</span> · <span th:text="${demo.version}">…</span></td>
+            <td th:text="${demo.keyReach}">…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="console-src">from the demo workspace — released by a human, served as this version forever</p>
+  </div>
+</div>

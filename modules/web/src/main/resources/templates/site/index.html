@@ -28,17 +28,38 @@
   <link rel="icon" type="image/png" sizes="16x16" th:href="@{/site/brand/favicon-16.png}">
   <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
   <link rel="manifest" th:href="@{/site/brand/site.webmanifest}">
-  <meta name="theme-color" content="#1F4FD8">
+  <meta name="theme-color" content="#F5F7FA">
   <!-- Site v2 batch 2 (111 §C): the whole head chain rides one bundled request
        (site-chrome.css) — see _layout.html for the derivation and the guard. The Manrope
        preload (the body/LCP face) rides at the top of the request queue; the mono faces
-       load in the late sheet instead (see _layout.html), off the critical chain. -->
-  <link rel="preload" as="font" type="font/woff2" crossorigin th:href="@{/vendor/fonts/manrope/manrope-latin-wght-normal.woff2}">
+       load in the late sheet instead (see _layout.html), off the critical chain.
+       133 §D: the display face's 700 weight (the LCP's face) is preloaded, the 600 is
+       a prefetch (see _layout.html — a second preload cost /how-it-works the 95 floor);
+       the 500 arrives by font-display: swap. -->
   <link rel="stylesheet" th:href="@{/site/css/site-chrome.css}">
+  <link rel="preload" as="font" type="font/woff2" crossorigin th:href="@{/vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2}">
+  <link rel="prefetch" as="font" type="font/woff2" crossorigin th:href="@{/vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2}">
+  <link rel="preload" as="font" type="font/woff2" crossorigin th:href="@{/vendor/fonts/manrope/manrope-latin-wght-normal.woff2}">
   <link id="dp-theme" rel="stylesheet" th:href="@{/vendor/design-system/themes/auto.css}" disabled>
   <!--/* The mono faces ride the LATE sheet (111 §C): media="print" keeps their 184 KB off
        the render-blocking chain; site.js flips it to all before first paint. */-->
   <link rel="stylesheet" th:href="@{/site/css/site-fonts-mono.css}" media="print" data-late-style>
+  <!--/* 133: the theme restore, inline — see _layout.html. The only JS that must run
+       before first paint; site.js is defer. */-->
+  <script>
+    (function () {
+      try {
+        var m = window.localStorage.getItem('dp-site-theme');
+        if (m === 'light' || m === 'dark') {
+          document.documentElement.setAttribute('data-theme', m);
+          if (m === 'dark') {
+            var l = document.getElementById('dp-theme');
+            if (l) { l.disabled = false; l.href = '/vendor/design-system/themes/dark.css'; }
+          }
+        }
+      } catch (e) { /* no storage — the default light stands */ }
+    })();
+  </script>
   <!--/* 073 §D — structured data. Two blocks, both parsed by SiteJsonLdTest (a block that
        stops being valid JSON is worse than no block: the crawler drops it silently). Every
        FAQ answer restates something this site claims elsewhere WITH its citation, so the
@@ -82,77 +103,62 @@
   <main id="main">
 
     <!-- ============================ HERO ============================ -->
-    <!--/* 115 §A.2.1: the buyer's page. The artifact, not the process — the sentence that
-         produced a result, and the result. The engineering vocabulary lives one click away
-         on /how-it-works, and SiteBuyerLanguageTest holds this fold to that. */-->
-    <section class="hero hero-center" aria-labelledby="hero-title">
-      <div class="container">
-        <div class="hero-copy ds-animate-slide-up">
-          <!-- claim: docs/deployment.md §10, docs/datasources.md §7 -->
-          <p class="eyebrow">Open source · runs on your servers · your data stays where it is</p>
-          <h1 id="hero-title" class="ds-display">Show your customers their data. No data team required.</h1>
-          <p class="hero-sub">Describe the dataset in a sentence. An AI agent builds it against your real databases, you check the numbers, and your app calls the API — today. Embeddable dashboards ship next month.</p>
-          <!--/* 127 §B.1: the release stage, rendered from the ONE constant (SitePages.RELEASE_STAGE)
-               — never typed into a page; the CTA points at the FAQ's support section. */-->
-          <p class="install-label"><span th:text="${releaseStage}">Public beta — self-hosted, AGPL, actively developed.</span>
-            <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a></p>
-          <div class="install">
-            <!-- claim: docs/deployment.md Appendix A (the reference compose ./app.sh brings up),
-                 docs/deployment.md Appendix B (the demo quickstart), docs/deployment.md §10 (free, AGPL-3.0) -->
-            <div class="code-block">
-              <pre><code>./app.sh --start</code></pre>
-              <button type="button" class="copy-btn" hidden>Copy</button>
+    <!--/* 115 §A.2.1: the buyer's page. 133 §B.1: the artifact is SHOWN, not described —
+         the console at the right is the real demo run (SiteFacts' demo block, ledger
+         T272), the sentence and its result. The engineering vocabulary lives one click
+         away on /how-it-works, and SiteBuyerLanguageTest holds this fold to that. */-->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container hero-flow">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <!-- claim: docs/deployment.md §10, docs/datasources.md §7 -->
+            <p class="kicker">Open source · runs on your servers · your data stays where it is</p>
+            <h1 id="hero-title" class="ds-display">Show your customers their data. No data team required.</h1>
+            <p class="hero-sub">Describe the dataset in a sentence. An AI agent builds it against your real databases, you check the numbers, and your app calls the API — today. Embeddable dashboards ship next month.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="#artifact">See it work</a>
+              <a class="btn btn-secondary" th:href="@{/how-it-works}">For engineers: how it works</a>
+              <!-- claim: docs/deployment.md Appendix A (the reference compose ./app.sh brings up),
+                   docs/deployment.md Appendix B (the demo quickstart), docs/deployment.md §10 (free, AGPL-3.0) -->
+              <span class="install"><code>./app.sh --start</code><button type="button" class="copy-btn" hidden>Copy</button></span>
             </div>
-            <p class="install-label">Run it on your machine — free, one command, no account.</p>
+            <!--/* 127 §B.1: the release stage, rendered from the ONE constant (SitePages.RELEASE_STAGE)
+                 — never typed into a page; the CTA points at the FAQ's support section. */-->
+            <p class="hero-note"><b th:text="${releaseStage}">Public beta — self-hosted, AGPL, actively developed.</b>
+              Run it on your machine, free, one command, no account.
+              <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a></p>
           </div>
-          <div class="btn-row">
-            <a class="btn btn-secondary" href="#artifact">See it work</a>
-            <a class="btn btn-secondary" th:href="@{/how-it-works}">For engineers: how it works</a>
-            <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">
-              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M8 4v12m8-8v8M8 4a2 2 0 1 0 .01 0M8 4h5l3 3m0 0h2a2 2 0 1 1-.01 0M8 16a2 2 0 1 0 .01 0" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              GitHub
-            </a>
-          </div>
+          <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
         </div>
-        <figure class="hero-shot ds-animate-fade-in">
-          <!-- 115: the hero placeholder names the frame the owner will capture — the sentence
-               and its result in one picture (the old editor shot described the process; this
-               one shows the product). No mocked dashboard: none exists until next month. -->
-          <div class="shot-placeholder" data-shot="sentence-to-result" style="--shot-ratio: 16 / 10"><b>[shot: sentence-to-result]</b>the sentence at the top of the console, the result table beneath, the published URL in the header</div>
-          <figcaption>One sentence in, a table of numbers out, and the URL your app calls — the whole product in one picture.</figcaption>
-        </figure>
-          <div class="strip strip--five">
-            <!-- claim: docs/rest-api.md §19 (one release, one publish) -->
-            <div><div class="strip-k">Your first API</div><div class="strip-v"><b>same day</b></div></div>
-            <!-- claim: docs/versioning.md §3 -->
-            <div><div class="strip-k">Approvals before it goes live</div><div class="strip-v"><b>one</b>yours</div></div>
-            <!-- claim: docs/staging.md §3 (the scratch area lives in memory for the run and is dropped after it) -->
-            <div><div class="strip-k">Copies of your data</div><div class="strip-v"><b>none</b></div></div>
-            <!-- claim: docs/datasources.md §7 -->
-            <div><div class="strip-k">Who ever sees your database password</div><div class="strip-v"><b>only the server</b></div></div>
-            <!-- claim: docs/deployment.md §10 (the AGPL-3.0 licence), §4.3 (network egress: the app reaches
-                 only what you configure), §11 ("no phoning-home telemetry" — the prompt's §12 is §11 here) -->
-            <div><div class="strip-k">Price</div><div class="strip-v"><b>$0</b><span class="strip-sub">AGPL-3.0 · self-hosted · no phone-home</span></div></div>
-          </div>
+        <div class="strip strip--five" aria-label="Five facts about the product">
+          <!-- claim: docs/rest-api.md §19 (one release, one publish) -->
+          <div><span class="strip-k">Your first API</span><span class="strip-v">same day</span></div>
+          <!-- claim: docs/versioning.md §3 -->
+          <div><span class="strip-k">Approvals before it goes live</span><span class="strip-v">one<small>yours</small></span></div>
+          <!-- claim: docs/staging.md §3 (the scratch area lives in memory for the run and is dropped after it) -->
+          <div><span class="strip-k">Copies of your data</span><span class="strip-v">none</span></div>
+          <!-- claim: docs/datasources.md §7 -->
+          <div><span class="strip-k">Who ever sees your database password</span><span class="strip-v">only the server</span></div>
+          <!-- claim: docs/deployment.md §10 (the AGPL-3.0 licence), §4.3 (network egress: the app reaches
+               only what you configure), §11 ("no phoning-home telemetry" — the prompt's §12 is §11 here) -->
+          <div><span class="strip-k">Price</span><span class="strip-v">$0<small>AGPL-3.0 · self-hosted · no phone-home</small></span></div>
+        </div>
       </div>
     </section>
 
     <!-- ============================ BEFORE / AFTER ============================ -->
     <!--/* 115 §A.2.2: the message that works for this buyer is a before/after on time and
-         headcount, because that is how they already experience the problem. The left column
-         is the buyer's ticket in their words — a scenario, not a product claim; the right
-         column is what happens here, and every assertion in it cites. */-->
+         headcount, because that is how they already experience the problem. 133: the mock's
+         .compare — the ticket on the left, the sentence on the right, the dated promise as
+         a receipt in the panel tones. */-->
     <section class="section" id="before-after" aria-labelledby="ba-title">
       <div class="container">
         <p class="kicker">The ticket, and the sentence</p>
         <h2 id="ba-title" class="ds-headline">What it costs today, and what it costs here</h2>
-        <div class="split">
-          <div>
-            <p class="eyebrow">Before</p>
-            <blockquote>&ldquo;We want customers to see their usage and billing in the app.&rdquo;</blockquote>
-            <ul class="fact-list fact-list--pain">
+        <div class="compare">
+          <div class="col">
+            <p class="quote">&ldquo;We want customers to see their usage and billing in the app.&rdquo;</p>
+            <ul class="ticket">
               <li>A ticket to engineering</li>
               <li>A data engineer and two sprints</li>
               <li>A warehouse bill and a BI licence</li>
@@ -160,105 +166,99 @@
               <li>The API was always a second project</li>
             </ul>
           </div>
-          <div>
-            <p class="eyebrow">After</p>
+          <div class="compare-arrow" aria-hidden="true">&rarr;</div>
+          <div class="col after">
+            <p class="quote">You describe it in a sentence.</p>
             <!-- claim: docs/mcp-server.md §6, docs/ui-screens.md §4.4, docs/auth.md §7.7 -->
-            <p>You describe it in a sentence. The agent builds the dataset against your real databases, runs it, fixes what fails, and hands you the result with every step visible. You check the numbers. You press release; the API is live; a partner's key opens exactly that one path and nothing else. Live by Friday.</p>
+            <p>The agent builds the dataset against your real databases, runs it, then shows what it read, what it assumed and what it found. You check the numbers. You press release, and the API is live — a partner's key guards exactly that one path and nothing else.</p>
             <!-- claim: docs/ROADMAP.md §2 (roadmap October 2026 — the dated status markup keeps
                  the freshness guard over this promise, same as the roadmap page's own dateline) -->
-            <p><span class="status">Next month: it runs on a schedule and drops an embeddable dashboard into your product. <span class="dateline" data-roadmap-updated="2026-09-10">&middot; dated 2026-09-10</span></span></p>
+            <p class="receipt">NEXT MONTH: <span>it runs on a schedule and drops an embeddable dashboard into your product. · dated <span class="dateline" data-roadmap-updated="2026-09-10">2026-09-10</span></span></p>
           </div>
         </div>
       </div>
     </section>
 
     <!-- ============================ THE ARTIFACT ============================ -->
-    <!--/* 115 §A.2.3: show the artifact. The blockquote is the demo showcase's own question in
-         the buyer's words; the curl is the legal path grammar; the paragraph is why the URL
-         keeps answering. This section is where the primary button lands. */-->
+    <!--/* 115 §A.2.3: show the artifact. 133 §B.1: the console in the hero IS the artifact —
+         a real demo run, not a capture of one. This section says why the answer keeps
+         answering, and hands the reader the same loop on their own machine. Buyer words
+         only: SiteBuyerLanguageTest's fold ends here. */-->
     <section class="section" id="artifact" aria-labelledby="artifact-title">
       <div class="container">
         <p class="kicker">The sentence and the result</p>
         <h2 id="artifact-title" class="ds-headline">This is the product</h2>
         <div class="prose">
           <!-- claim: docs/deployment.md Appendix B (the demo showcase pipeline this sentence drives) -->
-          <blockquote>&ldquo;For every borough and month of 2024, compare taxi and rideshare trips on rainy days versus dry days, and rank the boroughs by how much riders switch to rideshare when it rains.&rdquo;</blockquote>
+          <p>The panel at the top of this page is the whole loop: one sentence in, a table of numbers out — and the endpoint your app calls once you press release. Nothing was copied into a warehouse, nobody wrote a service.</p>
+          <!-- claim: docs/versioning.md §3 -->
+          <p>The URL will answer the same way tomorrow, because a released version never changes.</p>
         </div>
-        <figure class="shot">
-          <div class="shot-placeholder" data-shot="artifact-result" style="--shot-ratio: 16 / 9"><b>[shot: artifact-result]</b>the result table for the sentence above, published endpoint URL visible</div>
-        </figure>
         <div class="code-block">
           <!-- claim: docs/rest-api.md §19.1 path grammar, §19.3 query parameters — the example
-               path is two literal segments, legal under the grammar; `month` is a declared
-               parameter supplied from the query string -->
-          <pre><code>curl -H "DP-API-Key: …" https://your-host/api/x/nyc/rain-share?month=2024-07</code></pre>
-        </div>
-        <div class="prose">
-          <!-- claim: docs/versioning.md §3 -->
-          <p>The numbers came from four places your data already lives. Nothing was copied into a warehouse, nobody wrote a service, and the URL will answer the same way tomorrow because a released version never changes.</p>
+               path is two literal segments, legal under the grammar; anchor_date is a declared
+               parameter supplied from the query string. The endpoint itself renders from the
+               same SiteFacts demo block as the console above. -->
+          <pre><code>curl -H "DP-API-Key: …" https://your-host<span th:text="${facts.demo.endpoint}">…</span></code></pre>
+          <button type="button" class="copy-btn" hidden>Copy</button>
         </div>
       </div>
     </section>
 
     <!-- ============================ VERIFIED BY YOU ============================ -->
-    <!--/* 115 §A.2.4: the trust section — why a buyer can put these numbers in front of a
+    <!--/* 115 §A.2.4 + 133 §B.2: the trust section is the ONE dark slab on the page — the
+         DAG of the pipeline the agent built (the same demo run as the console, from the
+         same SiteFacts block) beside why a buyer can put these numbers in front of a
          customer. Nothing faked: the honesty IS the section. */-->
-    <section class="section" id="trust" aria-labelledby="trust-title">
-      <div class="container">
-        <p class="kicker">Built by AI. Verified by you.</p>
-        <h2 id="trust-title" class="ds-headline">Why you can put these numbers in front of a customer</h2>
-        <div class="story">
-          <div class="story-step">
-            <!-- claim: docs/ui-screens.md §4.4, §4.9 -->
-            <h3>You see every step</h3>
-            <p>Each step of the build shows the rows it produced, and the logic is readable SQL — not code you have to trust.</p>
-          </div>
-          <div class="story-step">
-            <!-- claim: docs/versioning.md §3, docs/auth.md §7.7 -->
-            <h3>Nothing goes live on its own</h3>
-            <p>One human release, every time. A released version is immutable; a partner's key is bound to its path.</p>
-          </div>
-          <div class="story-step">
-            <!-- claim: docs/rest-api.md §10 -->
-            <h3>You can rerun and compare</h3>
-            <p>Every run is recorded with its inputs, so a number you doubt can be reproduced, not argued about.</p>
-          </div>
+    <section class="section dark" id="trust" aria-labelledby="trust-title">
+      <div class="container dag-wrap">
+        <div class="dag-scroll">
+          <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
         </div>
-        <div class="prose">
-          <p>Automatic cross-checks between sources are on the roadmap. Today the check is yours — and it is a five-minute one, because everything is on one screen.</p>
-          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.2, §5 — facts recorded with their evidence, read back beside the columns -->
-          <p>And the agent records what it learns about your data — a unit, a time zone, what a code means — with the query that proved it, so the next question starts from evidence. <a th:href="@{/semantic-layer}">The learned semantic layer &rarr;</a></p>
+        <div class="dag-notes">
+          <p class="kicker">Built by AI. Verified by you.</p>
+          <h2 id="trust-title" class="ds-headline">Why you can put these numbers in front of a customer</h2>
+          <!-- claim: docs/ui-screens.md §4.4, §4.9 -->
+          <div class="row"><span class="n">1</span><p><b>You see every step.</b> Each stage of the build shows the rows it produced, and the logic is readable SQL — not code you have to trust.</p></div>
+          <!-- claim: docs/versioning.md §3, docs/auth.md §7.7 -->
+          <div class="row"><span class="n">2</span><p><b>Nothing goes live on its own.</b> One human release, every time. A released version is immutable; a partner's key is bound to its path.</p></div>
+          <!-- claim: docs/rest-api.md §10 -->
+          <div class="row"><span class="n">3</span><p><b>You can rerun and compare.</b> Every run is recorded with its inputs, so a number you doubt can be reproduced, not argued about.</p></div>
+          <p>Automatic cross-checks between sources are on the roadmap — today the check is yours, and it is a five-minute one, because everything is on one screen.
+            <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7.2, §5 — facts recorded with their evidence, read back beside the columns -->
+            And the agent records what it learns about your data — a unit, a time zone, what a code means — with the query that proved it, so the next question starts from evidence. <a th:href="@{/semantic-layer}">The learned semantic layer &rarr;</a></p>
         </div>
       </div>
     </section>
 
     <!-- ============================ WHAT YOU GET ============================ -->
     <!--/* 115 §A.2.5: outcomes with their ship dates on them — today or next month, never
-         a roadmap item in the present tense. */-->
-    <section class="section" id="outcomes" aria-labelledby="outcomes-title">
+         a roadmap item in the present tense. 133 §A.3: the band slab alternates with the
+         open sections. */-->
+    <section class="section band" id="outcomes" aria-labelledby="outcomes-title">
       <div class="container">
         <p class="kicker">What you get, and when</p>
         <h2 id="outcomes-title" class="ds-headline">Two things today, two next month</h2>
-        <div class="features-grid features-grid--four ds-stagger-children">
-          <article class="card ds-hover-lift">
+        <div class="features-grid features-grid--four">
+          <article class="card">
             <p class="kicker"><span class="status status-shipped">today</span></p>
             <!-- claim: docs/rest-api.md §19 -->
             <h3>An API your product calls</h3>
             <p>Release the dataset, and each one your product needs is a versioned GET endpoint with keys scoped to its path.</p>
           </article>
-          <article class="card ds-hover-lift">
+          <article class="card">
             <p class="kicker"><span class="status status-shipped">today</span></p>
             <!-- claim: docs/rest-api.md §19, docs/versioning.md §3 -->
             <h3>Your data in Tableau, governed</h3>
             <p>Feed Tableau a governed dataset — as an API it reads, or a table it already connects to. <a th:href="@{/tableau}">How it works beside Tableau &rarr;</a></p>
           </article>
-          <article class="card ds-hover-lift">
+          <article class="card">
             <p class="kicker"><span class="status">next month</span></p>
             <!-- claim: docs/ROADMAP.md §2 -->
             <h3>A dataset that stays current</h3>
             <p>The scheduler: datasets that refresh on a schedule, fired exactly once across instances. <a th:href="@{/roadmap}">The dates &rarr;</a></p>
           </article>
-          <article class="card ds-hover-lift">
+          <article class="card">
             <p class="kicker"><span class="status">next month</span></p>
             <!-- claim: docs/ROADMAP.md §2 -->
             <h3>A dashboard inside your app</h3>
@@ -276,18 +276,18 @@
       <div class="container">
         <p class="kicker">Who it's for</p>
         <h2 id="who-title" class="ds-headline">Three teams, one short list</h2>
-        <div class="features-grid ds-stagger-children">
-          <article class="card ds-hover-lift">
+        <div class="features-grid">
+          <article class="card">
             <!-- claim: docs/rest-api.md §19 -->
             <h3>Founders and product owners</h3>
             <p>Your customers are asking to see their data — their usage, their billing, in your app. Describe it, check it, release it.</p>
           </article>
-          <article class="card ds-hover-lift">
+          <article class="card">
             <!-- claim: docs/staging.md §3 -->
             <h3>Teams whose data lives in more than one database</h3>
             <p>One question, several databases, no warehouse project to answer it. The joining happens where the question runs.</p>
           </article>
-          <article class="card ds-hover-lift">
+          <article class="card">
             <!-- claim: docs/ui-screens.md §4.4 -->
             <h3>Engineers who would rather review SQL than write another service</h3>
             <p>The logic is readable SQL you can diff and approve. <a th:href="@{/how-it-works}">How it works, for the engineer who has to run it &rarr;</a></p>
@@ -299,18 +299,18 @@
     <!-- ============================ DEMO DATA ============================ -->
     <!--/* 115 §A.2.7: the demo, cut to half — the one command, the three families in one
          sentence each, and the prompt, which is the sentence in the artifact section (linked,
-         not repeated). */-->
-    <section class="section" id="demo" aria-labelledby="demo-title">
+         not repeated). 133: the mock's .fam rows. */-->
+    <section class="section band" id="demo" aria-labelledby="demo-title">
       <div class="container">
         <p class="kicker">The demo is the quickstart</p>
         <h2 id="demo-title" class="ds-headline">Real data, one command, three families</h2>
         <!-- claim: docs/deployment.md Appendix B (the demo families table and the dp-lake section) -->
         <p class="section-lede"><code>./app.sh --start --demo nyc</code> builds the jar, downloads the published sample set, verifies every checksum, restores the databases and seeds worked examples into your workspace at first login. <a th:href="@{/demo-data}">The demo data, table by table</a> — what loads, where it is from, and its licences.</p>
-        <ul class="fact-list">
-          <li><strong>nyc</strong> — taxi trips on Postgres, weather on MySQL, a reference database on SQLite — in one run.</li>
-          <li><strong>trade</strong> — US trade flows on DuckDB, world mirror statistics on MySQL, exchange rates on SQLite: <code>--demo nyc,trade</code>.</li>
-          <li><strong>lake</strong> — 470 million rideshare trips as Parquet on S3, read in place; nothing downloads: <code>--demo nyc,trade,lake</code>.</li>
-        </ul>
+        <div class="fam">
+          <div class="row"><span class="name">nyc</span><span>Taxi trips on Postgres, weather on MySQL, a reference database on SQLite — in one run.</span><code>--demo nyc</code></div>
+          <div class="row"><span class="name">trade</span><span>US trade flows on DuckDB, world mirror statistics on MySQL, exchange rates on SQLite.</span><code>--demo nyc,trade</code></div>
+          <div class="row"><span class="name">lake</span><span>470 million rideshare trips as Parquet on S3, read in place; nothing downloads.</span><code>--demo nyc,trade,lake</code></div>
+        </div>
         <p class="demo-note">Then ask it <a href="#artifact">the sentence at the top of this page</a> — or your own.</p>
       </div>
     </section>
@@ -350,7 +350,7 @@
     </section>
 
     <!-- ============================ FAQ ============================ -->
-    <section class="section" id="faq" aria-labelledby="faq-title">
+    <section class="section band" id="faq" aria-labelledby="faq-title">
       <div class="container">
         <p class="kicker" th:text="|The product, in ${faqEntries.size()} questions|">The product, in eight questions</p>
         <!-- claim: docs/versioning.md §3 — FAQ "Do I need a data engineer" -->
@@ -370,6 +370,6 @@
 
   <div th:replace="~{site/_layout :: siteFooter}"></div>
 
-  <script th:src="@{/site/js/site.js}"></script>
+  <script th:src="@{/site/js/site.js}" defer></script>
 </body>
 </html>

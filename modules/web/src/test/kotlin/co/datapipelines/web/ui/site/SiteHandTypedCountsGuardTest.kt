@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui.site
 
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.io.File
 
@@ -31,6 +32,75 @@ class SiteHandTypedCountsGuardTest {
 
         val violations = files.flatMap(::violationsIn)
         violations shouldBe emptyList()
+    }
+
+    /**
+     * The 133 demo arm: the console and the DAG show a REAL run, so every number they render
+     * comes from the ONE `SiteFacts.demo` block — no digit typed into either partial. The
+     * sweep strips the places a digit legitimately lives (an SVG's geometry attributes, and
+     * any `th:*` attribute whose value is an expression — the value renders from the block),
+     * then fails on any remaining numeric digit. A digit hugged by a letter is a product
+     * name, not a number ("H2" in the staging column's header), and is not flagged.
+     *
+     * The second half is the wiring proof: the rendered home page states the run's own
+     * numbers, so a partial that quietly stopped reading the block fails here too.
+     */
+    @Test
+    fun `the demo console and DAG render every number from the SiteFacts demo block`() {
+        val violations =
+            DEMO_PARTIALS.flatMap { name ->
+                val file = File(repoRoot(), "modules/web/src/main/resources/templates/site/$name")
+                check(file.isFile) { "the demo partial $name is gone — the arm would pass by checking nothing" }
+                val stripped = stripDemoExempt(file.readText())
+                TYPED_DIGIT
+                    .findAll(stripped)
+                    .map { match ->
+                        val line = stripped.take(match.range.first).count { it == '\n' } + 1
+                        "$name:$line — a digit typed outside the demo block or the SVG geometry"
+                    }.toList()
+            }
+        violations shouldBe emptyList()
+
+        val html = SitePageRenderer.render(SitePages.HOME)
+        val rendered =
+            listOf(
+                "17,660,839",
+                "6,078,750",
+                "80.27%",
+                "523 rows · 482 ms",
+                "263 rows · 204 ms",
+                "377k rows",
+                "stage_company_zone",
+                "awaiting a human release",
+            )
+        rendered.forEach { fact -> html shouldContain fact }
+    }
+
+    /**
+     * The demo partial with its legitimate digit positions blanked: HTML comments, every
+     * geometry attribute's value (`x`, `y`, `width`, `height`, `d`, `viewBox` … — layout,
+     * not data), and every `th:*` attribute whose value carries a `${…}` expression (the
+     * rendered text comes from the block; a `th:` attribute with a LITERAL value keeps its
+     * digits and is reported). Blanking preserves offsets, so a violation's line is real.
+     */
+    private fun stripDemoExempt(text: String): String {
+        val chars = text.toCharArray()
+
+        fun blank(range: IntRange) {
+            for (i in range) {
+                if (chars[i] != '\n') chars[i] = ' '
+            }
+        }
+
+        HTML_COMMENT.findAll(text).forEach { blank(it.range) }
+        DEMO_ATTR.findAll(text).forEach { attr ->
+            val name = attr.groupValues[1]
+            val value = attr.groups[2] ?: return@forEach
+            if (name in SVG_GEOMETRY || (name.startsWith("th:") && "\${" in value.value)) {
+                blank(value.range)
+            }
+        }
+        return String(chars)
     }
 
     /** The counted-noun pattern: a spelled-out or numeric count directly before the noun. */
@@ -128,5 +198,21 @@ class SiteHandTypedCountsGuardTest {
         /** 28 templates and 12 Kotlin files today; well under either means the sweep lost the directories. */
         const val MIN_TEMPLATES = 20
         const val MIN_KOTLIN = 8
+
+        /** The four 133 demo partials the arm sweeps. */
+        val DEMO_PARTIALS = listOf("_demo-api.html", "_demo-console.html", "_demo-dag.html", "_demo-datasources.html")
+
+        /** An HTML comment. */
+        val HTML_COMMENT = Regex("""<!--.*?-->""", RegexOption.DOT_MATCHES_ALL)
+
+        /** An HTML attribute with a quoted value: the name in group 1, the value in group 2. */
+        val DEMO_ATTR = Regex("""([\w:-]+)\s*=\s*"([^"]*)"""")
+
+        /** The SVG attributes whose values are layout geometry, never run data. */
+        val SVG_GEOMETRY =
+            setOf("x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "d", "viewBox", "transform")
+
+        /** A numeric digit — one NOT hugged by a letter ("H2" is a product name, not a number). */
+        val TYPED_DIGIT = Regex("""(?<![A-Za-z])\d""")
     }
 }

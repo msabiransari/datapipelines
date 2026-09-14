@@ -162,6 +162,23 @@ class SiteV2GuardsTest {
         withClue("registry pages no other page links to") { orphans.shouldBeEmpty() }
     }
 
+    /**
+     * 133 §B.3 — **no placeholder ships.** Every `[shot: …]` slot was replaced by a rendered
+     * component (the console, the DAG, a table) or removed with its copy; a placeholder that
+     * comes back fails the build. Falsified at birth: this arm was committed while
+     * placeholders still shipped and named every one of them.
+     */
+    @Test
+    fun `no shot placeholder survives on any rendered site page`() {
+        val offenders =
+            rendered
+                .filter { (_, html) -> "[shot:" in html }
+                .keys
+                .map { it.path }
+                .sorted()
+        withClue("pages still shipping a [shot: …] placeholder") { offenders.shouldBeEmpty() }
+    }
+
     private companion object {
         const val ROADMAP_MAX_AGE_DAYS = 120L
         val MAPPER = ObjectMapper()

@@ -1,0 +1,42 @@
+<!--/*
+  133 §B.2 — the DAG: the pipeline the agent built, as inline SVG on the dark product
+  slab. Geometry (x/y/width/height/d/viewBox) is layout and lives here — the viewBox is
+  700 wide so every node label sits INSIDE its node (the mock's 640 geometry bled the
+  calculator and release lines past their boxes); every LABEL with a number in it
+  renders from SiteFacts' demo block (th:attr does the per-node row arithmetic from the
+  loop index) — SiteHandTypedCountsGuardTest's demo arm fails a digit typed outside
+  those two places. role="img" + aria-label because the picture is content, not
+  decoration.
+*/-->
+<!-- claim: docs/deployment.md Appendix B — the demo showcase pipeline this graph runs;
+     docs/staging.md §3 — the per-run in-memory staging the middle column is -->
+<div th:fragment="dag(demo)" xmlns:th="http://www.thymeleaf.org">
+  <svg class="dag" viewBox="0 0 700 360" role="img" aria-label="The pipeline the agent built: three sources staged into one in-memory database, one answer node, one published endpoint">
+    <text class="lbl" x="24" y="30">SOURCES</text>
+    <text class="lbl" x="290" y="30">STAGING · H2 IN MEMORY</text>
+    <text class="lbl" x="556" y="30">ANSWER</text>
+    <th:block th:each="s, st : ${demo.sources}">
+      <rect class="node" x="24" th:attr="y=${48 + st.index * 72}" width="230" height="52" rx="8"/>
+      <text x="38" th:attr="y=${70 + st.index * 72}" th:text="${s.name}">source</text>
+      <text class="lbl" x="38" th:attr="y=${88 + st.index * 72}" th:text="${s.detail}">detail</text>
+    </th:block>
+    <th:block th:each="s, st : ${demo.stages}">
+      <rect class="node" x="290" th:attr="y=${84 + st.index * 72}" width="230" height="52" rx="8"/>
+      <text x="304" th:attr="y=${106 + st.index * 72}" th:text="${s.name}">stage</text>
+      <text class="lbl" x="304" th:attr="y=${124 + st.index * 72}" th:text="${s.detail}">detail</text>
+    </th:block>
+    <rect class="node hot" x="556" y="120" width="128" height="52" rx="8"/>
+    <text x="570" y="142" th:text="${demo.answer.name}">answer</text>
+    <text class="lbl" x="570" y="160" th:text="${demo.answer.detail}">detail</text>
+    <path class="edge" d="M254 74 C272 74 272 110 290 110"/>
+    <path class="edge" d="M254 146 C272 146 272 182 290 182"/>
+    <path class="edge" d="M254 218 C276 218 276 110 290 110"/>
+    <path class="flow" d="M520 110 C538 110 538 146 556 146"/>
+    <path class="flow" d="M520 182 C538 182 538 146 556 146"/>
+    <rect class="node" x="24" y="286" width="652" height="46" rx="8"/>
+    <rect class="pill" x="36" y="299" width="58" height="20" rx="10"/>
+    <text class="pill-t" x="46" y="313">DRAFT</text>
+    <text class="rel" x="106" y="313" th:text="${demo.releaseLine}">release line</text>
+    <path class="edge" d="M620 172 L620 286"/>
+  </svg>
+</div>

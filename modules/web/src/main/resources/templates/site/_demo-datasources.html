@@ -1,0 +1,28 @@
+<!--/*
+  133 §B.3 — the datasource roster: the demo workspace's sources as the datasources
+  screen lists them, rendered as a component instead of a screenshot. Same rule as the
+  console and the DAG: every value renders from SiteFacts' demo block, and
+  SiteHandTypedCountsGuardTest's demo arm sweeps this file for a typed digit.
+*/-->
+<!-- claim: docs/datasources.md §7 — the agent's access is read-only by default, the
+     credential never leaves the server -->
+<div class="console" th:fragment="datasources(demo)" aria-label="The datasources of the demo workspace, each registered read-only" xmlns:th="http://www.thymeleaf.org">
+  <div class="console-bar"><i></i><i></i><i></i><span>workspace: demo · datasources</span></div>
+  <div class="console-body">
+    <div class="console-result">
+      <table>
+        <thead>
+          <tr><th>datasource</th><th>what it is</th><th>access</th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="d : ${demo.datasources}">
+            <td th:text="${d.name}">name</td>
+            <td th:text="${d.kind}">kind</td>
+            <td class="access" th:text="${d.access}">access</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="console-src">from the demo workspace — the agent sees the schema, never the credential</p>
+  </div>
+</div>

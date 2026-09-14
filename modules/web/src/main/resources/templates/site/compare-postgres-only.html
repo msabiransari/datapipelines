@@ -70,11 +70,11 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="po-four">
+  <section class="section band" aria-labelledby="po-four">
     <div class="container">
       <p class="kicker">The four arrivals</p>
       <h2 id="po-four" class="ds-headline">What shows up with the second source — and the agent, and the partner</h2>
-      <div class="features-grid">
+      <div class="features-grid features-grid--two">
         <article class="card">
           <!-- claim: docs/staging.md §3 -->
           <h3>The second database</h3>
@@ -132,7 +132,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="po-split">
+  <section class="section band" aria-labelledby="po-split">
     <div class="container">
       <p class="kicker">The decision, short</p>
       <h2 id="po-split" class="ds-headline">Stay alone, or add the four</h2>
@@ -165,7 +165,7 @@
       <h2 id="po-shot" class="ds-headline">Postgres as a datasource, the agent as a reader</h2>
       <figure class="shot">
         <figcaption>The datasources screen: Postgres registered read-only, credentials encrypted, the agent's view of it bounded by the key it holds.</figcaption>
-        <div class="shot-placeholder" data-shot="datasources" style="--shot-ratio: 16 / 10"><b>[shot: datasources]</b>datasources list · read-only flag set · 1440×900</div>
+        <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
       </figure>
       <div class="prose">
         <!-- claim: docs/deployment.md §Appendix B -->
@@ -184,7 +184,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="faq-title">
+  <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/staging.md §3 — when is Postgres alone the right call -->

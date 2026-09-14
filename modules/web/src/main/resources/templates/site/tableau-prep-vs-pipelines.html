@@ -77,7 +77,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="tp-six">
+  <section class="section band" aria-labelledby="tp-six">
     <div class="container">
       <p class="kicker">The list</p>
       <h2 id="tp-six" class="ds-headline">Six things a flow cannot do</h2>
@@ -138,7 +138,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="tp-migrate">
+  <section class="section band" aria-labelledby="tp-migrate">
     <div class="container">
       <p class="kicker">The move</p>
       <h2 id="tp-migrate" class="ds-headline">Migrating a flow, step by step</h2>
@@ -186,17 +186,25 @@
       <div class="shots">
         <figure class="shot">
           <figcaption>The editor: the flow's reshape as a graph of SQL nodes, each one readable, the result dock open.</figcaption>
-          <div class="shot-placeholder" data-shot="editor-hero" style="--shot-ratio: 16 / 10"><b>[shot: editor-hero]</b>pipeline editor · the migrated graph · Results dock · 1600×1000</div>
+          <div class="dag-embed">
+            <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
+          </div>
         </figure>
         <figure class="shot">
           <figcaption>The agent's session: schemas read, the draft iterated, the run verified — the authoring a flow file cannot accept.</figcaption>
-          <div class="shot-placeholder" data-shot="mcp-session" style="--shot-ratio: 16 / 10"><b>[shot: mcp-session]</b>Claude Code session · tool calls against the demo · 1440×900</div>
+          <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
         </figure>
+      </div>
+      <div class="prose">
+        <!-- claim: docs/deployment.md §Appendix B -->
+        <p>Both panels are the demo workspace's real run, not a mock-up — the same sentence, the same
+          steps and the same numbers the home page shows, produced by <code>./app.sh --start --demo nyc</code>
+          on any machine that runs it.</p>
       </div>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="faq-title">
+  <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/pipeline-contract.md §3 — is a pipeline really code -->

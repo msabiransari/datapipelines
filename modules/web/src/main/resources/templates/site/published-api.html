@@ -79,7 +79,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
     </div>
   </section>
 
-  <section class="section" aria-labelledby="pa-shape">
+  <section class="section band" aria-labelledby="pa-shape">
     <div class="container">
       <p class="kicker">What the response is</p>
       <h2 id="pa-shape" class="ds-headline">The result, paged, with a cursor — never a cached one</h2>
@@ -113,7 +113,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
     <div class="container">
       <p class="kicker">What it is not</p>
       <h2 id="pa-not" class="ds-headline">A read surface, by construction</h2>
-      <div class="features-grid">
+      <div class="features-grid features-grid--two">
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
           <h3>GET only</h3>
@@ -138,7 +138,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
     </div>
   </section>
 
-  <section class="section" aria-labelledby="pa-story">
+  <section class="section band" aria-labelledby="pa-story">
     <div class="container">
       <p class="kicker">Why it matters</p>
       <h2 id="pa-story" class="ds-headline">The API was always the expensive part</h2>
@@ -166,12 +166,12 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
       <h2 id="pa-shot" class="ds-headline">The API section: endpoints, keys, the MCP server — one screen</h2>
       <figure class="shot">
         <figcaption>Published endpoints with the version each one serves, the keys bound to each path, and the MCP connection details.</figcaption>
-        <div class="shot-placeholder" data-shot="api-console" style="--shot-ratio: 16 / 10"><b>[shot: api-console]</b>API section · one published endpoint · 1440×900</div>
+        <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
       </figure>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="faq-title">
+  <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Published endpoints, in two questions')}"></div>

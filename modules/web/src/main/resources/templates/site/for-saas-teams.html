@@ -70,7 +70,7 @@
     </div>
   </section>
 
-  <section class="section" aria-labelledby="st-shipped">
+  <section class="section band" aria-labelledby="st-shipped">
     <div class="container">
       <p class="kicker"><span class="status status-shipped">Ships today</span></p>
       <h2 id="st-shipped" class="ds-headline">From data to an API in a day — the shipped half</h2>
@@ -135,7 +135,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
     </div>
   </section>
 
-  <section class="section" aria-labelledby="st-dash">
+  <section class="section band" aria-labelledby="st-dash">
     <div class="container">
       <p class="kicker"><span class="status">Roadmap · October 2026</span></p>
       <h2 id="st-dash" class="ds-headline">The dashboards, next month</h2>
@@ -192,18 +192,20 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
     </div>
   </section>
 
-  <section class="section" aria-labelledby="st-shot">
+  <section class="section band" aria-labelledby="st-shot">
     <div class="container">
       <p class="kicker">What it looks like</p>
       <h2 id="st-shot" class="ds-headline">The two screens the flow runs through</h2>
       <div class="shots">
         <figure class="shot">
           <figcaption>The pipeline the agent drafted against your databases — the graph, the SQL, the result dock with a real run's rows.</figcaption>
-          <div class="shot-placeholder" data-shot="editor-hero" style="--shot-ratio: 16 / 10"><b>[shot: editor-hero]</b>pipeline editor · the tenant-numbers graph · Results dock · 1600×1000</div>
+          <div class="dag-embed">
+            <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
+          </div>
         </figure>
         <figure class="shot">
           <figcaption>The API section: the published endpoint, the version it serves, and the customer key bound to its path.</figcaption>
-          <div class="shot-placeholder" data-shot="api-console" style="--shot-ratio: 16 / 10"><b>[shot: api-console]</b>API section · one published endpoint · key by path · 1440×900</div>
+          <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
         </figure>
       </div>
     </div>
@@ -221,7 +223,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
     </div>
   </section>
 
-  <section class="section" aria-labelledby="st-next">
+  <section class="section band" aria-labelledby="st-next">
     <div class="container">
       <h2 id="st-next" class="ds-headline">Serve one customer number this week</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
