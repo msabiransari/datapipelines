@@ -93,14 +93,40 @@ test("formatRunLine: the mock's `rows · ms`, NOT_MEASURED honoured, a calculato
   // rows without a duration (a wire that someday omits it) is still legal
   assert.equal(g.formatRunLine({ rows_out: 12 }), "12 rows");
   // A CALCULATOR's completion: the value it wrote, quoted
-  assert.equal(g.formatRunLine({ duration_ms: 1, context_value: "2026-Q3" }), '= "2026-Q3" · 1 ms');
-  // 121: a multi-output completion shows every key the one evaluation wrote
+  // T251: a calculator's footer COUNTS what it wrote; the values are the Details pane's
+  // (they used to be inlined, JSON-quoted, and wrapped the footer to three lines).
+  assert.equal(g.formatRunLine({ duration_ms: 1, context_value: "2026-Q3" }), "1 key · 1 ms");
   assert.equal(
     g.formatRunLine({ duration_ms: 2, context_values: { window_start: "2026-04-01", window_end: "2026-06-30" } }),
-    '= window_start="2026-04-01", window_end="2026-06-30" · 2 ms',
+    "2 keys · 2 ms",
   );
   assert.equal(g.formatRunLine(null), null);
   assert.equal(g.formatRunLine({ duration_ms: -1, rows_out: -1 }), null);
+});
+
+// T251 (owner screenshot, 2026-09-13): a multi-output CALCULATOR's footer carried the whole
+// value set, JSON-quoted — `= last_quarter_end="2024-12-31", last_quarter_start="2024-10-01"
+// · 2 ms` — which wrapped to three lines inside a footer laid out for `rows · ms`, floated the
+// Done dot mid-card, and read as "values mixed between fields". The footer is a COUNT line
+// (080 §A): a calculator says how many keys it wrote; the values live in Details/Events.
+test("formatRunLine: a calculator's footer counts its keys — the values are the Details pane's", () => {
+  const g = loadGraph();
+  assert.equal(
+    g.formatRunLine({ duration_ms: 2, context_values: { last_quarter_start: "2024-10-01", last_quarter_end: "2024-12-31" } }),
+    "2 keys · 2 ms",
+  );
+  assert.equal(g.formatRunLine({ duration_ms: 2, context_values: { only: 1 } }), "1 key · 2 ms");
+  assert.equal(g.formatRunLine({ duration_ms: 1, context_value: "2026-Q3" }), "1 key · 1 ms");
+  assert.equal(g.formatRunLine({ context_values: { a: 1, b: 2, c: 3 } }), "3 keys");
+});
+
+test("edgeLabelFor: a calculator's edge says what flowed — keys, never '0 rows'", () => {
+  const g = loadGraph();
+  assert.equal(g.edgeLabelFor({ duration_ms: 634, rows_out: 523 }), "523 rows");
+  assert.equal(g.edgeLabelFor({ duration_ms: 2, rows_out: 0, context_values: { start: "a", end: "b" } }), "2 keys");
+  assert.equal(g.edgeLabelFor({ duration_ms: 1, rows_out: 0, context_value: "2026-Q3" }), "1 key");
+  assert.equal(g.edgeLabelFor({ duration_ms: 5, rows_out: 0 }), "0 rows", "a SQL node that emitted nothing still says so");
+  assert.equal(g.edgeLabelFor({ duration_ms: 5, rows_out: -1 }), null, "NOT_MEASURED labels nothing");
 });
 
 test("the card is the mock's anatomy: tile, id, eyebrow, facts, footer, ports, progress", () => {

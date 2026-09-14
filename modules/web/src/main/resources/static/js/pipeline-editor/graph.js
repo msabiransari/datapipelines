@@ -400,20 +400,35 @@
    * rows_in on the wire, so the mock's `in → out` collapses to the out count; the
    * edge label picks the same number up as the count flowing OUT of the source.
    * A CALCULATOR completion carries context_value instead of rows — or, on a
-   * multi-output kind (121), the whole `context_values` set it wrote.
+   * multi-output kind (121), the whole `context_values` set it wrote. The footer
+   * COUNTS what flowed — `2 keys`, like `523 rows` — and never inlines the values:
+   * T251 (owner screenshot, 2026-09-13) was `= last_quarter_end="2024-12-31",
+   * last_quarter_start="2024-10-01" · 2 ms` wrapping to three lines inside a
+   * footer laid out for one, the Done dot floating mid-card. The values are the
+   * Details pane's and the Events tab's, where they have room.
    */
+  function keysWritten(stats) {
+    if (!stats) return null;
+    if (stats.context_values !== undefined && stats.context_values !== null) {
+      return Object.keys(stats.context_values).length;
+    }
+    if (stats.context_value !== undefined && stats.context_value !== null) return 1;
+    return null;
+  }
+
+  function countLabel(n, noun) {
+    return n.toLocaleString("en-US") + " " + noun + (n === 1 ? "" : "s");
+  }
+
   function formatRunLine(stats) {
     if (!stats) return null;
     var out = "";
-    if (stats.context_values !== undefined && stats.context_values !== null) {
-      out = "= " + Object.keys(stats.context_values).map(function (k) {
-        return k + "=" + JSON.stringify(stats.context_values[k]);
-      }).join(", ");
-    } else if (stats.context_value !== undefined && stats.context_value !== null) {
-      out = "= " + JSON.stringify(stats.context_value);
+    var keys = keysWritten(stats);
+    if (keys !== null) {
+      out = countLabel(keys, "key");
     } else {
       var r = Number(stats.rows_out);
-      if (isFinite(r) && r >= 0) out = r.toLocaleString("en-US") + " rows";
+      if (isFinite(r) && r >= 0) out = countLabel(r, "row");
     }
     var d = Number(stats.duration_ms);
     if (isFinite(d) && d >= 0) {
@@ -490,6 +505,20 @@
 
     h += "</div>";
     return h;
+  }
+
+  /**
+   * What flowed OUT of a completed node, for the edge label: a SQL node's rows
+   * (`0 rows` is a fact worth showing — the node ran and emitted nothing), a
+   * calculator's keys (its rows_out is 0 by construction and would have read
+   * "0 rows" on every calculator edge — T251), nothing when NOT_MEASURED.
+   */
+  function edgeLabelFor(stats) {
+    if (!stats) return null;
+    var keys = keysWritten(stats);
+    if (keys !== null) return countLabel(keys, "key");
+    var r = Number(stats.rows_out);
+    return isFinite(r) && r >= 0 ? countLabel(r, "row") : null;
   }
 
   function PipelineGraph(containerId, nodes, editor) {
@@ -1372,9 +1401,8 @@
     var node = this.findNode(nodeId);
     if (!node) return;
     node.data("run", formatRunLine(stats));
-    var r = Number(stats && stats.rows_out);
-    if (isFinite(r) && r >= 0) {
-      var label = r.toLocaleString("en-US") + " rows";
+    var label = edgeLabelFor(stats);
+    if (label !== null) {
       node.outgoers("edge").forEach(function (e) {
         e.data("rowLabel", label);
         e.addClass("rows");
@@ -1547,6 +1575,7 @@
     pulseEnabled: pulseEnabled,
     fitZoomFor: fitZoomFor,
     formatRunLine: formatRunLine,
+    edgeLabelFor: edgeLabelFor,
     truncateLeft: truncateLeft,
     templateLine: templateLine,
     edgeControlPoints: edgeControlPoints,

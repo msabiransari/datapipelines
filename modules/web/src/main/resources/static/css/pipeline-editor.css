@@ -720,8 +720,18 @@
   color: var(--accent-danger, #dc2626);
 }
 
+/* The run numbers never wrap: the footer is laid out for ONE line (`523 rows · 634 ms`,
+   `2 keys · 2 ms`), and a value that does not fit is clipped with an ellipsis rather
+   than folding the footer into three lines and floating the state dot mid-card
+   (T251, the calculator card, 2026-09-13 — the text was the defect, this is the
+   belt: graph.js counts keys instead of inlining values). `min-width: 0` lets the
+   flex item shrink below its content so the ellipsis can engage. */
 .pe-card-rt {
   font-family: var(--font-mono, monospace);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Ports: the dots the edges plug into — out on the right edge, in on the left. A
