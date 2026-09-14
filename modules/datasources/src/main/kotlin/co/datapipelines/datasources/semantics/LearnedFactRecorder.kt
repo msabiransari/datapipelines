@@ -32,10 +32,14 @@ import java.util.UUID
  *     `semantics.evidence_failed` (the fact is NOT recorded — evidence that does not run is not
  *     evidence). Its first rows become `evidence_summary` when none was given.
  *
- * Trust follows the evidence (D-S4): `observed` with it, `asserted` without. A superseding
- * fact retires its predecessor with reason `superseded` in the same call (§5) — the caller
- * resolves the predecessor through the visibility predicate first, so this recorder never
- * retires what the caller could not see.
+ * Trust follows the evidence (D-S4): `observed` with it, `asserted` without — except a
+ * [CHOICE_KINDS] fact (`definition`, `exclusion`, `preference`), which is `asserted` whatever it
+ * carries (C.2, owner 2026-09-13): evidence can show the distribution a choice was made over,
+ * never that the workspace chose it, so it is run and stored to inform the human's confirm, and
+ * `verified` stays reachable only through that confirmation. A superseding fact retires its
+ * predecessor with reason `superseded` in the same call (§5) — the caller resolves the
+ * predecessor through the visibility predicate first, so this recorder never retires what the
+ * caller could not see.
  */
 class LearnedFactRecorder(
     private val repository: LearnedFactRepository,
@@ -88,7 +92,8 @@ class LearnedFactRecorder(
                     refs = request.refs,
                     evidenceSql = request.evidenceSql,
                     evidenceSummary = summary,
-                    trust = if (request.evidenceSql != null) LearnedFactTrust.OBSERVED else LearnedFactTrust.ASSERTED,
+                    trust =
+                        if (request.evidenceSql != null && kind !in CHOICE_KINDS) LearnedFactTrust.OBSERVED else LearnedFactTrust.ASSERTED,
                     schemaFingerprint = fingerprint,
                     recordedBy = request.recordedBy,
                     recordedVia = request.recordedVia,
@@ -247,5 +252,11 @@ class LearnedFactRecorder(
 
         /** The `retired_reason` a superseding fact stamps on its predecessor (§5). */
         const val SUPERSEDED_REASON = "superseded"
+
+        /**
+         * The kinds that are a workspace's CHOICE rather than a fact about the data. Evidence
+         * cannot observe a choice, so these never land `observed` (C.2, owner 2026-09-13).
+         */
+        val CHOICE_KINDS = setOf(LearnedFactKind.DEFINITION, LearnedFactKind.EXCLUSION, LearnedFactKind.PREFERENCE)
     }
 }

@@ -15,10 +15,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.BrokenBarrierException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -138,23 +142,62 @@ class ConcurrencyTest {
         }
 
     /**
-     * Four sibling nodes, each a ~1s query.
+     * Four sibling nodes, each a query that blocks on a shared rendezvous **inside H2** — the
+     * `node_rendezvous()` alias, a real user-defined function the driver calls on the node's
+     * thread while the statement is executing. Nothing about the executor is faked.
      *
-     * The baseline is **measured, not assumed**: the same pipeline is run once with
-     * `max-parallel-nodes = 1` and once with `= 4`, and the parallel run must be substantially
-     * faster. A hard-coded millisecond floor would be a machine-speed bet that either goes flaky on
-     * a loaded CI box or silently stops discriminating on a fast one.
+     * "Independent nodes run at the same time" means: at some instant, more than one node is
+     * INSIDE its query. That, and only that, is what this asserts (O7, 128 §A):
+     *  - `max-parallel-nodes = 4`: the four queries meet at the barrier, so all four were inside
+     *    at once (`peak == 4`, no timeouts), and the pipeline completes. The barrier's wait is a
+     *    generous hang guard, never a slowness bet — a starved box makes the meeting later, not
+     *    impossible.
+     *  - `max-parallel-nodes = 1`: the barrier cannot trip — the first node in waits for siblings
+     *    the scheduler will not start until it returns — so it gives up after a short wait, the
+     *    barrier breaks, and the remaining three fall through it on entry. Every node went in
+     *    alone (`peak == 1`, none met). This is the arm that keeps the test able to fail: a
+     *    scheduler that ignored the limit would let the four meet here and go red on `peak`.
+     *
+     * No time is measured anywhere, so no load on the box can turn either arm red. The stopwatch
+     * version this replaces (parallel elapsed < serial × 0.7) went red six times since August
+     * with no defect anywhere, whenever another build starved four ~1 s queries into running back
+     * to back.
      */
     @Test
     fun `independent nodes really run at the same time`() =
         runBlocking<Unit> {
-            val serial = runFanOut(maxParallelNodes = 1)
-            val parallel = runFanOut(maxParallelNodes = 4)
+            val parallel = runFanOut(maxParallelNodes = FAN_OUT, rendezvousTimeout = HANG_GUARD)
+            parallel.peak shouldBe FAN_OUT
+            parallel.missed shouldBe 0
 
-            // Four-way parallelism cannot reach 4× on a shared box, but "meaningfully faster than
-            // serial" is exactly the claim, and serial scheduling cannot satisfy it.
-            (parallel < serial * PARALLEL_SPEEDUP_FACTOR).shouldBeTrue()
+            val serial = runFanOut(maxParallelNodes = 1, rendezvousTimeout = GIVE_UP)
+            serial.peak shouldBe 1
+            serial.missed shouldBe FAN_OUT
         }
+
+    /**
+     * Runs the fan-out with every node's query blocking on a fresh [NodeRendezvous] of
+     * [FAN_OUT] parties, and reports what the rendezvous saw. The execution itself must succeed
+     * on both arms — a node that gave up at the barrier still returns its row.
+     */
+    private suspend fun runFanOut(
+        maxParallelNodes: Int,
+        rendezvousTimeout: Duration,
+    ): NodeRendezvous.Outcome {
+        val rendezvous = NodeRendezvous.arm(parties = FAN_OUT, timeout = rendezvousTimeout)
+        val source = h2Datasource("par$maxParallelNodes", listOf(NodeRendezvous.CREATE_ALIAS))
+        val nodes = (1..FAN_OUT).map { Fixtures.node("n$it", source = "par$maxParallelNodes", output = NodeOutput.Tempdb("t$it")) }
+
+        return ExecutorHarness(
+            templateEngine = Fixtures.templateEngine((1..FAN_OUT).associate { "n$it" to RENDEZVOUS_SQL }),
+            registry = FakeDatasourceRegistry(mapOf("par$maxParallelNodes" to source)),
+            config = ExecutorConfig(maxParallelNodes = maxParallelNodes, executionTimeoutSeconds = TIMEOUT_SECONDS),
+        ).use { h ->
+            h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
+            h.emitter.allOf<NodeStarted>().size shouldBe FAN_OUT
+            rendezvous.outcome()
+        }
+    }
 
     /**
      * §5.3: blowing the overall timeout is a **FAILURE**. `ABORTED` is reserved for the three
@@ -251,22 +294,6 @@ class ConcurrencyTest {
                 h.slots.inFlight shouldBe 0
             }
         }
-
-    private suspend fun runFanOut(maxParallelNodes: Int): Long {
-        val source = h2Datasource("par$maxParallelNodes", listOf("CREATE TABLE par (n INT)"))
-        val nodes = (1..FAN_OUT).map { Fixtures.node("n$it", source = "par$maxParallelNodes", output = NodeOutput.Tempdb("t$it")) }
-
-        return ExecutorHarness(
-            templateEngine = Fixtures.templateEngine((1..FAN_OUT).associate { "n$it" to MEDIUM_SQL }),
-            registry = FakeDatasourceRegistry(mapOf("par$maxParallelNodes" to source)),
-            config = ExecutorConfig(maxParallelNodes = maxParallelNodes, executionTimeoutSeconds = TIMEOUT_SECONDS),
-        ).use { h ->
-            kotlin.system
-                .measureTimeMillis {
-                    h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
-                }.also { h.emitter.allOf<NodeStarted>().size shouldBe FAN_OUT }
-        }
-    }
 
     @Test
     fun `a datasource query_timeout_seconds overrides the executor default for its nodes`() =
@@ -397,8 +424,14 @@ class ConcurrencyTest {
         const val FAN_OUT = 4
         const val CHAIN = 4
 
-        /** Parallel must beat serial by a clear margin; loose enough to survive a loaded CI box. */
-        const val PARALLEL_SPEEDUP_FACTOR = 0.7
+        /** Every node's query: one row, blocking inside H2 until the siblings arrive or the wait ends. */
+        const val RENDEZVOUS_SQL = "SELECT node_rendezvous() AS met"
+
+        /** Parallel arm: only a hang can exhaust this — four nodes and eight dispatcher threads. */
+        val HANG_GUARD: Duration = Duration.ofSeconds(30)
+
+        /** Serial arm: how long the lone node inside waits for siblings that cannot come. */
+        val GIVE_UP: Duration = Duration.ofSeconds(2)
 
         /**
          * ~1s of real work. Calibrated, not guessed: SLOW_SQL's 9·10⁸ row visits take ≈57s here, so
@@ -406,5 +439,70 @@ class ConcurrencyTest {
          */
         const val MEDIUM_SQL =
             """SELECT COUNT(*) AS c FROM SYSTEM_RANGE(1, 4000) a, SYSTEM_RANGE(1, 4000) b WHERE MOD(a."X" + b."X", 7) = 0"""
+    }
+}
+
+/**
+ * The rendezvous [ConcurrencyTest] puts INSIDE each node's query.
+ *
+ * H2 calls [meet] through the `node_rendezvous` alias on the thread executing the statement, so
+ * the count of callers currently inside [Armed.meet] is exactly the count of nodes inside their
+ * query at that instant — the claim, observed where it is made rather than inferred from a
+ * clock. A public object with a `@JvmStatic` method because that is the shape H2 can load and
+ * invoke reflectively (`FunctionAlias` needs a public static method on a public class).
+ *
+ * One rendezvous is armed per run; the two arms of the test run one after the other, never at
+ * once, which is what lets a static alias target reach the right instance.
+ */
+object NodeRendezvous {
+    /** The DDL that binds the alias in a fresh H2 source, for [h2Datasource]. */
+    const val CREATE_ALIAS = """CREATE ALIAS node_rendezvous FOR "co.datapipelines.executor.NodeRendezvous.meet""""
+
+    @Volatile
+    private var current: Armed? = null
+
+    /** Arms a fresh barrier of [parties] whose waits give up after [timeout]. */
+    fun arm(
+        parties: Int,
+        timeout: Duration,
+    ): Armed = Armed(CyclicBarrier(parties), timeout).also { current = it }
+
+    /** What H2 calls. Returns 1 when the caller met every other party, 0 when it gave up. */
+    @JvmStatic
+    fun meet(): Int = checkNotNull(current) { "node_rendezvous() called with no rendezvous armed" }.meet()
+
+    /** What the rendezvous saw over one run. */
+    data class Outcome(
+        /** The most callers inside their query at one instant. */
+        val peak: Int,
+        /** Callers that entered and did not meet the other parties — timed out, or found the barrier broken. */
+        val missed: Int,
+    )
+
+    class Armed(
+        private val barrier: CyclicBarrier,
+        private val timeout: Duration,
+    ) {
+        private val inside = AtomicInteger()
+        private val peak = AtomicInteger()
+        private val missed = AtomicInteger()
+
+        fun meet(): Int {
+            val now = inside.incrementAndGet()
+            peak.updateAndGet { p -> maxOf(p, now) }
+            try {
+                barrier.await(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                return 1
+            } catch (_: TimeoutException) {
+                missed.incrementAndGet()
+            } catch (_: BrokenBarrierException) {
+                missed.incrementAndGet()
+            } finally {
+                inside.decrementAndGet()
+            }
+            return 0
+        }
+
+        fun outcome(): Outcome = Outcome(peak = peak.get(), missed = missed.get())
     }
 }

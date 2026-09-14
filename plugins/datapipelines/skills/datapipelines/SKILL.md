@@ -270,15 +270,15 @@ here.
 2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
    + credential questions immediately.
 2½. **Learned facts are shared memory — keep them honest.** A fact you record with
-   `evidence_sql` is `observed`; without it, only `asserted`. Two facts of one kind on the
-   same column are both served, flagged `conflict` — a reader decides, the store never picks.
-   To correct one, record the replacement with `supersedes` (the old one retires as
-   `superseded`); `semantics_retire` alone is for a fact that is simply wrong. **Every table the
-   `fact` text names must be in `refs`, spelled as the catalog spells it** (a near-miss is
-   `semantics.ref_mismatch`), and a DATASOURCE-scope fact is table-wide: "in Q4 only A and B
-   carry rows" belongs in a pipeline description, not a fact. A DATASOURCE
-   fact is visible to every workspace the datasource is granted to; a `definition`,
-   `exclusion` or `preference` (WORKSPACE scope) stays in yours.
+   `evidence_sql` is `observed`; without it, only `asserted` — except a `definition`, `exclusion`
+   or `preference`, which is a choice and lands `asserted` until a person confirms it. Two facts
+   of one kind on the same column are both served, flagged `conflict` — a reader decides, the
+   store never picks. To correct one, record the replacement with `supersedes` (the old one
+   retires as `superseded`); `semantics_retire` alone is for a fact that is simply wrong. **Every
+   table the `fact` text names must be in `refs`, spelled as the catalog spells it** (a near-miss
+   is `semantics.ref_mismatch`), and a DATASOURCE-scope fact is table-wide: "in Q4 only A and B
+   carry rows" belongs in a pipeline description, not a fact. A DATASOURCE fact is visible to every
+   workspace the datasource is granted to; a `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
    `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous

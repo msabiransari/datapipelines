@@ -116,7 +116,11 @@ be told apart) — the skill tells the agent not to, and human review can retire
 ## 5. Trust
 
 `asserted` (no evidence) → `observed` (evidence present, at record time) → `verified` (a human
-confirmed; UI round 2, or REST). Mechanical demotions: `needs_review` (fingerprint changed,
+confirmed; UI round 2, or REST). **A choice is never `observed`** (C.2, owner 2026-09-13): a
+`definition`, `exclusion` or `preference` lands `asserted` whatever it carries — evidence can
+show the distribution the choice was made over, never that the workspace chose it — and the
+evidence is still run and stored, so a person confirming it sees what it was made over;
+`verified` is that confirmation, and `observed` stays for facts about the data. Mechanical demotions: `needs_review` (fingerprint changed,
 refs resolve), `stale` (a ref no longer resolves), `retired` (explicit, with reason). A
 superseding fact starts at its own evidence level; the superseded one becomes `retired`
 with reason `superseded`. Promotion by agreement (two independent pipelines computing the
