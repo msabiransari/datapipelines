@@ -139,6 +139,12 @@ class SkillCoreRulesTest {
         assertClause("rules earlier pipelines chose")
     }
 
+    /** 135 §C — `templates_update` without `dialect` was refused three times in one day. */
+    @Test
+    fun `step 2 says templates_update inherits the dialect - 135 C`() {
+        assertClause("the dialect is inherited")
+    }
+
     /** 129 §A.2 — the reuse half: a definition an earlier pipeline recorded is the one to reuse. */
     @Test
     fun `a definition an earlier pipeline recorded is the one to reuse - 129 A2`() {

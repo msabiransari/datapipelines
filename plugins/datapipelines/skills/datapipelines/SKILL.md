@@ -160,10 +160,10 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    `templates_create` of a lookup or reference table — zones, calendars, stations, code lists —
    `templates_list {"q": "<table>"}` and PIN what exists; a narrowed variant (a region dropped,
    a year fixed) is a `WHERE` in the consumer or a parameter, not a new template. **To change a
-   draft template, read its `body_hash` with `templates_get` and call `templates_update`** — it
-   writes the DRAFT the same way `pipelines_update` writes a pipeline's. `templates_purge_draft`
-   is for a template that should not exist, not for editing one, and it is refused once a
-   pipeline pins the template.
+   draft template, read its `body_hash` with `templates_get` and call `templates_update`** (the
+   body and the hash; the dialect is inherited) — it writes the DRAFT the same way
+   `pipelines_update` writes a pipeline's. `templates_purge_draft` is for a template that should
+   not exist, not for editing one, and it is refused once a pipeline pins the template.
 3. **Preview the SQL.** `templates_render` with a representative context — save-time
    validation is parse-only, so this is your check that the SQL is actually what you
    meant. This is mandatory before step 4 for anything non-trivial — including one you create
