@@ -48,13 +48,29 @@ class SkillDistributionTest {
         lines.forEachIndexed { index, line ->
             val n = index + 1
             when {
-                n == 1 && line == "---" -> inFrontMatter = true
-                inFrontMatter && line == "---" -> inFrontMatter = false
-                inFrontMatter -> Unit
-                line.trimStart().startsWith("```") -> inFence = !inFence
-                inFence || line.trimStart().startsWith("|") -> Unit
-                line.length > MAX_SKILL_LINE_CHARS ->
+                n == 1 && line == "---" -> {
+                    inFrontMatter = true
+                }
+
+                inFrontMatter && line == "---" -> {
+                    inFrontMatter = false
+                }
+
+                inFrontMatter -> {
+                    // Exempt: the description is one line by the format's own rule.
+                }
+
+                line.trimStart().startsWith("```") -> {
+                    inFence = !inFence
+                }
+
+                inFence || line.trimStart().startsWith("|") -> {
+                    // Exempt: code lines and table rows are not wrappable prose.
+                }
+
+                line.length > MAX_SKILL_LINE_CHARS -> {
                     offenders += "SKILL.md:$n (${line.length} chars): ${line.take(80)}…"
+                }
             }
         }
         withClue(offenders.joinToString("\n")) { offenders.shouldBeEmpty() }
