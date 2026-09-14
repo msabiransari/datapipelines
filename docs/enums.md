@@ -536,7 +536,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `exclusion` | `WORKSPACE` | What a business question leaves out | "regions means the five named ones; drop 'Unknown' and 'N/A'" |
 | `preference` | `WORKSPACE` | How this organisation wants a thing computed | "share comparisons within mode only — the events feed is a sample" |
 
-**Trust** (the companion state, design §5 — not an enum a caller supplies): `asserted` (no evidence) → `observed` (evidence ran at record time) → `verified` (a human confirmed); the mechanical demotions `needs_review` (the table's column set changed around a still-resolving ref) and `stale` (a referenced column or table no longer exists); and `retired` (explicit, with a reason — never a delete). Written as the `chk_learned_facts_trust` CHECK.
+**Trust** (the companion state, design §5 — not an enum a caller supplies): `asserted` (no evidence — or a `definition`/`exclusion`/`preference`, a choice, whatever it carries; C.2 2026-09-13) → `observed` (evidence ran at record time, data-kind facts only) → `verified` (a human confirmed); the mechanical demotions `needs_review` (the table's column set changed around a still-resolving ref) and `stale` (a referenced column or table no longer exists); and `retired` (explicit, with a reason — never a delete). Written as the `chk_learned_facts_trust` CHECK.
 
 ## Cross-Reference: Where Each Enum Is Authored
 

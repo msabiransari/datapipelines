@@ -108,8 +108,8 @@
         </li>
         <li>
           <h3>It records the fact with the query that proved it</h3>
-          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5 (D-S4: evidence-bearing; without evidence the fact is only asserted) -->
-          <p><code>semantics_record</code> stores the fact, its references and its evidence SQL; the evidence runs once at record time, and a fact without evidence is stored as merely <em>asserted</em> — never as observed.</p>
+          <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5 (D-S4: evidence-bearing; without evidence the fact is only asserted; C.2 2026-09-13: a choice is asserted whatever it carries) -->
+          <p><code>semantics_record</code> stores the fact, its references and its evidence SQL; the evidence runs once at record time, and a fact without evidence is stored as merely <em>asserted</em> — never as observed. A business definition, an exclusion or a preference is a choice, not an observation: it is stored as <em>asserted</em> even with evidence, until a person confirms it.</p>
         </li>
         <li>
           <h3>The next agent sees it inline, where it is looking</h3>
@@ -206,8 +206,8 @@
         <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5 (D-S4, D-S5) -->
         <p>
           Every fact carries its trust state, and the ladder is short: <code>asserted</code> — recorded without
-          evidence; <code>observed</code> — the evidence query ran at record time and its first rows became the
-          evidence summary; <code>verified</code> — a person confirmed it. A fact is never higher-trust than its
+          evidence, or a choice (a definition, an exclusion, a preference) whatever it carries; <code>observed</code> — the evidence query ran at record time and its first rows became the
+          evidence summary, for a fact about the data; <code>verified</code> — a person confirmed it. A fact is never higher-trust than its
           evidence: "the pipeline executed" is not evidence of semantic correctness. And when two live facts of the
           same kind disagree — gross versus net revenue — they coexist and are flagged as a conflict, with provenance
           on each. The store never picks a winner for you.
