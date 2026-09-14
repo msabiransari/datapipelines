@@ -101,6 +101,21 @@ jobs:
           EOF
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         run: ./gradlew build ktlintCheck detekt -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
+      # The coverage and test-result XML, kept for a week, pass or fail: a coverage floor
+      # that holds on the dev box and fails here (2026-09-14: pipeline-contract at 93.9065
+      # against 94, the same 373 tests, 17 lines fewer covered) can only be diagnosed
+      # line by line, and the runner's numbers were unreachable without this.
+      - name: keep the coverage and test-result reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-reports
+          path: |
+            modules/*/build/reports/kover/report.xml
+            modules/*/build/reports/kover/verify.err
+            modules/*/build/test-results/test/*.xml
+          retention-days: 7
+          if-no-files-found: warn
       - name: docs audit
         run: ./scripts/docs-audit.sh
 
