@@ -61,15 +61,14 @@ class JarSmokeE2eTest {
     private var apiKey: String = ""
 
     /**
-     * The two editor screens sit on different floors since 122: the PIPELINE editor's floor
-     * is `EXECUTE_PIPELINE` — the operation the screen exists to perform for its lowest role
-     * (D-R3: viewers execute), and an author key is above it — while the TEMPLATE editor
-     * keeps `MUTATE_PIPELINES_TEMPLATES` (nothing a viewer may DO lives there, so 096 §C's
-     * authoring-state reasoning still holds). The read key every other screen is fetched
-     * with is refused at both (read < execute, §7.5). The smoke test's question is "does
-     * this screen render out of the jar", not "who may see it", so the renders use the
-     * author key; keeping the read key for everything else is itself worth asserting: a
-     * read-scoped key renders the whole product EXCEPT the editors.
+     * The two editor screens' floors: the PIPELINE editor's is `EXECUTE_PIPELINE` (122 — the
+     * operation the screen exists to perform for its lowest role, D-R3: viewers execute), so
+     * the read key every other screen is fetched with is refused there (read < execute,
+     * §7.5); the TEMPLATE editor's is `READ_RESOURCES` since 143 (T315, owner ruling — the
+     * explorer's Open links render for every reader, and the page renders read state; its
+     * writes are their own MUTATE routes). The smoke test's question is "does this screen
+     * render out of the jar", not "who may see it", so the renders use the author key; the
+     * boundary pair below is what says who may.
      */
     private var authorKey: String = ""
     private var executeKey: String = ""
@@ -199,18 +198,22 @@ class JarSmokeE2eTest {
     }
 
     /**
-     * The editors' boundary, live against the jar, as ONE assertion pair: an `execute` key
-     * renders the pipeline editor (its floor is EXECUTE_PIPELINE — 122) and a `read` key is
-     * refused there; the read key is refused at the template editor too (still MUTATE-floored).
-     * Asserted here rather than only at the auth boundary, because this is the deployment
-     * artifact people actually run.
+     * The editors' boundary, live against the jar: an `execute` key renders the pipeline
+     * editor (its floor is EXECUTE_PIPELINE — 122) and a `read` key is refused there; the
+     * read key RENDERS the template editor (READ-floored since 143 — the page a reader's Open
+     * link leads to, read-only). Asserted here rather than only at the auth boundary, because
+     * this is the deployment artifact people actually run.
      */
     @Test
-    fun `a read key is refused at both editors but renders the list screens`() {
+    fun `a read key is refused at the pipeline editor, renders the template editor and the list screens`() {
         // the boundary: execute reaches the pipeline editor, read does not.
         request("/pipelines/$PIPELINE/editor", executeKey).second shouldBe 200
         get("/pipelines/$PIPELINE/editor").second shouldBe 403
-        get("/templates/editor?name=$SEEDED_TEMPLATE").second shouldBe 403
+        val (templateEditor, templateEditorStatus) = get("/templates/editor?name=$SEEDED_TEMPLATE")
+        templateEditorStatus shouldBe 200
+        // ...and what a read key gets is the READER's page: the read-only pane, no textarea.
+        templateEditor shouldContain "id=\"versionBody\""
+        templateEditor shouldNotContain "id=\"templateBody\""
         get("/pipelines").second shouldBe 200
         get("/templates").second shouldBe 200
     }

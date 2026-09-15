@@ -31,8 +31,10 @@
       <span th:if="${v.isCurrent}"> · </span><span th:if="${v.isCurrent}" class="tplx-current">current</span>
     </span>
     <span class="tplx-vacts">
+      <!-- 143: Open carries THIS row's version (R5's `?version=`), so the editor shows the
+           version the reader clicked — not the working one whatever row they were on. -->
       <a class="ds-button ds-button-ghost ds-button-sm"
-         th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open</a>
+         th:href="@{/templates/editor(name=${templateId}, version=${v.version})}" th:title="${templateId}">Open</a>
 
       <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
            RELEASED → Discard; DISCARDED → Restore. No Switch — see the header comment. -->

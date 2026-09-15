@@ -116,6 +116,20 @@ class RoleVisibilityRenderTest {
         author shouldContain "data-role-note=\"promote\""
         // The plan itself is a READ and stays.
         author shouldContain "nyc/mobility/revenue_by_borough"
+
+        // 143 (T315): a reader's plan is a TABLE — no submission form, no Send column, no
+        // selection boxes — read from the rendered page's own content, not from a guard word.
+        val main = author.substringAfter("<main").substringBefore("</main>")
+        main shouldNotContain "<form"
+        main shouldNotContain "<input"
+        main shouldNotContain ">Send<"
+        main shouldContain "<table"
+        main shouldContain "Revenue by borough"
+        // ...and the promoter's keeps all three, so the reader arm is not "hide everything".
+        val promoterMain = promoter.substringAfter("<main").substringBefore("</main>")
+        promoterMain shouldContain "<form"
+        promoterMain shouldContain "type=\"checkbox\""
+        promoterMain shouldContain ">Send<"
     }
 
     // ------------------------------------------------------------------ workspaces

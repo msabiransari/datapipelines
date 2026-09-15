@@ -38,26 +38,30 @@ class TemplateEditorController(
     private val drafts: TemplateDraftService,
 ) {
     @GetMapping("/templates/editor")
-    // 096 §C: the editors render AUTHORING state (draft bodies, unreleased versions),
-    // so a read key has no business here — the floor is the mutation operation the
-    // screen exists to perform, not the read that paints it.
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    // 143 (T315): the page floors at READ, the pipeline editor's 122 rule — the operation
+    // the screen exists to perform for its LOWEST role is reading the source. What it
+    // renders is read state (a draft body is read, never written, by a GET); every write
+    // it can make — Edit, Preview, the lifecycle dialogs — is its own verb-guarded route,
+    // and the markup hides those verbs by role (§4.3e). 096 §C's "authoring state" floor
+    // stays on the writes below, where it belongs.
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun editor(
         @RequestParam name: String,
         @RequestParam(required = false) version: Int?,
         model: Model,
         request: HttpServletRequest,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         // §9.6: the name is a query parameter — it may contain `/`, which can never travel
         // in a URL path segment (the container refuses %2F below routing).
-        val draft = fillSource(model, workspaceId, name, version)
+        val draft = fillSource(model, workspaceId, name, version, RoleModel.roles(principal).canAuthor)
         model.addAttribute("versions", templates.listVersions(workspaceId, name))
         model.addAttribute("hasDraft", draft != null)
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
-        RoleModel.stamp(model)
+        RoleModel.stamp(model, principal)
         return "templates/editor"
     }
 
@@ -73,9 +77,10 @@ class TemplateEditorController(
         @RequestParam(required = false) version: Int?,
         model: Model,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        fillSource(model, workspaceId, name, version)
-        RoleModel.stamp(model)
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        fillSource(model, workspaceId, name, version, RoleModel.roles(principal).canAuthor)
+        RoleModel.stamp(model, principal)
         return "partials/template-source"
     }
 
@@ -144,6 +149,13 @@ class TemplateEditorController(
      * editable textarea only ever carries the working version, so no selection can make a
      * RELEASED row the write target.
      *
+     * 143 (T315): `readOnly` is the version rule ABOVE combined with the author capability —
+     * a reader (viewer, or a promoter, who releases but does not edit) sees every version,
+     * the working one included, in the read-only surface; the editable textarea exists only
+     * for an author on the working version. The same rule feeds the page and the partial,
+     * so no version selection can hand a non-author a textarea. [canAuthor] arrives from
+     * [RoleModel], already narrowed by an API key's scope.
+     *
      * Returns the draft detail it had to read anyway, so the page's header affordances
      * (the pending-release badge, Release, Discard) cost no second query.
      */
@@ -152,6 +164,7 @@ class TemplateEditorController(
         workspaceId: UUID,
         name: String,
         requested: Int?,
+        canAuthor: Boolean,
     ): TemplateVersionDetail? {
         val draft = templates.findDraftDetail(workspaceId, name)
         val latest = templates.findLatest(workspaceId, name)
@@ -166,7 +179,7 @@ class TemplateEditorController(
                 latest != null && selectedVersion == latest.version -> latest
                 else -> templates.findVersion(workspaceId, name, selectedVersion)
             } ?: latest
-        val readOnly = displayed != null && workingVersion != null && displayed.version != workingVersion
+        val readOnly = displayed != null && workingVersion != null && (displayed.version != workingVersion || !canAuthor)
         // `readOnly` proves `displayed` non-null; Kotlin's data-flow carries that here.
         val detail = if (readOnly) templates.findVersionDetail(workspaceId, name, displayed.version) else null
         model.addAttribute("template", displayed)

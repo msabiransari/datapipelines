@@ -271,10 +271,21 @@
            data-nav-group="Organisation" data-nav-label="Workspaces"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#building"></use></svg><span class="app-rail-label">Workspaces</span></a>
-        <a th:href="@{/admin/users}" class="app-nav-link" data-nav-section="/admin"
-           data-nav-group="Organisation" data-nav-label="Admin"
+        <!-- 143 (T315): the Admin item leads only where this principal is authorised — the
+             instance's users for a super admin (`USER_ADMINISTRATION`), the CURRENT workspace's
+             members section on Workspaces for a workspace admin (`MANAGE_WORKSPACE_MEMBERS`,
+             judged against the active workspace, §4.13) — and is absent for everyone else. The
+             two booleans come from UiWorkspaceAdvice (RoleModel.shell), so every full paint
+             carries them. The members link is NOT boosted: a full navigation is what lets the
+             browser scroll to the fragment, and the shell re-paints on it anyway. Its active
+             state follows the path rule like every item — on /workspaces the Workspaces item
+             is the active one, and this link never lights up by itself. -->
+        <a th:if="${navAdminUsers == true}" th:href="@{/admin/users}" class="app-nav-link" data-nav-section="/admin"
+           data-nav-group="Organisation" data-nav-label="Admin" data-nav-admin="users"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#users"></use></svg><span class="app-rail-label">Admin</span></a>
+        <a th:if="${navAdminMembers == true}" th:href="@{/workspaces} + '#workspace-members'" class="app-nav-link" data-nav-section="/admin"
+           data-nav-group="Organisation" data-nav-label="Admin" data-nav-admin="members" hx-boost="false"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#users"></use></svg><span class="app-rail-label">Admin</span></a>
         <a th:href="@{/docs}" class="app-nav-link" data-nav-section="/docs"
            data-nav-group="Organisation" data-nav-label="Docs"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'active' : null"

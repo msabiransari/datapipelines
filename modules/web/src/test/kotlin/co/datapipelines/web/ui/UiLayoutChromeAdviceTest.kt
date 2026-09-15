@@ -63,6 +63,44 @@ class UiLayoutChromeAdviceTest {
         workspaceActive = active,
     )
 
+    /** 143 — the rail's Admin entry rides the advice, so a controller that never stamps roles still gets it right. */
+    @Test
+    fun `the advice stamps the Admin entry from the principal's instance authority and active membership`() {
+        advice.navAdminUsers() shouldBe false
+        advice.navAdminMembers() shouldBe false
+
+        authenticateAs(co.datapipelines.auth.MembershipFlags.VIEWER)
+        advice.navAdminUsers() shouldBe false
+        advice.navAdminMembers() shouldBe false
+
+        authenticateAs(co.datapipelines.auth.MembershipFlags(author = true, admin = true))
+        advice.navAdminUsers() shouldBe false
+        advice.navAdminMembers() shouldBe true
+
+        // A super admin with NO active workspace keeps the instance entry.
+        authenticateAs(flags = null, superAdmin = true)
+        advice.navAdminUsers() shouldBe true
+        advice.navAdminMembers() shouldBe false
+    }
+
+    private fun authenticateAs(
+        flags: co.datapipelines.auth.MembershipFlags?,
+        superAdmin: Boolean = false,
+    ) {
+        val principal =
+            AuthenticatedPrincipal(
+                UUID.randomUUID(),
+                "a@b.c",
+                "A",
+                emptySet(),
+                AuthMethod.OIDC,
+                workspace = flags?.let { co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "acme", it) },
+                superAdmin = superAdmin,
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
+
     @Test
     fun `activeTheme resolves through the theme resolver for any request`() {
         every { themeResolver.resolve(any()) } returns "ocean"

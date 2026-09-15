@@ -105,7 +105,9 @@
     <!-- LEFT: the render-context rail. Keyboard/focus order is context → source →
          Preview (041 gate 4) — this rail precedes the source column in the DOM. -->
     <div class="te-rail">
-      <div>
+      <!-- 143 (T315): the render context is an AUTHOR's panel — it exists to feed Preview,
+           whose POST is MUTATE. A reader's rail keeps the Imports table below (a read). -->
+      <div th:if="${canAuthor == true}">
         <div class="te-panel-head">
           <h2>Render Context</h2>
           <div class="u-flex u-gap-xs">

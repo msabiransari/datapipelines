@@ -25,6 +25,11 @@ fun WebContext.withRoles(
     canAdminWorkspace: Boolean = true,
     isSuperAdmin: Boolean = true,
     roleLabel: String = "super admin",
+    // 143 — the shell's Admin entry (UiWorkspaceAdvice, from RoleModel.shell), defaulted
+    // the way that helper derives it so a render of the fullest role carries the rail's
+    // instance-users link; a test about the entry itself passes both explicitly.
+    navAdminUsers: Boolean = isSuperAdmin,
+    navAdminMembers: Boolean = canAdminWorkspace && !isSuperAdmin,
 ): WebContext =
     apply {
         setVariable("canRead", canRead)
@@ -34,6 +39,8 @@ fun WebContext.withRoles(
         setVariable("canAdminWorkspace", canAdminWorkspace)
         setVariable("isSuperAdmin", isSuperAdmin)
         setVariable("roleLabel", roleLabel)
+        setVariable("navAdminUsers", navAdminUsers)
+        setVariable("navAdminMembers", navAdminMembers)
     }
 
 /** The same set from [RoleModel.Roles], so a render test can stamp exactly what a controller would. */
