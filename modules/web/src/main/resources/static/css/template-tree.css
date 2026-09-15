@@ -82,7 +82,10 @@
   width: 3px;
   height: 40px;
   border-radius: var(--radius-pill, 999px);
-  background: transparent;
+  /* 141 §C: visible AT REST — the grip was transparent until hovered, and a resize nobody
+     can see is a resize nobody uses (the owner had three rounds of tree-width guesses
+     without ever finding this handle). `--border-default` is the 3:1 boundary token. */
+  background: var(--border-default, #d1d5db);
   transition: background var(--duration-fast, 150ms) ease;
 }
 

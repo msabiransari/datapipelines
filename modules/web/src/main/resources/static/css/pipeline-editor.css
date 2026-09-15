@@ -7,7 +7,15 @@
  * the one geometry the vendored scale does not carry). */
 
 :root {
-  --pe-sidebar-width: 280px;
+  /* 141 §B: the sidebar's width is the USER's now — splitter.js writes --pe-sidebar-w onto
+     the ROOT (an inline custom property, which outranks this declaration), remembers it under
+     `dp.pane.editor-sidebar`, and restores it before first paint. The 280px is therefore the
+     DEFAULT, and double-clicking the handle removes the root's property to come back to it.
+     The bounds are named here so the stylesheet and splitter.js share the two numbers (the
+     --pe-dock-min-h precedent); the browser suite measures both sides. */
+  --pe-sidebar-width: var(--pe-sidebar-w, 280px);
+  --pe-sidebar-min-w: 220px;
+  --pe-sidebar-max-w: 50vw;
   --pe-topbar-height: 52px;
   --pe-gap: var(--gap-md, 16px);
   --pe-transition: 200ms ease;
@@ -245,11 +253,54 @@
 /* ---- Body: sidebar + stage ---- */
 .pe-body {
   display: grid;
-  grid-template-columns: var(--pe-sidebar-width) 1fr;
+  /* 141 §B: the first track is the user's width, clamped so even a remembered value beyond
+     the bounds (written onto the root pre-paint, before any JS bound can run) cannot push
+     the stage off the screen. The ≤1024px collapse below (`0 1fr`) sits LATER in the
+     cascade, so a remembered 600px never reopens the collapsed sidebar at phone widths. */
+  grid-template-columns: clamp(var(--pe-sidebar-min-w), var(--pe-sidebar-width), var(--pe-sidebar-max-w)) 1fr;
   flex: 1;
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+
+/* ---- The sidebar's resize handle (141 §B) ----
+ * The `.tplx-splitter` shape (104 §C), on the sidebar's right border — the pane boundary.
+ * 12px of hit area centred on the 1px border, absolute so it is not a third grid column.
+ * The grip is a visible pill AT REST (141 §C): a resize nobody can see is a resize nobody
+ * uses. `var(--border-default)` is the design system's 3:1 interactive-boundary token; the
+ * brand colour stays the hover/focus/drag signal. The handle's x reads the same clamped
+ * track the grid does, so it can never sit off the boundary it resizes. */
+.pe-sidebar-splitter {
+  position: absolute;
+  user-select: none;
+  top: 0;
+  bottom: 0;
+  left: calc(clamp(var(--pe-sidebar-min-w), var(--pe-sidebar-width), var(--pe-sidebar-max-w)) - 6px);
+  width: 12px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.pe-sidebar-splitter::after {
+  content: "";
+  width: 3px;
+  height: 40px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--border-default, #d1d5db);
+  transition: background var(--pe-transition);
+}
+
+.pe-sidebar-splitter:hover::after,
+.pe-sidebar-splitter:focus-visible::after,
+.pe-body.is-dragging .pe-sidebar-splitter::after {
+  background: var(--brand, #2563eb);
 }
 
 /* ---- Left sidebar: settings + parameters (real machinery the mock omits; the
@@ -963,8 +1014,10 @@
 
 /* ---- The resize handle (104 §B) ----
  * The owner's report: "it has a fixed height. You can min/max it but cannot change the
- * height." A 9px strip straddling the dock's top border, with a centred grip that only
- * colours on hover/focus/drag — visible where the boundary is, silent until wanted. It is
+ * height." A 9px strip straddling the dock's top border, with a centred grip. The grip was
+ * transparent at rest until 141 §C — a resize nobody can see is a resize nobody uses — so
+ * it is now a visible pill (`--border-default`, the 3:1 boundary token) at rest and brand on
+ * hover/focus/drag. It is
  * NOT the native `resize` corner the tree pane used to carry: that handle sits at the
  * bottom-right of the pane, which is where nobody looks for a divider (§C).
  *
@@ -989,10 +1042,10 @@
 
 .pe-dock-splitter::after {
   content: "";
-  width: 44px;
+  width: 40px;
   height: 3px;
   border-radius: var(--radius-pill, 999px);
-  background: transparent;
+  background: var(--border-default, #d1d5db);
   transition: background var(--pe-transition);
 }
 
@@ -1725,6 +1778,13 @@ html.dp-splitting-y * {
 @media (max-width: 1024px) {
   .pe-body {
     grid-template-columns: 0 1fr;
+  }
+
+  /* 141 §B: the handle has no boundary to sit on once the sidebar is a drawer, and this
+     rule sits AFTER the property-sized column above — a remembered width never reopens
+     the collapse (PipelineEditorSidebarResizeBrowserTest's 390px arm asserts exactly that). */
+  .pe-sidebar-splitter {
+    display: none;
   }
 
   .pe-sidebar {
