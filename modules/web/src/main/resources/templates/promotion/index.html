@@ -99,7 +99,10 @@
            target-side role is consulted here. The PLAN stays readable for everyone — it is a
            read, and hiding it would leave an author unable to see what is waiting — but the
            button that SENDS it is the promoter's alone, which is the whole of D-R2. -->
-      <form th:unless="${#lists.isEmpty(plan.promotable)}"
+      <!-- 143 (T315): the form — Send column, selection boxes, Promote — exists for a PROMOTER
+           only. A reader gets the same plan as a plain table below: no form, no input, no
+           control the server would refuse, and the note naming who can send it. -->
+      <form th:if="${canPromote == true and !#lists.isEmpty(plan.promotable)}"
             th:action="@{/promotion/promote}" method="post">
         <table class="ds-table">
           <thead>
@@ -135,19 +138,48 @@
           </tbody>
         </table>
         <div class="u-row-md u-mt-lg">
-          <button th:if="${canPromote == true}" type="submit" data-verb="promote" class="ds-button ds-button-primary"
+          <button type="submit" data-verb="promote" class="ds-button ds-button-primary"
                   th:disabled="${plan.targetAuthoringEnabled}">Promote</button>
-          <div th:unless="${canPromote == true}" class="app-note" data-role-note="promote">
-            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
-            <span>Promotion is a promoter&#39;s verb here — ask someone with the promoter or admin
-              role in <span th:text="${activeWorkspace}">workspace</span> to send this batch.</span>
-          </div>
           <span class="u-secondary u-text-xs">
             The templates each pipeline pins and the child pipelines it runs are sent with it,
             in dependency order. The target applies the whole batch or none of it.
           </span>
         </div>
       </form>
+
+      <!-- The reader's plan (143): the same rows, read-only — 114 §B's "the PLAN stays readable
+           for everyone" kept, without the submission controls it used to carry. -->
+      <th:block th:if="${canPromote != true and !#lists.isEmpty(plan.promotable)}">
+        <table class="ds-table" data-promotion-plan="read-only">
+          <thead>
+            <tr>
+              <th>Pipeline</th>
+              <th class="num">Here</th>
+              <th class="num">On target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="candidate : ${plan.promotable}">
+              <td>
+                <span class="app-name" th:text="${candidate.displayName}">Daily revenue</span>
+                <span class="app-path" th:text="${candidate.name}">daily_revenue</span>
+              </td>
+              <td class="num">v<span th:text="${candidate.localVersion}">4</span></td>
+              <td class="num">
+                <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">3</span></span>
+                <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="u-row-md u-mt-lg">
+          <div class="app-note" data-role-note="promote">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+            <span>Promotion is a promoter&#39;s verb here — ask someone with the promoter or admin
+              role in <span th:text="${activeWorkspace}">workspace</span> to send this batch.</span>
+          </div>
+        </div>
+      </th:block>
     </th:block>
   </th:block>
 </th:block>
