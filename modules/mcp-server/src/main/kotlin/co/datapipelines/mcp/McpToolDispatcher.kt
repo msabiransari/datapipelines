@@ -192,7 +192,7 @@ class McpToolDispatcher(
                 put("outcome", outcome)
                 put("correlation_id", ctx.correlationId.toString())
                 targetOf(request)?.let { put("target", it) }
-                identifierExtras(request)
+                identifierExtras(toolName, request)
                 code?.let { put("code", it) }
                 put("elapsed_ms", (System.nanoTime() - startedAt) / NANOS_PER_MILLI)
                 // D-R8 (112 merge review): a super admin's key acting in a workspace where they
@@ -239,14 +239,37 @@ class McpToolDispatcher(
      * a probe statement is customer-authored text with the same transcript-hazard profile as a
      * credential, and the hash is what an operator needs to pair an audit row with a reported
      * statement without the log ever holding the text.
+     *
+     * 139: the table-level identifiers the entry-point checks learn from. A
+     * `datasources_get_columns` / `_get_tables` / `_get_table_stats` row carries `table` (and
+     * `namespace` when the caller passed one) beside the `target` datasource, so
+     * `pipeline.validation.table_not_learned` can ask "did THIS key read THIS table's
+     * columns" without a second data model; a `templates_render` row carries `template` so
+     * `pipeline.execution.template_unrendered` can compare the draft's `updated_at` against
+     * the key's last render. Rows written before 139 carry neither key and simply do not
+     * count (a fresh key learns fresh).
      */
-    private fun MutableMap<String, Any?>.identifierExtras(request: McpSchema.CallToolRequest) {
+    private fun MutableMap<String, Any?>.identifierExtras(
+        toolName: String,
+        request: McpSchema.CallToolRequest,
+    ) {
         val args = request.arguments() ?: return
         (args["node_id"] as? String)?.takeIf { it.isNotBlank() }?.let { put("node_id", it) }
         (args["version"] as? Number)?.toInt()?.let { put("version", it) }
         (args["sql"] as? String)?.let {
             put("sql_sha256", sha256Hex(it))
             put("sql_length", it.length)
+        }
+        (args["table"] as? String)?.takeIf { it.isNotBlank() }?.let { put("table", it) }
+        (args["namespace"] as? List<*>)
+            ?.filterIsInstance<String>()
+            ?.flatMap { it.split('.') }
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { put("namespace", it) }
+        if (toolName == "templates_render") {
+            (args["id"] as? String)?.takeIf { it.isNotBlank() }?.let { put("template", it) }
         }
     }
 

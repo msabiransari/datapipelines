@@ -145,9 +145,11 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
 
    Before your first `templates_create`, state — in your reasoning or your reply — which of
    these calls you made for EACH datasource and EACH table the SQL reads; a table you did
-   not `_get_columns` and `_get_table_stats` is a table you may not read.
+   not `_get_columns` and `_get_table_stats` is a table you may not read. The server checks
+   this: a `pipelines_create` naming a table you never `_get_columns`'d is refused
+   `pipeline.validation.table_not_learned` — the refusal lists the calls that clear it.
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
-   will touch (row estimate, indexes, per-column bounds — catalog reads, never a scan), then
+   will touch (row estimate, indexes, per-column bounds — catalog estimates, never a scan; probe for the exact bound), then
    `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
    `wall_ms` — a `seq` plan on a large table is the timeout you would meet in step 5, found
    while it is still cheap. A probe that settles a question about the DATA (not the plan) —
@@ -182,9 +184,11 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    read — see Best practices) writes the DRAFT: the first update opens it, later updates
    overwrite it, so iterating never piles up versions. `pipelines_execute` with no `version`
    runs the **working version** — your draft when one exists, else the latest release — so
-   testing your own work needs no version argument at all. **Then stop**: leave the draft for a
-   human to release from the UI. Never claim your change is live — it is not until released, and
-   no tool you have releases anything.
+   testing your own work needs no version argument at all. And `pipelines_execute` refuses a
+   draft whose pinned draft template was updated after its last render
+   (`pipeline.execution.template_unrendered`) — render, then run. **Then stop**: leave the
+   draft for a human to release from the UI. Never claim your change is live — it is not until
+   released, and no tool you have releases anything.
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
    Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
    TTL** — afterwards the result is gone (`result.expired`).
@@ -259,9 +263,6 @@ chain and stack frames travel with the error; a deployment may set `structured`,
 case `error.exception` and `error.sql` are absent and you have the code, message, node
 context and correlation id to work with.
 
-An agent that reports "the pipeline failed" without the root cause is doing what the UI did
-on 2026-09-02 (T85): the answer was in the event all along.
-
 ## Best practices (trouble-free authoring)
 
 **Read `references/authoring-playbook.md` before building anything with more than two
@@ -322,7 +323,10 @@ Do/Don't table is one screen; each row is a mistake an agent made here.
     that names a period — "2024", "Q3", "last month", "2023 to 2024" — gets that period's
     parameter (`year`, `quarter`, `base_year`/`comp_year`, an anchor date), and the calculator
     or in-dialect date math derives the bounds; two raw dates are an INPUT to a template,
-    never the door of a pipeline. A relative phrase's door is an anchor date — `$current_date`
+    never the door of a pipeline. The server enforces that: a raw-date door is
+    refused until you pass `door_acknowledged: true` — which you do only when the question truly fixes two
+    dates; passing it to silence the refusal is the miss it exists to catch. A relative
+    phrase's door is an anchor date — `$current_date`
     for a live one; for a fixed dataset, the data's last date for a "this period" phrase but
     **the day AFTER the data's last date for a "last N periods" phrase** — those kinds resolve
     the complete periods before the one CONTAINING the anchor (data ends 2026-06-30: "last
@@ -381,10 +385,6 @@ Do/Don't table is one screen; each row is a mistake an agent made here.
 - **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
 - **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response.
 - **`references/tools.md`** — every MCP tool, generated from the server's catalog at build time.
-
-Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` and by the
-`docs_get` tool (`docs_list` names them), and a deployment serves them at
-`GET /skill/<name>.md`; inside a checkout they are files in `references/` beside this one.
 
 ## References (when working inside the repo)
 

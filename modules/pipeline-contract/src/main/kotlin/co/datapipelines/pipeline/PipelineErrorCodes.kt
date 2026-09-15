@@ -28,12 +28,29 @@ object PipelineErrorCodes {
         const val NAME_INVALID = "pipeline.validation.name_invalid"
 
         /**
-         * §13.1 (094) — an AGENT asked to create a pipeline under a top-level folder that has
+         * §12.1 (094) — an AGENT asked to create a pipeline under a top-level folder that has
          * nothing in it yet, without `confirm_new_root: true`. `details.existing_roots` lists
          * the roots that do exist. MCP-only: a person choosing a folder in the UI, and an
          * operator over REST, have already decided.
          */
         const val NEW_ROOT_REQUIRES_CONFIRMATION = "pipeline.validation.new_root_requires_confirmation"
+
+        /**
+         * §12.11 (139) — an AGENT saved a pipeline whose template names a table this API key
+         * never read the columns of (`datasources_get_columns`), over MCP. `details.tables`
+         * lists each `{datasource, table}` and the one call that clears it. MCP-only: the
+         * check reads the caller's own audit rows, which only the agent loop has.
+         */
+        const val TABLE_NOT_LEARNED = "pipeline.validation.table_not_learned"
+
+        /**
+         * §12.11 (139) — an AGENT saved a pipeline whose door is a raw DATE pair (two DATE
+         * parameters, no INTEGER period parameter, no window calculator) without passing
+         * `door_acknowledged: true`. `details.parameters` names the pair. MCP-only, the same
+         * shape as [NEW_ROOT_REQUIRES_CONFIRMATION]: the flag forces the decision instead of
+         * a copy.
+         */
+        const val DOOR_UNACKNOWLEDGED = "pipeline.validation.door_unacknowledged"
 
         /** §12.1 — all node `id` values are unique. */
         const val DUPLICATE_NODE_ID = "pipeline.validation.duplicate_node_id"
@@ -365,6 +382,15 @@ object PipelineErrorCodes {
 
         /** §13.8 — pre-execution reachability check failed for a referenced datasource. */
         const val DATASOURCE_UNREACHABLE = "pipeline.execution.datasource_unreachable"
+
+        /**
+         * §13.3 (139) — an AGENT executed a DRAFT pipeline version over MCP while one of its
+         * pinned template versions is a DRAFT that was written AFTER this key's last
+         * `templates_render` of it. `details.templates` carries each `{id, version, updated_at,
+         * last_render}`. MCP-only: the render-then-run loop the skill describes, enforced at
+         * the entry point. RELEASED pins are exempt — they cannot change.
+         */
+        const val TEMPLATE_UNRENDERED = "pipeline.execution.template_unrendered"
     }
 
     /** §13.4 — node execution. */

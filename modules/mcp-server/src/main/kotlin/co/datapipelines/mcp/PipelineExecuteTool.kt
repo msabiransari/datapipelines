@@ -112,6 +112,12 @@ class PipelineExecuteTool(
      * reads both event names. Null only outside the assembled application.
      */
     private val launchAudit: AuditEventSink? = null,
+    /**
+     * 139 §B — the render-freshness check: a DRAFT version whose pinned DRAFT template was
+     * written after this key's last render of it refuses at the entry point. Null only
+     * outside the assembled application.
+     */
+    private val renderFreshness: TemplateRenderFreshness? = null,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -122,7 +128,9 @@ class PipelineExecuteTool(
                     "columns serialize as JSON strings — preserve them as strings when displaying or persisting to avoid " +
                     "precision loss. When the execution FAILS, the error result carries the full failure record " +
                     "(node context, rendered SQL, exception chain with the root cause last in caused_by) — the same " +
-                    "object executions_get returns; quote its correlation_id when escalating.",
+                    "object executions_get returns; quote its correlation_id when escalating. The server checks the " +
+                    "loop: a DRAFT whose pinned draft template was updated after this key's last templates_render of " +
+                    "it is refused pipeline.execution.template_unrendered — render, then run.",
             schema =
                 """
                 {
@@ -158,6 +166,13 @@ class PipelineExecuteTool(
         // D6: the version resolution is the aggregate's, shared with the REST execute path.
         val executable =
             pipelines.findExecutable(workspace.id, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        // 139 §B — render before you run, at the entry point: only a DRAFT version is
+        // checked (RELEASED pins cannot change), and only when THIS is the version being
+        // run — the working version when no version argument was given, so an agent
+        // executing its own draft is exactly the caller the check addresses.
+        pipelines.findDraft(workspace.id, id)?.takeIf { it.version == version }?.let { draft ->
+            renderFreshness?.require(workspace.id, ctx.principal.keyId, draft, executable.pipeline.nodes)
+        }
 
         val parameters = parameters(args)
         val request =

@@ -51,6 +51,9 @@ dependencies {
     testImplementation(libs.spring.boot.starter.web)
     testImplementation(libs.spring.boot.starter.oauth2.client)
     testImplementation(libs.spring.boot.starter.test)
+    // 139 — RealShippedTools passes the metadata jdbc the entry-point checks read through;
+    // `compileOnly` above is not on the test classpath, so name it here too.
+    testImplementation(libs.spring.boot.starter.jdbc)
 }
 
 // ---------------------------------------------------------------------------

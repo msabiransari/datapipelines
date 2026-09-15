@@ -92,6 +92,10 @@ class McpServerAutoConfiguration {
         // read the same-credential rule joins on. Plain parameters, the 068/074 pattern.
         cancellationService: ExecutionCancellationService,
         mcpCallAudit: McpCallAudit,
+        // 139 — the metadata jdbc, for the audit-log read behind the entry-point checks
+        // (the mcpCallAudit bean's collaborator, reached directly: the checks are built
+        // inline by the 037 discipline, so they need no bean of their own).
+        jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate,
         // 107: the launch-time audit row executions_cancel joins on — pipelines_execute blocks
         // until the execution is terminal, so the dispatcher's end-of-call row comes too late.
         auditSink: co.datapipelines.auth.AuditEventSink,
@@ -118,6 +122,15 @@ class McpServerAutoConfiguration {
         // same discipline: stateless over (templates, authoring), so inline construction adds no
         // wiring and the tool cannot describe a write path the server does not ship.
         val templateDrafts = co.datapipelines.templates.TemplateDraftService(templates, authoring)
+        // 139 — the entry-point checks, built inline by the 037 discipline: stateless over
+        // collaborators this method already holds, so the tools cannot describe a gate the
+        // server does not ship. The audit-log reader is the SAME metadata jdbc the
+        // mcpCallAudit bean wraps.
+        val learnings =
+            co.datapipelines.application.mcp
+                .McpToolLearnings(jdbc)
+        val tableLearning = TableLearningCheck(templates, introspector, datasources, learnings)
+        val renderFreshness = TemplateRenderFreshness(templates, learnings)
         return listOf(
             PipelinesListTool(pipelineService, pipelines),
             PipelinesGetTool(pipelineService, usage),
@@ -131,10 +144,11 @@ class McpServerAutoConfiguration {
                 resultConfig = executorConfig.result,
                 executionRunner = executionRunner.getIfAvailable(),
                 launchAudit = auditSink,
+                renderFreshness = renderFreshness,
             ),
-            PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner),
-            PipelinesCreateTool(pipelineService, pipelines),
-            PipelinesUpdateTool(pipelineService),
+            PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner, renderFreshness),
+            PipelinesCreateTool(pipelineService, pipelines, tableLearning),
+            PipelinesUpdateTool(pipelineService, tableLearning),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesUsedByTool(usage),

@@ -146,6 +146,12 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun mcpCallAudit(): co.datapipelines.application.mcp.McpCallAudit = mockk()
 
+        // 139 — the entry-point checks read the audit log through this jdbc; `mcpTools`
+        // now takes it directly (the same collaborator the mcpCallAudit bean wraps, which
+        // this stub context keeps out the same way).
+        @Bean fun jdbc(): org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate =
+            mockk<org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate>(relaxed = true)
+
         @Bean fun authErrorWriter(): AuthErrorWriter = AuthErrorWriter(ObjectMapper())
     }
 }

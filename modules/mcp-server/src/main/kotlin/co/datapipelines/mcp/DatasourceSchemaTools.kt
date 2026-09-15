@@ -235,7 +235,8 @@ class DatasourcesGetTableStatsTool(
             name = "datasources_get_table_stats",
             description =
                 "One table's catalog statistics: a row estimate, the index list (a lake table's partition column " +
-                    "reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds. " +
+                    "reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds — " +
+                    "the min/max are the catalog's estimates, not a scan — probe for the exact bound. " +
                     "For a LAKE table the payload also carries partition_column: the registered partition column's " +
                     "name, or null when the table has none — null means ONE unpartitioned file every read scans " +
                     "whole; filter pushdown inside a file is not pruning, whatever a plan's READ_PARQUET filter " +
