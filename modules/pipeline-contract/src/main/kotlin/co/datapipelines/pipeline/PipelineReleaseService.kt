@@ -2,6 +2,9 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.SimpleTransactionStatus
+import org.springframework.transaction.support.TransactionCallback
+import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
 
 /**
@@ -32,20 +35,59 @@ open class PipelineReleaseService(
     private val validator: PipelineValidator,
     private val authoring: AuthoringGuard,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
+    /**
+     * The 140 release-check gate, as the port this module declares — `web` wires the
+     * implementation riding `modules/application`'s check runner. [ReleaseCheckGate.NONE]
+     * keeps pre-140 constructions (unit tests of the lifecycle alone) releasing as before.
+     */
+    private val checkGate: ReleaseCheckGate = ReleaseCheckGate.NONE,
+    /**
+     * The transaction the template-pin guard and the one-statement flip run in (see
+     * [release]). A `TransactionTemplate` over `metadataTransactionManager` in production;
+     * the default executes the action directly, which is what a directly-constructed test
+     * always did. Programmatic rather than annotated because the check gate MUST run outside
+     * the metadata transaction: its probes open customer-datasource connections, and
+     * `ConnectionLease` refuses exactly that with `datasource.lease_in_transaction` while a
+     * metadata transaction is open on the thread (056 §E.2).
+     */
+    private val transactions: TransactionOperations = DIRECT_TRANSACTIONS,
 ) {
     /** What a release produced: the bumped record, the released version, the released body. */
     data class Released(
         val record: PipelineRecord,
         val version: PipelineVersionDetail,
         val bodyJson: String,
+        /**
+         * The ids of the checks that did NOT pass and were overridden to release anyway
+         * (140) — empty on a clean release. The surfaces add it to the
+         * `pipeline.version.released` audit event as `checks_overridden`.
+         */
+        val checksOverridden: List<String> = emptyList(),
+        /** The override reason the request carried, when [checksOverridden] is non-empty. */
+        val checksOverrideReason: String? = null,
     )
 
     /**
      * Releases the pipeline's DRAFT at [expectedHash].
      *
+     * Order of operations, and why the boundary sits where it does:
+     *
+     * 1. Authoring guard, draft read, body re-validation — plain reads.
+     * 2. **The release-check gate (140):** when the body carries `checks[]`, they run NOW,
+     *    fresh, `via = release`, OUTSIDE any metadata transaction (the probes open
+     *    customer-datasource connections; see [transactions]). Any `fail` or `error` verdict
+     *    refuses the release with `pipeline.check.failed` — unless [overrideChecksReason]
+     *    is a non-blank string of at least [OVERRIDE_REASON_MIN_CHARS] characters, in which
+     *    case the release proceeds and the result carries the overridden ids for the audit
+     *    event. A version with no checks skips the gate entirely: checks are opt-in.
+     * 3. The template-pin guard and the flip, inside [transactions]: the guard's reads are
+     *    what the flip depends on, and re-running them in the flip's transaction keeps the
+     *    pre-140 guarantee that a pin cannot be released out from under the check.
+     *
      * @throws DatapipelinesException / [PipelineValidationException]:
      *   `pipeline.version.not_draft`, §12 validation codes re-run on the draft body,
-     *   `pipeline.release.template_not_released`, `pipeline.version.conflict` (stale hash).
+     *   `pipeline.release.template_not_released`, `pipeline.check.failed`,
+     *   `pipeline.version.conflict` (stale hash).
      */
     @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued code
     open fun release(
@@ -53,6 +95,7 @@ open class PipelineReleaseService(
         pipelineId: UUID,
         expectedHash: String,
         actor: UUID,
+        overrideChecksReason: String? = null,
     ): Released {
         // §5.5: release is an authoring action — a promotion receiver refuses it.
         authoring.requirePipelineAuthoring()
@@ -69,47 +112,113 @@ open class PipelineReleaseService(
         val pipeline = deserializer.readOrThrow(bodyJson)
         validator.validateOrThrow(pipeline, workspaceId)
 
-        // §6: templates lock first — a DRAFT template pin blocks the pipeline's release.
-        //
-        // Only the nodes that HAVE a template pin. A PIPELINE node pins a child pipeline and a
-        // CALCULATOR node evaluates a catalog function; neither declares a template, so
-        // `node.template` is the empty default there and asking the registry about `@0` answers
-        // MISSING — which refused the release of every pipeline containing one, naming
-        // `template_id: ""`. Latent since composition shipped (a composite pipeline could be
-        // created, but never re-released after an edit) and unmissable since D55, because now
-        // EVERY pipeline needs a release. Found by `PromotionTwoDeploymentE2eTest`, whose parent
-        // pipeline has a PIPELINE node.
-        pipeline.nodes
-            .filter { it.type != NodeType.PIPELINE && it.type != NodeType.CALCULATOR }
-            .map { it.template }
-            .forEach { ref ->
-                val status = templates.statusOf(workspaceId, ref.id, ref.version)
-                if (status != PipelineVersionStatus.RELEASED) {
-                    throw DatapipelinesException(
-                        code = PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED,
-                        message = "Template '${ref.id}' version ${ref.version} is not released; release the template first.",
-                        details =
-                            mapOf(
-                                "template_id" to ref.id,
-                                "template_version" to ref.version,
-                                "template_status" to (status?.name ?: "MISSING"),
-                            ),
-                    )
-                }
-            }
+        val overridden = runCheckGate(workspaceId, pipelineId, draft.version, pipeline, actor, overrideChecksReason)
 
         val released =
-            pipelines.releaseDraft(
-                workspaceId = workspaceId,
-                pipelineId = pipelineId,
-                name = pipeline.name,
-                displayName = pipeline.displayName,
-                description = pipeline.description,
-                expectedHash = expectedHash,
-                actor = actor,
-            ) ?: throw conflictAfterGuardFailure(workspaceId, pipelineId)
-        return Released(released.record, released.version, bodyJson)
+            transactions.execute {
+                // §6: templates lock first — a DRAFT template pin blocks the pipeline's
+                // release. Checked in the flip's transaction (see the KDoc above).
+                //
+                // Only the nodes that HAVE a template pin. A PIPELINE node pins a child
+                // pipeline and a CALCULATOR node evaluates a catalog function; neither
+                // declares a template, so `node.template` is the empty default there and
+                // asking the registry about `@0` answers MISSING — which refused the release
+                // of every pipeline containing one, naming `template_id: ""`. Latent since
+                // composition shipped and unmissable since D55, because now EVERY pipeline
+                // needs a release. Found by `PromotionTwoDeploymentE2eTest`, whose parent
+                // pipeline has a PIPELINE node.
+                pipeline.nodes
+                    .filter { it.type != NodeType.PIPELINE && it.type != NodeType.CALCULATOR }
+                    .map { it.template }
+                    .forEach { ref ->
+                        val status = templates.statusOf(workspaceId, ref.id, ref.version)
+                        if (status != PipelineVersionStatus.RELEASED) {
+                            throw DatapipelinesException(
+                                code = PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED,
+                                message = "Template '${ref.id}' version ${ref.version} is not released; release the template first.",
+                                details =
+                                    mapOf(
+                                        "template_id" to ref.id,
+                                        "template_version" to ref.version,
+                                        "template_status" to (status?.name ?: "MISSING"),
+                                    ),
+                            )
+                        }
+                    }
+
+                pipelines.releaseDraft(
+                    workspaceId = workspaceId,
+                    pipelineId = pipelineId,
+                    name = pipeline.name,
+                    displayName = pipeline.displayName,
+                    description = pipeline.description,
+                    expectedHash = expectedHash,
+                    actor = actor,
+                ) ?: throw conflictAfterGuardFailure(workspaceId, pipelineId)
+            }!!
+        return Released(released.record, released.version, bodyJson, overridden.first, overridden.second)
     }
+
+    /**
+     * The 140 gate: run the body's checks fresh (`via = release`) and refuse on any verdict
+     * short of [CheckRunVerdict.PASS], unless the override reason rides the request.
+     *
+     * Returns the overridden check ids and the trimmed reason for the audit event; both
+     * empty on a clean pass or a check-less version. The run rows the gate's implementation
+     * persists are what the refusal's `details.checks` and the UI's latest-run list both
+     * read — one run, one truth.
+     */
+    private fun runCheckGate(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+        pipeline: Pipeline,
+        actor: UUID,
+        overrideChecksReason: String?,
+    ): Pair<List<String>, String?> {
+        if (pipeline.checks.isEmpty()) return emptyList<String>() to null
+        val outcomes = checkGate.runForRelease(workspaceId, pipelineId, version, pipeline, actor)
+        val failing = outcomes.filter { it.verdict != CheckRunVerdict.PASS }
+        if (failing.isEmpty()) return emptyList<String>() to null
+        val reason = overrideChecksReason?.trim()
+        if (reason != null && reason.length >= OVERRIDE_REASON_MIN_CHARS) {
+            return failing.map { it.checkId } to reason
+        }
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Check.FAILED,
+            message =
+                "Release blocked: ${failing.size} of ${outcomes.size} release checks did not pass. " +
+                    "Fix the pipeline or the data, or release with an override_checks_reason of at least " +
+                    "$OVERRIDE_REASON_MIN_CHARS characters (it is audited).",
+            details =
+                mapOf(
+                    "pipeline_id" to pipelineId.toString(),
+                    "version" to version,
+                    "checks" to failing.map { checkFailureDetails(it) },
+                ),
+        )
+    }
+
+    /** One failing check's entry in the `pipeline.check.failed` refusal's `details.checks`. */
+    private fun checkFailureDetails(outcome: CheckRunOutcome): Map<String, Any?> =
+        mapOf(
+            "check_id" to outcome.checkId,
+            "name" to outcome.name,
+            "expected" to expectedDetails(outcome.expected),
+            "observed" to outcome.observed,
+            "verdict" to outcome.verdict.wire,
+            "message" to outcome.message,
+        )
+
+    private fun expectedDetails(expected: CheckExpectation): Map<String, Any?> =
+        buildMap {
+            put("kind", expected.kind)
+            expected.value?.let { put("value", it) }
+            expected.min?.let { put("min", it) }
+            expected.max?.let { put("max", it) }
+            expected.rows?.let { put("rows", it) }
+            expected.tolerance?.let { put("tolerance", it) }
+        }
 
     /** What a draft purge did (§5.4, 101) — the row (and its executions) are gone either way. */
     sealed interface Purged {
@@ -190,4 +299,25 @@ open class PipelineReleaseService(
             message = "Pipeline '$pipelineId' has no draft to release or discard.",
             details = mapOf("pipeline_id" to pipelineId.toString()),
         )
+
+    companion object {
+        /**
+         * §13.17 (140) — the minimum length of the `override_checks_reason` a release past
+         * failing checks must carry. Bounded below so "ok" cannot stand as a reason: the
+         * override is audited with the release, and a reason shorter than a sentence is not
+         * one.
+         */
+        const val OVERRIDE_REASON_MIN_CHARS = 10
+
+        /**
+         * The default [TransactionOperations] for directly-constructed instances (tests):
+         * run the action straight through, with no transaction — exactly what an un-proxied
+         * service always did. Production wiring passes a `TransactionTemplate` over
+         * `metadataTransactionManager`.
+         */
+        private val DIRECT_TRANSACTIONS =
+            object : TransactionOperations {
+                override fun <T : Any?> execute(action: TransactionCallback<T>): T? = action.doInTransaction(SimpleTransactionStatus())
+            }
+    }
 }

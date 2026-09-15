@@ -37,6 +37,17 @@ test("the typed confirm matches only the exact expected text, trimmed", () => {
   assert.equal(dialogs.confirmMatches("v4", null), false);
 });
 
+// 140 — the release override's min-chars arm (the typed confirm's sibling): "Release anyway"
+// stays disabled until the reason carries at least N trimmed characters.
+test("the min-chars arm counts trimmed characters against the floor", () => {
+  assert.equal(dialogs.minCharsMet("0123456789", 10), true); // exactly at the floor
+  assert.equal(dialogs.minCharsMet("012345678", 10), false);
+  assert.equal(dialogs.minCharsMet("  0123456789  ", 10), true); // padding never counts
+  assert.equal(dialogs.minCharsMet("          ", 10), false); // all whitespace is empty
+  assert.equal(dialogs.minCharsMet("", 10), false);
+  assert.equal(dialogs.minCharsMet(null, 10), false);
+});
+
 // The ⋯ menu's placement (owner 2026-09-12: the menu fell into the tab panel's scrollable
 // overflow and never showed). The list lives in the top layer now, so WHERE it goes is this
 // pure rule's decision: under the ⋯, right-aligned; above it when the viewport has no room

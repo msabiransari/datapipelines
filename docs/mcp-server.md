@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.29 (frozen contract — additive-only changes after this point)
+**Status:** v1.40 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-14
@@ -159,7 +159,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 40 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 41 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -215,6 +215,7 @@ Tools are named `{domain}_{action}`:
 - `semantics_retire`
 - `docs_list`
 - `docs_get`
+- `pipelines_run_checks`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -364,6 +365,10 @@ Create a new pipeline.
         "type": "array",
         "description": "Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref {name, version} pinning an existing pipeline version to execute as a child execution, an optional parameters map (typed literals, or '${parent_param}' to pass a parent parameter through), and an optional output block allowed only when the pinned child has a caller node; it declares neither source nor template."
       },
+      "checks": {
+        "type": "array",
+        "description": "Release checks (pipeline-contract §3.3): at most 20 objects, each {id, name, datasource, sql, expected} — id [a-z0-9_]{1,63} unique in the body, name 1-200 chars, sql ONE read-only statement. expected.kind is value (single numeric cell compared with absolute tolerance, default 0), range (the cell within min..max inclusive), or rows (the statement's row count equals rows). Every :name bind must name a DECLARED pipeline parameter (the calculator context is not available to a check); ${} interpolation is refused (a check has no rendering); tempdb is not a check datasource. You supply the query and the expectation, never an observed value — run them with pipelines_run_checks, and only the server's run produces observed."
+      },
       "confirm_new_root": {"type": "boolean", "description": "Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it."},
       "door_acknowledged": {"type": "boolean", "description": "Set true ONLY when the question truly fixes two dates. A pipeline whose parameters are two raw DATE inputs with no period parameter (year, quarter, month, *_year) and no window CALCULATOR node is refused pipeline.validation.door_unacknowledged — the door is a decision: prefer the period vocabulary of rule 13, and never pass this to silence the refusal."}
     },
@@ -390,7 +395,7 @@ The whole pipeline is validated before it is stored — no invalid pipeline ever
 
 Update an existing pipeline by writing its DRAFT (versioning §3.2/§7, since 035).
 
-Same input as `pipelines_create` plus required `id` and required `expected_hash` — the `body_hash` of the version this edit is based on (`pipelines_get` or the previous update's result). The first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Same save-time validation applies — **and the same 139 entry-point checks**: a body naming a table this key never read the columns of is refused `pipeline.validation.table_not_learned`, and a raw-date door is refused `pipeline.validation.door_unacknowledged` until `door_acknowledged: true` (an update can change a body's parameters, unlike its name, so the door check belongs here too).
+Same input as `pipelines_create` plus required `id` and required `expected_hash` — the `body_hash` of the version this edit is based on (`pipelines_get` or the previous update's result). The first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Same save-time validation applies — **and the same 139 entry-point checks**: a body naming a table this key never read the columns of is refused `pipeline.validation.table_not_learned`, and a raw-date door is refused `pipeline.validation.door_unacknowledged` until `door_acknowledged: true` (an update can change a body's parameters, unlike its name, so the door check belongs here too). That input includes the optional `checks[]` (§6.2.4's `checks` property, pipeline-contract §3.3) — the release checks the SERVER runs; run them with `pipelines_run_checks` (§6.2.42), and only the server's own run produces `observed`.
 
 Returns: the draft version — `version`, `status: "DRAFT"`, `body_hash` (carry this into the next write), `current_version` (the unmoved released pointer), and the `draft` pointer. **The update does NOT release**: an agent leaves the draft for a human to review and release from the UI (versioning D4). On `pipeline.version.conflict` someone else modified it after you loaded it — re-read, rebase, retry; never retry blindly.
 
@@ -1671,6 +1676,36 @@ One skill document's full markdown — the same bytes the `datapipelines://docs/
 
 **Errors:** an unknown name is `mcp.doc_not_found` (pipeline-contract §13.16) with `details.known_docs` — the tool-surface answer to a resource read's RESOURCE_NOT_FOUND, which is a protocol-level error that cannot travel in a §9.2 content envelope.
 
+#### 6.2.42 `pipelines_run_checks`
+
+Run a pipeline version's release checks (`checks[]`, pipeline-contract §3.3) NOW (140). This is the only way an agent obtains an `observed` value: the SERVER runs every check through the same `PipelineCheckRunner` REST `POST /pipelines/{id}/versions/{version}/checks/run` (rest-api §5.16), the UI and the release gate ride, and persists one `pipeline_check_runs` row per check before returning. There is deliberately **no `pipelines_record_check` tool** — no tool records an observed value from a caller, because an observed value the caller supplied would be a claim, not a run.
+
+```json
+{
+  "name": "pipelines_run_checks",
+  "description": "Run a pipeline version's release checks (checks[]) NOW, against their own datasources. The SERVER runs every check and persists one pipeline_check_runs row per check before returning — only the server's own run produces `observed`, and there is deliberately no pipelines_record_check tool: no tool records an observed value from a caller. Each run's verdict is pass (observed satisfied expected), fail (a value was produced and did not satisfy it), or error (no verdict could be formed: the datasource was unresolvable or unreachable, the statement was refused or returned a shape the expectation cannot compare, or the parameters did not bind — the truth recorded, never silently a fail). With no version the WORKING version's checks run (the draft when one exists, else the latest released). Returns {version, runs: [{check_id, name, expected, observed, verdict, message, ran_at}]}; an empty checks[] returns an empty runs array.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["id"],
+    "properties": {
+      "id": {"type": "string", "format": "uuid"},
+      "version": {"type": "integer", "description": "Specific version whose checks to run. Defaults to the WORKING version: the draft when one exists, else the latest released. Never clamped — an unknown version is refused, not rounded to the latest."},
+      "parameters": {
+        "type": "object",
+        "description": "Object whose keys match the pipeline's declared parameters — the same binding pipelines_execute uses: undeclared keys are ignored, defaults fill the execute way, and the calculator context is NOT available to a check. Values must match the declared types (BIGINTEGER and BIGDECIMAL as strings, others as JSON native types).",
+        "additionalProperties": true
+      }
+    }
+  }
+}
+```
+
+**Scope:** `execute` — the REST twin's floor (`EXECUTE_PIPELINE`, auth.md §7.6): a viewer runs what they can read, and a check run returns no row data beyond the one observed cell per check. The catalog declares the tool **mutating** (it writes the run rows), so the dispatcher's `mcp.tool.write` row is the trace of who commissioned them.
+
+**Returns:** `{version, runs: [{check_id, name, expected, observed, verdict, message, ran_at}]}` — the REST `checkRuns` shape exactly: `expected` serialized from the `CheckExpectation` model (its non-null members only), `verdict` one of `pass` | `fail` | `error`, and `observed`/`message`/`ran_at` null exactly when the run has none. An `error` verdict means no verdict could be formed — the datasource was unresolvable or unreachable, the statement was refused, it returned a shape the expectation cannot compare (two columns for a `value` check), or the parameters did not bind; the reason is in `message`. It is the truth recorded, never silently a `fail`. A version with no `checks[]` returns an empty `runs` array.
+
+**Errors:** an unknown pipeline or version is the §6.2.3 not-found refusal; `{version: 0}` is `-32602`, never clamped.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1795,7 +1830,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 40 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 41 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -2009,7 +2044,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 
 **Fields** (the two tool events identical; the resource event mirrors them): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; for the table-addressed schema tools (`datasources_get_columns` / `_get_tables` / `_get_table_stats`) the `table` (and the `namespace` segments when the caller passed one) beside the `target` datasource; for `templates_render` the `template` id beside the `target`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`. A resource read records `uri` instead of `tool`/`target`, and its `code` names the failure (`resource_not_found`, `forbidden`, `internal_error`) — a name, never the JSON-RPC number. Since 139 the table/template identifiers are what the entry-point checks learn from (`pipeline.validation.table_not_learned` §6.2.4, `pipeline.execution.template_unrendered` §6.2.3); rows written before 139 carry neither key, and those simply do not count.
 
-**Which tools are mutating is a declared property of the catalog entry** (`McpToolCatalog.Entry.mutating`), never a name pattern — `McpToolCatalogBindingTest` fails if a catalogued tool lacks the declaration or a known writer (`pipelines_create`, `pipelines_update`, `pipelines_execute`, `pipelines_execute_node`, `templates_create`) is flagged read. The failure direction is asymmetric: a read tool declared mutating is a harmless over-audit; a mutating tool declared read is the hole.
+**Which tools are mutating is a declared property of the catalog entry** (`McpToolCatalog.Entry.mutating`), never a name pattern — `McpToolCatalogBindingTest` fails if a catalogued tool lacks the declaration or a known writer (`pipelines_create`, `pipelines_update`, `pipelines_execute`, `pipelines_execute_node`, `templates_create`, and since 140 `pipelines_run_checks` — it writes the `pipeline_check_runs` rows) is flagged read. The failure direction is asymmetric: a read tool declared mutating is a harmless over-audit; a mutating tool declared read is the hole.
 
 **Node runs are covered** (the point of 052): `pipelines_execute_node` runs real DML/DDL with no execution row, no SSE, no idempotency record — §6.2.20's ratification covers "no execution history", not "no trace". The `mcp.tool.write` row naming pipeline, node and version IS the trace that the write happened and by whom.
 
@@ -2102,6 +2137,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-09-15 | v1.39 | 139 the entry-point checks | No new tools, one new input property. **§6.2.4/§6.2.5 `pipelines_create`/`pipelines_update`**: a body whose template names a table the key never `datasources_get_columns`'d is refused `pipeline.validation.table_not_learned` (§12.11; details.tables + the clearing calls); a raw-date door (two DATE parameters, no INTEGER period parameter, no window calculator) is refused `pipeline.validation.door_unacknowledged` unless the call carries the new **`door_acknowledged`** boolean — the `confirm_new_root` shape (094). **§6.2.3 `pipelines_execute` / §6.2.20 `pipelines_execute_node`**: a DRAFT version whose pinned DRAFT template was written after this key's last successful `templates_render` is refused `pipeline.execution.template_unrendered` (§13.3; details.templates). **§14**: the schema tools' rows gain `table` (+ `namespace`), `templates_render` rows gain `template` — the identifiers the checks learn from; pre-139 rows carry neither and do not count. All three checks are MCP-only (they read the caller's own audit rows); REST and the UI unaffected. |
+| 2026-09-15 | v1.40 | 140 release checks over MCP | Tool surface 40 → **41**: new §6.2.42 `pipelines_run_checks` (scope `execute`, **mutating** — it writes one `pipeline_check_runs` row per check, so the `mcp.tool.write` audit's business) — the server runs a version's §3.3 `checks[]` NOW through the same `PipelineCheckRunner` REST `POST …/checks/run`, the UI and the release gate ride, persisting the rows before returning; `observed` exists only because the server's own run produced it, and there is deliberately NO `pipelines_record_check` tool — no tool records an observed value from a caller. `verdict` is `pass` \| `fail` \| `error` (error = no verdict could be formed: datasource unresolvable/unreachable, statement refused or an uncomparable shape, parameters did not bind — the truth recorded, never silently a fail). §6.2.4 `pipelines_create` / §6.2.5 `pipelines_update` gain the optional `checks` array property — passed through to the §3 body verbatim, validation stays server-side (§12.11). §6.1 lists it after `docs_get`; §5.1's static-surface count, §8's admission-rule count, §14's known-writer list and auth.md §7.6's MCP table (the `execute` row) moved in the same commit; the numbering appends 6.2.42 after 6.2.41 like 120/117 appended theirs. |
 | 2026-09-14 | v1.38 | 136 §D the three T289 follow-ups | No new tools, no new fields. **§6.2.36 `templates_update`**: `type` no longer defaults to `sql` — absent, the working version's is inherited (an html template updated without `type` was refused `type_immutable`, T289b); schema `default` dropped, description says so. **§6.2.18 `datasources_get_columns` / §6.2.33 `datasources_get_table_stats` descriptions**: a LAKE datasource answers `datasource.lake_table_not_found` for a table its registry does not carry (T289c). REST `PUT /templates` inherits `dialect`/`type` the same way (T289a, rest-api.md v2.12). |
 | 2026-09-14 | v1.37 | 136 §A/§B definitions where the agent looks; refs optional on a rule | No new tools. **§6.2.10 `datasources_list` / §6.2.11 `datasources_get`**: each per-datasource entry gains **`definitions`** — every WORKSPACE-scope fact (`definition`, `exclusion`, `preference`) visible to the reader on that datasource, with refs or with none, §7A.5 shape, newest last, `[]` when none, from the same one enrichment read as `facts` (which keeps its datasource-wide meaning); the acceptance run's agent met the workspace's rule buried on a column and re-chose it (T287). Descriptions updated (drift-pinned). **§6.2.37 `semantics_record`**: `refs` is OPTIONAL — a WORKSPACE rule that spans datasources carries none (T278; V26 relaxes the CHECK; `minItems` dropped, `refs` out of `required`); a DATASOURCE kind still needs one (`semantics.fact_invalid`). |
 | 2026-09-14 | v1.36 | 135 §C templates_update inherits the dialect | No new tools. §6.2.36 `templates_update`: `dialect` is optional — omitted, the working version's is inherited before validation; present and different from the established one, refused `template.validation.dialect_invalid` naming both in `details` (T276: three acceptance-run updates in one day were refused for omitting the field the draft already had, and resent with that same value). The property's description and the tool description say so; `required` unchanged (it never listed `dialect` — the refusal was the validator's). REST §8.4 unchanged. |

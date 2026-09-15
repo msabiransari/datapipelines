@@ -61,6 +61,9 @@ internal object PipelineToolPayloads {
                 args.objectArg("parameters")?.let { put("parameters", it) }
                 args.objectArg("settings")?.let { put("settings", it) }
                 put("nodes", args.requiredList("nodes"))
+                // 140 — the §3.3 release checks, passed through verbatim: validation is the
+                // server's (§12.12), exactly as for nodes; the tool assembles, never judges.
+                args.listArg("checks")?.let { put("checks", it) }
             }
         return ExecutorJson.write(body)
     }
@@ -125,6 +128,17 @@ internal object PipelineToolPayloads {
         "Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter " +
             "declaration point: the full parameter map, defaults applied, is the render context for every template " +
             "the pipeline references."
+
+    /** The §6.2.4 `checks` description (140, pipeline-contract §3.3), restated verbatim by both tools. */
+    const val CHECKS_DESCRIPTION: String =
+        "Release checks (pipeline-contract §3.3): at most 20 objects, each {id, name, datasource, sql, expected} — " +
+            "id [a-z0-9_]{1,63} unique in the body, name 1-200 chars, sql ONE read-only statement. expected.kind is " +
+            "value (single numeric cell compared with absolute tolerance, default 0), range (the cell within min..max " +
+            "inclusive), or rows (the statement's row count equals rows). Every :name bind must name a DECLARED " +
+            "pipeline parameter (the calculator context is not available to a check); \${} interpolation is refused " +
+            "(a check has no rendering); tempdb is not a check datasource. You supply the query and the expectation, " +
+            "never an observed value — run them with pipelines_run_checks, and only the server's run produces " +
+            "observed."
 }
 
 /** `pipelines_create` (mcp-server.md §6.2.4). Scope: `author`. */
@@ -212,6 +226,7 @@ class PipelinesCreateTool(
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
                 "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
+                "checks": {"type": "array", "description": "${PipelineToolPayloads.CHECKS_DESCRIPTION}"},
                 "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"},
                 "door_acknowledged": {"type": "boolean", "description": "${DoorAcknowledgment.ARG_DESC}"}
               },
@@ -302,6 +317,7 @@ class PipelinesUpdateTool(
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
                 "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
+                "checks": {"type": "array", "description": "${PipelineToolPayloads.CHECKS_DESCRIPTION}"},
                 "door_acknowledged": {"type": "boolean", "description": "${DoorAcknowledgment.ARG_DESC}"}
               },
               "additionalProperties": false

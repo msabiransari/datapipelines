@@ -53,10 +53,10 @@ class DatasourcesCreateRemovedTest {
             { ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys shouldNotContain TOOL },
             // 31 → 30 (089's three lake_tables_* tools landed first), 30 → 34 (107's four
             // probe/cancel/purge tools), 34 → 35 (117's `templates_update`), 35 → 38 (118's three semantics_* tools),
-            // 38 → 40 (120's two docs_* tools). The site
+            // 38 → 40 (120's two docs_* tools), 40 → 41 (140's `pipelines_run_checks`). The site
             // renders NAMES.size, so this is also what the marketing page says.
-            { McpToolCatalog.NAMES.size shouldBe 40 },
-            { ScopeMatrix.MCP_TOOL_MIN_SCOPE.size shouldBe 40 },
+            { McpToolCatalog.NAMES.size shouldBe 41 },
+            { ScopeMatrix.MCP_TOOL_MIN_SCOPE.size shouldBe 41 },
         )
     }
 
@@ -148,7 +148,7 @@ class DatasourcesCreateRemovedTest {
                 .result() as McpSchema.ListToolsResult
 
         result.tools().map { it.name() } shouldNotContain TOOL
-        result.tools().size shouldBe 40
+        result.tools().size shouldBe 41
     }
 
     private val pipelines = mockk<PipelineRepository>()

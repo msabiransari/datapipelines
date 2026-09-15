@@ -138,6 +138,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "semantics.",
                 // 120 — the MCP surface itself (§13.16).
                 "mcp.",
+                // 140 — release checks (§13.17).
+                "pipeline.check.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")

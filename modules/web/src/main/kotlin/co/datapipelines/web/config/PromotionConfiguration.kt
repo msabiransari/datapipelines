@@ -79,6 +79,8 @@ class PromotionConfiguration {
         transactionManager: PlatformTransactionManager,
         // 074 — endpoints ride the batch, through the same publish path REST and MCP use.
         endpointPromotion: EndpointPromotion,
+        // 140 — the receiver's release-check gate rides the one shared runner.
+        checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -89,6 +91,7 @@ class PromotionConfiguration {
             TransactionTemplate(transactionManager),
             authoringEnabled(environment),
             endpointPromotion,
+            checkRunner,
         )
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */

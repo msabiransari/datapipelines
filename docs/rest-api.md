@@ -294,6 +294,7 @@ outcome is "already in that state".
 ```
 POST /pipelines/{id}/release
 If-Match: <the draft's body_hash>
+[?override_checks_reason=<text — only when a check is failing>]
 ```
 
 Locks the draft: the version flips to RELEASED, `pipelines.current_version` moves to it,
@@ -301,7 +302,14 @@ and the index row's name/display_name/description adopt the released body's valu
 (metadata rides the release — versioning §3.5). Preconditions evaluated server-side:
 §12 re-validation on the draft body; every pinned template version RELEASED
 (`409 pipeline.release.template_not_released` naming it); the hash guard
-(`409 pipeline.version.conflict`); no draft at all (`409 pipeline.version.not_draft`).
+(`409 pipeline.version.conflict`); no draft at all (`409 pipeline.version.not_draft`);
+and — when the body carries [`checks[]`](pipeline-contract.md#33-release-checks-checks) —
+**the release-check gate** (versioning §5.3 precondition 4): a fresh check run whose every
+verdict must be `pass`, else `409 pipeline.check.failed` with `details.checks` (expected,
+observed and message per failing check). Releasing past a failing check needs
+`override_checks_reason`, a non-blank reason of ≥ 10 characters, and is recorded:
+`pipeline.version.released` gains `checks_overridden: [ids]` and `override_reason`. A
+version with no checks releases exactly as before.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
 the verb needs `RELEASE_VERSION` (`author` scope on a key whose issuer is a promoter, or a
 promoter's session), so a promoter's own CI key may release; a key issued by anyone else
@@ -383,6 +391,43 @@ rollout/rollback lever — but still **session-only**; audited as
 `pipeline.current_switched` (from/to in `details`).
 
 Response: `200 OK` with the pipeline's full shape at the new pointer.
+
+### 5.16 Release checks (140)
+
+```
+POST /pipelines/{id}/versions/{version}/checks/run
+GET  /pipelines/{id}/versions/{version}/checks
+```
+
+A pipeline body may carry [`checks[]`](pipeline-contract.md#33-release-checks-checks) —
+server-run cross-checks that gate §5.10's release. The agent writes the query and the
+expectation; **only the server's own run produces `observed`** — there is no endpoint,
+and no tool, that records an observed value from a caller.
+
+**Run** (`execute` scope — it writes `pipeline_check_runs` rows, like execute writes
+executions): runs the version's checks NOW against their datasources, bound with the
+pipeline's declared parameters (defaults filled the way §6's execute fills them — the
+calculator context is NOT available to a check), through the same bounded probe path as
+`sql_probe` (`via = rest`). An optional `parameters` JSON body overrides the defaults for
+this run. Response `200 OK`:
+
+```json
+{ "version": 3,
+  "runs": [ { "check_id": "manhattan_share_reconciles", "name": "Manhattan rideshare share, Q4 2024",
+              "expected": { "kind": "value", "value": 74.62, "tolerance": 0.01 },
+              "observed": "74.62", "verdict": "pass", "message": null, "ran_at": "…" } ] }
+```
+
+`verdict` is `pass` | `fail` | `error` (enums.md §20): `error` means no verdict could be
+formed — the datasource was unreachable, the statement was refused, or it returned a shape
+the expectation cannot compare (a `value`/`range` check requires exactly one row and one
+column) — with the reason in `message`. A version with no checks answers `200` with an
+empty `runs` list.
+
+**Latest** (`read` scope): the version's check definitions each with their LATEST run
+(latest per `(version, check_id)` of the append-only `pipeline_check_runs`), or `null`
+runs when none was ever recorded. This is what the UI's release dialog and version page
+read.
 
 ### 5.6 Delete pipeline (the entity purge)
 
@@ -1895,6 +1940,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v2.13 | 140 release checks | New **§5.16** — `POST /pipelines/{id}/versions/{version}/checks/run` (`execute` scope; writes `pipeline_check_runs`; optional `parameters` body; `pass`/`fail`/`error` verdicts) and `GET …/checks` (`read`; definitions with the latest run per check). §5.10 gains the **release-check gate**: a body with `checks[]` releases only past an all-pass fresh run, else `409 pipeline.check.failed` with `details.checks`; `override_checks_reason` (≥ 10 chars, audited as `checks_overridden` + `override_reason` on `pipeline.version.released`) is the only way past. Only the server's run produces `observed` — no endpoint records one from a caller. All additive; no route removed. |
 | 2026-09-08 | v2.8 | 099 draft-first (D55/D56) | **§5.1** — `POST /pipelines` lands v1 as a **DRAFT**: `status: "DRAFT"`, `current_version: null`, the `draft` pointer, and release is `POST …/release` like any other draft ([Versioning §3.2](versioning.md)). **New §6.1.1** — execute with no `version` runs the WORKING version (the draft when one exists, else the latest release); an explicit version stays exact and never clamped. **§5.7** — listing rows carry the working `version` plus a new `status` field. **§5.9** — export is released-only and refuses a never-released pipeline with `409 pipeline.promotion.not_released`. §8.1 (templates) mirrors §5.1. Response VALUES change; no request shape and no route does. |
 | 2026-09-02 | v1.18 | 051 auth/config sweep | §10.1 gains its field table (T19): the listing's items were documented only by cross-reference to §10.2. The table is the shared metadata projection minus `result_url`/`result_expires_at`, including the fields §10.2's example omitted (`draft_run`, `error`, `failed_node_id`, `correlation_id`), plus the ownership sentence |
 | 2026-08-05 | v1.0 | initial draft | Initial REST API + SSE specification: endpoints, envelopes, SSE event schemas, claim-check pattern, pagination, rate limits, CORS |

@@ -76,9 +76,10 @@ class SemanticsToolsTest {
             { ScopeMatrix.requiredScopeForTool("semantics_retire") shouldBe Scope.AUTHOR },
             { ScopeMatrix.requiredCapabilityForTool("semantics_retire") shouldBe Capability.AUTHOR },
             {
-                // 120 appended the two docs tools after these three — the tail is now five.
-                realShippedTools().map { it.name }.takeLast(5) shouldContainExactly
-                    listOf("semantics_record", "semantics_list", "semantics_retire", "docs_list", "docs_get")
+                // 120 appended the two docs tools after these three and 140 the check run after
+                // those — the tail is now six.
+                realShippedTools().map { it.name }.takeLast(6) shouldContainExactly
+                    listOf("semantics_record", "semantics_list", "semantics_retire", "docs_list", "docs_get", "pipelines_run_checks")
             },
         )
     }

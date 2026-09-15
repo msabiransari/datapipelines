@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **40 tools**, in `tools/list` order.
+There are **41 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -78,6 +78,7 @@ Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must f
 | `parameters` | object | optional | Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter declaration point: the full parameter map, defaults applied, is the render context for every template the pipeline references. |
 | `settings` | object | optional | Pipeline-level execution settings (e.g., tempdb engine). |
 | `nodes` | array | required | Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref {name, version} pinning an existing pipeline version to execute as a child execution, an optional parameters map (typed literals, or '${parent_param}' to pass a parent parameter through), and an optional output block allowed only when the pinned child has a caller node; it declares neither source nor template. |
+| `checks` | array | optional | Release checks (pipeline-contract §3.3): at most 20 objects, each {id, name, datasource, sql, expected} — id [a-z0-9_]{1,63} unique in the body, name 1-200 chars, sql ONE read-only statement. expected.kind is value (single numeric cell compared with absolute tolerance, default 0), range (the cell within min..max inclusive), or rows (the statement's row count equals rows). Every :name bind must name a DECLARED pipeline parameter (the calculator context is not available to a check); ${} interpolation is refused (a check has no rendering); tempdb is not a check datasource. You supply the query and the expectation, never an observed value — run them with pipelines_run_checks, and only the server's run produces observed. |
 | `confirm_new_root` | boolean | optional | Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it. |
 | `door_acknowledged` | boolean | optional | Set true ONLY when the question truly fixes two dates. A pipeline whose parameters are two raw DATE inputs with no period parameter (year, quarter, month, *_year) and no window CALCULATOR node is refused pipeline.validation.door_unacknowledged — the door is a decision: prefer the period vocabulary of rule 13, and never pass this to silence the refusal. |
 
@@ -97,6 +98,7 @@ Update an existing pipeline by writing its DRAFT — the first update after a re
 | `parameters` | object | optional | Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter declaration point: the full parameter map, defaults applied, is the render context for every template the pipeline references. |
 | `settings` | object | optional | Pipeline-level execution settings (e.g., tempdb engine). |
 | `nodes` | array | required | Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref {name, version} pinning an existing pipeline version to execute as a child execution, an optional parameters map (typed literals, or '${parent_param}' to pass a parent parameter through), and an optional output block allowed only when the pinned child has a caller node; it declares neither source nor template. |
+| `checks` | array | optional | Release checks (pipeline-contract §3.3): at most 20 objects, each {id, name, datasource, sql, expected} — id [a-z0-9_]{1,63} unique in the body, name 1-200 chars, sql ONE read-only statement. expected.kind is value (single numeric cell compared with absolute tolerance, default 0), range (the cell within min..max inclusive), or rows (the statement's row count equals rows). Every :name bind must name a DECLARED pipeline parameter (the calculator context is not available to a check); ${} interpolation is refused (a check has no rendering); tempdb is not a check datasource. You supply the query and the expectation, never an observed value — run them with pipelines_run_checks, and only the server's run produces observed. |
 | `door_acknowledged` | boolean | optional | Set true ONLY when the question truly fixes two dates. A pipeline whose parameters are two raw DATE inputs with no period parameter (year, quarter, month, *_year) and no window CALCULATOR node is refused pipeline.validation.door_unacknowledged — the door is a decision: prefer the period vocabulary of rule 13, and never pass this to silence the refusal. |
 
 ## templates
@@ -525,3 +527,17 @@ One datapipelines skill document's full markdown: `name` is `skill` for the oper
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `name` | string | required | The document name: `skill` for the operating core, or a reference name from docs_list, e.g. authoring-playbook. |
+
+## pipelines
+
+### `pipelines_run_checks`
+
+Scope `execute` · **writes**
+
+Run a pipeline version's release checks (checks[]) NOW, against their own datasources. The SERVER runs every check and persists one pipeline_check_runs row per check before returning — only the server's own run produces `observed`, and there is deliberately no pipelines_record_check tool: no tool records an observed value from a caller. Each run's verdict is pass (observed satisfied expected), fail (a value was produced and did not satisfy it), or error (no verdict could be formed: the datasource was unresolvable or unreachable, the statement was refused or returned a shape the expectation cannot compare, or the parameters did not bind — the truth recorded, never silently a fail). With no version the WORKING version's checks run (the draft when one exists, else the latest released). Returns {version, runs: [{check_id, name, expected, observed, verdict, message, ran_at}]}; an empty checks[] returns an empty runs array.
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `id` | string | required |  |
+| `version` | integer | optional | Specific version whose checks to run. Defaults to the WORKING version: the draft when one exists, else the latest released. Never clamped — an unknown version is refused, not rounded to the latest. |
+| `parameters` | object | optional | Object whose keys match the pipeline's declared parameters — the same binding pipelines_execute uses: undeclared keys are ignored, defaults fill the execute way, and the calculator context is NOT available to a check. Values must match the declared types (BIGINTEGER and BIGDECIMAL as strings, others as JSON native types). |

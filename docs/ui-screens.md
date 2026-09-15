@@ -473,6 +473,24 @@ Templates (`id@version`, each linked into §4.6), Created (when · by whom), Las
 default with a `required` chip, a table **as wide as its content** with its own 22rem scroll.
 The one-row **"Settings" table is gone** — the staging engine is a chip.
 
+*Checks* (140): when the working version's body declares `checks[]`, Overview gains a Checks
+sub-section — the count in the header note, a **Run checks** button (the execute floor; hidden
+from a credential that cannot execute), and the list itself, lazy-loaded on paint
+(`hx-trigger="load"`) from the read-only partial:
+
+| Fragment | Route | Model |
+|---|---|---|
+| `partials/pipeline-checks` | `GET /partials/pipelines/{id}/versions/{v}/checks` (read, session) | the version's check definitions, each with its latest `pipeline_check_runs` row — "not run" when never run |
+| same, refreshed | `POST /partials/pipelines/{id}/versions/{v}/checks/run` (execute floor, session) | a FRESH run on the shared `PipelineCheckRunner`, `via = ui`, the session principal, the request's correlation id |
+
+One row per check: the verdict chip in the run-status idiom (`app-chip-ok` pass /
+`app-chip-bad` fail / `app-chip-warn` error), the name, its datasource, the expectation as one
+compact clause (`= 74.62 ± 0.01`, `74 ≤ x ≤ 75`, `6 rows`), the SERVER's observed value (an
+error names its reason instead — `observed` exists only because a run produced it), and
+when · via. Both routes are session-only (`auth.session.required` for a key — the REST twins
+of rest-api §5.16 are the key surface); the editor's Details pane (§4.4) shows the same count
+read off the loaded body JSON and lazy-loads the same partial for the working version.
+
 There is deliberately **no "via UI / MCP / API" chip on Created**, though the mock shows one:
 nothing records the surface a pipeline CREATE arrived on. There is no `pipeline.created` audit
 event and `pipelines` carries no `triggered_via`, so the chip would have to be inferred. It
@@ -555,7 +573,7 @@ same services 101 wired, never the REST controllers over HTTP and never a second
 
 | Verb | Dialog (`GET`, into the container) | What it shows before its one button | Shapes that render it |
 |---|---|---|---|
-| Release | `…/lifecycle/release` | the draft's number, who last wrote it and when, every template pin with its status — a DRAFT or MISSING pin is refused colour, says "release the template first", and the button is NOT rendered; else "Releasing makes v`<n>` the current version and locks it." | any with a DRAFT |
+| Release | `…/lifecycle/release` | the draft's number, who last wrote it and when, every template pin with its status — a DRAFT or MISSING pin is refused colour, says "release the template first", and the button is NOT rendered; else "Releasing makes v`<n>` the current version and locks it." When the draft declares `checks[]` (140): the dialog RUNS them as it opens (`POST …/checks/run?footer=release` on `hx-trigger="load"`), the Release submit starts DISABLED, and the run's own fragment decides the footer out-of-band — all pass enables Release; anything short of PASS keeps it withheld and offers the **Override** disclosure: a required ≥ 10-char `overrideChecksReason` textarea (armed client-side at 10 trimmed chars by `lifecycle-dialog.js`'s min-chars arm — the dialogs' own layer, since Alpine is the editor's, not the explorers'), copy naming the overridden check ids and that the reason is recorded on the release's audit event, and a "Release anyway" submit riding the SAME release POST. A draft with no checks says "No checks on this version" and behaves exactly as before. | any with a DRAFT |
 | Purge draft | `…/lifecycle/purge?version=v` | the version and its execution count; the button reads "Purge v`<n>` and `<k>` runs" and needs the typed confirm `v<n>` | any with a DRAFT |
 | Discard | `…/lifecycle/discard?version=v` | whether the version is current (then the §3.4 fallback: "v`<m>` becomes current" or "nothing eligible remains — the pipeline will have no current version and its endpoints will answer 503"); parents that pin it (listed, no button); "Discard is reversible — Restore brings it back." | RELEASED rows |
 | Restore | `…/lifecycle/restore?version=v` | whether restoring moves the pointer (v > current, or current is NULL); "Restoring makes v`<n>` a live release again." | DISCARDED rows |
@@ -1446,6 +1464,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.46 | 140 release checks UI | §4.3b/§4.3d **the release checks are on screen.** New `partials/pipeline-checks` (definitions + latest runs, read-only GET; the same fragment re-rendered from the FRESH outcomes of `POST …/checks/run`, `via = ui`, session-only on both) behind `PipelineChecksPartialsController`. The explorer detail's Overview gains a Checks sub-section when the working body declares checks (lazy `hx-get` + a Run checks button at the execute floor); the editor's Details pane shows the count read off the loaded body and lazy-loads the same partial. The Release dialog on a checked draft runs the checks as it opens: the submit starts disabled and the run's fragment decides the footer OOB — all pass enables Release; anything short of PASS withholds it and offers the Override disclosure (required ≥ 10-char reason armed by `lifecycle-dialog.js`'s min-chars pair, which re-arms on swaps inside an open dialog; the overridden ids named, the reason audited on `pipeline.version.released`). |
 | 2026-09-14 | v1.45 | 137 mail notices | §4.12 admin users: with mail configured the create/reset notice shows "Emailed to \<address\>" with the send's outcome (sending → polled `/partials/admin/users/{id}/mail/{kind}?act=` → sent / failed with the error) and never the one-time password; mail off is unchanged. |
 | 2026-09-13 | v1.44 | 127 beta feedback setup | §3.4 **the avatar menu gains "Report a problem"** — the GitHub bug form, `target="_blank" rel="noopener"`, the fourth `menuitem` between API keys and Log out, its URL read off the new `SitePages.REPORT_PROBLEM_URL` constant through `SiteOriginAdvice` (no template types it); the v1.42 close-on-choice rule covers it, and `AppShellBrowserTest` pins the item count, the arrow-key order, the new tab and the app tab not navigating. §4.16's signed-in docs index header carries the same link from the same constant. The lucide sprite gains the `bug` glyph (manifest subset + sha recorded). The public side is §4.15-adjacent: the beta line renders from `SitePages.RELEASE_STAGE` on the hero and in the site footer, `/roadmap` gains the known-limitations section (docs/ROADMAP.md §2.2 read the other way), and `/faq` gains the "Support and feedback" group the footer links as `#support-and-feedback`. |
 | 2026-09-13 | v1.43 | owner testing round, day 3 — the scrollbar | §5.1 **the skeleton never lands on body, and never in the history snapshot.** The owner's `/dashboard` document scrollbar (R11): `document.body`'s last child was a `.app-target-skeleton` row, static, 64 px past the viewport. Root cause: a boosted navigation's htmx target is `<body>` at `beforeRequest` (shell.js retargets at `beforeSwap`), so a navigation slower than the 150 ms arm appended the row to body — outside the `100dvh` shell; htmx snapshotted the page for history with the row in it (the snapshot is taken during the swap, before `afterRequest` removes the live one), and Back restored it as markup no tracker owned. `AppShellBrowserTest`'s guard could not see it: it measures plain loads, never a boosted-then-Back path. Fix in shell.js: `swapTargetFor` resolves a boosted request to `#app-main` at BOTH ends; `htmx:beforeHistorySave` strips live skeletons and busy marks; `htmx:historyRestore` and `pageshow` purge orphans (heals caches poisoned before the fix). Pinned: four `shell.test.mjs` cases through the real listeners; `ShellBusyBrowserTest` holds a boosted GET past the arm, asserts the row is inside main, settles, goes Back, and asserts no skeleton, no body busy mark and a zero-overflow document. |

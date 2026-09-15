@@ -190,15 +190,18 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    Window knows what the pipeline is (`references/authoring-playbook.md` §5). **Create lands v1 as
    a DRAFT** — executable immediately, and not published: `current_version` comes back null and
    the response carries the `draft` pointer with the `body_hash` for your next write.
-5. **Iterate on the DRAFT, and run it.** `pipelines_update` (requires the `expected_hash` you
-   read — see Best practices) writes the DRAFT: the first update opens it, later updates
-   overwrite it, so iterating never piles up versions. `pipelines_execute` with no `version`
-   runs the **working version** — your draft when one exists, else the latest release — so
-   testing your own work needs no version argument at all. And `pipelines_execute` refuses a
-   draft whose pinned draft template was updated after its last render
-   (`pipeline.execution.template_unrendered`) — render, then run. **Then stop**: leave the
-   draft for a human to release from the UI. Never claim your change is live — it is not until
-   released, and no tool you have releases anything.
+5. **Iterate on the DRAFT, run it, then write checks.** `pipelines_update` (requires the
+   `expected_hash` you read — see Best practices) writes the DRAFT: the first update opens it,
+   later updates overwrite it, so iterating never piles up versions. `pipelines_execute` with no
+   `version` runs the **working version** — your draft when one exists, else the latest release — so
+   testing your own work needs no version argument at all. A draft whose pinned template was
+   updated after its last render is refused (`pipeline.execution.template_unrendered`) — render, then run.
+   **Then write checks.** Every number you validated independently (playbook §5) becomes a `checks[]`
+   entry — the query you ran and the value it gave, as `expected` — and you run `pipelines_run_checks`;
+   the server's `observed` is the only observed value there is. A human sees them on the release
+   dialog and cannot release past a failing one without a reason. **Then stop**: leave the draft
+   for a human to release from the UI. Never claim your change is live — it is not until released,
+   and no tool you have releases anything.
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
    Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
    TTL** — afterwards the result is gone (`result.expired`). **A client can truncate a large
@@ -213,18 +216,15 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
   (default 600 s) aborts it. There are no progress notifications in v1; the final result
   carries `node_stats` (per-node status, durations, row counts, errors) — the authoritative
   per-node record. A 3-minute pipeline is one 3-minute tool call.
-- **Drafts are executable, and a draft run is not a release.** Executing your own draft is
-  the expected test loop; history marks those runs (`draft_run`) and they never count as validation for release — the human decides that.
+- **Drafts are executable, and a draft run is not a release** — the expected test loop; history marks it (`draft_run`) and it never counts as validation for release.
 - **Cancellation:** `executions_cancel` cancels a RUNNING execution your own MCP calls
   started — the same-credential rule: `triggered_via` MCP, your user, and an audit row
   pairing THIS key with the execution's correlation id (an execution started over REST,
   the UI, or another key of the same user is refused, and the refusal says which rule
   fired). Cancellation is requested, not awaited: poll `executions_get` for the terminal
   `ABORTED`. For anything the rule refuses, the out-of-band REST `DELETE /api/v1/executions/{id}` remains.
-- **Abandoned calls** run to completion — a dropped HTTP request has no disconnect
-  callback on `/mcp`; cancel with `executions_cancel` or let the timeout handle it.
-- **Idempotency:** REST execute accepts `Idempotency-Key`; the MCP tool has no key carrier.
-  If you are unsure whether a previous execute landed, check `executions_list` rather than firing a duplicate.
+- **Abandoned calls** run to completion — `/mcp` has no disconnect callback; cancel with `executions_cancel` or let the timeout handle it.
+- **Idempotency:** REST execute accepts `Idempotency-Key`; the MCP tool has none — unsure a call landed? Check `executions_list` before refiring.
 - **Zero-caller pipelines** return stats with no rows — that is a valid design, not a
   failure.
 - `/mcp` and `/api/v1` share a per-user rate limiter — back off on `429`.

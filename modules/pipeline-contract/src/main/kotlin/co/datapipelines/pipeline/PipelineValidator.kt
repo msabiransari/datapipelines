@@ -80,6 +80,7 @@ class PipelineValidator(
         NodeTypeRules.check(pipeline, collector)
         ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector, calculatorKinds)
         ParameterRules.check(pipeline, collector)
+        ChecksRules.check(pipeline, datasources, workspaceId, collector)
         SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, collector)
         CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
         CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)

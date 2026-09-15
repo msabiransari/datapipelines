@@ -214,7 +214,7 @@ object ScopeMatrix {
     }
 
     /**
-     * All 40 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 41 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
@@ -293,6 +293,10 @@ object ScopeMatrix {
             // calculator catalog, so the same floor (the 072 reasoning, two rows up).
             "docs_list" to Scope.READ,
             "docs_get" to Scope.READ,
+            // 140 — run the release checks: the REST twin's floor (EXECUTE_PIPELINE is
+            // `execute`, the D-R3 verb — a viewer runs what they can read, and a check run
+            // returns no row data beyond the one observed cell per check).
+            "pipelines_run_checks" to Scope.EXECUTE,
         )
 
     /**
@@ -332,6 +336,9 @@ object ScopeMatrix {
             "pipelines_execute" to Capability.EXECUTE,
             "executions_cancel" to Capability.EXECUTE,
             "pipelines_execute_node" to Capability.EXECUTE,
+            // 140 — the release-check run is the same D-R3 verb as the execute it mirrors:
+            // commissioned by a viewer, no row data beyond the observed cell.
+            "pipelines_run_checks" to Capability.EXECUTE,
             // D-R3 / design §1 row 3: the read-only, capped row-data probes are viewer verbs.
             "datasources_preview_rows" to Capability.VIEW,
             "sql_probe" to Capability.VIEW,

@@ -10,6 +10,7 @@ import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
+import java.util.UUID
 
 /**
  * 080 — the v2 editor: the mock's top bar, the canvas chrome (hint, legend, minimap,
@@ -128,6 +129,17 @@ class PipelineEditorRenderTest {
         render() shouldContain "/js/pipeline-editor/sql-highlight.js"
     }
 
+    @Test
+    fun `140 - the Details pane carries the release checks line and the lazy verdict load`() {
+        val html = render()
+
+        // The count is client-side (the loaded body JSON); the verdict summary's URL points at
+        // the read-only checks partial for the WORKING version (the release, in this fixture).
+        html shouldContain "(pipeline.checks || []).length"
+        html shouldContain "id=\"pe-checks-latest\""
+        html shouldContain "data-checks-url=\"/partials/pipelines/$LEAF_ID/versions/1/checks\""
+    }
+
     /**
      * The canvas chrome (080 §A): the card overlay's vendored script, the icon system,
      * the keyboard hint, the legend, the minimap and the view controls — fit included,
@@ -210,6 +222,7 @@ class PipelineEditorRenderTest {
                 setVariable("activeTheme", "saas")
                 setVariable("authenticated", true)
                 setVariable("currentPath", "/pipelines")
+                setVariable("pipelineId", LEAF_ID)
                 setVariable("hasDraft", false)
                 setVariable("draftVersion", null)
                 setVariable("draftHash", null)
@@ -228,4 +241,8 @@ class PipelineEditorRenderTest {
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
         ).withRoles()
+
+    private companion object {
+        val LEAF_ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
+    }
 }

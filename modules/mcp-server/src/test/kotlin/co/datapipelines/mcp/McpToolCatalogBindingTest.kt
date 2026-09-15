@@ -29,6 +29,8 @@ class McpToolCatalogBindingTest {
             "pipelines_execute",
             "pipelines_execute_node",
             "templates_create",
+            // 140 — writes one `pipeline_check_runs` row per check; §14 names it with the R4 five.
+            "pipelines_run_checks",
         )
 
     @Test

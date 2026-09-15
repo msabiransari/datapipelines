@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.LogicalType
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -191,6 +192,65 @@ class PipelineSerializerTest {
         node.has("context_key") shouldBe false
         node.path("context_keys").path("start").asText() shouldBe "window_start"
         node.path("context_keys").path("end").asText() shouldBe "window_end"
+        val reread = PipelineDeserializer().readOrThrow(written)
+        reread shouldBe pipeline
+        serializer.write(reread) shouldBe written
+    }
+
+    @Test
+    fun `a body without checks serialises without a checks key - existing bodies are byte-identical`() {
+        // 140's hash-neutrality proof: `checks` defaults to an empty list under NON_EMPTY
+        // inclusion, so a body written before §3.3 existed serializes exactly as it did — no
+        // stored version's body hash moves (versioning §9.2, §15.2 additive).
+        val pipeline = Fixtures.pipeline()
+
+        val written = serializer.write(pipeline)
+
+        written.contains("checks") shouldBe false
+        val reread = PipelineDeserializer().readOrThrow(written)
+        reread shouldBe pipeline
+        serializer.write(reread) shouldBe written
+    }
+
+    @Test
+    fun `an explicit empty checks array canonicalizes to the absent form`() {
+        // The second hash-neutrality direction: `"checks":[]` on the wire means the same as no
+        // key, so it serializes back to the same bytes — the two spellings hash identically.
+        val absent = serializer.write(Fixtures.pipeline())
+        val explicit = absent.replaceFirst("{", "{\"checks\":[],")
+
+        val reread = PipelineDeserializer().readOrThrow(explicit)
+
+        reread.checks.shouldBeEmpty()
+        serializer.write(reread) shouldBe absent
+    }
+
+    @Test
+    fun `a body with one check round-trips with every field preserved and tolerance omitted stays omitted`() {
+        val pipeline =
+            Fixtures.pipeline(
+                checks =
+                    listOf(
+                        Fixtures.check(
+                            id = "row_count",
+                            name = "Orders row count matches the rollup.",
+                            datasource = "pg-prod",
+                            sql = "SELECT COUNT(*) FROM orders",
+                            expected = CheckExpectation(kind = CheckExpectation.KIND_VALUE, value = 1_000_000.0),
+                        ),
+                    ),
+            )
+
+        val written = serializer.write(pipeline)
+
+        val check = Fixtures.json(written).path("checks").single()
+        check.properties().map { it.key } shouldContainExactlyInAnyOrder listOf("id", "name", "datasource", "sql", "expected")
+        val expected = check.path("expected")
+        expected.path("kind").asText() shouldBe "value"
+        expected.path("value").asDouble() shouldBe 1_000_000.0
+        // Omitted is meaningful: `tolerance` absent is the default (0), `"tolerance": null`
+        // would assert something §3.3 does not define.
+        expected.has("tolerance") shouldBe false
         val reread = PipelineDeserializer().readOrThrow(written)
         reread shouldBe pipeline
         serializer.write(reread) shouldBe written

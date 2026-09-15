@@ -7,10 +7,13 @@ import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.ReleaseCheckGate
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The pipeline aggregate's service and the version-lifecycle collaborators it composes
@@ -51,7 +54,17 @@ class PipelineLifecycleConfiguration {
         templates: TemplateVersionStatuses,
         validator: PipelineValidator,
         authoring: AuthoringGuard,
-    ): PipelineReleaseService = PipelineReleaseService(pipelines, templates, validator, authoring)
+        metadataTransactionManager: PlatformTransactionManager,
+        checkGate: ReleaseCheckGate,
+    ): PipelineReleaseService =
+        PipelineReleaseService(
+            pipelines,
+            templates,
+            validator,
+            authoring,
+            checkGate = checkGate,
+            transactions = TransactionTemplate(metadataTransactionManager),
+        )
 
     /**
      * The entity purge's exclusive-draft-templates offer (versioning §3.5, 101), as the port

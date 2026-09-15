@@ -197,8 +197,12 @@ class ApiErrorCatalogSpecDriftTest {
          * nothing ran; wired explicitly in [ApiErrorCatalog] EXCEPTIONS against the family's
          * 500 default), landed in the SAME commit as its constant and its catalog row.
          * Re-derived from the document's own parse.
+         *
+         * 177 → 178 with 140 (release checks): the one `pipeline.check.*` row of the new
+         * §13.17, landed in the SAME commit as its constant and its catalog row. Re-derived
+         * from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 177
+        const val SECTION_13_ROW_COUNT = 178
 
         /**
          * §12's distinct validation codes.
@@ -226,7 +230,11 @@ class ApiErrorCatalogSpecDriftTest {
          * (`pipeline.validation.table_not_learned`, `pipeline.validation.door_unacknowledged`),
          * both 400 like the family default, landed in the SAME commit as their constants.
          * Re-derived from the document's own parse.
+         *
+         * 66 → 67 with 140 (release checks): §12.12's `pipeline.validation.check_invalid` —
+         * one code for every `checks[]` declaration defect. A 400 like every other §12 code;
+         * landed in the SAME commit as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 66
+        const val SECTION_12_CODE_COUNT = 67
     }
 }

@@ -6,6 +6,7 @@ import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 
 /**
@@ -17,7 +18,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
  * `id`, `owner`, `version`, `created_at` and `updated_at` are **server-assigned** and are
  * deliberately absent from this class. Three independent reasons agree:
  *
- *  - metadata-db §4.5 defines `pipeline_versions.body_json` as exactly these seven fields.
+ *  - metadata-db §4.5 defines `pipeline_versions.body_json` as exactly these fields.
  *  - §14 defines the create/update payload as the pipeline JSON *without* `id`, `version`,
  *    `created_at`, `updated_at` — the server assigns them.
  *  - Security: a protected field that is absent from the inbound shape cannot be
@@ -50,6 +51,18 @@ data class Pipeline(
     val parameters: Map<String, Parameter>,
     @field:JsonProperty("nodes") @get:JsonProperty("nodes") @param:JsonProperty("nodes")
     val nodes: List<Node>,
+    /**
+     * The pipeline's release checks (§3.3, 140) — optional, versioned with the body like
+     * [nodes].
+     *
+     * `NON_EMPTY` inclusion is what makes this field **body-hash neutral** (versioning §9.2):
+     * an existing pipeline — no `checks` key — deserializes to an empty list and serializes
+     * back to byte-identical JSON, so no stored version's hash moves (§15.2 additive). An
+     * explicit `"checks": []` canonicalizes to the same absent form.
+     */
+    @field:JsonProperty("checks") @get:JsonProperty("checks") @param:JsonProperty("checks")
+    @get:JsonInclude(JsonInclude.Include.NON_EMPTY)
+    val checks: List<PipelineCheck> = emptyList(),
 ) {
     /** The node with this id, or null. */
     fun node(id: String): Node? = nodes.firstOrNull { it.id == id }
@@ -131,6 +144,7 @@ data class Pipeline(
             @JsonProperty("settings") settings: PipelineSettings?,
             @JsonProperty("parameters") parameters: Map<String, Parameter>?,
             @JsonProperty("nodes") nodes: List<Node>?,
+            @JsonProperty("checks") checks: List<PipelineCheck>?,
         ): Pipeline =
             Pipeline(
                 schemaVersion = schemaVersion ?: SUPPORTED_SCHEMA_VERSION,
@@ -140,6 +154,7 @@ data class Pipeline(
                 settings = settings ?: PipelineSettings(),
                 parameters = parameters ?: emptyMap(),
                 nodes = nodes ?: emptyList(),
+                checks = checks ?: emptyList(),
             )
     }
 }

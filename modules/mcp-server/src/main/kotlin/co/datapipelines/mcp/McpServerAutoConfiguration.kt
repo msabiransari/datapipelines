@@ -38,7 +38,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 40 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 41 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -51,7 +51,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 40 tools of §6.1, in `tools/list` order. */
+    /** The 41 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -104,6 +104,11 @@ class McpServerAutoConfiguration {
         // fact recorded over MCP is validated, audited and served exactly as anywhere else.
         semanticsService: SemanticsService,
         factEnrichment: FactEnrichment,
+        // 140 — the SAME check runner REST POST …/checks/run, the UI and the release gate ride
+        // (declared by `web`'s ChecksConfiguration), so an MCP check run crosses the same probe
+        // contract and persists the same pipeline_check_runs rows. A plain parameter, the
+        // 068/074 pattern.
+        checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -185,7 +190,11 @@ class McpServerAutoConfiguration {
             // 120 — the skill docs as tools: no collaborators at all, the 072 reasoning —
             // the content is the packaged build artifact, read through the same SkillDocs
             // loader the resources use.
-            DocsTools.all()
+            DocsTools.all() +
+            // 140 — the release-check run, appended after the docs tools (the 117/107 append
+            // rule). Takes the service for the working-version resolution and the shared
+            // runner for everything else.
+            listOf(PipelineRunChecksTool(pipelineService, checkRunner))
     }
 
     @Bean

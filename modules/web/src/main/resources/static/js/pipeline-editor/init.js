@@ -183,6 +183,16 @@
           self.graph.render();
           self.cy = self.graph.cy;
 
+          /* 140: the body's release checks — the Details pane's verdict summary lazy-loads
+             from the read-only checks partial, and only when the body DECLARES any (a check-less
+             pipeline pays no request). htmx.ajax fires the same CSRF-wired request an hx-get
+             would; the swapped fragment carries no hx-* of its own, so nothing needs
+             re-processing. */
+          var checksTarget = document.getElementById("pe-checks-latest");
+          if (checksTarget && Array.isArray(data.checks) && data.checks.length > 0 && window.htmx) {
+            window.htmx.ajax("GET", checksTarget.getAttribute("data-checks-url"), "#pe-checks-latest");
+          }
+
           // The first fit ran at layoutstop, which can precede Alpine's x-show
           // flush (the banner/modal hide only then, growing the stage). One refit
           // after the flush keeps the graph centred in the canvas it really has.

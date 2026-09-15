@@ -59,10 +59,9 @@ The mandatory read order, for **every** datasource a pipeline will touch:
      source's count is the sample-or-full answer.
    - A PROBE: the `unit` column's distinct values, a code column's spread.
 
-6. **Write what you learned into the pipeline's description** — every fact the SQL relies on
-   that the schema alone does not state (time zone, units, sampling, grain, partition
-   column, window, what an enum value means). A reader who cannot see your probes must
-   still be able to trust your numbers.
+6. **Write what you learned into the pipeline's description** — every fact the SQL relies
+   on that the schema alone does not state (time zone, units, sampling, grain, window, what
+   an enum value means). A reader who cannot see your probes must still trust your numbers.
 7. **Then re-read that description before `pipelines_create`, and strike every sentence you
    cannot point at a call you made.** A description carries facts about the data and the
    interpretation you chose — never claims about your own process: "validated", "reproduced",
@@ -105,9 +104,8 @@ semantics; the question's words decide the window.
   the question names a site — an airport, a plant, a store, a port — and the data has a
   station, a meter or a device located at that site, the site's measure is that one station's
   reading, not an average over the stations nearby. The average is a different measure: it
-  smooths the very difference the question asks about (real miss: two sites averaged over
-  five stations disagreed with their own stations by more than 2 °C on the top day, and the answer named
-  the wrong site). Probe the station table for the site's name or coordinates first; when
+  smooths the very difference the question asks about (real miss: averaging five stations
+  named the wrong site). Probe the station table for the site's name or coordinates first; when
   no station sits at the site, the nearest one — or the average — is a choice, and you say so.
   Either way the station choice is recorded: a `preference` fact (or a `definition` when it
   defines the measure), with the probe that listed the stations as its evidence — a rule you
@@ -217,12 +215,8 @@ semantics; the question's words decide the window.
 - **One template, bound per node.** If two nodes run the same SQL over different values,
   that is one template with parameters, not two copies. Copies drift.
 - **On a lake table, read the stats first — a table with no `partition` index has no
-  partition column to filter on.** `datasources_get_table_stats` is the one read that states
-  partition status: a registered partition column reports as `partition_column` and an index
-  entry of kind `partition`; `partition_column: null` means the table is ONE unpartitioned
-  file and every read scans it whole — row-group filter pushdown inside the file is not
-  pruning, whatever the plan's `READ_PARQUET` filter line shows. When the column IS
-  registered, a predicate over it prunes:
+  partition column to filter on** (§1 step 4 states the rule, and why pushdown inside a
+  file is not pruning). When the column IS registered, a predicate over it prunes:
   `WHERE <partition_col> IN (DATE '…', …)`, `BETWEEN` two dates, and — measured on
   DuckDB 1.5.5 — a deterministic expression of the column such as `CAST(<partition_col> AS …)`
   still prune. **Bound parameters prune too**: write `:d` for a date filter and the engine
@@ -242,12 +236,10 @@ semantics; the question's words decide the window.
   for a *syntax and self-contained* check against an empty engine — a statement that parses
   and fails with "table not found" has passed that check; one that fails on a name it
   defines itself (a `VALUES` column, an alias) has not. Use it before every full run.
-  What the probe rung settles about the DATA — a unit, a time zone, a sample rate, what a
-  coded value means — is a fact the next session should not re-probe: `semantics_record` it
-  with that SELECT as `evidence_sql` (SKILL.md, golden path step 1). A LAKE table's ref
-  takes `schema` as the DOTTED namespace string — one `{"schema": "lake.mart", "table": "events"}`
-  segment, never a namespace array; the array shape is the `semantics.ref_unresolved` you
-  just met.
+  What the probe rung settles about the DATA — a unit, a time zone, what a coded value
+  means — is a fact: `semantics_record` it with that SELECT as `evidence_sql` (SKILL.md
+  step 1). A LAKE table's ref takes `schema` as the DOTTED string — `{"schema": "lake.mart",
+  "table": "events"}` — never a namespace array (that is `semantics.ref_unresolved`).
   **Stop-loss: three identical failures → stop and report.** A schema refusal is not
   your typo — re-introspect or hand back; a fourth identical call changes nothing.
 - **A table marked unavailable is broken at the lake, not by your query.** If a lake
@@ -343,6 +335,14 @@ semantics; the question's words decide the window.
   and reason over what the server returned, never over a partial view.
 - **Report what you did not verify.** "Row counts match the previous version" is not
   "the numbers are right". Name the independent check you ran — or that you ran none.
+- **Write checks, and let the server be the judge.** Every number you verified independently
+  becomes a `checks[]` entry: ONE number per check, read from the RAW source — never from
+  the pipeline's own output tables — with the pipeline's parameters bound, and `expected`
+  set to what your independent query gave. Two to five per pipeline is the right band. Then
+  `pipelines_run_checks`: the server's `observed` is the only observed value there is — you
+  never supply one, and there is no tool that records one from a caller. A human releasing
+  from the UI sees every check's expected and observed, and cannot release past a failing
+  one without giving a reason that lands in the audit log.
 - **Report the index analysis** (§3): for every source node, one line — supported by
   `<index>` / *not supported — suggest `CREATE INDEX … ON table (cols)`* / *lake: filters on
   the partition column, `partitions_scanned`/`partitions_total` from `sql_probe`'s plan*.

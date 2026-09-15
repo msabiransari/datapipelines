@@ -1,0 +1,74 @@
+<!-- The release checks fragment (140, ui-screens §4.3b/§4.3d) — ONE list shape for every
+     surface: the explorer detail's Checks section and the editor's Details pane GET it
+     (definitions + latest runs, read-only); the release dialog and the detail's Run checks
+     button POST …/checks/run and get the SAME fragment back from the fresh outcomes.
+
+     One row per check: the verdict chip in the run-status idiom (app-chip-ok pass /
+     app-chip-bad fail / app-chip-warn error; "not run" when no pipeline_check_runs row
+     exists yet), the name, its datasource, the expectation as one compact clause, the
+     SERVER's observed value (an error names its reason instead), and when · via.
+
+     The optional footer is the release dialog's (§4.3d), requested with ?footer=release and
+     delivered OUT-OF-BAND: hx-swap-oob="true" is outerHTML-by-id, so this element replaces
+     the dialog's #plc-release-footer placeholder and is REMOVED from the swapped content —
+     the list above never carries it. It decides what the dialog's submit area offers:
+     all pass → the Release submit; anything short of PASS → the override disclosure whose
+     reason rides the SAME release POST (the field is wired server-side) and is audited. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="checks" class="plc-checks">
+  <p class="ds-empty-description" th:if="${!hasChecks}">No checks on this version.</p>
+
+  <ul class="plc-check-list" th:if="${hasChecks}">
+    <li class="plc-check-row" th:each="c : ${checks}">
+      <span th:if="${c.verdict != null}" class="app-chip" th:attr="data-status=${c.verdict.name()}"
+            th:classappend="${c.verdict.name() == 'PASS'} ? 'app-chip-ok' : (${c.verdict.name() == 'FAIL'} ? 'app-chip-bad' : 'app-chip-warn')"><i class="ds-status"></i><span th:text="${c.verdictLabel}">Pass</span></span>
+      <span th:if="${c.verdict == null}" class="ds-badge ds-badge-default">not run</span>
+      <span class="plc-check-name" th:text="${c.name}">Share from the raw rollup</span>
+      <span class="u-mono u-muted" th:text="${c.datasource}">sample-lake</span>
+      <span class="u-mono" th:text="${c.expectedText}">= 74.62 ± 0.01</span>
+      <span th:if="${c.observed != null}" class="u-mono" th:text="${c.observed}">74.62</span>
+      <span th:if="${c.observed == null and c.message != null}" class="u-secondary u-text-sm"
+            th:text="${c.message}">The statement returned two columns.</span>
+      <span th:if="${c.ranAt != null}" class="u-muted u-text-sm">
+        <span th:text="${c.ranAgo}" th:title="${#temporals.format(c.ranAt, 'yyyy-MM-dd HH:mm')}">just now</span>
+        <span th:if="${c.via != null}" th:text="' · via ' + ${c.via}"> · via ui</span>
+      </span>
+    </li>
+  </ul>
+
+  <div th:if="${releaseFooter}" id="plc-release-footer" hx-swap-oob="true">
+    <th:block th:if="${allPass}">
+      <p class="u-secondary u-text-sm u-mb-md">
+        All <span th:text="${#lists.size(checks)}">2</span> checks pass.
+      </p>
+      <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-confirm"
+              class="ds-button ds-button-primary u-full"
+              hx-disabled-elt="this" th:text="'Release v' + ${version}">Release v3</button>
+    </th:block>
+
+    <th:block th:if="${anyFailing}">
+      <p class="u-secondary u-text-sm u-mb-md">
+        <span th:text="${#lists.size(failingIds)}">1</span> of
+        <span th:text="${#lists.size(checks)}">2</span> checks did not pass — releasing is blocked.
+      </p>
+      <!-- The override (versioning §13.17): the reason is required, ≥ 10 characters, and lands
+           on the release's audit event next to the overridden ids. The button starts disabled
+           in the MARKUP (no-JS is safe) and arms client-side through lifecycle-dialog.js's
+           min-chars arm — the dialogs' own client layer, since Alpine is the editor's, not the
+           explorers'. The server re-runs the whole gate on the POST regardless. -->
+      <details class="plc-override">
+        <summary class="ds-button ds-button-ghost ds-button-sm tplx-danger">Override and release anyway…</summary>
+        <p class="u-secondary u-text-sm u-mt-md">
+          Overriding
+          <th:block th:each="f, i : ${failingIds}"><span class="u-mono" th:text="${f}">share_matches</span><span th:if="${!i.last}">, </span></th:block>
+          — the reason is recorded on the release's audit event.
+        </p>
+        <textarea name="overrideChecksReason" class="ds-textarea u-mt-md" rows="3" required minlength="10"
+                  data-min-chars-input data-min-chars="10"
+                  placeholder="Why this release is safe despite the failing checks (at least 10 characters)"></textarea>
+        <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-override" data-min-chars-submit disabled
+                class="ds-button ds-button-danger u-full u-mt-md" hx-disabled-elt="this"
+                th:text="'Release v' + ${version} + ' anyway'">Release v3 anyway</button>
+      </details>
+    </th:block>
+  </div>
+</div>

@@ -107,6 +107,9 @@ class FlywayMigrationIntegrationTest {
                 "26|learned facts workspace rule refs|true",
                 // 137 — mail_sends: the claim row behind every notice (metadata-db §4.19).
                 "27|mail sends|true",
+                // 140 — pipeline_check_runs: the server-side record of every release check run
+                // (metadata-db §4.20).
+                "28|pipeline check runs|true",
             )
     }
 
@@ -152,6 +155,59 @@ class FlywayMigrationIntegrationTest {
             }
         }
         query("SELECT COUNT(*) FROM mail_sends WHERE user_id = '$userId'") { it.getInt(1) }.single() shouldBe 0
+    }
+
+    /**
+     * 140 (V28) — the check-run table: append-only history keyed by (pipeline, version, check),
+     * both closed lists proven by INSERT (the V17 rule — a constraint that parses but does not
+     * bind is invisible to a text assertion). The FK is to `pipelines(id)` only, so a check row
+     * for a version NUMBER no stored version row still carries is legal — a purged draft's runs
+     * are history the table keeps (metadata-db §4.20).
+     */
+    @Test
+    fun `V28 records a check run and refuses a via or verdict outside the closed lists`() {
+        val userId = UUID.randomUUID()
+        val pipelineId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) " +
+                        "VALUES ('$userId', 'v28-$userId@datapipelines.test', 'V28', 'local', 'v28-$userId')",
+                )
+                statement.execute(
+                    "INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version)" +
+                        " VALUES ('$pipelineId', 'v28/probe', 'V28 probe', '', '$userId'," +
+                        " (SELECT id FROM workspaces LIMIT 1), NULL)",
+                )
+                // Version 7 has no pipeline_versions row at all — the plain FK admits the run.
+                statement.execute(
+                    "INSERT INTO pipeline_check_runs (id, pipeline_id, version, check_id, ran_by, via, verdict, duration_ms) " +
+                        "VALUES ('${UUID.randomUUID()}', '$pipelineId', 7, 'share_q4', '$userId', 'release', 'pass', 12)",
+                )
+                val badVia =
+                    shouldThrow<SQLException> {
+                        statement.execute(
+                            "INSERT INTO pipeline_check_runs (id, pipeline_id, version, check_id, via, verdict) VALUES " +
+                                "('${UUID.randomUUID()}', '$pipelineId', 7, 'share_q4', 'cron', 'pass')",
+                        )
+                    }
+                badVia.message.orEmpty() shouldContain "chk_pipeline_check_runs_via"
+                val badVerdict =
+                    shouldThrow<SQLException> {
+                        statement.execute(
+                            "INSERT INTO pipeline_check_runs (id, pipeline_id, version, check_id, via, verdict) VALUES " +
+                                "('${UUID.randomUUID()}', '$pipelineId', 7, 'share_q4', 'mcp', 'maybe')",
+                        )
+                    }
+                badVerdict.message.orEmpty() shouldContain "chk_pipeline_check_runs_verdict"
+                // Plain FK, no cascade: the history row goes first, then its pipeline.
+                statement.execute("DELETE FROM pipeline_check_runs WHERE pipeline_id = '$pipelineId'")
+                statement.execute("DELETE FROM pipelines WHERE id = '$pipelineId'")
+                statement.execute("DELETE FROM users WHERE id = '$userId'")
+            }
+        }
+        query("SELECT COUNT(*) FROM pipeline_check_runs WHERE pipeline_id = '$pipelineId'") { it.getInt(1) }
+            .single() shouldBe 0
     }
 
     @Test
@@ -535,7 +591,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the eighteen tables of metadata-db §4`() {
+    fun `creates exactly the nineteen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -561,6 +617,8 @@ class FlywayMigrationIntegrationTest {
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
                 "mail_sends",
+                // 140 (V28) — the release check run history.
+                "pipeline_check_runs",
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
@@ -627,6 +685,9 @@ class FlywayMigrationIntegrationTest {
                 // 137 (V27) — one claim per message identity (user, kind, act).
                 "mail_sends.mail_sends_pkey",
                 "mail_sends.uq_mail_sends_message",
+                // 140 (V28) — the latest-run-per-check read.
+                "pipeline_check_runs.idx_pipeline_check_runs_latest",
+                "pipeline_check_runs.pipeline_check_runs_pkey",
                 "pipeline_executions.idx_executions_correlation",
                 "pipeline_executions.idx_executions_heartbeat",
                 "pipeline_executions.idx_executions_pipeline",
@@ -724,6 +785,9 @@ class FlywayMigrationIntegrationTest {
                 "chk_learned_facts_via",
                 // 137 (V27) — mail_sends.kind is the closed welcome | password_reset | new_user list.
                 "chk_mail_sends_kind",
+                // 140 (V28) — the surface and verdict closed lists (metadata-db §4.20).
+                "chk_pipeline_check_runs_verdict",
+                "chk_pipeline_check_runs_via",
                 // 101 (V19): discard stamps — both NULL unless DISCARDED, a stamp when it is.
                 "chk_pipeline_versions_discard_stamps",
                 "chk_pipeline_versions_status",

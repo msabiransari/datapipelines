@@ -169,6 +169,143 @@ class PipelineReleaseServiceTest {
         error.details["current_status"] shouldBe "DRAFT"
     }
 
+    // -------------------------------------------------------------------------------------
+    // 140 — the release-check gate (§13.17)
+    // -------------------------------------------------------------------------------------
+
+    /** A draft body carrying one check — the gate's input. */
+    private val checkedDraftBody =
+        """{"schema_version":1,"name":"test/monthly_revenue","display_name":"M","description":"d",""" +
+            """"parameters":{},"settings":{"tempdb":{"engine":"H2"}},""" +
+            """"nodes":[{"id":"n1","type":"DQL","source":"pg","template":{"id":"test/t.sql","version":2},"depends_on":[]}],""" +
+            """"checks":[{"id":"revenue_matches","name":"Revenue matches the ledger","datasource":"pg",""" +
+            """"sql":"SELECT 1","expected":{"kind":"value","value":1.0}}]}"""
+
+    private fun outcome(verdict: CheckRunVerdict) =
+        CheckRunOutcome(
+            checkId = "revenue_matches",
+            name = "Revenue matches the ledger",
+            expected = CheckExpectation(kind = "value", value = 1.0),
+            observed = "1",
+            verdict = verdict,
+            message = null,
+        )
+
+    private fun stubSuccessfulFlip() {
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns checkedDraftBody
+        every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every {
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+        } returns
+            PipelineRepository.Released(
+                pipelineRecord().copy(currentVersion = 2),
+                draftDetail().copy(status = PipelineVersionStatus.RELEASED, version = 2),
+            )
+    }
+
+    @Test
+    fun `a failing check refuses the release with pipeline check failed and the details`() {
+        stubSuccessfulFlip()
+        val gated =
+            PipelineReleaseService(
+                pipelines,
+                templates,
+                validator,
+                AuthoringGuard(true),
+                checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.FAIL)) },
+            )
+
+        val error = shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId) }
+
+        error.code shouldBe PipelineErrorCodes.Check.FAILED
+        @Suppress("UNCHECKED_CAST")
+        val checks = error.details["checks"] as List<Map<String, Any?>>
+        checks.single()["check_id"] shouldBe "revenue_matches"
+        checks.single()["verdict"] shouldBe "fail"
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an error verdict refuses too - a check that could not run is not a pass`() {
+        stubSuccessfulFlip()
+        val gated =
+            PipelineReleaseService(
+                pipelines,
+                templates,
+                validator,
+                AuthoringGuard(true),
+                checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.ERROR)) },
+            )
+
+        shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId) }
+            .code shouldBe PipelineErrorCodes.Check.FAILED
+    }
+
+    @Test
+    fun `the override reason releases past failing checks and rides the result for the audit`() {
+        stubSuccessfulFlip()
+        val gated =
+            PipelineReleaseService(
+                pipelines,
+                templates,
+                validator,
+                AuthoringGuard(true),
+                checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.FAIL)) },
+            )
+
+        val released =
+            gated.release(workspaceId, pipelineId, "draft-hash", userId, overrideChecksReason = "Ledger lags one day; verified by hand.")
+
+        released.checksOverridden shouldBe listOf("revenue_matches")
+        released.checksOverrideReason shouldBe "Ledger lags one day; verified by hand."
+    }
+
+    @Test
+    fun `an override reason shorter than the minimum still refuses`() {
+        stubSuccessfulFlip()
+        val gated =
+            PipelineReleaseService(
+                pipelines,
+                templates,
+                validator,
+                AuthoringGuard(true),
+                checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.FAIL)) },
+            )
+
+        shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId, overrideChecksReason = "ok") }
+            .code shouldBe PipelineErrorCodes.Check.FAILED
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `all checks passing releases clean - and a check-less draft never calls the gate`() {
+        stubSuccessfulFlip()
+        var gateCalls = 0
+        val gated =
+            PipelineReleaseService(
+                pipelines,
+                templates,
+                validator,
+                AuthoringGuard(true),
+                checkGate =
+                    ReleaseCheckGate { _, _, _, _, _ ->
+                        gateCalls++
+                        listOf(outcome(CheckRunVerdict.PASS))
+                    },
+            )
+
+        gated.release(workspaceId, pipelineId, "draft-hash", userId).checksOverridden shouldBe emptyList()
+        gateCalls shouldBe 1
+
+        // The plain body (no checks) releases exactly as before: the gate is never consulted.
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
+        gateCalls = 0
+        gated.release(workspaceId, pipelineId, "draft-hash", userId)
+        gateCalls shouldBe 0
+    }
+
     @Test
     fun `purge deletes the version or the entity, or refuses - never clobbers`() {
         // 101: the draft verb is PURGE — the row (and its executions) are gone either way;

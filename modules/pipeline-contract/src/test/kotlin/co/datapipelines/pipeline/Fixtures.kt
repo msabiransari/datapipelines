@@ -52,6 +52,7 @@ internal object Fixtures {
         parameters: Map<String, Parameter> = emptyMap(),
         settings: PipelineSettings = PipelineSettings(),
         schemaVersion: Int = Pipeline.SUPPORTED_SCHEMA_VERSION,
+        checks: List<PipelineCheck> = emptyList(),
     ): Pipeline =
         Pipeline(
             schemaVersion = schemaVersion,
@@ -61,7 +62,20 @@ internal object Fixtures {
             settings = settings,
             parameters = parameters,
             nodes = nodes,
+            checks = checks,
         )
+
+    /**
+     * A §3.3 release check, valid as defaulted: [StubDatasources] resolves `pg-prod`, the SQL
+     * binds nothing, and a `value` expectation carries its `value`.
+     */
+    fun check(
+        id: String = "row_count",
+        name: String = "Orders row count matches the rollup.",
+        datasource: String = "pg-prod",
+        sql: String = "SELECT COUNT(*) FROM orders",
+        expected: CheckExpectation = CheckExpectation(kind = CheckExpectation.KIND_VALUE, value = 0.0),
+    ): PipelineCheck = PipelineCheck(id = id, name = name, datasource = datasource, sql = sql, expected = expected)
 
     /**
      * A validator whose environment resolves everything the default fixtures reference.

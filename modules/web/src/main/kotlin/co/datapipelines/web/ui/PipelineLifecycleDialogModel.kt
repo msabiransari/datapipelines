@@ -78,6 +78,12 @@ class PipelineLifecycleDialogModel(
         val updatedAgo: String,
         val updatedAt: Instant?,
         val pins: List<PinView>,
+        /**
+         * 140: the draft body declares `checks[]` — the dialog runs them as it opens and the
+         * run's own fragment decides the submit footer (all pass → Release; failing → the
+         * override disclosure). False renders the pre-140 shape: no run, the submit enabled.
+         */
+        val hasChecks: Boolean,
         /** §3.5's `not_draft` branch: the dialog opens and says why there is no button. */
         val refusal: Refusal?,
     ) {
@@ -100,13 +106,14 @@ class PipelineLifecycleDialogModel(
                 updatedAgo = "",
                 updatedAt = null,
                 pins = emptyList(),
+                hasChecks = false,
                 refusal = refusal("pipeline.version.not_draft", "This pipeline has no draft — nothing to release."),
             )
         }
         val body = repository.findVersionBody(workspaceId, id, draft.version)
+        val parsed = body?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
         val pins =
-            body
-                ?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
+            parsed
                 ?.nodes
                 ?.filter { it.template.id.isNotBlank() }
                 ?.map { node ->
@@ -124,6 +131,7 @@ class PipelineLifecycleDialogModel(
             updatedAgo = RelativeTime.since(draft.updatedAt ?: draft.createdAt, Instant.now()),
             updatedAt = draft.updatedAt ?: draft.createdAt,
             pins = pins,
+            hasChecks = parsed?.checks?.isNotEmpty() == true,
             refusal = null,
         )
     }

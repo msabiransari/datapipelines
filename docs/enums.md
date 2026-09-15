@@ -424,7 +424,7 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 | `pipeline.version.purged` | A DRAFT pipeline version was purged — the row and its executions deleted, irreversible. `details` carries the execution-row count that went with it ([Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
 | `pipeline.purged` | A pipeline ENTITY was purged (only-draft, no inbound edges) — the entity row went with its draft. `details` carries `exclusive_draft_templates` offered/purged ([Versioning §3.2](versioning.md#32-entity-status-is-derived-names-are-unique-forever)) |
 | `pipeline.current_switched` | The sticky pointer was moved by the manual switch verb (`POST /pipelines/{id}/current`) — including on a promotion receiver, where this is the rollout/rollback lever. `details` carries from/to versions ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
-| `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. |
+| `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. Since 140, a release past failing checks also carries `checks_overridden: [check ids]` and `override_reason` — the escape hatch is on the record, never silent |
 | `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. |
 | `template.version.discarded` / `template.version.restored` / `template.version.purged` / `template.purged` / `template.current_switched` | The template twins, by name — same triggers, template surfaces ([Versioning §3.5's notation rule](versioning.md#35-the-lifecycle-table)) |
 
@@ -468,6 +468,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
 | `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
+| `pipeline.check.*` | Release checks — the server-run cross-checks gating release | pipeline-contract §13.17 |
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
 | `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 | `mcp.*` | The MCP surface's own refusals (the resource surface's not-found is the JSON-RPC protocol's, not a code) | pipeline-contract §13.16 (defined in [MCP §6.2](mcp-server.md#62-tool-definitions)) |
@@ -545,6 +546,37 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 
 **Trust** (the companion state, design §5 — not an enum a caller supplies): `asserted` (no evidence — or a `definition`/`exclusion`/`preference`, a choice, whatever it carries; C.2 2026-09-13) → `observed` (evidence ran at record time, data-kind facts only) → `verified` (a human confirmed); the mechanical demotions `needs_review` (the table's column set changed around a still-resolving ref) and `stale` (a referenced column or table no longer exists); and `retired` (explicit, with a reason — never a delete). Written as the `chk_learned_facts_trust` CHECK.
 
+## 20. `CheckRunVerdict` — a release check's outcome (140)
+
+**Source:** [pipeline-contract §13.17](pipeline-contract.md#1317-release-checks); the `chk_pipeline_check_runs_verdict` CHECK of [Metadata DB §4.20](metadata-db.md#420-pipeline_check_runs) is the enforcing copy; the Kotlin enum is `CheckRunVerdict` (pipeline-contract `ReleaseCheckGate.kt`).
+**Used by:** pipeline-contract (the release gate), application (the check runner), mcp-server (`pipelines_run_checks`), rest-api (§5.16), the UI.
+
+| Value | Meaning |
+|---|---|
+| `pass` | The server's observed value satisfied the check's expectation |
+| `fail` | The run produced a value and it did NOT satisfy the expectation |
+| `error` | No verdict could be formed — datasource unreachable, statement refused, or a result shape the expectation cannot compare (a `value`/`range` check requires exactly one row and one column). The run row's `message` says which. Never silently a `fail` |
+
+**Closed.** A release refuses on `fail` OR `error` alike (versioning §5.3 precondition 4) — the distinction exists for the human reading the dialog, not for the gate.
+
+---
+
+## 21. `CheckRunVia` — who commissioned a check run (140)
+
+**Source:** [pipeline-contract §13.17](pipeline-contract.md#1317-release-checks); the `chk_pipeline_check_runs_via` CHECK of [Metadata DB §4.20](metadata-db.md#420-pipeline_check_runs); the Kotlin enum is `CheckRunVia`.
+**Used by:** application (the check runner), mcp-server, rest-api, the UI.
+
+| Value | Meaning |
+|---|---|
+| `mcp` | The `pipelines_run_checks` tool |
+| `rest` | `POST /pipelines/{id}/versions/{version}/checks/run` |
+| `ui` | The release dialog / version page's run action |
+| `release` | The release gate's own fresh run (versioning §5.3 precondition 4) |
+
+**Closed.** The run rows are append-only; `via` is the record of WHICH surface commissioned each one.
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -569,6 +601,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `ExecutionTrigger` | rest-api | mcp-server, persistence |
 | `ApiKeyKind` | [auth.md §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) | metadata-db, rest-api, mcp-server |
 | `LearnedFactKind` | [learned-semantic-layer design §4](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) (§19 here is the wire table) | datasources, metadata-db (the V25 CHECK), mcp-server, rest-api |
+| `CheckRunVerdict` | pipeline-contract (`ReleaseCheckGate.kt`; §20 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
+| `CheckRunVia` | pipeline-contract (`ReleaseCheckGate.kt`; §21 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
 
 ---
 
@@ -591,6 +625,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.11 | 140 release checks | New **§20 `CheckRunVerdict`** (`pass` \| `fail` \| `error`) and **§21 `CheckRunVia`** (`mcp` \| `rest` \| `ui` \| `release`) — the wire values of `pipeline_check_runs` (metadata-db §4.20, V28), authored in pipeline-contract `ReleaseCheckGate.kt`. §15's `pipeline.version.released` row gains the override record (`checks_overridden`, `override_reason`); §16 registers the `pipeline.check.*` domain (pipeline-contract §13.17). |
 | 2026-09-14 | v1.10 | 137 mail notices | §15 gains the **mail audit events** sub-table: `mail.sent` / `mail.failed` (`MailAuditEvents`, drift-guarded by `MailAuditEventsSpecDriftTest`) — kind, recipients, act and Message-ID or error in `details`; never a body, never a password. |
 | 2026-09-09 | v1.9 | T202 node query timeout | §17's 504 row gains `pipeline.node.query_timeout`. |
 | 2026-09-08 | v1.8 | 091 keys | §8A `ApiKeyKind` gains **`server`** — the promotion peer's credential as a stored key (auth.md §7.7, V15). Three kinds now, and the note that a scopeless kind is refused everywhere off its own family, `/mcp` and the UI pages included. |

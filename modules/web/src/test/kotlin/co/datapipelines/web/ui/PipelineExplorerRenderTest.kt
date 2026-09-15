@@ -522,6 +522,31 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
+    fun `140 - the overview carries the working version's Checks section only when the body declares checks`() {
+        val withChecks =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                setVariable("checksCount", 2)
+            }
+
+        withChecks shouldContain ">Checks</h3>"
+        withChecks shouldContain "2 checks"
+        // The list lazy-loads the read-only partial for the WORKING version (the draft here),
+        // and Run checks posts a fresh ui run into the same container.
+        withChecks shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/versions/2/checks\""
+        withChecks shouldContain "hx-trigger=\"load\""
+        withChecks shouldContain "hx-post=\"/partials/pipelines/$LEAF_ID/versions/2/checks/run\""
+        withChecks shouldContain "hx-target=\"#pipeline-detail-checks\""
+        withChecks shouldContain "Run checks"
+
+        // No checks in the body: no shell at all — an empty section would claim they had
+        // been checked. The base fixture's checksCount is 0.
+        val without = render("partials/pipeline-detail") { fillDetail() }
+        without shouldNotContain ">Checks</h3>"
+        without shouldNotContain "checks/run"
+    }
+
+    @Test
     fun `a search result SELECTS exactly like a tree leaf`() {
         val html = render("partials/pipeline-search") { fillSearch() }
 
@@ -618,6 +643,7 @@ class PipelineExplorerRenderTest {
             )
         setVariable("parameters", mapOf("start_date" to startDate))
         setVariable("nodeCount", 3)
+        setVariable("checksCount", 0)
         setVariable("datasourceRows", listOf(DatasourceRowView("sample-lake", Dialect.POSTGRES)))
         setVariable("templatePins", listOf(TemplatePinView("demo/top_carrier.sql", 1)))
         setVariable("createdBy", "Muhammad")

@@ -72,6 +72,8 @@ class StructuralRulesTest {
             Validation.TEMPLATE_PARAMETER_UNDECLARED,
             Validation.TEMPLATE_RENDER_FAILED,
             Validation.TEMPDB_CONFIG_INVALID,
+            // §12.12 (140) — a body with no checks must not raise the release-check code either.
+            Validation.CHECK_INVALID,
         ).forEach { code -> withClue(code) { codes shouldNotContain code } }
         codes.shouldBeEmpty()
     }

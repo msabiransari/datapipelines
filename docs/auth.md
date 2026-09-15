@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.17 (revised — see Change Log)
+**Status:** v2.19 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-14
@@ -843,13 +843,13 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | Add / remove members, set their flags | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}/members/{user_id}` — the last admin cannot be removed or demoted (`workspace.last_admin`) | `author` | `ws_admin` |
 | Grant / revoke a datasource to a workspace | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | `admin` | `super_admin` |
 
-**MCP tools** (all 40 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 41 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope | Min role |
 |---|---|---|
 | `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats`, `semantics_list`, `docs_list`, `docs_get` | `read` | `view` |
 | `endpoints_list`, `endpoints_get` | `read` | `view` |
-| `pipelines_execute`, `executions_cancel` | `execute` | `execute` |
+| `pipelines_execute`, `executions_cancel`, `pipelines_run_checks` | `execute` | `execute` |
 | `pipelines_execute_node` | `author` | `execute` |
 | `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe` | `author` | `view` |
 | `datasources_test` | `author` | `ws_admin` |
@@ -858,7 +858,7 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` | `author` |
 | `semantics_record`, `semantics_retire` — recording a learned fact is an authoring act ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) D-S8); a DATASOURCE-scope record additionally needs the datasource granted to the active workspace (the §5.3 gate — not-found otherwise), and retiring a DATASOURCE fact another workspace established needs the workspace-admin role, enforced in the service | `author` | `author` |
 
-(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 36 of the 40 tools operate inside the API key's pinned workspace; the four exceptions are `calculators_list` / `calculators_get` (072) and `docs_list` / `docs_get` (120), and only because they touch no workspace data at all — the calculator catalog and the shipped skill docs are properties of the BUILD, identical for every caller.)
+(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 37 of the 41 tools operate inside the API key's pinned workspace; the four exceptions are `calculators_list` / `calculators_get` (072) and `docs_list` / `docs_get` (120), and only because they touch no workspace data at all — the calculator catalog and the shipped skill docs are properties of the BUILD, identical for every caller.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the flag that renders it, and the operation row above it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the Min role column, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes.
 
@@ -1469,6 +1469,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v2.19 | 140 release checks over MCP | §7.6 MCP table: `pipelines_run_checks` joins the `execute`/`execute` row (40 → 41 tools) — the D-R3 verb, the same floor as the `EXECUTE_PIPELINE` REST twin (`POST …/checks/run`): a viewer runs what they can read, and a check run returns no row data beyond the one observed cell per check. Both `ScopeMatrixSpecDriftTest` counts moved 40 → 41 in the same commit. The status line had drifted a version behind the rows again (the v2.16 note's pattern); now current. |
 | 2026-09-14 | v2.18 | 137 mail notices | New **§5A.8 Mail**: the welcome mail (login URL + one-time password) at local-account creation, the reset mail at an admin reset, and the sys-ops "New user" notice (no password) at every creation — local or the OIDC callback's create branch (§5.5: `findOrCreateByEmail` answers `Provisioned(user, created)`). Enabled exactly when configured ([Configuration §3.27](configuration.md#327-mail)); claimed before sent (`mail_sends`, [Metadata DB §4.19](metadata-db.md#419-mail_sends)) so a password mail never goes twice; sent after commit off the request thread; `mail.sent` / `mail.failed` audited without a body. §5A.1's "no email flow — the product has no SMTP" is gone: there is still no self-service reset, but the credential an admin mints is mailed, and the admin screen shows where it went instead of what it was ([UI §4.12](ui-screens.md#412-admin-user-management-admin-scope-only)). |
 | 2026-09-14 | v2.17 | 134 MCP save sees workspace datasources | §8.5: the principal reaches an MCP tool through the transport context, not the thread — the SDK's scheduler thread has an empty `SecurityContextHolder`, so anything reachable from a tool takes principal and workspace as arguments (the save-time datasource port did not, and every MCP save saw owner-less datasources only). No matrix change. |
 | 2026-09-13 | v2.16 | 122 viewer executes | §7.6: no matrix row changed — the round re-floored a PAGE route. The pipeline editor (`GET /pipelines/{id}/editor`) declares `EXECUTE_PIPELINE` instead of `MUTATE_PIPELINES_TEMPLATES`: D-R3 says viewers execute, the §4.3e table already gave the viewer's editor an Execute verb, and the author floor refused the viewer before any of it was reachable (the owner's 2026-09-12 report). The template editor keeps the author floor. New paragraph after the UI-screens one states the page-route reasoning; the read key's "everything except the editors" property is unchanged (read < execute). Status line had drifted a version behind the rows (119-style); now current. |

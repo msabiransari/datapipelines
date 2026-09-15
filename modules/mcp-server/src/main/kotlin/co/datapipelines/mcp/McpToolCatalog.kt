@@ -114,6 +114,11 @@ object McpToolCatalog {
             // the BUILD, like the calculator catalog — reads in the strongest sense.
             Entry("docs_list", mutating = false),
             Entry("docs_get", mutating = false),
+            // 140 — the release-check run. It writes one `pipeline_check_runs` row per check,
+            // so it is the `mcp.tool.write` audit's business even though it changes no
+            // definition: the rows are the server's own observed values, and WHO commissioned
+            // them is exactly what the write event records.
+            Entry("pipelines_run_checks", mutating = true),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

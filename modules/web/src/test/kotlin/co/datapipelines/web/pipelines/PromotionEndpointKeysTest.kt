@@ -56,6 +56,7 @@ class PromotionEndpointKeysTest {
             TransactionTemplate(mockk(relaxed = true)),
             false,
             EndpointPromotion(publishing, endpointKeys, mockk(relaxed = true), mockk(relaxed = true), apiKeys, mockk(relaxed = true)),
+            mockk(relaxed = true),
         )
 
     @Test
