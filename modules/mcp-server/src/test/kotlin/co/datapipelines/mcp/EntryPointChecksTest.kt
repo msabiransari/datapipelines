@@ -72,7 +72,6 @@ class EntryPointChecksTest {
         id: String,
         source: String,
         templateId: String,
-        body: String,
     ): Node =
         Node(
             id = id,
@@ -104,7 +103,7 @@ class EntryPointChecksTest {
         val e =
             shouldThrow<DatapipelinesException> {
                 TableLearningCheck(templates, introspector, datasources, learnings)
-                    .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+                    .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
             }
         e.code shouldBe PipelineErrorCodes.Validation.TABLE_NOT_LEARNED
         e.details["tables"] shouldBe
@@ -118,7 +117,7 @@ class EntryPointChecksTest {
         every { learnings.columnsRead(key, "pg") } returns setOf("trips")
 
         TableLearningCheck(templates, introspector, datasources, learnings)
-            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
     }
 
     @Test
@@ -129,7 +128,7 @@ class EntryPointChecksTest {
         every { learnings.columnsRead(key, "pg") } returns emptySet()
 
         TableLearningCheck(templates, introspector, datasources, learnings)
-            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
         // Only prose tokens and a non-listed identifier: nothing was refused, and the
         // catalog was still consulted for the listing.
         verify { introspector.tables(eq(pg), isNull(), any(), isNull()) }
@@ -143,12 +142,12 @@ class EntryPointChecksTest {
         every { learnings.columnsRead(key, "pg") } returns emptySet()
 
         TableLearningCheck(templates, introspector, datasources, learnings)
-            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
     }
 
     @Test
     fun `a tempdb source is exempt - there is no catalog to learn`() {
-        val tempdbNode = node("stage", "tempdb", "test/t.sql", "ignored")
+        val tempdbNode = node("stage", "tempdb", "test/t.sql")
         every { templates.findVersion(workspace, "test/t.sql", 1) } returns
             template("test/t.sql", "SELECT * FROM trips")
 
@@ -166,7 +165,7 @@ class EntryPointChecksTest {
             template("test/t.sql", "SELECT * FROM trips")
 
         TableLearningCheck(templates, introspector, datasources, learnings)
-            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
     }
 
     @Test
@@ -178,7 +177,7 @@ class EntryPointChecksTest {
             template("test/t.sql", "SELECT * FROM trips")
 
         TableLearningCheck(templates, introspector, datasources, learnings)
-            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
         verify(exactly = 0) { learnings.columnsRead(any(), any()) }
     }
 
@@ -192,7 +191,7 @@ class EntryPointChecksTest {
         val e =
             shouldThrow<DatapipelinesException> {
                 TableLearningCheck(templates, introspector, datasources, learnings)
-                    .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql", "ignored")))
+                    .require(workspace, key, pipeline(node("rows", "pg", "test/t.sql")))
             }
 
         @Suppress("UNCHECKED_CAST")
@@ -241,7 +240,7 @@ class EntryPointChecksTest {
         val e =
             shouldThrow<DatapipelinesException> {
                 TemplateRenderFreshness(templates, learnings)
-                    .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql", "ignored")))
+                    .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql")))
             }
         e.code shouldBe PipelineErrorCodes.Execution.TEMPLATE_UNRENDERED
         e.details["templates"] shouldBe
@@ -264,7 +263,7 @@ class EntryPointChecksTest {
 
         shouldThrow<DatapipelinesException> {
             TemplateRenderFreshness(templates, learnings)
-                .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql", "ignored")))
+                .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql")))
         }
     }
 
@@ -276,7 +275,7 @@ class EntryPointChecksTest {
         every { learnings.lastRenderAt(key, "test/t.sql") } returns Instant.parse("2026-09-15T10:30:00Z")
 
         TemplateRenderFreshness(templates, learnings)
-            .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql")))
     }
 
     @Test
@@ -286,7 +285,7 @@ class EntryPointChecksTest {
             templateVersion(PipelineVersionStatus.RELEASED, null)
 
         TemplateRenderFreshness(templates, learnings)
-            .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, detail, listOf(node("rows", "pg", "test/t.sql")))
         verify(exactly = 0) { learnings.lastRenderAt(any(), any()) }
     }
 
@@ -295,7 +294,7 @@ class EntryPointChecksTest {
         val released =
             draftDetail(Instant.parse("2026-09-15T10:00:00Z")).copy(status = PipelineVersionStatus.RELEASED)
         TemplateRenderFreshness(templates, learnings)
-            .require(workspace, key, released, listOf(node("rows", "pg", "test/t.sql", "ignored")))
+            .require(workspace, key, released, listOf(node("rows", "pg", "test/t.sql")))
         verify(exactly = 0) { templates.lookupVersion(any(), any(), any()) }
     }
 
@@ -311,7 +310,7 @@ class EntryPointChecksTest {
             "",
             PipelineSettings(),
             params.associate { (n, t) -> n to Parameter(type = t) },
-            listOf(node("rows", "pg", "test/t.sql", "ignored")),
+            listOf(node("rows", "pg", "test/t.sql")),
         )
 
     @Test

@@ -82,31 +82,46 @@ class TableLearningCheck(
             pipeline.nodes
                 .filter { it.template.id.isNotBlank() && it.resolvedSource is NodeSource.Datasource }
                 .groupBy { (it.resolvedSource as NodeSource.Datasource).name }
-        val missing = linkedSetOf<MissingTable>()
-        for ((datasourceName, datasourceNodes) in grouped) {
-            val listing =
-                try {
-                    val gated = datasources.requireVisible(datasourceName, workspaceId)
-                    introspector.tables(gated)
-                } catch (_: DatapipelinesException) {
-                    // Not visible (D-R5 not-found), not registered (§12.5 will refuse), or the
-                    // dialect's catalog read failed — none of these is "you did not learn".
-                    null
-                } catch (_: DatasourceUnreachableException) {
-                    null
-                }
-            // A truncated listing is not the catalog's truth — failing closed on it would
-            // tax tables the listing never showed. Skip; the probe still answers.
-            if (listing == null || listing.truncated) continue
-            val catalogSpelling = listing.tables.associate { it.name.lowercase() to it.name }
-            if (catalogSpelling.isEmpty()) continue
-            val named = namedTables(workspaceId, datasourceNodes, catalogSpelling.keys)
-            if (named.isEmpty()) continue
-            val learned = learnings.columnsRead(keyId, datasourceName).map { it.lowercase() }.toSet()
-            // Name the refusal as the catalog spells the table, never as the body did.
-            missing += named.filterNot { it in learned }.map { MissingTable(datasourceName, catalogSpelling.getValue(it)) }
-        }
+        val missing =
+            grouped.flatMap { (datasourceName, datasourceNodes) ->
+                unlearned(workspaceId, keyId, datasourceName, datasourceNodes)
+            }
         if (missing.isNotEmpty()) throw refusal(missing)
+    }
+
+    /**
+     * The tables of ONE datasource the nodes name but the key never learned — empty when the
+     * datasource skips the check (not visible, not reachable, truncated listing, empty
+     * catalog, nothing named). One exit per skip keeps the skip reasons in one place.
+     */
+    @Suppress("ReturnCount") // each early return IS the skip reason the KDoc names
+    private fun unlearned(
+        workspaceId: UUID,
+        keyId: String?,
+        datasourceName: String,
+        datasourceNodes: List<Node>,
+    ): List<MissingTable> {
+        val listing =
+            try {
+                val gated = datasources.requireVisible(datasourceName, workspaceId)
+                introspector.tables(gated)
+            } catch (_: DatapipelinesException) {
+                // Not visible (D-R5 not-found), not registered (§12.5 will refuse), or the
+                // dialect's catalog read failed — none of these is "you did not learn".
+                return emptyList()
+            } catch (_: DatasourceUnreachableException) {
+                return emptyList()
+            }
+        // A truncated listing is not the catalog's truth — failing closed on it would
+        // tax tables the listing never showed. Skip; the probe still answers.
+        if (listing.truncated) return emptyList()
+        val catalogSpelling = listing.tables.associate { it.name.lowercase() to it.name }
+        if (catalogSpelling.isEmpty()) return emptyList()
+        val named = namedTables(workspaceId, datasourceNodes, catalogSpelling.keys)
+        if (named.isEmpty()) return emptyList()
+        val learned = learnings.columnsRead(keyId, datasourceName).map { it.lowercase() }.toSet()
+        // Name the refusal as the catalog spells the table, never as the body did.
+        return named.filterNot { it in learned }.map { MissingTable(datasourceName, catalogSpelling.getValue(it)) }
     }
 
     /** The catalog tables (in catalog spelling) the nodes' template bodies name. */
@@ -124,7 +139,7 @@ class TableLearningCheck(
                     ?: emptySequence()
             }.filterTo(mutableSetOf()) { it in listed }
 
-    private fun refusal(missing: Set<MissingTable>): DatapipelinesException =
+    private fun refusal(missing: List<MissingTable>): DatapipelinesException =
         DatapipelinesException(
             code = PipelineErrorCodes.Validation.TABLE_NOT_LEARNED,
             message =
