@@ -13,9 +13,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
-import org.testcontainers.utility.MountableFile
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -236,35 +233,15 @@ class WorkspaceInvitationOidcE2eTest {
         val REQUEST_TIMEOUT: Duration = Duration.ofMinutes(2)
         val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(20)
         const val MAX_HOPS = 10
-        const val KEYCLOAK_PORT = 8080
         const val SECRET_BYTES = 32
 
         /** A pre-reserved local port, so `datapipelines.auth.base-url` names the exact origin (§5.2). */
         @JvmStatic
         val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
 
+        // Both shared (SharedPostgres, SharedKeycloak); this suite's provider is the
+        // `invites` realm, a namespace no other suite logs into.
         val postgres get() = SharedPostgres.postgres
-
-        @JvmStatic
-        val keycloak: GenericContainer<*> =
-            GenericContainer("quay.io/keycloak/keycloak:26.0")
-                .withExposedPorts(KEYCLOAK_PORT)
-                .withCopyFileToContainer(
-                    MountableFile.forClasspathResource("keycloak/realm-invites.json"),
-                    "/opt/keycloak/data/import/realm-invites.json",
-                ).withCommand("start-dev", "--import-realm")
-                .withReuse(true)
-                .waitingFor(
-                    Wait
-                        .forHttp("/realms/invites/.well-known/openid-configuration")
-                        .forPort(KEYCLOAK_PORT)
-                        .forStatusCode(200)
-                        .withStartupTimeout(Duration.ofMinutes(20)),
-                )
-
-        init {
-            keycloak.start()
-        }
 
         @JvmStatic
         @DynamicPropertySource
@@ -282,7 +259,7 @@ class WorkspaceInvitationOidcE2eTest {
             registry.add("datapipelines.auth.oidc.providers[0].client-id") { "dp-client" }
             registry.add("datapipelines.auth.oidc.providers[0].client-secret") { "dp-secret" }
             registry.add("datapipelines.auth.oidc.providers[0].issuer-uri") {
-                "http://${keycloak.host}:${keycloak.getMappedPort(KEYCLOAK_PORT)}/realms/invites"
+                SharedKeycloak.issuerUri("invites")
             }
             registry.add("datapipelines.auth.oidc.providers[0].display-name") { "Company SSO" }
         }

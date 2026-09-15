@@ -2,11 +2,20 @@ package co.datapipelines.integration
 
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.utility.DockerImageName
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.S3Configuration
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier
+import java.net.URI
 import java.sql.DriverManager
 
 /**
- * ONE Postgres and ONE Redis for this module's whole test JVM (round 060) — the singleton
+ * ONE Postgres, ONE Redis and (round 141) ONE MinIO for this module's whole test JVM — the singleton
  * pattern `dag`'s `RedisSupport` established. First touch starts each container and resets
  * it to a provably empty state; the suites here boot full application contexts against
  * them through `@DynamicPropertySource` instead of declaring their own `@Container` pairs,
@@ -35,12 +44,21 @@ import java.sql.DriverManager
  *
  * ## Reuse (DEVELOPMENT.md, "Reusing test containers across runs")
  *
- * `withReuse(true)` is declared on both containers so a developer who opts in locally via
+ * `withReuse(true)` is declared on every container so a developer who opts in locally via
  * `~/.testcontainers.properties` keeps them across Gradle runs; without the opt-in it is
  * a no-op and Ryuk reaps them at JVM exit as always. The database is dropped and
- * recreated and the keyspace FLUSHALLed at first touch either way, so a reused pair
- * behaves exactly like fresh ones. A container wedged by a killed run is removed with
- * `docker rm`.
+ * recreated, the keyspace FLUSHALLed and every bucket deleted at first touch either way,
+ * so a reused set behaves exactly like fresh ones. A container wedged by a killed run is
+ * removed with `docker rm`.
+ *
+ * ## MinIO: the lake suites' S3, one server, one bucket per suite
+ *
+ * The two lake suites each seed a bucket of their own (`dp-lake-it`, `dp-lake-e2e`) — S3's
+ * namespace unit — and every key they read carries their bucket, so they cannot see each
+ * other's objects. First touch deletes every bucket the server holds (objects first), which
+ * is the whole reset a reused container needs. The suites that pair MinIO with engines whose
+ * isolation IS the subject (a second Postgres, the compose stack's exact MySQL) keep those
+ * private and take only the S3 from here.
  */
 internal object SharedE2e {
     private const val PG_IMAGE = "postgres:16-alpine"
@@ -105,6 +123,61 @@ internal object SharedE2e {
     val redisHost: String get() = redis.host
 
     val redisPort: Int get() = redis.getMappedPort(REDIS_PORT)
+
+    /**
+     * The current stable RELEASE tag (verified 2026-09-08), pinned exactly. quay.io, not Docker
+     * Hub: MinIO withdrew this tag from `minio/minio` on Docker Hub (404 "pull access denied" on
+     * every CI run from 2026-09-11); a laptop with the image cached never noticed.
+     */
+    private const val MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+    private const val MINIO_PORT = 9000
+
+    /** The root credential the lake datasources and the seeding client both present. */
+    const val MINIO_USER = "minioadmin"
+    const val MINIO_PASSWORD = "minioadmin"
+
+    /** The shared MinIO, started and emptied of every bucket on first touch. */
+    val minio: GenericContainer<*> by lazy {
+        GenericContainer(DockerImageName.parse(MINIO_IMAGE))
+            .withEnv("MINIO_ROOT_USER", MINIO_USER)
+            .withEnv("MINIO_ROOT_PASSWORD", MINIO_PASSWORD)
+            .withCommand("server", "/data")
+            .withExposedPorts(MINIO_PORT)
+            .withReuse(true)
+            .waitingFor(Wait.forHttp("/minio/health/ready").forPort(MINIO_PORT))
+            .also { container ->
+                container.start()
+                s3ClientFor(container).use { s3 ->
+                    s3.listBuckets().buckets().forEach { bucket ->
+                        val name = bucket.name()
+                        s3.listObjectsV2Paginator { it.bucket(name) }.contents().chunked(1000).forEach { page ->
+                            s3.deleteObjects { req ->
+                                req.bucket(name).delete { d ->
+                                    d.objects(page.map { ObjectIdentifier.builder().key(it.key()).build() })
+                                }
+                            }
+                        }
+                        s3.deleteBucket { it.bucket(name) }
+                    }
+                }
+            }
+    }
+
+    /** `host:port`, the form a LAKE datasource's `endpoint` and an S3 endpoint override both take. */
+    val minioEndpoint: String get() = "localhost:${minio.getMappedPort(MINIO_PORT)}"
+
+    /** A path-style S3 client on the shared MinIO with its root credential; the caller closes it. */
+    fun s3Client(): S3Client = s3ClientFor(minio)
+
+    private fun s3ClientFor(container: GenericContainer<*>): S3Client =
+        S3Client
+            .builder()
+            .endpointOverride(URI.create("http://localhost:${container.getMappedPort(MINIO_PORT)}"))
+            .region(Region.US_EAST_1)
+            .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(MINIO_USER, MINIO_PASSWORD)))
+            .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
+            .httpClient(UrlConnectionHttpClient.builder().build())
+            .build()
 
     /**
      * A fresh EMPTY database on the shared Postgres, for a suite that builds a partial

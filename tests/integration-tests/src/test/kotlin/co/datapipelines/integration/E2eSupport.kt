@@ -16,9 +16,13 @@ import java.security.SecureRandom
  *   boilerplate: fixed user vs per-key owner, fixed workspace vs per-key workspace, and
  *   `ON CONFLICT DO NOTHING` present in some suites only. Forcing them through one
  *   parameterized INSERT would trade seven readable blocks for one four-knob helper.
- * - **The container blocks stay per-suite.** `@Container` on a suite's companion restarts the
- *   containers per class; hoisting them to a shared singleton would change isolation
- *   semantics every existing E2E relies on.
+ * - **The containers are NOT here either — they live in [SharedE2e].** Since round 060 the
+ *   Postgres and Redis every suite boots against are one per test JVM (data isolation via
+ *   suite-unique seeds and [E2eClean]), and since round 141 so is the lake suites' MinIO
+ *   (one bucket per suite); only suites whose SUBJECT is a separate instance — a private
+ *   Redis whose pub/sub is killed or counted, Keycloak and GreenMail, the two-deployment
+ *   promotion pair, the fresh-deployment walkthrough, the compose stack's exact engines —
+ *   still declare a per-class `@Container`.
  */
 object E2eAuth {
     private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"

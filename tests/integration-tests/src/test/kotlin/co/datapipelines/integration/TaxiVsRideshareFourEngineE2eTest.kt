@@ -22,19 +22,13 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.utility.DockerImageName
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.core.sync.RequestBody
-import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.S3Configuration
 import java.math.BigDecimal
 import java.net.URI
 import java.net.http.HttpClient
@@ -174,9 +168,9 @@ class TaxiVsRideshareFourEngineE2eTest {
             """
             {"name": "sample-lake", "display_name": "NYC Rideshare Lake (sample)", "dialect": "LAKE",
              "jdbc_url": "jdbc:duckdb::memory:", "readonly": true,
-             "credential": {"kind": "password", "username": "$MINIO_USER", "secret": "$MINIO_PASSWORD"},
+             "credential": {"kind": "password", "username": "${SharedE2e.MINIO_USER}", "secret": "${SharedE2e.MINIO_PASSWORD}"},
              "properties": {"dialect": {"catalog.kind": "s3", "region": "us-east-1",
-               "endpoint": "localhost:${minio.getMappedPort(MINIO_PORT)}", "url_style": "path"}}}
+               "endpoint": "${SharedE2e.minioEndpoint}", "url_style": "path"}}}
             """.trimIndent(),
         )
     }
@@ -607,16 +601,6 @@ class TaxiVsRideshareFourEngineE2eTest {
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val BUCKET = "dp-lake-e2e"
-        private const val MINIO_PORT = 9000
-        private const val MINIO_USER = "minioadmin"
-        private const val MINIO_PASSWORD = "minioadmin"
-
-        /** The same MinIO pin the 089 §F MinIO suite verified against Docker Hub. *
-         * quay.io, not Docker Hub: MinIO withdrew this tag from `minio/minio` on Docker Hub (404
-         * "pull access denied" on every CI run from 2026-09-11); a laptop with the image cached
-         * never noticed.
-         */
-        private const val MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 
         /** The compose stack's exact MySQL pin (deploy/compose.yml). */
         private const val MYSQL_IMAGE = "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
@@ -636,16 +620,6 @@ class TaxiVsRideshareFourEngineE2eTest {
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-4eng-key", arrayOf("read", "execute", "author"))
         private val RUN_KEY = E2eAuth.generateKey("e2e-lake-4eng-run", arrayOf("read", "execute", "author"))
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
-
-        @Container
-        @JvmStatic
-        val minio: GenericContainer<*> =
-            GenericContainer(DockerImageName.parse(MINIO_IMAGE))
-                .withEnv("MINIO_ROOT_USER", MINIO_USER)
-                .withEnv("MINIO_ROOT_PASSWORD", MINIO_PASSWORD)
-                .withCommand("server", "/data")
-                .withExposedPorts(MINIO_PORT)
-                .waitingFor(Wait.forHttp("/minio/health/ready").forPort(MINIO_PORT))
 
         @Container
         @JvmStatic
@@ -687,19 +661,9 @@ class TaxiVsRideshareFourEngineE2eTest {
             sqliteFile = staging.resolve("nyc_reference.db")
             generateZonesSqlite(sqliteFile)
 
-            val client =
-                S3Client
-                    .builder()
-                    .endpointOverride(URI.create("http://localhost:${minio.getMappedPort(MINIO_PORT)}"))
-                    .region(Region.US_EAST_1)
-                    .credentialsProvider(
-                        StaticCredentialsProvider.create(AwsBasicCredentials.create(MINIO_USER, MINIO_PASSWORD)),
-                    ).serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
-                    .httpClient(
-                        software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient
-                            .builder()
-                            .build(),
-                    ).build()
+            // The module's shared MinIO (SharedE2e): this suite owns the `dp-lake-e2e` bucket. The
+            // Postgres and MySQL beside it stay private — separate engines are this suite's subject.
+            val client = SharedE2e.s3Client()
             s3 = client
             client.createBucket { it.bucket(BUCKET) }
             uploadTree(client, staging.resolve("lake"), "lake")
