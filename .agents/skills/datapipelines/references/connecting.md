@@ -121,6 +121,12 @@ Three facts, and where to go for the rest:
 
 ## REST fallback (when the client has no MCP transport)
 
+**The manual needs no MCP at all.** `GET /skill.md` is the operating core; its reference map
+names each `GET /skill/<reference>.md` (e.g. `/skill/authoring-playbook.md`) — unauthenticated,
+`text/markdown`, the same bytes `docs_get` and the `datapipelines://docs/skill` resources serve.
+An unknown reference is a `404` whose message points back at the map. Read the core first, then
+follow its map — the same learning path as the MCP one.
+
 Same server, HTTP + JSON, authenticated with `-H "DP-API-Key: dpk_..."`:
 
 ```bash

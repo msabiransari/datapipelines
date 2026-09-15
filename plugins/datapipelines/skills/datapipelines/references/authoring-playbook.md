@@ -294,6 +294,20 @@ semantics; the question's words decide the window.
   run's tip rate was 18.98% over every fare and 23.83% over card-paid fares for the same
   cell; the first number is the cash share in disguise. Say which denominator you used in
   the description, beside the window.
+- **Decide the missing-data policy on purpose — one policy for numerators and denominators.**
+  Every measure has an expected population and an expected time coverage: name them (which
+  keys, which periods), then probe for what is absent — the keys with no rows, the periods
+  with no data. A missing period is not a zero: a day with no reading is unknown, not dry; an
+  entity with no rows is absent from the table, not a zero row. Choose the policy per measure —
+  report as unknown, exclude with the exclusion written into the description, or impute only
+  with the justification written down — and apply the SAME policy on both sides of every ratio:
+  a share whose denominator quietly counts periods the numerator treats as missing is two
+  different answers glued together. Prove the coverage: a denominator coverage check or a
+  verification query — periods present against periods expected over the window — belongs
+  beside the measure. An empty bucket or a gap you found is a fact about the population to
+  report, never an error to smooth over. Then exercise it: run the draft over a period the
+  population does not cover, and once with an alternate parameter set — an empty answer with
+  the policy stated is the pipeline working; a quietly plausible number is not.
 - **Ties and exclusions are part of the answer.** `RANK()` can return two rows for one
   group on a tie — say so in the description or use `ROW_NUMBER()` with a stated
   tie-break. Filters like `distance > 0 AND distance < 100` are assumptions; write them into
@@ -325,8 +339,14 @@ semantics; the question's words decide the window.
   defined. **Sources and grain** — each datasource and table, its grain, sample vs census,
   time zone and units (§1.6). **Interpretation** — every rule chosen: thresholds, exclusions,
   tie-breaks, sample scaling, which tables were joined for names, and which rules are recorded
-  definitions. **Verification** — the cross-check queries you ran against the sources and the
-  numbers they gave, so a human can re-run them before releasing; the probe SQL and the
+  definitions. **Verification** — the numbered recipe a human re-runs before releasing: steps
+  separated by blank lines, each carrying its purpose, the datasource and dialect it runs on,
+  the parameter values used, the SQL itself on its own lines (rerunnable as-is), the observed
+  result, the comparison it supports, and its scope or limitation — plus the check-id when the
+  query also lives in `checks[]`. One recipe may span several queries and engines; `checks[]`
+  holds the checks, the recipe holds EVERYTHING you ran — reconciliation queries that fit no
+  check included. It carries queries and observed numbers — evidence, never the word
+  "validated": a reader re-runs the recipe and reaches their own verdict. The SQL and the
   observed values live with the pipeline, not in a transcript. **Caveats.** Short paragraphs,
   no wall of text; a reader who stops after Question and Window knows what the pipeline is.
 - **Read the whole result, not the part your client showed you.** A client can truncate a
@@ -335,19 +355,60 @@ semantics; the question's words decide the window.
   and reason over what the server returned, never over a partial view.
 - **Report what you did not verify.** "Row counts match the previous version" is not
   "the numbers are right". Name the independent check you ran — or that you ran none.
-- **Write checks, and let the server be the judge.** Every number you verified independently
-  becomes a `checks[]` entry: ONE number per check, read from the RAW source — never from
-  the pipeline's own output tables — with the pipeline's parameters bound, and `expected`
-  set to what your independent query gave. Two to five per pipeline is the right band. Then
-  `pipelines_run_checks`: the server's `observed` is the only observed value there is — you
-  never supply one, and there is no tool that records one from a caller. A human releasing
-  from the UI sees every check's expected and observed, and cannot release past a failing
-  one without giving a reason that lands in the audit log.
+- **Write checks, and let the server be the judge.** A check is ONE number per `checks[]`
+  entry, read from the RAW source — never from the pipeline's own output tables — with
+  `expected` supplied by you and `observed` produced only by the server's own run
+  (`pipelines_run_checks`; there is no tool that records an observed value from a caller). Two
+  to five per pipeline is the right band. A human releasing from the UI sees every check's
+  expected and observed and cannot release past a failing one without giving a reason. Each
+  check takes ONE of three shapes:
+
+  - **Fixed-baseline drift check.** Literals for one baseline window; `expected` is the value
+    your independent query measured there. It says "the baseline still holds" and nothing
+    else — name the baseline in the check's `name` ("… (2024 baseline)"), because the static
+    expectation means nothing beside any other window. When the baseline stops being the
+    interesting window, the check is re-measured and re-based, not silently failed.
+  - **Parameterized invariant.** The SQL binds the pipeline's parameters AND the expectation
+    holds for EVERY input the pipeline accepts: a violation count is zero, a reconciliation
+    difference is empty. The tell that you have this shape: the expectation needs no window in
+    its name. **Never bind a changing parameter while keeping an unrelated fixed expected
+    total** — that is a baseline check wearing a bind: green on the baseline, a lie everywhere
+    else.
+  - **Independent output reconciliation.** A source check cannot prove the OUTPUT right — it
+    never sees it. Recompute one meaningful output group independently from the source —
+    joins, filters and denominator included — and compare it against the pipeline's own
+    result for the same group. That comparison is usually more than one query, sometimes more
+    than one engine, plus an explicit side-by-side: keep every query and both numbers in the
+    Verification recipe, and never force a two-engine reconciliation into the one-datasource,
+    one-number shape of `checks[]`.
+
+  Two honest limits, by design. Expectations are STATIC — the server compares the observed
+  value against the value, range or row count you declared; there is no dynamic expectation.
+  And the release gate runs with the declared DEFAULTS (it supplies no parameters), so it
+  re-proves the default window, not every combination a caller can pass. What the defaults
+  cannot prove stays in the Verification recipe as measured observations; the server remains
+  the only source of a check run's observed values.
 - **Report the index analysis** (§3): for every source node, one line — supported by
   `<index>` / *not supported — suggest `CREATE INDEX … ON table (cols)`* / *lake: filters on
   the partition column, `partitions_scanned`/`partitions_total` from `sql_probe`'s plan*.
   The operator reads the handback; that line is how a slow pipeline becomes a fast one
   without a rewrite.
+- **A performance rewrite proves two things, both measured.** When a node is the bottleneck
+  and you reshape it (§6.5's materialisation, a pushed-down filter, a rollup table), the
+  rewrite is done when (1) a meaningful reconciliation says the new shape answers the same
+  question — the same rows, or the same aggregates over the same population — and (2) the
+  timings say it is faster: `node_stats` durations before and after, or `sql_probe`'s
+  `wall_ms` on both shapes. "Should be faster" is not a measurement, and a faster query over
+  a different population is a different answer. §6.5 is about the shape it names — an
+  aggregate or ranking CTE JOINED to another table in H2 — not a licence to stage every CTE,
+  and H2's inlining is not every engine's behavior.
+- **Report from the output you read, not the story you remember.** Every quantitative claim
+  in your reply — a direction ("share rose"), a unit, the period, a sample size — is
+  reconciled against the result rows before you write it: read the sign off the numbers, the
+  period off the window you bound, the base off the denominator. An association is not a
+  mechanism: "the two move together" is what the rows say; "one caused the other" names a
+  cause the rows do not show (SKILL.md rule 13½). When the reply and the output disagree,
+  the output is right — fix the reply.
 
 ## 6. Engine quirks you will meet
 
@@ -407,7 +468,10 @@ on the failed node's stack: a `queryGroup` inside a `queryGroup`, reached throug
 `RegularQueryExpressionIndex` — H2's name for the inlined view being probed as an index.
 Stage the aggregate as its own tempdb node (`output: tempdb`, the ranked or grouped rows only)
 and join it in the NEXT node; the DAG is the materialisation H2 will not do for you. The same
-rule reaches a derived table in the `FROM` clause when it aggregates and is joined.
+rule reaches a derived table in the `FROM` clause when it aggregates and is joined. This is
+H2's behavior, measured on the pinned driver — other engines materialise differently, and a
+CTE that is not joined to is not this shape; §5's rewrite rule (reconcile, then measure) is
+the general one.
 
 ## Do / Don't, in one screen
 
@@ -436,4 +500,9 @@ rule reaches a derived table in the `FROM` clause when it aggregates and is join
 | Exclude the lookup's catch-all rows when the question names the real groups | Group by whatever the lookup contains |
 | `sql_probe` a tempdb statement against the empty engine before a full run | Pay a full DAG run to find an H2 syntax error |
 | Validate one number independently | Call two runs of your own pipeline "verified" |
+| Name the baseline in a fixed-baseline check's `name` | Bind a changing parameter beside an unrelated fixed expected total |
+| Keep every reconciliation query in the numbered Verification recipe, check-id beside the query that is also a check | Force a two-engine reconciliation into one `checks[]` entry, or write "validated" where the rerunnable SQL should be |
+| Choose and state the missing-data policy — one policy for numerators and denominators, coverage proven | Treat a missing period as a zero, or glue two population definitions into one share |
+| Prove a performance rewrite with a reconciliation and before/after timings | Claim a speedup you did not measure, or stage every CTE |
+| Report directions, units, periods and sample sizes from the result rows you read | Report the story you remember — or a cause the rows do not show |
 | Stop at the draft; a human releases | Call release; say "released"/"live" |

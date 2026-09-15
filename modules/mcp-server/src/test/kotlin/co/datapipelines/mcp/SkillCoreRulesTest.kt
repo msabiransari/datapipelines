@@ -221,6 +221,39 @@ class SkillCoreRulesTest {
         assertClause("never over a partial view")
     }
 
+    // ---- 144 — the check strategy and the verification recipe (2026-09-15 acceptance run:
+    // checks that hard-coded a window beside bound parameters, and a Verification section of
+    // process claims with no rerunnable SQL).
+
+    @Test
+    fun `step 5 names the three check shapes - 144 B`() {
+        assertClause("each in one of three shapes")
+        assertClause("fixed-baseline drift check")
+        assertClause("parameterized invariant")
+        assertClause("independent output reconciliation")
+    }
+
+    @Test
+    fun `step 5 forbids a changing parameter beside a fixed expected total - 144 B`() {
+        assertClause("never a changing parameter beside a fixed expected total")
+    }
+
+    @Test
+    fun `step 5 says the release gate runs with the declared defaults - 144 B`() {
+        assertClause("release gate runs with the declared DEFAULTS")
+    }
+
+    @Test
+    fun `step 4 makes Verification a numbered recipe with rerunnable SQL - 144 D`() {
+        assertClause("numbered recipe")
+        assertClause("purpose, datasource, parameter values, SQL,")
+    }
+
+    @Test
+    fun `rule 13half reconciles the reply against the actual result rows - 144 C`() {
+        assertClause("reconciled against the actual result rows")
+    }
+
     /** Finds [clause] somewhere in SKILL.md and fails naming the line when absent. */
     private fun assertClause(clause: String) {
         val found = lines.indexOfFirst { it.contains(clause) }

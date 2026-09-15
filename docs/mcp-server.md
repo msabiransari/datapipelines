@@ -2074,7 +2074,10 @@ drift-tested against it.
 **Delivery 1 — the handshake (push).** `initialize`'s `instructions` (§5.1) is the operating
 core distilled: the introspection-first flow, the name grammar and `confirm_new_root`, "agents
 describe datasources, humans register them", the three recoveries an agent gets wrong most
-often, the draft rule, and a closing pointer to the resource below. It lives in
+often, the draft rule, and a closing learning path that applies to creating AND updating:
+read the core (`docs_get`/`docs_list`, the resource, or — with no MCP transport — plain-HTTP
+`GET /skill.md` and `GET /skill/{reference}.md`), then the authoring playbook beyond two
+nodes, then the task's reference. It lives in
 `modules/mcp-server/src/main/resources/mcp/server-instructions.txt` — a file, so the diff is
 readable and the bytes are assertable — and is capped at **4096 bytes**, test-enforced: every
 client injects it into every session, so a line that does not change what an agent DOES on its

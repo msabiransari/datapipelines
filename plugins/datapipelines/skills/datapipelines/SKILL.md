@@ -149,13 +149,11 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    this: a `pipelines_create` naming a table you never `_get_columns`'d is refused
    `pipeline.validation.table_not_learned` — the refusal lists the calls that clear it.
 1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
-   will touch (row estimate, indexes, per-column bounds — catalog estimates, never a scan; probe for the exact bound), then
-   `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and
-   `wall_ms` — a `seq` plan on a large table is the timeout you would meet in step 5, found
-   while it is still cheap. A probe that settles a question about the DATA (not the plan) —
-   "is `reading` already in the unit `unit` names?", "is `occurred_at` UTC or wall-clock?" —
-   is a fact: record it (step 1) so the next session skips the probe. Only then write the
-   template.
+   will touch (row estimate, indexes, per-column bounds — catalog estimates, never a scan; probe
+   for the exact bound), then `sql_probe` the exact SELECT with representative parameters and read
+   `plan.scan` and `wall_ms` — a `seq` plan on a large table is the timeout you would meet in
+   step 5, found while it is still cheap. A probe that settles a question about the DATA is a
+   fact: record it (step 1) so the next session skips the probe. Only then write the template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
    (the description is the only discoverability mechanism for parameters). Before
@@ -185,8 +183,8 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    period and the parameters that set it), **Sources and grain** (each datasource and table, its
    grain, sample vs census, time zone and units), **Interpretation** (every rule chosen —
    thresholds, exclusions, tie-breaks — and which are recorded definitions), **Verification** (the
-   cross-check queries you ran against the sources and the numbers they gave, so a human re-runs
-   them before releasing), **Caveats**. Short paragraphs; a reader who stops after Question and
+   numbered recipe of the cross-check queries you ran — purpose, datasource, parameter values, SQL,
+   observed result, comparison — so a human re-runs them before releasing), **Caveats**. Short paragraphs; a reader who stops after Question and
    Window knows what the pipeline is (`references/authoring-playbook.md` §5). **Create lands v1 as
    a DRAFT** — executable immediately, and not published: `current_version` comes back null and
    the response carries the `draft` pointer with the `body_hash` for your next write.
@@ -196,18 +194,20 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    `version` runs the **working version** — your draft when one exists, else the latest release — so
    testing your own work needs no version argument at all. A draft whose pinned template was
    updated after its last render is refused (`pipeline.execution.template_unrendered`) — render, then run.
-   **Then write checks.** Every number you validated independently (playbook §5) becomes a `checks[]`
-   entry — the query you ran and the value it gave, as `expected` — and you run `pipelines_run_checks`;
-   the server's `observed` is the only observed value there is. A human sees them on the release
-   dialog and cannot release past a failing one without a reason. **Then stop**: leave the draft
-   for a human to release from the UI. Never claim your change is live — it is not until released,
-   and no tool you have releases anything.
-6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
-   Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
-   TTL** — afterwards the result is gone (`result.expired`). **A client can truncate a large
-   tool result:** if the execute reply reports more rows than you can see, or your client shows
-   a truncation notice, page the rows with `executions_get_result` (`limit`, `offset`) and
-   reason over what the server returned, never over a partial view.
+   **Then write checks — each in one of three shapes (`references/authoring-playbook.md` §5).**
+   A fixed-baseline drift check (literals for the baseline window, `expected` the value you measured
+   there, the baseline named in the check's `name`); a parameterized invariant (binds the pipeline's
+   parameters AND an expectation that holds for every input — never a changing parameter beside a fixed expected total);
+   or an independent output reconciliation (a meaningful output group recomputed from the source).
+   Then `pipelines_run_checks`: the server's `observed` is the only observed value there is; the
+   release gate runs with the declared DEFAULTS — the default window, not every parameter combination.
+   **Then stop**: leave the draft for a human to release from the UI — never claim your change is
+   live; no tool you have releases anything.
+6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`; page the
+   remainder with `executions_get_result` (`offset`/`limit`) **within the TTL** — afterwards it
+   is gone (`result.expired`). **A client can truncate a large tool result:** more rows than you
+   can see, or a truncation notice? Page the rows and reason over what the server returned,
+   never over a partial view.
 
 ## Execution semantics agents must know
 
@@ -278,13 +278,13 @@ context and correlation id to work with.
 
 ## Best practices (trouble-free authoring)
 
-**Read `references/authoring-playbook.md` before building anything with more than two
-nodes** — the judgment between the golden path's steps: the question's grain, the lookups and
-display names, table roles from naming, aggregating at the source, indexing a staged table
-after loading it, filtering a lake table on its partition column, the `CREATE INDEX`
-suggestion in your handback, `depends_on` as data flow, a timeout as work in the wrong place,
-casting across engines, sample vs census, one independent number, stopping at the draft. Its
-Do/Don't table is one screen; each row is a mistake an agent made here.
+**Read `references/authoring-playbook.md` before building or updating anything with more than
+two nodes** — the judgment between the golden path's steps: the question's grain, the lookups
+and display names, aggregating at the source, indexing a staged table, filtering a lake table
+on its partition column, `depends_on` as data flow, a timeout as work in the wrong place,
+sample vs census, the missing-data policy, the three shapes a check can take, the numbered
+verification recipe, stopping at the draft. Its Do/Don't table is one screen; each row is a
+mistake an agent made here.
 
 1. **Render before you create.** `templates_render` with representative values catches
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
@@ -366,21 +366,19 @@ Do/Don't table is one screen; each row is a mistake an agent made here.
     stats read (no `partition` index = one unpartitioned file, whatever the plan's pushdown shows);
     a column's values over the WHOLE table from a whole-table probe, never a lookup or a
     description; "census, not sample" from a reconciled count or an `asserted` record. **And a
-    cause is a claim too:** the REASON for a number you noticed — why a ratio collapsed, why a
-    month is empty — is named only after the probe that shows it (`ORDER BY <measure> DESC
-    LIMIT 5` finds an outlier in one call; a join to the flag you suspect shows whether it
-    correlates), and never names a mechanism — "the generator", "the feed" — you have not seen.
-    That includes the PLATFORM: when a tool behaves unexpectedly, report what you observed and
-    what you did about it; never name the server's mechanism — you cannot see it, and a wrong
-    mechanism in a handback becomes somebody's wrong fix.
-    **And a description carries data facts and the interpretation you chose —
-    never claims about your own process:** "validated", "reproduced", "checked" go in your reply —
-    a description outlives the validation, and it is an exemplar the next agent copies. When the
-    data cannot reveal a fact you depend on (a sample rate no table states, a time zone no type
-    states): write the assumption into the pipeline's `description`, `semantics_record` it WITHOUT
-    evidence so it lands as `asserted` for a human to verify — that record, not your reply, is what
-    the next session finds — and say in the reply which facts you derived and which you assumed. An
-    assumption that moves the answer by an order of magnitude: stop and ask first.
+    cause is a claim too:** the REASON for a number you noticed is named only after the probe that
+    shows it, and never names a mechanism — "the generator", "the feed" — you have not seen. That
+    includes the PLATFORM: a tool behaving unexpectedly is reported as what you observed and what
+    you did — never name the server's mechanism, which you cannot see. **Report from the output you
+    read:** a direction, a unit, the time period, a sample size in your reply is reconciled against the actual result rows before you write
+    it — the rows outrank the story you remember. **And a description carries data facts and the
+    interpretation you chose — never claims about your own process:** "validated", "reproduced", "checked" go in your reply — a description outlives the
+    validation, and it is an exemplar the next agent copies. When the data cannot reveal a fact you
+    depend on (a sample rate no table states, a time zone no type states): write the assumption into
+    the pipeline's `description`, `semantics_record` it WITHOUT evidence so it lands as `asserted`
+    for a human to verify — that record, not your reply, is what the next session finds — and say in
+    the reply which facts you derived and which you assumed. An assumption that moves the answer by
+    an order of magnitude: stop and ask first.
 14. **Engine quirks** — a `:bind` inside an H2 GROUP BY, DECIMAL ÷ DECIMAL in H2, H2's
     `C1…` `VALUES` columns, `rows` on MySQL/DuckDB, the one-datasource wall for source
     nodes and probes: `references/authoring-playbook.md` §6, read it before your first

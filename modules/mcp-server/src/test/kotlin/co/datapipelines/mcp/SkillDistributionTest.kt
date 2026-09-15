@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -131,7 +132,35 @@ class SkillDistributionTest {
             { McpServerFactory.SERVER_INSTRUCTIONS shouldContain McpResourceUri.skill() },
             { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "confirm_new_root" },
             { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "pipeline.version.conflict" },
+            // 144 — the learning path: the tool-shaped pointer, the playbook, and the
+            // no-MCP HTTP alternative, applying to creating and updating alike.
+            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "docs_get" },
+            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "authoring-playbook" },
+            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "/skill.md" },
+            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "updating" },
         )
+    }
+
+    @Test
+    fun `every document the instructions point at is one the server actually serves - 144`() {
+        // A broken learning pointer is the quietest way to strand a remote agent: the
+        // handshake says "read X" and X does not exist. Parse the docs_get pointers out of
+        // the shipped instructions and resolve each against the served catalog.
+        val pointed =
+            INSTRUCTION_POINTER
+                .findAll(McpServerFactory.SERVER_INSTRUCTIONS)
+                .map { it.groupValues[1] }
+                .toList()
+        withClue("the instructions name no docs_get document — the learning path lost its pointer") {
+            pointed.isNotEmpty() shouldBe true
+        }
+        val known = SkillDocs.catalog.map { it.name }.toSet()
+        withClue("the instructions point at documents the server does not serve: ${pointed - known}") {
+            (pointed - known).shouldBeEmpty()
+        }
+        // The path's first two steps, in order: the core, then the playbook.
+        pointed shouldContain "skill"
+        pointed shouldContain "authoring-playbook"
     }
 
     @Test
@@ -212,5 +241,8 @@ class SkillDistributionTest {
         const val MAX_INSTRUCTIONS_BYTES = 4096
 
         const val PLUGIN_SKILL_DIR = "plugins/datapipelines/skills/datapipelines"
+
+        /** 144 — a `docs_get {"name": "…"}` pointer in the connect-time instructions. */
+        val INSTRUCTION_POINTER = Regex("""docs_get \{"name": "([a-z0-9-]+)"\}""")
     }
 }

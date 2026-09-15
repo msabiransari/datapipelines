@@ -48,7 +48,9 @@ own run produces `observed`. One check:
 `expected.kind` is `value` (numeric, ± `tolerance`, default 0), `range` (`min`..`max`
 inclusive) or `rows` (exact row count). `:name` binds come from the pipeline's declared
 parameters only; `${}` is refused (a check has no rendering); `tempdb` is not a check
-datasource.
+datasource. Expectations are STATIC, and the release gate runs with the declared defaults:
+label a baseline-specific expectation in the check's `name`, and bind parameters only when
+the expectation holds for every input — `authoring-playbook.md` §5 lays out the three shapes.
 
 ## The `current_version` pointer (read it honestly)
 
