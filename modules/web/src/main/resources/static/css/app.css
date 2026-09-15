@@ -1873,6 +1873,9 @@ button.app-busy::after {
 .u-semibold { font-weight: var(--weight-semibold); }
 .u-bold { font-weight: var(--weight-bold); }
 .u-nowrap { white-space: nowrap; }
+/* 138 §E — a description is a document, not a paragraph: blank lines become paragraphs and
+   single breaks hold, while the text stays th:text-escaped (no markdown, never th:utext). */
+.u-pre-line { white-space: pre-line; }
 .u-break { word-break: break-all; }
 .u-center { text-align: center; }
 .u-right { text-align: right; }
