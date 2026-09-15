@@ -18,7 +18,8 @@
  *    sits beside it: the release override's [data-min-chars-input] arms its
  *    [data-min-chars-submit] at ≥ N trimmed characters, and because that footer lands by
  *    out-of-band swap AFTER the dialog opened, both arms re-run on any swap INSIDE an open
- *    dialog (a `lcArmed` marker keeps re-arms from stacking listeners). 142's consent arm
+ *    dialog (the typed confirm's `lcArmed` marker, and for the gates ONE delegated listener
+ *    per container, keep re-arms from stacking listeners). 142's consent arm
  *    is the third of the family and composes with the second: a [data-consent-input]
  *    checkbox (the release cascade's "also release these draft templates") withholds every
  *    [data-consent-submit] while unchecked, and a button that is ALSO a min-chars submit
@@ -113,39 +114,51 @@
    * [data-min-chars-input] at data-min-chars (default 10) trimmed characters; a
    * [data-consent-submit] needs every [data-consent-input] checked; a button carrying both
    * attributes needs both. Written as one function because two evaluators writing the same
-   * button's `disabled` would each undo the other's verdict. The footer that carries the
-   * min-chars pair lands by OUT-OF-BAND swap AFTER the dialog opened, so this runs on every
-   * swap inside an open dialog (the `lcArmed` marker keeps a re-arm from stacking listeners
-   * on a survivor; the evaluation itself always re-runs so a fresh footer is judged at once).
+   * button's `disabled` would each undo the other's verdict.
+   *
+   * It resolves the controls from the container AT EACH EVALUATION, never from a captured
+   * list: the footer that carries the buttons and the reason lands by OUT-OF-BAND swap after
+   * the dialog opened and is replaced on every checks run, while the consent checkbox in
+   * the form body survives — a listener that closed over the first footer's nodes would keep
+   * judging detached buttons and leave the live one stale (142 review, 2026-09-15).
    */
-  function armReleaseGates(container) {
+  function evaluateReleaseGates(container) {
     var reason = container.querySelector('[data-min-chars-input]');
     var boxes = container.querySelectorAll('[data-consent-input]');
     var buttons = container.querySelectorAll('[data-min-chars-submit], [data-consent-submit]');
-    if (buttons.length === 0) return;
     var min = reason ? parseInt(reason.getAttribute('data-min-chars') || '10', 10) : 0;
-    var evaluate = function () {
-      var consent = consentMet(boxes);
-      for (var i = 0; i < buttons.length; i++) {
-        var button = buttons[i];
-        var needsReason = button.hasAttribute('data-min-chars-submit');
-        var needsConsent = button.hasAttribute('data-consent-submit');
-        var reasonMet = !needsReason || (reason !== null && minCharsMet(reason.value, min));
-        var consentOk = !needsConsent || consent;
-        button.disabled = !(reasonMet && consentOk);
-      }
-    };
-    if (reason && !reason.dataset.lcArmed) {
-      reason.dataset.lcArmed = '1';
-      reason.addEventListener('input', evaluate);
+    var consent = consentMet(boxes);
+    for (var i = 0; i < buttons.length; i++) {
+      var button = buttons[i];
+      var needsReason = button.hasAttribute('data-min-chars-submit');
+      var needsConsent = button.hasAttribute('data-consent-submit');
+      var reasonMet = !needsReason || (reason !== null && minCharsMet(reason.value, min));
+      var consentOk = !needsConsent || consent;
+      button.disabled = !(reasonMet && consentOk);
     }
-    for (var b = 0; b < boxes.length; b++) {
-      if (!boxes[b].dataset.lcArmed) {
-        boxes[b].dataset.lcArmed = '1';
-        boxes[b].addEventListener('change', evaluate);
-      }
+  }
+
+  /**
+   * The gates' wiring: ONE delegated listener per dialog CONTAINER (the permanent
+   * #px-dialog and siblings, which outlive every dialog swapped into them), armed once and
+   * marked on the container — so a replaced footer, a re-opened dialog or a repeated checks
+   * run never stacks a listener and never leaves one bound to a node that is gone. `input`
+   * and `change` both bubble; the handler re-judges from whatever controls exist NOW. The
+   * evaluation itself runs on every (re-)arm so a fresh footer is judged at once.
+   */
+  function armReleaseGates(container) {
+    if (!container.dataset.lcGatesArmed) {
+      container.dataset.lcGatesArmed = '1';
+      var onGateInput = function (event) {
+        var source = event.target;
+        if (!source || !source.matches) return;
+        if (!source.matches('[data-min-chars-input], [data-consent-input]')) return;
+        evaluateReleaseGates(container);
+      };
+      container.addEventListener('input', onGateInput);
+      container.addEventListener('change', onGateInput);
     }
-    evaluate();
+    evaluateReleaseGates(container);
   }
 
   function arm(container) {

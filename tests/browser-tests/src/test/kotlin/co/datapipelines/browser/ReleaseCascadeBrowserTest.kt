@@ -95,6 +95,8 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         name: String,
         datasource: String,
         templateIds: List<String>,
+        /** 142 review — `checks[]` on the body, so the release dialog runs them and OOB-replaces its footer. */
+        checks: String = "",
     ): String {
         val nodes =
             templateIds.mapIndexed { index, id ->
@@ -108,7 +110,7 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
                 "POST",
                 "/api/v1/pipelines",
                 """{"name":"$name","display_name":"${name.substringAfterLast('/')}",""" +
-                    """"description":"142 browser golden path","nodes":[${nodes.joinToString(",")}]}""",
+                    """"description":"142 browser golden path","nodes":[${nodes.joinToString(",")}]$checks}""",
             )
         if (status != 201) throw AssertionError("pipeline POST $status: ${body?.take(400)}")
         return Regex(""""id"\s*:\s*"([0-9a-f-]+)"""").find(body!!)!!.groupValues[1]
@@ -207,6 +209,170 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         toast shouldNotContain "release the template first"
 
         assertAuditedCascade(fixture.pipelineId, shared, own)
+    }
+
+    /**
+     * 142 review (2026-09-15) — the consent gate must survive a REPLACED footer. The dialog's
+     * checks run splices `#plc-release-footer` in out-of-band, so the buttons (and the
+     * override's reason field) are NEW nodes after every run while the consent checkbox in
+     * the form body survives. A listener that closed over the first footer's buttons would
+     * keep judging detached nodes and leave the live button stale. The dialog itself runs
+     * the checks once (`hx-trigger="load"`); a repeat here is the SAME request re-issued
+     * through htmx (`htmx.ajax` with the element's own `hx-post`), so the swap, the OOB
+     * footer and the afterSwap re-arm are the product's, not a simulation.
+     *
+     * Both gates on one button (a failing check → the override footer), both orders after
+     * every replacement: reason then consent, consent then reason — and the withdrawing
+     * transitions (uncheck → disabled, shorten → disabled) that only a LIVE evaluator over
+     * the CURRENT nodes can produce. Then the override releases with consent, and the audit
+     * row carries both the override and the cascade.
+     */
+    @Test
+    fun `the consent and reason gates keep judging the live button after every footer replacement`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+
+        val suffix = generatedPassword("d").take(8).lowercase()
+        val datasource = "h2-rc142c-$suffix"
+        registerH2(datasource)
+        val template = "test/rc142c_$suffix.sql"
+        createDraftTemplate(template)
+        val pipelineName = "test/rc142c_$suffix"
+        val pipelineId =
+            createDraftPipeline(
+                pipelineName,
+                datasource,
+                listOf(template),
+                checks =
+                    ""","checks":[""" +
+                        """{"id":"one_passes","name":"One passes","datasource":"$datasource",""" +
+                        """"sql":"SELECT 1","expected":{"kind":"value","value":1}},""" +
+                        """{"id":"one_fails","name":"One fails","datasource":"$datasource",""" +
+                        """"sql":"SELECT 1","expected":{"kind":"value","value":2}}]""",
+            )
+
+        page.setViewportSize(1280, 900)
+        page.navigate("$baseUrl/pipelines")
+        selectLeafOf(pipelineName)
+
+        val dialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
+        val consent = dialog.locator("[data-consent-input]")
+        consent.waitFor()
+        consent.isChecked shouldBe true
+        // Footer #1 — the checks' own run: the override button, disabled (no reason yet).
+        page.locator(OVERRIDE).waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED))
+        dialog.locator("button[data-verb='pipeline-release-confirm']").count() shouldBe 0
+        bothOrdersOn(dialog, consent)
+
+        // Footers #2 and #3 — the checks run again; the reason field is new (empty) and so is
+        // the button. Both orders and both withdrawing transitions again on each: only a
+        // live evaluator over the CURRENT nodes can produce them, and a third replacement
+        // proves nothing stacked or went stale across repeated runs.
+        repeat(2) {
+            rerunChecks()
+            waitDisabled(OVERRIDE, true)
+            bothOrdersOn(dialog, consent)
+        }
+
+        // The override releases WITH the cascade: the toast names the template, the audit
+        // row carries the override reason and the cascade list.
+        val toast = successToastAfter { page.locator(OVERRIDE).click() }
+        toast shouldContain "Released v1"
+        toast shouldContain "Also released: $template@1."
+        assertAuditedOverrideWithCascade(pipelineId, template)
+    }
+
+    /**
+     * On the footer that is live NOW: consent withdrawn FIRST, then the reason — the button
+     * stays withheld until BOTH gates pass and opens the moment consent returns (order B);
+     * then reason first with consent toggled off and on (order A); then the reason shortened
+     * and restored. Ends enabled, consent checked, reason at length.
+     */
+    private fun bothOrdersOn(
+        dialog: Locator,
+        consent: Locator,
+    ) {
+        dialog.locator("details.plc-override summary").click()
+        waitDisabled(OVERRIDE, true)
+        consent.uncheck()
+        fillReason(REASON)
+        waitDisabled(OVERRIDE, true)
+        consent.check()
+        waitDisabled(OVERRIDE, false)
+        consent.uncheck()
+        waitDisabled(OVERRIDE, true)
+        consent.check()
+        waitDisabled(OVERRIDE, false)
+        fillReason("short")
+        waitDisabled(OVERRIDE, true)
+        fillReason(REASON)
+        waitDisabled(OVERRIDE, false)
+    }
+
+    private fun fillReason(text: String) {
+        page.locator("#px-dialog textarea[name='overrideChecksReason']").fill(text)
+    }
+
+    private fun waitDisabled(
+        selector: String,
+        disabled: Boolean,
+    ) {
+        page.waitForFunction(
+            "(args) => { const b = document.querySelector(args.sel); return b !== null && b.disabled === args.disabled; }",
+            mapOf("sel" to selector, "disabled" to disabled),
+        )
+    }
+
+    /**
+     * Re-issue the dialog's own checks run through htmx and wait for the footer to be a NEW
+     * node: the current footer is stamped first, and the stamp is gone once the OOB swap has
+     * replaced it (`hx-swap-oob` is outerHTML-by-id, so the stamped element leaves the DOM).
+     */
+    private fun rerunChecks() {
+        page.evaluate(
+            """() => {
+              document.getElementById('plc-release-footer').dataset.rc142Stale = '1';
+              const el = document.getElementById('plc-dialog-checks');
+              return htmx.ajax('POST', el.getAttribute('hx-post'), {source: el, target: el, swap: 'innerHTML'});
+            }""",
+        )
+        page.waitForFunction(
+            "() => { const f = document.getElementById('plc-release-footer');" +
+                " return f !== null && !f.dataset.rc142Stale && f.querySelector('button') !== null; }",
+        )
+    }
+
+    /** One release event: `checks_overridden` + `override_reason` AND the cascaded template. */
+    private fun assertAuditedOverrideWithCascade(
+        pipelineId: String,
+        template: String,
+    ) {
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection.createStatement().use { statement ->
+                val rows =
+                    statement.executeQuery(
+                        "SELECT details_json->>'override_reason' AS reason," +
+                            " details_json->'checks_overridden' AS overridden," +
+                            " details_json->'templates_released' AS released" +
+                            " FROM audit_log WHERE event = 'pipeline.version.released'" +
+                            " AND details_json->>'pipeline_id' = '$pipelineId'",
+                    )
+                rows.next() shouldBe true
+                rows.getString("reason") shouldBe REASON
+                rows.getString("overridden") shouldContain "one_fails"
+                rows.getString("released") shouldContain template
+                rows.next() shouldBe false
+                val cascaded =
+                    statement.executeQuery(
+                        "SELECT details_json->>'cascade_from_pipeline_id' AS src FROM audit_log" +
+                            " WHERE event = 'template.version.released' AND details_json->>'template_id' = '$template'",
+                    )
+                cascaded.next() shouldBe true
+                cascaded.getString("src") shouldBe pipelineId
+                cascaded.next() shouldBe false
+            }
+        }
     }
 
     // ------------------------------------------------------------------ shared helpers
@@ -329,5 +495,10 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
             browse.first().click()
             page.locator(".tplx-body.is-drawer-open").waitFor()
         }
+    }
+
+    private companion object {
+        const val OVERRIDE = "#px-dialog button[data-verb='pipeline-release-override']"
+        const val REASON = "Verified by hand against the source rollup."
     }
 }
