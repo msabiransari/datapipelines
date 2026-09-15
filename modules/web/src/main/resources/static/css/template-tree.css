@@ -1038,3 +1038,25 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 .plc-override summary::-webkit-details-marker {
   display: none;
 }
+
+/* 142 — the release dialog's cascade consent (§4.3d): the checkbox and its rows keep the
+   pins list's rhythm, and the rows' wording follows the box WITHOUT a script — each row
+   carries both the consented and the refused wording, and `:has()` shows the one the box
+   selects (the same selector idiom app.css uses for the kind chips). The submit's disabled
+   state is lifecycle-dialog.js's consent arm; CSS cannot disable a button. */
+.plc-cascade-consent {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm, 8px);
+  cursor: pointer;
+}
+
+.plc-cascade-pins {
+  margin: var(--gap-xs, 4px) 0 0;
+  padding-left: calc(var(--gap-sm, 8px) * 3);
+}
+
+.plc-release:has([data-consent-input]:not(:checked)) .plc-cascade-on,
+.plc-release:not(:has([data-consent-input]:not(:checked))) .plc-cascade-off {
+  display: none;
+}

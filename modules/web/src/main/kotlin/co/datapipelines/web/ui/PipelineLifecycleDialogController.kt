@@ -67,6 +67,7 @@ class PipelineLifecycleDialogController(
         @PathVariable id: UUID,
         @RequestParam(required = false) from: String?,
         @RequestParam(required = false) overrideChecksReason: String?,
+        @RequestParam(required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
     ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -81,17 +82,16 @@ class PipelineLifecycleDialogController(
                 )
         // 140: a failing check run refuses with pipeline.check.failed unless the dialog's
         // override disclosure supplied the reason — it arrives audited on the release event.
-        val released = pipelines.release(workspaceId, id, draft.bodyHash, principal.userId, overrideChecksReason)
-        // T187 — the release is the D4 human step; it is audited on every surface that offers it.
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.AUDIT_VERSION_RELEASED,
-            principal,
-            workspaceId,
-            LifecycleVerbs.releaseDetails(principal, id, released),
-        )
+        // 142: the consent checkbox ("Also release these N draft templates") posts
+        // releasePinnedTemplates; without it a DRAFT pin refuses template_not_released as
+        // it always has, and the server — never the checkbox — is the guard.
+        val released =
+            pipelines.release(workspaceId, id, draft.bodyHash, principal.userId, overrideChecksReason, releasePinnedTemplates)
+        // T187 — the release is the D4 human step; it is audited on every surface that offers
+        // it — one event per cascaded template first, then the pipeline's (142).
+        LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)
         return if (from == FROM_EDITOR) {
-            redirect("/pipelines/$id/editor?ok=released")
+            redirect("/pipelines/$id/editor?ok=" + if (released.templatesReleased.isEmpty()) "released" else "released_with_templates")
         } else {
             applied(
                 model,
@@ -99,9 +99,17 @@ class PipelineLifecycleDialogController(
                 workspaceId,
                 id,
                 "Released v${released.version.version}",
-                "v${released.version.version} is the current version now, and it is locked.",
+                releasedMessage(released),
             )
         }
+    }
+
+    /** The toast's sentence: the lock, and — cascading (142) — the templates released with it. */
+    private fun releasedMessage(released: PipelineReleaseService.Released): String {
+        val lock = "v${released.version.version} is the current version now, and it is locked."
+        if (released.templatesReleased.isEmpty()) return lock
+        val templates = released.templatesReleased.joinToString(", ") { "${it.id}@${it.version}" }
+        return "$lock Also released: $templates."
     }
 
     // ------------------------------------------------------------------ purge draft (the versioned verb)

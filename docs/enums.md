@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.11 (living document — updated as enums evolve)
+**Status:** v1.12 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -424,8 +424,8 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 | `pipeline.version.purged` | A DRAFT pipeline version was purged — the row and its executions deleted, irreversible. `details` carries the execution-row count that went with it ([Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
 | `pipeline.purged` | A pipeline ENTITY was purged (only-draft, no inbound edges) — the entity row went with its draft. `details` carries `exclusive_draft_templates` offered/purged ([Versioning §3.2](versioning.md#32-entity-status-is-derived-names-are-unique-forever)) |
 | `pipeline.current_switched` | The sticky pointer was moved by the manual switch verb (`POST /pipelines/{id}/current`) — including on a promotion receiver, where this is the rollout/rollback lever. `details` carries from/to versions ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
-| `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. Since 140, a release past failing checks also carries `checks_overridden: [check ids]` and `override_reason` — the escape hatch is on the record, never silent |
-| `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. |
+| `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. Since 140, a release past failing checks also carries `checks_overridden: [check ids]` and `override_reason` — the escape hatch is on the record, never silent. Since 142 it always carries `templates_released: [{template_id, version}]` — the DRAFT template versions the release cascaded to with the promoter's consent (versioning §5.3), an empty list when none |
+| `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. Since 142 a release the PIPELINE cascade made (versioning §5.3) carries the same shape plus `cascade_from_pipeline_id` and `cascade_from_version` — "who released template X v2 and why" reads off this one event. |
 | `template.version.discarded` / `template.version.restored` / `template.version.purged` / `template.purged` / `template.current_switched` | The template twins, by name — same triggers, template surfaces ([Versioning §3.5's notation rule](versioning.md#35-the-lifecycle-table)) |
 
 **Learned-semantics audit events** (same `audit_log` table, defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §9; emitted by `SemanticsService` for the `semantics_record` / `semantics_retire` MCP tools — 118):
@@ -625,6 +625,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-15 | v1.12 | 142 release cascade | §15's `pipeline.version.released` row gains `templates_released`; `template.version.released` gains the cascade source (`cascade_from_pipeline_id`, `cascade_from_version`) when the pipeline release made it. |
 | 2026-09-14 | v1.11 | 140 release checks | New **§20 `CheckRunVerdict`** (`pass` \| `fail` \| `error`) and **§21 `CheckRunVia`** (`mcp` \| `rest` \| `ui` \| `release`) — the wire values of `pipeline_check_runs` (metadata-db §4.20, V28), authored in pipeline-contract `ReleaseCheckGate.kt`. §15's `pipeline.version.released` row gains the override record (`checks_overridden`, `override_reason`); §16 registers the `pipeline.check.*` domain (pipeline-contract §13.17). |
 | 2026-09-14 | v1.10 | 137 mail notices | §15 gains the **mail audit events** sub-table: `mail.sent` / `mail.failed` (`MailAuditEvents`, drift-guarded by `MailAuditEventsSpecDriftTest`) — kind, recipients, act and Message-ID or error in `details`; never a body, never a password. |
 | 2026-09-09 | v1.9 | T202 node query timeout | §17's 504 row gains `pipeline.node.query_timeout`. |

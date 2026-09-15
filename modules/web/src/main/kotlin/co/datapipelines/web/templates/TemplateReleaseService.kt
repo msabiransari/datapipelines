@@ -84,6 +84,48 @@ open class TemplateReleaseService(
     }
 
     /**
+     * 142 — the pipeline release cascade's leg: releases the DRAFT that IS [version], at
+     * whatever hash it currently has. The pipeline's pin names the exact version, which is
+     * the "you release what you tested" guarantee here (versioning §5.3 precondition 1 per
+     * template); a second hash handshake would only restate it. Everything else is
+     * [release] itself — the same validation, the same flip statement, the same pointer
+     * rule — so the direct verb and the cascaded one cannot drift.
+     *
+     * Runs in the CALLER's metadata transaction (a plain JDBC write on the metadata
+     * datasource joins it): `PipelineReleaseService` opens one around the cascade and the
+     * pipeline flip, and a throw here unwinds both.
+     *
+     * @throws DatapipelinesException `template.version.not_draft` when the template holds no
+     *   draft (the pin's version was released or purged under the dialog), and
+     *   `template.version.conflict` when the draft is a DIFFERENT version than the pin names
+     *   — the cascade releases the pinned version and nothing newer, ever.
+     */
+    open fun releasePinned(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+        actor: UUID,
+    ): Released {
+        val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
+        if (draft.version != version) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.VERSION_CONFLICT,
+                message =
+                    "Template '$id' version $version is pinned, but its draft is version ${draft.version}; " +
+                        "the cascade releases the pinned version only.",
+                details =
+                    mapOf(
+                        "template_id" to id,
+                        "pinned_version" to version,
+                        "draft_version" to draft.version,
+                        "current_body_hash" to draft.bodyHash,
+                    ),
+            )
+        }
+        return release(workspaceId, id, draft.bodyHash, actor)
+    }
+
+    /**
      * Purges the template's DRAFT at [expectedHash] (versioning §5.4, 101 — a hard delete;
      * the sole-draft case takes the entity row with it, D57's twin).
      *

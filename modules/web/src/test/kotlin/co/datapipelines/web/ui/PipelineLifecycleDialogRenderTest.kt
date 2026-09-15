@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -35,12 +36,67 @@ class PipelineLifecycleDialogRenderTest {
     }
 
     @Test
-    fun `release - a DRAFT template pin is the refused colour, says release the template first, and renders NO button`() {
-        val html = renderRelease(pins = listOf(pin("demo/x.sql@2", PipelineVersionStatus.DRAFT)))
+    fun `release - 142 - a DRAFT template pin is a checked consent row, and the button IS rendered`() {
+        val html =
+            renderRelease(
+                pins =
+                    listOf(
+                        pin("demo/x.sql@2", PipelineVersionStatus.DRAFT, otherPinners = 1),
+                        pin("demo/y.sql@1", PipelineVersionStatus.RELEASED),
+                    ),
+            )
+
+        // The consent box: checked by default, named after the flag the service reads.
+        html shouldContain "name=\"releasePinnedTemplates\""
+        html shouldContain "checked data-consent-input"
+        html shouldContain "Also release this draft template with the pipeline"
+        // The row names the template, the version, and the other draft pipelines pinning it.
+        html shouldContain "data-cascade-pin=\"demo/x.sql@2\""
+        html shouldContain ", also pinned by 1 other draft pipeline<"
+        // Both wordings are in the markup — the CSS shows the one the box selects — so the
+        // order rule stays visible when the box is unchecked.
+        html shouldContain "released with this pipeline"
+        html shouldContain "release the template first"
+        // The RELEASED pin is in the plain list, the draft one is NOT (one row per pin).
+        html shouldContain "demo/y.sql@1"
+        html shouldContain "data-release-pins"
+        // And the submit exists, consent-gated.
+        html shouldContain "data-verb=\"pipeline-release-confirm\" data-consent-submit"
+    }
+
+    @Test
+    fun `release - 142 - the consent group pluralises and omits the shared line at zero other pinners`() {
+        val html =
+            renderRelease(
+                pins =
+                    listOf(
+                        pin("demo/x.sql@2", PipelineVersionStatus.DRAFT),
+                        pin("demo/z.sql@4", PipelineVersionStatus.DRAFT, otherPinners = 3),
+                    ),
+            )
+
+        html shouldContain "Also release these 2 draft templates with the pipeline"
+        html shouldContain ", also pinned by 3 other draft pipelines<"
+        // Exactly one shared line: the zero-pinner row carries none.
+        Regex("data-cascade-shared").findAll(html).count() shouldBe 1
+        html shouldNotContain "<ul class=\"u-text-sm u-mb-xs\" data-release-pins"
+    }
+
+    @Test
+    fun `release - 142 - a DRAFT pin beside a MISSING one is the pre-142 refused shape - no consent, no button`() {
+        val html =
+            renderRelease(
+                pins =
+                    listOf(
+                        pin("demo/x.sql@2", PipelineVersionStatus.DRAFT),
+                        pin("gone/missing.sql@9", null),
+                    ),
+            )
 
         html shouldContain "demo/x.sql@2"
-        html shouldContain "DRAFT"
+        html shouldContain "MISSING"
         html shouldContain "release the template first"
+        html shouldNotContain "data-consent-input"
         html shouldNotContain "<button type=\"submit\""
     }
 
@@ -263,11 +319,13 @@ class PipelineLifecycleDialogRenderTest {
     private fun pin(
         label: String,
         status: PipelineVersionStatus?,
+        otherPinners: Int = 0,
     ): PipelineLifecycleDialogModel.PinView =
         PipelineLifecycleDialogModel.PinView(
             id = label.substringBefore("@"),
             version = label.substringAfter("@").toInt(),
             status = status,
+            otherPinners = otherPinners,
         )
 
     private fun releaseDialog(

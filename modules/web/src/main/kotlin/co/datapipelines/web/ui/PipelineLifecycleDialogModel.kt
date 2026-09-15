@@ -10,6 +10,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
 import java.util.UUID
@@ -32,6 +33,12 @@ class PipelineLifecycleDialogModel(
     private val runStats: PipelineRunStats,
     private val actors: ActorNames,
     private val authoring: AuthoringGuard,
+    /**
+     * 142 — the used-by service behind "also pinned by K other draft pipelines" on a
+     * cascadable pin: the promoter is releasing a shared object, and the dialog says so
+     * from the ONE used-by scan every surface reads (040), never a scan of its own.
+     */
+    private val usage: TemplateUsageService,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     /** "v3 is not draft" and friends: a dialog for a shape the table refuses still OPENS. */
@@ -51,11 +58,23 @@ class PipelineLifecycleDialogModel(
         val version: Int,
         /** Null = the pinned version does not exist at all (a MISSING pin refuses release). */
         val status: PipelineVersionStatus?,
+        /**
+         * 142 — how many OTHER pipelines pin this version in their working version (the
+         * used-by count minus this one); shown on a cascadable pin so the promoter knows the
+         * template is shared. Zero for a pin the cascade cannot release.
+         */
+        val otherPinners: Int = 0,
     ) {
         val label: String get() = "$id@$version"
 
         /** §5.3's rule, stated as the row's colour: anything but RELEASED blocks the release. */
         val blocksRelease: Boolean get() = status != RELEASED
+
+        /**
+         * 142 — a DRAFT pin is the one kind of blocking pin the release can CASCADE to with
+         * consent; DISCARDED and MISSING are not releasable and refuse as before.
+         */
+        val cascadable: Boolean get() = status == PipelineVersionStatus.DRAFT
 
         val statusLabel: String get() = status?.name ?: "MISSING"
     }
@@ -87,8 +106,18 @@ class PipelineLifecycleDialogModel(
         /** §3.5's `not_draft` branch: the dialog opens and says why there is no button. */
         val refusal: Refusal?,
     ) {
-        /** §5.3 precondition 2, pre-read: a DRAFT or MISSING pin, so no button is rendered. */
-        val blockingPins: List<PinView> get() = pins.filter { it.blocksRelease }
+        /**
+         * §5.3 precondition 2, pre-read: a pin the release can neither pass nor cascade past
+         * (DISCARDED or MISSING), so no button is rendered. A DRAFT pin is no longer here
+         * since 142 — it is a [draftPins] row behind the consent checkbox.
+         */
+        val blockingPins: List<PinView> get() = pins.filter { it.blocksRelease && !it.cascadable }
+
+        /** 142 — the DRAFT pins the consent checkbox offers to release, one row per version. */
+        val draftPins: List<PinView> get() = pins.filter { it.cascadable }
+
+        /** 142 — every pin that is NOT a cascade row: the RELEASED ones and the blocking ones. */
+        val otherPins: List<PinView> get() = pins.filter { !it.cascadable }
     }
 
     fun release(
@@ -116,11 +145,15 @@ class PipelineLifecycleDialogModel(
             parsed
                 ?.nodes
                 ?.filter { it.template.id.isNotBlank() }
-                ?.map { node ->
+                ?.map { it.template }
+                ?.distinct()
+                ?.map { ref ->
+                    val status = templates.statusOf(workspaceId, ref.id, ref.version)
                     PinView(
-                        id = node.template.id,
-                        version = node.template.version,
-                        status = templates.statusOf(workspaceId, node.template.id, node.template.version),
+                        id = ref.id,
+                        version = ref.version,
+                        status = status,
+                        otherPinners = if (status == PipelineVersionStatus.DRAFT) otherPinners(workspaceId, id, ref) else 0,
                     )
                 } ?: emptyList()
         return ReleaseDialog(
@@ -134,6 +167,33 @@ class PipelineLifecycleDialogModel(
             hasChecks = parsed?.checks?.isNotEmpty() == true,
             refusal = null,
         )
+    }
+
+    /**
+     * 142 — the pipelines OTHER than [pipelineId] whose working version pins [ref], from the
+     * used-by service's question 1. The version was just read as DRAFT, so the template
+     * exists; the ONE expected failure is the race that removes it between the two reads —
+     * the service's own `template.not_found` — and that answers zero rather than refusing
+     * to open the dialog (the POST is the guard, never this count). Anything else (the
+     * database, a programming error, a different refusal) propagates through the dialog
+     * GET's existing error path: an unknown failure must never read as "shared by nobody".
+     */
+    private fun otherPinners(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        ref: co.datapipelines.pipeline.TemplateRef,
+    ): Int {
+        val usedBy =
+            try {
+                usage.usedBy(workspaceId, ref.id, ref.version)
+            } catch (e: DatapipelinesException) {
+                if (e.code != PipelineErrorCodes.Template.NOT_FOUND) throw e
+                return 0
+            }
+        return usedBy.references
+            .map { it.pipelineId }
+            .distinct()
+            .count { it != pipelineId }
     }
 
     // ------------------------------------------------------------------ purge draft
