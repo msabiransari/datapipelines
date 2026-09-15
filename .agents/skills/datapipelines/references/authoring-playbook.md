@@ -113,6 +113,15 @@ semantics; the question's words decide the window.
   defines the measure), with the probe that listed the stations as its evidence — a rule you
   chose for the answer's grain is recorded with the same care as the threshold you chose for
   its filter, and the next pipeline over the same sites reads it before choosing its own.
+  **If the answer's grain names the place** — an `airport` column, a `site` column — **the
+  reading is per place, not a mean across places**: a row that names one site carries that
+  site's sensor, never the average of several.
+- **A unit that is not what the question ranks is never ranked.** A lookup can carry an
+  entry that is the wrong KIND of thing beside the right ones — an airport zone in a region
+  ranking, a depot in a store ranking, a test account among customers. It is excluded with the
+  reason written into the description, or shown outside the ranking as its own line — never
+  ranked among the units the question named. (Real miss: an airport's own zone ranked as a
+  region, and the answer's "top region" was a runway.)
 - **Exclude what the question excludes.** A lookup table often carries catch-all rows —
   `Unknown`, `N/A`, an out-of-area entry — beside the values the question means; "each
   region" means the regions, not the catch-alls. Look at the distinct values of the grouping
@@ -162,6 +171,16 @@ semantics; the question's words decide the window.
   (bound, `:name`), or **literals in the template** with the computing node kept so the
   labels stay data-driven — and in both cases the description says so. There is no
   push-down of a staged table into a source engine.
+  **A pushed-down literal is a copy, and a copy is checked.** When a source engine cannot
+  reach the table a lookup comes from (a calendar on another engine, a zone map in a file),
+  the literal list goes into that source template, the node that COMPUTES the lookup stays in
+  the DAG, and the answer node compares the two — a mismatch fails the run, not the reader.
+  The list lives in ONE template — a pinned library template the source templates import —
+  never copied between siblings. The door stays: the literal covers the window the door can
+  select, and the template's `WHERE` binds the door, so `parameters: {}` is never the answer
+  to a question that names a period. (Real miss: two sibling templates each carrying the same
+  443 literal rows, no node reading the source they came from, and no parameters at all —
+  the numbers were right, and nothing would have said so when they stopped being right.)
 - **Aggregate at the source.** The source engine is built for its own data; tempdb (H2) is
   not a warehouse. Ship *the grain the answer needs*, not the raw rows: a node that returns
   `SUM(x) GROUP BY key` ships a thousand rows; the same node without the `GROUP BY` shipped
@@ -287,6 +306,14 @@ semantics; the question's words decide the window.
   group on a tie — say so in the description or use `ROW_NUMBER()` with a stated
   tie-break. Filters like `distance > 0 AND distance < 100` are assumptions; write them into
   the description.
+- **When the top of a ranking sits on its eligibility floor, the floor is wrong.** A ranking
+  by share gain, growth or rate over a floor of a few sampled events per unit lets every
+  leader be a unit with a base of a few dozen — noise won, whatever the numbers say. State the
+  floor in the question's own unit of time (events per day, not per year), look at the
+  leaders' bases, and raise the floor until they are bases you would defend in front of the
+  person; a parameter the reader can raise is not a substitute for a default that is right.
+  (Real miss: a floor of fifty sampled events a year — about two population events a day —
+  cleared twenty thousand pairs, and every leader had a base of fifty to a hundred.)
 - **Validate against an independent number** before you call it done: one group's total
   from a direct query on the source, compared to the pipeline's row. Row counts agreeing
   between two versions of *your* pipeline proves consistency, not correctness.
@@ -298,10 +325,22 @@ semantics; the question's words decide the window.
 - **Stop at the draft.** Your update is not live until a human releases it — never call a
   release endpoint, never say "released" or "live" about your own work. Execute the draft
   (by version) to prove it, then hand back.
-- **Describe what a reader needs:** the question, the grain, the assumptions (filters,
-  exclusions, sample scaling, tie-break), what you learned about the data that the SQL
-  relies on (§1.6), the parameters and how "today" is defined, and which tables were joined
-  for names. The description is the only documentation the pipeline will ever have.
+- **Describe what a reader needs, in sections.** The description is the only documentation
+  the pipeline will ever have, and it is read as a document: sections separated by blank
+  lines, each opening with its label on its own line, in this order and with these labels.
+  **Question** — the question in the person's words and the answer's grain (one row per …).
+  **Window and door** — the period and the parameters that set it, and how "today" is
+  defined. **Sources and grain** — each datasource and table, its grain, sample vs census,
+  time zone and units (§1.6). **Interpretation** — every rule chosen: thresholds, exclusions,
+  tie-breaks, sample scaling, which tables were joined for names, and which rules are recorded
+  definitions. **Verification** — the cross-check queries you ran against the sources and the
+  numbers they gave, so a human can re-run them before releasing; the probe SQL and the
+  observed values live with the pipeline, not in a transcript. **Caveats.** Short paragraphs,
+  no wall of text; a reader who stops after Question and Window knows what the pipeline is.
+- **Read the whole result, not the part your client showed you.** A client can truncate a
+  large tool result: if the execute reply reports more rows than you can see, or your client
+  shows a truncation notice, page the rows with `executions_get_result` (`limit`, `offset`)
+  and reason over what the server returned, never over a partial view.
 - **Report what you did not verify.** "Row counts match the previous version" is not
   "the numbers are right". Name the independent check you ran — or that you ran none.
 - **Report the index analysis** (§3): for every source node, one line — supported by

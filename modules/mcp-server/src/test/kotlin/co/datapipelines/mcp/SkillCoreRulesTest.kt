@@ -166,12 +166,60 @@ class SkillCoreRulesTest {
         assertClause("`datasources_list` is your first call and your first read")
     }
 
+    // ---- 138 §C / §E.2 — what the same-model re-run (2026-09-14/15) left.
+
+    @Test
+    fun `step 0 - confirm_new_root on the first create of EITHER kind - 138 C1`() {
+        assertClause("on the FIRST create of either kind")
+    }
+
+    @Test
+    fun `step 4 - every node carries a one-sentence description with its grain - 138 C5`() {
+        assertClause("what it ships and at what grain")
+    }
+
+    @Test
+    fun `step 4 - the description is a document in labelled sections, Verification among them - 138 E2`() {
+        // The six labels, in the order the skill fixes them, all inside step 4 — a reader who
+        // stops after Question and Window knows what the pipeline is, and Verification is the
+        // owner's second ask in its cheap form: the probe SQL and its numbers live with the
+        // pipeline, not in a transcript.
+        val stepFour = golden(step = 4)
+        val positions = DESCRIPTION_LABELS.map { label -> label to stepFour.indexOf(label) }
+        withClue("step 4 lost a description label: ${positions.filter { it.second < 0 }.map { it.first }}") {
+            positions.all { it.second >= 0 } shouldBe true
+        }
+        withClue("the labels are out of order: $positions") {
+            positions.map { it.second } shouldBe positions.map { it.second }.sorted()
+        }
+        assertClause("a document, not a paragraph")
+    }
+
+    @Test
+    fun `step 6 - a truncated tool result is paged, never reasoned over - 138 C6`() {
+        assertClause("never over a partial view")
+    }
+
     /** Finds [clause] somewhere in SKILL.md and fails naming the line when absent. */
     private fun assertClause(clause: String) {
         val found = lines.indexOfFirst { it.contains(clause) }
         withClue("SKILL.md lost the clause \"$clause\" — it was at the heart of a 120 rule") {
             (found >= 0) shouldBe true
         }
+    }
+
+    /** Golden-path step [step]'s text, from its `N. ` header to the next step's, joined by spaces. */
+    private fun golden(step: Int): String {
+        val start = lines.indexOfFirst { it.startsWith("$step. ") }
+        require(start >= 0) { "SKILL.md has no golden-path line starting with '$step. '" }
+        val end =
+            lines
+                .withIndex()
+                .drop(start + 1)
+                .firstOrNull { RULE_START.matches(it.value) || it.value.startsWith("## ") }
+                ?.index
+                ?: lines.size
+        return lines.subList(start, end).joinToString(" ") { it.trim() }
     }
 
     /** Rule 13's lines as (1-based line number, text), from its `13. ` header to the next rule. */
@@ -217,6 +265,10 @@ class SkillCoreRulesTest {
         /** 135 §A.1 — the clause that must OPEN rule 13, and the window it must begin inside. */
         const val DOOR_CLAUSE = "never the door of a pipeline"
         const val RULE_OPENING_CHARS = 300
+
+        /** 138 §E.2 — the description's sections, in the order step 4 fixes them. */
+        val DESCRIPTION_LABELS =
+            listOf("**Question**", "**Window and door**", "**Sources and grain**", "**Interpretation**", "**Verification**", "**Caveats**")
 
         /** A best-practices rule header: `13. `, `13½. `, `14. ` — numbered and half-numbered forms. */
         val RULE_START = Regex("^[0-9]+[½0-9]*\\. ")

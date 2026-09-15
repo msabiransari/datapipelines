@@ -85,15 +85,18 @@ import kotlin.io.path.relativeTo
  *
  * ## The fixture's arithmetic (asserted exactly in Order(3))
  *
- * Window `2024-12-01..2024-12-02` (span 1, so the per-day rates divide by 2),
- * `rain_threshold_mm=2.5`: 12-01 averages 1.2 mm PRCP across the two seeded stations
- * (dry), 12-02 averages 6.0 (rainy). Every engine also carries one noise row — an
- * out-of-window day (12-05) in Postgres/MySQL/the lake, a 200-mile trip and a
- * non-PRCP element — so a missing predicate changes an expected number. Expected caller
- * rows (109 §D's per-mode rain-lift shape — no share column, the taxi side being a
- * 1-in-16 sample): Brooklyn dry-only 1.0/1.5 per day with NULL lifts; Manhattan
- * taxi lift 1.0/1.5 = 0.67 and rideshare lift 3.0/3.0 = 1.00; Queens rainy-only
- * 0.5/2.0 per day with NULL lifts.
+ * The door is the month (138 §A): `year=2024, month=12`, so the window is December 2024 and
+ * every per-day rate divides by its 31 days — the month's length is derived in H2 from the
+ * two integers, in the answer template, not by a calculator. The seeded trips sit on two of
+ * those days; to keep the per-day figures whole numbers each seeded trip row is inserted 31
+ * times and each rideshare `trip_count` is 31 × its base. `rain_threshold_mm=2.5`: 12-01
+ * averages 1.2 mm PRCP across the two seeded stations (dry), 12-02 averages 6.0 (rainy).
+ * Every engine also carries one noise row — an out-of-window day (2025-01-05, the month
+ * after) in Postgres/MySQL/the lake, a 200-mile trip and a non-PRCP element — so a missing
+ * predicate changes an expected number. Expected caller rows (109 §D's per-mode rain-lift
+ * shape — no share column, the taxi side being a 1-in-16 sample): Brooklyn dry-only
+ * 2.0/3.0 per day with NULL lifts; Manhattan taxi 3.0 dry / 2.0 rainy (lift 0.67) and
+ * rideshare 6.0/6.0 (lift 1.00); Queens rainy-only 1.0/4.0 per day with NULL lifts.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -267,8 +270,8 @@ class TaxiVsRideshareFourEngineE2eTest {
             execute(
                 pipelineId,
                 mapOf(
-                    "start_date" to WINDOW_START,
-                    "end_date" to WINDOW_END,
+                    "year" to WINDOW_YEAR,
+                    "month" to WINDOW_MONTH,
                     "rain_threshold_mm" to RAIN_THRESHOLD,
                 ),
             )
@@ -276,17 +279,16 @@ class TaxiVsRideshareFourEngineE2eTest {
         names.first() shouldBe "execution_started"
         names.last() shouldBe "data_ready"
         names.none { it == "node_failed" } shouldBe true
-        names.count { it == "node_started" } shouldBe 6
-        names.count { it == "node_completed" } shouldBe 6
+        names.count { it == "node_started" } shouldBe 5
+        names.count { it == "node_completed" } shouldBe 5
         val executionId = events.first().second["execution_id"].asText()
 
-        // Every node, including the CALCULATOR, succeeded; the computed span reached the
-        // context as 1 day (the per-day rates below divide by span + 1 = 2).
+        // Every node succeeded — four source stagers and the H2 answer; the month's length
+        // (31, what the per-day rates below divide by) is derived inside the answer template.
         val stats = nodeStats(executionId)
         stats.map { it["node_id"].asText() } shouldContainExactlyInAnyOrder
-            listOf("stage_taxi", "stage_rideshare", "stage_zones", "stage_rain", "window_span", "taxi_vs_rideshare")
+            listOf("stage_taxi", "stage_rideshare", "stage_zones", "stage_rain", "taxi_vs_rideshare")
         stats.forEach { it["status"].asText() shouldBe "SUCCESS" }
-        stats.single { it["node_id"].asText() == "window_span" }["context_value"].asText() shouldBe "1"
 
         // The answer: one row per borough (per-mode rain lift), exact arithmetic against the
         // seeded fixtures.
@@ -310,7 +312,7 @@ class TaxiVsRideshareFourEngineE2eTest {
      * taxi side is a 1-in-16 sample, so a share would be a number about the sampling. A
      * borough with only one weather in the window carries NULLs for the other — Brooklyn saw
      * no rainy day, Queens no dry one — and both lifts are NULL there (a lift needs both
-     * sides). Manhattan: taxi 1.0/1.5 = 0.67, rideshare 3.0/3.0 = 1.00.
+     * sides). Manhattan: taxi 2.0/3.0 = 0.67, rideshare 6.0/6.0 = 1.00.
      */
     private fun assertRainLiftAnswer(rows: List<List<Any?>>) {
         rows.map { it[0].toString() } shouldContainExactly
@@ -321,9 +323,9 @@ class TaxiVsRideshareFourEngineE2eTest {
             )
         val expected =
             listOf(
-                listOf("1.0", null, "1.5", null, null, null),
-                listOf("1.5", "1.0", "3.0", "3.0", "0.67", "1.00"),
-                listOf(null, "0.5", null, "2.0", null, null),
+                listOf("2.0", null, "3.0", null, null, null),
+                listOf("3.0", "2.0", "6.0", "6.0", "0.67", "1.00"),
+                listOf(null, "1.0", null, "4.0", null, null),
             )
         rows.forEachIndexed { index, row ->
             (1..6).forEach { column ->
@@ -341,8 +343,9 @@ class TaxiVsRideshareFourEngineE2eTest {
 
     /**
      * `trips` with exactly the columns `nyc/lake/taxi_zone_day.sql` reads. Three zones over
-     * the two window days, plus a 200-mile row (the template's plausibility filter must drop
-     * it) and a 12-05 row (outside the window).
+     * two December days — each base row inserted [DAYS_IN_WINDOW] times so the per-day rate
+     * over the month's 31 days is the base count — plus a 200-mile row (the template's
+     * plausibility filter must drop it) and a 2025-01-05 row (outside the month).
      */
     private fun seedTripsEngine() {
         DriverManager.getConnection(trips.jdbcUrl, trips.username, trips.password).use { connection ->
@@ -357,20 +360,22 @@ class TaxiVsRideshareFourEngineE2eTest {
                     )
                     """.trimIndent(),
                 )
+                val base =
+                    listOf(
+                        "(DATE '2024-12-01', 1,  2.0,  10.00)",
+                        "(DATE '2024-12-01', 1,  3.5,  12.50)",
+                        "(DATE '2024-12-01', 1,  1.2,   9.50)",
+                        "(DATE '2024-12-01', 2,  4.0,  15.00)",
+                        "(DATE '2024-12-01', 2,  6.0,  18.00)",
+                        "(DATE '2024-12-02', 1,  5.0,  25.00)",
+                        "(DATE '2024-12-02', 1,  7.5,  30.00)",
+                        "(DATE '2024-12-02', 3,  8.0,  40.00)",
+                        "(DATE '2024-12-01', 1, 200.0, 500.00)",
+                        "(DATE '2025-01-05', 1,  2.0,  12.00)",
+                    )
                 statement.execute(
-                    """
-                    INSERT INTO trips (pickup_date, pu_location_id, trip_distance_mi, total_amount) VALUES
-                        (DATE '2024-12-01', 1,  2.0,  10.00),
-                        (DATE '2024-12-01', 1,  3.5,  12.50),
-                        (DATE '2024-12-01', 1,  1.2,   9.50),
-                        (DATE '2024-12-01', 2,  4.0,  15.00),
-                        (DATE '2024-12-01', 2,  6.0,  18.00),
-                        (DATE '2024-12-02', 1,  5.0,  25.00),
-                        (DATE '2024-12-02', 1,  7.5,  30.00),
-                        (DATE '2024-12-02', 3,  8.0,  40.00),
-                        (DATE '2024-12-01', 1, 200.0, 500.00),
-                        (DATE '2024-12-05', 1,  2.0,  12.00)
-                    """.trimIndent(),
+                    "INSERT INTO trips (pickup_date, pu_location_id, trip_distance_mi, total_amount) VALUES " +
+                        List(DAYS_IN_WINDOW) { base }.flatten().joinToString(",\n"),
                 )
             }
         }
@@ -379,7 +384,7 @@ class TaxiVsRideshareFourEngineE2eTest {
     /**
      * `observations` in the demo's EAV shape. 12-01 averages 1.2 mm (dry at the 2.5
      * threshold), 12-02 averages 6.0 (rainy); a TMAX row proves the element filter and a
-     * 12-05 row the date predicate.
+     * 2025-01-05 row the month predicate.
      */
     private fun seedWeatherEngine() {
         DriverManager.getConnection(weather.jdbcUrl, weather.username, weather.password).use { connection ->
@@ -402,7 +407,7 @@ class TaxiVsRideshareFourEngineE2eTest {
                         ('USW00094728', '2024-12-02', 'PRCP', 5.0),
                         ('USW00014732', '2024-12-02', 'PRCP', 7.0),
                         ('USW00094728', '2024-12-01', 'TMAX', 8.0),
-                        ('USW00094728', '2024-12-05', 'PRCP', 20.0)
+                        ('USW00094728', '2025-01-05', 'PRCP', 20.0)
                     """.trimIndent(),
                 )
             }
@@ -616,8 +621,10 @@ class TaxiVsRideshareFourEngineE2eTest {
         /** The compose stack's exact MySQL pin (deploy/compose.yml). */
         private const val MYSQL_IMAGE = "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
 
-        private const val WINDOW_START = "2024-12-01"
-        private const val WINDOW_END = "2024-12-02"
+        /** 138 §A — the door is the month; December 2024 has 31 days, the per-day divisor. */
+        private const val WINDOW_YEAR = 2024
+        private const val WINDOW_MONTH = 12
+        private const val DAYS_IN_WINDOW = 31
         private const val RAIN_THRESHOLD = "2.5"
 
         private val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
@@ -708,8 +715,9 @@ class TaxiVsRideshareFourEngineE2eTest {
 
         /**
          * The `hvfhv_zone_day` shape probed from the published lake/v1 object (see the class
-         * KDoc). One (zone, day, company)-grain row per line; the 12-05 partition is the
-         * out-of-window noise the template's date predicate must prune away from the result.
+         * KDoc). One (zone, day, company)-grain row per line, `trip_count` at 31 × its base so
+         * the per-day rate over December's 31 days is the base; the 2025-01-05 partition is
+         * the out-of-window noise the template's month predicate must prune away.
          */
         private fun generateLakeParquet(target: Path) {
             Files.createDirectories(target)
@@ -734,12 +742,12 @@ class TaxiVsRideshareFourEngineE2eTest {
                     statement.execute(
                         """
                         INSERT INTO hvfhv_zone_day VALUES
-                            (DATE '2024-12-01', 1, 'uber',   4,   80.00,  8.00,  60.00,  12.50, 3600, 1),
-                            (DATE '2024-12-01', 1, 'lyft',   2,   40.00,  4.00,  30.00,   6.25, 1800, 0),
-                            (DATE '2024-12-01', 2, 'uber',   3,   60.00,  6.00,  45.00,   9.00, 2700, 0),
-                            (DATE '2024-12-02', 1, 'uber',   6,  120.00, 12.00,  90.00,  18.00, 5400, 2),
-                            (DATE '2024-12-02', 3, 'via',    4,   88.00,  8.80,  66.00,  11.00, 4000, 0),
-                            (DATE '2024-12-05', 1, 'uber', 100,  999.00,  0.00, 700.00, 100.00, 9000, 0)
+                            (DATE '2024-12-01', 1, 'uber', 124,   80.00,  8.00,  60.00,  12.50, 3600, 1),
+                            (DATE '2024-12-01', 1, 'lyft',  62,   40.00,  4.00,  30.00,   6.25, 1800, 0),
+                            (DATE '2024-12-01', 2, 'uber',  93,   60.00,  6.00,  45.00,   9.00, 2700, 0),
+                            (DATE '2024-12-02', 1, 'uber', 186,  120.00, 12.00,  90.00,  18.00, 5400, 2),
+                            (DATE '2024-12-02', 3, 'via',  124,   88.00,  8.80,  66.00,  11.00, 4000, 0),
+                            (DATE '2025-01-05', 1, 'uber', 100,  999.00,  0.00, 700.00, 100.00, 9000, 0)
                         """.trimIndent(),
                     )
                     statement.execute(

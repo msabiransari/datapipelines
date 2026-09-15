@@ -117,7 +117,7 @@
                     th:text="${#lists.size(datasourceRows)} + (${#lists.size(datasourceRows)} == 1 ? ' datasource' : ' datasources')">3 datasources</span>
             </div>
 
-            <p class="tplx-measure" th:if="${!#strings.isEmpty(pipeline.description)}"
+            <p class="tplx-measure u-pre-line" th:if="${!#strings.isEmpty(pipeline.description)}"
                th:text="${pipeline.description}">What this pipeline answers.</p>
 
             <dl class="tplx-kv">

@@ -108,8 +108,8 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    `confirm_new_root: true`** — `pipelines_create` and `templates_create` answer
    `pipeline.validation.new_root_requires_confirmation` / `template.validation.new_root_requires_confirmation`
    with `details.existing_roots` listing what already exists. `test/` never needs it, and when the
-   person has named the folder, pass `confirm_new_root: true` on the FIRST create — the
-   confirmation is theirs, already given.
+   person has named the folder, pass `confirm_new_root: true` on the FIRST create of either kind —
+   a template or a pipeline, whichever you create first — the confirmation is theirs, already given.
    Everything you create in the steps below goes under the prefix you settle on here — and it
    cannot be moved later.
 1. **Learn before you assume.** You know nothing about a datasource until you have read it —
@@ -175,8 +175,18 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    `default` are exclusive — a parameter with a default is optional by definition), nodes
    referencing the template `{id, version}`, `depends_on` wiring, and `output` blocks for
    staging/write-back. Save-time validation dry-renders every template against the
-   declared parameters and rejects anything that would not run. **Create lands v1 as a
-   DRAFT** — executable immediately, and not published: `current_version` comes back null and
+   declared parameters and rejects anything that would not run. **Every node carries a
+   `description`** — one sentence: what it ships and at what grain (`one row per region and day
+   class`). **The pipeline's `description` is a document, not a paragraph:** sections separated by
+   blank lines, each opening with its label on its own line, in this order — **Question** (the
+   question in the person's words and the answer's grain, one row per …), **Window and door** (the
+   period and the parameters that set it), **Sources and grain** (each datasource and table, its
+   grain, sample vs census, time zone and units), **Interpretation** (every rule chosen —
+   thresholds, exclusions, tie-breaks — and which are recorded definitions), **Verification** (the
+   cross-check queries you ran against the sources and the numbers they gave, so a human re-runs
+   them before releasing), **Caveats**. Short paragraphs; a reader who stops after Question and
+   Window knows what the pipeline is (`references/authoring-playbook.md` §5). **Create lands v1 as
+   a DRAFT** — executable immediately, and not published: `current_version` comes back null and
    the response carries the `draft` pointer with the `body_hash` for your next write.
 5. **Iterate on the DRAFT, and run it.** `pipelines_update` (requires the `expected_hash` you
    read — see Best practices) writes the DRAFT: the first update opens it, later updates
@@ -187,7 +197,10 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    no tool you have releases anything.
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
    Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
-   TTL** — afterwards the result is gone (`result.expired`).
+   TTL** — afterwards the result is gone (`result.expired`). **A client can truncate a large
+   tool result:** if the execute reply reports more rows than you can see, or your client shows
+   a truncation notice, page the rows with `executions_get_result` (`limit`, `offset`) and
+   reason over what the server returned, never over a partial view.
 
 ## Execution semantics agents must know
 
@@ -385,16 +398,3 @@ Do/Don't table is one screen; each row is a mistake an agent made here.
 Each of these is served as the MCP resource `datapipelines://docs/skill/<name>` and by the
 `docs_get` tool (`docs_list` names them), and a deployment serves them at
 `GET /skill/<name>.md`; inside a checkout they are files in `references/` beside this one.
-
-## References (when working inside the repo)
-
-- `docs/pipeline-contract.md` — pipeline/node JSON schema, validation rules, error catalog §13
-- `docs/templates.md` — Freemarker rules, versioning, library templates
-- `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
-- `docs/type-system.md` — canonical types and wire encodings
-- `docs/mcp-server.md` — the MCP surface (tools, prompts, transport)
-- `docs/rest-api.md` — REST endpoints, SSE, result cursor, and §19's published endpoints: the path grammar, the read-only rule, the status table
-- `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6), key kinds and the hierarchical binding rule (§7.7)
-- `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
-- `docs/versioning.md` — the draft/release lifecycle, the hash-precondition protocol, why agents never release

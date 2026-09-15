@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
 
 /**
  * The datasource endpoints (rest-api.md §9) under the workspaces model (design §5.3/D8/§6).
@@ -65,9 +66,11 @@ class DatasourcesController(
     private val rules: DatasourceWorkspaceRules,
     private val registrations: DatasourceCreateService,
     private val updates: DatasourceUpdateService,
-    // 118 — the learned facts the detail carries (rest-api §9.7A), the same enrichment the MCP
-    // twin uses. Defaulted so the slice tests that construct this controller by hand keep
-    // compiling; the assembled application injects `SemanticsConfiguration`'s bean.
+    // 118 — the learned facts the listing and the detail carry (rest-api §9.7A), the same
+    // enrichment the MCP twin uses; 138 §B — both blocks, `facts` AND `definitions`, on both
+    // reads, from the same one-store-read the MCP `datasources_list` makes (136 §A). Defaulted so
+    // the slice tests that construct this controller by hand keep compiling; the assembled
+    // application injects `SemanticsConfiguration`'s bean.
     private val facts: co.datapipelines.application.semantics.FactEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
 ) {
     /**
@@ -96,6 +99,9 @@ class DatasourcesController(
      * §9.2 — the listing, workspace-scoped: the active workspace's bound datasources plus
      * all global ones. Paginated with an EXACT total — the visibility predicate ran in SQL,
      * so `total` counts exactly what this principal can see (no post-filter paging leak).
+     * Each item carries `facts` and `definitions` (138 §B): the MCP listing has carried both
+     * since 136 — a rule is read BEFORE the tables are chosen, so it rides the call every
+     * client makes first — and the REST twin appended `facts` on the detail only.
      */
     @GetMapping
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -117,14 +123,15 @@ class DatasourcesController(
         val size = Pagination.clampLimit(limit)
         val workspaceId = currentPrincipal().requireWorkspace().id
         val visible = datasources.listVisible(filter, workspaceId)
-        val items = visible.drop(page).take(size).map { it.toResponse() }
+        val items = visible.drop(page).take(size).map { it.toResponse() + blocks(workspaceId, it) }
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, visible.size.toLong(), items.size)))
     }
 
     /**
      * §9.3 — one datasource; a workspace-bound datasource of another workspace is not-found (§5.3).
-     * Carries `facts` (118, §9.7A): the datasource-wide learned facts, served as stored — this
-     * read opens no connection, so there is nothing to recompute drift against.
+     * Carries `facts` (118, §9.7A) and `definitions` (138 §B): the datasource-wide learned facts
+     * and the workspace's rules naming this datasource, served as stored — this read opens no
+     * connection, so there is nothing to recompute drift against.
      */
     @GetMapping("/{name}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -133,8 +140,14 @@ class DatasourcesController(
     ): ApiResponse<Map<String, Any?>> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val datasource = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
-        return ApiResponse.of(datasource.toResponse() + ("facts" to facts.forDatasource(workspaceId, datasource)))
+        return ApiResponse.of(datasource.toResponse() + blocks(workspaceId, datasource))
     }
+
+    /** The two learned-fact blocks both reads carry, from one store read — the MCP twin's shape exactly. */
+    private fun blocks(
+        workspaceId: UUID,
+        datasource: Datasource,
+    ): Map<String, Any?> = facts.forListing(workspaceId, datasource).let { mapOf("facts" to it.facts, "definitions" to it.definitions) }
 
     /**
      * §9.4 — update, under the D8 gates. `password` optional (omit to keep); `readonly`

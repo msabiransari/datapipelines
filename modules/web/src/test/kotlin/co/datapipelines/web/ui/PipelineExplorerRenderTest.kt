@@ -268,6 +268,31 @@ class PipelineExplorerRenderTest {
         html shouldNotContain "via UI"
     }
 
+    /**
+     * 138 §E.1 — a description is a document, not a paragraph. The re-run's descriptions carried
+     * blank-line-separated sections (Question / Window and door / …) and the browser collapsed
+     * every newline, because the element had no `white-space` rule. The render side of the fix:
+     * the newlines reach the DOM INTACT (th:text keeps them, and keeps escaping — `<b>` in a
+     * description is text, never markup), on an element carrying the one utility rule
+     * (`u-pre-line`) that turns them into paragraphs. The browser half is
+     * ExplorerDetailBrowserTest (two sections, two blocks).
+     */
+    @Test
+    fun `138 - a description's blank lines reach the DOM intact, escaped, on the pre-line element`() {
+        val html =
+            render("partials/pipeline-detail") {
+                fillDetail()
+                setVariable("pipeline", record(DEEP_PATH).copy(description = sectionedDescription))
+            }
+
+        html shouldContain "class=\"tplx-measure u-pre-line\""
+        // The two paragraphs, with the blank line between them, in ONE text node — not joined,
+        // not turned into <p> or <br> by the server.
+        html shouldContain
+            "Question\nWhat the pipeline answers.\n\nWindow and door\nOne year, chosen by year.\n\nCaveats\n&lt;b&gt;none&lt;/b&gt;"
+        html shouldNotContain "<b>none</b>"
+    }
+
     @Test
     fun `106 - the acting column renders version ROWS, never a table`() {
         val html = render("partials/pipeline-versions") { fillDetail() }
@@ -662,6 +687,10 @@ class PipelineExplorerRenderTest {
         setVariable("currentPath", "/pipelines")
         setVariable("scopes", setOf("ADMIN"))
     }
+
+    /** 138: the sectioned shape the skill teaches, with a markup-shaped line that must stay text. */
+    private val sectionedDescription =
+        "Question\nWhat the pipeline answers.\n\nWindow and door\nOne year, chosen by year.\n\nCaveats\n<b>none</b>"
 
     private fun record(name: String) =
         PipelineRecord(

@@ -66,8 +66,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         postJson(
             "/api/v1/pipelines",
             """{"name":"test/detail_probe","display_name":"detail_probe",""" +
-                """"description":"The 106 detail fixture — long enough to exercise the 78ch reading measure in the """ +
-                """overview card without wrapping into the acting column beside it.",""" +
+                // 138 §E: the sectioned shape the skill teaches — label, line, blank line, label…
+                // The JSON carries real newlines (\n escapes); the first section keeps the 106
+                // sentence, long enough to exercise the 78ch measure.
+                """"description":"Question\nThe 106 detail fixture — long enough to exercise the 78ch reading measure in the """ +
+                """overview card without wrapping into the acting column beside it.\n\nWindow and door\nOne year, chosen by year.",""" +
                 """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
                 """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
         )
@@ -385,6 +388,51 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             withClue({ "at ${width}px the meta column sets on ${meta.d("lines")} lines" }) {
                 meta.d("lines") shouldBeLessThan META_MAX_LINES
             }
+        }
+    }
+
+    /**
+     * 138 §E.1 — the description's blank line is a paragraph break on screen. The re-run's
+     * descriptions had sections separated by blank lines, and the browser collapsed every
+     * newline because the element had no `white-space` rule: two labelled sections read as one
+     * run-on line. The assertion is geometric, not stylistic: the second section's label sits
+     * at least two line-heights below the first (its line, the section's line, the blank line),
+     * which is exactly what collapsing makes impossible — removed `u-pre-line`, the two labels
+     * share a line and this goes red.
+     */
+    @Test
+    fun `a description's blank line renders as a paragraph break - two sections, two blocks`() {
+        startTrace()
+        ready()
+        seed()
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/pipelines")
+        selectLeaf()
+        page.locator("#pipeline-detail .tplx-measure").first().waitFor()
+
+        @Suppress("UNCHECKED_CAST")
+        val blocks =
+            page.evaluate(
+                """
+                () => {
+                  const p = document.querySelector('#pipeline-detail .tplx-measure');
+                  const text = p.firstChild;
+                  const top = (label) => {
+                    const r = document.createRange();
+                    const at = text.data.indexOf(label);
+                    r.setStart(text, at); r.setEnd(text, at + label.length);
+                    return r.getBoundingClientRect().top;
+                  };
+                  return { whiteSpace: getComputedStyle(p).whiteSpace,
+                           line: parseFloat(getComputedStyle(p).lineHeight) || 16,
+                           gap: top('Window and door') - top('Question') };
+                }
+                """.trimIndent(),
+            ) as Map<String, Any?>
+
+        blocks["whiteSpace"] shouldBe "pre-line"
+        withClue({ "the second label sits ${blocks.d("gap")}px below the first at a ${blocks.d("line")}px line" }) {
+            blocks.d("gap") shouldBeGreaterThan 2.0 * blocks.d("line")
         }
     }
 
