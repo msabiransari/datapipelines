@@ -28,7 +28,7 @@ class SiteDemoDataTest {
         val model = SiteDemoData(javaClass.classLoader)
 
         val nyc = model.family("nyc")
-        withClue("nyc version") { nyc.version shouldBe "v7" }
+        withClue("nyc version") { nyc.version shouldBe "v8" }
         withClue("nyc dataset") { nyc.dataset shouldBe "mobility" }
         withClue("nyc tables") {
             nyc.tables.map { it.table } shouldBe
