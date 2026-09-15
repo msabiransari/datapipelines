@@ -2,7 +2,10 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
@@ -51,7 +54,12 @@ class TemplateEditorControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate() {
+    /**
+     * The session under test. An AUTHOR by default — the pre-143 tests were written about an
+     * author's editor (the route floored at MUTATE, so nobody else could reach it); 143 opens
+     * the page to every reader, and the tests below pass the membership they mean.
+     */
+    private fun authenticate(flags: MembershipFlags = MembershipFlags(author = true)) {
         val principal =
             AuthenticatedPrincipal(
                 userId,
@@ -59,7 +67,7 @@ class TemplateEditorControllerTest {
                 "A",
                 setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                workspace = WorkspaceContext(workspaceId, "acme", flags),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -208,6 +216,56 @@ class TemplateEditorControllerTest {
         model["readOnly"] shouldBe false
         model["selectedVersion"] shouldBe 2
         model["workingVersion"] shouldBe 2
+    }
+
+    /**
+     * 143 (T315) — a reader's editor is READ-ONLY on the working version too: `readOnly` is
+     * the author capability combined with the version-state rule, on the page and on the
+     * partial the version select swaps, so no selection can hand a viewer a textarea.
+     */
+    @Test
+    fun `a non-author opens the working version read-only, on the page and on the partial`() {
+        authenticate(MembershipFlags.VIEWER)
+        every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
+        every { templates.listVersions(any(), "test/my_template.sql") } returns sampleVersions
+        every { templates.findDraftDetail(any(), any()) } returns null
+        every { templates.findVersionDetail(any(), "test/my_template.sql", 2) } returns
+            TemplateVersionDetail("test/my_template.sql", 2, PipelineVersionStatus.RELEASED, "h2", Instant.EPOCH, userId)
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        val page = ExtendedModelMap()
+        controller.editor("test/my_template.sql", null, page, mockk(relaxed = true))
+        page["readOnly"] shouldBe true
+        page["selectedVersion"] shouldBe 2
+        page["workingVersion"] shouldBe 2
+        page["canAuthor"] shouldBe false
+
+        val partial = ExtendedModelMap()
+        controller.source("test/my_template.sql", null, partial)
+        partial["readOnly"] shouldBe true
+
+        // A PROMOTER is a reader of the source as well: release is a header verb, not an edit.
+        authenticate(MembershipFlags(promoter = true))
+        val promoter = ExtendedModelMap()
+        controller.editor("test/my_template.sql", null, promoter, mockk(relaxed = true))
+        promoter["readOnly"] shouldBe true
+        promoter["canPromote"] shouldBe true
+    }
+
+    /** 143 — the page route floors at READ: the screen's lowest role reads it (the 122 rule). */
+    @Test
+    fun `the editor page route is floored at READ_RESOURCES and the writes stay at MUTATE`() {
+        val scopeOf = { name: String ->
+            TemplateEditorController::class.java.methods
+                .single { it.name == name }
+                .getAnnotation(RequiredScope::class.java)
+                .value
+        }
+        scopeOf("editor") shouldBe ScopeMatrix.RestOperation.READ_RESOURCES
+        scopeOf("source") shouldBe ScopeMatrix.RestOperation.READ_RESOURCES
+        scopeOf("edit") shouldBe ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES
+        scopeOf("renderPreview") shouldBe ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES
     }
 
     @Test
