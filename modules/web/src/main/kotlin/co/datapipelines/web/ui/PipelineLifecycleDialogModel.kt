@@ -172,20 +172,29 @@ class PipelineLifecycleDialogModel(
     /**
      * 142 — the pipelines OTHER than [pipelineId] whose working version pins [ref], from the
      * used-by service's question 1. The version was just read as DRAFT, so the template
-     * exists; a race that removes it between the two reads answers zero rather than
-     * refusing to open the dialog (the POST is the guard, never this count).
+     * exists; the ONE expected failure is the race that removes it between the two reads —
+     * the service's own `template.not_found` — and that answers zero rather than refusing
+     * to open the dialog (the POST is the guard, never this count). Anything else (the
+     * database, a programming error, a different refusal) propagates through the dialog
+     * GET's existing error path: an unknown failure must never read as "shared by nobody".
      */
     private fun otherPinners(
         workspaceId: UUID,
         pipelineId: UUID,
         ref: co.datapipelines.pipeline.TemplateRef,
-    ): Int =
-        runCatching { usage.usedBy(workspaceId, ref.id, ref.version) }
-            .getOrNull()
-            ?.references
-            ?.map { it.pipelineId }
-            ?.distinct()
-            ?.count { it != pipelineId } ?: 0
+    ): Int {
+        val usedBy =
+            try {
+                usage.usedBy(workspaceId, ref.id, ref.version)
+            } catch (e: DatapipelinesException) {
+                if (e.code != PipelineErrorCodes.Template.NOT_FOUND) throw e
+                return 0
+            }
+        return usedBy.references
+            .map { it.pipelineId }
+            .distinct()
+            .count { it != pipelineId }
+    }
 
     // ------------------------------------------------------------------ purge draft
 

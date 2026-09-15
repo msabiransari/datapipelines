@@ -146,6 +146,26 @@ class PipelineLifecycleDialogModelTest {
         model.release(WS, ID).draftPins.map { it.otherPinners } shouldBe listOf(0, 0)
     }
 
+    /**
+     * 142 review — ONLY the disappearing-template race is a known zero. Any other failure of
+     * the used-by lookup (the database, a programming error, a different refusal) must reach
+     * the dialog's existing error path rather than be shown as "shared by nobody".
+     */
+    @Test
+    fun `release - 142 - an unexpected used-by failure propagates instead of reading as zero other pinners`() {
+        every { repository.findById(any(), any()) } returns recordOf(current = 1)
+        every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
+        every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
+        every { templates.statusOf(any(), any(), any()) } returns DRAFT
+
+        every { usage.usedBy(any(), any(), any()) } throws IllegalStateException("connection refused")
+        shouldThrow<IllegalStateException> { model.release(WS, ID) }.message shouldBe "connection refused"
+
+        every { usage.usedBy(any(), any(), any()) } throws
+            DatapipelinesException(PipelineErrorCodes.Validation.PIPELINE_NOT_FOUND, "another refusal", emptyMap())
+        shouldThrow<DatapipelinesException> { model.release(WS, ID) }.code shouldBe PipelineErrorCodes.Validation.PIPELINE_NOT_FOUND
+    }
+
     @Test
     fun `purge - a released target is last_release and a missing one is not-found`() {
         recordOf(current = 1)
