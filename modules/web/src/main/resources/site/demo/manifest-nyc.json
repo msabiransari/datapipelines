@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "dataset": "mobility",
-  "version": "v7",
-  "built_at": "2026-09-10T04:40:33Z",
+  "version": "v8",
+  "built_at": "2026-09-15T14:56:08Z",
   "build": {
     "window_start": "2023-01",
     "window_end": "2024-12",
@@ -35,8 +35,8 @@
     },
     {
       "file": "examples.json",
-      "sha256": "fa2733c448eb01d0f6087501b370c399960c9789a6f29b3c952215e58315a596",
-      "bytes": 40670,
+      "sha256": "5e1ca101237e886348dfd9c9f497cd433e801c326c4d81815b1f420c8e72fb40",
+      "bytes": 53456,
       "restore_hint": "mount and point datapipelines.bootstrap.examples-file at it (configuration.md \u00a73.18)"
     }
   ],

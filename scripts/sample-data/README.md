@@ -126,11 +126,15 @@ artifacts (byte-identical MySQL and SQLite dumps; the Postgres dump differs only
 in its 5-byte header create-date — the README's contents-not-bytes contract) with
 the corrected `examples.json` (042's parameter-interpolated migration, which v1
 predates — T70). A re-publication is a NEW version directory (v3, …) —
-never an overwrite of an existing one. **v7 (109 §E, pending publish)** is the same shape as
+never an overwrite of an existing one. **v7 (109 §E) published** (in the bucket and loader-verified by 2026-09-12) is the same shape as
 v2's: a restore-and-redump of v6 carrying one change — the composite index
 `idx_trips_pu_location_pickup_date` on `trips` (measured ~90× on the airport-count shape,
 `docs/deployment.md` Appendix B "Demo Postgres sizing"). Every table content-checksum is
-byte-identical to v6; the set sits with the owner for upload.
+byte-identical to v6. **v8 published 2026-09-15:** v7's three data artifacts byte-identical, with 138's
+`examples.json` (every seeded pipeline takes the question's door — T296); the manifest was built by
+`manifest.sh` from the loader's verified cache of v7 (no raw sources on the box), with the four
+provenance `retrieved_at` values carried over from v7's manifest, and `verify.sh` re-derived every
+row count and checksum (16/16) before upload; `check-published.sh v8` green.
 
 ```bash
 cd scripts/sample-data/work/artifacts
