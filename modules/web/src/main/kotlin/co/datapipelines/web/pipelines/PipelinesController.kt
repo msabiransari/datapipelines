@@ -221,7 +221,12 @@ class PipelinesController(
      * pinned template version is still a draft, `pipeline.version.conflict` on a stale hash,
      * and — for a body carrying `checks[]` — `pipeline.check.failed` when the gate's fresh
      * run did not pass, unless [overrideChecksReason] (≥ 10 characters) rides the request
-     * (140; audited on the release event).
+     * (140; audited on the release event). `release_pinned_templates=true` (142) is the
+     * consent to release the DRAFT template versions the body pins in the same transaction,
+     * templates first — each audited as `template.version.released` with the cascade source,
+     * the pipeline's event listing them; the refusal's `details.pins_not_released` is what a
+     * client reads to decide whether to retry with it. Same query carrier as the override
+     * flag, for the same reason: the endpoint has no body.
      * UI-driven in practice (D4: agents never release); no MCP tool is exposed.
      */
     @PostMapping("/{id}/release")
@@ -230,17 +235,20 @@ class PipelinesController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestParam(value = "override_checks_reason", required = false) overrideChecksReason: String? = null,
+        @RequestParam(value = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean = false,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val released = pipelines.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId, overrideChecksReason)
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.AUDIT_VERSION_RELEASED,
-            principal,
-            workspaceId,
-            LifecycleVerbs.releaseDetails(principal, id, released),
-        )
+        val released =
+            pipelines.release(
+                workspaceId,
+                id,
+                IfMatchHeader.required(ifMatch),
+                principal.userId,
+                overrideChecksReason,
+                releasePinnedTemplates,
+            )
+        LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)
         return ApiResponse.of(PipelineResponses.full(released.record, released.bodyJson, released.version))
     }
 

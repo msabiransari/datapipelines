@@ -122,8 +122,9 @@ class UiConfig {
         runStats: PipelineRunStats,
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
+        usage: co.datapipelines.templates.TemplateUsageService,
     ): PipelineLifecycleDialogModel =
-        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring)
+        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring, usage)
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean

@@ -31,10 +31,13 @@ import kotlin.random.Random
  *    parsed through the same [VersionLifecycleTable] the drift guard reads, never a copy —
  *    is materialized in the database and its event fired at the real surface. The outcome
  *    code, the After state (versions + pointer) and the entity verdict must equal the row.
- *    Four rows are excluded with reasons: the template-twin rows and the two pin-guard rows
+ *    Five rows are excluded with reasons: the template-twin rows and the two pin-guard rows
  *    whose evidence is a template registry read (their codes are `template.*`; the template
- *    suites own them), and the restated §5.3 draft-template-pin release refusal (035's
- *    rule, proven by its own suite; the stub registry here answers RELEASED).
+ *    suites own them), the restated §5.3 draft-template-pin release refusal (035's rule,
+ *    proven by its own suite; the stub registry here answers RELEASED), and its 142 cascade
+ *    twin `release(releasePinnedTemplates)` — a template WRITE through the `TemplateReleaser`
+ *    port, which `ReleaseCascadeE2eTest` proves over the real port; it carries the
+ *    "(template twin)" marker like the other template-side rows.
  * 2. **Random sequences.** A seeded RNG (seed printed in every failure) generates event
  *    sequences (length 1–25) per posture; after EVERY event the database state must equal
  *    the reference model's state and the §13 invariants must hold. The gate runs
@@ -114,7 +117,7 @@ class VersionLifecycleModelTest {
     @Test
     fun `every lifecycle-table row replays against the real surface`() {
         val rows = VersionLifecycleTable.parse(Fixtures.repoFile(SPEC_PATH).readText())
-        withClue("the table must parse (the drift guard owns the floor)") { rows.size shouldBe 67 }
+        withClue("the table must parse (the drift guard owns the floor)") { rows.size shouldBe 68 }
 
         rows.forEachIndexed { index, row ->
             if (excluded(row)) return@forEachIndexed

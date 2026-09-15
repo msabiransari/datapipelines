@@ -205,6 +205,61 @@ class PipelineLifecycleDialogControllerTest {
     }
 
     @Test
+    fun `release - 142 - the consent checkbox posts the flag, the toast lists the templates, the audit is templates first`() {
+        happyPathReads(record(currentVersion = 3))
+        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        // Answers only for releasePinnedTemplates = true: a controller that dropped the flag
+        // would hit an unstubbed call, not a silently-passing default.
+        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
+            PipelineReleaseService.Released(
+                record = record(currentVersion = 3),
+                version = draftDetail().copy(status = PipelineVersionStatus.RELEASED),
+                bodyJson = "{}",
+                templatesReleased = listOf(co.datapipelines.pipeline.TemplateRef("test/a.sql", 2)),
+            )
+
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("releasePinnedTemplates", "true")
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+            .andExpect(
+                org.springframework.test.web.servlet.result.MockMvcResultMatchers.model().attribute(
+                    "lifecycleToastMessage",
+                    "v3 is the current version now, and it is locked. Also released: test/a.sql@2.",
+                ),
+            )
+        audit.events shouldBe listOf("template.version.released", "pipeline.version.released")
+        audit.details[0]["cascade_from_pipeline_id"] shouldBe PIPELINE.toString()
+        audit.details[0]["cascade_from_version"] shouldBe 3
+        audit.details[1]["templates_released"] shouldBe listOf(mapOf("template_id" to "test/a.sql", "version" to 2))
+    }
+
+    @Test
+    fun `release - 142 - the editor surface names the cascade in its flash code`() {
+        happyPathReads(record(currentVersion = 3))
+        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
+            PipelineReleaseService.Released(
+                record(currentVersion = 3),
+                draftDetail().copy(status = PipelineVersionStatus.RELEASED),
+                "{}",
+                templatesReleased = listOf(co.datapipelines.pipeline.TemplateRef("test/a.sql", 2)),
+            )
+
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("from", "editor")
+                    .param("releasePinnedTemplates", "true")
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE/editor?ok=released_with_templates"))
+    }
+
+    @Test
     fun `discard - a refusal is Shape C with the REAL status and the §13 code in the toast`() {
         every {
             pipelines.discardVersion(WORKSPACE, PIPELINE, 1, USER)
@@ -372,6 +427,7 @@ class PipelineLifecycleDialogControllerTest {
     /** The recording fake the MISTAKES entry asks for: effects asserted, absence observable. */
     internal class RecordingAudit : AuditEventSink {
         val events = mutableListOf<String>()
+        val details = mutableListOf<Map<String, Any?>>()
 
         override fun log(
             event: String,
@@ -382,6 +438,7 @@ class PipelineLifecycleDialogControllerTest {
             details: Map<String, Any?>,
         ) {
             events.add(event)
+            this.details.add(details)
         }
     }
 

@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.ReleaseCheckGate
+import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
@@ -48,6 +49,25 @@ class PipelineLifecycleConfiguration {
             templates.findVersionStatus(workspaceId, templateId, version)
         }
 
+    /**
+     * The release cascade's write (versioning §5.3 precondition 2, 142), as the port
+     * `pipeline-contract` declares — the same module-arrow arrangement as
+     * [templateVersionStatuses], now for the one WRITE the pipeline aggregate asks of
+     * `templates`. It rides [TemplateReleaseService.releasePinned], i.e. the template's own
+     * release path: one implementation of "release a template", so the direct verb
+     * (`POST /api/v1/templates/release`, the template dialog) and the cascaded one cannot
+     * drift. Wrapped here rather than moved down to `application`: that module is for
+     * cross-aggregate use cases and does not depend on `templates` today, and the service
+     * is a single-aggregate lifecycle service exactly like `PipelineReleaseService` — the
+     * port is the seam, not a relocation.
+     */
+    @Bean
+    fun templateReleaser(releases: co.datapipelines.web.templates.TemplateReleaseService): TemplateReleaser =
+        TemplateReleaser { workspaceId, templateId, version, actor ->
+            val released = releases.releasePinned(workspaceId, templateId, version, actor)
+            co.datapipelines.pipeline.TemplateRef(released.detail.templateId, released.detail.version)
+        }
+
     @Bean
     fun pipelineReleaseService(
         pipelines: PipelineRepository,
@@ -56,6 +76,7 @@ class PipelineLifecycleConfiguration {
         authoring: AuthoringGuard,
         metadataTransactionManager: PlatformTransactionManager,
         checkGate: ReleaseCheckGate,
+        templateReleaser: TemplateReleaser,
     ): PipelineReleaseService =
         PipelineReleaseService(
             pipelines,
@@ -63,6 +84,7 @@ class PipelineLifecycleConfiguration {
             validator,
             authoring,
             checkGate = checkGate,
+            templateReleaser = templateReleaser,
             transactions = TransactionTemplate(metadataTransactionManager),
         )
 

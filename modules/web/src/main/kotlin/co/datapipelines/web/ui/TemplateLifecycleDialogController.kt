@@ -77,11 +77,7 @@ class TemplateLifecycleDialogController(
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
             principal,
             workspaceId,
-            mapOf(
-                "template_id" to released.detail.templateId,
-                "version" to released.detail.version,
-                "via" to LifecycleVerbs.via(principal),
-            ),
+            LifecycleVerbs.templateReleaseDetails(principal, released.detail.templateId, released.detail.version),
         )
         return if (from == FROM_EDITOR) {
             redirect("/templates/editor?name=${urlEncode(name)}&ok=released")

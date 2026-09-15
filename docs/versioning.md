@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.9 — R12: a discarded pipeline version protects the draft templates it pins (the entity-purge offer counted only live pinners)
+**Status:** v1.11 — 142: releasing a pipeline may release the draft templates it pins (consent, one transaction, one audit trail)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-09-11
@@ -293,6 +293,7 @@ substitute `template.version.last_release` / `not_released` / `not_discarded` /
 | {R} | `1R cur=1` | import (subsequent) | both | — | allowed — lands RELEASED; the pointer does NOT move (D60) | `1R 2R cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | release | dev | — | allowed | `1R 2R cur=2` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | release | dev | draft pins a DRAFT template version | refused `pipeline.release.template_not_released` (§5.3's rule, restated) | `1R 2D cur=1` | ACTIVE |
+| {R,D} | `1R 2D cur=1` | release(releasePinnedTemplates) | dev | draft pins a DRAFT template version (template twin: the pinned template releases with it) | allowed — the pinned template version and the pipeline flip in ONE transaction, templates first (§5.3's cascade, 142); a refusal anywhere rolls both back | `1R 2R cur=2` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | purge(v2) | dev | — | allowed — draft + its executions deleted | `1R cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | purge(v2) | dev | draft template v2 pinned by another stored pipeline version, discarded included (template twin) | refused `template.in_use` | `1R 2D cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | discard(v1) | dev | — | allowed — fallback: the draft is the highest eligible live version | `1X 2D cur=2` | ACTIVE |
@@ -597,6 +598,32 @@ Preconditions, evaluated server-side before the statement runs:
    A pin on a DRAFT template version fails with `pipeline.release.template_not_released`
    naming the template and version. (Pinning a DRAFT template version from a DRAFT pipeline
    is legal while iterating — §6 — and only becomes an error at pipeline release time.)
+   The refusal's `details` name the first offending pin at the top level (`template_id`,
+   `template_version`, `template_status`) and, since 142, list every pin that is not
+   RELEASED under `pins_not_released`.
+
+   **The cascade (142, owner 2026-09-15: "a headache-free promotion").** The promoter may
+   CONSENT to release the pinned draft templates as part of the same release —
+   `release(…, releasePinnedTemplates = true)`; `?release_pinned_templates=true` over REST;
+   the checked-by-default "Also release these N draft templates" group in the release
+   dialog. Consent is explicit (the default is the refusal above, byte for byte), the write
+   is atomic (every DRAFT pin is released through the `TemplateReleaser` port in the SAME
+   metadata transaction as the pipeline flip, templates first, pipeline last — a refusal
+   anywhere, a template's own preconditions, the pin guard, a stale hash on the flip, a
+   concurrent write, rolls the whole transaction back, so no template is ever left released
+   with the pipeline still a draft), and the audit trail reads as if each template had been
+   released by hand: one `template.version.released` per cascaded template with the direct
+   verb's shape plus `cascade_from_pipeline_id` / `cascade_from_version`, then the pipeline's
+   `pipeline.version.released` with `templates_released: [{template_id, version}]` (an empty
+   list when nothing cascaded). The cascade releases the PINNED version and nothing newer —
+   the pin names the exact version, which is precondition 1 per template without a second
+   hash handshake; a template whose draft is a different version than the pin refuses
+   `template.version.conflict`. A DISCARDED or MISSING pin is NOT releasable and refuses
+   `pipeline.release.template_not_released` exactly as before, flag or no flag. The release
+   check gate (precondition 4) runs before the transaction exactly as now. Promotion receive
+   is unaffected: promoted content arrives RELEASED (§10), so the flag is not exposed there.
+   The same role holds both verbs (auth §7.6, "Release a version"), so the cascade grants no
+   new capability; the MCP surface is untouched — no tool releases anything.
 3. Full [pipeline-contract §12](pipeline-contract.md) validation re-runs on the draft body. Release is the final save-time
    gate; nothing is released that the validator would refuse.
 4. **Every release check the body carries passes (140).** When the draft body declares
@@ -1288,6 +1315,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-15 | v1.11 | 142 release cascade | §5.3 precondition 2 gains **the cascade**: `release(releasePinnedTemplates = true)` — REST `?release_pinned_templates=true`, the dialog's checked-by-default consent group — releases every DRAFT template version the draft body pins in the SAME metadata transaction as the pipeline flip, templates first, through the new `TemplateReleaser` port (`pipeline-contract`, implemented in `web` over `TemplateReleaseService.releasePinned` so the direct and cascaded verbs share one implementation); any refusal rolls everything back. Audit: one `template.version.released` per cascaded template with `cascade_from_pipeline_id` / `cascade_from_version`, then `pipeline.version.released` with `templates_released`. The default is the pre-142 refusal byte for byte; its details gain `pins_not_released`. DISCARDED / MISSING pins stay unreleasable; promotion receive unexposed (§10); no MCP tool releases anything. §3.5.2 gains the `{R,D} release(releasePinnedTemplates)` row (excluded from the model replay like the template-twin rows; `ReleaseCascadeE2eTest` owns it). |
 | 2026-09-14 | v1.10 | 140 release checks | §5.3 gains **precondition 4 — the release-check gate**: a body carrying `checks[]` (pipeline-contract §3.3) gets a fresh server run (`via = release`, one `pipeline_check_runs` row per check, outside the metadata transaction) before the flip; any `fail`/`error` refuses with `409 pipeline.check.failed` (`details.checks` = expected/observed/message per failing check) unless the request carries `override_checks_reason` (non-blank, ≥ 10 chars), which releases and adds `checks_overridden` + `override_reason` to the `pipeline.version.released` audit event. Checks are opt-in — a check-less version releases exactly as before — and the agent never supplies an observed value: only the server's own run produces `observed`. §10.5 records that a promoted release's checks travel in the body and the receiver re-runs them on its own datasources at its release step (no override channel; a missing datasource is `error`, the truth). The gate's placement moved `PipelineService.release`'s transaction boundary: the template-pin guard and the flip still share one transaction; the check runs deliberately run outside it (`datasource.lease_in_transaction`). |
 | 2026-09-13 | v1.9 | R12 discarded pinners protect | §3.5: **a DISCARDED pipeline version protects the draft templates it pins**, exactly like a live one. The entity purge's exclusive-template offer counted only DRAFT/RELEASED pinners of other pipelines (`EXCLUSIVE_DRAFT_TEMPLATES_SQL`), so purging pipeline B could take a template that A's discarded version still pins, and D59's "restore always works" would revive a version that cannot run. Owner ruling (b): restore must keep what it runs — the status filter on other pinners is gone (a purged version has no row and never pinned). The direct template purge/discard guard (`findAnyVersionTemplatePins`) already counted every stored version; its prose said "live" and now says "stored". Found by `ExclusiveDraftTemplatesIntegrationTest`, the first test of that SQL (the service suite stubs the seam, the web suites stub the model); the table's two template-twin rows reworded, still excluded from the replay by their "(template twin)" marker. |
 | 2026-09-11 | v1.8 | 117 templates_update | §7.1's MCP-authoring paragraph now names the template twin: `templates_update` calls the same `TemplateDraftService.write` as `PUT /templates` and lands its work as drafts, with the `If-Match` hash as the required `expected_hash` argument. No lifecycle rule changed — the agent writes the draft, a human releases (D4). |

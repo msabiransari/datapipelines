@@ -295,6 +295,7 @@ outcome is "already in that state".
 POST /pipelines/{id}/release
 If-Match: <the draft's body_hash>
 [?override_checks_reason=<text — only when a check is failing>]
+[?release_pinned_templates=true — consent to release the DRAFT template versions the body pins]
 ```
 
 Locks the draft: the version flips to RELEASED, `pipelines.current_version` moves to it,
@@ -310,6 +311,19 @@ observed and message per failing check). Releasing past a failing check needs
 `override_checks_reason`, a non-blank reason of ≥ 10 characters, and is recorded:
 `pipeline.version.released` gains `checks_overridden: [ids]` and `override_reason`. A
 version with no checks releases exactly as before.
+**The cascade (142, versioning §5.3):** without `release_pinned_templates` a DRAFT template pin
+refuses `409 pipeline.release.template_not_released` exactly as before — `details.template_id`
+/ `template_version` / `template_status` name the first offending pin, and
+`details.pins_not_released` lists EVERY pin that is not RELEASED, so a client can decide whether
+retrying with the flag would succeed (all DRAFT) or not (a DISCARDED or MISSING pin, which is
+never releasable). With `release_pinned_templates=true` every DRAFT pin is released at its
+pinned version in the SAME transaction as the pipeline flip, templates first; any refusal
+(a template's own preconditions, a stale `If-Match`, a concurrent write) rolls the whole
+transaction back. Each cascaded release is audited as `template.version.released` with
+`cascade_from_pipeline_id` / `cascade_from_version`, and the pipeline's event carries
+`templates_released: [{template_id, version}]` (empty when nothing cascaded). The flag rides the
+query like `override_checks_reason`, for the same reason: the endpoint has no body. The same
+role holds both release verbs (auth §7.6), so the flag grants no new capability.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
 the verb needs `RELEASE_VERSION` (`author` scope on a key whose issuer is a promoter, or a
 promoter's session), so a promoter's own CI key may release; a key issued by anyone else
@@ -1940,6 +1954,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-15 | v2.14 | 142 release cascade | §5.10 gains `?release_pinned_templates=true`: consent to release the DRAFT template versions the body pins in the same transaction as the pipeline flip (templates first; any refusal rolls all back); the refusal's `details` gain `pins_not_released`; audit `template.version.released` per cascaded template (`cascade_from_pipeline_id`, `cascade_from_version`) and `templates_released` on `pipeline.version.released`. Additive; no route removed; no MCP tool releases anything. |
 | 2026-09-14 | v2.13 | 140 release checks | New **§5.16** — `POST /pipelines/{id}/versions/{version}/checks/run` (`execute` scope; writes `pipeline_check_runs`; optional `parameters` body; `pass`/`fail`/`error` verdicts) and `GET …/checks` (`read`; definitions with the latest run per check). §5.10 gains the **release-check gate**: a body with `checks[]` releases only past an all-pass fresh run, else `409 pipeline.check.failed` with `details.checks`; `override_checks_reason` (≥ 10 chars, audited as `checks_overridden` + `override_reason` on `pipeline.version.released`) is the only way past. Only the server's run produces `observed` — no endpoint records one from a caller. All additive; no route removed. |
 | 2026-09-08 | v2.8 | 099 draft-first (D55/D56) | **§5.1** — `POST /pipelines` lands v1 as a **DRAFT**: `status: "DRAFT"`, `current_version: null`, the `draft` pointer, and release is `POST …/release` like any other draft ([Versioning §3.2](versioning.md)). **New §6.1.1** — execute with no `version` runs the WORKING version (the draft when one exists, else the latest release); an explicit version stays exact and never clamped. **§5.7** — listing rows carry the working `version` plus a new `status` field. **§5.9** — export is released-only and refuses a never-released pipeline with `409 pipeline.promotion.not_released`. §8.1 (templates) mirrors §5.1. Response VALUES change; no request shape and no route does. |
 | 2026-09-02 | v1.18 | 051 auth/config sweep | §10.1 gains its field table (T19): the listing's items were documented only by cross-reference to §10.2. The table is the shared metadata projection minus `result_url`/`result_expires_at`, including the fields §10.2's example omitted (`draft_run`, `error`, `failed_node_id`, `correlation_id`), plus the ownership sentence |

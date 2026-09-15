@@ -48,6 +48,15 @@ test("the min-chars arm counts trimmed characters against the floor", () => {
   assert.equal(dialogs.minCharsMet(null, 10), false);
 });
 
+// 142 — the release cascade's consent arm: every consent box present must be checked; a
+// dialog with no box (no draft pin) has nothing to withhold.
+test("the consent rule needs every box checked, and an absent box is consent", () => {
+  assert.equal(dialogs.consentMet([]), true);
+  assert.equal(dialogs.consentMet([{ checked: true }]), true);
+  assert.equal(dialogs.consentMet([{ checked: false }]), false);
+  assert.equal(dialogs.consentMet([{ checked: true }, { checked: false }]), false);
+});
+
 // The ⋯ menu's placement (owner 2026-09-12: the menu fell into the tab panel's scrollable
 // overflow and never showed). The list lives in the top layer now, so WHERE it goes is this
 // pure rule's decision: under the ⋯, right-aligned; above it when the viewport has no room

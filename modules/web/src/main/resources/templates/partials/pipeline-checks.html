@@ -13,7 +13,9 @@
      the dialog's #plc-release-footer placeholder and is REMOVED from the swapped content —
      the list above never carries it. It decides what the dialog's submit area offers:
      all pass → the Release submit; anything short of PASS → the override disclosure whose
-     reason rides the SAME release POST (the field is wired server-side) and is audited. -->
+     reason rides the SAME release POST (the field is wired server-side) and is audited.
+     Both submits carry data-consent-submit (142): when the dialog's consent checkbox for
+     the draft template pins is unchecked, lifecycle-dialog.js withholds them too. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="checks" class="plc-checks">
   <p class="ds-empty-description" th:if="${!hasChecks}">No checks on this version.</p>
 
@@ -40,7 +42,7 @@
       <p class="u-secondary u-text-sm u-mb-md">
         All <span th:text="${#lists.size(checks)}">2</span> checks pass.
       </p>
-      <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-confirm"
+      <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
               class="ds-button ds-button-primary u-full"
               hx-disabled-elt="this" th:text="'Release v' + ${version}">Release v3</button>
     </th:block>
@@ -65,7 +67,7 @@
         <textarea name="overrideChecksReason" class="ds-textarea u-mt-md" rows="3" required minlength="10"
                   data-min-chars-input data-min-chars="10"
                   placeholder="Why this release is safe despite the failing checks (at least 10 characters)"></textarea>
-        <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-override" data-min-chars-submit disabled
+        <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-override" data-min-chars-submit data-consent-submit disabled
                 class="ds-button ds-button-danger u-full u-mt-md" hx-disabled-elt="this"
                 th:text="'Release v' + ${version} + ' anyway'">Release v3 anyway</button>
       </details>

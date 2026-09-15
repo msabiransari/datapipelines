@@ -340,6 +340,51 @@ class PipelinesControllerTest {
     }
 
     @Test
+    fun `release - 142 - the query flag reaches the service, and the cascade is audited templates first`() {
+        authenticate()
+        val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
+        // The flag is FORWARDED, not read off a default: a stub that answers only for `true`.
+        every { releases.release(any(), pipelineId, "hash-v2", userId, null, true) } returns
+            PipelineReleaseService.Released(
+                record.copy(currentVersion = 2),
+                releasedDetail.copy(version = 2),
+                draftBody,
+                templatesReleased =
+                    listOf(
+                        co.datapipelines.pipeline.TemplateRef("test/a.sql", 3),
+                        co.datapipelines.pipeline.TemplateRef("test/b.sql", 1),
+                    ),
+            )
+
+        controller.release(pipelineId, "hash-v2", releasePinnedTemplates = true)
+
+        // One template event per cascaded release, in write order, then the pipeline's.
+        audited.map { it.first } shouldBe
+            listOf("template.version.released", "template.version.released", "pipeline.version.released")
+        val first = audited[0].second
+        first["template_id"] shouldBe "test/a.sql"
+        first["version"] shouldBe 3
+        first["via"] shouldBe "session"
+        first["cascade_from_pipeline_id"] shouldBe pipelineId.toString()
+        first["cascade_from_version"] shouldBe 2
+        audited[1].second["template_id"] shouldBe "test/b.sql"
+        audited[2].second["templates_released"] shouldBe
+            listOf(mapOf("template_id" to "test/a.sql", "version" to 3), mapOf("template_id" to "test/b.sql", "version" to 1))
+    }
+
+    @Test
+    fun `release - 142 - without the flag the pipeline event carries an EMPTY templates_released and no template event`() {
+        authenticate()
+        every { releases.release(any(), pipelineId, "hash-v2", userId, null, false) } returns
+            PipelineReleaseService.Released(record.copy(currentVersion = 2), releasedDetail.copy(version = 2), "{}")
+
+        controller.release(pipelineId, "hash-v2")
+
+        audited.map { it.first } shouldBe listOf("pipeline.version.released")
+        audited.single().second["templates_released"] shouldBe emptyList<Any>()
+    }
+
+    @Test
     fun `discard requires If-Match and is a 204 on success`() {
         authenticate()
         shouldThrow<ApiException> { controller.discard(pipelineId, null) }.details["reason"] shouldBe "precondition_missing"

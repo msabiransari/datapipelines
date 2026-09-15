@@ -18,7 +18,11 @@
  *    sits beside it: the release override's [data-min-chars-input] arms its
  *    [data-min-chars-submit] at ≥ N trimmed characters, and because that footer lands by
  *    out-of-band swap AFTER the dialog opened, both arms re-run on any swap INSIDE an open
- *    dialog (a `lcArmed` marker keeps re-arms from stacking listeners).
+ *    dialog (a `lcArmed` marker keeps re-arms from stacking listeners). 142's consent arm
+ *    is the third of the family and composes with the second: a [data-consent-input]
+ *    checkbox (the release cascade's "also release these draft templates") withholds every
+ *    [data-consent-submit] while unchecked, and a button that is ALSO a min-chars submit
+ *    needs both — so one evaluator decides each button from every gate present.
  * 4. CLOSE ON SUCCESS. A Shape A response swaps the DETAIL pane, not the dialog; the hidden
  *    [data-lifecycle-applied] marker riding with it is what closes the dialog — a refusal
  *    (Shape C, retargeted at #toast) never carries the marker, so an error cannot close
@@ -94,28 +98,60 @@
   }
 
   /**
-   * 140 — the release override's pair: [data-min-chars-input] arms [data-min-chars-submit]
-   * at data-min-chars (default 10) trimmed characters. The footer that carries these lands
-   * by OUT-OF-BAND swap AFTER the dialog opened, so this runs on every swap inside an open
-   * dialog (the `lcArmed` marker keeps a re-arm from stacking listeners on a survivor).
+   * 142 — the consent rule, the pure half: every [data-consent-input] present must be
+   * checked; a dialog with no consent box has nothing to withhold.
    */
-  function armMinChars(container) {
-    var input = container.querySelector('[data-min-chars-input]');
-    var button = container.querySelector('[data-min-chars-submit]');
-    if (!input || !button || input.dataset.lcArmed) return;
-    input.dataset.lcArmed = '1';
-    var min = parseInt(input.getAttribute('data-min-chars') || '10', 10);
+  function consentMet(boxes) {
+    for (var i = 0; i < boxes.length; i++) {
+      if (!boxes[i].checked) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 140 + 142 — the release gates, ONE evaluator: a [data-min-chars-submit] needs its
+   * [data-min-chars-input] at data-min-chars (default 10) trimmed characters; a
+   * [data-consent-submit] needs every [data-consent-input] checked; a button carrying both
+   * attributes needs both. Written as one function because two evaluators writing the same
+   * button's `disabled` would each undo the other's verdict. The footer that carries the
+   * min-chars pair lands by OUT-OF-BAND swap AFTER the dialog opened, so this runs on every
+   * swap inside an open dialog (the `lcArmed` marker keeps a re-arm from stacking listeners
+   * on a survivor; the evaluation itself always re-runs so a fresh footer is judged at once).
+   */
+  function armReleaseGates(container) {
+    var reason = container.querySelector('[data-min-chars-input]');
+    var boxes = container.querySelectorAll('[data-consent-input]');
+    var buttons = container.querySelectorAll('[data-min-chars-submit], [data-consent-submit]');
+    if (buttons.length === 0) return;
+    var min = reason ? parseInt(reason.getAttribute('data-min-chars') || '10', 10) : 0;
     var evaluate = function () {
-      button.disabled = !minCharsMet(input.value, min);
+      var consent = consentMet(boxes);
+      for (var i = 0; i < buttons.length; i++) {
+        var button = buttons[i];
+        var needsReason = button.hasAttribute('data-min-chars-submit');
+        var needsConsent = button.hasAttribute('data-consent-submit');
+        var reasonMet = !needsReason || (reason !== null && minCharsMet(reason.value, min));
+        var consentOk = !needsConsent || consent;
+        button.disabled = !(reasonMet && consentOk);
+      }
     };
-    input.addEventListener('input', evaluate);
+    if (reason && !reason.dataset.lcArmed) {
+      reason.dataset.lcArmed = '1';
+      reason.addEventListener('input', evaluate);
+    }
+    for (var b = 0; b < boxes.length; b++) {
+      if (!boxes[b].dataset.lcArmed) {
+        boxes[b].dataset.lcArmed = '1';
+        boxes[b].addEventListener('change', evaluate);
+      }
+    }
     evaluate();
   }
 
   function arm(container) {
     if (!container) return;
     armTypedConfirm(container);
-    armMinChars(container);
+    armReleaseGates(container);
     var focus = firstControl(container);
     if (focus) focus.focus();
   }
@@ -124,7 +160,7 @@
   function rearm(container) {
     if (!container) return;
     armTypedConfirm(container);
-    armMinChars(container);
+    armReleaseGates(container);
   }
 
   // ------------------------------------------------------------------ wiring
@@ -266,7 +302,7 @@
 
   var api = {
     confirmMatches: confirmMatches, closeDialog: closeDialog, closeMenus: closeMenus,
-    menuPlacement: menuPlacement, minCharsMet: minCharsMet,
+    menuPlacement: menuPlacement, minCharsMet: minCharsMet, consentMet: consentMet,
   };
   if (typeof window !== 'undefined') window.lifecycleDialog = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

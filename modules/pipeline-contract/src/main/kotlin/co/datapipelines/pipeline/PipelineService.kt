@@ -485,6 +485,11 @@ open class PipelineService(
      *
      * [overrideChecksReason] is the §13.17 escape hatch: non-blank, ≥ 10 characters, audited
      * with the release when any check did not pass. Ignored for a version with no checks.
+     *
+     * [releasePinnedTemplates] is 142's consent: the DRAFT template versions the body pins
+     * are released in the flip's transaction, templates first, and the result's
+     * `templatesReleased` names them for the surfaces' audit events. False (the default)
+     * keeps the §6 refusal exactly as before.
      */
     open fun release(
         workspaceId: UUID,
@@ -492,7 +497,9 @@ open class PipelineService(
         expectedHash: String,
         actor: UUID,
         overrideChecksReason: String? = null,
-    ): PipelineReleaseService.Released = releases.release(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason)
+        releasePinnedTemplates: Boolean = false,
+    ): PipelineReleaseService.Released =
+        releases.release(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason, releasePinnedTemplates)
 
     /**
      * §5.11 — purge the draft: the row and its executions are deleted (no tombstone since

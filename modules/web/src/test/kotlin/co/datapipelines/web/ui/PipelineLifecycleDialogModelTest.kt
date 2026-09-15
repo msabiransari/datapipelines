@@ -11,6 +11,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.anonymousActors
 import io.kotest.assertions.throwables.shouldThrow
@@ -32,6 +33,7 @@ class PipelineLifecycleDialogModelTest {
     private val templates = mockk<TemplateVersionStatuses>()
     private val exclusive = mockk<ExclusiveDraftTemplates>()
     private val runStats = mockk<PipelineRunStats>()
+    private val usage = mockk<TemplateUsageService>()
 
     private val model =
         PipelineLifecycleDialogModel(
@@ -41,6 +43,7 @@ class PipelineLifecycleDialogModelTest {
             runStats,
             anonymousActors(),
             AuthoringGuard(enabled = true),
+            usage,
         )
 
     @Test
@@ -69,6 +72,78 @@ class PipelineLifecycleDialogModelTest {
         // POST's re-validation is what answers for the malformed draft.
         every { repository.findVersionBody(any(), any(), any()) } returns "not json"
         model.release(WS, ID).hasChecks shouldBe false
+    }
+
+    /** A draft body pinning `t1@1` from two nodes and `t2@1` from a third. */
+    private val twoTemplateBody =
+        """{"name":"test/probe","display_name":"probe","description":"d","nodes":[""" +
+            """{"id":"a","type":"DQL","source":"h2","template":{"id":"test/t1.sql","version":1},"depends_on":[]},""" +
+            """{"id":"b","type":"DQL","source":"h2","template":{"id":"test/t1.sql","version":1},"depends_on":[]},""" +
+            """{"id":"c","type":"DQL","source":"h2","template":{"id":"test/t2.sql","version":1},"depends_on":[]}]}"""
+
+    private fun pin(
+        pipelineId: UUID,
+        version: Int = 1,
+    ) = co.datapipelines.pipeline.TemplatePin(pipelineId, "test/other", version, DRAFT, "n", 1)
+
+    @Test
+    fun `release - 142 - a DRAFT pin is a cascade row with its other-pinner count, not a blocking one`() {
+        every { repository.findById(any(), any()) } returns recordOf(current = 1)
+        every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
+        every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
+        every { templates.statusOf(any(), "test/t1.sql", 1) } returns DRAFT
+        every { templates.statusOf(any(), "test/t2.sql", 1) } returns RELEASED
+        val other = UUID.randomUUID()
+        // t1@1's used-by: THIS pipeline (twice — two nodes) and one other pipeline (twice too).
+        every { usage.usedBy(WS, "test/t1.sql", 1) } returns
+            TemplateUsageService.UsedBy(
+                "test/t1.sql",
+                1,
+                listOf(pin(ID), pin(ID), pin(other), pin(other)),
+                pipelineCount = 2,
+            )
+
+        val dialog = model.release(WS, ID)
+
+        // Two nodes, one pin: the list is per VERSION, and the shared pin counts one other pipeline.
+        dialog.pins.map { it.label } shouldBe listOf("test/t1.sql@1", "test/t2.sql@1")
+        dialog.draftPins.map { it.label } shouldBe listOf("test/t1.sql@1")
+        dialog.draftPins.single().otherPinners shouldBe 1
+        dialog.blockingPins shouldBe emptyList()
+        // The RELEASED pin never asked the used-by service (no count to show).
+        dialog.pins.last().otherPinners shouldBe 0
+    }
+
+    @Test
+    fun `release - 142 - a MISSING or DISCARDED pin still blocks and offers no cascade`() {
+        every { repository.findById(any(), any()) } returns recordOf(current = 1)
+        every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
+        every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
+        every { templates.statusOf(any(), "test/t1.sql", 1) } returns DRAFT
+        every { templates.statusOf(any(), "test/t2.sql", 1) } returns null
+        every { usage.usedBy(WS, "test/t1.sql", 1) } returns
+            TemplateUsageService.UsedBy("test/t1.sql", 1, listOf(pin(ID)), pipelineCount = 1)
+
+        val missing = model.release(WS, ID)
+        missing.blockingPins.map { it.label } shouldBe listOf("test/t2.sql@1")
+        missing.draftPins.map { it.label } shouldBe listOf("test/t1.sql@1")
+        missing.draftPins.single().otherPinners shouldBe 0
+
+        every { templates.statusOf(any(), "test/t2.sql", 1) } returns DISCARDED
+        val discarded = model.release(WS, ID)
+        discarded.blockingPins.map { it.statusLabel } shouldBe listOf("DISCARDED")
+    }
+
+    @Test
+    fun `release - 142 - a used-by miss answers zero other pinners rather than refusing to open`() {
+        every { repository.findById(any(), any()) } returns recordOf(current = 1)
+        every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
+        every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
+        every { templates.statusOf(any(), any(), any()) } returns DRAFT
+        every { usage.usedBy(any(), any(), any()) } throws
+            DatapipelinesException(PipelineErrorCodes.Template.NOT_FOUND, "gone", emptyMap())
+
+        model.release(WS, ID).draftPins.map { it.otherPinners } shouldBe listOf(0, 0)
     }
 
     @Test
@@ -148,6 +223,7 @@ class PipelineLifecycleDialogModelTest {
                 runStats,
                 anonymousActors(),
                 AuthoringGuard(enabled = false),
+                usage,
             )
         val hard = hardened.switch(WS, ID)
         hard.options.first { it.version == 2 }.eligible shouldBe false
