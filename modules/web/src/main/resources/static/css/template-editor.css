@@ -24,9 +24,59 @@
    RIGHT taking the remainder. */
 .te-body {
   display: grid;
-  grid-template-columns: var(--app-detail-width) minmax(0, 1fr);
+  /* 141 §B: the rail's width is the USER's — splitter.js writes --te-side-w onto the root
+     before first paint and remembers it under `dp.pane.template-editor-side`; unset, the
+     fallback IS the shipped --app-detail-width default, so "reset" is "remove the property".
+     The clamp is the stylesheet half of the bounds (splitter.js's SIDE_MIN/SIDE_MAX_SHARE —
+     TemplateEditorSideResizeBrowserTest measures both, so a one-sided change goes red), and
+     it is what pulls a remembered width beyond the ceiling back in even pre-paint. ONE
+     derived length feeds the column and the handle's x, so they cannot disagree. */
+  --te-side-min-w: 220px;
+  --te-side-max-w: 50vw;
+  --te-side-size: clamp(var(--te-side-min-w), var(--te-side-w, var(--app-detail-width)), var(--te-side-max-w));
+  grid-template-columns: var(--te-side-size) minmax(0, 1fr);
   gap: var(--gap-lg);
   min-height: 0;
+  /* 141 §B: the containing block for the resize handle, absolute so it can sit in the
+     gap ON the boundary without being a third grid column. */
+  position: relative;
+}
+
+/* ---- The rail's resize handle (141 §B) ----
+ * The `.tplx-splitter` shape (104 §C). Unlike the explorer there is no border here, so the
+ * 12px hit area is centred in the gap between the rail and the source column. The grip is
+ * a visible pill AT REST (141 §C — a resize nobody can see is a resize nobody uses);
+ * `--border-default` is the 3:1 boundary token, brand stays the hover/focus/drag signal. */
+.te-side-splitter {
+  position: absolute;
+  user-select: none;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--te-side-size) + (var(--gap-lg) / 2) - 6px);
+  width: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.te-side-splitter::after {
+  content: "";
+  width: 3px;
+  height: 40px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--border-default, #d1d5db);
+  transition: background var(--duration-fast, 150ms) ease;
+}
+
+.te-side-splitter:hover::after,
+.te-side-splitter:focus-visible::after,
+.te-body.is-dragging .te-side-splitter::after {
+  background: var(--brand);
 }
 
 .te-rail {

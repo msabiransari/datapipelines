@@ -15,6 +15,11 @@
        the one reader of the double-submit cookie. -->
   <script th:src="@{/js/csrf.js}"></script>
   <script th:src="@{/js/template-editor/lifecycle.js}"></script>
+  <!-- 141 §B: the shared pane splitter. PARSER-BLOCKING and above the markup on purpose —
+       it restores the remembered `--te-side-w` onto <html> BEFORE the rail paints, which is
+       the only way to size a pane without a layout shift now that no inline script is
+       allowed on the page (090's stylesheet lesson, one layer up). -->
+  <script th:src="@{/js/splitter.js}"></script>
 
   <!-- 041 layout: the page is a two-row grid — this header, then a row that fills
        the viewport below the nav. Inside that row: context rail LEFT (the
@@ -147,6 +152,13 @@
         </div>
       </th:block>
     </div>
+
+    <!-- 141 §B — the rail's resize handle, centred in the gap between the rail and the
+         source column. The `.tplx-splitter` contract (104 §C): `role="separator"` with the
+         orientation set here so the control is correct in the DOM the moment it exists;
+         splitter.js keeps aria-valuemin/max/now moving and sets the shared drag/reset hint. -->
+    <div class="te-side-splitter" data-splitter="template-editor-side" role="separator"
+         aria-orientation="vertical" tabindex="0" aria-label="Resize context rail"></div>
 
     <!-- RIGHT: the source column — the editor (~2/3) and, below it sharing the
          width, the preview output (~1/3). Both scroll inside their panes (D2/D3).

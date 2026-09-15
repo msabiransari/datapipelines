@@ -184,6 +184,14 @@
         </div>
       </aside>
 
+      <!-- 141 §B — the sidebar's resize handle, on the sidebar's right border. The
+           `.tplx-splitter` contract (104 §C): `role="separator"` with the orientation set
+           here so the control is correct in the DOM the moment it exists; splitter.js keeps
+           aria-valuemin/max/now moving and sets the shared drag/reset hint. Hidden below
+           1024px, where the sidebar is a drawer and there is no boundary to sit on. -->
+      <div class="pe-sidebar-splitter" data-splitter="editor-sidebar" role="separator"
+           aria-orientation="vertical" tabindex="0" aria-label="Resize settings sidebar"></div>
+
       <!-- The stage (080 §A): dotted grid, cards, bezier edges, minimap, controls,
            legend, keyboard hint. -->
       <section class="pe-stage" aria-label="Pipeline graph">
