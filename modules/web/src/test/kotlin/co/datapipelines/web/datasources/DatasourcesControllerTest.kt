@@ -2,16 +2,19 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
+import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.TableInfo
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -240,6 +243,84 @@ class DatasourcesControllerTest {
             .asText() shouldBe "verify-full"
         json shouldNotContain "\"password\":"
     }
+
+    /**
+     * 138 §B (T293) — the MCP listing has carried `definitions` beside `facts` since 136; the
+     * REST twin appended `facts` to the detail only. Both REST reads now carry both blocks from
+     * the same [FactEnrichment.forListing] read: a WORKSPACE `definition` recorded on a datasource
+     * is in the listing's item AND the detail, and a datasource with nothing recorded carries the
+     * two EMPTY arrays, never absent keys. The enrichment is a real in-memory implementation, not
+     * a strict mock: a missing call must be VISIBLE as a missing key, not as an unstubbed throw.
+     */
+    @Test
+    fun `list and get carry the workspace's definitions beside the facts, from the one enrichment read`() {
+        authenticate()
+        val recorded = listOf(mapOf("kind" to "window", "fact" to "data covers 2024 only", "trust" to "observed"))
+        val definitions = listOf(mapOf("kind" to "definition", "fact" to "rainy = precipitation_mm >= 2.5", "trust" to "asserted"))
+        val enriched =
+            DatasourcesController(
+                registry,
+                rules,
+                registrations,
+                DatasourceUpdateService(registry, rules),
+                enrichmentReturning(recorded, definitions),
+            )
+        every { registry.listVisible(null, workspaceId) } returns listOf(datasource(), datasource().copy(name = "lake-one"))
+        every { registry.getVisible("pg-prod", workspaceId) } returns datasource()
+
+        val items = enriched.list(dialect = null, offset = 0, limit = 10).data.items
+        val one = enriched.get("pg-prod").data
+        val json = mapper.readTree(mapper.writeValueAsString(items[0]))
+
+        assertAll(
+            { items[0]["facts"] shouldBe recorded },
+            { items[0]["definitions"] shouldBe definitions },
+            { items[1]["facts"] shouldBe emptyList<Map<String, Any?>>() },
+            { items[1]["definitions"] shouldBe emptyList<Map<String, Any?>>() },
+            { one["facts"] shouldBe recorded },
+            { one["definitions"] shouldBe definitions },
+            // …and on the wire, not only in the Kotlin map.
+            {
+                json
+                    .get("definitions")
+                    .get(0)
+                    .get("fact")
+                    .asText() shouldBe "rainy = precipitation_mm >= 2.5"
+            },
+        )
+    }
+
+    /** A recording-shaped enrichment: `pg-prod` has both blocks, anything else has neither. */
+    private fun enrichmentReturning(
+        recorded: List<Map<String, Any?>>,
+        definitions: List<Map<String, Any?>>,
+    ): FactEnrichment =
+        object : FactEnrichment {
+            override fun forListing(
+                readerWorkspaceId: UUID,
+                datasource: Datasource,
+            ): FactEnrichment.DatasourceBlocks =
+                if (datasource.name == "pg-prod") {
+                    FactEnrichment.DatasourceBlocks(recorded, definitions)
+                } else {
+                    FactEnrichment.DatasourceBlocks.EMPTY
+                }
+
+            override fun forTables(
+                readerWorkspaceId: UUID,
+                datasource: Datasource,
+                tables: List<TableInfo>,
+                complete: Boolean,
+            ): Map<String, List<Map<String, Any?>>> = emptyMap()
+
+            override fun forColumns(
+                readerWorkspaceId: UUID,
+                datasource: Datasource,
+                table: String,
+                namespace: List<String>?,
+                columns: List<ColumnInfo>,
+            ): Map<String, List<Map<String, Any?>>> = emptyMap()
+        }
 
     @Test
     fun `get returns the redacted entity, and an unknown name is datasource-not_found`() {
