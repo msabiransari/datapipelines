@@ -191,6 +191,29 @@ class RoleModelTest {
         RoleModel.roles(null) shouldBe RoleModel.NONE
     }
 
+    /**
+     * 143 — found by JarSmokeE2eTest the moment the template editor opened to readers: the
+     * auth predicates `isAuthor`/`isPromoter` short-circuit on `superAdmin` BEFORE their key
+     * conjunct, so a super admin's `read` key rendered as an author (a textarea, Preview) on
+     * a page whose writes the interceptor refuses on the scope axis. This class promises
+     * every boolean narrows by the key's scope; the promise is kept here for those two rungs.
+     */
+    @Test
+    fun `a super admin's read key renders as a reader on every rung`() {
+        val roles = RoleModel.roles(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.READ, superAdmin = true))
+
+        roles.canRead shouldBe true
+        roles.canExecute shouldBe false
+        roles.canAuthor shouldBe false
+        roles.canPromote shouldBe false
+        roles.canAdminWorkspace shouldBe false
+        roles.isSuperAdmin shouldBe false
+        // The badge stays the owner's authority (documented at the branch), not the key's reach.
+        roles.roleLabel shouldBe "super admin"
+        RoleModel.shell(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.READ, superAdmin = true)) shouldBe
+            RoleModel.Shell(adminUsers = false, adminMembers = false)
+    }
+
     // ---------------------------------------------------------------- the shell (143)
 
     /**

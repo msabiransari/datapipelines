@@ -74,8 +74,15 @@ object RoleModel {
         val flags = principal.workspace?.flags ?: return NONE
         // A member is a member: VIEW and EXECUTE are satisfied by every row (D-R3, "viewers
         // execute"), so the only question left on those two rungs is the credential's scope.
-        val canAuthor = principal.isAuthor
-        val canPromote = principal.isPromoter
+        //
+        // 143: the scope conjunct is stated HERE for author and promoter too. The auth
+        // predicates carry it, but they short-circuit on `superAdmin` before reaching it, so
+        // a super admin's `read` key answered "author" — and, once the template editor opened
+        // to readers, was drawn a textarea on a page whose writes the interceptor refuses on
+        // the scope axis (found by JarSmokeE2eTest). The screen must not offer what the key
+        // cannot do; the predicate itself is the auth module's and is not touched.
+        val canAuthor = principal.isAuthor && principal.scopeReaches(Scope.AUTHOR)
+        val canPromote = principal.isPromoter && principal.scopeReaches(Scope.AUTHOR)
         return Roles(
             canRead = Capability.VIEW.satisfiedBy(flags) && principal.scopeReaches(Scope.READ),
             canExecute = Capability.EXECUTE.satisfiedBy(flags) && principal.scopeReaches(Scope.EXECUTE),
