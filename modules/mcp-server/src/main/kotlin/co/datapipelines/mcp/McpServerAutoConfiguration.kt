@@ -51,6 +51,25 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
+    /**
+     * 139 — the entry-point checks, built by the 037 discipline: stateless over collaborators
+     * [mcpTools] already holds, so the tools cannot describe a gate the server does not ship. The
+     * audit-log reader is the SAME metadata jdbc the mcpCallAudit bean wraps. Its own function
+     * because [mcpTools] sits at detekt's LongMethod ceiling (139 and 140 each grew it).
+     */
+    private fun entryPointChecks(
+        jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate,
+        templates: TemplateRepository,
+        introspector: SchemaIntrospector,
+        datasources: DatasourceRegistry,
+    ): Pair<TableLearningCheck, TemplateRenderFreshness> {
+        val learnings =
+            co.datapipelines.application.mcp
+                .McpToolLearnings(jdbc)
+        return TableLearningCheck(templates, introspector, datasources, learnings) to
+            TemplateRenderFreshness(templates, learnings)
+    }
+
     /** The 41 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
@@ -127,15 +146,7 @@ class McpServerAutoConfiguration {
         // same discipline: stateless over (templates, authoring), so inline construction adds no
         // wiring and the tool cannot describe a write path the server does not ship.
         val templateDrafts = co.datapipelines.templates.TemplateDraftService(templates, authoring)
-        // 139 — the entry-point checks, built inline by the 037 discipline: stateless over
-        // collaborators this method already holds, so the tools cannot describe a gate the
-        // server does not ship. The audit-log reader is the SAME metadata jdbc the
-        // mcpCallAudit bean wraps.
-        val learnings =
-            co.datapipelines.application.mcp
-                .McpToolLearnings(jdbc)
-        val tableLearning = TableLearningCheck(templates, introspector, datasources, learnings)
-        val renderFreshness = TemplateRenderFreshness(templates, learnings)
+        val (tableLearning, renderFreshness) = entryPointChecks(jdbc, templates, introspector, datasources)
         return listOf(
             PipelinesListTool(pipelineService, pipelines),
             PipelinesGetTool(pipelineService, usage),
