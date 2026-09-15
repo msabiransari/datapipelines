@@ -13,9 +13,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
-import org.testcontainers.utility.MountableFile
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -209,7 +206,6 @@ class OidcLoginIntegrationTest {
         val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(20)
 
         const val MAX_HOPS = 10
-        const val KEYCLOAK_PORT = 8080
         const val SECRET_BYTES = 32
 
         /**
@@ -224,45 +220,11 @@ class OidcLoginIntegrationTest {
         @JvmStatic
         val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
 
-        // The module's shared, already-started container: any @DynamicPropertySource
-        // supplier resolves it lazily, so no explicit static-init ordering is needed for
-        // the database. Keycloak stays this suite's own container and keeps the explicit
-        // start below — the provider is the test's subject and nothing else uses it.
+        // The module's shared, already-started containers: any @DynamicPropertySource
+        // supplier resolves them lazily, so no explicit static-init ordering is needed.
+        // Keycloak is shared too (SharedKeycloak): this suite's provider is the
+        // `datapipelines` realm, a namespace no other suite logs into.
         val postgres get() = SharedPostgres.postgres
-
-        @JvmStatic
-        val keycloak: GenericContainer<*> =
-            GenericContainer("quay.io/keycloak/keycloak:26.0")
-                .withExposedPorts(KEYCLOAK_PORT)
-                .withCopyFileToContainer(
-                    MountableFile.forClasspathResource("keycloak/realm-datapipelines.json"),
-                    "/opt/keycloak/data/import/realm-datapipelines.json",
-                ).withCommand("start-dev", "--import-realm")
-                // Reuse-declared like the shared containers (DEVELOPMENT.md): a no-op
-                // unless the local opt-in is set, and a ~40 s Keycloak boot saved when
-                // it is. The realm import re-runs nothing on reuse — the realm persists.
-                .withReuse(true)
-                .waitingFor(
-                    Wait
-                        .forHttp("/realms/datapipelines/.well-known/openid-configuration")
-                        .forPort(KEYCLOAK_PORT)
-                        .forStatusCode(200)
-                        // Generous, and raised from 10 minutes in 083 §C because 10 was not
-                        // generous enough: this container's boot is set by the BOX, not by us
-                        // — Quarkus augmentation plus a realm import, CPU-heavy, while other
-                        // lanes' Testcontainers compete for the same cores. Measured on a
-                        // loaded box: ~11 minutes, which timed out here and turned a green
-                        // suite into `initializationError`. Twenty minutes is roughly twice
-                        // the worst boot observed. The cost of the ceiling being high is that
-                        // a genuinely broken container stalls a gate for 20 minutes; the cost
-                        // of it being low is a red gate every time the box is busy, which is
-                        // the failure this round exists to remove.
-                        .withStartupTimeout(Duration.ofMinutes(20)),
-                )
-
-        init {
-            keycloak.start()
-        }
 
         @JvmStatic
         @DynamicPropertySource
@@ -280,9 +242,9 @@ class OidcLoginIntegrationTest {
             registry.add("datapipelines.auth.oidc.providers[0].name") { "keycloak" }
             registry.add("datapipelines.auth.oidc.providers[0].client-id") { "dp-client" }
             registry.add("datapipelines.auth.oidc.providers[0].client-secret") { "dp-secret" }
-            // Lazy — the mapped port only exists after the container has started.
+            // Lazy — the mapped port only exists after the shared container has started.
             registry.add("datapipelines.auth.oidc.providers[0].issuer-uri") {
-                "http://${keycloak.host}:${keycloak.getMappedPort(KEYCLOAK_PORT)}/realms/datapipelines"
+                SharedKeycloak.issuerUri("datapipelines")
             }
             registry.add("datapipelines.auth.oidc.providers[0].display-name") { "Company SSO" }
         }

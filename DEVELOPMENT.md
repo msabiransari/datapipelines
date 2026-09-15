@@ -523,11 +523,15 @@ lane-local state and never reaches anyone's demo.
 
 ### 9.1 One container per module, not per suite
 
-Each module's integration suites share ONE container per engine for the whole test JVM (a `SharedPostgres` / `SharedRedis` / `SharedE2e` singleton in the module's test sources). The container starts on first touch, is reset to an empty database, and — in the domain modules — the shipped migrations are applied once; `app` and the E2E module let the first Spring context's Flyway do it, exactly as production boots.
+Each module's integration suites share ONE container per engine for the whole test JVM (a `SharedPostgres` / `SharedRedis` / `SharedE2e` singleton in the module's test sources; `auth` also has `SharedKeycloak`, `datasources` `SharedMysql`, and `SharedE2e` carries the lake suites' MinIO). The container starts on first touch, is reset to an empty state (databases dropped, buckets deleted, Redis flushed), and — in the domain modules — the shipped migrations are applied once; `app` and the E2E module let the first Spring context's Flyway do it, exactly as production boots.
+
+A JVM-static singleton is one container per *fork*: with `dp.test.forks=3` (§9.5) a module's suites are split across three JVMs, so two suites share a boot only when Gradle lands them in the same fork. CI runs `dp.test.forks=1`, where the sharing is certain — and CI's 2-vCPU runner is where a Keycloak or MySQL boot is slowest.
 
 Sharing is safe because of a rule the suites already follow: **each spec cleans the tables it touches** (`TRUNCATE ... CASCADE` plus re-seed) instead of relying on a fresh container, and E2E seeds carry suite-unique identities. When you add an integration suite:
 
-- reference the module's shared container — never declare a per-class `@Container` for Postgres/Redis;
+- reference the module's shared container — never declare a per-class `@Container` for Postgres, Redis, MySQL (`datasources`), Keycloak (`auth`) or MinIO (`tests/integration-tests`);
+- a per-class container is for a suite whose SUBJECT is the separate instance — a second deployment (`PromotionTwoDeploymentE2eTest`), a fresh-install walkthrough (`SampleDataBootstrapE2eTest`), a private Redis whose pub/sub the suite kills or counts, an engine pinned to the compose stack's exact image — and its KDoc says so;
+- a shared Keycloak means the realm fixtures are read-only: a suite that must create or edit users, clients or sessions through the admin API declares its own container;
 - clean what you touch, and give your seeds identities no other suite uses (emails, ids, names);
 - if your assertions are global (exact-set listings, whole-table counts) or your suite re-seeds the shared `acme`/`globex` fixture world, call `E2eClean.beforeSeeding()` from your first-test seed hook;
 - if you need the schema in a partial migration state, take `SharedPostgres.scratchDatabase("your_name")` — a fresh empty database on the same container.
@@ -545,7 +549,9 @@ The shared containers declare `withReuse(true)`. This is a **no-op** unless you 
 testcontainers.reuse.enable=true
 ```
 
-With the opt-in, the containers survive Gradle runs, saving their cold starts (Postgres ~4 s; the auth module's Keycloak ~22 s). The shared objects drop and recreate their database (and FLUSHALL Redis) at first touch of every run, so a reused container behaves exactly like a fresh one — yesterday's rows cannot leak into today's assertions.
+With the opt-in, the containers survive Gradle runs, saving their cold starts (Postgres ~4 s; MySQL ~8 s; the auth module's Keycloak ~20 s). The shared objects drop and recreate their database (FLUSHALL Redis, delete every bucket) at first touch of every run, so a reused container behaves exactly like a fresh one — yesterday's rows cannot leak into today's assertions.
+
+**Never enable it on a box running parallel lanes.** Reuse keys a container by its configuration hash, so two worktrees running the same module land on ONE container — and each JVM's first touch drops every database on it, mid-run for the other lane. The opt-in is for a single-lane laptop only.
 
 The one trap: a container left wedged by a **killed** run (Ryuk never reaped it) keeps its old database reset working but may hold stale ports or state. When in doubt, remove it and let the next run start clean:
 

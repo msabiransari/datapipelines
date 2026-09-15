@@ -7,9 +7,6 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.testcontainers.containers.MySQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
 import java.sql.SQLException
 
@@ -42,7 +39,6 @@ import java.sql.SQLException
  * driver needs `-Pmysql`, the test one does not), and round 087's fence permits `modules/dag`
  * only for `SqlIdentifiers` and its call sites.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MysqlIdentifierQuotingIntegrationTest {
     @Test
@@ -66,6 +62,8 @@ class MysqlIdentifierQuotingIntegrationTest {
             }
 
             connection.createStatement().use {
+                // Clean what this suite touches (SharedMysql's rule): the server is shared.
+                it.execute("DROP TABLE IF EXISTS ${adapter.quoteIdentifier("orders")}")
                 it.execute("CREATE TABLE ${adapter.quoteIdentifier("orders")} (${adapter.quoteIdentifier("order")} INT, id INT)")
             }
 
@@ -94,11 +92,9 @@ class MysqlIdentifierQuotingIntegrationTest {
 
     private companion object {
         /**
-         * The same image [DialectConnectivityIntegrationTest] uses. `sql_mode` is deliberately
-         * NOT configured: the defect is about what a stock server does.
+         * The module's shared MySQL (the same stock image, `sql_mode` deliberately NOT
+         * configured: the defect is about what a stock server does — asserted above).
          */
-        @Container
-        @JvmStatic
-        val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4").apply { start() }
+        val mysql get() = SharedMysql.mysql
     }
 }

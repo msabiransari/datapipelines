@@ -9,9 +9,6 @@ import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.assertAll
-import org.testcontainers.containers.MySQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.Connection
 import java.sql.DriverManager
 
@@ -21,12 +18,12 @@ import java.sql.DriverManager
  * type-system.md §5 table for that dialect) maps a real `ResultSetMetaData` column. Proves the
  * adapter → HikariCP → driver → typesystem wiring end to end.
  *
- * Postgres and MySQL live here because both publish arm64 images and start natively everywhere.
- * **MSSQL is in [MssqlConnectivityIntegrationTest]**, which carries the same probe behind a host
- * architecture gate — see that class for why it cannot share this one's `@Container` lifecycle.
+ * Postgres and MySQL live here because both publish arm64 images and start natively everywhere —
+ * both on the module's shared containers ([SharedPostgres], [SharedMysql]). **MSSQL is in
+ * [MssqlConnectivityIntegrationTest]**, which carries the same probe behind a host architecture
+ * gate — see that class for why it starts its own container only after the gate has passed.
  * Oracle needs `-Poracle`; its absence is covered by the `driver_not_loaded` unit case instead.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DialectConnectivityIntegrationTest {
     @Test
@@ -77,6 +74,9 @@ class DialectConnectivityIntegrationTest {
     fun `mysql introspection routes an underscore-named database through the literal catalog`() {
         DriverManager.getConnection(mysql.jdbcUrl, mysql.username, mysql.password).use { connection ->
             connection.createStatement().use {
+                // Clean what this suite touches (SharedMysql's rule): the server is shared.
+                it.execute("DROP TABLE IF EXISTS routed_orders")
+                it.execute("DROP TABLE IF EXISTS annotated_orders")
                 it.execute("CREATE TABLE routed_orders (id INT PRIMARY KEY)")
                 // The remarks pair: a table AND a column carrying a real COMMENT beside an
                 // uncommented sibling — Connector/J reports REMARKS as "" for the uncommented
@@ -168,20 +168,7 @@ class DialectConnectivityIntegrationTest {
          */
         val postgres get() = SharedPostgres.postgres
 
-        /** `my_app` on purpose: the underscore-named database is what catches an escaped
-         *  catalog argument (a literal must match the stored name exactly). One container,
-         * one suite, one subject — MySQL stays per-class. */
-        @Container
-        @JvmStatic
-        val mysql: MySQLContainer<*> =
-            MySQLContainer("mysql:8.4")
-                .withDatabaseName("my_app")
-                // Testcontainers' DEFAULT startup wait is 60 s, and MySQL's first boot
-                // (initialising the data directory) does not fit in it on a box running
-                // several lanes' containers — this suite failed a full gate with
-                // `Could not create new connection` while the server was still starting
-                // (083, found by the round's own gate). A startup ceiling is not a
-                // performance assertion; the boot's duration belongs to the machine.
-                .withStartupTimeout(java.time.Duration.ofMinutes(5))
+        /** The module's shared MySQL — `my_app`, underscore-named on purpose (SharedMysql's KDoc). */
+        val mysql get() = SharedMysql.mysql
     }
 }

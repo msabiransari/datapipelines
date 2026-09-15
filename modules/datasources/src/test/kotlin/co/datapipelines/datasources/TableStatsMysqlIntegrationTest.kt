@@ -14,9 +14,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.assertAll
-import org.testcontainers.containers.MySQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.Connection
 import java.sql.DriverManager
 
@@ -26,7 +23,6 @@ import java.sql.DriverManager
  * by ANALYZE TABLE — and `information_schema.statistics` orders a composite key by
  * `seq_in_index`. MySQL's catalog routing means the schema bind is the DATABASE.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TableStatsMysqlIntegrationTest {
     /** Built lazily — the container's JDBC URL exists only after it starts. */
@@ -121,12 +117,7 @@ class TableStatsMysqlIntegrationTest {
     }
 
     private companion object {
-        /** One container, one suite — the DialectConnectivityIntegrationTest rationale applies. */
-        @Container
-        @JvmStatic
-        val mysql: MySQLContainer<*> =
-            MySQLContainer("mysql:8.4")
-                .withDatabaseName("my_app")
-                .withStartupTimeout(java.time.Duration.ofMinutes(5))
+        /** The module's shared MySQL; `stats_probe` is dropped before and after every test. */
+        val mysql get() = SharedMysql.mysql
     }
 }
