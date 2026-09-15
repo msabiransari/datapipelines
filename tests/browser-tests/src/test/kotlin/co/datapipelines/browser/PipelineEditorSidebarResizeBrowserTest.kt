@@ -283,9 +283,16 @@ class PipelineEditorSidebarResizeBrowserTest : BrowserSuite() {
         loginReadyUser()
         val name = "side/narrow/" + generatedPassword("p").take(8).lowercase()
         seedPipeline(name) shouldBe 201
-        page.setViewportSize(390, 844)
-        page.addInitScript("window.localStorage.setItem('dp.pane.editor-sidebar', '600');")
+        page.setViewportSize(1440, 900)
+        // The editor URL comes from the desktop flow (at 390px the explorer's tree is a
+        // drawer and its leaf is off-canvas); the narrow window is the SECOND open of the
+        // editor, which is the real scenario — a width remembered on the desktop meets a
+        // phone. The remembered 600px is seeded before that navigation.
         openEditorFor(name)
+        page.addInitScript("window.localStorage.setItem('dp.pane.editor-sidebar', '600');")
+        page.setViewportSize(390, 844)
+        page.navigate(editorUrl)
+        page.locator(".pe-sidebar").waitFor()
         val m = read()
         // THE falsification for the cascade order: the ≤1024px collapse (`0 1fr`) sits AFTER
         // the property-sized column in the stylesheet. If it ever sits before it, a remembered
