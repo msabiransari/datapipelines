@@ -190,9 +190,15 @@ class ApiErrorCatalogSpecDriftTest {
          * 175 → 176 with 125 §B (a fact names real tables): §13.15 gains
          * `semantics.ref_mismatch` (400 — the fact's text names a table its `refs` do not),
          * landed in the SAME commit as its constants (both sides of the datasources mirror)
-         * and its catalog row. Re-derived from the document's own parse.
+         * and their catalog rows. Re-derived from the document's own parse.
+         *
+         * 176 → 177 with 139 (the MCP entry-point checks): §13.3 gains
+         * `pipeline.execution.template_unrendered` (400 — the execute request is premature,
+         * nothing ran; wired explicitly in [ApiErrorCatalog] EXCEPTIONS against the family's
+         * 500 default), landed in the SAME commit as its constant and its catalog row.
+         * Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 176
+        const val SECTION_13_ROW_COUNT = 177
 
         /**
          * §12's distinct validation codes.
@@ -215,7 +221,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 61 → 64 with 121 (calculator multi-output): §12.10's three mapping rules
          * (`calculator_output_shape_mismatch`, `calculator_output_unknown`,
          * `calculator_outputs_incomplete`), landed in the SAME commit-chain as their constants.
+         *
+         * 64 → 66 with 139 (the MCP entry-point checks): §12.11's two gates
+         * (`pipeline.validation.table_not_learned`, `pipeline.validation.door_unacknowledged`),
+         * both 400 like the family default, landed in the SAME commit as their constants.
+         * Re-derived from the document's own parse.
          */
-        const val SECTION_12_CODE_COUNT = 64
+        const val SECTION_12_CODE_COUNT = 66
     }
 }

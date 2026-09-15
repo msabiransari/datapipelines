@@ -110,6 +110,10 @@ object ApiErrorCatalog {
             // §13.3 / 121 — a proper subset of a multi-output node's keys: 400 like its
             // invalid_parameter_type sibling — the execute input is not acceptable, nothing ran.
             PipelineErrorCodes.Execution.CALCULATOR_KEYS_PARTIAL to HttpStatus.BAD_REQUEST,
+            // §13.3 / 139 — the MCP entry-point render check: a draft whose pinned draft
+            // template postdates the key's last render. 400 — the execute request is premature,
+            // nothing ran; the fix is the caller's (templates_render).
+            PipelineErrorCodes.Execution.TEMPLATE_UNRENDERED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Execution.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
             PipelineErrorCodes.Execution.CONCURRENCY_LIMIT to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Execution.NOT_RUNNING to HttpStatus.CONFLICT,
