@@ -212,6 +212,11 @@ class WebsiteFactsGuardTest {
                 lakeTableRegistryService = mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
                 cancellationService = mockk<co.datapipelines.executor.ExecutionCancellationService>(),
                 mcpCallAudit = mockk<co.datapipelines.application.mcp.McpCallAudit>(),
+                // 139 — the entry-point checks' audit reader; never queried by this guard.
+                jdbc =
+                    org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(
+                        mockk<javax.sql.DataSource>(),
+                    ),
                 auditSink = mockk<co.datapipelines.auth.AuditEventSink>(),
                 semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
                 factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,

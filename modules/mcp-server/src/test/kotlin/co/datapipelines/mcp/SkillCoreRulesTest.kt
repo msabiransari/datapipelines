@@ -156,6 +156,27 @@ class SkillCoreRulesTest {
         assertClause("is the one to reuse")
     }
 
+    /** 139 §A — learn-before-you-write is now a server refusal, and step 1 says so. */
+    @Test
+    fun `step 1 says the server refuses a pipeline naming a table the key never read - 139 A`() {
+        assertClause("naming a table you never `_get_columns`'d is refused")
+        assertClause("`pipeline.validation.table_not_learned` — the refusal lists the calls")
+    }
+
+    /** 139 §B — render-before-you-run is now a server refusal, and step 5 says so. */
+    @Test
+    fun `step 5 says pipelines_execute refuses an unrendered draft template - 139 B`() {
+        assertClause("updated after its last render")
+        assertClause("`pipeline.execution.template_unrendered`) — render, then run")
+    }
+
+    /** 139 §C — the door flag is a decision; passing it to silence the refusal is the miss. */
+    @Test
+    fun `rule 13 says the raw-date door needs door_acknowledged and only honestly - 139 C`() {
+        assertClause("refused until you pass `door_acknowledged: true`")
+        assertClause("passing it to silence the refusal is the miss it exists to catch")
+    }
+
     /**
      * 126 §A.3 — step 1's first sentence makes the listing the learn-first read: the facts
      * arrive on the call the agent already makes, so "call `datasources_get` for every

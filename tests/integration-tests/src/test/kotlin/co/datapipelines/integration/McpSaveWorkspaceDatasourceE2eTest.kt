@@ -175,6 +175,17 @@ class McpSaveWorkspaceDatasourceE2eTest {
     @Test
     @Order(4)
     fun `pipelines_execute over MCP runs what MCP saved - the two halves agree`() {
+        // 139's render-before-you-run check is live at the entry point now, so the loop runs
+        // it: render the pinned draft template, then execute. (Before 139 this leg executed an
+        // unrendered draft and passed — the exact miss the check exists to catch.)
+        val (rendered, renderError) =
+            callTool(
+                30,
+                "templates_render",
+                mapOf("id" to TEMPLATE_ID, "version" to 1, "context" to emptyMap<String, Any>()),
+            )
+        withClue("render must succeed: $rendered") { renderError shouldBe false }
+
         val (payload, isError) = callTool(3, "pipelines_execute", mapOf("id" to mcpPipelineId, "parameters" to emptyMap<String, Any>()))
 
         withClue("execute must succeed: $payload") { isError shouldBe false }

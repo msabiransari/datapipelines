@@ -445,4 +445,48 @@ class McpToolDispatcherTest {
     }
 
     private fun dispatcher(vararg tools: McpTool) = McpToolDispatcher(tools.toList(), auditLogger)
+
+    /**
+     * 139 — the table-level identifiers the entry-point checks learn from: the schema tools'
+     * rows carry `table` (+ `namespace` segments) beside the `target` datasource, and
+     * `templates_render` rows carry `template`. Identifier-shaped only; the render `context`
+     * is never read.
+     */
+    @Test
+    fun `schema and render rows carry the table and template identifiers the checks learn from`() {
+        val sink = RecordingAuditSink()
+        val dispatcher =
+            McpToolDispatcher(
+                listOf(
+                    SpyTool("datasources_get_columns"),
+                    SpyTool("datasources_get_table_stats"),
+                    SpyTool("templates_render"),
+                ),
+                sink,
+            )
+        val ctx = McpFixtures.ctx(Scope.READ)
+
+        dispatcher.call(
+            McpFixtures.request(
+                "datasources_get_columns",
+                mapOf("name" to "sample-lake", "table" to "trips", "namespace" to listOf("a1", "sales")),
+            ),
+            ctx,
+        )
+        dispatcher.call(
+            McpFixtures.request("templates_render", mapOf("id" to "test/t.sql", "version" to 3, "context" to mapOf("secret" to "value"))),
+            ctx,
+        )
+
+        val columnsRow = sink.calls().single { it.details["tool"] == "datasources_get_columns" }
+        val renderRow = sink.calls().single { it.details["tool"] == "templates_render" }
+        assertAll(
+            { columnsRow.details["target"] shouldBe "sample-lake" },
+            { columnsRow.details["table"] shouldBe "trips" },
+            { columnsRow.details["namespace"] shouldBe listOf("a1", "sales") },
+            { renderRow.details["template"] shouldBe "test/t.sql" },
+            { renderRow.details["version"] shouldBe 3 },
+            { sink.rows.toString() shouldNotContain "secret" },
+        )
+    }
 }

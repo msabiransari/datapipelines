@@ -222,6 +222,7 @@ class PipelineExecuteToolTest {
     @Test
     fun `an explicit version executes that version's stored snapshot`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 7)
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 3) } returns McpFixtures.pipelineBody(name = "v3_snapshot")
         val request = slot<ExecuteRequest>()
         coEvery { executor.execute(capture(request)) } returns result(resultRef = null)

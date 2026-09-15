@@ -52,6 +52,11 @@ fun realShippedTools(): List<McpTool> {
         lakeTableRegistryService = mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
         cancellationService = mockk<co.datapipelines.executor.ExecutionCancellationService>(),
         mcpCallAudit = mockk<co.datapipelines.application.mcp.McpCallAudit>(),
+        // 139 — the entry-point checks' audit reader; a bare mock jdbc is fine, the tools
+        // under these tests never reach the queries.
+        jdbc =
+            org.springframework.jdbc.core.namedparam
+                .NamedParameterJdbcTemplate(mockk<javax.sql.DataSource>()),
         auditSink = mockk<co.datapipelines.auth.AuditEventSink>(),
         semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
         factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,

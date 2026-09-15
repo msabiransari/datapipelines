@@ -41,6 +41,9 @@ internal const val NAME_ARG_DESC: String =
  * of the boundary: a service must not know what a tool result looks like.
  */
 internal object PipelineToolPayloads {
+    /** The body parser both write tools run the entry-point checks against (139). */
+    internal val bodyParser = co.datapipelines.pipeline.PipelineDeserializer()
+
     /**
      * Assembles the §3 body from the tool arguments.
      *
@@ -133,6 +136,11 @@ class PipelinesCreateTool(
      * the roots the agent would have seen had it looked first.
      */
     private val tree: PipelineRepository,
+    /**
+     * 139's table-learning check. Null only outside the assembled application (the launcher
+     * precedent) — wherever the tools exist, the autoconfiguration has wired it.
+     */
+    private val tableLearning: TableLearningCheck? = null,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -147,9 +155,13 @@ class PipelinesCreateTool(
                     "nodes bind as :context_key — call calculators_list first for the kinds and their input names, and " +
                     "remember that a node referencing another node's context_key must depend_on it. A NEW top-level " +
                     "folder is refused until you confirm it: reuse an existing root, or ask the person first and " +
-                    "then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and " +
-                    "version 1, which lands as a DRAFT: run it straight away, then STOP — a human releases it from " +
-                    "the UI, and no tool releases anything.",
+                    "then pass confirm_new_root: true. The server checks what you learned: a body whose template " +
+                    "names a table this key never datasources_get_columns'd is refused " +
+                    "pipeline.validation.table_not_learned with the clearing calls listed, and a raw-date door (two " +
+                    "DATE parameters, no period parameter, no window calculator) is refused " +
+                    "pipeline.validation.door_unacknowledged until you pass door_acknowledged: true. Returns the " +
+                    "created pipeline with server-assigned id and version 1, which lands as a DRAFT: run it straight " +
+                    "away, then STOP — a human releases it from the UI, and no tool releases anything.",
             schema = SCHEMA,
         )
 
@@ -165,12 +177,18 @@ class PipelinesCreateTool(
             confirmed = args.boolean(NewRootConfirmation.ARG),
             code = PipelineErrorCodes.Validation.NEW_ROOT_REQUIRES_CONFIRMATION,
         ) { tree.listFolder(workspaceId).folders.map { it.segment } }
+        // 139 §C then §A — the entry-point checks, before any write: the door first (a pure
+        // read of the body being saved), then the table-learning read (catalog + audit rows).
+        val bodyJson = PipelineToolPayloads.bodyJson(args)
+        val parsed = PipelineToolPayloads.bodyParser.readOrThrow(bodyJson)
+        DoorAcknowledgment.require(parsed, args.boolean(DoorAcknowledgment.ARG))
+        tableLearning?.require(workspaceId, ctx.principal.keyId, parsed)
         // The authoring capability check (versioning §5.5), the §12 validation and the write are
         // all PipelineService.create's — the same call PUT /pipelines makes.
         val saved =
             pipelines.create(
                 workspaceId,
-                PipelineToolPayloads.bodyJson(args),
+                bodyJson,
                 ctx.principal.userId,
                 // The MCP surface stamp (V20): MCP is API-key-authenticated, so only the tool
                 // knows the write arrived over MCP — the auth method alone cannot tell.
@@ -194,7 +212,8 @@ class PipelinesCreateTool(
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
                 "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
-                "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"}
+                "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"},
+                "door_acknowledged": {"type": "boolean", "description": "${DoorAcknowledgment.ARG_DESC}"}
               },
               "additionalProperties": false
             }
@@ -216,9 +235,15 @@ class PipelinesCreateTool(
  * caller read (from `pipelines_get` or a previous update's result) — the precondition that
  * makes two writers (two agents, an agent and a human, two tabs) never silently overwrite
  * each other; on `pipeline.version.conflict`, re-read and rebase, never retry blindly.
+ *
+ * 139: the entry-point checks run here exactly as at create — [DoorAcknowledgment] (the
+ * `door_acknowledged` flag, an update CAN change a body's parameters, unlike its name) and
+ * [TableLearningCheck] — both before the draft write.
  */
 class PipelinesUpdateTool(
     private val pipelines: PipelineService,
+    /** 139's table-learning check — null only outside the assembled application. */
+    private val tableLearning: TableLearningCheck? = null,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -230,7 +255,10 @@ class PipelinesUpdateTool(
                     "edit on. The result carries status='DRAFT' — your work is NOT released; a human releases it from " +
                     "the UI. On pipeline.version.conflict someone modified it after you loaded it: re-read, rebase, " +
                     "retry; never retry blindly. The body takes the same node types as pipelines_create, CALCULATOR " +
-                    "included (calculators_list has the kinds); no extra arguments are needed for one.",
+                    "included (calculators_list has the kinds); no extra arguments are needed for one. The same " +
+                    "entry-point checks apply: a body naming a table this key never datasources_get_columns'd is " +
+                    "refused pipeline.validation.table_not_learned, and a raw-date door is refused " +
+                    "pipeline.validation.door_unacknowledged until door_acknowledged: true.",
             schema = SCHEMA,
         )
 
@@ -239,11 +267,16 @@ class PipelinesUpdateTool(
         ctx: McpToolContext,
     ): Any {
         val id: UUID = args.requiredUuid("id")
+        // 139 §C then §A — the same entry-point checks pipelines_create runs, before the write.
+        val bodyJson = PipelineToolPayloads.bodyJson(args)
+        val parsed = PipelineToolPayloads.bodyParser.readOrThrow(bodyJson)
+        DoorAcknowledgment.require(parsed, args.boolean(DoorAcknowledgment.ARG))
+        tableLearning?.require(ctx.principal.requireWorkspace().id, ctx.principal.keyId, parsed)
         val saved =
             pipelines.update(
                 workspaceId = ctx.principal.requireWorkspace().id,
                 pipelineId = id,
-                bodyJson = PipelineToolPayloads.bodyJson(args),
+                bodyJson = bodyJson,
                 expectedHash = args.requiredString("expected_hash"),
                 actor = ctx.principal.userId,
                 via = WriteSurface.MCP,
@@ -268,7 +301,8 @@ class PipelinesUpdateTool(
                 "description": {"type": "string"},
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
-                "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"}
+                "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
+                "door_acknowledged": {"type": "boolean", "description": "${DoorAcknowledgment.ARG_DESC}"}
               },
               "additionalProperties": false
             }

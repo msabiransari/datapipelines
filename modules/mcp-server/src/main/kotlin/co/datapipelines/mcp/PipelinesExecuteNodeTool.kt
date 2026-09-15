@@ -43,6 +43,11 @@ class PipelinesExecuteNodeTool(
     private val resolver: NodeSqlResolver,
     private val datasources: DatasourceRegistry,
     private val runner: SqlRunner,
+    /**
+     * 139 §B — the render-freshness check on the ONE node's pin, when the version this run
+     * resolved to is a DRAFT. Null only outside the assembled application.
+     */
+    private val renderFreshness: TemplateRenderFreshness? = null,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -55,7 +60,8 @@ class PipelinesExecuteNodeTool(
                     "Parameters bind through the pipeline's declarations; unsupplied required parameters fall " +
                     "back to sample values and the response names them in sampled_parameters. Absent version " +
                     "runs the DRAFT if one exists, else the current released version; the response states which " +
-                    "version and status ran.",
+                    "version and status ran. A draft whose pinned draft template was updated after this key's last " +
+                    "templates_render of it is refused pipeline.execution.template_unrendered — render, then run.",
             schema =
                 """
                 {
@@ -157,6 +163,12 @@ class PipelinesExecuteNodeTool(
             }
 
             is NodeSqlResolution.Rendered -> {
+                renderFreshness?.require(
+                    ctx.principal.requireWorkspace().id,
+                    ctx.principal.keyId,
+                    resolution.version,
+                    listOf(resolution.node),
+                )
                 run(resolution, ctx)
             }
         }
