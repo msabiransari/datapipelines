@@ -68,7 +68,7 @@
   </th:block>
 
   <!-- EDITABLE: the working version, which is the only edit target there is. -->
-  <th:block th:unless="${readOnly}">
+  <th:block th:if="${canAuthor == true and !readOnly}">
     <div class="te-panel-head">
       <h2>Template Source</h2>
       <span class="ds-caption">Freemarker</span>

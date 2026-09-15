@@ -163,6 +163,18 @@ class ViewerEditorRenderTest {
             )
     }
 
+    @Test
+    fun `a missing template never gives a reader an editable source`() {
+        val html =
+            render("partials/template-source") {
+                source(readOnly = false, selected = 1)
+                setVariable("template", null)
+                viewer()
+            }
+
+        interactive(html) shouldContainExactly emptyList()
+    }
+
     // ----------------------------------------------------------------- fixtures
 
     private fun WebContext.viewer() {
