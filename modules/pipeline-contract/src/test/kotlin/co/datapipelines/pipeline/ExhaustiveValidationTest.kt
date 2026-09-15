@@ -29,7 +29,7 @@ class ExhaustiveValidationTest {
     private val workspaceId = UUID.randomUUID()
 
     /**
-     * One pipeline, defects spanning all six rule groups plus the deserializer's pre-scan:
+     * One pipeline, defects spanning all seven rule groups plus the deserializer's pre-scan:
      *
      *  - §12.1 structural — `name` is not an identifier; two nodes share an id; two tempdb
      *    outputs share a table; a node id is the reserved `tempdb` literal; a `source` carries
@@ -41,6 +41,7 @@ class ExhaustiveValidationTest {
      *  - §12.6 template — a template that is not in the registry.
      *  - §12.7 parameter — a bad key, a missing precision, required-plus-default.
      *  - §12.8 settings — an unknown tempdb config key.
+     *  - §12.11 release checks — a check reading an unregistered datasource.
      */
     private val broken =
         Pipeline(
@@ -81,6 +82,7 @@ class ExhaustiveValidationTest {
                     Fixtures.node(id = "cyc_b", output = NodeOutput.Tempdb("cb"), dependsOn = listOf("cyc_a")),
                     Fixtures.node(id = "side", type = NodeType.DML).copy(output = NodeOutput.Caller),
                 ),
+            checks = listOf(Fixtures.check(datasource = "pg-unregistered")),
         )
 
     private val validator =
@@ -123,6 +125,8 @@ class ExhaustiveValidationTest {
                     Validation.CONFLICTING_REQUIRED_DEFAULT,
                     // §12.8
                     Validation.TEMPDB_CONFIG_INVALID,
+                    // §12.11
+                    Validation.CHECK_INVALID,
                 )
         }
     }
@@ -130,10 +134,10 @@ class ExhaustiveValidationTest {
     @Test
     fun `the failure count far exceeds the group count - nothing is collapsed`() {
         // A validator that returned one failure per group would satisfy the assertion above.
-        // Sixteen distinct codes across six groups is what "all failures collected" means.
+        // Seventeen distinct codes across seven groups is what "all failures collected" means.
         val result = validator.validate(broken, workspaceId)
 
-        result.codes.size shouldBeGreaterThanOrEqual 16
+        result.codes.size shouldBeGreaterThanOrEqual 17
         result.failures.size shouldBeGreaterThanOrEqual result.codes.size
         result.isValid shouldBe false
     }

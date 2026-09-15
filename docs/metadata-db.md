@@ -71,6 +71,8 @@ datasources ──1:N── learned_facts (datasource_name references the NAME p
 workspaces  ──1:N── learned_facts (workspace_id: the WORKSPACE-scope binding; recorded_in: provenance — §4.18)
 learned_facts ──1:N── learned_facts (supersedes — the drift history, §4.18)
 users ──1:N── mail_sends (the claim row behind every notice sent about or to the user, ON DELETE CASCADE — §4.19)
+
+pipelines ──1:N── pipeline_check_runs (the server-run release-check history of the pipeline's versions — §4.20)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -787,6 +789,40 @@ CREATE TABLE mail_sends (
 - **The claim rides the caller's transaction.** `MailSendRepository.tryClaim` runs on the request thread inside whatever metadata transaction is open, so a rolled-back creation claims nothing; the send itself is an after-commit task on a bounded pool.
 - **Nothing here is a credential.** The body is never stored; the one-time password exists in exactly one place, the message handed to the transport (`MailNotifierIntegrationTest` greps `row_to_json(mail_sends)` for it).
 
+### 4.20 `pipeline_check_runs`
+
+**The server-side record of every release check run** (V28, round 140; [Pipeline Contract §3.3/§12.11](pipeline-contract.md)). A pipeline body optionally declares `checks[]` — a read-only statement against a datasource plus the value the author expects it to produce — and the SERVER runs them: on demand from a surface (`mcp` / `rest` / `ui`) and inside the release gate (`release`). One row per check per run, written by the run itself before the outcome is returned. There is deliberately no field on the `checks[]` declaration that could carry an observed value in from a caller: the only `observed` that exists anywhere is the one this table stores, and only a run produces it.
+
+```sql
+CREATE TABLE pipeline_check_runs (
+    id              UUID        PRIMARY KEY,
+    pipeline_id     UUID        NOT NULL REFERENCES pipelines(id),
+    version         INT         NOT NULL,                          -- the version NUMBER whose body declared the check
+    check_id        TEXT        NOT NULL,                          -- the check's §15.1 identifier within the body
+    ran_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ran_by          UUID,                                          -- the actor; NULL-able, no FK — the run outlives the user
+    via             TEXT        NOT NULL,                          -- mcp | rest | ui | release
+    parameters_json JSONB       NOT NULL DEFAULT '{}',             -- the BOUND parameters (defaults applied), wire-encoded
+    observed_json   JSONB,                                         -- {"value": "74.62"} or {"rows": 6}; NULL on error
+    verdict         TEXT        NOT NULL,                          -- pass | fail | error
+    message         TEXT,                                          -- the reason for a fail / error, bounded
+    correlation_id  TEXT,
+    duration_ms     BIGINT,
+    CONSTRAINT chk_pipeline_check_runs_via CHECK (via IN ('mcp', 'rest', 'ui', 'release')),
+    CONSTRAINT chk_pipeline_check_runs_verdict CHECK (verdict IN ('pass', 'fail', 'error'))
+);
+
+CREATE INDEX idx_pipeline_check_runs_latest
+    ON pipeline_check_runs (pipeline_id, version, check_id, ran_at DESC);
+```
+
+**Notes:**
+- **Append-only.** Rows are never updated and never cleaned up — a check run is an observation, and the history of observations is what a release refusal cites, what the UI's latest-run list reads, and what an operator greps. The latest run per check is a read (`DISTINCT ON (check_id)` over `idx_pipeline_check_runs_latest`), never a stored row that could lie about being current.
+- **`verdict` is three-valued on purpose.** `pass` / `fail` are clean comparisons — the run produced a value and it did or did not satisfy the expectation. `error` is "no verdict could be formed": the datasource was unresolvable or unreachable, the statement was refused or timed out, the result had a shape the expectation cannot compare (two columns for a `value` check), or the parameters did not bind. Recording `error` instead of folding it into `fail` is what keeps "the check said no" distinct from "the check could not run" — a release gate refuses on both, but for different reasons, and the operator's next action differs.
+- **The FK is to `pipelines(id)`, not the composite `(pipeline_id, version)`.** A check run is a fact about a version NUMBER, and a DRAFT version row is deleted by a purge — the composite FK `pipeline_executions` carries would make purging a checked draft refuse for history the table should keep. This is the same separation §4.5's purge-deletes-executions choice already documents from the other side.
+- **`observed_json` is one small object, two shapes.** `{"value": "<the single cell, wire-encoded>"}` for `value` and `range` checks; `{"rows": <count>}` for a `rows` check. NULL whenever the verdict is `error` reached before a value could be read (unresolvable datasource, refusal, timeout, bind failure) — there is no observed value to record, and storing a placeholder would invent one.
+- **`parameters_json` stores the BOUND context, not the request.** Defaults are applied, undeclared supplied keys are absent, and every value is wire-encoded per its declared type — the row records what the statement actually ran with, which is the only parameters value an audit needs. A run whose bind failed stores the default `{}`: there is no bound context to record.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -851,6 +887,8 @@ CREATE TABLE mail_sends (
 | `learned_facts` | `idx_learned_facts_workspace` | explicit (partial) | A workspace's own WORKSPACE facts; partial because DATASOURCE facts carry no workspace ([§4.18](#418-learned_facts)) |
 | `mail_sends` | `mail_sends_pkey` | via PK | The claim's id — what `markSent` / `markFailed` update |
 | `mail_sends` | `uq_mail_sends_message` | via UNIQUE | One claim per message identity `(user_id, kind, act_id)` — the "never twice" rule; doubles as the per-user read the admin screen makes ([§4.19](#419-mail_sends)) |
+| `pipeline_check_runs` | `pipeline_check_runs_pkey` | via PK | The run row's id |
+| `pipeline_check_runs` | `idx_pipeline_check_runs_latest` | explicit | The latest run per `(pipeline_id, version, check_id)` — the release gate's and the UI's only read ([§4.20](#420-pipeline_check_runs)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -897,6 +935,7 @@ table and the test's expected-table list in the same commit.
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
 | `mail_sends` | derived | MailSend | — | — | The claim rows behind the notices THIS deployment sent about ITS users (§4.19) — a record of local sends, not authored, and meaningless beside another environment's `users` |
+| `pipeline_check_runs` | derived | CheckRun | — | `(pipeline, version, check_id)` | Produced by THIS deployment's server running the checks a pipeline body declares (§4.20): the observed value is only truthful against this environment's datasource data, which is the whole point of a check. The runs of a promoted pipeline are re-produced by the target's own runs, never transferred |
 | `lake_tables` | environment-local | LakeTable | — | — | Rows point at an environment-local [`datasources`](#410-datasources) row and at bucket locations whose credentials never leave the deployment; the registry is rebuilt on the target from its own manifest import, exactly as the datasource itself is re-registered there |
 
 ---
@@ -1161,6 +1200,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-14 | v1.20 | V28 migration (140 release checks) | New **§4.20 `pipeline_check_runs`** — the server-side record of every release check run ([Pipeline Contract §3.3/§12.11](pipeline-contract.md)): one append-only row per check per run, `via` CHECK'd over `mcp` \| `rest` \| `ui` \| `release`, `verdict` CHECK'd over `pass` \| `fail` \| `error` (error = no verdict could be formed, recorded — never silently a fail), `parameters_json` the BOUND context, `observed_json` one small object (`{"value": …}` or `{"rows": …}`, NULL when the run errored before a value was read). FK to `pipelines(id)` only, deliberately not the composite version FK — a purged draft's runs are history to keep. §5 gains `idx_pipeline_check_runs_latest`; §5A classifies it derived; the ERD gains `pipelines ──1:N── pipeline_check_runs`. Nineteen tables. |
 | 2026-09-14 | v1.19 | V27 migration (137 mail notices) | New **§4.19 `mail_sends`** — the claim row behind every notice ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)): one row per message identity `(user_id, kind, act_id)` (`uq_mail_sends_message`), `chk_mail_sends_kind` over the closed list, `claimed_at` / `sent_at` / `message_id` / `error`; a row proves an attempt, never a delivery, and is never cleaned up. §5 gains its two constraint-backed indexes; the ERD gains `users ──1:N── mail_sends`. Eighteen tables. |
 | 2026-08-05 | v1.0 | initial draft | Complete metadata DB schema: 10 tables (users, api_keys, audit_log, pipelines, pipeline_versions, pipeline_executions, execution_events, templates, template_versions, datasources), indexes, ERD, NamedParameterJdbcTemplate data access pattern, Flyway strategy, maintenance jobs |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.10](SPEC-REVIEW-2026-08.md#210-metadata-dbmd). Established as sole DDL authority (D4): `_json` suffix rule stated in §2 and applied (`audit_log.details` → `details_json`); `TIMESTAMPTZ` confirmed everywhere. `datasources` (§4.10) absorbed the datasources.md reconciliation — `description` nullable, `name` CHECK (63 chars + `^[a-z0-9_-]+$`), new `query_timeout_seconds` column with CHECK, soft-delete partial index, `properties_json` documented as the hikari/jdbc passthrough (D7). `params_schema` deleted from `template_versions` (D3); `is_library` moved from `templates` to `template_versions` (version-scoped per D12); `idx_templates_active` added. `users` gained `updated_at` + `theme_preference TEXT NULL` (NULL = follow the deployment default `datapipelines.ui.theme`; stored preference, not session state — ui-screens §2.12.4), with the per-request `is_active` cache note (D13); `templates` gained `updated_at`; `updated_at` maintenance rule stated (app-set, no triggers). `pipeline_executions` gained the composite FK to `pipeline_versions(pipeline_id, version)`, dropped `result_delivery` (D9), gained `result_row_count`. `execution_events`: redundant `idx_events_execution` dropped, UNIQUE constraint named. §5 regenerated from §4 with constraint-backed indexes under their real names (phantom `uq_users_email` / `uq_pipelines_name` removed) plus a deliberately-absent list. §6.1 `create()` rewritten as working single-CTE SQL + a real `RowMapper` whose result is returned; §6.2 conventions extended. §8 renamed "Operational Jobs" and fully parameterized from config keys (D8) — no interval literals. New §9 stating idempotency keys, results, the 1-hour event log, and cancel flags are Redis-only (D9/D7). Broken link `pipeline-contract §15.3` → §17.3 fixed; terminal-node language replaced by the caller-node model (D1) |

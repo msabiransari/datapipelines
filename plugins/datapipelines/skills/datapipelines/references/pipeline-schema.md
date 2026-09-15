@@ -31,6 +31,25 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
 }
 ```
 
+**Checks** — optional top-level `checks[]`: server-run cross-checks that gate a human's
+release (pipeline-contract §3.3). You write the query and the expectation; only the server's
+own run produces `observed`. One check:
+
+```json
+"checks": [{
+  "id": "orders_total_reconciles",
+  "name": "Orders total for the window, from the raw orders table",
+  "datasource": "pg-local",
+  "sql": "SELECT ... ",
+  "expected": {"kind": "value", "value": 74.62, "tolerance": 0.01}
+}]
+```
+
+`expected.kind` is `value` (numeric, ± `tolerance`, default 0), `range` (`min`..`max`
+inclusive) or `rows` (exact row count). `:name` binds come from the pipeline's declared
+parameters only; `${}` is refused (a check has no rendering); `tempdb` is not a check
+datasource.
+
 ## The `current_version` pointer (read it honestly)
 
 Responses carry `current_version` — the version every dependent (a published endpoint, promotion) runs. Five lines:

@@ -3,11 +3,13 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.CheckRunVia
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
+import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
@@ -63,6 +65,8 @@ import java.util.UUID
 class PipelinesController(
     private val pipelines: PipelineService,
     private val audit: AuditEventSink,
+    private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
+    private val checkRuns: co.datapipelines.application.checks.PipelineCheckRunRepository,
 ) {
     /**
      * §5.1 — create; the server assigns id, version 1 (**DRAFT**, D55), owner and timestamps.
@@ -97,6 +101,61 @@ class PipelinesController(
         val workspaceId = currentPrincipal().requireWorkspace().id
         val loaded = pipelines.findWorking(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(PipelineResponses.full(loaded.record, loaded.bodyJson, loaded.version, loaded.draft))
+    }
+
+    /**
+     * §5.16 (140) — run the version's release checks NOW (`via = rest`), against their own
+     * datasources, bound with the pipeline's declared parameters (defaults filled the execute
+     * way; an optional `{"parameters": {…}}` body overrides them for this run — the calculator
+     * context is not available to a check). One `pipeline_check_runs` row per check is the
+     * run's own record; `observed` exists only because the server's run produced it.
+     */
+    @PostMapping("/{id}/versions/{version}/checks/run")
+    @RequiredScope(ScopeMatrix.RestOperation.EXECUTE_PIPELINE)
+    fun runChecks(
+        @PathVariable id: UUID,
+        @PathVariable version: Int,
+        @RequestBody(required = false) body: JsonNode?,
+    ): ApiResponse<JsonNode> {
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val parameters =
+            body
+                ?.get("parameters")
+                ?.takeIf { it.isObject }
+                ?.properties()
+                ?.associate { it.key to it.value }
+                ?: emptyMap()
+        val outcomes =
+            checkRunner.run(
+                workspaceId,
+                id,
+                version,
+                parameters,
+                CheckRunVia.REST,
+                principal.userId,
+                CorrelationId.current(),
+            ) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        return ApiResponse.of(PipelineResponses.checkRuns(version, outcomes))
+    }
+
+    /**
+     * §5.16 (140) — the version's check definitions, each with its LATEST run (latest per
+     * `(version, check_id)` of the append-only `pipeline_check_runs`), `latest_run: null`
+     * when never run. The release dialog and the version page read exactly this.
+     */
+    @GetMapping("/{id}/versions/{version}/checks")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    fun checks(
+        @PathVariable id: UUID,
+        @PathVariable version: Int,
+    ): ApiResponse<JsonNode> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val record = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val executable = pipelines.findExecutable(workspaceId, record, version) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        return ApiResponse.of(
+            PipelineResponses.checksLatest(version, executable.pipeline.checks, checkRuns.latestPerCheck(id, version)),
+        )
     }
 
     /** §5.3 — a specific version. */
@@ -159,7 +218,10 @@ class PipelinesController(
     /**
      * §5.10 — release (lock) the draft: `pipeline.version.not_draft` when none exists,
      * §12 re-validation on the draft body, `pipeline.release.template_not_released` when a
-     * pinned template version is still a draft, `pipeline.version.conflict` on a stale hash.
+     * pinned template version is still a draft, `pipeline.version.conflict` on a stale hash,
+     * and — for a body carrying `checks[]` — `pipeline.check.failed` when the gate's fresh
+     * run did not pass, unless [overrideChecksReason] (≥ 10 characters) rides the request
+     * (140; audited on the release event).
      * UI-driven in practice (D4: agents never release); no MCP tool is exposed.
      */
     @PostMapping("/{id}/release")
@@ -167,21 +229,17 @@ class PipelinesController(
     fun release(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
+        @RequestParam(value = "override_checks_reason", required = false) overrideChecksReason: String? = null,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val released = pipelines.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId)
+        val released = pipelines.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId, overrideChecksReason)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.AUDIT_VERSION_RELEASED,
             principal,
             workspaceId,
-            mapOf(
-                "pipeline_id" to id.toString(),
-                "pipeline_name" to released.record.name,
-                "version" to released.version.version,
-                "via" to LifecycleVerbs.via(principal),
-            ),
+            LifecycleVerbs.releaseDetails(principal, id, released),
         )
         return ApiResponse.of(PipelineResponses.full(released.record, released.bodyJson, released.version))
     }

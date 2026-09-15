@@ -51,6 +51,27 @@ class PipelineLifecycleDialogModelTest {
     }
 
     @Test
+    fun `release - hasChecks follows the draft body's checks key`() {
+        every { repository.findById(any(), any()) } returns recordOf(current = 1)
+        every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
+        every { templates.statusOf(any(), any(), any()) } returns RELEASED
+
+        every { repository.findVersionBody(any(), any(), any()) } returns
+            """{"name":"test/probe","display_name":"probe","description":"d","nodes":[],"checks":[""" +
+            """{"id":"share_matches","name":"Share","datasource":"h2","sql":"SELECT 1","expected":{"kind":"value","value":1}}]}"""
+        model.release(WS, ID).hasChecks shouldBe true
+
+        every { repository.findVersionBody(any(), any(), any()) } returns
+            """{"name":"test/probe","display_name":"probe","description":"d","nodes":[]}"""
+        model.release(WS, ID).hasChecks shouldBe false
+
+        // A body that does not parse is no checks AND no pins — the dialog opens and the
+        // POST's re-validation is what answers for the malformed draft.
+        every { repository.findVersionBody(any(), any(), any()) } returns "not json"
+        model.release(WS, ID).hasChecks shouldBe false
+    }
+
+    @Test
     fun `purge - a released target is last_release and a missing one is not-found`() {
         recordOf(current = 1)
         every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 1)

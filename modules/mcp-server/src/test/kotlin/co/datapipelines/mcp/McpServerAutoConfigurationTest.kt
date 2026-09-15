@@ -112,6 +112,10 @@ class McpServerAutoConfigurationTest {
         @Bean fun factEnrichment(): co.datapipelines.application.semantics.FactEnrichment =
             co.datapipelines.application.semantics.FactEnrichment.NONE
 
+        // 140 — the check runner `web`'s ChecksConfiguration declares in the assembled
+        // application; pipelines_run_checks takes it.
+        @Bean fun checkRunner(): co.datapipelines.application.checks.PipelineCheckRunner = mockk()
+
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 
         @Bean fun executions(): ExecutionRepository = mockk()

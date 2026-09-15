@@ -1,6 +1,9 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.checks.PipelineCheckRun
+import co.datapipelines.pipeline.CheckRunOutcome
 import co.datapipelines.pipeline.DerivedInputs
+import co.datapipelines.pipeline.PipelineCheck
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineVersionDetail
@@ -122,4 +125,69 @@ object PipelineResponses {
             "updated_by" to (draft.updatedBy?.toString() ?: ""),
             "updated_at" to (draft.updatedAt?.toString() ?: ""),
         )
+
+    /**
+     * §5.16 — the run response: one entry per check of [version]'s fresh run. `expected` rides
+     * the body's own declaration (the author wrote it); `observed` exists because the server's
+     * run produced it — never from a caller.
+     */
+    fun checkRuns(
+        version: Int,
+        outcomes: List<CheckRunOutcome>,
+    ): JsonNode {
+        val root = MAPPER.createObjectNode()
+        root.put("version", version)
+        val runs = root.putArray("runs")
+        outcomes.forEach { outcome ->
+            val entry = runs.addObject()
+            entry.put("check_id", outcome.checkId)
+            entry.put("name", outcome.name)
+            entry.set<JsonNode>("expected", MAPPER.valueToTree<JsonNode>(outcome.expected))
+            if (outcome.observed == null) entry.putNull("observed") else entry.put("observed", outcome.observed)
+            entry.put("verdict", outcome.verdict.wire)
+            if (outcome.message == null) entry.putNull("message") else entry.put("message", outcome.message)
+            if (outcome.ranAt == null) entry.putNull("ran_at") else entry.put("ran_at", outcome.ranAt.toString())
+        }
+        return root
+    }
+
+    /**
+     * §5.16 — the latest-run read: every check the version DECLARES, each with its latest
+     * `pipeline_check_runs` row (or null when never run). The UI's release dialog and version
+     * page read exactly this.
+     */
+    fun checksLatest(
+        version: Int,
+        checks: List<PipelineCheck>,
+        latest: List<PipelineCheckRun>,
+    ): JsonNode {
+        val byId = latest.associateBy { it.checkId }
+        val root = MAPPER.createObjectNode()
+        root.put("version", version)
+        val array = root.putArray("checks")
+        checks.forEach { check ->
+            val entry = array.addObject()
+            entry.put("check_id", check.id)
+            entry.put("name", check.name)
+            entry.put("datasource", check.datasource)
+            entry.set<JsonNode>("expected", MAPPER.valueToTree<JsonNode>(check.expected))
+            val run = byId[check.id]
+            if (run == null) {
+                entry.putNull("latest_run")
+            } else {
+                val latestRun = entry.putObject("latest_run")
+                if (run.observedJson == null) {
+                    latestRun.putNull("observed")
+                } else {
+                    latestRun.set<JsonNode>("observed", MAPPER.readTree(run.observedJson))
+                }
+                latestRun.put("verdict", run.verdict.wire)
+                if (run.message == null) latestRun.putNull("message") else latestRun.put("message", run.message)
+                latestRun.put("ran_at", run.ranAt.toString())
+                latestRun.put("via", run.via.wire)
+                if (run.durationMs == null) latestRun.putNull("duration_ms") else latestRun.put("duration_ms", run.durationMs)
+            }
+        }
+        return root
+    }
 }

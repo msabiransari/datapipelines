@@ -159,6 +159,28 @@
                 </a>
               </dd>
             </dl>
+
+            <!-- 140 — the working version's release checks, a sub-section of Overview. The
+                 shell renders only when the working body DECLARES checks (an empty section
+                 would claim they had been checked); the list lazy-loads the read-only partial
+                 like the pane's other lazy regions, and Run checks commissions a fresh `ui`
+                 run into the same container. -->
+            <div th:if="${checksCount != null and checksCount > 0}" class="u-mt-md">
+              <div class="app-card-h">
+                <h3>Checks</h3>
+                <span class="app-card-note"
+                      th:text="${checksCount} + (${checksCount} == 1 ? ' check' : ' checks')">2 checks</span>
+                <button type="button" class="ds-button ds-button-secondary ds-button-sm"
+                        th:if="${canExecute == true}"
+                        th:attr="hx-post=@{'/partials/pipelines/{id}/versions/{version}/checks/run'(id=${pipeline.id}, version=${workingVersion})},
+                                 hx-target='#pipeline-detail-checks', hx-swap='innerHTML'">Run checks</button>
+              </div>
+              <div id="pipeline-detail-checks"
+                   th:attr="hx-get=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipeline.id}, version=${workingVersion})},
+                            hx-trigger='load', hx-target='this', hx-swap='innerHTML'">
+                <p class="u-secondary u-text-sm">Loading checks…</p>
+              </div>
+            </div>
           </div>
         </section>
 

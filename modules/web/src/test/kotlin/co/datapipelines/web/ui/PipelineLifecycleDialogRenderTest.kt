@@ -66,6 +66,37 @@ class PipelineLifecycleDialogRenderTest {
     }
 
     @Test
+    fun `release - a draft WITHOUT checks keeps the pre-140 shape - no run, the submit enabled`() {
+        val html = renderRelease(pins = emptyList())
+
+        html shouldContain "No checks on this version."
+        html shouldContain ">Release v3</button>"
+        html shouldNotContain "checks/run"
+        html shouldNotContain "hx-trigger=\"load\""
+        // The enabled submit carries no disabled attribute (hx-disabled-elt is htmx's own).
+        html shouldNotContain "type=\"submit\" disabled"
+    }
+
+    @Test
+    fun `release - a draft WITH checks fires the run as the dialog opens and the submit starts disabled`() {
+        val html =
+            render("partials/pipeline-lifecycle-release") {
+                setVariable("dlg", releaseDialog(pins = emptyList(), hasChecks = true))
+                setVariable("from", "explorer")
+            }
+
+        // The run rides the dialog's own checks POST, asking for the release footer OOB.
+        html shouldContain "hx-post=\"/partials/pipelines/$LEAF_ID/versions/3/checks/run?footer=release\""
+        html shouldContain "hx-trigger=\"load\""
+        html shouldContain "id=\"plc-dialog-checks\""
+        // The footer placeholder exists for the OOB swap, and the submit in it is withheld
+        // until the run's own fragment answers (§4.3d: never clickable past a pending run).
+        html shouldContain "id=\"plc-release-footer\""
+        html shouldContain "disabled"
+        html shouldNotContain "data-verb=\"pipeline-release-confirm\""
+    }
+
+    @Test
     fun `purge - the button names the version and its runs, and starts disabled behind the typed confirm`() {
         val html =
             render("partials/pipeline-lifecycle-purge") {
@@ -239,17 +270,20 @@ class PipelineLifecycleDialogRenderTest {
             status = status,
         )
 
-    private fun releaseDialog(pins: List<PipelineLifecycleDialogModel.PinView>) =
-        PipelineLifecycleDialogModel.ReleaseDialog(
-            id = LEAF_ID,
-            name = "nyc/mobility/probe",
-            version = 3,
-            updatedBy = "Muhammad",
-            updatedAgo = "2 hours ago",
-            updatedAt = Instant.parse("2026-09-09T10:00:00Z"),
-            pins = pins,
-            refusal = null,
-        )
+    private fun releaseDialog(
+        pins: List<PipelineLifecycleDialogModel.PinView>,
+        hasChecks: Boolean = false,
+    ) = PipelineLifecycleDialogModel.ReleaseDialog(
+        id = LEAF_ID,
+        name = "nyc/mobility/probe",
+        version = 3,
+        updatedBy = "Muhammad",
+        updatedAgo = "2 hours ago",
+        updatedAt = Instant.parse("2026-09-09T10:00:00Z"),
+        pins = pins,
+        hasChecks = hasChecks,
+        refusal = null,
+    )
 
     private fun renderRelease(pins: List<PipelineLifecycleDialogModel.PinView>): String =
         render("partials/pipeline-lifecycle-release") {

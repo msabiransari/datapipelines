@@ -67,6 +67,9 @@ object ApiErrorCatalog {
             "pipeline.version." to HttpStatus.CONFLICT,
             "pipeline.release." to HttpStatus.CONFLICT,
             "pipeline.promotion." to HttpStatus.CONFLICT,
+            // 140 §13.17 — release refused because a check on the version failed: a state
+            // conflict on the release path, same class as the lifecycle rows above.
+            "pipeline.check." to HttpStatus.CONFLICT,
             // versioning §5.5: the authoring capability refusal — a promotion receiver's
             // write path refuses, naming the reason. §13.13 documents both mirrors 403.
             "pipeline.authoring." to HttpStatus.FORBIDDEN,
@@ -326,6 +329,7 @@ object ApiErrorCatalog {
             "pipeline.validation." to "This pipeline isn't valid yet. Check the highlighted problem and try again.",
             "pipeline.import." to "This pipeline couldn't be imported into this environment.",
             "pipeline.promotion." to "This item couldn't be promoted to the target environment.",
+            "pipeline.check." to "Some release checks failed. Review the checks on this version and try again.",
             "pipeline.execution." to "The pipeline run couldn't be completed.",
             "pipeline.node." to "A step in the pipeline failed while it was running.",
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",

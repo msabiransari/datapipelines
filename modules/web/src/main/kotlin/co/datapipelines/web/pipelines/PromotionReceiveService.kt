@@ -58,6 +58,8 @@ class PromotionReceiveService(
     private val authoringEnabled: Boolean,
     /** 074 — published endpoints ride the batch; the rules live in one collaborator. */
     private val endpointPromotion: EndpointPromotion,
+    /** 140 — the receiver's release-check gate (§10.5): the one runner, shared with every surface. */
+    private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -67,12 +69,6 @@ class PromotionReceiveService(
         val actor = userService.systemActor()
         val promoter = promotionPrincipal(actor, workspace)
 
-        // §10.5's discipline, applied to endpoint bindings: every key name the batch references
-        // must already exist on this deployment, checked ONCE for the whole batch BEFORE anything
-        // is pushed, so the target is left byte-unchanged rather than failing mid-batch. Keys are
-        // environment-local — a promotion must never mint one.
-        endpointPromotion.refuseIfKeysMissing(batch.endpoints, workspace.id, batch.workspace)
-
         // The import services take the TARGET workspace explicitly, and since 134 so does
         // everything beneath them: the datasource port `PipelineValidator` resolves a node's
         // `source` through takes the workspace as an ARGUMENT, so a workspace-BOUND datasource
@@ -81,6 +77,24 @@ class PromotionReceiveService(
         // credential does not pin — and this block stamped the batch's workspace onto the
         // principal for the duration of the import; found by the two-deployment E2E, which
         // registers its datasource workspace-bound and still guards this path.
+        //
+        // §10.5's discipline, applied to endpoint bindings: every key name the batch references
+        // must already exist on this deployment, checked ONCE for the whole batch BEFORE anything
+        // is pushed, so the target is left byte-unchanged rather than failing mid-batch. Keys are
+        // environment-local — a promotion must never mint one.
+        endpointPromotion.refuseIfKeysMissing(batch.endpoints, workspace.id, batch.workspace)
+
+        // 140 §10.5 — the receiver's release-check gate, BEFORE the import transaction: a
+        // promoted release's checks travel in its body, and the receiver re-runs them on its
+        // OWN datasources at its release step — the same gate a human release faces, with no
+        // override channel. It runs outside the transaction (the probes open
+        // customer-datasource connections, which `ConnectionLease` refuses while a metadata
+        // transaction is open on the thread — `datasource.lease_in_transaction`), and it is
+        // deliberately NOT persisted: the pipelines do not exist on the receiver yet, so no
+        // `pipeline_check_runs` row can key to them; the receiver's first persisted run is
+        // the first one commissioned after the batch lands.
+        gateChecks(batch, workspace.id, actor.id)
+
         transactionTemplate.executeWithoutResult {
             if (batch.templates.isNotEmpty()) {
                 templateImportService.import(templatesPayload(batch), workspace.id, actor.id)
@@ -177,6 +191,60 @@ class PromotionReceiveService(
         val root: ObjectNode = MAPPER.createObjectNode()
         root.set<ObjectNode>("templates", MAPPER.createArrayNode().addAll(batch.templates))
         return MAPPER.writeValueAsString(root)
+    }
+
+    /**
+     * The 140 gate: every batch pipeline whose body declares `checks[]` gets a fresh,
+     * unpersisted run on THIS deployment's datasources (see [apply] for why outside the
+     * transaction and why unpersisted). Any `fail` or `error` verdict refuses the whole
+     * batch with `pipeline.check.failed` — one unit or nothing, exactly like every other
+     * §10 pre-validation. There is no override channel: promotion is two deployments
+     * trusting each other, and a number nobody verified is not a release.
+     */
+    private fun gateChecks(
+        batch: PromotionWire.Batch,
+        workspaceId: java.util.UUID,
+        actorId: java.util.UUID,
+    ) {
+        val deserializer = co.datapipelines.pipeline.PipelineDeserializer()
+        batch.pipelines.forEach { payload ->
+            val pipeline = deserializer.readOrThrow(payload.toString())
+            if (pipeline.checks.isEmpty()) return@forEach
+            val version = payload.get("version")?.takeIf { it.isInt }?.asInt() ?: 0
+            val outcomes =
+                checkRunner.run(
+                    workspaceId = workspaceId,
+                    // Inert for an unpersisted run — no row is written to key on it.
+                    pipelineId = java.util.UUID(0L, 0L),
+                    version = version,
+                    pipeline = pipeline,
+                    parameters = emptyMap(),
+                    via = co.datapipelines.pipeline.CheckRunVia.RELEASE,
+                    actor = actorId,
+                    persist = false,
+                )
+            val failing = outcomes.filter { it.verdict != co.datapipelines.pipeline.CheckRunVerdict.PASS }
+            if (failing.isNotEmpty()) {
+                throw ApiException(
+                    PipelineErrorCodes.Check.FAILED,
+                    "Promotion refused: pipeline '${pipeline.name}' carries release checks and " +
+                        "${failing.size} of ${outcomes.size} did not pass on this deployment's datasources.",
+                    mapOf(
+                        "pipeline" to pipeline.name,
+                        "checks" to
+                            failing.map { outcome ->
+                                mapOf(
+                                    "check_id" to outcome.checkId,
+                                    "name" to outcome.name,
+                                    "observed" to outcome.observed,
+                                    "verdict" to outcome.verdict.wire,
+                                    "message" to outcome.message,
+                                )
+                            },
+                    ),
+                )
+            }
+        }
     }
 
     companion object {

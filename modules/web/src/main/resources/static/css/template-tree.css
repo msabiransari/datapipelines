@@ -996,3 +996,42 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   color: var(--text-muted);
   background: var(--surface-default);
 }
+
+/* 140 — the release checks list (§4.3b's Checks section, §4.3d's release dialog): one row per
+   check — the verdict chip, the name, its datasource, the expectation, the server's observed
+   value, when · via. The list is compact like the versions' rows, never a table. */
+.plc-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs, 4px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.plc-check-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--gap-xs, 4px) var(--gap-sm, 8px);
+  padding: var(--gap-xs, 4px) var(--gap-sm, 8px);
+  border: 1px solid var(--border-faint, var(--border-subtle));
+  border-radius: var(--radius-base);
+}
+
+.plc-check-name {
+  font-weight: var(--weight-semibold, 600);
+}
+
+/* The release dialog's override disclosure (§4.3d): the summary reads as the danger ghost
+   button it is styled as; the body keeps the modal's rhythm. */
+.plc-override summary {
+  list-style: none;
+  display: inline-block;
+  cursor: pointer;
+}
+
+.plc-override summary::-webkit-details-marker {
+  display: none;
+}

@@ -82,6 +82,8 @@ class PipelinesControllerTest {
                     draftTemplates = co.datapipelines.web.NO_EXCLUSIVE_DRAFT_TEMPLATES,
                 ),
             audit = audit,
+            checkRunner = io.mockk.mockk(relaxed = true),
+            checkRuns = io.mockk.mockk(relaxed = true),
         )
 
     private val userId = UUID.randomUUID()
@@ -458,6 +460,8 @@ class PipelinesControllerTest {
                         draftTemplates = co.datapipelines.web.NO_EXCLUSIVE_DRAFT_TEMPLATES,
                     ),
                 audit = audit,
+                checkRunner = io.mockk.mockk(relaxed = true),
+                checkRuns = io.mockk.mockk(relaxed = true),
             )
 
         val body =

@@ -14,7 +14,11 @@
  * 3. TYPED CONFIRM. The irreversible verbs (purge, purge-entity) ship a
  *    [data-typed-confirm] button that stays disabled until [data-confirm-input] carries
  *    exactly the expected text (§5.1's convention; the server re-checks the field and
- *    answers 400 *.confirm_mismatch, so this is convenience, not the guard).
+ *    answers 400 *.confirm_mismatch, so this is convenience, not the guard). 140's sibling
+ *    sits beside it: the release override's [data-min-chars-input] arms its
+ *    [data-min-chars-submit] at ≥ N trimmed characters, and because that footer lands by
+ *    out-of-band swap AFTER the dialog opened, both arms re-run on any swap INSIDE an open
+ *    dialog (a `lcArmed` marker keeps re-arms from stacking listeners).
  * 4. CLOSE ON SUCCESS. A Shape A response swaps the DETAIL pane, not the dialog; the hidden
  *    [data-lifecycle-applied] marker riding with it is what closes the dialog — a refusal
  *    (Shape C, retargeted at #toast) never carries the marker, so an error cannot close
@@ -64,11 +68,21 @@
       value.trim() === expected;
   }
 
+  /**
+   * 140 — the min-chars arm, the typed confirm's sibling for the release override: the
+   * button stays disabled until the reason carries at least `min` characters, whitespace
+   * trimmed (the server re-runs the whole gate on the POST; this is convenience, not the
+   * guard — same division as the typed confirm).
+   */
+  function minCharsMet(value, min) {
+    return typeof value === 'string' && value.trim().length >= min;
+  }
+
   function armTypedConfirm(container) {
-    if (!container) return;
     var input = container.querySelector('[data-confirm-input]');
     var button = container.querySelector('[data-typed-confirm]');
-    if (!input || !button) return;
+    if (!input || !button || input.dataset.lcArmed) return;
+    input.dataset.lcArmed = '1';
     var expected = input.getAttribute('data-confirm-expect') || '';
     var evaluate = function () {
       button.disabled = !confirmMatches(input.value, expected);
@@ -79,11 +93,38 @@
     evaluate();
   }
 
+  /**
+   * 140 — the release override's pair: [data-min-chars-input] arms [data-min-chars-submit]
+   * at data-min-chars (default 10) trimmed characters. The footer that carries these lands
+   * by OUT-OF-BAND swap AFTER the dialog opened, so this runs on every swap inside an open
+   * dialog (the `lcArmed` marker keeps a re-arm from stacking listeners on a survivor).
+   */
+  function armMinChars(container) {
+    var input = container.querySelector('[data-min-chars-input]');
+    var button = container.querySelector('[data-min-chars-submit]');
+    if (!input || !button || input.dataset.lcArmed) return;
+    input.dataset.lcArmed = '1';
+    var min = parseInt(input.getAttribute('data-min-chars') || '10', 10);
+    var evaluate = function () {
+      button.disabled = !minCharsMet(input.value, min);
+    };
+    input.addEventListener('input', evaluate);
+    evaluate();
+  }
+
   function arm(container) {
     if (!container) return;
     armTypedConfirm(container);
+    armMinChars(container);
     var focus = firstControl(container);
     if (focus) focus.focus();
+  }
+
+  /** A swap INSIDE the open dialog re-arms what it replaced; the focus move stays the landing's. */
+  function rearm(container) {
+    if (!container) return;
+    armTypedConfirm(container);
+    armMinChars(container);
   }
 
   // ------------------------------------------------------------------ wiring
@@ -126,7 +167,12 @@
     if ((target.id === 'pipeline-detail' || target.id === 'template-detail') &&
         target.querySelector('[data-lifecycle-applied]')) {
       closeDialog();
+      return;
     }
+    // 140 — a swap INSIDE the open dialog (the release checks' run re-rendering the list
+    // and splicing the submit footer in out-of-band) re-arms the inputs it just replaced.
+    var open = openContainer();
+    if (open && open !== target && open.contains(target)) rearm(open);
   });
 
   // ------------------------------------------------------------------ 5. menus
@@ -220,7 +266,7 @@
 
   var api = {
     confirmMatches: confirmMatches, closeDialog: closeDialog, closeMenus: closeMenus,
-    menuPlacement: menuPlacement,
+    menuPlacement: menuPlacement, minCharsMet: minCharsMet,
   };
   if (typeof window !== 'undefined') window.lifecycleDialog = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

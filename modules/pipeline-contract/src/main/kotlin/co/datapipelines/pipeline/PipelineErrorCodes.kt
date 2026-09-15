@@ -251,6 +251,17 @@ object PipelineErrorCodes {
         const val COMPOSITION_TOO_DEEP = "pipeline.validation.composition_too_deep"
 
         /**
+         * §12.11 (140) — a `checks[]` entry is malformed: the id fails the §15.1 identifier
+         * grammar or is duplicated, the name is blank, the datasource is `tempdb` or not
+         * visible to the workspace, the SQL carries a `${}` interpolation or binds an
+         * undeclared parameter, the `expected.kind` is outside `value | range | rows`, or a
+         * kind's required member is absent or contradictory. One code for every save-time
+         * defect because to the author they are one category: this check cannot stand as
+         * written.
+         */
+        const val CHECK_INVALID = "pipeline.validation.check_invalid"
+
+        /**
          * §12.10 — a CALCULATOR node declares `kind` and `inputs`. A missing key mapping is
          * not reported here: [CALCULATOR_OUTPUT_SHAPE_MISMATCH] names both legal fields
          * (`context_key` / `context_keys`), which is the guidance an author needs (121).
@@ -1091,5 +1102,21 @@ object PipelineErrorCodes {
     object Mcp {
         /** `docs_get` named a document the shipped skill does not carry; `details.known_docs` lists them. */
         const val DOC_NOT_FOUND = "mcp.doc_not_found"
+    }
+
+    /**
+     * §13.17 (140) — release checks: the server-run cross-checks a pipeline body carries in
+     * `checks[]` (§3.3). Run-time codes, raised on the release path and by the check runner.
+     */
+    object Check {
+        /**
+         * §13.17 / versioning §5.3 — release REFUSED because the version's fresh check run
+         * (via `release`) produced a `fail` or `error` verdict and the request carried no
+         * `override_checks_reason` (a non-empty string, ≥ 10 characters). `details.checks`
+         * lists every failing check with its expected and observed values and the run
+         * message. HTTP 409, the release-path conflict class. Never raised for a version
+         * with no checks — checks are opt-in.
+         */
+        const val FAILED = "pipeline.check.failed"
     }
 }

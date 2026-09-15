@@ -46,8 +46,29 @@
         <p class="u-secondary u-text-sm u-mb-md">
           Releasing makes v<span th:text="${dlg.version}">3</span> the current version and locks it.
         </p>
-        <button type="submit" data-verb="pipeline-release-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
-                th:text="'Release v' + ${dlg.version}">Release v3</button>
+
+        <!-- 140: a draft carrying checks[] runs them AS THE DIALOG OPENS — the run POST
+             re-renders partials/pipeline-checks here and splices the submit footer below
+             out-of-band, so the verdicts the user just saw are what the button offers. The
+             submit starts DISABLED and only the run's own answer enables it. -->
+        <th:block th:if="${dlg.hasChecks}">
+          <p class="u-text-sm u-mb-xs">Release checks on this version — running now:</p>
+          <div id="plc-dialog-checks" class="u-mb-md"
+               th:attr="hx-post=@{'/partials/pipelines/{id}/versions/{version}/checks/run?footer=release'(id=${dlg.id}, version=${dlg.version})},
+                        hx-trigger='load', hx-target='this', hx-swap='innerHTML'">
+            <p class="u-secondary u-text-sm">Running the checks…</p>
+          </div>
+        </th:block>
+        <p th:if="${!dlg.hasChecks}" class="u-secondary u-text-sm u-mb-md">No checks on this version.</p>
+
+        <div id="plc-release-footer">
+          <button th:if="${!dlg.hasChecks}" type="submit" data-verb="pipeline-release-confirm"
+                  class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+                  th:text="'Release v' + ${dlg.version}">Release v3</button>
+          <button th:if="${dlg.hasChecks}" type="submit" disabled
+                  class="ds-button ds-button-primary u-full"
+                  th:text="'Release v' + ${dlg.version}">Release v3</button>
+        </div>
       </form>
     </th:block>
   </div>

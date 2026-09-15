@@ -76,4 +76,26 @@ object LifecycleVerbs {
 
     /** The `via` detail every release event carries — the D4 question is "was it a person". */
     fun via(principal: AuthenticatedPrincipal): String = if (principal.keyId != null) "api_key" else "session"
+
+    /**
+     * The shared `pipeline.version.released` details (T187 + 140): ids, name, version, `via`
+     * — and, when the release-check gate was overridden, `checks_overridden` and
+     * `override_reason`. One constructor so the REST surface and the dialog cannot drift on
+     * what an audited release records (enums.md §15).
+     */
+    fun releaseDetails(
+        principal: AuthenticatedPrincipal,
+        pipelineId: UUID,
+        released: co.datapipelines.pipeline.PipelineReleaseService.Released,
+    ): Map<String, Any?> =
+        buildMap {
+            put("pipeline_id", pipelineId.toString())
+            put("pipeline_name", released.record.name)
+            put("version", released.version.version)
+            put("via", via(principal))
+            if (released.checksOverridden.isNotEmpty()) {
+                put("checks_overridden", released.checksOverridden)
+                put("override_reason", released.checksOverrideReason)
+            }
+        }
 }

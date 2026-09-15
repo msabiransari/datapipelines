@@ -264,6 +264,9 @@ class PipelineBrowseModel(
         model.addAttribute("draftVersion", draftVersion)
         model.addAttribute("parameters", body?.parameters ?: emptyMap<String, Any>())
         model.addAttribute("nodeCount", body?.nodes?.size ?: 0)
+        // 140: the working body's release checks — the overview's Checks section renders its
+        // shell only when there are any; definitions and runs lazy-load from the checks partial.
+        model.addAttribute("checksCount", body?.checks?.size ?: 0)
         // The "Settings" table is gone (106): the staging engine is a chip, because one row of
         // one column was a table pretending to be a section.
         model.addAttribute("stagingEngine", body?.settings?.tempdb?.engine)

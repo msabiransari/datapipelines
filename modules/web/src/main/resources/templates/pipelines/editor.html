@@ -297,6 +297,16 @@
       <div class="pe-dock-body" id="pe-pane-details" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-details"
            x-show="dock.tab === 'details'">
+        <!-- 140: the loaded body's release checks. The count is read off the client-side body
+             JSON; the latest verdicts lazy-load from the read-only checks partial (init.js
+             fires the GET only when the body declares any). -->
+        <div class="pe-field" x-show="(pipeline.checks || []).length > 0">
+          <label class="pe-label">Checks</label>
+          <div class="pe-value"
+               x-text="(pipeline.checks || []).length + ' check' + ((pipeline.checks || []).length === 1 ? '' : 's') + ' on this version'"></div>
+          <div id="pe-checks-latest"
+               th:attr="data-checks-url=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipelineId}, version=${hasDraft ? draftVersion : releasedVersion})}"></div>
+        </div>
         <div class="pe-empty" x-show="!selectedNode">Select a node to see its source, template, output and last run.</div>
         <template x-if="selectedNode">
           <div class="pe-details" x-bind:style="detailsTypeStyle(selectedNode)">

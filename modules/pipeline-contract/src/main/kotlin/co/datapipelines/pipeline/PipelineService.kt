@@ -473,19 +473,26 @@ open class PipelineService(
     // -------------------------------------------------------------------------------------
 
     /**
-     * §5.10 — release the draft. Transactional: the three preconditions (a draft exists, it
-     * re-validates, every template version it pins is RELEASED) are reads that the flip then
-     * depends on, and a release that locked a body whose template pin was released out from
-     * under it between the check and the flip would be exactly the corruption the check
-     * exists to prevent.
+     * §5.10 — release the draft.
+     *
+     * The preconditions (a draft exists, it re-validates, every template version it pins is
+     * RELEASED) and the 140 release-check gate run in [PipelineReleaseService]; the
+     * template-pin guard and the one-statement flip run in a metadata transaction there.
+     * This method is deliberately NOT `@Transactional` as a whole since 140: the gate's
+     * check runs open customer-datasource connections, and `ConnectionLease` refuses exactly
+     * that (`datasource.lease_in_transaction`) while a metadata transaction is open on the
+     * thread (056 §E.2).
+     *
+     * [overrideChecksReason] is the §13.17 escape hatch: non-blank, ≥ 10 characters, audited
+     * with the release when any check did not pass. Ignored for a version with no checks.
      */
-    @Transactional("metadataTransactionManager")
     open fun release(
         workspaceId: UUID,
         pipelineId: UUID,
         expectedHash: String,
         actor: UUID,
-    ): PipelineReleaseService.Released = releases.release(workspaceId, pipelineId, expectedHash, actor)
+        overrideChecksReason: String? = null,
+    ): PipelineReleaseService.Released = releases.release(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason)
 
     /**
      * §5.11 — purge the draft: the row and its executions are deleted (no tombstone since

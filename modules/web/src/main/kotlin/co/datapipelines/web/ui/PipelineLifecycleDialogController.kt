@@ -66,6 +66,7 @@ class PipelineLifecycleDialogController(
         response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam(required = false) from: String?,
+        @RequestParam(required = false) overrideChecksReason: String?,
     ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -78,19 +79,16 @@ class PipelineLifecycleDialogController(
                     message = "This pipeline has no draft to release.",
                     details = mapOf("pipeline_id" to id.toString()),
                 )
-        val released = pipelines.release(workspaceId, id, draft.bodyHash, principal.userId)
+        // 140: a failing check run refuses with pipeline.check.failed unless the dialog's
+        // override disclosure supplied the reason — it arrives audited on the release event.
+        val released = pipelines.release(workspaceId, id, draft.bodyHash, principal.userId, overrideChecksReason)
         // T187 — the release is the D4 human step; it is audited on every surface that offers it.
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.AUDIT_VERSION_RELEASED,
             principal,
             workspaceId,
-            mapOf(
-                "pipeline_id" to id.toString(),
-                "pipeline_name" to released.record.name,
-                "version" to released.version.version,
-                "via" to LifecycleVerbs.via(principal),
-            ),
+            LifecycleVerbs.releaseDetails(principal, id, released),
         )
         return if (from == FROM_EDITOR) {
             redirect("/pipelines/$id/editor?ok=released")

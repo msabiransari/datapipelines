@@ -191,8 +191,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `semantics.ref_mismatch` (400 — the fact's text names a table its `refs` do not),
          * landed in the SAME commit as its constants (both sides of the datasources mirror)
          * and its catalog row. Re-derived from the document's own parse.
+         *
+         * 176 → 177 with 140 (release checks): the one `pipeline.check.*` row of the new
+         * §13.17, landed in the SAME commit as its constant and its catalog row. Re-derived
+         * from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 176
+        const val SECTION_13_ROW_COUNT = 177
 
         /**
          * §12's distinct validation codes.
@@ -215,7 +219,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 61 → 64 with 121 (calculator multi-output): §12.10's three mapping rules
          * (`calculator_output_shape_mismatch`, `calculator_output_unknown`,
          * `calculator_outputs_incomplete`), landed in the SAME commit-chain as their constants.
+         *
+         * 64 → 65 with 140 (release checks): §12.11's `pipeline.validation.check_invalid` —
+         * one code for every `checks[]` declaration defect. A 400 like every other §12 code;
+         * landed in the SAME commit as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 64
+        const val SECTION_12_CODE_COUNT = 65
     }
 }
