@@ -72,22 +72,7 @@ class DialectConnectivityIntegrationTest {
      */
     @Test
     fun `mysql introspection routes an underscore-named database through the literal catalog`() {
-        DriverManager.getConnection(mysql.jdbcUrl, mysql.username, mysql.password).use { connection ->
-            connection.createStatement().use {
-                // Clean what this suite touches (SharedMysql's rule): the server is shared.
-                it.execute("DROP TABLE IF EXISTS routed_orders")
-                it.execute("DROP TABLE IF EXISTS annotated_orders")
-                it.execute("CREATE TABLE routed_orders (id INT PRIMARY KEY)")
-                // The remarks pair: a table AND a column carrying a real COMMENT beside an
-                // uncommented sibling — Connector/J reports REMARKS as "" for the uncommented
-                // ones (non-nullable information_schema columns defaulting to ''), and the
-                // wire contract is omitted-when-none, not "" (F4).
-                it.execute(
-                    "CREATE TABLE annotated_orders (id INT COMMENT 'surrogate primary key', note VARCHAR(30)) " +
-                        "COMMENT='customer orders'",
-                )
-            }
-        }
+        createSuiteTables()
 
         val ds =
             Datasource(
@@ -158,6 +143,28 @@ class DialectConnectivityIntegrationTest {
             { schemas.map { it.lowercase() } shouldContain mysql.databaseName.lowercase() },
             { schemas.none { it.lowercase() in mysqlFloor } shouldBe true },
         )
+    }
+
+    /**
+     * The MySQL test's fixture tables, dropped first: the server is shared (SharedMysql's rule),
+     * so the suite cleans what it touches before it creates it.
+     * The remarks pair: a table AND a column carrying a real COMMENT beside an
+     * uncommented sibling — Connector/J reports REMARKS as "" for the uncommented
+     * ones (non-nullable information_schema columns defaulting to ''), and the
+     * wire contract is omitted-when-none, not "" (F4).
+     */
+    private fun createSuiteTables() {
+        DriverManager.getConnection(mysql.jdbcUrl, mysql.username, mysql.password).use { connection ->
+            connection.createStatement().use {
+                it.execute("DROP TABLE IF EXISTS routed_orders")
+                it.execute("DROP TABLE IF EXISTS annotated_orders")
+                it.execute("CREATE TABLE routed_orders (id INT PRIMARY KEY)")
+                it.execute(
+                    "CREATE TABLE annotated_orders (id INT COMMENT 'surrogate primary key', note VARCHAR(30)) " +
+                        "COMMENT='customer orders'",
+                )
+            }
+        }
     }
 
     private companion object {
