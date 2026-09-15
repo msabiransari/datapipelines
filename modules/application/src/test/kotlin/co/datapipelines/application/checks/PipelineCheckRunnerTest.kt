@@ -310,6 +310,77 @@ class PipelineCheckRunnerTest {
             .shouldBeNull()
     }
 
+    // ------------------------------------------------------------------------------- 144 — the semantics the guide teaches
+
+    @Test
+    fun `a fixed expectation beside a bound window passes on the baseline and fails off it - 144 B`() {
+        // The synthetic shape of the 2026-09-15 acceptance miss: the window is a parameter,
+        // the expected total was measured at the default. Nothing in the machinery moves the
+        // expectation with the window — which is why the guide names this a fixed-baseline
+        // drift check and requires the baseline in the check's name.
+        val parameters = mapOf("year" to Parameter(LogicalType.INTEGER, default = IntNode(2024)))
+        val pipeline =
+            pipeline(
+                parameters,
+                check(
+                    id = "baseline_total",
+                    name = "Window total (2024 baseline)",
+                    datasource = "main",
+                    expected = CheckExpectation(kind = CheckExpectation.KIND_VALUE, value = 100.0),
+                    sql = "select sum(amount) from facts where year = :year",
+                ),
+            )
+        datasources.register("main")
+        probeBehavior = { call ->
+            probeResult(if (call.parameters.getValue("year").value == "2024") BigDecimal("100") else BigDecimal("137"))
+        }
+
+        // The release-gate shape: no supplied parameters, so the DEFAULT window is what runs.
+        val releaseRun = runner.run(WORKSPACE, PIPELINE_ID, VERSION, pipeline, emptyMap(), CheckRunVia.RELEASE, ACTOR)
+        releaseRun.single().verdict shouldBe CheckRunVerdict.PASS
+        probeCalls.single().parameters.getValue("year") shouldBe SqlProbeParameter(LogicalType.INTEGER, "2024")
+
+        probeCalls.clear()
+        val otherWindow =
+            runner.run(WORKSPACE, PIPELINE_ID, VERSION, pipeline, supplied("""{"year": 2025}"""), CheckRunVia.MCP, ACTOR)
+        otherWindow.single().verdict shouldBe CheckRunVerdict.FAIL
+        otherWindow.single().observed shouldBe "137"
+    }
+
+    @Test
+    fun `a rows-zero expectation passes under both tested parameter sets - binding and comparison, not SQL truth - 144 B`() {
+        // The parameterized-invariant shape the guide teaches, tested at the level this suite
+        // can honestly reach: the binding (each run binds the supplied/default window) and the
+        // comparison (a rows: 0 expectation against an empty result). The probe is stubbed to
+        // return zero rows for both calls, so this proves machinery behavior over the TWO
+        // tested parameter sets — NOT that the example SQL is an invariant of any real data.
+        val parameters = mapOf("year" to Parameter(LogicalType.INTEGER, default = IntNode(2024)))
+        val pipeline =
+            pipeline(
+                parameters,
+                check(
+                    id = "no_violations",
+                    name = "No rule violations in the window",
+                    datasource = "main",
+                    expected = rowsExpectation(0),
+                    sql = "select id from facts where year = :year and violates_rule",
+                ),
+            )
+        datasources.register("main")
+        probeBehavior = { SqlProbeResult(QueryRows(SCHEMA, emptyList(), truncated = false), wallMs = 1, plan = null) }
+
+        runner
+            .run(WORKSPACE, PIPELINE_ID, VERSION, pipeline, emptyMap(), CheckRunVia.RELEASE, ACTOR)
+            .single()
+            .verdict shouldBe CheckRunVerdict.PASS
+        runner
+            .run(WORKSPACE, PIPELINE_ID, VERSION, pipeline, supplied("""{"year": 1999}"""), CheckRunVia.MCP, ACTOR)
+            .single()
+            .verdict shouldBe CheckRunVerdict.PASS
+        // Same expectation, two bound windows — the machinery moves the window, not the expectation.
+        probeCalls.map { it.parameters.getValue("year").value } shouldBe listOf("2024", "1999")
+    }
+
     // ------------------------------------------------------------------------------- fixtures
 
     private data class ProbeCall(

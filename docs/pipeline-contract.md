@@ -205,7 +205,7 @@ A pipeline body MAY carry `checks`: an optional list of read-only statements the
 Normative notes:
 
 - `checks` is versioned with the body exactly like `nodes`: additive per §15.2, and body-hash neutral — an existing body (no `checks` key) deserializes to an empty list and serializes back byte-identically; an explicit `"checks": []` canonicalizes to the same absent form.
-- Every `:name` bind in `sql` must name a **declared pipeline parameter** (§6). The calculator Context (§7.2) is NOT available to a check — a check runs outside any execution.
+- Every `:name` bind in `sql` must name a **declared pipeline parameter** (§6). The calculator Context (§7.2) is NOT available to a check — a check runs outside any execution. A run binds the declared parameters exactly as an execute does, and the release gate's run supplies **no parameters**: for any parameter a check binds, the declared DEFAULTS are what the gate proves — not every combination a caller can pass — while a check written against fixed literals proves exactly the baseline those literals name. Expectations are static — a fixed value, range or row count — so an expectation that is only true for one window is a baseline-specific statement, and the baseline belongs in the check's `name`.
 - The author — agent or human — supplies the query and the expectation, **never an observed value**. `observed` exists only on the server's own run rows (`pipeline_check_runs`, metadata-db §4.20); the body's shape has no field that could carry one in.
 
 ---

@@ -17,7 +17,9 @@ import java.io.File
  *
  * The scan covers the hand-written skill files AND the rendered `references/tools.md`, because
  * tool DESCRIPTIONS are agent-facing text too (they reach the agent through `tools/list`
- * before any document does) and `tools.md` is rendered from them.
+ * before any document does) and `tools.md` is rendered from them. Since 144 it also covers the
+ * connect-time `instructions` string — the one delivered surface no skill-file scan reaches,
+ * paid for by every session of every client.
  *
  * The token list is the sample data's vocabulary — table names, family names, the datasource
  * names `app.sh --demo` registers, the domain words the demo questions use. Add to it when a
@@ -85,7 +87,7 @@ class SkillHasNoDemoContentTest {
                     if (found.isEmpty()) {
                         null
                     } else {
-                        val where = "${file.relativeTo(skillDir)}:${index + 1}"
+                        val where = "${displayName(file)}:${index + 1}"
                         "$where: ${found.joinToString()} — ${line.trim().take(90)}"
                     }
                 }
@@ -97,7 +99,16 @@ class SkillHasNoDemoContentTest {
         skillDir
             .walkTopDown()
             .filter { it.isFile && it.extension == "md" }
-            .toList()
+            .toList() +
+            File(SpecFiles.root, INSTRUCTIONS_PATH)
+
+    /** Skill files report relative to the skill dir; the instructions file by its repo path. */
+    private fun displayName(file: File): String =
+        if (file.absolutePath.startsWith(skillDir.absolutePath)) {
+            file.relativeTo(skillDir).path
+        } else {
+            INSTRUCTIONS_PATH
+        }
 
     /** Word-bounded for plain words; substring for path-shaped tokens (`nyc/`, `--demo`). */
     private fun matches(
@@ -110,5 +121,10 @@ class SkillHasNoDemoContentTest {
         } else {
             lower.contains(token)
         }
+    }
+
+    private companion object {
+        /** 144 — the connect-time briefing, the delivered instruction surface no skill-file scan reaches. */
+        const val INSTRUCTIONS_PATH = "modules/mcp-server/src/main/resources/mcp/server-instructions.txt"
     }
 }

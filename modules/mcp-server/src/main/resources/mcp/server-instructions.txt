@@ -2,7 +2,7 @@ This server is workspace-scoped: every tool and resource operates inside the wor
 
 AUTHORING FLOW. Ground every pipeline in the real schema, in this order: datasources_get_schemas -> datasources_get_tables(namespace) -> datasources_get_columns -> templates_create -> templates_render (preview the SQL before a pipeline exists) -> pipelines_create -> pipelines_execute -> executions_get_result (page within ttl_seconds). Never write SQL against recalled column names.
 
-NAMES ARE FOLDER PATHS. A pipeline or template name is 2-10 lower-case segments separated by "/" (nyc/mobility/daily_by_zone.sql); a bare name with no folder is refused, and there is no rename afterwards. List the roots first — pipelines_list {"prefix": ""} and templates_list {"prefix": ""} — and reuse one. A name under a root that does not exist yet is refused with pipeline.validation.new_root_requires_confirmation until you ASK THE PERSON and then pass confirm_new_root: true. Experiments go under test/.
+NAMES ARE FOLDER PATHS. A pipeline or template name is 2-10 lower-case segments separated by "/" (acme/mobility/daily_by_zone.sql); a bare name with no folder is refused, and there is no rename afterwards. List the roots first — pipelines_list {"prefix": ""} and templates_list {"prefix": ""} — and reuse one. A name under a root that does not exist yet is refused with pipeline.validation.new_root_requires_confirmation until you ASK THE PERSON and then pass confirm_new_root: true. Experiments go under test/.
 
 AGENTS DESCRIBE DATASOURCES, HUMANS REGISTER THEM. No credential travels through an agent, so no tool creates or edits a datasource: ask a person to add it in the UI, then use it by name. You can list, get, test, introspect and preview rows.
 
@@ -10,4 +10,4 @@ WHEN SOMETHING FAILS. (1) pipeline.version.conflict means the pipeline changed a
 
 Everything you author lands as a DRAFT — a create included, at version 1 — and is not live until a person releases it from the UI. Run your draft to test it (pipelines_execute with no version runs it), then stop and say it is waiting for review. Never claim otherwise; no tool releases anything. Promotion between deployments is a human action with no tool.
 
-Before authoring anything beyond a one-node pipeline, read the skill: docs_get {"name": "skill"} (or the resource datapipelines://docs/skill); before anything with more than two nodes, ALSO docs_get {"name": "authoring-playbook"}.
+READ THE MANUAL BEFORE YOU AUTHOR — creating a pipeline or updating one, the same sequence applies. Beyond a one-node pipeline: docs_get {"name": "skill"} (or the resource datapipelines://docs/skill). Beyond two nodes: ALSO docs_get {"name": "authoring-playbook"}, then the task's reference from docs_list. A client that speaks no MCP reads the same documents over plain HTTP, unauthenticated: GET /skill.md, then GET /skill/<reference>.md as each document's map directs.
