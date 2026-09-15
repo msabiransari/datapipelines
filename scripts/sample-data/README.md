@@ -177,16 +177,22 @@ a library template — and their results are what the marketing page quotes.
 
 | Pipeline | The question it answers | Nodes | Engines | Parameters | Expected result |
 |---|---|---|---|---|---|
-| `nyc/mobility/revenue_by_borough` | Which borough earns the most yellow-taxi revenue, and which tips best? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date` | 6 rows, `6bfee9237736…`, ~6 s |
-| `nyc/mobility/rainy_vs_dry_ridership` | Do New Yorkers take more taxis when it rains? | 4 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 6 rows, `097c408cefda…`, ~4 s |
-| `nyc/mobility/borough_od_matrix` | Where do the trips that start in each borough actually end up? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date`, `pickup_borough` | 27 rows, `d3f16810e1c7…`, ~8 s |
-| `nyc/mobility/airport_access_by_borough` | Which boroughs ride to JFK, LaGuardia and Newark, what does it cost, and how does that compare with the borough's ordinary economics? | 5 | Postgres + SQLite → H2 | `start_date`, `end_date` | 13 rows, `3ab8325f6b21…`, ~11 s |
-| `nyc/mobility/weather_sensitivity_by_borough` | Which boroughs lose riders when it rains, and which barely notice? | 5 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 29 rows, `c030bbb8f702…`, ~5 s |
-| `nyc/mobility/mobility_briefing` | Per borough: how many trips start there, how many never leave it, what a trip is worth. | 3 (one is a `PIPELINE` node) | composition over `nyc/mobility/borough_od_matrix` | `start_date`, `end_date` | 6 rows, `4760c5d87db6…`, ~6 s |
+| `nyc/mobility/revenue_by_borough` | Which borough earns the most yellow-taxi revenue, and which tips best? | 3 | Postgres + SQLite → H2 | `year` | 6 rows, `6bfee9237736…`, ~1 s |
+| `nyc/mobility/rainy_vs_dry_ridership` | Do New Yorkers take more taxis when it rains? | 4 | Postgres + MySQL + SQLite → H2 | `year`, `rain_threshold_mm` | 6 rows, `097c408cefda…`, ~1 s |
+| `nyc/mobility/borough_od_matrix` | Where do the trips that start in each borough actually end up? | 3 | Postgres + SQLite → H2 | `year`, `quarter`, `pickup_borough` | 27 rows, `479b2ce8321b…`, ~3 s |
+| `nyc/mobility/airport_access_by_borough` | Which boroughs ride to JFK, LaGuardia and Newark, what does it cost, and how does that compare with the borough's ordinary economics? | 5 | Postgres + SQLite → H2 | `year`, `quarter` | 13 rows, `ce7f1371511e…`, ~3 s |
+| `nyc/mobility/weather_sensitivity_by_borough` | Which boroughs lose riders when it rains, and which barely notice? | 5 | Postgres + MySQL + SQLite → H2 | `year`, `quarter`, `rain_threshold_mm` | 29 rows, `ac7030f3db19…`, ~3 s |
+| `nyc/mobility/mobility_briefing` | Per borough: how many trips start there, how many never leave it, what a trip is worth. | 7 (one is a `PIPELINE` node, four are `CALCULATOR`s) | composition over `nyc/mobility/borough_od_matrix` | `anchor_date` | 6 rows, `0176daa7ecd7…`, ~3 s |
 
-The default window is **2024-07-01 … 2024-09-30** (one quarter), which is what keeps the
-trip-level scans in single-digit seconds; the sample covers 2023-01-01 … 2024-12-31 and any
-sub-window of it is a valid parameter set.
+**The door is the question's period, never two raw dates** (138 §A — the seeded pipelines are
+the house patterns every agent copies, so they carry the rule the skill teaches): the annual
+questions take `year` (default 2024), the quarterly ones `year` + `quarter` (default 2024, 3 —
+one quarter is what keeps the trip-level scans in single-digit seconds), the lake pipeline
+`year` + `month` (default 2024, 12), and the briefing an `anchor_date` (default 2025-01-01, the
+day after the sample's last day: it briefs the last complete quarter BEFORE the anchor,
+2024-Q4). Each template derives the bounds in its own dialect (`make_date` in Postgres and
+DuckDB, `MAKEDATE` in MySQL); the sample covers 2023 and 2024. The expected hashes are the
+ones `deploy/sample-data/expected-results-nyc.json` records, checked by `check-baselines.sh`.
 
 ### Template hierarchy
 

@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
@@ -108,6 +109,45 @@ class SampleDataExamplesContentTest {
 
         problems.joinToString("\n") shouldContain PipelineErrorCodes.Template.PARAMETER_INTERPOLATED
     }
+
+    /**
+     * 138 §A — the seeded pipelines are the house patterns every agent reads first, and the
+     * same-model acceptance re-run (2026-09-14) showed exemplars beating rule 13: with all seven
+     * carrying a raw-date door, every re-run pipeline declared `start_date`/`end_date` as its
+     * door too. The rule the exemplars must now teach: two raw dates are an INPUT to a template,
+     * never the door of a pipeline — the door is the question's period (`year`, `quarter`, an
+     * anchor date) and the bounds are derived. Falsified by putting one raw-date pair back into a
+     * copy of the shipped file: red, naming the pipeline.
+     */
+    @Test
+    fun `no seeded pipeline declares both start_date and end_date as parameters - the door is the question's period`() {
+        val offenders = EXAMPLES_PATHS.flatMap { path -> rawDateDoors(readExamples(path)).map { "$path: $it" } }
+
+        offenders.shouldBeEmpty()
+    }
+
+    @Test
+    fun `falsification - a seeded pipeline with a raw-date door is named`() {
+        val doc = readExamples(EXAMPLES_PATHS[0])
+        val first = doc.path("pipelines").first() as ObjectNode
+        val parameters = first.path("parameters") as ObjectNode
+        listOf(RAW_DOOR_START, RAW_DOOR_END).forEach { name ->
+            parameters
+                .putObject(name)
+                .put("type", "DATE")
+                .put("required", false)
+                .put("default", "2024-01-01")
+        }
+
+        rawDateDoors(doc) shouldBe listOf(first.path("name").asText())
+    }
+
+    /** The names of the pipelines in [doc] whose declared parameters carry BOTH raw-date names. */
+    private fun rawDateDoors(doc: JsonNode): List<String> =
+        doc
+            .path("pipelines")
+            .filter { it.path("parameters").has(RAW_DOOR_START) && it.path("parameters").has(RAW_DOOR_END) }
+            .map { it.path("name").asText() }
 
     /** Parses a shipped file; a malformed file is this suite's failure, not a skip. */
     private fun readExamples(path: String): JsonNode = mapper.readTree(TemplateFixtures.repoFile(path).readText())
@@ -275,10 +315,14 @@ class SampleDataExamplesContentTest {
 
         /** The template the falsification poisons — referenced by a pipeline that declares the parameter. */
         private const val POISONED_TEMPLATE_ID = "nyc/mobility/sample_trips_monthly.sql"
-        private const val BIND_FORM = ":start_date"
+        private const val BIND_FORM = ":year"
 
-        /** Escaped at the use site (a dollar in a Kotlin string literal): the interpolation form of start_date. */
-        private const val INTERPOLATION_FORM = "\${start_date}"
+        /** 138 §A — the raw-date door no seeded pipeline may declare (both names together). */
+        private const val RAW_DOOR_START = "start_date"
+        private const val RAW_DOOR_END = "end_date"
+
+        /** Escaped at the use site (a dollar in a Kotlin string literal): the interpolation form of year (138: the door). */
+        private const val INTERPOLATION_FORM = "\${year}"
 
         /** The version a fresh import lands at — every shipped pipeline node pins version 1. */
         private const val SEED_VERSION = 1

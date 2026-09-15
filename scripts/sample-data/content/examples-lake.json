@@ -7,9 +7,9 @@
       "engine": "freemarker",
       "dialect": "LAKE",
       "display_name": "Rideshare trips and fares per pickup zone and day (lake)",
-      "description": "Reads the pre-aggregated hvfhv_zone_day table straight out of the dp-lake object store - Parquet on S3, queried in place, nothing downloaded. One row per pickup zone and day, summed across Uber, Lyft, Via and Juno. The table is already at (zone, day, company) grain, so this node reads a few hundred thousand rows rather than the 400M-row trip table beside it. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one month so the trip-level scan stays a few seconds.",
+      "description": "Reads the pre-aggregated hvfhv_zone_day table straight out of the dp-lake object store - Parquet on S3, queried in place, nothing downloaded. One row per pickup zone and day, summed across Uber, Lyft, Via and Juno. The table is already at (zone, day, company) grain, so this node reads a few hundred thousand rows rather than the 400M-row trip table beside it. Expects INTEGER parameters year and month (1-12); the month's bounds are derived in DuckDB (make_date and last_day), so the door is the month the question names, never two dates. The shipped sample covers 2023 and 2024.",
       "imports": [],
-      "body": "SELECT\n    r.pickup_date                     AS pickup_date,\n    r.pu_location_id                  AS pu_location_id,\n    SUM(r.trip_count)                 AS rideshare_trips,\n    ROUND(SUM(r.total_base_fare), 2)  AS rideshare_base_fare,\n    SUM(r.shared_request_count)       AS rideshare_shared_requests\nFROM hvfhv_zone_day r\nWHERE r.pickup_date BETWEEN :start_date AND :end_date\nGROUP BY r.pickup_date, r.pu_location_id",
+      "body": "SELECT\n    r.pickup_date                     AS pickup_date,\n    r.pu_location_id                  AS pu_location_id,\n    SUM(r.trip_count)                 AS rideshare_trips,\n    ROUND(SUM(r.total_base_fare), 2)  AS rideshare_base_fare,\n    SUM(r.shared_request_count)       AS rideshare_shared_requests\nFROM hvfhv_zone_day r\nWHERE r.pickup_date BETWEEN make_date(:year, :month, 1) AND last_day(make_date(:year, :month, 1))\nGROUP BY r.pickup_date, r.pu_location_id",
       "is_library": false
     },
     {
@@ -18,9 +18,9 @@
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Yellow-taxi trips and fares per pickup zone and day",
-      "description": "Trip-level scan of the sample-trips Postgres database at (day, pickup zone) grain - the same grain the lake node returns, so the two engines' rows line up without either side being re-aggregated. The raw TLC feed carries implausible rows, so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is what makes an average a fact rather than an artefact of one bad row. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one month so the trip-level scan stays a few seconds.",
+      "description": "Trip-level scan of the sample-trips Postgres database at (day, pickup zone) grain - the same grain the lake node returns, so the two engines' rows line up without either side being re-aggregated. The raw TLC feed carries implausible rows, so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is what makes an average a fact rather than an artefact of one bad row. Expects INTEGER parameters year and month (1-12); the month's bounds are derived in Postgres (make_date plus one month). The shipped sample covers 2023 and 2024; one month keeps the trip-level scan at a few seconds.",
       "imports": [],
-      "body": "SELECT\n    t.pickup_date                 AS pickup_date,\n    t.pu_location_id              AS pu_location_id,\n    COUNT(*)                      AS taxi_trips,\n    ROUND(SUM(t.total_amount), 2) AS taxi_total_amount\nFROM trips t\nWHERE t.pickup_date BETWEEN :start_date AND :end_date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pickup_date, t.pu_location_id",
+      "body": "SELECT\n    t.pickup_date                 AS pickup_date,\n    t.pu_location_id              AS pu_location_id,\n    COUNT(*)                      AS taxi_trips,\n    ROUND(SUM(t.total_amount), 2) AS taxi_total_amount\nFROM trips t\nWHERE t.pickup_date >= make_date(:year, :month, 1)\n  AND t.pickup_date <  (make_date(:year, :month, 1) + INTERVAL '1 month')::date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pickup_date, t.pu_location_id",
       "is_library": false
     },
     {
@@ -40,9 +40,9 @@
       "engine": "freemarker",
       "dialect": "MYSQL",
       "display_name": "Daily precipitation, averaged across the NYC stations",
-      "description": "One row per day from the sample-weather MySQL database with precipitation in millimetres, averaged across the five NYC-area stations. Days with no PRCP reading anywhere come back NULL and are treated as dry by the answer node. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one month so the trip-level scan stays a few seconds.",
+      "description": "One row per day from the sample-weather MySQL database with precipitation in millimetres, averaged across the five NYC-area stations. Days with no PRCP reading anywhere come back NULL and are treated as dry by the answer node. Expects INTEGER parameters year and month (1-12); the month's bounds are derived in MySQL (MAKEDATE plus months). The shipped sample covers 2023 and 2024.",
       "imports": [],
-      "body": "SELECT\n    o.obs_date                                                   AS obs_date,\n    ROUND(AVG(CASE WHEN o.element = 'PRCP' THEN o.value END), 2) AS precip_mm\nFROM observations o\nWHERE o.obs_date BETWEEN :start_date AND :end_date\n  AND o.element = 'PRCP'\nGROUP BY o.obs_date",
+      "body": "SELECT\n    o.obs_date                                                   AS obs_date,\n    ROUND(AVG(CASE WHEN o.element = 'PRCP' THEN o.value END), 2) AS precip_mm\nFROM observations o\nWHERE o.obs_date >= MAKEDATE(:year, 1) + INTERVAL (:month - 1) MONTH\n  AND o.obs_date <  MAKEDATE(:year, 1) + INTERVAL :month MONTH\n  AND o.element = 'PRCP'\nGROUP BY o.obs_date",
       "is_library": false
     },
     {
@@ -51,9 +51,9 @@
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Rain lift per borough: taxi vs rideshare",
-      "description": "The answer node. Puts the four staged tables together in tempdb: yellow-taxi zone-days from Postgres, rideshare zone-days from the lake, the borough lookup from SQLite and the day's rainfall from MySQL. The two trip sources are UNIONed to a common grain before aggregation rather than joined, so a zone-day that only one of them saw still counts - an inner join between them would silently drop it and every rate on the screen would be wrong by a few points. stg_taxi is a 1-in-16 hash sample (sources.lock: trips_sample_modulus 16) while stg_rideshare is the full census, so a taxi/rideshare share would be a number about the sampling, not the city — the deliverable is the per-mode RAIN LIFT (rainy per-day trips / dry per-day trips, per borough), a within-mode ratio in which the sample rate cancels, and the raw per-day columns are labelled ‘sampled’ so nobody reads them as totals. Binds :rain_threshold_mm (a declared parameter) and :window_span_days (from the CALCULATOR node). The weather bucket is computed in an inner CTE so the outer GROUP BY names plain columns — H2's matching of two parameterized CASE expressions is data-dependent (089 live gate).",
+      "description": "The answer node. Puts the four staged tables together in tempdb: yellow-taxi zone-days from Postgres, rideshare zone-days from the lake, the borough lookup from SQLite and the day's rainfall from MySQL. The two trip sources are UNIONed to a common grain before aggregation rather than joined, so a zone-day that only one of them saw still counts - an inner join between them would silently drop it and every rate on the screen would be wrong by a few points. stg_taxi is a 1-in-16 hash sample (sources.lock: trips_sample_modulus 16) while stg_rideshare is the full census, so a taxi/rideshare share would be a number about the sampling, not the city — the deliverable is the per-mode RAIN LIFT (rainy per-day trips / dry per-day trips, per borough), a within-mode ratio in which the sample rate cancels, and the raw per-day columns are labelled ‘sampled’ so nobody reads them as totals. Binds :rain_threshold_mm, :year and :month (declared parameters); the month's length is derived in H2 from year and month, in the window_days CTE, and every per-day rate divides by it. The weather bucket is computed in an inner CTE so the outer GROUP BY names plain columns — H2's matching of two parameterized CASE expressions is data-dependent (089 live gate).",
       "imports": [],
-      "body": "WITH grain AS (\n    SELECT t.pickup_date AS d, t.pu_location_id AS z,\n           t.taxi_trips  AS taxi_trips, 0 AS rideshare_trips\n    FROM stg_taxi t\n    UNION ALL\n    SELECT r.pickup_date, r.pu_location_id,\n           0, r.rideshare_trips\n    FROM stg_rideshare r\n),\nbucketed AS (\n    SELECT\n        z.borough                                                                AS borough,\n        CASE WHEN COALESCE(w.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END AS weather,\n        g.taxi_trips                                                             AS taxi_trips,\n        g.rideshare_trips                                                        AS rideshare_trips\n    FROM grain g\n    JOIN stg_zones z ON z.location_id = g.z\n    LEFT JOIN stg_rain w ON w.obs_date = g.d\n)\n,\nper_day AS (\n    SELECT\n        borough                                                                 AS borough,\n        weather                                                                 AS weather,\n        CAST(SUM(taxi_trips) AS DECIMAL(18,4))\n            / NULLIF(:window_span_days + 1, 0)                                  AS taxi_per_day,\n        CAST(SUM(rideshare_trips) AS DECIMAL(18,4))\n            / NULLIF(:window_span_days + 1, 0)                                  AS rideshare_per_day\n    FROM bucketed\n    GROUP BY borough, weather\n)\nSELECT\n    borough                                                                       AS borough,\n    ROUND(MAX(CASE WHEN weather = 'dry'   THEN taxi_per_day END), 1)             AS taxi_sampled_trips_per_day_dry,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN taxi_per_day END), 1)             AS taxi_sampled_trips_per_day_rainy,\n    ROUND(MAX(CASE WHEN weather = 'dry'   THEN rideshare_per_day END), 1)        AS rideshare_trips_per_day_dry,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN rideshare_per_day END), 1)        AS rideshare_trips_per_day_rainy,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN taxi_per_day END)\n          / NULLIF(MAX(CASE WHEN weather = 'dry' THEN taxi_per_day END), 0), 2)  AS taxi_rain_lift,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN rideshare_per_day END)\n          / NULLIF(MAX(CASE WHEN weather = 'dry' THEN rideshare_per_day END), 0), 2) AS rideshare_rain_lift\nFROM per_day\nGROUP BY borough\nORDER BY borough",
+      "body": "WITH grain AS (\n    SELECT t.pickup_date AS d, t.pu_location_id AS z,\n           t.taxi_trips  AS taxi_trips, 0 AS rideshare_trips\n    FROM stg_taxi t\n    UNION ALL\n    SELECT r.pickup_date, r.pu_location_id,\n           0, r.rideshare_trips\n    FROM stg_rideshare r\n),\nbucketed AS (\n    SELECT\n        z.borough                                                                AS borough,\n        CASE WHEN COALESCE(w.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END AS weather,\n        g.taxi_trips                                                             AS taxi_trips,\n        g.rideshare_trips                                                        AS rideshare_trips\n    FROM grain g\n    JOIN stg_zones z ON z.location_id = g.z\n    LEFT JOIN stg_rain w ON w.obs_date = g.d\n)\n,\nwindow_days AS (\n    -- The month's length, from the same year/month door the source nodes bound: H2 date\n    -- arithmetic from the two integers, so every per-day rate divides by the window.\n    SELECT DAY_OF_MONTH(LAST_DAY(DATEADD('MONTH', :month - 1, DATEADD('YEAR', :year - 1970, DATE '1970-01-01')))) AS n\n),\nper_day AS (\n    SELECT\n        borough                                                                 AS borough,\n        weather                                                                 AS weather,\n        CAST(SUM(taxi_trips) AS DECIMAL(18,4))\n            / (SELECT n FROM window_days)                                  AS taxi_per_day,\n        CAST(SUM(rideshare_trips) AS DECIMAL(18,4))\n            / (SELECT n FROM window_days)                                  AS rideshare_per_day\n    FROM bucketed\n    GROUP BY borough, weather\n)\nSELECT\n    borough                                                                       AS borough,\n    ROUND(MAX(CASE WHEN weather = 'dry'   THEN taxi_per_day END), 1)             AS taxi_sampled_trips_per_day_dry,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN taxi_per_day END), 1)             AS taxi_sampled_trips_per_day_rainy,\n    ROUND(MAX(CASE WHEN weather = 'dry'   THEN rideshare_per_day END), 1)        AS rideshare_trips_per_day_dry,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN rideshare_per_day END), 1)        AS rideshare_trips_per_day_rainy,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN taxi_per_day END)\n          / NULLIF(MAX(CASE WHEN weather = 'dry' THEN taxi_per_day END), 0), 2)  AS taxi_rain_lift,\n    ROUND(MAX(CASE WHEN weather = 'rainy' THEN rideshare_per_day END)\n          / NULLIF(MAX(CASE WHEN weather = 'dry' THEN rideshare_per_day END), 0), 2) AS rideshare_rain_lift\nFROM per_day\nGROUP BY borough\nORDER BY borough",
       "is_library": false
     }
   ],
@@ -62,24 +62,24 @@
       "schema_version": 1,
       "name": "nyc/mobility/taxi_vs_rideshare",
       "display_name": "Rain lift: taxi vs rideshare, by borough",
-      "description": "FOUR ENGINES in one pipeline, one of them a data lake read in place. Yellow-taxi trips come from Postgres, Uber/Lyft/Via/Juno trips from Parquet on S3 (nothing is downloaded - only the rows the query names are fetched), the borough lookup from SQLite and the day's rainfall from MySQL; a CALCULATOR turns the two date parameters into the window length so the per-day rates are real rates. The taxi side is a 1-in-16 hash sample of trips while the lake's rideshare zone-days are the full census, so the answer is the per-mode RAIN LIFT — rainy-day per-day trips divided by dry-day per-day trips, for yellow taxi and for rideshare, per borough: a within-mode ratio in which the sample rate cancels. The raw per-day columns are labelled ‘sampled’ where the source is sampled, and are never totals.",
+      "description": "Question\nDo New Yorkers switch to a taxi, or to a rideshare, when it rains? One row per borough: sampled taxi trips per day and rideshare trips per day on dry and on rainy days, and each mode's RAIN LIFT (its rainy per-day figure over its dry one).\n\nWindow and door\nOne calendar month, chosen by year and month (default 2024, 12: December). The rainy threshold is rain_threshold_mm (default 2.5 mm, the US National Weather Service 'light rain' floor). Every source template derives the month's bounds in its own dialect - Postgres, DuckDB and MySQL each in their own date functions - and the answer node derives the month's length in H2 from the same two integers.\n\nSources and grain\nFOUR ENGINES, one of them a data lake read in place. sample-trips (Postgres): trips, a deterministic 1-in-16 hash sample of yellow-taxi trips, rolled up at the source to one row per (day, pickup zone). sample-lake (DuckDB over Parquet on S3, nothing downloaded): hvfhv_zone_day, the FULL census of Uber/Lyft/Via/Juno trips at (day, pickup zone, company) grain, summed over companies - the 400M-row trip table beside it is never touched. sample-reference (SQLite): zones, the TLC lookup both trip tables share. sample-weather (MySQL): observations, five stations averaged to one PRCP value per day.\n\nInterpretation\nThe taxi side is a sample and the rideshare side a census, so a taxi/rideshare SHARE would be a number about the sampling, not the city; the deliverable is the within-mode rain lift, a ratio in which the sample rate cancels, and the raw per-day taxi columns are labelled 'sampled' so nobody reads them as totals. A day is rainy at or above the threshold; no reading counts as dry. The two trip sources are UNIONed to a common (day, zone) grain before aggregation rather than joined, so a zone-day only one of them saw still counts. The plausibility filter (0 < miles < 100, 0 < total < 1000 USD) applies to the taxi rows at the source.\n\nVerification\nLake total for the month, SELECT SUM(trip_count) FROM hvfhv_zone_day WHERE pickup_date BETWEEN '2024-12-01' AND '2024-12-31': 21,065,840 rideshare trips over 31 days. Multiplying every row's rideshare dry and rainy per-day figures by 31 and summing recovers 21,065,082.8 - the total within the rounding of the per-day figures. Rainy days in the month from the weather source (the same AVG(value) >= 2.5 query as rainy_vs_dry_ridership, over December): 11 of 31.\n\nCaveats\nThe per-day figures divide each weather bucket's total by the window's 31 days, not by that bucket's own day count; with 11 rainy and 20 dry days in December 2024 the rain lift therefore compares the two buckets' TOTALS, and a lift near 11/20 (0.55) is what 'no effect' looks like. EWR is Newark Airport's zone, not a borough. Trip counts on the taxi side are sample counts (x16 for the population).",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
-          "type": "DATE",
+        "year": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-12-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 2024,
+          "description": "The calendar year to report, as the question names it (2024). The sample covers 2023 and 2024."
         },
-        "end_date": {
-          "type": "DATE",
+        "month": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-12-31",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 12,
+          "description": "The month of that year to report, 1-12 (the default, 12, is December)."
         },
         "rain_threshold_mm": {
           "type": "BIGDECIMAL",
@@ -93,7 +93,7 @@
       "nodes": [
         {
           "id": "stage_taxi",
-          "description": "Stage yellow-taxi trips per pickup zone and day from Postgres.",
+          "description": "Stage the month's yellow-taxi trips per pickup zone and day from Postgres: one row per (day, pickup zone).",
           "type": "DQL",
           "source": "sample-trips",
           "template": {
@@ -108,7 +108,7 @@
         },
         {
           "id": "stage_rideshare",
-          "description": "Stage rideshare trips per pickup zone and day from the dp-lake object store. The datasource is read-only Parquet on S3: the pre-aggregate is a few hundred thousand rows, and the 400M-row trip table beside it is only touched by a query that names it.",
+          "description": "Stage the month's rideshare trips per pickup zone and day from the dp-lake object store: one row per (day, pickup zone), summed over companies. The datasource is read-only Parquet on S3: the pre-aggregate is a few hundred thousand rows, and the 400M-row trip table beside it is only touched by a query that names it.",
           "type": "DQL",
           "source": "sample-lake",
           "template": {
@@ -138,7 +138,7 @@
         },
         {
           "id": "stage_rain",
-          "description": "Stage the day's average precipitation from MySQL.",
+          "description": "Stage the month's average precipitation per day from MySQL: one row per day.",
           "type": "DQL",
           "source": "sample-weather",
           "template": {
@@ -149,19 +149,6 @@
             "target": "tempdb",
             "table": "stg_rain"
           },
-          "depends_on": []
-        },
-        {
-          "id": "window_span",
-          "description": "How many whole days the reporting window spans. A CALCULATOR node: no SQL, no rows - one typed value written into the execution Context under window_span_days, which the answer node binds as :window_span_days to turn totals into per-day rates. Computing it in SQL would mean each engine's own date arithmetic, and there are four of them here.",
-          "type": "CALCULATOR",
-          "kind": "date_diff",
-          "inputs": {
-            "from": "$start_date",
-            "to": "$end_date",
-            "unit": "day"
-          },
-          "context_key": "window_span_days",
           "depends_on": []
         },
         {
@@ -180,8 +167,7 @@
             "stage_taxi",
             "stage_rideshare",
             "stage_zones",
-            "stage_rain",
-            "window_span"
+            "stage_rain"
           ]
         }
       ]

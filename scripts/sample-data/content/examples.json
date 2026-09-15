@@ -6,9 +6,9 @@
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Monthly trips by pickup zone",
-      "description": "Reads the pre-aggregated trips_monthly rollup from the sample-trips Postgres datasource for the pipeline's start_date/end_date window. Expects DATE parameters named start_date and end_date; the shipped sample covers 2023-01-01..2024-12-31.",
+      "description": "Reads the pre-aggregated trips_monthly rollup from the sample-trips Postgres datasource for one calendar year: one row per (month, pickup zone) with trip count, revenue and tips. Expects an INTEGER parameter named year; the bounds are derived in Postgres (make_date) so the door is the year, never two dates. The shipped sample covers 2023 and 2024.",
       "imports": [],
-      "body": "SELECT\n    m.month_start     AS month_start,\n    m.pu_location_id  AS pu_location_id,\n    m.trip_count      AS trip_count,\n    m.total_revenue   AS total_revenue,\n    m.total_tips      AS total_tips\nFROM trips_monthly m\nWHERE m.month_start BETWEEN :start_date AND :end_date",
+      "body": "SELECT\n    m.month_start     AS month_start,\n    m.pu_location_id  AS pu_location_id,\n    m.trip_count      AS trip_count,\n    m.total_revenue   AS total_revenue,\n    m.total_tips      AS total_tips\nFROM trips_monthly m\nWHERE m.month_start >= make_date(:year, 1, 1)\n  AND m.month_start <  make_date(:year + 1, 1, 1)",
       "is_library": false
     },
     {
@@ -17,9 +17,9 @@
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Daily trip counts and revenue",
-      "description": "Reads the pre-aggregated trips_daily rollup from the sample-trips Postgres datasource for the pipeline's start_date/end_date window. Expects DATE parameters named start_date and end_date; the shipped sample covers 2023-01-01..2024-12-31.",
+      "description": "Reads the pre-aggregated trips_daily rollup from the sample-trips Postgres datasource for one calendar year: one row per day with trip count, revenue and distance. Expects an INTEGER parameter named year; the bounds are derived in Postgres (make_date). The shipped sample covers 2023 and 2024.",
       "imports": [],
-      "body": "SELECT\n    d.pickup_date       AS pickup_date,\n    d.trip_count        AS trip_count,\n    d.total_revenue     AS total_revenue,\n    d.total_distance_mi AS total_distance_mi\nFROM trips_daily d\nWHERE d.pickup_date BETWEEN :start_date AND :end_date",
+      "body": "SELECT\n    d.pickup_date       AS pickup_date,\n    d.trip_count        AS trip_count,\n    d.total_revenue     AS total_revenue,\n    d.total_distance_mi AS total_distance_mi\nFROM trips_daily d\nWHERE d.pickup_date >= make_date(:year, 1, 1)\n  AND d.pickup_date <  make_date(:year + 1, 1, 1)",
       "is_library": false
     },
     {
@@ -39,9 +39,9 @@
       "engine": "freemarker",
       "dialect": "SQLITE",
       "display_name": "Weekend and US federal holiday calendar",
-      "description": "Reads the generated day calendar from the sample-reference SQLite datasource for the pipeline's window. Expects DATE parameters named start_date and end_date. cal_date is ISO-8601 TEXT because SQLite has no DATE type; cast it after staging.",
+      "description": "Reads the whole generated day calendar (731 rows, 2023-01-01..2024-12-31) from the sample-reference SQLite datasource: one row per day with the weekend and holiday flags. Takes no parameters - it is a lookup, and the answer node's join to the trips' days is what narrows it to the window. cal_date is ISO-8601 TEXT because SQLite has no DATE type; cast it after staging.",
       "imports": [],
-      "body": "SELECT\n    c.cal_date     AS cal_date,\n    c.is_weekend   AS is_weekend,\n    c.is_holiday   AS is_holiday,\n    c.holiday_name AS holiday_name\nFROM calendar c\nWHERE c.cal_date BETWEEN :start_date AND :end_date",
+      "body": "SELECT\n    c.cal_date     AS cal_date,\n    c.is_weekend   AS is_weekend,\n    c.is_holiday   AS is_holiday,\n    c.holiday_name AS holiday_name\nFROM calendar c",
       "is_library": false
     },
     {
@@ -50,9 +50,9 @@
       "engine": "freemarker",
       "dialect": "MYSQL",
       "display_name": "Daily precipitation across the NYC stations",
-      "description": "Averages the PRCP element across the five NYC-area GHCN stations, one row per day, from the sample-weather MySQL datasource. Expects DATE parameters named start_date and end_date. Values are millimetres.",
+      "description": "Averages the PRCP element across the five NYC-area GHCN stations, one row per day, from the sample-weather MySQL datasource, for one calendar year. Expects an INTEGER parameter named year; the bounds are derived in MySQL (MAKEDATE). Values are millimetres.",
       "imports": [],
-      "body": "SELECT\n    o.obs_date                AS obs_date,\n    ROUND(AVG(o.value), 2)    AS precip_mm,\n    ROUND(MAX(o.value), 2)    AS max_precip_mm\nFROM observations o\nWHERE o.element = 'PRCP'\n  AND o.obs_date BETWEEN :start_date AND :end_date\nGROUP BY o.obs_date",
+      "body": "SELECT\n    o.obs_date                AS obs_date,\n    ROUND(AVG(o.value), 2)    AS precip_mm,\n    ROUND(MAX(o.value), 2)    AS max_precip_mm\nFROM observations o\nWHERE o.element = 'PRCP'\n  AND o.obs_date >= MAKEDATE(:year, 1)\n  AND o.obs_date <  MAKEDATE(:year + 1, 1)\nGROUP BY o.obs_date",
       "is_library": false
     },
     {
@@ -94,9 +94,9 @@
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Trips by pickup zone, drop-off zone and rate code",
-      "description": "Trip-level scan of the sample-trips Postgres database, rolled up to one row per (pickup zone, drop-off zone, rate code) for the window. This is the shared origin-destination staging source: the zone and rate-code lookups that turn these ids into boroughs, airports and fare bases live in a different engine, which is what makes the join a cross-engine one. The raw TLC feed carries implausible rows - the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance - so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is 98.1 percent of the trips and is what makes an average a fact rather than an artefact of one bad row. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one quarter so the trip-level scan stays a few seconds.",
+      "description": "Trip-level scan of the sample-trips Postgres database, rolled up to one row per (pickup zone, drop-off zone, rate code) for the window. This is the shared origin-destination staging source: the zone and rate-code lookups that turn these ids into boroughs, airports and fare bases live in a different engine, which is what makes the join a cross-engine one. The raw TLC feed carries implausible rows - the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance - so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is 98.1 percent of the trips and is what makes an average a fact rather than an artefact of one bad row. Expects INTEGER parameters year and quarter (1-4); the quarter's bounds are derived in Postgres (make_date plus three months), so the door is the quarter the question names, never two dates. The shipped sample covers 2023 and 2024; one quarter keeps the trip-level scan at a few seconds.",
       "imports": [],
-      "body": "SELECT\n    t.pu_location_id                  AS pu_location_id,\n    t.do_location_id                  AS do_location_id,\n    t.rate_code_id                    AS rate_code_id,\n    COUNT(*)                          AS trip_count,\n    ROUND(SUM(t.total_amount), 2)     AS total_amount,\n    ROUND(SUM(t.tolls_amount), 2)     AS total_tolls,\n    ROUND(SUM(t.trip_distance_mi), 2) AS total_distance_mi\nFROM trips t\nWHERE t.pickup_date BETWEEN :start_date AND :end_date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pu_location_id, t.do_location_id, t.rate_code_id",
+      "body": "SELECT\n    t.pu_location_id                  AS pu_location_id,\n    t.do_location_id                  AS do_location_id,\n    t.rate_code_id                    AS rate_code_id,\n    COUNT(*)                          AS trip_count,\n    ROUND(SUM(t.total_amount), 2)     AS total_amount,\n    ROUND(SUM(t.tolls_amount), 2)     AS total_tolls,\n    ROUND(SUM(t.trip_distance_mi), 2) AS total_distance_mi\nFROM trips t\nWHERE t.pickup_date >= make_date(:year, 3 * :quarter - 2, 1)\n  AND t.pickup_date <  (make_date(:year, 3 * :quarter - 2, 1) + INTERVAL '3 months')::date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pu_location_id, t.do_location_id, t.rate_code_id",
       "is_library": false
     },
     {
@@ -116,9 +116,9 @@
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Daily trips by pickup zone",
-      "description": "Trip-level scan of the sample-trips Postgres database at (day, pickup zone) grain - the grain a weather join needs, which neither shipped rollup has. The raw TLC feed carries implausible rows - the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance - so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is 98.1 percent of the trips and is what makes an average a fact rather than an artefact of one bad row. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one quarter so the trip-level scan stays a few seconds.",
+      "description": "Trip-level scan of the sample-trips Postgres database at (day, pickup zone) grain - the grain a weather join needs, which neither shipped rollup has. The raw TLC feed carries implausible rows - the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance - so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is 98.1 percent of the trips and is what makes an average a fact rather than an artefact of one bad row. Expects INTEGER parameters year and quarter (1-4); the quarter's bounds are derived in Postgres (make_date plus three months). The shipped sample covers 2023 and 2024; one quarter keeps the trip-level scan at a few seconds.",
       "imports": [],
-      "body": "SELECT\n    t.pickup_date                 AS pickup_date,\n    t.pu_location_id              AS pu_location_id,\n    COUNT(*)                      AS trip_count,\n    ROUND(SUM(t.total_amount), 2) AS total_amount\nFROM trips t\nWHERE t.pickup_date BETWEEN :start_date AND :end_date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pickup_date, t.pu_location_id",
+      "body": "SELECT\n    t.pickup_date                 AS pickup_date,\n    t.pu_location_id              AS pu_location_id,\n    COUNT(*)                      AS trip_count,\n    ROUND(SUM(t.total_amount), 2) AS total_amount\nFROM trips t\nWHERE t.pickup_date >= make_date(:year, 3 * :quarter - 2, 1)\n  AND t.pickup_date <  (make_date(:year, 3 * :quarter - 2, 1) + INTERVAL '3 months')::date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pickup_date, t.pu_location_id",
       "is_library": false
     },
     {
@@ -127,9 +127,9 @@
       "engine": "freemarker",
       "dialect": "MYSQL",
       "display_name": "Daily weather elements, averaged across stations",
-      "description": "One row per day from the sample-weather MySQL database, with precipitation, snowfall, maximum temperature and wind speed pivoted into columns and averaged across the five NYC-area stations. Expects DATE parameters start_date and end_date.",
+      "description": "One row per day from the sample-weather MySQL database, with precipitation, snowfall, maximum temperature and wind speed pivoted into columns and averaged across the five NYC-area stations. Expects INTEGER parameters year and quarter (1-4); the quarter's bounds are derived in MySQL (MAKEDATE plus three months). Values: millimetres, degrees Celsius, metres per second.",
       "imports": [],
-      "body": "SELECT\n    o.obs_date                                                   AS obs_date,\n    ROUND(AVG(CASE WHEN o.element = 'PRCP' THEN o.value END), 2) AS precip_mm,\n    ROUND(AVG(CASE WHEN o.element = 'SNOW' THEN o.value END), 2) AS snow_mm,\n    ROUND(AVG(CASE WHEN o.element = 'TMAX' THEN o.value END), 1) AS tmax_c,\n    ROUND(AVG(CASE WHEN o.element = 'AWND' THEN o.value END), 1) AS wind_ms\nFROM observations o\nWHERE o.obs_date BETWEEN :start_date AND :end_date\n  AND o.element IN ('PRCP', 'SNOW', 'TMAX', 'AWND')\nGROUP BY o.obs_date",
+      "body": "SELECT\n    o.obs_date                                                   AS obs_date,\n    ROUND(AVG(CASE WHEN o.element = 'PRCP' THEN o.value END), 2) AS precip_mm,\n    ROUND(AVG(CASE WHEN o.element = 'SNOW' THEN o.value END), 2) AS snow_mm,\n    ROUND(AVG(CASE WHEN o.element = 'TMAX' THEN o.value END), 1) AS tmax_c,\n    ROUND(AVG(CASE WHEN o.element = 'AWND' THEN o.value END), 1) AS wind_ms\nFROM observations o\nWHERE o.obs_date >= MAKEDATE(:year, 1) + INTERVAL (3 * :quarter - 3) MONTH\n  AND o.obs_date <  MAKEDATE(:year, 1) + INTERVAL (3 * :quarter) MONTH\n  AND o.element IN ('PRCP', 'SNOW', 'TMAX', 'AWND')\nGROUP BY o.obs_date",
       "is_library": false
     },
     {
@@ -223,30 +223,24 @@
       "schema_version": 1,
       "name": "nyc/mobility/revenue_by_borough",
       "display_name": "Revenue by borough",
-      "description": "Which NYC borough earns the most yellow-taxi revenue, and which tips best. Joins the Postgres trip rollup to the SQLite zone lookup — two different database engines, staged into tempdb and joined there. Run it as-is for the full 2024 calendar year.",
+      "description": "Question\nWhich NYC borough earns the most yellow-taxi revenue in a year, and which tips best. One row per pickup borough, ranked by revenue.\n\nWindow and door\nOne calendar year, chosen by the year parameter (default 2024). The templates derive the bounds in their own dialect; there is no start or end date to pass.\n\nSources and grain\nsample-trips (Postgres): trips_monthly, one row per (month, pickup zone) - a rollup of a deterministic 1-in-16 hash sample of yellow-taxi trips, local New York dates, USD. sample-reference (SQLite): zones, the 265-row TLC zone lookup that maps a pickup zone id to its borough. Two engines, so both are staged into tempdb and joined there.\n\nInterpretation\nTrip counts are sample counts: multiply by 16 to estimate the population, and never read them as a share against a full-count feed. tip_pct_of_revenue is tips over total revenue (every trip, not card-paid trips only - the rollup has no payment split). The zone lookup's two catch-all rows ('Unknown', 'N/A') are excluded, so no bucket that is not a borough is ranked.\n\nVerification\nSource total for 2024, SELECT SUM(trip_count), SUM(total_revenue) FROM trips_monthly WHERE month_start >= '2024-01-01' AND month_start < '2025-01-01': 2,527,759 trips, 72,642,978.77 USD. The six rows sum to 2,518,747 trips and 72,264,742.61 USD; the difference (9,012 trips, 0.36%) is the trips whose pickup zone is a catch-all - the exclusion above, measured.\n\nCaveats\nEWR is the zone lookup's label for Newark Airport, not a borough; it appears as its own row. A year with no rows in the sample (anything but 2023 or 2024) returns zero rows, not an error.",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
-          "type": "DATE",
+        "year": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-01-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
-        },
-        "end_date": {
-          "type": "DATE",
-          "required": false,
-          "default": "2024-12-31",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 2024,
+          "description": "The calendar year to report, as the question names it (2024). The sample covers 2023 and 2024."
         }
       },
       "nodes": [
         {
           "id": "stage_trips_monthly",
-          "description": "Stage the monthly trip rollup from the sample-trips Postgres database.",
+          "description": "Stage the year's monthly rollup from the sample-trips Postgres database: one row per (month, pickup zone).",
           "type": "DQL",
           "source": "sample-trips",
           "template": {
@@ -297,24 +291,18 @@
       "schema_version": 1,
       "name": "nyc/mobility/rainy_vs_dry_ridership",
       "display_name": "Rainy vs dry ridership",
-      "description": "Do New Yorkers take more taxis when it rains? Joins daily trip counts (Postgres), daily precipitation from five NYC weather stations (MySQL) and a weekend/holiday calendar (SQLite) — three engines, one answer. Split by weather and by day type.",
+      "description": "Question\nDo New Yorkers take more taxis when it rains? One row per (weather, day type): rainy or dry, crossed with holiday, weekend or workday - six rows, each with its days, trips and average trips per day.\n\nWindow and door\nOne calendar year, chosen by the year parameter (default 2024). The rainy threshold is the rain_threshold_mm parameter (default 2.5 mm). Both trip and weather templates derive the year's bounds in their own dialect.\n\nSources and grain\nsample-trips (Postgres): trips_daily, one row per day - a 1-in-16 hash sample of yellow-taxi trips. sample-weather (MySQL): observations, GHCN daily elements for five NYC-area stations, averaged to one PRCP value per day in millimetres. sample-reference (SQLite): calendar, one row per day with weekend and holiday flags. Three engines, one answer, joined in tempdb on the day.\n\nInterpretation\nA day is rainy when the five stations' average precipitation is at or above rain_threshold_mm (2.5 mm is the US National Weather Service 'light rain' floor); a day with no PRCP reading counts as dry. Day type is holiday first, then weekend, else workday. Counts are sample counts (x16 for the population); the comparison of interest is the per-day AVERAGE, which the sample rate does not distort.\n\nVerification\nSELECT COUNT(*), SUM(trip_count) FROM trips_daily WHERE pickup_date >= '2024-01-01' AND pickup_date < '2025-01-01': 366 days, 2,527,759 trips - the six rows sum to exactly that. Rainy days from the weather source, SELECT COUNT(*) FROM (SELECT obs_date, AVG(value) p FROM observations WHERE element = 'PRCP' AND obs_date >= '2024-01-01' AND obs_date < '2025-01-01' GROUP BY obs_date) d WHERE p >= 2.5: 76, the same 76 the three rainy rows hold.\n\nCaveats\nEvery 2024 day has a PRCP reading, so the 'no reading counts as dry' rule changed nothing in this window; it would on a year with gaps. The holiday flag is the calendar's - eleven US federal holidays - not a school or transit calendar.",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
-          "type": "DATE",
+        "year": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-01-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
-        },
-        "end_date": {
-          "type": "DATE",
-          "required": false,
-          "default": "2024-12-31",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 2024,
+          "description": "The calendar year to report, as the question names it (2024). The sample covers 2023 and 2024."
         },
         "rain_threshold_mm": {
           "type": "BIGDECIMAL",
@@ -328,7 +316,7 @@
       "nodes": [
         {
           "id": "stage_trips_daily",
-          "description": "Stage daily trip counts and revenue from the sample-trips Postgres database.",
+          "description": "Stage the year's daily trip counts and revenue from the sample-trips Postgres database: one row per day.",
           "type": "DQL",
           "source": "sample-trips",
           "template": {
@@ -343,7 +331,7 @@
         },
         {
           "id": "stage_daily_rain",
-          "description": "Stage daily precipitation from the sample-weather MySQL database.",
+          "description": "Stage the year's daily precipitation from the sample-weather MySQL database: one row per day, averaged across the five stations.",
           "type": "DQL",
           "source": "sample-weather",
           "template": {
@@ -358,7 +346,7 @@
         },
         {
           "id": "stage_calendar",
-          "description": "Stage the weekend/holiday calendar from the sample-reference SQLite database.",
+          "description": "Stage the whole weekend/holiday calendar from the sample-reference SQLite database: one row per day; the answer node's join narrows it to the window.",
           "type": "DQL",
           "source": "sample-reference",
           "template": {
@@ -395,24 +383,24 @@
       "schema_version": 1,
       "name": "nyc/mobility/borough_od_matrix",
       "display_name": "Borough-to-borough trip matrix",
-      "description": "Where do the trips that start in each borough actually end up? Rolls 4.9M trip rows down to origin-destination pairs in Postgres, resolves both ends through the SQLite zone lookup, and joins them in tempdb - two engines, one matrix. Filter to a single pickup borough with the borough parameter.",
+      "description": "Question\nWhere do the trips that start in each borough actually end up? One row per (pickup borough, drop-off borough) with trips, revenue, revenue per trip and miles per trip; filter to one pickup borough with pickup_borough.\n\nWindow and door\nOne calendar quarter, chosen by year and quarter (default 2024, 3: July to September). The trip-level template derives the quarter's bounds in Postgres; there is no start or end date to pass.\n\nSources and grain\nsample-trips (Postgres): trips, trip-level rows of a 1-in-16 hash sample of yellow-taxi trips, local New York dates, USD - rolled up at the source to one row per (pickup zone, drop-off zone, rate code), about 4.9M rows a year down to a few thousand. sample-reference (SQLite): zones, the TLC zone lookup, joined at BOTH ends in tempdb.\n\nInterpretation\nThe raw TLC feed carries implausible rows (the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance), so the source template keeps only 0 < distance < 100 miles and 0 < total < 1000 USD; that is what makes miles_per_trip a fact rather than an artefact of one bad row. A pair is counted only when both ends resolve to a borough: the two catch-all zones are excluded from the lookup, so a trip with an unknown end is not in the matrix.\n\nVerification\nSELECT COUNT(*) FROM trips WHERE pickup_date >= '2024-07-01' AND pickup_date < '2024-10-01' AND trip_distance_mi > 0 AND trip_distance_mi < 100 AND total_amount > 0 AND total_amount < 1000: 583,112 trips (593,730 before the plausibility filter). The 27 rows sum to 577,205; the 5,907 short of the source are the trips with a catch-all zone at one end - the exclusion above, measured.\n\nCaveats\nEWR is the lookup's label for Newark Airport, not a borough; it appears as a pickup and a drop-off row of its own. Trip counts are sample counts (x16 for the population); the ratios are unaffected.",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
-          "type": "DATE",
+        "year": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-07-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 2024,
+          "description": "The calendar year to report, as the question names it (2024). The sample covers 2023 and 2024."
         },
-        "end_date": {
-          "type": "DATE",
+        "quarter": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-09-30",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 3,
+          "description": "The calendar quarter of that year to report, 1-4 (the default, 3, is July to September)."
         },
         "pickup_borough": {
           "type": "STRING",
@@ -424,7 +412,7 @@
       "nodes": [
         {
           "id": "stage_od_pairs",
-          "description": "Stage trips by pickup and drop-off zone from the sample-trips Postgres database.",
+          "description": "Stage the quarter's trips by pickup and drop-off zone from the sample-trips Postgres database: one row per (pickup zone, drop-off zone, rate code).",
           "type": "DQL",
           "source": "sample-trips",
           "template": {
@@ -475,30 +463,30 @@
       "schema_version": 1,
       "name": "nyc/mobility/airport_access_by_borough",
       "display_name": "Airport access by borough",
-      "description": "Which boroughs ride to JFK, LaGuardia and Newark, what does that trip cost, and how does it compare with the borough's ordinary economics? Five nodes across Postgres and SQLite: a trip-level scan, a zone lookup used at BOTH ends of the journey, a rate-code lookup, a baseline computed in tempdb from the same population as the numerator, and an answer node that reads one against the other.",
+      "description": "Question\nWhich boroughs ride to JFK, LaGuardia and Newark, what does that trip cost, and how does it compare with the borough's ordinary economics? One row per (pickup borough, airport), ranked by trips.\n\nWindow and door\nOne calendar quarter, chosen by year and quarter (default 2024, 3: July to September). The trip-level template derives the quarter's bounds in Postgres.\n\nSources and grain\nsample-trips (Postgres): trips, a 1-in-16 hash sample of yellow-taxi trips, rolled up at the source to one row per (pickup zone, drop-off zone, rate code). sample-reference (SQLite): zones (the TLC zone lookup, used at both ends of the journey) and rate_codes (the seven fare bases). Five nodes across the two engines: the rollup, the two lookups, a per-borough baseline computed in tempdb from the SAME staged rows as the numerator, and the answer node that reads one against the other.\n\nInterpretation\nAn airport leg is a trip whose drop-off zone's service_zone is 'Airports' or 'EWR' - the lookup's own classification, not a zone-name match. pct_of_borough_trips is airport legs over the borough's plausibility-filtered trips in the same quarter, from the same staged table, so numerator and denominator are one population. flat_fare_trips counts legs metered on the JFK or Newark flat rate codes; pct_flat_fare is that over the airport legs. The plausibility filter (0 < miles < 100, 0 < total < 1000 USD) is applied at the source.\n\nVerification\nThe JFK zone id is 132 in the lookup (SELECT location_id FROM zones WHERE zone = 'JFK Airport'); the Manhattan zone ids are the 69 rows WHERE borough = 'Manhattan'. Against the source: SELECT COUNT(*) FROM trips WHERE do_location_id = 132 AND pu_location_id IN (<those 69 ids>) AND pickup_date >= '2024-07-01' AND pickup_date < '2024-10-01' AND <the plausibility filter>: 4,876 - exactly the Manhattan / JFK Airport row's airport_trips. Re-run it before releasing.\n\nCaveats\nTrip counts are sample counts (x16 for the population). A borough with no airport legs in the quarter has no row rather than a zero row. EWR as a PICKUP borough is Newark Airport's own zone, not a borough.",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
-          "type": "DATE",
+        "year": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-07-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 2024,
+          "description": "The calendar year to report, as the question names it (2024). The sample covers 2023 and 2024."
         },
-        "end_date": {
-          "type": "DATE",
+        "quarter": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-09-30",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 3,
+          "description": "The calendar quarter of that year to report, 1-4 (the default, 3, is July to September)."
         }
       },
       "nodes": [
         {
           "id": "stage_od_pairs",
-          "description": "Stage trips by pickup and drop-off zone from the sample-trips Postgres database.",
+          "description": "Stage the quarter's trips by pickup and drop-off zone from the sample-trips Postgres database: one row per (pickup zone, drop-off zone, rate code).",
           "type": "DQL",
           "source": "sample-trips",
           "template": {
@@ -584,24 +572,24 @@
       "schema_version": 1,
       "name": "nyc/mobility/weather_sensitivity_by_borough",
       "display_name": "Weather sensitivity by borough",
-      "description": "Which boroughs lose riders when it rains, and which barely notice? Joins daily trips by pickup zone (Postgres), daily precipitation, snow, temperature and wind from five NYC-area stations (MySQL), the zone lookup and the weekend/holiday calendar (SQLite) - three source engines staged into one tempdb and split by wet/dry and by day type.",
+      "description": "Question\nWhich boroughs lose riders when it rains, and which barely notice? One row per (borough, weather, day type) - wet or dry, crossed with holiday, weekend or workday - with days, trips, trips per day and revenue per trip.\n\nWindow and door\nOne calendar quarter, chosen by year and quarter (default 2024, 3: July to September). The wet threshold is rain_threshold_mm (default 2.5 mm). The trip and weather templates derive the quarter's bounds in their own dialect.\n\nSources and grain\nsample-trips (Postgres): trips, a 1-in-16 hash sample, rolled up at the source to one row per (day, pickup zone). sample-weather (MySQL): observations, GHCN daily elements for five NYC-area stations, pivoted and averaged to one row per day (precipitation mm, snow mm, max temperature C, wind m/s). sample-reference (SQLite): zones and the whole calendar. Three source engines staged into one tempdb.\n\nInterpretation\nA day is wet when the five-station average precipitation is at or above rain_threshold_mm; no reading counts as dry. Day type is holiday, then weekend, else workday. trips_per_day divides the cell's trips by its own number of days, so a borough's wet and dry rows are comparable. The plausibility filter (0 < miles < 100, 0 < total < 1000 USD) is applied at the source; the two catch-all zones are excluded.\n\nVerification\nThe quarter has 92 days (SELECT COUNT(*) FROM calendar WHERE cal_date BETWEEN '2024-07-01' AND '2024-09-30'); each of Bronx, Brooklyn, Manhattan and Queens sums to 92 days across its six rows. Wet days from the source, SELECT COUNT(*) FROM (SELECT obs_date, AVG(value) p FROM observations WHERE element = 'PRCP' AND obs_date >= '2024-07-01' AND obs_date < '2024-10-01' GROUP BY obs_date) d WHERE p >= 2.5: 21 - Manhattan's three wet rows sum to 21 days.\n\nCaveats\nEWR (Newark Airport's zone) and Staten Island have pickups on only 22 and 24 of the 92 days, so their per-day figures rest on thin bases. Trip counts are sample counts (x16 for the population).",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
-          "type": "DATE",
+        "year": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-07-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 2024,
+          "description": "The calendar year to report, as the question names it (2024). The sample covers 2023 and 2024."
         },
-        "end_date": {
-          "type": "DATE",
+        "quarter": {
+          "type": "INTEGER",
           "required": false,
-          "default": "2024-09-30",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": 3,
+          "description": "The calendar quarter of that year to report, 1-4 (the default, 3, is July to September)."
         },
         "rain_threshold_mm": {
           "type": "BIGDECIMAL",
@@ -615,7 +603,7 @@
       "nodes": [
         {
           "id": "stage_daily_by_zone",
-          "description": "Stage daily trips by pickup zone from the sample-trips Postgres database.",
+          "description": "Stage the quarter's daily trips by pickup zone from the sample-trips Postgres database: one row per (day, pickup zone).",
           "type": "DQL",
           "source": "sample-trips",
           "template": {
@@ -630,7 +618,7 @@
         },
         {
           "id": "stage_daily_weather",
-          "description": "Stage daily precipitation, snow, temperature and wind from the sample-weather MySQL database.",
+          "description": "Stage the quarter's daily precipitation, snow, temperature and wind from the sample-weather MySQL database: one row per day.",
           "type": "DQL",
           "source": "sample-weather",
           "template": {
@@ -660,7 +648,7 @@
         },
         {
           "id": "stage_calendar",
-          "description": "Stage the weekend/holiday calendar from the sample-reference SQLite database.",
+          "description": "Stage the whole weekend/holiday calendar from the sample-reference SQLite database: one row per day; the answer node's join narrows it to the quarter.",
           "type": "DQL",
           "source": "sample-reference",
           "template": {
@@ -698,45 +686,85 @@
       "schema_version": 1,
       "name": "nyc/mobility/mobility_briefing",
       "display_name": "Borough mobility briefing",
-      "description": "One line per borough: how many trips start there, how many never leave it, and what a trip is worth. Built by COMPOSITION - the first node runs borough_od_matrix as a real child execution, pinned to version 1, and hands its result into this pipeline's tempdb. Every number comes from that one child result, so the share and its denominator are the same population.",
+      "description": "Question\nThe quarterly mobility brief: one line per borough - how many trips start there, how many never leave it, and what a trip is worth - for the last complete quarter.\n\nWindow and door\nThe last complete calendar quarter BEFORE anchor_date (default 2025-01-01, the day after the sample's last day, so the default briefs 2024-Q4). A CALCULATOR node (trailing_periods, one quarter back from the anchor) writes the window's first and last day into the execution Context; two more derive the window's calendar year and quarter, which the PIPELINE node maps into the child's year and quarter door - so the child is asked in its own vocabulary and no raw date is passed anywhere.\n\nSources and grain\nBuilt by COMPOSITION: the first node runs borough_od_matrix as a real child execution, pinned to version 1, and stages its (pickup borough, drop-off borough) matrix into this pipeline's tempdb; sample-reference (SQLite) zones is staged to count each borough's pickup zones. Every number comes from that one child result, so the share and its denominator are the same population.\n\nInterpretation\ntrips_within_borough are the child's rows whose drop-off borough equals the pickup borough; pct_within_borough is that over the borough's trips. The fiscal_quarter column labels the run with the quarter the window ends in under the deployment's own fiscal start (the org_fiscal_start_date key), so the same pipeline labels itself correctly on a deployment whose fiscal year does not start in January. The child's plausibility filter and catch-all exclusion apply.\n\nVerification\nThe child's own cross-check applies to the window the anchor resolves: for the default, SELECT COUNT(*) FROM trips WHERE pickup_date >= '2024-10-01' AND pickup_date < '2025-01-01' AND trip_distance_mi > 0 AND trip_distance_mi < 100 AND total_amount > 0 AND total_amount < 1000 gives 669,779 trips; the six rows' trip_count sums to 663,500, and the 6,279 short of the source are the trips with a catch-all zone at either end (the child's exclusion, measured). Re-run it before releasing.\n\nCaveats\nAn anchor inside a quarter briefs the quarter BEFORE it (2024-12-31 briefs 2024-Q3, 2025-01-01 briefs 2024-Q4) - that is what 'last complete quarter' means. EWR is Newark Airport's zone, not a borough. Trip counts are sample counts (x16 for the population).",
       "settings": {
         "tempdb": {
           "engine": "H2"
         }
       },
       "parameters": {
-        "start_date": {
+        "anchor_date": {
           "type": "DATE",
           "required": false,
-          "default": "2024-07-01",
-          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
-        },
-        "end_date": {
-          "type": "DATE",
-          "required": false,
-          "default": "2024-09-30",
-          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+          "default": "2025-01-01",
+          "description": "The day the briefing is written: the brief covers the last complete calendar quarter BEFORE this date. The sample ends 2024-12-31, so the default (the day after the data's last day) briefs 2024-Q4; pass 2024-10-01 for 2024-Q3."
         }
       },
       "nodes": [
         {
+          "id": "window",
+          "description": "The last complete calendar quarter before the anchor: one CALCULATOR node (trailing_periods, one quarter back) writing the window's first and last day into the Context as window_start and window_end.",
+          "type": "CALCULATOR",
+          "kind": "trailing_periods",
+          "inputs": {
+            "date": "$anchor_date",
+            "unit": "quarter",
+            "count": 1
+          },
+          "context_keys": {
+            "start": "window_start",
+            "end": "window_end"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "window_year",
+          "description": "The calendar year of the window's first day, for the child's year door. fiscal_year with a January fiscal start IS the calendar year; the catalog has no bare calendar-year kind.",
+          "type": "CALCULATOR",
+          "kind": "fiscal_year",
+          "inputs": {
+            "date": "$window_start",
+            "fiscal_start": "01-01"
+          },
+          "context_key": "window_year",
+          "depends_on": [
+            "window"
+          ]
+        },
+        {
+          "id": "window_quarter",
+          "description": "The calendar quarter (1-4) of the window's first day, for the child's quarter door.",
+          "type": "CALCULATOR",
+          "kind": "quarter_of_year",
+          "inputs": {
+            "date": "$window_start"
+          },
+          "context_key": "window_quarter",
+          "depends_on": [
+            "window"
+          ]
+        },
+        {
           "id": "od_matrix",
-          "description": "Run the borough_od_matrix pipeline as a pinned child execution and stage its result.",
+          "description": "Run the borough_od_matrix pipeline as a pinned child execution over the window's year and quarter - the child's own door, mapped from this pipeline's derived values - and stage its result: one row per (pickup borough, drop-off borough).",
           "type": "PIPELINE",
           "pipeline": {
             "name": "nyc/mobility/borough_od_matrix",
             "version": 1
           },
           "parameters": {
-            "start_date": "${start_date}",
-            "end_date": "${end_date}",
+            "year": "${window_year}",
+            "quarter": "${window_quarter}",
             "pickup_borough": "All"
           },
           "output": {
             "target": "tempdb",
             "table": "stg_od_matrix"
           },
-          "depends_on": []
+          "depends_on": [
+            "window_year",
+            "window_quarter"
+          ]
         },
         {
           "id": "stage_zones",
@@ -755,15 +783,17 @@
         },
         {
           "id": "fiscal_quarter",
-          "description": "Label the run with the fiscal quarter the reporting window ends in. A CALCULATOR node: no SQL, no rows - one typed value written into the execution Context under run_fiscal_quarter, which the briefing node binds as :run_fiscal_quarter. fiscal_start comes from the deployment's own setting, so the same pipeline labels its output correctly on a deployment whose fiscal year does not start in January.",
+          "description": "Label the run with the fiscal quarter the window ends in. A CALCULATOR node: no SQL, no rows - one typed value written into the execution Context under run_fiscal_quarter, which the briefing node binds as :run_fiscal_quarter. fiscal_start comes from the deployment's own setting, so the same pipeline labels its output correctly on a deployment whose fiscal year does not start in January.",
           "type": "CALCULATOR",
           "kind": "fiscal_quarter",
           "inputs": {
-            "date": "$end_date",
+            "date": "$window_end",
             "fiscal_start": "$org_fiscal_start_date"
           },
           "context_key": "run_fiscal_quarter",
-          "depends_on": []
+          "depends_on": [
+            "window"
+          ]
         },
         {
           "id": "briefing",

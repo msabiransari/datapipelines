@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "family": "nyc",
-  "artifact_version": "v5",
-  "recorded": "2026-09-08",
-  "how": "Re-recorded after the defect-100 unsized-numeric fix (type-system v1.3): an exact-numeric expression whose typmod the source engine drops (SUM/AVG/division over NUMERIC(10,2)) now stages as H2 DECFLOAT(100000) instead of DECIMAL(100000, 0), so staged totals keep their cents. Executed against the published mobility artifacts in an isolated stack (APP_COMPOSE_PROJECT=num100, APP_HOST_PORT=18100), through POST /api/v1/pipelines/{id}/execute with an author-scoped API key, every pipeline at its DEFAULT parameters. row_sha256 is sha256 over json.dumps(rows, sort_keys=True, separators=(',',':')) of the full result page - one canonical encoding on both sides. Four pipelines moved: borough_od_matrix, airport_access_by_borough and weather_sensitivity_by_borough stage ROUND(SUM(...), 2) totals that previously truncated to whole dollars on insert, and mobility_briefing inherits the correction because it composes borough_od_matrix (PIPELINE node) and re-aggregates its now-exact totals in tempdb. Every other pipeline's hash is unchanged: check-baselines.sh went green on the pre-fix build against the previous file (all six matched) and on the fixed build against this file.",
+  "artifact_version": "v7",
+  "recorded": "2026-09-15",
+  "how": "138 §A: the seven seeded pipelines took a door in the question's vocabulary (year / year+quarter / year+month / an anchor date) with the raw dates derived in each template's own dialect. Six of them keep their exact window, and their hashes below are UNCHANGED - re-executed before and after the change in an isolated stack (APP_COMPOSE_PROJECT=dp138, APP_HOST_PORT=8138), every pipeline at its DEFAULT parameters, byte-identical result pages. mobility_briefing alone is re-recorded: its door is now anchor_date (default 2025-01-01, the day after the sample's last day), so its default window moved from 2024-Q3 to 2024-Q4, the last complete quarter before the anchor. row_sha256 is sha256 over json.dumps(rows, sort_keys=True, separators=(',',':')) of the full result page - one canonical encoding on both sides. Earlier history: Re-recorded after the defect-100 unsized-numeric fix (type-system v1.3): an exact-numeric expression whose typmod the source engine drops (SUM/AVG/division over NUMERIC(10,2)) now stages as H2 DECFLOAT(100000) instead of DECIMAL(100000, 0), so staged totals keep their cents. Executed against the published mobility artifacts in an isolated stack (APP_COMPOSE_PROJECT=num100, APP_HOST_PORT=18100), through POST /api/v1/pipelines/{id}/execute with an author-scoped API key, every pipeline at its DEFAULT parameters. row_sha256 is sha256 over json.dumps(rows, sort_keys=True, separators=(',',':')) of the full result page - one canonical encoding on both sides. Four pipelines moved: borough_od_matrix, airport_access_by_borough and weather_sensitivity_by_borough stage ROUND(SUM(...), 2) totals that previously truncated to whole dollars on insert, and mobility_briefing inherits the correction because it composes borough_od_matrix (PIPELINE node) and re-aggregates its now-exact totals in tempdb. Every other pipeline's hash is unchanged: check-baselines.sh went green on the pre-fix build against the previous file (all six matched) and on the fixed build against this file.",
   "checked_by": "deploy/sample-data/check-baselines.sh",
   "pipelines": {
     "nyc/mobility/revenue_by_borough": {
@@ -87,8 +87,8 @@
         "pct_within_borough",
         "revenue_per_trip"
       ],
-      "row_sha256": "2bb76405762083a498318dd072748267a20d458b402ad4b7928b11e9411db073",
-      "observed_seconds": 2.14
+      "row_sha256": "0176daa7ecd7d5c26e412e6feb0ad9045acd2360af8506dc35611aa680f5ee7d",
+      "observed_seconds": 2.9
     }
   }
 }
