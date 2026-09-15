@@ -348,10 +348,12 @@ class PipelineCheckRunnerTest {
     }
 
     @Test
-    fun `a violation-count invariant passes under every parameter value - 144 B`() {
-        // The parameterized-invariant shape the guide teaches: the expectation (no violation
-        // rows) holds for EVERY input, so binding the window is honest — the two runs below
-        // bind different years and both pass.
+    fun `a rows-zero expectation passes under both tested parameter sets - binding and comparison, not SQL truth - 144 B`() {
+        // The parameterized-invariant shape the guide teaches, tested at the level this suite
+        // can honestly reach: the binding (each run binds the supplied/default window) and the
+        // comparison (a rows: 0 expectation against an empty result). The probe is stubbed to
+        // return zero rows for both calls, so this proves machinery behavior over the TWO
+        // tested parameter sets — NOT that the example SQL is an invariant of any real data.
         val parameters = mapOf("year" to Parameter(LogicalType.INTEGER, default = IntNode(2024)))
         val pipeline =
             pipeline(
@@ -375,7 +377,7 @@ class PipelineCheckRunnerTest {
             .run(WORKSPACE, PIPELINE_ID, VERSION, pipeline, supplied("""{"year": 1999}"""), CheckRunVia.MCP, ACTOR)
             .single()
             .verdict shouldBe CheckRunVerdict.PASS
-        // Same expectation, two bound windows — the invariant did not need a baseline.
+        // Same expectation, two bound windows — the machinery moves the window, not the expectation.
         probeCalls.map { it.parameters.getValue("year").value } shouldBe listOf("2024", "1999")
     }
 

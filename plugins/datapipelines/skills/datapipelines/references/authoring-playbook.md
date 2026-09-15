@@ -344,8 +344,9 @@ semantics; the question's words decide the window.
   the parameter values used, the SQL itself on its own lines (rerunnable as-is), the observed
   result, the comparison it supports, and its scope or limitation — plus the check-id when the
   query also lives in `checks[]`. One recipe may span several queries and engines; `checks[]`
-  holds the checks, the recipe holds EVERYTHING you ran — reconciliation queries that fit no
-  check included. It carries queries and observed numbers — evidence, never the word
+  holds the checks, the recipe holds the COMPLETE reproduction path for every verification
+  claim you report — reconciliation queries beyond `checks[]` included, exploratory dead ends
+  excluded. It carries queries and observed numbers — evidence, never the word
   "validated": a reader re-runs the recipe and reaches their own verdict. The SQL and the
   observed values live with the pipeline, not in a transcript. **Caveats.** Short paragraphs,
   no wall of text; a reader who stops after Question and Window knows what the pipeline is.
@@ -355,39 +356,45 @@ semantics; the question's words decide the window.
   and reason over what the server returned, never over a partial view.
 - **Report what you did not verify.** "Row counts match the previous version" is not
   "the numbers are right". Name the independent check you ran — or that you ran none.
-- **Write checks, and let the server be the judge.** A check is ONE number per `checks[]`
-  entry, read from the RAW source — never from the pipeline's own output tables — with
+- **Verify three ways — two are checks, and the server is their judge.** A `checks[]` entry is
+  ONE datasource, ONE read-only statement, ONE expectation (`value`, `range` or `rows` — a
+  `rows` expectation counts the statement's rows, so an assertion need not return a single
+  numeric cell), read from the RAW source — never from the pipeline's own output tables — with
   `expected` supplied by you and `observed` produced only by the server's own run
   (`pipelines_run_checks`; there is no tool that records an observed value from a caller). Two
   to five per pipeline is the right band. A human releasing from the UI sees every check's
-  expected and observed and cannot release past a failing one without giving a reason. Each
-  check takes ONE of three shapes:
+  expected and observed and cannot release past a failing one without giving a reason. The
+  first two verification strategies below are `checks[]` entries; the third is not and cannot
+  be — pretending otherwise is the miss this section exists to prevent.
 
   - **Fixed-baseline drift check.** Literals for one baseline window; `expected` is the value
     your independent query measured there. It says "the baseline still holds" and nothing
     else — name the baseline in the check's `name` ("… (2024 baseline)"), because the static
     expectation means nothing beside any other window. When the baseline stops being the
     interesting window, the check is re-measured and re-based, not silently failed.
-  - **Parameterized invariant.** The SQL binds the pipeline's parameters AND the expectation
-    holds for EVERY input the pipeline accepts: a violation count is zero, a reconciliation
-    difference is empty. The tell that you have this shape: the expectation needs no window in
-    its name. **Never bind a changing parameter while keeping an unrelated fixed expected
-    total** — that is a baseline check wearing a bind: green on the baseline, a lie everywhere
-    else.
-  - **Independent output reconciliation.** A source check cannot prove the OUTPUT right — it
-    never sees it. Recompute one meaningful output group independently from the source —
-    joins, filters and denominator included — and compare it against the pipeline's own
-    result for the same group. That comparison is usually more than one query, sometimes more
-    than one engine, plus an explicit side-by-side: keep every query and both numbers in the
-    Verification recipe, and never force a two-engine reconciliation into the one-datasource,
-    one-number shape of `checks[]`.
+  - **Parameterized invariant check.** The SQL binds the pipeline's parameters AND the
+    expectation holds for EVERY input the pipeline accepts: a violation count is zero, a
+    reconciliation difference is empty. The tell that you have this shape: the expectation
+    needs no window in its name. **Never bind a changing parameter while keeping an unrelated
+    fixed expected total** — that is a baseline check wearing a bind: green on the baseline, a
+    lie everywhere else.
+  - **Independent output reconciliation — the recipe, not a check.** A source check cannot
+    prove the OUTPUT right — it never sees it, and no `checks[]` entry reads the pipeline's
+    result. Recompute one meaningful output group independently from the source — joins,
+    filters and denominator included — and compare it against the pipeline's actual result
+    for the same group. That comparison is usually more than one query, sometimes more than
+    one engine, plus an explicit side-by-side: it lives in the numbered Verification recipe,
+    never in `checks[]`. A source assertion that DOES fit the one-datasource, one-statement
+    shape (a raw total the group's number must equal) is a check of one of the two kinds
+    above — link it in the recipe by check-id.
 
   Two honest limits, by design. Expectations are STATIC — the server compares the observed
   value against the value, range or row count you declared; there is no dynamic expectation.
-  And the release gate runs with the declared DEFAULTS (it supplies no parameters), so it
-  re-proves the default window, not every combination a caller can pass. What the defaults
-  cannot prove stays in the Verification recipe as measured observations; the server remains
-  the only source of a check run's observed values.
+  And the release gate binds the declared DEFAULTS (it supplies no parameters): a
+  parameterized check proves the default window, not every combination a caller can pass; a
+  fixed-literal baseline check proves its own named baseline, whatever the defaults are. What
+  the defaults cannot prove stays in the Verification recipe as measured observations; the
+  server remains the only source of a check run's observed values.
 - **Report the index analysis** (§3): for every source node, one line — supported by
   `<index>` / *not supported — suggest `CREATE INDEX … ON table (cols)`* / *lake: filters on
   the partition column, `partitions_scanned`/`partitions_total` from `sql_probe`'s plan*.

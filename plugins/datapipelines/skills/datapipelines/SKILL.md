@@ -184,25 +184,26 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    grain, sample vs census, time zone and units), **Interpretation** (every rule chosen —
    thresholds, exclusions, tie-breaks — and which are recorded definitions), **Verification** (the
    numbered recipe of the cross-check queries you ran — purpose, datasource, parameter values, SQL,
-   observed result, comparison — so a human re-runs them before releasing), **Caveats**. Short paragraphs; a reader who stops after Question and
-   Window knows what the pipeline is (`references/authoring-playbook.md` §5). **Create lands v1 as
-   a DRAFT** — executable immediately, and not published: `current_version` comes back null and
-   the response carries the `draft` pointer with the `body_hash` for your next write.
+   observed result, comparison — so a human re-runs them before releasing), **Caveats**. Short
+   paragraphs (`references/authoring-playbook.md` §5). **Create lands v1 as a DRAFT** — executable
+   immediately, `current_version` null, the response carrying the `draft` pointer with the
+   `body_hash` for your next write.
 5. **Iterate on the DRAFT, run it, then write checks.** `pipelines_update` (requires the
    `expected_hash` you read — see Best practices) writes the DRAFT: the first update opens it,
    later updates overwrite it, so iterating never piles up versions. `pipelines_execute` with no
    `version` runs the **working version** — your draft when one exists, else the latest release — so
    testing your own work needs no version argument at all. A draft whose pinned template was
    updated after its last render is refused (`pipeline.execution.template_unrendered`) — render, then run.
-   **Then write checks — each in one of three shapes (`references/authoring-playbook.md` §5).**
-   A fixed-baseline drift check (literals for the baseline window, `expected` the value you measured
-   there, the baseline named in the check's `name`); a parameterized invariant (binds the pipeline's
-   parameters AND an expectation that holds for every input — never a changing parameter beside a fixed expected total);
-   or an independent output reconciliation (a meaningful output group recomputed from the source).
-   Then `pipelines_run_checks`: the server's `observed` is the only observed value there is; the
-   release gate runs with the declared DEFAULTS — the default window, not every parameter combination.
-   **Then stop**: leave the draft for a human to release from the UI — never claim your change is
-   live; no tool you have releases anything.
+   **Then verify — three strategies, two of them checks (`references/authoring-playbook.md` §5).**
+   A fixed-baseline drift check (literals for the baseline window, `expected` the value you measured there, the baseline named in the
+   check's `name`) and a parameterized invariant check (binds the pipeline's parameters AND an expectation that holds for every input —
+   never a changing parameter beside a fixed expected total) are `checks[]` entries: one datasource, one statement, one value or row
+   count. The third strategy — independent output reconciliation, a meaningful output group recomputed from the source and compared
+   against the actual result — lives in the numbered Verification recipe, never in `checks[]`: no check reads the pipeline's output;
+   a source assertion that fits the check shape links in the recipe by check-id. Then `pipelines_run_checks`: the server's `observed`
+   is the only observed value there is; the release gate binds the declared DEFAULTS — a parameterized check proves the default window,
+   a fixed-literal baseline check its own named baseline. **Then stop**: leave the draft for a human to release from the UI — never
+   claim your change is live; no tool you have releases anything.
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`; page the
    remainder with `executions_get_result` (`offset`/`limit`) **within the TTL** — afterwards it
    is gone (`result.expired`). **A client can truncate a large tool result:** more rows than you
@@ -282,7 +283,7 @@ context and correlation id to work with.
 two nodes** — the judgment between the golden path's steps: the question's grain, the lookups
 and display names, aggregating at the source, indexing a staged table, filtering a lake table
 on its partition column, `depends_on` as data flow, a timeout as work in the wrong place,
-sample vs census, the missing-data policy, the three shapes a check can take, the numbered
+sample vs census, the missing-data policy, the three verification strategies, the numbered
 verification recipe, stopping at the draft. Its Do/Don't table is one screen; each row is a
 mistake an agent made here.
 
