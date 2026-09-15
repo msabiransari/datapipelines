@@ -37,7 +37,11 @@ import java.util.UUID
 class ViewerEditorRenderTest {
     @Test
     fun `a viewer's editor page is a read surface - no textarea, no preview, no context rail, no verb`() {
-        val html = render("templates/editor") { page(readOnly = true); viewer() }
+        val html =
+            render("templates/editor") {
+                page(readOnly = true)
+                viewer()
+            }
 
         html shouldContain "id=\"versionBody\""
         html shouldContain BODY
@@ -59,27 +63,43 @@ class ViewerEditorRenderTest {
     /** The exact interactive surface of a viewer's editor page — by element, not by grep. */
     @Test
     fun `a viewer's editor page carries exactly the version select and the shell's own controls`() {
-        val html = render("templates/editor") { page(readOnly = true); viewer() }
+        val html =
+            render("templates/editor") {
+                page(readOnly = true)
+                viewer()
+            }
 
         interactive(mainOf(html)) shouldContainExactly listOf("select#versionSelect")
     }
 
     @Test
     fun `the source partial for a reader is the read-only pane whatever version it shows`() {
-        val working = render("partials/template-source") { source(readOnly = true, selected = 2); viewer() }
+        val working =
+            render("partials/template-source") {
+                source(readOnly = true, selected = 2)
+                viewer()
+            }
         working shouldContain "id=\"versionBody\""
         working shouldNotContain "<textarea"
         working shouldNotContain "previewBtn"
         working shouldNotContain "tpl-edit-version"
 
-        val older = render("partials/template-source") { source(readOnly = true, selected = 1); viewer() }
+        val older =
+            render("partials/template-source") {
+                source(readOnly = true, selected = 1)
+                viewer()
+            }
         older shouldContain "id=\"versionBody\""
         older shouldNotContain "<textarea"
     }
 
     @Test
     fun `an author's editor keeps the textarea, Preview and the context rail`() {
-        val html = render("templates/editor") { page(readOnly = false); author() }
+        val html =
+            render("templates/editor") {
+                page(readOnly = false)
+                author()
+            }
 
         html shouldContain "id=\"templateBody\""
         html shouldContain "id=\"previewBtn\""
@@ -92,19 +112,31 @@ class ViewerEditorRenderTest {
 
     @Test
     fun `an author selecting an older version gets Edit, a reader never does`() {
-        val author = render("partials/template-source") { source(readOnly = true, selected = 1); author() }
+        val author =
+            render("partials/template-source") {
+                source(readOnly = true, selected = 1)
+                author()
+            }
         author shouldContain "tpl-edit-version"
         // Preview stays an author's on the read-only pane too — it renders the STORED version.
         author shouldContain "previewBtn"
 
-        val promoter = render("partials/template-source") { source(readOnly = true, selected = 1); promoter() }
+        val promoter =
+            render("partials/template-source") {
+                source(readOnly = true, selected = 1)
+                promoter()
+            }
         promoter shouldNotContain "tpl-edit-version"
         promoter shouldNotContain "previewBtn"
     }
 
     @Test
     fun `a promoter's editor is read-only and keeps Release when a draft is pending`() {
-        val html = render("templates/editor") { page(readOnly = true, hasDraft = true); promoter() }
+        val html =
+            render("templates/editor") {
+                page(readOnly = true, hasDraft = true)
+                promoter()
+            }
 
         html shouldContain "id=\"versionBody\""
         html shouldNotContain "<textarea"
@@ -117,7 +149,11 @@ class ViewerEditorRenderTest {
     /** Every version row's Open names ITS version — a reader can trust which version opened. */
     @Test
     fun `every version row's Open carries that row's exact version`() {
-        val html = render("partials/template-versions") { versions(); viewer() }
+        val html =
+            render("partials/template-versions") {
+                versions()
+                viewer()
+            }
 
         val opens = Regex("href=\"(/templates/editor\\?[^\"]*)\"[^>]*>Open<").findAll(html).map { it.groupValues[1] }.toList()
         opens shouldContainExactly
@@ -130,15 +166,39 @@ class ViewerEditorRenderTest {
     // ----------------------------------------------------------------- fixtures
 
     private fun WebContext.viewer() {
-        withRoles(canRead = true, canExecute = true, canAuthor = false, canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
+        withRoles(
+            canRead = true,
+            canExecute = true,
+            canAuthor = false,
+            canPromote = false,
+            canAdminWorkspace = false,
+            isSuperAdmin = false,
+            roleLabel = "viewer",
+        )
     }
 
     private fun WebContext.promoter() {
-        withRoles(canRead = true, canExecute = true, canAuthor = false, canPromote = true, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+        withRoles(
+            canRead = true,
+            canExecute = true,
+            canAuthor = false,
+            canPromote = true,
+            canAdminWorkspace = false,
+            isSuperAdmin = false,
+            roleLabel = "promoter",
+        )
     }
 
     private fun WebContext.author() {
-        withRoles(canRead = true, canExecute = true, canAuthor = true, canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+        withRoles(
+            canRead = true,
+            canExecute = true,
+            canAuthor = true,
+            canPromote = false,
+            canAdminWorkspace = false,
+            isSuperAdmin = false,
+            roleLabel = "author",
+        )
     }
 
     private fun WebContext.source(
@@ -179,8 +239,8 @@ class ViewerEditorRenderTest {
         setVariable(
             "versions",
             listOf(
-                VersionRowView.of(2, PipelineVersionStatus.DRAFT, Instant.EPOCH, "Muhammad", Instant.EPOCH, 0, "pipeline", isCurrent = false),
-                VersionRowView.of(1, PipelineVersionStatus.RELEASED, Instant.EPOCH, "Muhammad", Instant.EPOCH, 1, "pipeline", isCurrent = true),
+                VersionRowView.of(2, PipelineVersionStatus.DRAFT, Instant.EPOCH, "Muhammad", Instant.EPOCH, 0, "pipeline", false),
+                VersionRowView.of(1, PipelineVersionStatus.RELEASED, Instant.EPOCH, "Muhammad", Instant.EPOCH, 1, "pipeline", true),
             ),
         )
     }

@@ -104,6 +104,39 @@ object RoleModel {
     }
 
     /**
+     * 143 (T315) — the SHELL's Admin entry: which destination, if any, the rail's Admin item
+     * points at for this principal. Decided here, beside the verb booleans and from the same
+     * predicates, never from the role LABEL (a string comparison would be a second
+     * authorization matrix). Exactly one of the two is true, or neither:
+     *
+     * - [adminUsers] — instance user administration (`/admin/users`, `USER_ADMINISTRATION`,
+     *   super admin only). The instance authority is the USER's, not the membership's, so
+     *   it is judged WITHOUT the workspace: a super admin whose active workspace is gone
+     *   still owns the instance. Narrowed by the credential axis like every other rung —
+     *   no key holds `admin` scope (O-2), so a key never shows it.
+     * - [adminMembers] — the ACTIVE workspace's member management (the Workspaces screen's
+     *   members section, `MANAGE_WORKSPACE_MEMBERS`) for a workspace admin. This one IS
+     *   workspace-bound (§4.13: member verbs follow the active workspace) and is
+     *   [Roles.canAdminWorkspace] verbatim; a super admin takes the instance entry instead.
+     *
+     * Viewers, authors and pure promoters get neither: an Admin item that leads to a screen
+     * the interceptor refuses is exactly the dead link 114 §A exists to remove.
+     */
+    data class Shell(
+        val adminUsers: Boolean,
+        val adminMembers: Boolean,
+    )
+
+    fun shell(principal: AuthenticatedPrincipal?): Shell {
+        if (principal == null) return Shell(adminUsers = false, adminMembers = false)
+        val adminUsers = principal.isSuperAdmin && principal.scopeReaches(Scope.ADMIN)
+        return Shell(
+            adminUsers = adminUsers,
+            adminMembers = !adminUsers && roles(principal).canAdminWorkspace,
+        )
+    }
+
+    /**
      * Stamps [roles] into [model] under the names every template reads. Called by each screen's
      * controller rather than by a `@ControllerAdvice`, because the UI controllers are unit-tested
      * by DIRECT invocation (no dispatcher, no advice chain) — an advice would put the attributes

@@ -191,6 +191,54 @@ class RoleModelTest {
         RoleModel.roles(null) shouldBe RoleModel.NONE
     }
 
+    // ---------------------------------------------------------------- the shell (143)
+
+    /**
+     * 143 (T315) — the rail's Admin entry is decided here, from the same predicates the verb
+     * booleans use, and NEVER from the role label. Two destinations, mutually exclusive:
+     * instance user administration for a super admin (workspace-independent — the instance
+     * authority is the USER's, so a super admin with no active workspace keeps the entry),
+     * or the active workspace's member management for a workspace admin. Nobody else has one.
+     */
+    @Test
+    fun `viewer, author and promoter get no Admin entry at all`() {
+        listOf(MembershipFlags.VIEWER, MembershipFlags(author = true), MembershipFlags(promoter = true)).forEach { flags ->
+            RoleModel.shell(session(flags)) shouldBe RoleModel.Shell(adminUsers = false, adminMembers = false)
+        }
+    }
+
+    @Test
+    fun `a workspace admin's Admin entry is the active workspace's members, never the instance`() {
+        RoleModel.shell(session(MembershipFlags(author = true, admin = true))) shouldBe
+            RoleModel.Shell(adminUsers = false, adminMembers = true)
+    }
+
+    @Test
+    fun `a super admin's Admin entry is instance users, with or without a workspace`() {
+        RoleModel.shell(session(MembershipFlags.IMPLICIT_SUPER_ADMIN, superAdmin = true)) shouldBe
+            RoleModel.Shell(adminUsers = true, adminMembers = false)
+        // No active workspace: the workspace-bound Roles are NONE, the shell entry survives.
+        RoleModel.roles(session(flags = null, superAdmin = true)) shouldBe RoleModel.NONE
+        RoleModel.shell(session(flags = null, superAdmin = true)) shouldBe
+            RoleModel.Shell(adminUsers = true, adminMembers = false)
+    }
+
+    @Test
+    fun `a key narrows the shell entry like every other boolean`() {
+        // O-2: no key holds `admin`, so a super admin's key never shows instance users.
+        RoleModel.shell(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.AUTHOR, superAdmin = true)) shouldBe
+            RoleModel.Shell(adminUsers = false, adminMembers = true)
+        // A read key of a workspace admin shows neither (the member verbs floor at `author`).
+        RoleModel.shell(key(MembershipFlags(author = true, admin = true), Scope.READ)) shouldBe
+            RoleModel.Shell(adminUsers = false, adminMembers = false)
+    }
+
+    @Test
+    fun `no principal and no workspace render no Admin entry`() {
+        RoleModel.shell(null) shouldBe RoleModel.Shell(adminUsers = false, adminMembers = false)
+        RoleModel.shell(session(flags = null)) shouldBe RoleModel.Shell(adminUsers = false, adminMembers = false)
+    }
+
     // ---------------------------------------------------------------- the model contract
 
     /**

@@ -103,7 +103,9 @@
   <!-- `data-workspace` is the stable hook a test (and a future partial swap) addresses this
        section by: the heading carries the name inside a span, which is a fragile thing to
        select on and says nothing about which workspace the FORMS beneath it post to. -->
-  <section th:each="entry : ${managed}" class="u-mb-xl" th:attr="data-workspace=${entry.key}">
+  <!-- 143: `id="workspace-members"` is where the rail's Admin item lands a workspace admin
+       (`/workspaces#workspace-members`). At most one section renders — the ACTIVE workspace's. -->
+  <section th:each="entry : ${managed}" class="u-mb-xl" id="workspace-members" th:attr="data-workspace=${entry.key}">
     <h2 class="ds-title u-mb-md">
       Members — <span th:text="${entry.key}">team</span>
     </h2>

@@ -61,6 +61,20 @@ class UiWorkspaceAdvice(
     @ModelAttribute("roleLabel")
     fun roleLabel(): String = RoleModel.roles(principal()).roleLabel
 
+    /**
+     * 143 (T315) — the rail's Admin entry, on EVERY page for the same reason as the badge:
+     * the rail is painted at each full paint (login, a workspace switch) and persists across
+     * boosted swaps, so it must be right wherever the first paint happens — including on
+     * screens whose controllers never call [RoleModel.stamp]. Two booleans, at most one true
+     * ([RoleModel.shell]): the layout renders the instance-users link or the current
+     * workspace's members link, or no Admin item at all.
+     */
+    @ModelAttribute("navAdminUsers")
+    fun navAdminUsers(): Boolean = RoleModel.shell(principal()).adminUsers
+
+    @ModelAttribute("navAdminMembers")
+    fun navAdminMembers(): Boolean = RoleModel.shell(principal()).adminMembers
+
     @ModelAttribute("activeTheme")
     fun activeTheme(request: HttpServletRequest): String = themeResolver.resolve(request)
 
