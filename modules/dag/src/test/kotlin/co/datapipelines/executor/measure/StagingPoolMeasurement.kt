@@ -6,7 +6,6 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorHarness
 import co.datapipelines.executor.FakeDatasourceRegistry
 import co.datapipelines.executor.Fixtures
-import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultPage
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.StoredResult
@@ -362,7 +361,7 @@ class StagingPoolMeasurement {
         private val sleepPerRows: Int = 0,
     ) : ResultStore {
         private val checksums = ConcurrentHashMap<UUID, String>()
-        private val config = ResultConfig()
+        private val views = ConcurrentHashMap<String, StoredResultView>()
 
         fun checksumOf(executionId: UUID): String = checksums[executionId] ?: "none"
 
@@ -382,7 +381,21 @@ class StagingPoolMeasurement {
                 if (sleepPerRows > 0 && rows % sleepPerRows == 0L) Thread.sleep(SLOW_SINK_SLEEP_MS)
             }
             checksums[executionId] = "rows=$rows,h=${java.lang.Long.toHexString(hash)}"
-            return StoredResult("m:$executionId", rows, 0, Instant.now().plusSeconds(ttlSeconds), schema.warnings)
+            val expiresAt = Instant.now().plusSeconds(ttlSeconds)
+            // The executor reads the stored result back before `data_ready` (§6.4.2), so a view
+            // must exist; the rows themselves are not kept — only their checksum matters here.
+            views[keyFor(executionId)] =
+                StoredResultView(
+                    key = keyFor(executionId),
+                    executionId = executionId,
+                    schema = schema.columns,
+                    firstPage = emptyList(),
+                    totalRows = rows,
+                    bytes = 0,
+                    expiresAt = expiresAt,
+                    warnings = schema.warnings,
+                )
+            return StoredResult(keyFor(executionId), rows, 0, expiresAt, schema.warnings)
         }
 
         override suspend fun materializeRows(
@@ -397,7 +410,7 @@ class StagingPoolMeasurement {
         override fun describe(
             key: String,
             firstPageRows: Int?,
-        ): StoredResultView? = null
+        ): StoredResultView? = views[key]
 
         override fun page(
             key: String,
