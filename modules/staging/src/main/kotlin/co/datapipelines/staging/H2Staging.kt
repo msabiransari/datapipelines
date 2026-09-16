@@ -161,7 +161,9 @@ class H2Staging internal constructor(
      * Destroys the staging database (§3.4): the enumerate-and-drop belt runs on one owned
      * connection when no lease is outstanding — or on the last late return when one is — and
      * every owned connection is closed; the last close destroys the in-memory database. Never
-     * waits for a lease still inside the driver and never throws (§3.4, §6).
+     * waits for a lease still inside the driver and does not throw for any SQL or runtime
+     * cleanup failure (§3.4, §6); a JVM `Error` propagates only after every owned connection
+     * was closed and the pool is terminal.
      */
     override fun close() {
         val outcome = pool.close { connection -> H2StagingSql.dropStagedTables(connection, executionId) }

@@ -150,9 +150,10 @@ interface Staging : AutoCloseable {
     /**
      * Destroys the staging database: drops every staged table (enumerated from the catalog,
      * since `DROP ALL OBJECTS` needs admin — §9.5) then closes every owned connection (§3.4).
-     * Never throws — a failure is logged and surfaces as `pipeline.staging.cleanup_failed` —
-     * and never waits for a lease still inside the driver (§6): that lease closes its own
-     * connection when it returns.
+     * Does not throw for a SQL or runtime cleanup failure — it is logged and surfaces as
+     * `pipeline.staging.cleanup_failed` — and never waits for a lease still inside the driver
+     * (§6): that lease closes its own connection when it returns. A JVM `Error` raised by the
+     * driver during cleanup propagates, but only after every owned connection was closed.
      */
     override fun close()
 }

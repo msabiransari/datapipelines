@@ -219,7 +219,10 @@ internal class H2ConnectionPool(
     /**
      * Closes the pool: no further leases, every idle connection closed, [sweep] run once on a
      * connection this pool owns when no session is outstanding — or deferred to the last late
-     * arrival (lease return, late open, guardian) when one is. Idempotent and non-throwing (§3.4).
+     * arrival (lease return, late open, guardian) when one is. Idempotent. Non-throwing for any
+     * `Exception` the sweep or a close raises (logged as `cleanup_failed` / a refused close,
+     * see [refusedCloses]); a JVM `Error` propagates only AFTER every idle session was closed and
+     * the state reached CLOSED, so no fault can leave the pool stuck in CLOSING (§3.4).
      */
     fun close(sweep: (Connection) -> Unit = {}): CloseOutcome {
         val toClose: List<Connection>
