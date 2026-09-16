@@ -80,13 +80,16 @@ interface StagingFactory {
  * @param config the already-resolved effective properties (see [H2StagingProperties] — the
  *   per-pipeline `max_memory_mb` override is applied by the caller before construction).
  */
-class H2StagingFactory internal constructor(
+class H2StagingFactory(
     /** The effective properties every execution's staging is built from; readable so wiring is testable. */
     val properties: H2StagingProperties,
     /**
-     * How a JDBC connection is opened — `DriverManager` in production. The seam exists so a
-     * test can make one phase of creation fail (a restricted connect that opens but cannot
-     * report its session defaults, say) and prove the database does not outlive the failure.
+     * How a JDBC connection is opened — `DriverManager` in production, which the one-argument
+     * constructor supplies. This is a **fault-injection seam for tests**, not a configuration
+     * point: the executor suite (`StagingLostExecutorTest`) wraps the restricted sessions to
+     * fail a reset and refuse the replacement, which is the only way to reach a LOST pool
+     * through the real executor; the staging suite uses it to fail one phase of creation.
+     * Production wiring (`DomainConfiguration.stagingFactory`) never passes it.
      */
     private val connect: (url: String, user: String, password: String) -> Connection,
 ) : StagingFactory {
