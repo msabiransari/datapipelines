@@ -367,7 +367,19 @@ class H2ConnectionPoolTest {
 
     @Test
     fun `an opener failure inside a lease releases the permit and surfaces the driver error`() {
-        val pool = pool(max = 2, opener = { throw SQLException("no more sessions", "08001") })
+        // The FIRST open fails; later opens succeed, so the closing check can really take a second
+        // connection and thereby prove the failed checkout gave its permit back.
+        val failedOnce = AtomicInteger()
+        val pool =
+            pool(max = 2, opener = {
+                if (failedOnce.getAndIncrement() ==
+                    0
+                ) {
+                    throw SQLException("no more sessions", "08001")
+                } else {
+                    open()
+                }
+            })
         val firstIn = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         runBlocking {
@@ -385,10 +397,15 @@ class H2ConnectionPoolTest {
             release.complete(Unit)
             first.await()
         }
-        // The failed checkout returned its permit and reserved no phantom connection.
+        // The failed checkout returned its permit and reserved no phantom connection: two more
+        // leases fit inside the cap of two, bounded so a leaked permit reads as red, not a hang.
         pool.activeLeases shouldBe 0
         pool.physicalConnections shouldBe 1
-        runBlocking { pool.lease(LeaseKind.INTERNAL) { } }
+        runBlocking {
+            withTimeout(TIMEOUT_MS) {
+                pool.lease(LeaseKind.INTERNAL) { pool.lease(LeaseKind.INTERNAL) { } }
+            }
+        }
         pool.close()
     }
 
@@ -397,8 +414,13 @@ class H2ConnectionPoolTest {
         val pool = pool(max = 1)
         runBlocking {
             shouldThrow<IllegalStateException> { pool.lease(LeaseKind.INTERNAL) { error("callback failure") } }
+            // Every later lease is bounded: with capacity ONE, a permit leaked by the failure above
+            // would make the next acquisition wait forever, and an unbounded wait is a hang, not a
+            // red test.
             shouldThrow<SQLException> {
-                pool.lease(LeaseKind.AUTHOR) { c -> c.createStatement().use { it.execute("SELECT * FROM \"nope\"") } }
+                withTimeout(TIMEOUT_MS) {
+                    pool.lease(LeaseKind.AUTHOR) { c -> c.createStatement().use { it.execute("SELECT * FROM \"nope\"") } }
+                }
             }
             // Both failures returned their permit and connection: the next lease proceeds at once.
             withTimeout(TIMEOUT_MS) { pool.lease(LeaseKind.INTERNAL) { } }
