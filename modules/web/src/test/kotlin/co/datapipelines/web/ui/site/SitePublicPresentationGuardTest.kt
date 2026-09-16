@@ -133,6 +133,26 @@ class SitePublicPresentationGuardTest {
         siteJs shouldNotContain "dp-site-theme"
     }
 
+    /**
+     * 148: the header's breakpoint is written twice by necessity — a media query cannot read a
+     * custom property — so the token site.js reads (`--site-nav-wide-min`) and the query that
+     * shows the wide row (`.nav-wide { display: flex }`) must name one value, or the script
+     * closes menus at a width the sheet does not switch at.
+     */
+    @Test
+    fun `the header breakpoint token and the wide-row media query name one width`() {
+        val token = checkNotNull(NAV_BREAKPOINT_TOKEN.find(siteCss)?.groupValues?.get(1)) { "site.css lost --site-nav-wide-min" }
+        val queries =
+            WIDE_ROW_QUERY
+                .findAll(withoutComments(siteCss))
+                .map { it.groupValues[1] }
+                .toList()
+        withClue("the media query that shows .nav-wide") { queries shouldBe listOf(token) }
+        withClue("site.js reads the token rather than typing a width") { siteJs shouldContain "--site-nav-wide-min" }
+        // Positive control: the query pattern sees a block that shows the wide row.
+        WIDE_ROW_QUERY.containsMatchIn("@media (min-width: 1px) {\n  .nav-wide {\n    display: flex;\n  }") shouldBe true
+    }
+
     @Test
     fun `the site sheets load nothing from another host`() {
         listOf("site.css" to siteCss, "site-fonts-mono.css" to read("static/site/css/site-fonts-mono.css")).forEach { (name, css) ->
@@ -164,5 +184,9 @@ class SitePublicPresentationGuardTest {
         val EXTERNAL_URL = Regex("""url\(\s*["']?(?:https?:)?//""")
         val FONT_URL = Regex("""url\("\.\./\.\./vendor/fonts/[^"]+\.woff2"\)""")
         val COMMENT = Regex("""/\*.*?\*/|<!--.*?-->""", RegexOption.DOT_MATCHES_ALL)
+        val NAV_BREAKPOINT_TOKEN = Regex("""--site-nav-wide-min:\s*([^;]+);""")
+
+        /** A min-width query whose block shows `.nav-wide` — the width the wide row appears at. */
+        val WIDE_ROW_QUERY = Regex("""@media \(min-width: ([^)]+)\) \{\s*\.nav-wide \{\s*display: flex;""")
     }
 }

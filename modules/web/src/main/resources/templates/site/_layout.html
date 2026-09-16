@@ -67,12 +67,22 @@
 </html>
 
 <!--/*
-  The public header (145): the five primary pages, the docs, and the host-aware application
-  entry — on datapipelines.co a visitor is invited to the live demo, on a customer's own
-  deployment the same /login route is how their people sign in (119 §C.1). The current page
-  is marked aria-current from the registry path PublicPage puts on the model. Below 64rem the
-  row folds into the phone menu — a <details>, so it opens and closes without JS; site.js adds
-  Escape (focus back on the summary) and click-outside.
+  The public header (145; Product restored by 148): the Product disclosure, the five primary
+  pages, the docs, and the host-aware application entry — on datapipelines.co a visitor is
+  invited to the live demo, on a customer's own deployment the same /login route is how their
+  people sign in (119 §C.1). The current page is marked aria-current from the registry path
+  PublicPage puts on the model. Below 64rem the row folds into the phone menu — a <details>,
+  so it opens and closes without JS; site.js adds Escape (focus back on the summary),
+  click-outside, one-open-at-a-time and a close when the breakpoint changes.
+
+  148 (#115, owner 2026-09-16): the seven feature pages 130 put in a Product disclosure had
+  moved to /explore and the footer with 145; preserving their routes did not preserve their
+  prominence. The disclosure is back — the APG disclosure-navigation pattern: a <details>
+  whose summary shows a list of links, never role="menu" (that is for application action
+  menus) — and the phone menu carries the same seven as a labelled group. The links are ONE
+  fragment (productLinks, below) rendered in both places, so the two menus cannot drift;
+  SiteProductNavigationTest holds the list, the parity and the current-page mark, and
+  SiteHeaderMenuBrowserTest holds the behaviour in a real browser.
 */-->
 <header class="site-header" th:fragment="siteHeader" xmlns:th="http://www.thymeleaf.org">
   <div class="container header-inner">
@@ -81,6 +91,15 @@
       <span>datapipelines.co</span>
     </a>
     <nav class="nav-wide" aria-label="Primary">
+      <!--/* Click/touch and keyboard, not hover-to-open: open/close, focus and Enter/Space are
+           the element's own. The summary is a nav item like its sibling links (one CSS rule for
+           both) and is marked like one when the page being read is inside the panel. */-->
+      <details class="nav-menu">
+        <summary>Product</summary>
+        <nav class="nav-panel" aria-label="Product">
+          <th:block th:replace="~{site/_layout :: productLinks}"/>
+        </nav>
+      </details>
       <a th:href="@{/how-it-works}" th:attr="aria-current=${currentSitePath == '/how-it-works'} ? 'page' : null">How it works</a>
       <a th:href="@{/use-cases}" th:attr="aria-current=${currentSitePath == '/use-cases'} ? 'page' : null">Use cases</a>
       <a th:href="@{/pricing}" th:attr="aria-current=${currentSitePath == '/pricing'} ? 'page' : null">Pricing</a>
@@ -94,6 +113,14 @@
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
       </summary>
       <nav class="nav-panel" aria-label="Primary mobile">
+        <!--/* 148: the same seven as a labelled GROUP. The label is a <p>, not an <h2>: the header
+             sits outside the document outline, and an h2 here would be the first heading a
+             screen reader's heading list offers on EVERY page — before the h1. The group's
+             aria-labelledby is what gives the label its weight (announced on entry). */-->
+        <div class="nav-group" role="group" aria-labelledby="nav-product-heading">
+          <p class="menu-heading" id="nav-product-heading">Product</p>
+          <th:block th:replace="~{site/_layout :: productLinks}"/>
+        </div>
         <a th:href="@{/how-it-works}" th:attr="aria-current=${currentSitePath == '/how-it-works'} ? 'page' : null">How it works</a>
         <a th:href="@{/use-cases}" th:attr="aria-current=${currentSitePath == '/use-cases'} ? 'page' : null">Use cases</a>
         <a th:href="@{/pricing}" th:attr="aria-current=${currentSitePath == '/pricing'} ? 'page' : null">Pricing</a>
@@ -104,6 +131,25 @@
     </details>
   </div>
 </header>
+
+<!--/*
+  148: the Product links — the ONE source both header menus render (the wide disclosure's
+  panel and the phone menu's group), so a link added, renamed or dropped here is the same in
+  both. Seven feature pages, in the order the owner set (130, R13), each a registry page:
+  SiteProductNavigationTest asserts every path is in SitePages.ALL, so a page retired from
+  the registry (and the sitemap) fails the build here rather than shipping as a dead link.
+  Labels are the pages' short names, not their SEO titles; /explore stays the exhaustive
+  directory and the footer's Product column keeps its wider list.
+*/-->
+<th:block th:fragment="productLinks" xmlns:th="http://www.thymeleaf.org">
+  <a th:href="@{/semantic-layer}" th:attr="aria-current=${currentSitePath == '/semantic-layer'} ? 'page' : null">Semantic layer</a>
+  <a th:href="@{/dp-lake}" th:attr="aria-current=${currentSitePath == '/dp-lake'} ? 'page' : null">dp-lake</a>
+  <a th:href="@{/federated-query}" th:attr="aria-current=${currentSitePath == '/federated-query'} ? 'page' : null">Federated query</a>
+  <a th:href="@{/text-to-sql-agent}" th:attr="aria-current=${currentSitePath == '/text-to-sql-agent'} ? 'page' : null">Text-to-SQL agent</a>
+  <a th:href="@{/mcp-tools}" th:attr="aria-current=${currentSitePath == '/mcp-tools'} ? 'page' : null">MCP tools</a>
+  <a th:href="@{/demo-data}" th:attr="aria-current=${currentSitePath == '/demo-data'} ? 'page' : null">Demo data</a>
+  <a th:href="@{/security}" th:attr="aria-current=${currentSitePath == '/security'} ? 'page' : null">Security</a>
+</th:block>
 
 <!--/*
   The public footer (145): the brand line and primary links from the approved preview, the

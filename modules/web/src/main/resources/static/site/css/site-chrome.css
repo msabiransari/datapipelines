@@ -860,6 +860,11 @@ hr,
   --site-gap-head: clamp(28px, 4vw, 44px);
   --site-radius-panel: calc(var(--radius-xl) + var(--space-1));
   --site-header-height: 4.5rem;
+  /* 148: the width at which the wide row replaces the phone menu. A media query cannot
+     read a custom property, so the `@media (min-width: 64rem)` in the header block repeats
+     this value by hand; site.js reads THIS token to close an open menu when the viewport
+     crosses it, so the two agree on one number. */
+  --site-nav-wide-min: 64rem;
 
   /* Motion — every duration and distance the site animates with. */
   --site-motion-fast: var(--duration-normal);
@@ -1264,8 +1269,9 @@ code {
 }
 
 /* --------------------------------------------------------
-   Header + navigation — five pages, the docs, and the host-aware entry.
-   Sticky, translucent; the hairline appears once the page has scrolled.
+   Header + navigation — the Product disclosure (148), five pages, the
+   docs, and the host-aware entry. Sticky, translucent; the hairline
+   appears once the page has scrolled.
    -------------------------------------------------------- */
 
 .site-header {
@@ -1321,7 +1327,11 @@ code {
   gap: var(--space-5);
 }
 
-.nav-wide a {
+/* 148: the Product disclosure's summary is a nav item like its sibling links — ONE rule for
+   both, so the row's height, type and colour come from one place. Direct children only:
+   the disclosure's panel hangs inside the row and its links are panel items, not row items. */
+.nav-wide > a,
+.nav-wide > .nav-menu > summary {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -1333,7 +1343,10 @@ code {
   white-space: nowrap;
 }
 
-.nav-wide a:not(.btn)::after {
+/* The underline: a link draws it with ::after; the summary keeps ::after for its chevron
+   and draws the same line with ::before. */
+.nav-wide > a:not(.btn)::after,
+.nav-wide > .nav-menu > summary::before {
   content: "";
   position: absolute;
   left: 0;
@@ -1346,28 +1359,98 @@ code {
   transition: transform var(--site-motion-fast) var(--site-motion-ease);
 }
 
-.nav-wide a:not(.btn):hover,
-.nav-wide a:not(.btn):focus-visible {
+.nav-wide > a:not(.btn):hover,
+.nav-wide > a:not(.btn):focus-visible,
+.nav-wide > .nav-menu > summary:hover,
+.nav-wide > .nav-menu > summary:focus-visible,
+.nav-menu[open] > summary {
   color: var(--text-primary);
 }
 
-.nav-wide a:not(.btn):hover::after,
-.nav-wide a:not(.btn):focus-visible::after,
-.nav-wide a[aria-current="page"]::after {
+.nav-wide > a:not(.btn):hover::after,
+.nav-wide > a:not(.btn):focus-visible::after,
+.nav-wide > a[aria-current="page"]::after,
+.nav-wide > .nav-menu > summary:hover::before,
+.nav-wide > .nav-menu > summary:focus-visible::before,
+.nav-menu[open] > summary::before {
   transform: scaleX(1);
 }
 
-.nav-wide a[aria-current="page"] {
+.nav-wide > a[aria-current="page"] {
   color: var(--text-primary);
   font-weight: var(--weight-bold);
 }
 
-.nav-wide .btn {
+/* The summary wears the current-page mark when the page being read is inside its panel.
+   `:has()` sits in rules of its own: a browser without it drops the whole selector list
+   it appears in, and these are an enhancement over the link's own aria-current. */
+.nav-menu:has(a[aria-current="page"]) > summary {
+  color: var(--text-primary);
+  font-weight: var(--weight-bold);
+}
+
+.nav-menu:has(a[aria-current="page"]) > summary::before {
+  transform: scaleX(1);
+}
+
+.nav-wide > .btn {
   margin-inline-start: var(--space-2);
+}
+
+/* 148 — the Product disclosure (APG disclosure navigation: a <details> whose summary shows
+   a list of links; not role="menu"). Open/close, focus and Enter/Space are the element's;
+   site.js adds Escape, click-outside, one-open-at-a-time and a close on a breakpoint
+   change. Click and keyboard only — no hover-to-open, so touch and pointer behave alike. */
+.nav-menu {
+  position: relative;
+}
+
+.nav-menu > summary {
+  gap: var(--space-2);
+  list-style: none;
+  cursor: pointer;
+}
+
+.nav-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The chevron: a bordered square turned 45°, so its size and stroke are tokens, not an
+   icon file; it turns over on open (motion.css zeroes the duration under reduced motion). */
+.nav-menu > summary::after {
+  content: "";
+  width: var(--space-1-5);
+  height: var(--space-1-5);
+  margin-block-start: calc(-1 * var(--space-0-5));
+  border-inline-end: var(--space-0-5) solid currentColor;
+  border-block-end: var(--space-0-5) solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.nav-menu[open] > summary::after {
+  margin-block-start: var(--space-0-5);
+  transform: rotate(225deg);
+}
+
+/* The disclosure's panel hangs from its start edge; the phone menu's from its end edge. */
+.nav-menu > .nav-panel {
+  inset-inline-start: 0;
 }
 
 .nav-mobile {
   position: relative;
+}
+
+.nav-mobile > .nav-panel {
+  inset-inline-end: 0;
+  /* 148: with the Product group the phone menu is thirteen items; on the shortest
+     supported viewport (320×568) that is taller than the screen, and a panel hanging
+     from a sticky header cannot be scrolled INTO — so the panel scrolls itself. */
+  max-height: calc(100vh - var(--site-header-height) - var(--space-4));
+  max-height: calc(100dvh - var(--site-header-height) - var(--space-4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .nav-mobile summary {
@@ -1400,11 +1483,11 @@ code {
   height: var(--icon-md);
 }
 
-/* The dropped panel. */
+/* The dropped panel — ONE definition shared by the phone menu and the Product disclosure
+   (148); which edge it hangs from is the only thing each parent sets. */
 .nav-panel {
   position: absolute;
   top: calc(100% + var(--space-2));
-  inset-inline-end: 0;
   z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
@@ -1446,6 +1529,30 @@ code {
   justify-content: center;
 }
 
+/* 148 — the phone menu's Product group: a labelled run of the same seven, the label a
+   muted eyebrow in the panel's own rhythm, a hairline closing the group. */
+.nav-panel .nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block-end: var(--space-2);
+  margin-block-end: var(--space-1);
+  border-block-end: var(--space-px) solid var(--site-hair);
+}
+
+.nav-panel .menu-heading {
+  margin: var(--space-1) 0 0;
+  padding-inline: var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The breakpoint is `--site-nav-wide-min` (token block) — repeated here by hand because a
+   media query cannot read a custom property; SitePublicPresentationGuardTest holds the two
+   equal. */
 @media (min-width: 64rem) {
   .nav-wide {
     display: flex;
