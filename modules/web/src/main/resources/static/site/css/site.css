@@ -328,8 +328,40 @@ button {
   margin-top: var(--space-4);
 }
 
-.kicker + * {
+/* The same default for the 145 structures — a walkthrough step's column, a use-case
+   column, a section opener, a status box, a price card, the closing call, an example's
+   panel — measured by the same walk (SiteRhythmBrowserTest's tight-pairs arm): 30 pairs
+   of a headline on its lede or a caption on its table at 0px before this rule, 0 after.
+   Component rules below of equal or greater weight still set their own rhythm. */
+.grid-2 > div > * + *,
+.split-hero > div > * + *,
+.dark-grid > div > * + *,
+.walkthrough > div > * + *,
+.use-card > div > * + *,
+.section-title > * + *,
+.status-box > * + *,
+.price-card > * + *,
+.final-cta > * + *,
+.use-visual > * + *,
+.cost-row > * + *,
+.knowledge-fact > * + *,
+.knowledge-example > * + *,
+.media-canvas > * + *,
+.walk-card > * + *,
+.panel > * + *,
+.question > * + * {
+  margin-top: var(--space-4);
+}
+
+.kicker + *,
+.eyebrow + * {
   margin-top: 0;
+}
+
+/* The hidden attribute outranks any display a component sets (the tablist and the copy
+   buttons ship hidden and the script reveals them). */
+[hidden] {
+  display: none !important;
 }
 
 .split blockquote + .fact-list {
@@ -716,7 +748,7 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-height: 2.75rem;
   padding: var(--space-2-5) var(--space-5);
   font-size: var(--text-sm);
@@ -1286,7 +1318,7 @@ code {
    SVG whose width attribute is the share from the demo block — data, not a style. */
 .bar-row {
   display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr) 3.25rem;
+  grid-template-columns: 5.5rem minmax(0, 1fr) 6.5rem;
   gap: var(--space-3);
   align-items: center;
   margin: var(--space-3) 0;
@@ -1311,6 +1343,7 @@ code {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
 .chart-note {
@@ -1929,10 +1962,6 @@ code {
   }
 }
 
-.walk-card > * + * {
-  margin-top: var(--space-3);
-}
-
 .walk-card .code {
   padding: var(--space-4);
   background: var(--site-ground);
@@ -2297,7 +2326,7 @@ code {
 }
 
 .cost-row h3 {
-  margin: 0 0 var(--space-1-5);
+  margin: 0 0 var(--space-2-5);
   font-size: var(--text-base);
 }
 
