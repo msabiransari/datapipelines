@@ -8,6 +8,7 @@ import co.datapipelines.typesystem.MappedColumn
 import co.datapipelines.typesystem.TypeMappers
 import co.datapipelines.typesystem.TypeMappingWarning
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
@@ -15,6 +16,7 @@ import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
 import java.util.UUID
+import kotlin.coroutines.coroutineContext
 
 /**
  * The H2 implementation of [Staging] (staging.md §3, §4, §8, §9).
@@ -294,6 +296,9 @@ class H2Staging internal constructor(
         var batchIndex = 0L
         var lastBudgetCheckMs = 0L
         while (true) {
+            // A cancelled node stops at the next batch boundary: neither the semaphore's fast path
+            // nor a blocking driver call checks for cancellation, so the drain checks itself.
+            coroutineContext.ensureActive()
             val batch = nextBatch(batchSize)
             val exhausted = batch.size < batchSize
             if (batch.isNotEmpty() || rowCount == 0L) {
