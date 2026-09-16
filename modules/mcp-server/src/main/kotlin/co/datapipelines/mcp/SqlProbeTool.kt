@@ -272,8 +272,8 @@ class SqlProbeTool(
             "and not proof it is wrong. To finish the check, either (a) restate the suspect construct as a " +
             "self-contained statement — replace each staged table with a typed, aliased VALUES derived table " +
             "of the same column shape — so it EXECUTES here (that validates the construct, not the real column " +
-            "types or data), or (b) run the node with its real staged inputs (pipelines_execute_node after the " +
-            "nodes it depends on, or pipelines_execute), which validates the statement against the real " +
+            "types or data), or (b) use pipelines_execute to run the DAG with its real staged inputs. " +
+            "Standalone node execution cannot access tempdb. A full run validates the statement against the real " +
             "schema at the cost of a run. templates_render checks what the template emits, not whether it runs."
 
     private companion object {

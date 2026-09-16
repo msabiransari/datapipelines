@@ -242,9 +242,9 @@ semantics; the question's words decide the window.
   find, and nothing after that point — a join form, a clause, a column — was checked; it is not
   a pass and not a failure. Finish it before the run: restate the suspect construct over typed,
   aliased `VALUES` inputs of the staged tables' shape so it executes on the scratch (that proves
-  the construct, not the real column types), or run the node with its real staged inputs
-  (`pipelines_execute_node`, which proves the statement against the real schema at the cost of
-  a run). An error is a real H2 error. Rendering, an incomplete preparation and an execution are
+  the construct, not the real column types), or use `pipelines_execute` to run the DAG with its
+  real staged inputs. Standalone `pipelines_execute_node` refuses tempdb sources; running source
+  nodes separately does not retain staged tables. An error is a real H2 error. Rendering, an incomplete preparation and an execution are
   three different pieces of evidence; only the last one says the node runs.
   What the probe rung settles about the DATA — a unit, a time zone, what a coded value
   means — is a fact: `semantics_record` it with that SELECT as `evidence_sql` (SKILL.md
@@ -335,8 +335,9 @@ the right quantity was computed.
    to disprove, never to assume. Keep three quantities distinct in the output and its labels:
    observed sample support (rows you saw), the estimated population count (support × weight) and a
    census count. When no rate is stated, a sample can be compared only with itself, and a
-   within-sample ratio equals the population's only under an assumption you name (that the
-   sampling is independent of the quantity) — say which you did, and what it assumes.
+   using a within-sample ratio to estimate a population ratio requires a justified sampling
+   assumption. Independent sampling does not make a finite sample's ratio exactly equal to the
+   population's or make every ratio estimator unbiased; state the assumption and uncertainty.
 3. **Reuse a helper by its formula, not its name.** Before importing a shared macro or metric,
    read what it computes: its numerator and denominator, its precision, and what it does with a
    missing value. A helper that ROUNDS is a presentation helper — reused inside a difference, a

@@ -93,6 +93,8 @@ class SqlProbeTempdbWireTest {
             { payload.containsKey("rows") shouldBe false },
             { payload.containsKey("row_count_returned") shouldBe false },
             { (payload["note"] as String) shouldContain "INCOMPLETE" },
+            { (payload["note"] as String) shouldContain "use pipelines_execute to run the DAG" },
+            { (payload["note"] as String) shouldNotContain "pipelines_execute_node" },
             { (payload["note"] as String) shouldNotContain "every name it defines itself resolved" },
             { (payload["note"] as String) shouldNotContain "Nothing about the SQL needs to change" },
         )

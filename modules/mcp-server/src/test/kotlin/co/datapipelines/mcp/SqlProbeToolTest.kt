@@ -18,6 +18,7 @@ import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -202,7 +203,8 @@ class SqlProbeToolTest {
             { (payload["note"] as String) shouldContain "Nothing after that point was checked" },
             { (payload["note"] as String) shouldContain "not proof the SQL is sound" },
             { (payload["note"] as String) shouldContain "VALUES" },
-            { (payload["note"] as String) shouldContain "pipelines_execute_node" },
+            { (payload["note"] as String) shouldContain "use pipelines_execute to run the DAG" },
+            { (payload["note"] as String) shouldNotContain "pipelines_execute_node" },
         )
         verify(exactly = 0) { datasources.getVisible(any(), any()) }
         verify(exactly = 0) { probe.probe(any(), any(), any(), any(), any()) }
