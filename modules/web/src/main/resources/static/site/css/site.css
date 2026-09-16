@@ -979,7 +979,11 @@ code {
 .card {
   display: flex;
   flex-direction: column;
-  gap: var(--gap-sm);
+  /* 12px, the approved preview's title → body gap. Not the 8px design-system --gap-sm: with
+     Manrope's metrics the rendered h3 → p distance rounded to 7.99px on /security's cards
+     at 1440 and failed the tight-pairs floor (gate run 2 on e7d49c13); a value on the floor
+     is a value that fails by rounding. */
+  gap: var(--space-3);
   padding: var(--space-5);
   background: var(--site-surface);
   border: var(--space-px) solid var(--site-hair);
