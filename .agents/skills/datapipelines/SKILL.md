@@ -148,12 +148,16 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    not `_get_columns` and `_get_table_stats` is a table you may not read. The server checks
    this: a `pipelines_create` naming a table you never `_get_columns`'d is refused
    `pipeline.validation.table_not_learned` — the refusal lists the calls that clear it.
-1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL
-   will touch (row estimate, indexes, per-column bounds — catalog estimates, never a scan; probe
-   for the exact bound), then `sql_probe` the exact SELECT with representative parameters and read
-   `plan.scan` and `wall_ms` — a `seq` plan on a large table is the timeout you would meet in
-   step 5, found while it is still cheap. A probe that settles a question about the DATA is a
-   fact: record it (step 1) so the next session skips the probe. Only then write the template.
+1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL will touch (row
+   estimate, indexes, per-column bounds — catalog estimates, never a scan; probe for the exact bound), then
+   `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and `wall_ms` — a `seq` plan
+   on a large table is the timeout you would meet in step 5, found while it is still cheap. A probe that settles a
+   question about the DATA is a fact: record it (step 1) so the next session skips the probe. Then, before the
+   first template, write the calculation down: each quantity's population, window, unit, grain and sampling
+   weight, and why the quantities you will add, compare or rank are the same kind of thing — a sampled count is
+   weighted BEFORE it meets a census count in a total or a ranking, precision is kept until the output, and every
+   group's observed support is shown beside its estimate (`references/authoring-playbook.md` §4). Only then write
+   the template.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
    (the description is the only discoverability mechanism for parameters). Before
@@ -164,12 +168,14 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    body and the hash; the dialect is inherited) — it writes the DRAFT the same way
    `pipelines_update` writes a pipeline's. `templates_purge_draft` is for a template that should
    not exist, not for editing one, and it is refused once a pipeline pins the template.
-3. **Preview the SQL.** `templates_render` with a representative context — save-time
-   validation is parse-only, so this is your check that the SQL is actually what you
-   meant. This is mandatory before step 4 for anything non-trivial — including one you create
-   after the pipeline exists; the run is not its render. Every template the pipeline pins — the
-   tempdb ones included: a `sql_probe {"name": "tempdb"}` checks syntax and names,
-   `templates_render` checks what the Freemarker actually emits, and they are not the same check.
+3. **Preview the SQL.** `templates_render` with a representative context — save-time validation is parse-only, so
+   this is your check that the SQL is actually what you meant. This is mandatory before step 4 for anything
+   non-trivial — including one you create after the pipeline exists; the run is not its render. Every template the
+   pipeline pins — the tempdb ones included: `templates_render` checks what the Freemarker emits; `sql_probe
+   {"name": "tempdb"}` prepares the emitted statement on an empty engine and answers `validation_status` —
+   `executed` validated it, `incomplete` means H2 stopped at a missing staged table and checked NOTHING after it
+   (finish with a `VALUES` restatement or the node's real run, playbook §3); neither is the execution, and none of
+   the three replaces another.
 4. **Create the pipeline.** `pipelines_create` with `parameters` declared (types +
    required/defaults — remember `DECIMAL` needs `precision`; `required: true` and
    `default` are exclusive — a parameter with a default is optional by definition), nodes
@@ -198,9 +204,11 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    A fixed-baseline drift check (literals for the baseline window, `expected` the value you measured there, the baseline named in the
    check's `name`) and a parameterized invariant check (binds the pipeline's parameters AND an expectation that holds for every input —
    never a changing parameter beside a fixed expected total) are `checks[]` entries: one datasource, one statement, one value or row
-   count. The third strategy — independent output reconciliation, a meaningful output group recomputed from the source and compared
-   against the actual result — lives in the numbered Verification recipe, never in `checks[]`: no check reads the pipeline's output;
-   a source assertion that fits the check shape links in the recipe by check-id. Then `pipelines_run_checks`: the server's `observed`
+   count. The third strategy — independent output reconciliation — lives in the numbered Verification recipe, never in `checks[]`:
+   no check reads the pipeline's output; a source assertion that fits the check shape links in the recipe by check-id. Independent
+   means derived again from the QUESTION and the source facts (weights, denominators, window), never a re-run of your own formula;
+   it covers every requested dimension and the vulnerable rows — the rank cutoff, the sparsest and the absent groups — compared at
+   the declared precision; one winner's combined total proves neither the ranking nor its breakdown. Then `pipelines_run_checks`: the server's `observed`
    is the only observed value there is; the release gate binds the declared DEFAULTS — a parameterized check proves the default window,
    a fixed-literal baseline check its own named baseline. **Then stop**: leave the draft for a human to release from the UI — never
    claim your change is live; no tool you have releases anything.
@@ -279,13 +287,12 @@ context and correlation id to work with.
 
 ## Best practices (trouble-free authoring)
 
-**Read `references/authoring-playbook.md` before building or updating anything with more than
-two nodes** — the judgment between the golden path's steps: the question's grain, the lookups
-and display names, aggregating at the source, indexing a staged table, filtering a lake table
-on its partition column, `depends_on` as data flow, a timeout as work in the wrong place,
-sample vs census, the missing-data policy, the three verification strategies, the numbered
-verification recipe, stopping at the draft. Its Do/Don't table is one screen; each row is a
-mistake an agent made here.
+**Read `references/authoring-playbook.md` before building or updating anything with more than two nodes** — the
+judgment between the golden path's steps: the question's grain, the lookups and display names, aggregating at the
+source, indexing a staged table, filtering a lake table on its partition column, `depends_on` as data flow, the
+three timeout budgets and when a scan may be partitioned, the measurement contract (population, units, weights,
+precision, ties, support), the three verification strategies, the numbered verification recipe, stopping at the
+draft. Its Do/Don't table is one screen; each row is a mistake an agent made here.
 
 1. **Render before you create.** `templates_render` with representative values catches
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
@@ -333,53 +340,47 @@ mistake an agent made here.
 12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
-13. **Parameters wear the question's vocabulary; technical inputs are derived.** A question
-    that names a period — "2024", "Q3", "last month", "2023 to 2024" — gets that period's
-    parameter (`year`, `quarter`, `base_year`/`comp_year`, an anchor date), and the calculator
-    or in-dialect date math derives the bounds; two raw dates are an INPUT to a template,
-    never the door of a pipeline. The server enforces that: a raw-date door is
-    refused until you pass `door_acknowledged: true` — which you do only when the question truly fixes two
-    dates; passing it to silence the refusal is the miss it exists to catch. A relative
-    phrase's door is an anchor date — `$current_date`
-    for a live one; for a fixed dataset, the data's last date for a "this period" phrase but
-    **the day AFTER the data's last date for a "last N periods" phrase** — those kinds resolve
-    the complete periods before the one CONTAINING the anchor (data ends 2026-06-30: "last
-    quarter" anchors `2026-07-01` → 2026-04-01..2026-06-30; `2026-06-30` → Q1). **Any relative
-    time phrase in the question — "last", "this", "to date", "trailing", "N ago" — is resolved
-    by reading `calculators_list`:** each kind lists the everyday phrases it answers; pick the
-    kind whose phrases match the question's words, and when two kinds both fit, ask the person
-    which one. A CALCULATOR node then writes the technical inputs into the execution Context,
-    which downstream SQL binds as `:start_date` / `:end_date`
-    ([calculators.md](../../../docs/calculators.md)); a kind may write several keys at once —
-    the catalog's `outputs` says which. Write the interpretation you chose into
-    the pipeline's `description` in the question's own words, and name the window the same way
-    in every template's `description`. The calculator's `context_key` is already an optional
-    execute input — never also declare it as a parameter
-    (`pipeline.validation.calculator_output_collision`). When the question leaves a threshold
-    or a rule to you — what counts as rainy, active, churned, late — write the rule you chose
-    into the description AND record it as a `definition` fact on the workspace, with the probe
-    that showed the distribution you chose over; before choosing, read the listing's facts — a
-    `definition` an earlier pipeline recorded is the one to reuse, so two pipelines in one
-    workspace never answer "rainy" two ways.
-13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come
-    from `datasources_get_table_stats`, a probe, or a metadata table — never estimated. **A claim
-    about the DATA is a probe you ran or a registry line you read:** partition layout from the
-    stats read (no `partition` index = one unpartitioned file, whatever the plan's pushdown shows);
-    a column's values over the WHOLE table from a whole-table probe, never a lookup or a
-    description; "census, not sample" from a reconciled count or an `asserted` record. **And a
-    cause is a claim too:** the REASON for a number you noticed is named only after the probe that
-    shows it, and never names a mechanism — "the generator", "the feed" — you have not seen. That
-    includes the PLATFORM: a tool behaving unexpectedly is reported as what you observed and what
-    you did — never name the server's mechanism, which you cannot see. **Report from the output you
-    read:** a direction, a unit, the time period, a sample size in your reply is reconciled against the actual result rows before you write
-    it — the rows outrank the story you remember. **And a description carries data facts and the
-    interpretation you chose — never claims about your own process:** "validated", "reproduced", "checked" go in your reply — a description outlives the
-    validation, and it is an exemplar the next agent copies. When the data cannot reveal a fact you
-    depend on (a sample rate no table states, a time zone no type states): write the assumption into
-    the pipeline's `description`, `semantics_record` it WITHOUT evidence so it lands as `asserted`
-    for a human to verify — that record, not your reply, is what the next session finds — and say in
-    the reply which facts you derived and which you assumed. An assumption that moves the answer by
-    an order of magnitude: stop and ask first.
+13. **Parameters wear the question's vocabulary; technical inputs are derived.** A question that names a
+    period — "2024", "Q3", "last month", "2023 to 2024" — gets that period's parameter (`year`, `quarter`,
+    `base_year`/`comp_year`, an anchor date), and the calculator or in-dialect date math derives the bounds;
+    two raw dates are an INPUT to a template, never the door of a pipeline. The server enforces that: a
+    raw-date door is refused until you pass `door_acknowledged: true` — which you do only when the question
+    truly fixes two dates; passing it to silence the refusal is the miss it exists to catch. A relative
+    phrase's door is an anchor date — `$current_date` for a live one; for a fixed dataset, the data's last
+    date for a "this period" phrase but **the day AFTER the data's last date for a "last N periods"
+    phrase** — those kinds resolve the complete periods before the one CONTAINING the anchor (data ends
+    2026-06-30: "last quarter" anchors `2026-07-01` → 2026-04-01..2026-06-30; `2026-06-30` → Q1). **Any
+    relative time phrase in the question — "last", "this", "to date", "trailing", "N ago" — is resolved by
+    reading `calculators_list`:** each kind lists the everyday phrases it answers; pick the kind whose
+    phrases match the question's words, and when two kinds both fit, ask the person which one. A CALCULATOR
+    node writes the technical inputs into the execution Context for downstream SQL to bind
+    ([calculators.md](../../../docs/calculators.md)); the catalog's `outputs` says which keys. Write the
+    interpretation you chose into the pipeline's `description` in the question's own words, and
+    name the window the same way in every template's `description`. The calculator's `context_key` is already
+    an optional execute input — never also declare it as a parameter (`pipeline.validation.calculator_output_collision`).
+    When the question leaves a threshold or a rule to you — what counts as rainy, active, churned, late —
+    write the rule you chose into the description AND record it as a `definition` fact on the workspace, with
+    the probe that showed the distribution you chose over; before choosing, read the listing's facts — a
+    `definition` an earlier pipeline recorded is the one to reuse, so two pipelines in one workspace never
+    answer "rainy" two ways.
+13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come from
+    `datasources_get_table_stats`, a probe, or a metadata table — never estimated. **A claim about the DATA is a
+    probe you ran or a registry line you read:** partition layout from the stats read (no `partition` index = one
+    unpartitioned file, whatever the plan's pushdown shows); a column's values over the WHOLE table from a
+    whole-table probe, never a lookup or a description; "census, not sample" from a reconciled count or an
+    `asserted` record. **And a cause is a claim too:** the REASON for a number you noticed is named only after the
+    probe that shows it, and never names a mechanism — "the generator", "the feed" — you have not seen. That
+    includes the PLATFORM: a tool behaving unexpectedly is reported as what you observed and what you did —
+    never name the server's mechanism, which you cannot see. **Report from the output you read:** a direction, a unit,
+    the time period, a sample size in your reply is reconciled against the actual result rows before you write it
+    — the rows outrank the story you remember. **And a description carries data facts and the interpretation you
+    chose — never claims about your own process:** "validated", "reproduced", "checked" go in your reply — a
+    description outlives the validation, and it is an exemplar the next agent copies. When the data cannot reveal
+    a fact you depend on (a sample rate no table states, a time zone no type states): write the assumption into
+    the pipeline's `description`, `semantics_record` it WITHOUT evidence so it lands as `asserted` for a human to
+    verify — that record, not your reply, is what the next session finds — and say in the reply which facts you
+    derived and which you assumed. An assumption that moves the answer by an order of magnitude: stop and ask
+    first.
 14. **Engine quirks** — a `:bind` inside an H2 GROUP BY, DECIMAL ÷ DECIMAL in H2, H2's
     `C1…` `VALUES` columns, `rows` on MySQL/DuckDB, the one-datasource wall for source
     nodes and probes: `references/authoring-playbook.md` §6, read it before your first

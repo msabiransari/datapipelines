@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import java.sql.DriverManager
+import java.sql.SQLException
 
 /**
  * §7D probes over a real in-memory H2 (the [SqlRunnerTest] rationale: caps, decoding and the
@@ -171,22 +172,104 @@ class SqlProbeH2Test {
         )
     }
 
-    // ------------------------------------------------------------------ the tempdb scratch check (2026-09-11)
+    // ------------------------------------------------------------------ the tempdb scratch check (2026-09-11; #119 2026-09-16)
 
     /**
-     * The pass signal: a statement over a staged table that does not exist parses, resolves
-     * every name it defines, and stops at the missing input — reported as Parsed, naming it.
+     * A sibling H2 opened with the scratch probe's OWN url shape (staging mode, lower-folding)
+     * but kept alive and pre-populated with [ddl] — the counterexample engine: what the same
+     * driver says about the same statement once the tables exist.
+     */
+    private fun scratchModeDatasourceWith(vararg ddl: String): Datasource {
+        val url =
+            "jdbc:h2:mem:scratch_ce_${System.nanoTime()};MODE=${SqlProbe.DEFAULT_SCRATCH_MODE};" +
+                "DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
+        DriverManager.getConnection(url).use { c -> c.createStatement().use { st -> ddl.forEach { st.execute(it) } } }
+        return wireDatasource(Fixtures.h2(name = "scratch-counterexample", jdbcUrl = url))
+    }
+
+    private fun h2ErrorCode(thrown: SqlProbeExecutionException): Int = (thrown.cause as SQLException).errorCode
+
+    /**
+     * #119 — the engine premise, proven on the pinned driver, not mocked: H2 stops PREPARING at
+     * the first table it cannot find, so a syntax error AFTER that table is invisible to the
+     * empty-scratch check. The same statement against a sibling H2 in the same mode where the
+     * tables exist is a `42000` syntax error at `OUTER` — which is what a real staged execution
+     * then reports. The pre-#119 outcome called this "Parsed; every self-defined name resolved".
+     * It is [ScratchProbeOutcome.Incomplete], naming the table and claiming nothing after it.
      */
     @Test
-    fun `scratch - a sound statement over a missing staged table is Parsed with the table named`() {
+    fun `scratch - a missing table masks a later syntax error, so the outcome is Incomplete, not a pass`() {
+        val outcome = probe.probeScratch(MASKED_FULL_OUTER_JOIN)
+
+        outcome.shouldBeInstanceOf<ScratchProbeOutcome.Incomplete>()
+        outcome.missingTable shouldBe "absent_a"
+
+        // The counterexample, same driver, same mode: with both tables present the engine
+        // reaches the join keyword and refuses it. Had the scratch outcome meant "the SQL is
+        // sound", this statement would run here.
+        val withTables = scratchModeDatasourceWith("CREATE TABLE absent_a (id INT)", "CREATE TABLE absent_b (id INT)")
+        val thrown = shouldThrow<SqlProbeExecutionException> { probe.probe(withTables, MASKED_FULL_OUTER_JOIN) }
+        assertAll(
+            { h2ErrorCode(thrown) shouldBe H2_SYNTAX_ERROR },
+            { thrown.driverMessage shouldContain "OUTER" },
+        )
+    }
+
+    /** #119 — the same masking hides a misspelt clause and an unknown column, not only a join form. */
+    @Test
+    fun `scratch - a missing table also masks a misspelt clause and a bad column after it`() {
+        val misspelt = "SELECT a.id FROM absent_a a WHERE a.id > 0 GROUPP BY a.id"
+        val badColumn = "SELECT a.no_such_col FROM absent_a a"
+
+        probe.probeScratch(misspelt).shouldBeInstanceOf<ScratchProbeOutcome.Incomplete>()
+        probe.probeScratch(badColumn).shouldBeInstanceOf<ScratchProbeOutcome.Incomplete>()
+
+        val withTable = scratchModeDatasourceWith("CREATE TABLE absent_a (id INT)")
+        assertAll(
+            { h2ErrorCode(shouldThrow<SqlProbeExecutionException> { probe.probe(withTable, misspelt) }) shouldBe H2_SYNTAX_ERROR },
+            { shouldThrow<SqlProbeExecutionException> { probe.probe(withTable, badColumn) }.driverMessage shouldContain "no_such_col" },
+        )
+    }
+
+    /**
+     * The boundary of the masking, so the note claims no more than the engine does: H2 resolves
+     * a FUNCTION name while parsing the select list, BEFORE it resolves the FROM tables — so an
+     * unknown function is a real error even over a missing table, while a column (resolved after
+     * the tables) is masked (the test above).
+     */
+    @Test
+    fun `scratch - an unknown function is NOT masked by a missing table`() {
+        val thrown = shouldThrow<SqlProbeExecutionException> { probe.probeScratch("SELECT no_such_fn(a.id) FROM absent_a a") }
+
+        thrown.driverMessage shouldContain "no_such_fn"
+    }
+
+    /**
+     * A VALID statement over a staged table that does not exist is the SAME outcome — incomplete
+     * is not "invalid". It keeps the missing-table evidence, its binds still go through the
+     * house grammar, and the wall time is measured.
+     */
+    @Test
+    fun `scratch - a valid statement over a missing staged table is Incomplete with the table named`() {
         val outcome =
             probe.probeScratch(
                 "SELECT t.hr, s.n FROM (VALUES (0),(1)) AS t(hr) LEFT JOIN stg_orders s ON s.hr = t.hr WHERE s.n > :min",
                 parameters = mapOf("min" to SqlProbeParameter(LogicalType.INTEGER, "1")),
             )
 
-        outcome.shouldBeInstanceOf<ScratchProbeOutcome.Parsed>()
-        outcome.missingTable shouldBe "stg_orders"
+        outcome.shouldBeInstanceOf<ScratchProbeOutcome.Incomplete>()
+        assertAll(
+            { outcome.missingTable shouldBe "stg_orders" },
+            { outcome.wallMs shouldBeGreaterThanOrEqualTo 0L },
+        )
+    }
+
+    /** A self-contained statement that H2 itself refuses is the structured error, never Incomplete. */
+    @Test
+    fun `scratch - an invalid self-contained statement is the execution exception, not Incomplete`() {
+        val thrown = shouldThrow<SqlProbeExecutionException> { probe.probeScratch("SELECT t.x FORM (VALUES (1)) AS t(x)") }
+
+        h2ErrorCode(thrown) shouldBe H2_SYNTAX_ERROR
     }
 
     /** The defect that cost a full DAG run: H2 names VALUES columns C1, not column1. */
@@ -211,9 +294,37 @@ class SqlProbeH2Test {
             .name shouldBe "hr"
     }
 
+    /** A self-contained statement with a bound parameter runs too — the binder is the pipeline's. */
+    @Test
+    fun `scratch - a bound self-contained statement returns the rows the bind selects`() {
+        val outcome =
+            probe.probeScratch(
+                "SELECT t.hr FROM (VALUES (0),(1),(2)) AS t(hr) WHERE t.hr >= :min ORDER BY t.hr",
+                parameters = mapOf("min" to SqlProbeParameter(LogicalType.INTEGER, "1")),
+            )
+
+        outcome.shouldBeInstanceOf<ScratchProbeOutcome.Rows>()
+        val selected =
+            outcome.result.rows.rows
+                .map { it["hr"].toString() }
+        selected shouldBe listOf("1", "2")
+    }
+
     /** The classifier still guards the scratch engine: nothing but one SELECT/WITH runs. */
     @Test
     fun `scratch - a non-SELECT is refused before any engine opens`() {
         shouldThrow<SqlProbeRefusalException> { probe.probeScratch("DROP TABLE stg_orders") }
+    }
+
+    private companion object {
+        /**
+         * #119's witness (spec §2): on an empty scratch the missing table is reported; with both
+         * tables present H2 2.3.232 refuses `FULL OUTER JOIN` at `OUTER`. An acceptance audit
+         * matched this shape's SQL hash between a "passing" probe and the failing execution.
+         */
+        const val MASKED_FULL_OUTER_JOIN = "SELECT a.id FROM absent_a a FULL OUTER JOIN absent_b b ON a.id = b.id"
+
+        /** H2's `SYNTAX_ERROR_1`/`_2` error code. */
+        const val H2_SYNTAX_ERROR = 42000
     }
 }
