@@ -71,7 +71,9 @@ class StagingPoolMeasurement {
                 "conns opened | lease wait ms/run | GC ms/run | CPU ms/run | peak heap MB |",
         )
         println("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-        capacities.forEach { capacity -> println(measureShape1(capacity)) }
+        withSources((1..SOURCES).map { i -> h2Datasource("m_src_$i", sourceDdl()) }) { sources ->
+            capacities.forEach { capacity -> println(measureShape1(capacity, sources)) }
+        }
         println()
         println("### Shape 2 — caller drain of $DRAIN_ROWS rows into a slow sink beside three independent DDL nodes")
         println()
@@ -86,7 +88,9 @@ class StagingPoolMeasurement {
         println()
         println("| capacity | checksums equal | batch median ms | per-execution p95 ms | executions/s | GC ms/batch | CPU ms/batch |")
         println("|---|---|---|---|---|---|---|")
-        capacities.forEach { capacity -> println(measureShape3(capacity)) }
+        withSources((1..SOURCES).map { i -> h2Datasource("m_conc_$i", sourceDdl()) }) { sources ->
+            capacities.forEach { capacity -> println(measureShape3(capacity, sources)) }
+        }
         println()
         println("Median and p95 are over the measured repetitions; per-node figures come from the")
         println("executor's own node_stats durations. Lease wait is the pool's own counter (this tree")
@@ -95,8 +99,10 @@ class StagingPoolMeasurement {
 
     // ------------------------------------------------------------ shape 1
 
-    private fun measureShape1(capacity: Int): String {
-        val sources = (1..SOURCES).map { i -> h2Datasource("m_src_$i", sourceDdl()) }
+    private fun measureShape1(
+        capacity: Int,
+        sources: List<co.datapipelines.datasources.Datasource>,
+    ): String {
         val nodes =
             (1..SOURCES).map { i -> Fixtures.node("src$i", source = "m_src_$i", output = NodeOutput.Tempdb("s_$i")) } +
                 listOf(
@@ -207,8 +213,10 @@ class StagingPoolMeasurement {
 
     // ------------------------------------------------------------ shape 3
 
-    private fun measureShape3(capacity: Int): String {
-        val sources = (1..SOURCES).map { i -> h2Datasource("m_conc_$i", sourceDdl()) }
+    private fun measureShape3(
+        capacity: Int,
+        sources: List<co.datapipelines.datasources.Datasource>,
+    ): String {
         val nodes =
             (1..SOURCES).map { i -> Fixtures.node("src$i", source = "m_conc_$i", output = NodeOutput.Tempdb("s_$i")) } +
                 listOf(
@@ -260,6 +268,30 @@ class StagingPoolMeasurement {
             """INSERT INTO s SELECT "X", CASE WHEN MOD("X", 5) = 0 THEN NULL ELSE "X" * 1.25 END, 'l' || MOD("X", 7) """ +
                 "FROM SYSTEM_RANGE(1, $SOURCE_ROWS)",
         )
+
+    /**
+     * The source databases are built ONCE per shape and shut down afterwards. `h2Datasource`
+     * pins them with `DB_CLOSE_DELAY=-1`, so per-arm sources would accumulate for the JVM's
+     * life and every later arm would pay for a larger live set in the memory guard's forced
+     * collections — measured: the same capacity read 5.2 s per concurrent batch as the third
+     * arm of one JVM and 3.4 s alone. Run order, not capacity, was the variable.
+     */
+    private fun withSources(
+        sources: List<co.datapipelines.datasources.Datasource>,
+        body: (List<co.datapipelines.datasources.Datasource>) -> Unit,
+    ) {
+        try {
+            body(sources)
+        } finally {
+            sources.forEach(::shutDown)
+        }
+    }
+
+    private fun shutDown(source: co.datapipelines.datasources.Datasource) {
+        java.sql.DriverManager.getConnection(source.jdbcUrl, source.username, "").use { c ->
+            c.createStatement().use { it.execute("SHUTDOWN") }
+        }
+    }
 
     private fun config() = ExecutorConfig(maxParallelNodes = PARALLEL_NODES, executionTimeoutSeconds = EXECUTION_TIMEOUT_S)
 
