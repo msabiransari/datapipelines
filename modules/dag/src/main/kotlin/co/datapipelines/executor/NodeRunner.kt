@@ -153,17 +153,24 @@ fun interface NodeProgressSink {
  *
  * §5.2 reads `staging.connection` and calls `staging.stage(rs, table)` from inside a cursor over
  * the same connection. Neither is reachable against the shipped `Staging` contract: the
- * connection is private behind `withConnection`, and the staging mutex is **not reentrant** —
- * calling `stage` from inside `withQuery` deadlocks by construction (staging.md §3.3, §9.2 and
- * the `Staging` KDoc say so explicitly). So a `tempdb` → `tempdb` DQL node runs as a single
- * `CREATE TABLE … AS <sql>` on the staging connection instead of cursor-plus-stage: one
- * statement, one lock acquisition, and the copy never leaves H2.
+ * connection is private behind `withConnection`, and a staging lease must **never be nested** —
+ * calling `stage` from inside `withQuery` deadlocks at `max-connections = 1` and, above it, holds
+ * one of the execution's few connections idle while waiting for another (staging.md §3.3, §9.2
+ * and the `Staging` KDoc say so explicitly). So a `tempdb` → `tempdb` DQL node runs as a single
+ * `CREATE TABLE … AS <sql>` on one leased connection instead of cursor-plus-stage: one
+ * statement, one lease, and the copy never leaves H2.
  *
  * Every tempdb statement this class issues — the CTAS, DML/DDL, and the read cursors of
  * [tempdbCursor] — runs through `withConnection` on a statement the executor owns, so all of them
  * carry `node-query-timeout-seconds` and are registered for `Statement.cancel()` (§6.3, §8.3.1).
  * `withQuery` is deliberately unused: a statement created inside `staging` cannot be registered,
  * and an unregistered statement is an uncancellable one.
+ *
+ * Since #118 each `withConnection` block owns ONE physical connection out of a bounded
+ * per-execution pool, so independent nodes' tempdb work overlaps inside H2 up to the cap.
+ * Session state (`SET SCHEMA`, `SET @var`, local temporary tables, an open transaction) is
+ * reset when the lease returns and must not be relied on across nodes — a node's data reaches
+ * another node through ordinary tables and `depends_on` (staging §9.2).
  */
 @Suppress("LongParameterList")
 class NodeRunner(
@@ -362,12 +369,13 @@ class NodeRunner(
      * to close, and inconsistent with the sibling `tempdbCreateTableAs`/`tempdbWrite` paths that
      * already did this correctly.
      *
-     * ## The §6.4.2 lock-across-drain guarantee is preserved, not traded away
+     * ## The §6.4.2 lease-across-drain guarantee is preserved, not traded away
      *
-     * `withConnection` holds the *same* serialization mutex for the whole block, so the cursor and
-     * the caller's suspending drain to the result store are still covered end to end: a concurrent
-     * `stage`/`execute` on the shared connection cannot interleave with an open cursor. The two
-     * methods differ only in who creates the statement, which is the one thing that matters here.
+     * `withConnection` owns its leased connection for the whole block, so the cursor and the
+     * caller's suspending drain to the result store are still covered end to end: nothing else
+     * can execute on THAT connection while the cursor is open (a concurrent `stage`/`execute`
+     * runs on another connection of the pool, #118). The two methods differ only in who creates
+     * the statement, which is the one thing that matters here.
      *
      * The statement is `TYPE_FORWARD_ONLY`/`CONCUR_READ_ONLY` (§6.3.1) and carries the node query
      * timeout, so tempdb reads now honour `node-query-timeout-seconds` — which, through
@@ -394,8 +402,8 @@ class NodeRunner(
      *
      * Run through `withConnection` rather than `Staging.execute` so the statement gets a
      * `queryTimeout` and is registered for `Statement.cancel()`: staging sets **no** timeout on
-     * `execute`/`withConnection`, so author tempdb SQL could otherwise hold the staging mutex for
-     * as long as it liked with the execution timeout as the only backstop. The memory budget
+     * `execute`/`withConnection`, so author tempdb SQL could otherwise hold its leased connection
+     * for as long as it liked with the execution timeout as the only backstop. The memory budget
      * `execute` would have checked is checked explicitly afterwards ([checkStagingBudget]).
      *
      * ## Why the row count is a second statement
@@ -405,8 +413,8 @@ class NodeRunner(
      * DML, and a CTAS is DDL. Reporting that 0 as `rows_out` would put a silent lie in every
      * `node_completed` payload and in `node_stats_json` for the most common node shape there is.
      * So the freshly created table is counted, inside the **same** `withConnection` block — one
-     * lock acquisition, so no *concurrent* node can write to the table between the create and the
-     * count. The honest bound stops there: `sql` is author-authored and H2 accepts multiple
+     * lease, one connection, so the count is the node's own view of the table it just built.
+     * The honest bound stops there: `sql` is author-authored and H2 accepts multiple
      * statements, so an author who appends their own `INSERT` after the projection can still
      * influence the number this reports. `rows_out` is therefore "rows in the table when the node
      * finished", which is the useful quantity anyway — not a tamper-proof count of the projection.

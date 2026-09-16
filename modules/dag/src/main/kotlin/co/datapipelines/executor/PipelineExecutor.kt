@@ -809,7 +809,10 @@ class PipelineExecutor(
     /**
      * The `finally` of §5.1 step 16, which runs on **every** path — success, failure, timeout,
      * cancellation. `Staging.close()` is contractually non-throwing (staging §3.4), so tempdb
-     * cleanup cannot mask the real outcome.
+     * cleanup cannot mask the real outcome — and since #118 it never WAITS either: a node body
+     * abandoned by [runWithNodeDeadline] may still hold a staging lease inside a driver call,
+     * and `close()` quarantines that lease rather than blocking this thread on it; the lease's
+     * own return finishes the cleanup (staging §6).
      */
     private suspend fun cleanup(
         executionId: UUID,
