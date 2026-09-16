@@ -241,6 +241,35 @@ class H2StagingPoolLifecycleTest {
     }
 
     @Test
+    fun `poolStats reports the cap, the overlap peak, the connections opened and the wait`() {
+        val staging = H2StagingFactory(props.copy(maxConnections = 3)).create(UUID.randomUUID()) as H2Staging
+        val bothIn = CompletableDeferred<Unit>()
+        val entered = AtomicInteger()
+        val release = CompletableDeferred<Unit>()
+        runBlocking {
+            val leases =
+                (1..2).map {
+                    async(Dispatchers.IO) {
+                        staging.withConnection {
+                            if (entered.incrementAndGet() == 2) bothIn.complete(Unit)
+                            bothIn.await()
+                            release.await()
+                        }
+                    }
+                }
+            withTimeout(TIMEOUT_MS) { bothIn.await() }
+            release.complete(Unit)
+            leases.awaitAll()
+        }
+        val stats = staging.poolStats()
+        stats.maxConnections shouldBe 3
+        stats.peakActiveLeases shouldBe 2
+        stats.physicalOpened shouldBe 2
+        (stats.leaseWaitNanos >= 0L) shouldBe true
+        staging.close()
+    }
+
+    @Test
     fun `two executions cannot see each other's objects`() {
         val a = H2StagingFactory(props).create(UUID.randomUUID())
         val b = H2StagingFactory(props).create(UUID.randomUUID())

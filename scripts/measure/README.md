@@ -30,3 +30,4 @@ reports numbers, and a human reads them.
 | `01-driver-timeouts.sh` | §1 | Per statement kind: does the driver honour `queryTimeout`, does the T202 conversion fire, and how long from deadline to failure |
 | `02-staging-overlap.sh` | §2 | Three independent source nodes: per-node windows and execution wall time, plus staging throughput at several batch sizes |
 | `03-pressure.sh` | §3 | Measured RSS of an execution staging at the default budget, and the DuckDB/executor CPU contention |
+| `05-staging-pool.sh` | 146 / #118 | Whole pipelines through the executor at `max-connections` 1/2/4: fan-out + CTAS chain, a slow caller drain beside independent DDL, four concurrent executions — latency, per-node time, lease wait, GC, CPU, heap, with a result checksum per arm |

@@ -174,6 +174,19 @@ class H2Staging internal constructor(
         }
     }
 
+    /**
+     * The pool's counters — for measurements and tests, never a decision input. Not part of
+     * the engine-neutral [Staging] contract (it is H2-specific by nature), which is why it lives
+     * on the implementation class only.
+     */
+    fun poolStats(): H2PoolStats =
+        H2PoolStats(
+            maxConnections = pool.maxConnections,
+            peakActiveLeases = pool.peakActiveLeases,
+            physicalOpened = pool.physicalOpened,
+            leaseWaitNanos = pool.leaseWaitNanos,
+        )
+
     // ------------------------------------------------------------ table ownership
 
     /** Reserves [tableName] and creates it on a fresh lease; a refused create frees the reservation. */
@@ -434,3 +447,15 @@ class H2Staging internal constructor(
         const val MAX_SOURCE_TYPE_CHARS = 64
     }
 }
+
+/**
+ * A point-in-time reading of one execution's connection pool (staging.md §9): the configured
+ * cap, the most leases ever inside their callbacks at once, how many physical connections were
+ * opened over the execution, and the total time callers spent suspended waiting for a lease.
+ */
+data class H2PoolStats(
+    val maxConnections: Int,
+    val peakActiveLeases: Int,
+    val physicalOpened: Int,
+    val leaseWaitNanos: Long,
+)
