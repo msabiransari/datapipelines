@@ -601,9 +601,10 @@ code {
 }
 
 /* 148: the Product disclosure's summary is a nav item like its sibling links — ONE rule for
-   both, so the row's height, type and colour come from one place. */
-.nav-wide a,
-.nav-wide summary {
+   both, so the row's height, type and colour come from one place. Direct children only:
+   the disclosure's panel hangs inside the row and its links are panel items, not row items. */
+.nav-wide > a,
+.nav-wide > .nav-menu > summary {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -617,8 +618,8 @@ code {
 
 /* The underline: a link draws it with ::after; the summary keeps ::after for its chevron
    and draws the same line with ::before. */
-.nav-wide a:not(.btn)::after,
-.nav-wide summary::before {
+.nav-wide > a:not(.btn)::after,
+.nav-wide > .nav-menu > summary::before {
   content: "";
   position: absolute;
   left: 0;
@@ -631,24 +632,24 @@ code {
   transition: transform var(--site-motion-fast) var(--site-motion-ease);
 }
 
-.nav-wide a:not(.btn):hover,
-.nav-wide a:not(.btn):focus-visible,
-.nav-wide summary:hover,
-.nav-wide summary:focus-visible,
+.nav-wide > a:not(.btn):hover,
+.nav-wide > a:not(.btn):focus-visible,
+.nav-wide > .nav-menu > summary:hover,
+.nav-wide > .nav-menu > summary:focus-visible,
 .nav-menu[open] > summary {
   color: var(--text-primary);
 }
 
-.nav-wide a:not(.btn):hover::after,
-.nav-wide a:not(.btn):focus-visible::after,
-.nav-wide a[aria-current="page"]::after,
-.nav-wide summary:hover::before,
-.nav-wide summary:focus-visible::before,
+.nav-wide > a:not(.btn):hover::after,
+.nav-wide > a:not(.btn):focus-visible::after,
+.nav-wide > a[aria-current="page"]::after,
+.nav-wide > .nav-menu > summary:hover::before,
+.nav-wide > .nav-menu > summary:focus-visible::before,
 .nav-menu[open] > summary::before {
   transform: scaleX(1);
 }
 
-.nav-wide a[aria-current="page"] {
+.nav-wide > a[aria-current="page"] {
   color: var(--text-primary);
   font-weight: var(--weight-bold);
 }
@@ -665,7 +666,7 @@ code {
   transform: scaleX(1);
 }
 
-.nav-wide .btn {
+.nav-wide > .btn {
   margin-inline-start: var(--space-2);
 }
 
