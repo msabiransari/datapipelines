@@ -10,22 +10,249 @@
     </ol>
   </nav>
 
-  <!--/* 115 §A.3 — the engineering page. When the home page started speaking to the buyer
-       (115 §A.2), every term an engineer searches for moved HERE, deliberately: the opening
-       paragraph is where pipeline, DAG, MCP, staging and the engine names live, and
-       SiteBuyerLanguageTest asserts both sides of that move. The four sections below are the
-       former homepage sections, moved verbatim — markup, claims, screenshots and all. */-->
+  <!--/* 145 — the page opens with the approved preview's accessible walkthrough (connection,
+       learning, authoring, review, delivery), three screenshot slots, the quickstart and the
+       practical questions; the engineering depth 115 §A.3 moved here from the homepage
+       follows UNCHANGED under its own opener, every anchor kept (hiw-title, hiw-mechanism,
+       engines-title, how-it-works, capabilities/cap-title, security, next). The 115 rule
+       still holds: the terms the buyer's page does not lead with live here, and
+       SiteBuyerLanguageTest asserts the move. */-->
 
-  <section class="section page-hero" aria-labelledby="hiw-title">
+  <section class="section page-hero" aria-labelledby="hiw-hero-title">
+    <div class="container">
+      <div class="split-hero">
+        <div>
+          <p class="eyebrow">From a question to a reusable answer</p>
+          <h1 id="hiw-hero-title" class="ds-display">How it works: ask it once. Build an answer you can reuse.</h1>
+          <!-- claim: docs/pipeline-contract.md §3.1 (sources, SQL nodes, declared parameters), docs/mcp-server.md §6 (an agent authors), docs/versioning.md §3 (a person releases) -->
+          <p class="lede">A pipeline is the saved recipe for an answer: which sources to read, how to combine them, and which inputs can change. AI helps write it. The server executes it. Your team decides when it is ready to share.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="#quickstart">Try it with sample data <span aria-hidden="true">&rarr;</span></a>
+            <a class="btn btn-secondary" href="#review">How review works</a>
+          </div>
+        </div>
+        <div class="mini-flow" role="img" aria-label="Your existing databases flow into a pipeline you can review, then into your application or BI tool">
+          <div class="flow-item">
+            <b>Your existing databases</b>
+            <!-- claim: docs/datasources.md §4.1 (the engine catalog) -->
+            <small th:text="|${facts.engines}|">Postgres · MySQL · SQL Server · S3 · and more</small>
+          </div>
+          <div class="flow-arrow" aria-hidden="true">&darr;</div>
+          <div class="flow-item accent">
+            <b>A pipeline you can review</b>
+            <small>Sources · SQL · parameters · release checks</small>
+          </div>
+          <div class="flow-arrow" aria-hidden="true">&darr;</div>
+          <div class="flow-item">
+            <b>Your application or BI tool</b>
+            <small>Published API · a database Tableau connects to</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ THE WALKTHROUGH ============================ -->
+  <section class="section" id="walkthrough" aria-label="The workflow, in four steps">
+    <div class="container">
+      <div class="walkthrough" id="connect">
+        <div class="walk-number" aria-hidden="true">01</div>
+        <div>
+          <h2>Connect the data you already have.</h2>
+          <!-- claim: docs/deployment.md §4 (an operator runs it on your infrastructure), docs/datasources.md §3 (registered connections), docs/auth.md §5.6 (workspaces decide who may use them) -->
+          <p>An operator runs datapipelines on your infrastructure and registers the database connections. You choose which workspaces and people can use them.</p>
+          <!-- claim: docs/datasources.md §7 (passwords stay on the server), docs/staging.md §3 (temporary staging for the run), docs/mcp-server.md §6.2.22 (the agent uses a datasource by name) -->
+          <p>The agent accesses connections by name. Database passwords stay with the server. Cross-database joins use temporary staging during the run; you do not need to build a warehouse first.</p>
+        </div>
+        <div class="walk-card">
+          <span class="subtle-label">Example connections</span>
+          <div class="connection-row"><b>Sales</b><span>Postgres</span></div>
+          <div class="connection-row"><b>Operations</b><span>MySQL</span></div>
+          <div class="connection-row"><b>Reference data</b><span>SQLite</span></div>
+          <p class="caption">Illustrative names. Use the supported databases your organization already runs.</p>
+        </div>
+      </div>
+
+      <div class="walkthrough" id="learn">
+        <div class="walk-number" aria-hidden="true">02</div>
+        <div>
+          <h2>Give the question its business context.</h2>
+          <!-- claim: docs/mcp-server.md §6 (schema reads, the SQL probe, learned facts before authoring) -->
+          <p>Connect a compatible AI client through MCP, the protocol it uses to work with the server. The agent reads your schema, probes your data and checks recorded facts before building a pipeline.</p>
+          <!-- claim: docs/datasources.md §7E (learned facts and definitions kept for later sessions), docs/templates.md §5 (reusable versioned templates) -->
+          <p>Specify what “revenue” includes, which dates matter and what to exclude. The agent can save those definitions for later sessions and reuse SQL templates across pipelines.</p>
+        </div>
+        <div class="walk-card">
+          <span class="subtle-label">Start with a business question</span>
+          <p class="quote">“Show revenue by region for the last quarter, excluding cancelled orders.”</p>
+          <p class="caption">Agree on the definition, check source coverage, then record the rule. The next question starts with that context.</p>
+        </div>
+      </div>
+
+      <div class="walkthrough" id="review">
+        <div class="walk-number" aria-hidden="true">03</div>
+        <div>
+          <h2>Check the answer before you share it.</h2>
+          <!-- claim: docs/ui-screens.md §4.4 (the SQL, the nodes and the results on screen), docs/pipeline-contract.md §12.12 (release checks you declare) -->
+          <p>Review the SQL, source assumptions and output. Add release checks where they help: counts, expected totals, or other values your team can verify.</p>
+          <!-- claim: docs/versioning.md §3 (a released version is immutable; the next change is a draft), docs/pipeline-contract.md §12.12 (checks support review; they do not prove an interpretation) -->
+          <p>Configured checks run on the server before release. A person approves the version. The released logic is immutable; further changes go into a draft. Passing checks support review without proving every business interpretation.</p>
+        </div>
+        <div class="walk-card">
+          <span class="subtle-label">A practical review</span>
+          <div class="check-row"><span aria-hidden="true">&#10003;</span> Are the dates and exclusions right?</div>
+          <div class="check-row"><span aria-hidden="true">&#10003;</span> Do totals reconcile with the source?</div>
+          <div class="check-row"><span aria-hidden="true">&#10003;</span> Is missing data handled consistently?</div>
+          <div class="check-row"><span aria-hidden="true">&#10003;</span> Has a person approved the version?</div>
+        </div>
+      </div>
+
+      <div class="walkthrough" id="deliver">
+        <div class="walk-number" aria-hidden="true">04</div>
+        <div>
+          <h2>Put the dataset to work.</h2>
+          <!-- claim: docs/rest-api.md §19 (a released pipeline as an authenticated GET endpoint that executes the latest released version), docs/auth.md §7.7 (the endpoint key) -->
+          <p>Publish a released, read-only pipeline as an authenticated API. Each request supplies declared inputs and executes the latest released version. Changing a draft does not change what the endpoint runs.</p>
+          <!-- claim: docs/pipeline-contract.md §8 (write-back to a datasource), docs/ROADMAP.md §2 (dashboards are planned) -->
+          <p>For Tableau, write results into a database it already connects to, or use a suitable web data connector for the API. Native dashboard creation is planned.</p>
+        </div>
+        <div class="walk-card">
+          <span class="subtle-label">Example API path</span>
+          <!-- claim: docs/rest-api.md §19.1 (the path grammar), §19.3 (query parameters) — the demo endpoint from SiteFacts' demo block -->
+          <pre class="code"><span>GET </span><span th:text="${facts.demo.endpoint}">/api/x/…</span></pre>
+          <p class="caption">The demo workspace's published endpoint. Your deployed host, released pipeline and scoped key determine access.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ BUILT TO RUN AGAIN ============================ -->
+  <section class="section border" id="reuse" aria-labelledby="reuse-title">
+    <div class="container">
+      <div class="section-title">
+        <p class="eyebrow">Built to run again</p>
+        <h2 id="reuse-title">The same logic. New inputs. Fresh results.</h2>
+        <!-- claim: docs/pipeline-contract.md §3.1 (declared parameters), docs/versioning.md §3 (a release fixes the logic, not the data) -->
+        <p>Change the reporting date or region without asking AI to rewrite the query. The saved pipeline executes against your sources; a released version fixes the logic, not a snapshot of the data.</p>
+      </div>
+      <div class="grid-3">
+        <article class="card">
+          <span class="card-number">REUSE</span>
+          <!-- claim: docs/templates.md §5 (versioned templates pinned by pipelines), docs/pipeline-contract.md §4.9 (pipeline composition) -->
+          <h3>Build on existing work</h3>
+          <p>Share versioned SQL templates across pipelines, and compose a larger workflow from smaller pipelines.</p>
+        </article>
+        <article class="card">
+          <span class="card-number">INSPECT</span>
+          <!-- claim: docs/rest-api.md §6 (execution events), docs/dag-executor.md §8.4 (readable failures), docs/pipeline-editor.md §10 (results, errors and events on screen) -->
+          <h3>See what happened</h3>
+          <p>Follow execution progress and inspect results, node timings and errors when a run needs attention.</p>
+        </article>
+        <article class="card">
+          <span class="card-number">PROMOTE</span>
+          <!-- claim: docs/versioning.md §10 (promotion between environments, released versions only, initiated by a person) -->
+          <h3>Move reviewed work forward</h3>
+          <p>Promote released pipelines and their dependencies between configured environments, with a person initiating the move.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ INSIDE THE APPLICATION ============================ -->
+  <!--/* 145 §6: three labelled placeholders reserved for real captures after the acceptance
+       testing — the pipeline canvas, the execution results, the draft/release workflow. No
+       fabricated screen; the recorded run itself is shown further down the page. */-->
+  <section class="section border" id="application" aria-labelledby="application-title">
+    <div class="container">
+      <div class="section-title">
+        <p class="eyebrow">Inside the application</p>
+        <h2 id="application-title">See the work behind the result.</h2>
+        <p>These spaces will show the real pipeline canvas, execution results and release workflow after testing is complete.</p>
+      </div>
+      <div class="media-gallery">
+        <figure class="media-frame" id="shot-pipeline">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Inside the application</span><span class="tag">Screenshot placeholder</span></div>
+          <div class="media-canvas"><div class="media-symbol" aria-hidden="true">&#9639;</div><h3>Read the pipeline.</h3><p>Application capture coming after testing</p></div>
+          <figcaption>Pipeline canvas: source connections, dependencies and the SQL behind each step.</figcaption>
+        </figure>
+        <figure class="media-frame" id="shot-results">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Inside the application</span><span class="tag">Screenshot placeholder</span></div>
+          <div class="media-canvas"><div class="media-symbol" aria-hidden="true">&#9639;</div><h3>Inspect the result.</h3><p>Application capture coming after testing</p></div>
+          <figcaption>Execution results: returned rows, node timings and visible failure details.</figcaption>
+        </figure>
+        <figure class="media-frame" id="shot-release">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Inside the application</span><span class="tag">Screenshot placeholder</span></div>
+          <div class="media-canvas"><div class="media-symbol" aria-hidden="true">&#9639;</div><h3>Review before release.</h3><p>Application capture coming after testing</p></div>
+          <figcaption>Release workflow: the draft, configured checks and the version your team approves.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ QUICKSTART ============================ -->
+  <section class="section" id="quickstart" aria-labelledby="quickstart-title">
+    <div class="container">
+      <div class="quickstart">
+        <div class="grid-2">
+          <div>
+            <p class="eyebrow">Try the sample data first</p>
+            <h2 id="quickstart-title">One small demo.<br>No business data required.</h2>
+            <!-- claim: docs/deployment.md Appendix B (the demo quickstart: prepare the host, run the demo command, sign in with the generated login) -->
+            <ol>
+              <li>Follow the deployment guide to prepare the host and obtain the repository.</li>
+              <li>Run the demo command from the repository directory.</li>
+              <li>Open the printed address and sign in with the generated login.</li>
+              <li>Connect your AI client and explore a worked example.</li>
+            </ol>
+            <a class="text-link" th:href="@{/docs/deployment}">Open the full deployment guide <span aria-hidden="true">&rarr;</span></a>
+          </div>
+          <div>
+            <div class="quick-code">
+              <button class="copy-btn" type="button" hidden>Copy</button>
+              <!-- claim: docs/deployment.md Appendix B (the demo families nyc, trade and lake) -->
+              <pre class="code" id="demo-command">./app.sh --start --demo nyc,trade,lake</pre>
+            </div>
+            <p class="caption">Run this in your own deployment checkout. It starts the full sample stack.</p>
+            <div class="callout">Prefer help with the first connection?<br><a th:href="'mailto:' + ${contactEmail}">Ask the founder</a>.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ FAQ ============================ -->
+  <!--/* 145: the three practical questions first, then the operational list the page always
+       carried (SiteFaqs.APIS_AND_OPERATIONS) — one fragment, one JSON-LD block. */-->
+  <section class="section border" id="faq" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Before you begin, and once you run it</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'A few practical questions')}"></div>
+    </div>
+  </section>
+
+  <!-- ============================ THE ENGINEERING DEPTH (115 §A.3, unchanged) ============================ -->
+  <!--/* Everything from here to the closing call is the page 115 built: the mechanism, the
+       engine strip, the agent loop, the twenty-seven cited cards, the security posture and
+       the exits. It is kept in full, under its own opener, because it is what an engineer
+       searching for the mechanism comes here for. */-->
+  <section class="section depth-intro" id="engineering" aria-labelledby="hiw-title">
     <div class="container">
       <p class="kicker">For the engineer who has to run it</p>
-      <h1 id="hiw-title" class="ds-display">How it works, for the engineer who has to run it</h1>
+      <h2 id="hiw-title" class="ds-headline">How it works, for the engineer who has to run it</h2>
       <p class="section-lede">
-        The buyer's page above (/) promised the outcome. This page is the mechanism: what a
+        The page above promised the outcome. From here down is the mechanism: what a
         dataset is here, where it runs, what the agent may and may not do, and what a release
         costs you. Every card below cites the spec section it comes from — view source and
         spot-check us.
       </p>
+      <ul class="jump-list" aria-label="On this page">
+        <li><a href="#hiw-mechanism">The mechanism</a></li>
+        <li><a href="#engines-title">The engines</a></li>
+        <li><a href="#how-it-works">The agent loop</a></li>
+        <li><a href="#capabilities">What's in the box</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#next">Where to next</a></li>
+      </ul>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/mcp-server-for-sql-databases}">Start with the MCP server</a>
         <a class="btn btn-secondary" th:href="@{/docs}">Read the specs</a>
@@ -458,6 +685,14 @@
       </div>
 
       <div class="shots">
+        <!--/* 145: the DAG the agent built joins the console and the endpoint panel here — the
+             three rendered records of the one demo run (133 §B), off the home page now. */-->
+        <figure class="shot shot--wide">
+          <figcaption>The pipeline the agent built, as the product draws it: three sources read in place, two staging steps in the per-run scratch database, one answer node — every count and timing from the recorded run.</figcaption>
+          <div class="dag-embed">
+            <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
+          </div>
+        </figure>
         <figure class="shot">
           <figcaption>The run, recorded: the agent's steps with their row counts and timings, then the rows themselves — which is how an agent checks its own work instead of asserting it.</figcaption>
           <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
@@ -631,13 +866,19 @@
     </div>
   </section>
 
-  <!-- ============================ FAQ ============================ -->
-  <!--/* 115 §A.3: the most engineering-shaped existing list — SiteFaqs.APIS_AND_OPERATIONS,
-       passed by the controller. No new entries. */-->
-  <section class="section band" id="faq" aria-labelledby="faq-title">
+
+  <!-- ============================ FINAL CALL ============================ -->
+  <section class="section" id="start" aria-labelledby="start-title">
     <div class="container">
-      <p class="kicker">Questions engineers ask</p>
-      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The operational questions')}"></div>
+      <div class="final-cta">
+        <h2 id="start-title">Start with one question your team needs answered.</h2>
+        <!-- claim: docs/deployment.md Appendix B (the demo quickstart) -->
+        <p>Explore the sample data first. Connect your own databases when you’re ready.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="#quickstart">Try the self-hosted demo <span aria-hidden="true">&rarr;</span></a>
+          <a class="btn btn-secondary" th:href="'mailto:' + ${contactEmail}">Talk to the founder</a>
+        </div>
+      </div>
     </div>
   </section>
 

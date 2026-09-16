@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# build-site-chrome.sh — regenerate static/site/css/site-chrome.css from its three
-# vendored sources (tokens, base, motion), in that order, under the derivation header.
-# SiteCssBundleParityTest fails the build when the bundle drifts from the sources, so
-# run this after any design-system update. Born 111 §C.
+# build-site-chrome.sh — regenerate static/site/css/site-chrome.css from its five
+# sources (the vendored tokens, base, motion and themes/light sheets, then the site's own
+# site.css), in that order, under the authored derivation header. SiteCssBundleParityTest
+# fails the build when the bundle drifts from the sources, so run this after any
+# design-system update or site.css edit. Born 111 §C; 145 swapped the theme source from
+# themes/auto.css to themes/light.css — the public site is light-only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="modules/web/src/main/resources/static/site/css/site-chrome.css"
@@ -15,9 +17,9 @@ header = current.split('========================================================
 tokens = open(f'{v}/tokens.css').read()
 base = open(f'{v}/base.css').read()
 motion = open(f'{v}/motion.css').read()
-auto = open(f'{v}/themes/auto.css').read()
+light = open(f'{v}/themes/light.css').read()
 site = open('modules/web/src/main/resources/static/site/css/site.css').read()
-body = tokens + '\n' + base + '\n' + motion + '\n' + auto + '\n' + site
+body = tokens + '\n' + base + '\n' + motion + '\n' + light + '\n' + site
 if header is None:
     sys.exit('site-chrome.css not found; the header is authored, not generated')
 open(out, 'w').write(header + body)

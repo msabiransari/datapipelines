@@ -42,8 +42,10 @@ class SiteHandTypedCountsGuardTest {
      * then fails on any remaining numeric digit. A digit hugged by a letter is a product
      * name, not a number ("H2" in the staging column's header), and is not flagged.
      *
-     * The second half is the wiring proof: the rendered home page states the run's own
-     * numbers, so a partial that quietly stopped reading the block fails here too.
+     * The second half is the wiring proof: the rendered pages state the run's own numbers
+     * — the home page's worked example shows the rows (145), the engineering page shows
+     * the console, the DAG and the endpoint panel — so a partial or a page that quietly
+     * stopped reading the block fails here too.
      */
     @Test
     fun `the demo console and DAG render every number from the SiteFacts demo block`() {
@@ -61,19 +63,26 @@ class SiteHandTypedCountsGuardTest {
             }
         violations shouldBe emptyList()
 
-        val html = SitePageRenderer.render(SitePages.HOME)
-        val rendered =
-            listOf(
-                "17,660,839",
-                "6,078,750",
-                "80.27%",
-                "523 rows · 482 ms",
-                "263 rows · 204 ms",
-                "377k rows",
-                "stage_company_zone",
-                "awaiting a human release",
-            )
-        rendered.forEach { fact -> html shouldContain fact }
+        val home = SitePageRenderer.render(SitePages.HOME)
+        listOf(
+            "17,660,839",
+            "80.27%",
+            "77.92%",
+            "Staten Island",
+            "rendered 3 templates, ran the draft",
+            "/api/x/demo/top-company-by-borough",
+        ).forEach { fact -> home shouldContain fact }
+        val engineering = SitePageRenderer.render(SitePages.HOW_IT_WORKS)
+        listOf(
+            "17,660,839",
+            "6,078,750",
+            "80.27%",
+            "523 rows · 482 ms",
+            "263 rows · 204 ms",
+            "377k rows",
+            "stage_company_zone",
+            "awaiting a human release",
+        ).forEach { fact -> engineering shouldContain fact }
     }
 
     /**

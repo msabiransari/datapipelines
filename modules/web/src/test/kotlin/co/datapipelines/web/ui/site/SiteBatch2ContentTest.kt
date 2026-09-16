@@ -102,18 +102,25 @@ class SiteBatch2ContentTest {
     }
 
     /**
-     * 115 §A.1 — the home page's primary phrase moved off the engineer's vocabulary: the
-     * pillar page `/mcp-server-for-sql-databases` keeps "SQL MCP server" in its own title and
-     * H1, so `/` targets "no data team required". Pinned here (not in the sweep above)
-     * because the home page is not a batch-2 intent page and carries no word floor.
+     * 115 §A.1 — the home page's primary phrase moved off the engineer's vocabulary; 145
+     * retargeted it again, to the OUTCOME the approved preview leads with: "clear answers".
+     * The pillar page `/mcp-server-for-sql-databases` keeps "SQL MCP server" in its own title
+     * and H1. Pinned here (not in the sweep above) because the home page is not a batch-2
+     * intent page and carries no word floor.
      */
     @Test
     fun `the home H1 carries its new primary phrase`() {
         val html = SitePageRenderer.render(SitePages.HOME)
-        val h1 = H1.find(html)?.groupValues?.get(1)
+        val h1 =
+            H1
+                .find(html)
+                ?.groupValues
+                ?.get(1)
+                ?.replace(TAG, " ")
+                ?.replace(WHITESPACE, " ")
         withClue("/: no <h1>") { h1.shouldNotBeBlank() }
         withClue("/: H1 is '$h1'") {
-            h1!!.lowercase() shouldContain "no data team required"
+            h1!!.lowercase() shouldContain "clear answers"
         }
     }
 
@@ -154,6 +161,7 @@ class SiteBatch2ContentTest {
             )
 
         val H1 = Regex("""<h1[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL)
+        val TAG = Regex("<[^>]+>")
         val MAIN = Regex("""<main\b[\s\S]*?</main>""")
         val HREF = Regex("""<a[^>]*\shref="([^"]*)"""")
         val STRIP = Regex("<[^>]+>")

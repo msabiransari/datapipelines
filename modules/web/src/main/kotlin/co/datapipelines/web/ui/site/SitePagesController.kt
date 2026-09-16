@@ -149,13 +149,15 @@ class SitePagesController(
      * 115 §A.3 — the engineering page the buyer-facing home page handed its vocabulary to.
      * The moved sections render the engine strip from the registry (the `engines` model
      * attribute [PublicPage] fills) and the agent loop from the compile-time tool count, so
-     * nothing here is page-specific beyond the row and its FAQ.
+     * nothing here is page-specific beyond the row and its FAQ. 145 opens the page with an
+     * accessible walkthrough and three practical questions ([SiteFaqsHub.HOW_IT_WORKS]);
+     * the engineering depth follows, unchanged.
      */
     @GetMapping("/how-it-works")
     fun howItWorks(
         model: Model,
         response: HttpServletResponse,
-    ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, faq = SiteFaqs.APIS_AND_OPERATIONS)
+    ): String = PublicPage.render(model, response, SitePages.HOW_IT_WORKS, faq = SiteFaqsHub.HOW_IT_WORKS)
 
     /**
      * 116 — the demo-data page. Its one live input is [SiteDemoData], parsed from the

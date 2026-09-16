@@ -207,51 +207,67 @@ object SiteFaqs {
     /**
      * The eight the home page carries (115): the buyer's questions, in the order a first
      * visit asks them — cost, data location, what ships when, trust, tenancy — with the
-     * engineer's "which databases" deliberately LAST. Every answer above the fold speaks the
-     * buyer's language; the vocabulary an engineer wants lives on /how-it-works.
+     * engineer's "which databases" deliberately LAST. Every answer speaks the buyer's
+     * language; the vocabulary an engineer wants lives on /how-it-works.
+     *
+     * CORRECTED by 145 against the contracts
+     * they cite — three answers had drifted from what the product does: "your data goes
+     * nowhere" (results are kept for paging and rows the agent reads reach its provider —
+     * docs/rest-api.md §7, docs/mcp-server.md §6.2.15), "built by hand in the editor" (the
+     * editor is read-only in v1 — docs/pipeline-editor.md §11), and a dated "next month"
+     * for dashboards and the scheduler (docs/ROADMAP.md §2 carries no date). The questions
+     * that changed changed their wording too; the lane's reconciliation records each one.
      */
     val HOME: List<FaqEntry> =
         listOf(
             FaqEntry(
                 "Do I need a data engineer?",
-                "No. You describe the dataset; an AI agent builds and runs it against your databases and shows you every " +
-                    "step. Someone who can read a table of numbers and press Release is the whole team. If you have " +
-                    "engineers, they review SQL instead of writing a service. (The release step: docs/versioning.md §3.)",
-                "docs/versioning.md §3",
+                "Not to ask the questions. Someone technical deploys the server, registers the database " +
+                    "connections and connects the AI client (docs/deployment.md §4, docs/datasources.md §3). " +
+                    "After that a business question is a sentence, and a person who understands the data reviews " +
+                    "the SQL and the numbers before release (docs/versioning.md §3).",
+                "docs/deployment.md §4, docs/datasources.md §3, docs/versioning.md §3",
             ),
             FaqEntry(
                 "Where does my data go?",
-                "Nowhere. The software runs on your servers, reads each database in place, does the joining in memory " +
-                    "for the duration of a run, and returns the result. Your database passwords stay on the server; the " +
-                    "AI agent never sees them. (Details: docs/datasources.md §7 and docs/staging.md §3.)",
-                "docs/datasources.md §7, docs/staging.md §3",
+                "Your database passwords stay on the server, encrypted (docs/datasources.md §7). A run reads " +
+                    "each source in place and joins across sources in a temporary staging database dropped when " +
+                    "the run ends (docs/staging.md §3); the result is kept briefly so your app or agent can page it " +
+                    "(docs/rest-api.md §7). Rows and metadata the agent asks for do reach the agent, and so its " +
+                    "model provider; a pipeline can also write results back to a database you choose " +
+                    "(docs/pipeline-contract.md §8).",
+                "docs/datasources.md §7, docs/staging.md §3, docs/rest-api.md §7, docs/pipeline-contract.md §8",
             ),
             FaqEntry(
-                "What do I get on day one, and what comes next month?",
-                "Day one: datasets built from a sentence, an API for each one your product can call, and governed " +
-                    "Tableau access. Next month: datasets that refresh on a schedule and a dashboard you embed in your " +
-                    "own app. The roadmap page carries the dates. (Source: docs/ROADMAP.md §2.)",
+                "What do I get today, and what is planned?",
+                "Today: pipelines authored with an AI agent, reviewed and released by a person, a published API " +
+                    "for each released one, and datasets your Tableau workbook or your own application reads. " +
+                    "Planned, without a date on this page: native dashboards, scheduled refresh, reports and " +
+                    "alerts — the roadmap page carries the current order (docs/ROADMAP.md §2).",
                 "docs/ROADMAP.md §2",
             ),
             FaqEntry(
                 "How do I know the numbers are right?",
                 "You look. Every step shows the rows it produced, the logic is readable SQL, and every run is recorded " +
-                    "with its inputs so a number can be reproduced. Nothing goes live until you press Release. (The " +
-                    "record a run leaves: docs/rest-api.md §10.)",
-                "docs/rest-api.md §10",
+                    "with its inputs so a number can be reproduced (docs/rest-api.md §10). Release checks you " +
+                    "configure compare a run against expectations you declare (docs/pipeline-contract.md §12.12); " +
+                    "they support the review, they do not replace it, and nothing goes live until you press Release.",
+                "docs/rest-api.md §10, docs/pipeline-contract.md §12.12",
             ),
             FaqEntry(
                 "Can each customer see only their own rows?",
-                "Yes, through your app: a published API takes parameters your app supplies (the customer's id, the " +
-                    "month), and a partner's key is bound to that one API path. Per-customer rules on embedded " +
-                    "dashboards ship with the dashboards. (The mechanics: docs/rest-api.md §19.3 and docs/auth.md §7.7.)",
+                "Through your application: it supplies the customer's id as a declared parameter and holds the " +
+                    "key. An endpoint key restricts which published paths it may call, not which rows a caller may " +
+                    "see — row-level authorisation stays your backend's job (docs/rest-api.md §19.3, docs/auth.md " +
+                    "§7.7). Per-viewer filtering for native dashboards is planned with the dashboards.",
                 "docs/rest-api.md §19.3, docs/auth.md §7.7",
             ),
             FaqEntry(
                 "Do I have to use an AI agent?",
-                "No. The same datasets can be built by hand in the app's editor. The agent is the fast path, not the " +
-                    "only one. (The editor: docs/ui-screens.md §4.4.)",
-                "docs/ui-screens.md §4.4",
+                "Today, yes for authoring: the surface is an agent over MCP or the REST API. The browser inspects " +
+                    "a pipeline, executes it, and manages draft and released versions, but does not yet author one " +
+                    "(docs/pipeline-editor.md §11). Browser authoring is a roadmap item (docs/ROADMAP.md §2).",
+                "docs/pipeline-editor.md §11, docs/ROADMAP.md §2",
             ),
             FaqEntry(
                 "What does it cost?",

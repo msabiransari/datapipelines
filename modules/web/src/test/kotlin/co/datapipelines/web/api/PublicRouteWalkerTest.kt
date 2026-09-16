@@ -103,6 +103,10 @@ class PublicRouteWalkerTest {
                 "SiteV2Batch2Controller#semanticLayer",
                 "SiteV2Batch2Controller#tableauPrep",
                 "SiteV2Batch2Controller#tableauRoadmap",
+                // 145: the website transition's two hub pages — /use-cases and the generated
+                // /explore directory — in their own controller, same shape and reasoning.
+                "SiteHubController#explore",
+                "SiteHubController#useCases",
                 // Crawler infrastructure (073) — robots.txt is a static file, not a handler.
                 "SitemapController#sitemap",
                 // The packaged spec set (073) and the agent skill (095): jar-packaged

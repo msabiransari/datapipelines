@@ -80,26 +80,21 @@ class SiteV2GuardsTest {
         }
     }
 
+    /**
+     * 115 §A.2 dated the home page's "next month" promise and put it on the roadmap clock.
+     * 145 §4 replaced the promise: unshipped features on the home page are PLANNED, with no
+     * month and no date — so the invariant inverts. The busiest page may not name a month
+     * for anything it does not ship, and a dateline on it would be a dateline for nothing.
+     */
     @Test
-    fun `the home page's roadmap promise carries a fresh dateline`() {
-        // 115 §A.2: the before/after section promises next month's scheduler and dashboard in
-        // the roadmap page's own dated `status` markup, so the SAME freshness clock covers the
-        // home page's promise — a stale promise on the busiest page is worse than a stale one
-        // on the roadmap page nobody re-reads. (The SoftwareApplication block has no
-        // dateModified to pair with, so unlike the roadmap pages there is nothing to mirror.)
-        val html = rendered.getValue(SitePages.HOME)
-        val updated =
-            Regex("""data-roadmap-updated="([0-9-]+)"""")
-                .find(html)
-                ?.groupValues
-                ?.get(1)
-        withClue("/: the roadmap promise carries no data-roadmap-updated dateline") { updated.shouldNotBeNull() }
-        val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())
-        withClue(
-            "/ promises next month with a dateline of $updated — $age days ago; the promise is " +
-                "revisited whenever the roadmap pages are (at least every $ROADMAP_MAX_AGE_DAYS days)",
-        ) {
-            (age <= ROADMAP_MAX_AGE_DAYS) shouldBe true
+    fun `the home page promises no month for what it does not ship`() {
+        val text = TAG.replace(COMMENT.replace(rendered.getValue(SitePages.HOME), " "), " ")
+        withClue("/: a dated or month-named promise is back on the home page") {
+            DATED_PROMISE.containsMatchIn(text) shouldBe false
+        }
+        withClue("/: the planned list is still there (the arm would pass on an empty page)") {
+            text shouldContain "Planned"
+            text shouldContain "Native embeddable dashboards"
         }
     }
 
@@ -195,5 +190,15 @@ class SiteV2GuardsTest {
         /** One tool row on /mcp-tools: the name, then its first status chip (the scope). */
         val TOOL_ROW = Regex("""<li>\s*<code>([a-z_]+)</code>\s*<span class="status">([^<]*)</span>""")
         val HREF = Regex("""<a[^>]*\shref="([^"]*)"""")
+        val TAG = Regex("<[^>]+>")
+        val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
+
+        /** "next month", "this month", a month name with a year, or a data-roadmap-updated stamp. */
+        val DATED_PROMISE =
+            Regex(
+                """\b(next month|this month|""" +
+                    """(January|February|March|April|May|June|July|August|September|October|November|December) 20\d\d)\b""",
+                RegexOption.IGNORE_CASE,
+            )
     }
 }

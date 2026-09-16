@@ -2,15 +2,12 @@ package co.datapipelines.web.ui.site
 
 import co.datapipelines.web.ui.DocsCatalog
 import jakarta.servlet.http.HttpServletResponse
-import org.springframework.beans.factory.ObjectProvider
-import org.springframework.boot.info.BuildProperties
 import org.springframework.http.CacheControl
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.ResponseBody
-import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 /**
@@ -26,20 +23,17 @@ import java.util.concurrent.TimeUnit
  * against those sources, and the E2E sweep fetches every `<loc>` anonymously — a `<loc>`
  * that does not answer 200 fails the build rather than the crawl.
  *
- * `lastmod` is the BUILD time, which is the honest answer for content packaged in the jar:
- * every page and every doc in it changed, at the latest, when this artifact was built. A
- * per-file date would be a lie in the other direction (the markdown's mtime in a Docker
- * layer is not when anyone edited it). Where no `build-info.properties` is on the classpath
- * — a plain `bootRun`, or a test slice — the field is omitted rather than faked: `lastmod`
- * is optional in the protocol, and a fabricated date is worse than none.
+ * **No `lastmod`** (145 §7). Until 145 the field carried the BUILD time for every URL —
+ * honest for "the artifact changed", but a crawler reads `lastmod` as "this PAGE changed",
+ * and a deploy that touched one doc stamped all sixty-odd URLs as modified. A per-page
+ * modification date would need a date system nobody maintains; the field is optional in
+ * the protocol, so it is omitted everywhere — the live route and the static export now
+ * agree on that (`SiteExportMain` never had a build time to give).
  */
 @Controller
 class SitemapController(
     private val docs: DocsCatalog,
-    buildProperties: ObjectProvider<BuildProperties>,
 ) {
-    private val buildTime: Instant? = buildProperties.ifAvailable?.time
-
     @GetMapping("/sitemap.xml", produces = [MediaType.APPLICATION_XML_VALUE])
     @ResponseBody
     fun sitemap(response: HttpServletResponse): String {
@@ -47,7 +41,7 @@ class SitemapController(
             HttpHeaders.CACHE_CONTROL,
             CacheControl.maxAge(SITEMAP_MAX_AGE_HOURS, TimeUnit.HOURS).cachePublic().headerValue,
         )
-        return SitemapXml.render(locations(), buildTime)
+        return SitemapXml.render(locations(), lastmod = null)
     }
 
     /**

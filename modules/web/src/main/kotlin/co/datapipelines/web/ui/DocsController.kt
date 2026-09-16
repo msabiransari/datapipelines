@@ -109,6 +109,8 @@ class DocsController(
         model.addAttribute("extraCss", "/css/docs.css")
         // The public footer builds its engine column from the registry, on every public page.
         model.addAttribute("engines", SitePages.ENGINES)
+        // 145: the header marks the current primary item; every docs route is "Docs".
+        model.addAttribute("currentSitePath", "/docs")
     }
 
     private fun isAuthenticated(model: Model): Boolean = model.getAttribute("authenticated") == true

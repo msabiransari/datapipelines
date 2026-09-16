@@ -53,6 +53,8 @@ class PublicPathsTest {
                 "/demo-data",
                 "/pricing",
                 "/semantic-layer",
+                "/use-cases",
+                "/explore",
                 "/docs",
                 "/docs/*",
                 "/skill.md",
@@ -147,6 +149,6 @@ class PublicPathsTest {
          * 119 added the pricing page (37 -> 38) and the semantic-layer page (38 -> 39).
          * (Kotlin block comments nest, so the glob's spelling is written without its star.)
          */
-        const val DOCUMENTED_ROWS = 39
+        const val DOCUMENTED_ROWS = 41
     }
 }

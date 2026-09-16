@@ -1065,6 +1065,8 @@ Two things are deliberately **not** rows in this table:
 | `/demo-data` | Demo-data page: GET-only, renders the vendored manifests parsed at startup; no datastore, no principal. | 116 |
 | `/pricing` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | 119 |
 | `/semantic-layer` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | 119 |
+| `/use-cases` | Site v3 hub page: GET-only constant content, no datastore and no principal on the request. | 145 |
+| `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | 145 |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
 | `/docs/*` | One packaged spec per slug, rendered from the jar; the same text is already public on GitHub. | 073 |
 | `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |

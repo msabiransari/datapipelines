@@ -67,7 +67,8 @@ class SiteOpenSourceSignalsTest {
         val html = SitePageRenderer.render(SitePages.PRICING)
         html shouldContain "Free. Open source. Yours to run."
         html shouldContain "There is no paid tier today; if a hosted version ever exists it will be announced on the roadmap first."
-        html shouldContain """data-roadmap-updated="2026-09-11""""
+        // 145 re-set the page (the approved preview's structure), so its dateline moved on.
+        html shouldContain """data-roadmap-updated="2026-09-16""""
     }
 
     private companion object {

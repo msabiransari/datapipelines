@@ -2,22 +2,25 @@ package co.datapipelines.web.ui.site
 
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeAtLeast
-import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
- * 115 §B — the fold guard. The home page now speaks to the BUYER (owner + an outside review,
- * 2026-09-10): above the fold it sells the outcome — the sentence, the result, the API — and
- * every engineering term moved one hop away to `/how-it-works`. Two rules, both mechanical:
+ * 115 §B — the fold guard, re-set by 145. The home page speaks to the BUYER (owner + an
+ * outside review, 2026-09-10; the approved 2026-09-16 preview): above the fold it sells the
+ * outcome — the question, the reviewed answer, where it goes — and the engineering
+ * mechanism stays one hop away on `/how-it-works`. Two rules, both mechanical:
  *
- *  1. **The fold is buyer language.** Everything from `<main` to the END of `section#artifact`
- *     (hero, before/after, artifact) contains no case-insensitive, word-bounded match of the
- *     vocabulary the page is not allowed to lead with: pipeline(s), DAG, federated, Iceberg,
- *     DuckDB, Parquet, MCP, JDBC, staging. HTML comments and tag attributes are stripped
- *     first — a claim comment may cite `docs/rest-api.md`, and a `data-shot` attribute may
- *     name a file, without tripping the guard; the READER's text may not.
+ *  1. **The fold is outcome language.** Everything from `<main` to the END of
+ *     `section#hero` (the copy and the worked example; the engine strip is excluded — it
+ *     lists the product names the buyer's own database has) contains no case-insensitive,
+ *     word-bounded match of the vocabulary the page is not allowed to lead with: DAG,
+ *     federated, Iceberg, DuckDB, Parquet, MCP, JDBC, staging. 145 removed "pipeline" from
+ *     the list: the approved copy explains the pipeline IN business language ("a reusable
+ *     SQL pipeline … review the logic") — it is the product's noun, not jargon to hide. HTML
+ *     comments and tag attributes are stripped first — a claim comment may cite
+ *     `docs/rest-api.md` without tripping the guard; the READER's text may not.
  *  2. **The vocabulary moved; it did not vanish.** `/how-it-works` must contain at least six
  *     of those words — the guard would be satisfied by deleting the engineering story, and
  *     that is not what happened (the owner ruled: nothing is hidden, the mechanism moves).
@@ -37,12 +40,16 @@ class SiteBuyerLanguageTest {
             sections(fold).flatMap { (id, text) ->
                 BANNED.findAll(text).map { word -> "section#$id says \"${word.value}\"" }
             }
-        withClue("engineering vocabulary above the fold (hero + before/after + artifact)") {
+        withClue("engineering vocabulary above the fold (the hero's copy and worked example)") {
             offenders shouldBe emptyList()
         }
-        // Non-vacuity: the fold actually rendered sections to scan. A changed template shape
-        // that emptied `sections` would pass the assertion above by checking nothing.
+        // Non-vacuity: the fold actually rendered a section to scan, and that section says
+        // the product's noun (a changed template shape that emptied `sections` would pass
+        // the assertion above by checking nothing).
         sections(fold).size shouldBeAtLeast MIN_FOLD_SECTIONS
+        withClue("the fold explains the product in its own noun") {
+            sections(fold).any { (_, text) -> text.contains("pipeline", ignoreCase = true) } shouldBe true
+        }
     }
 
     @Test
@@ -58,8 +65,8 @@ class SiteBuyerLanguageTest {
     fun `the matcher hears the difference between the brand and the banned word`() {
         // Positive control, both directions: the word boundary is what keeps the site's own
         // name legal, and the same matcher must still fire on a bare banned word.
-        BANNED.findAll("Customer-facing data at datapipelines.co, no data team required").count() shouldBe 0
-        BANNED.find("the pipeline runs where the data lives")?.value shouldBe "pipeline"
+        BANNED.findAll("Clear answers at datapipelines.co, with an MCPish name that is one word").count() shouldBe 0
+        BANNED.find("the agent reaches the database over MCP")?.value shouldBe "MCP"
     }
 
     /**
@@ -85,13 +92,17 @@ class SiteBuyerLanguageTest {
         }
     }
 
-    /** From `<main` to the closing tag of `section#artifact` — the fold, as the buyer reads it. */
+    /** From `<main` to the closing tag of `section#hero`, minus the engine strip — the fold, as the buyer reads it. */
     private fun fold(html: String): String {
         val from = html.indexOf("<main")
-        val artifact = html.indexOf("id=\"artifact\"")
-        check(from >= 0 && artifact > from) { "the home template lost its main/artifact markers — fix this guard, do not delete it" }
-        val to = html.indexOf("</section>", artifact) + "</section>".length
-        return html.substring(from, to)
+        val hero = html.indexOf("id=\"hero\"")
+        check(from >= 0 && hero > from) { "the home template lost its main/hero markers — fix this guard, do not delete it" }
+        val to = html.indexOf("</section>", hero) + "</section>".length
+        val fold = html.substring(from, to)
+        // The engine strip names the engines (DuckDB, dp-lake …): product names, not
+        // engineering vocabulary — and it must be there for the exclusion to mean anything.
+        check(fold.contains("class=\"compat\"")) { "the hero lost its engine strip — fix this guard, do not delete it" }
+        return COMPAT.replace(fold, " ")
     }
 
     /** The fold's `<section>`s as (id, reader-visible text): comments and tags stripped. */
@@ -110,13 +121,14 @@ class SiteBuyerLanguageTest {
         /** Word-boundary split for the "free" check — "freedom" must not count. */
         val WORD_BOUNDARY = Regex("""\b""")
 
-        /** Hero, before/after, artifact — the fold must always render at least these three. */
-        const val MIN_FOLD_SECTIONS = 3
+        /** The hero is the fold; it must always render. */
+        const val MIN_FOLD_SECTIONS = 1
 
         /** §B: at least six of the moved words must survive on the engineering page. */
         const val MIN_MOVED_WORDS = 6
 
-        val BANNED = Regex("""\b(pipeline|pipelines|DAG|federated|Iceberg|DuckDB|Parquet|MCP|JDBC|staging)\b""", RegexOption.IGNORE_CASE)
+        val BANNED = Regex("""\b(DAG|federated|Iceberg|DuckDB|Parquet|MCP|JDBC|staging)\b""", RegexOption.IGNORE_CASE)
+        val COMPAT = Regex("""<div class="compat".*?</div>""", RegexOption.DOT_MATCHES_ALL)
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
         val TAG = Regex("<[^>]*>")
         val ID = Regex("""id="([^"]+)"""")

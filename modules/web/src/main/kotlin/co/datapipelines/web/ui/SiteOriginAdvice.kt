@@ -1,10 +1,13 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.ui.site.ADVISORY_URL
 import co.datapipelines.web.ui.site.CONTACT_EMAIL
+import co.datapipelines.web.ui.site.DISCUSSIONS_URL
 import co.datapipelines.web.ui.site.GITHUB_STARS
 import co.datapipelines.web.ui.site.RELEASE_STAGE
 import co.datapipelines.web.ui.site.RELEASE_STAGE_CTA
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import co.datapipelines.web.ui.site.REPO_URL
 import co.datapipelines.web.ui.site.isPublicOrigin
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
@@ -50,4 +53,15 @@ class SiteOriginAdvice {
 
     @ModelAttribute("reportProblemUrl")
     fun reportProblemUrl(): String = REPORT_PROBLEM_URL
+
+    // 145 — the site footer's source, support and private vulnerability-report links render
+    // from the same constants (SitePages), never typed into the layout.
+    @ModelAttribute("repoUrl")
+    fun repoUrl(): String = REPO_URL
+
+    @ModelAttribute("discussionsUrl")
+    fun discussionsUrl(): String = DISCUSSIONS_URL
+
+    @ModelAttribute("advisoryUrl")
+    fun advisoryUrl(): String = ADVISORY_URL
 }

@@ -25,30 +25,35 @@ import org.springframework.ui.ExtendedModelMap
  */
 class SiteRenderTest {
     @Test
-    fun `the marketing home renders anonymously with the catalog tool count and no unresolved expressions`() {
+    fun `the marketing home renders anonymously with the recorded demo run and no unresolved expressions`() {
         val html = SitePageRenderer.render(SitePages.HOME)
 
-        // 115: the H1 speaks to the buyer — "no data team required"; the old poster line and
-        // every engineering noun moved to /how-it-works (SiteBuyerLanguageTest holds the fold).
-        html shouldContain "Show your customers their data. No data team required."
+        // 145: the H1 speaks the outcome (the approved preview); the engineering story lives
+        // on /how-it-works (SiteBuyerLanguageTest holds the fold).
+        html shouldContain "Clear answers."
         html shouldContain "<title>${SitePages.HOME.title}</title>"
         // Assets resolve through the app's own static surface, never the retired website/ copy.
         // 111 §C: the foundation sheets ride the generated site-chrome.css bundle (one
-        // render-blocking request, parity-guarded by SiteCssBundleParityTest); the swap sheet
-        // loads disabled and the site sheet rides inside the bundle.
+        // render-blocking request, parity-guarded by SiteCssBundleParityTest). 145: no theme
+        // swap sheet and no inline theme script — the public site is light-only.
         html shouldContain "href=\"/site/css/site-chrome.css\""
-        html shouldContain "href=\"/vendor/design-system/themes/auto.css\""
-        // 133 §B: the hero shows the ARTIFACT as a rendered console — the real demo run from
-        // SiteFacts' demo block (the sentence, the steps, the result table) — and the dark
-        // product slab carries the run's DAG. No placeholder, no mocked dashboard, ever: none
-        // exists until next month, and a stale or invented product shot is a false claim.
-        html shouldContain "class=\"console\""
+        html shouldNotContain "themes/auto.css"
+        html shouldNotContain "dp-site-theme"
+        // 145 §4: the worked example is the recorded demo run (SiteFacts' demo block) shown
+        // three ways — the question, the rows as a chart, the endpoint and the agent's steps.
+        // No placeholder, no mocked dashboard: a stale or invented product shot is a false claim.
+        html shouldContain "class=\"demo\" id=\"example\""
         html shouldContain "Which rideshare company carried the most trips in each borough last quarter?"
-        html shouldContain "class=\"dag\""
-        html shouldContain "stage_company_zone"
+        html shouldContain "role=\"tablist\""
+        html shouldContain "Staten Island"
+        html shouldContain SiteFacts.current().demo.endpoint
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.
         html shouldContain "href=\"/login\""
+        // 145 §6: the video slot is a labelled placeholder, never a fake control.
+        html shouldContain "id=\"pipeline-video\""
+        html shouldContain "Video placeholder"
+        html shouldNotContain "<video"
 
         html shouldNotContain "assets/"
         // " th:" with the leading space — an unprocessed th:* attribute. The root
@@ -60,19 +65,23 @@ class SiteRenderTest {
     @Test
     fun `the engineering page renders the moved sections with the catalog tool count`() {
         // 115 §A.3: the homepage's engineering sections moved here verbatim — the agent loop
-        // with its live tool count, and the execution screenshot the homepage used to carry.
+        // with its live tool count, and the recorded run. 145 keeps all of it under the
+        // walkthrough; the old H1 is the depth's H2 and every anchor survives.
         val count = McpToolCatalog.NAMES.size
         val html = SitePageRenderer.render(SitePages.HOW_IT_WORKS)
 
         html shouldContain "How it works, for the engineer who has to run it"
+        html shouldContain "id=\"hiw-title\""
         html shouldContain "<title>${SitePages.HOW_IT_WORKS.title}</title>"
         // The moved facts, still derived from the catalog rather than transcribed (033/C4).
         html shouldContain "<span>$count</span> tools cover the full lifecycle"
         html shouldContain "/mcp — $count MCP tools"
         html shouldContain "($count tools)"
-        // 133 §B.3: the run is a rendered console and the endpoint a rendered panel now —
-        // the pre-v2 captures left with the placeholders; the siteShots round re-shoots later.
+        // 133 §B.3: the run is a rendered console and the endpoint a rendered panel.
         html shouldContain "class=\"console\""
+        // 145 §6: three screenshot slots, labelled, no fabricated screen.
+        listOf("shot-pipeline", "shot-results", "shot-release").forEach { html shouldContain "id=\"$it\"" }
+        html shouldNotContain "<img"
         html shouldNotContain " th:"
         html shouldNotContain ("\${")
     }
