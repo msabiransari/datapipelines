@@ -282,7 +282,7 @@ class SiteRhythmBrowserTest : BrowserSuite() {
                      const gap = b.getBoundingClientRect().top - a.getBoundingClientRect().bottom;
                      if (gap < 8) {
                        const name = x => x.tagName + (x.className ? '.' + String(x.className).trim().split(/\s+/)[0] : '');
-                       tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + Math.round(gap) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
+                       tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + gap.toFixed(2) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
                      }
                    }
                  }
