@@ -167,7 +167,8 @@ class H2Staging internal constructor(
         val outcome = pool.close { connection -> H2StagingSql.dropStagedTables(connection, executionId) }
         if (outcome.leasesOutstanding > 0) {
             log.warn(
-                "tempdb closed with {} lease(s) still in flight for execution {}; their connections close on return",
+                "tempdb closed with {} session(s) still owned (leases, opens in flight, guardians) for execution {}; " +
+                    "each closes itself on return",
                 outcome.leasesOutstanding,
                 executionId,
             )
