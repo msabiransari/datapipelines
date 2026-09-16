@@ -12,19 +12,25 @@ import java.util.UUID
  * execution's in-memory scratch database; a future `DuckDbStaging` can be a drop-in
  * replacement without changing this contract (§10.1).
  *
- * ## Serialization is the implementation's job, not the caller's
+ * ## Connection ownership is the implementation's job, not the caller's
  *
- * A single JDBC connection backs the instance and is **not** safe for concurrent callers
- * (§9.2). Every method that touches it — [stage], [withQuery], [execute], [stats] — takes an
- * internal `Mutex`, which is why they are `suspend`. Direct SQL access for SQL nodes goes
- * through [withConnection], which acquires that same mutex for the duration of the block:
- * the connection is never handed out unguarded, and the mutex itself is not reachable — or
- * even observable — from outside the implementation.
+ * A bounded pool of JDBC connections backs the instance (§9, #118), and a JDBC `Connection`
+ * is **not** safe for concurrent callers (§9.2). Every method that touches one — [stage],
+ * [withQuery], [execute], [stats] — **leases** exactly one connection for the span of its own
+ * statements and cursor, which is why they are `suspend`: admission past the configured cap
+ * suspends and is cancellable. Direct SQL access for SQL nodes goes through [withConnection],
+ * which leases a connection for the duration of the block: a connection is never handed out
+ * unowned, and the pool itself is not reachable — or even observable — from outside the
+ * implementation. Independent callers run on different connections at the same time.
  *
- * Cursor consumption is enforced by construction, not convention: [withQuery] holds the same
- * lock for the entire lifetime of the cursor, including the caller node's suspending drain to
- * the result store (§3.3, §6.1). No method hands out a live `ResultSet`, so a downstream
- * `stage`/`execute` cannot interleave with an open cursor on the shared connection.
+ * Cursor consumption is enforced by construction, not convention: [withQuery] retains its lease
+ * for the entire lifetime of the cursor, including the caller node's suspending drain to the
+ * result store (§3.3, §6.1). No method hands out a live `ResultSet`, so nothing can interleave
+ * on the cursor's connection.
+ *
+ * Session state — `SET SCHEMA`, session variables, local temporary tables, an open transaction —
+ * belongs to one lease and is reset when the lease returns (§9.2). Cross-node data travels
+ * through ordinary staged tables, never through a session.
  *
  * [close] is deliberately **not** `suspend`: it is called from the executor's `finally` block
  * and must never throw (§3.4).
@@ -34,18 +40,20 @@ interface Staging : AutoCloseable {
     val executionId: UUID
 
     /**
-     * Runs [block] against the single staging JDBC connection (§9.1) with the instance's
-     * serialization lock **held for the whole block**, and returns its value.
+     * Runs [block] on one leased staging JDBC connection (§9.1), **owned for the whole block**,
+     * and returns its value.
      *
      * This is the only route to the raw [Connection]: SQL nodes that need to issue their own
-     * DDL/DML get it here instead of from a property, so a caller can neither reach the
-     * connection without the lock nor be trusted to take a lock it cannot see (§9.2).
+     * DDL/DML get it here instead of from a property, so a caller can neither reach a
+     * connection without a lease nor be trusted to return one it cannot see (§9.2).
      *
      * Two rules for [block]:
-     *  - **Never re-enter.** The lock is not reentrant, so calling [stage], [withQuery], [execute],
-     *    [stats], or [withConnection] from inside [block] deadlocks.
+     *  - **Never re-enter.** A lease is never nested: calling [stage], [withQuery], [execute],
+     *    [stats], or [withConnection] from inside [block] deadlocks at `max-connections = 1` and
+     *    holds a connection idle while waiting for another above it.
      *  - **Never let the [Connection] escape.** Anything derived from it (statements, cursors)
-     *    must be consumed or closed before [block] returns; the guarantee ends with the block.
+     *    must be consumed or closed before [block] returns; the guarantee ends with the block,
+     *    and so does the session state the block set up.
      */
     suspend fun <T> withConnection(block: suspend (Connection) -> T): T
 
@@ -78,8 +86,8 @@ interface Staging : AutoCloseable {
          * The one thing an operator watching a long node wants to know is how far it has got, and
          * this is the only place that knows. Defaulted to a no-op so every existing caller and
          * every fixture is unchanged, and deliberately non-suspending: it is invoked from inside
-         * the drain, and a suspending callback there would let a caller's slow I/O hold the
-         * staging lock — the exact defect §B just removed.
+         * the drain, between leases, and a suspending callback there would let a caller's slow
+         * I/O stall the drain — the exact defect §B removed.
          */
         onProgress: (Long) -> Unit = {},
     ): StageResult
@@ -111,21 +119,22 @@ interface Staging : AutoCloseable {
     ): StageResult
 
     /**
-     * Runs a read query and hands its cursor to [block] with the serialization lock held for
+     * Runs a read query and hands its cursor to [block] with the cursor's connection leased for
      * the **whole** consumption — statement creation, execution, and the caller's row-by-row
      * drain (§3.3, §9.2). The statement times out per `query-timeout-seconds`, fetches per
      * `result-batch-size`, and is closed when [block] returns.
      *
-     * There is deliberately no API that returns a live `ResultSet` to be read after the lock
-     * is released. That earlier shape relied on caller discipline the type system could not
+     * There is deliberately no API that returns a live `ResultSet` to be read after the lease
+     * is returned. That earlier shape relied on caller discipline the type system could not
      * enforce, and it contradicted §6.1: the caller node's drain to the result store is
      * suspending Redis I/O, so a concurrent `stage`/`execute` could execute a statement on the
-     * shared connection while the cursor was still open — the exact state corruption §9.2
-     * warns about. Holding the lock across [block] makes that unreachable by construction.
+     * cursor's connection while the cursor was still open — the exact state corruption §9.2
+     * warns about. Retaining the lease across [block] makes that unreachable by construction;
+     * independent operations run on other connections meanwhile.
      *
      * [block] must fully consume (or abandon) the cursor before returning, and nothing derived
-     * from it may escape. As with [withConnection], the lock is not reentrant: re-entering any
-     * staging operation from inside [block] deadlocks.
+     * from it may escape. As with [withConnection], never re-enter a staging operation from
+     * inside [block].
      */
     suspend fun <T> withQuery(
         sql: String,
@@ -140,8 +149,10 @@ interface Staging : AutoCloseable {
 
     /**
      * Destroys the staging database: drops every staged table (enumerated from the catalog,
-     * since `DROP ALL OBJECTS` needs admin — §9.5) then closes the connection (§3.4).
-     * Never throws — a failure is logged and surfaces as `pipeline.staging.cleanup_failed`.
+     * since `DROP ALL OBJECTS` needs admin — §9.5) then closes every owned connection (§3.4).
+     * Never throws — a failure is logged and surfaces as `pipeline.staging.cleanup_failed` —
+     * and never waits for a lease still inside the driver (§6): that lease closes its own
+     * connection when it returns.
      */
     override fun close()
 }
