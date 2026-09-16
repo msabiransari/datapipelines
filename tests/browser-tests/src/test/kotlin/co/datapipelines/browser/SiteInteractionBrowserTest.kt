@@ -174,11 +174,19 @@ class SiteInteractionBrowserTest : BrowserSuite() {
             withClue("the copy button stays hidden without the script") {
                 p.locator(".copy-btn").all().none { it.isVisible() } shouldBe true
             }
-            // The phone menu is a <details>: it opens natively.
+            // 148: the Product disclosure is a <details> too — it opens natively and its links are real anchors.
+            p.click(".nav-menu > summary")
+            withClue("the Product disclosure opens without the script") {
+                p.locator(".nav-menu .nav-panel a[href='/semantic-layer']").isVisible() shouldBe true
+            }
+            // The phone menu is a <details>: it opens natively, the Product group inside it.
             p.setViewportSize(390, 844)
             p.click(".nav-mobile > summary")
             withClue("the phone menu opens without the script") {
                 p.locator(".nav-mobile .nav-panel a[href='/use-cases']").isVisible() shouldBe true
+            }
+            withClue("the phone menu's Product group is there without the script") {
+                p.locator(".nav-mobile .nav-group a[href='/security']").isVisible() shouldBe true
             }
         } finally {
             noJs.close()

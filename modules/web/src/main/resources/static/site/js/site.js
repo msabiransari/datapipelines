@@ -1,9 +1,10 @@
-/* datapipelines.co — the public site's one script (145): the worked example's
-   tabs, the phone menu's dismissal, copy-to-clipboard, the late mono sheet,
-   the header hairline and the one-time entrances. The site is fully readable
-   and navigable without this file: the tablist ships `hidden` and the three
-   panels stack in order, the menu is a <details>, copy buttons ship `hidden`,
-   and every element rests visible — motion only decorates a first entry.
+/* datapipelines.co — the public site's one script (145; 148 added the Product
+   disclosure): the worked example's tabs, the header menus' dismissal,
+   copy-to-clipboard, the late mono sheet, the header hairline and the
+   one-time entrances. The site is fully readable and navigable without this
+   file: the tablist ships `hidden` and the three panels stack in order, both
+   header menus are <details>, copy buttons ship `hidden`, and every element
+   rests visible — motion only decorates a first entry.
 
    No style injection anywhere here (SitePublicPresentationGuardTest sweeps
    this file): state is attributes and classes, appearance is site.css. */
@@ -85,10 +86,15 @@
   }
 
   /* ------------------------------------------------------
-     The phone menu — a <details>: open/close, a focusable summary
-     and Enter/Space come from the element. This adds Escape (focus
-     back on the summary) and a click outside. Scoped to the header;
-     the FAQ <details> keep their own behaviour.
+     The header's menus — the Product disclosure (148) and the phone
+     menu, both <details>: open/close, a focusable summary and
+     Enter/Space come from the element. This adds Escape (focus back
+     on the summary), a click outside, focus leaving the menu (Tab
+     past its last link closes it, so nothing is left open behind the
+     reader), one open at a time, and a close when the viewport
+     crosses the header's breakpoint (a panel opened in one layout is
+     not found open in the other). Scoped to the header; the FAQ
+     <details> keep their own behaviour.
      ------------------------------------------------------ */
   var headerMenus = Array.prototype.slice.call(document.querySelectorAll('.site-header details'));
 
@@ -103,6 +109,14 @@
         summary.focus();
       }
     }
+  }
+
+  function closeMenusExcept(kept) {
+    headerMenus.forEach(function (menu) {
+      if (menu !== kept) {
+        closeMenu(menu, false);
+      }
+    });
   }
 
   if (headerMenus.length) {
@@ -121,6 +135,30 @@
         }
       });
     });
+    headerMenus.forEach(function (menu) {
+      menu.addEventListener('toggle', function () {
+        if (menu.open) {
+          closeMenusExcept(menu);
+        }
+      });
+      menu.addEventListener('focusout', function (event) {
+        if (event.relatedTarget && !menu.contains(event.relatedTarget)) {
+          closeMenu(menu, false);
+        }
+      });
+    });
+
+    /* The breakpoint is the sheet's token (site.css declares it once and
+       repeats it in the media query; the guard test holds the two equal). */
+    var wideMin = window.getComputedStyle(document.documentElement).getPropertyValue('--site-nav-wide-min').trim();
+    if (wideMin) {
+      var wideQuery = window.matchMedia('(min-width: ' + wideMin + ')');
+      if (wideQuery.addEventListener) {
+        wideQuery.addEventListener('change', function () {
+          closeMenusExcept(null);
+        });
+      }
+    }
   }
 
   /* ------------------------------------------------------
