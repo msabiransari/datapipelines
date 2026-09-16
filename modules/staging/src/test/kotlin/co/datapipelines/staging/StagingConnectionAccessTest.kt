@@ -8,7 +8,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Modifier
@@ -17,25 +16,26 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The §9.2 containment rule: the staging JDBC connection is reachable **only** under the
- * instance's own lock, and that lock is reachable from nowhere at all.
+ * The §9.2 containment rule: a staging JDBC connection is reachable **only** inside a lease
+ * the implementation grants, and the pool that grants leases is reachable from nowhere at all.
  *
  * The earlier contract exposed `Staging.connection` as a property and asked callers to "hold
  * the mutex" — a mutex that was `private` to `H2Staging` and therefore impossible for any
- * caller to take. Every direct user of the connection was consequently unserialized, on a
- * connection the spec itself says is not safe for concurrent callers. [Staging.withConnection]
- * replaces it: the implementation takes the lock, runs the block, releases it.
+ * caller to take. [Staging.withConnection] replaced it, and #118 replaced the one connection
+ * with a bounded pool: the implementation leases a connection, runs the block, returns it.
  *
  * Two halves, because either alone is a false green:
  *  - **Compile surface** — reflection proves no public member of the interface or the
- *    implementation hands out a [Connection] or a [Mutex]. A behavior test cannot see a
- *    property that a future edit re-adds.
- *  - **Behavior** — the lock is really held for the whole block, across suspension points, so
- *    a concurrent staging operation waits. A reflection test cannot see an accessor that takes
- *    no lock.
+ *    implementation hands out a [Connection] or an [H2ConnectionPool]. A behavior test cannot
+ *    see a property that a future edit re-adds.
+ *  - **Behavior** — a leased connection is owned for the whole block, across suspension points.
+ *    At capacity ONE that is observable as the old serialization: a concurrent operation waits
+ *    until the block returns. (Overlap across connections at higher capacity is
+ *    `H2StagingConcurrencyTest`'s subject.)
  */
 class StagingConnectionAccessTest {
-    private val staging = H2StagingFactory(H2StagingProperties()).create(UUID.randomUUID())
+    /** Capacity one: the shape in which "the block owns its connection" is visible as waiting. */
+    private val staging = H2StagingFactory(H2StagingProperties(maxConnections = 1)).create(UUID.randomUUID())
 
     @AfterEach
     fun tearDown() = staging.close()
@@ -51,30 +51,43 @@ class StagingConnectionAccessTest {
     }
 
     @Test
-    fun `the H2 implementation keeps its connection and mutex private`() {
+    fun `the H2 implementation keeps its pool private and holds no connection of its own`() {
         val leakingMethods =
             H2Staging::class.java.methods
                 .filter { it.declaringClass == H2Staging::class.java && Modifier.isPublic(it.modifiers) }
                 .filter { it.returnType in GUARDED_TYPES }
                 .map { it.name }
 
-        // A `private val` compiles to a private field with no getter; making either member
-        // public again would add a getter here or flip its field's modifier below. (The
-        // constructor still takes the connection — that is the factory's hand-off, not an
-        // accessor a caller can reach through an instance.)
+        // A `private val` compiles to a private field with no getter; making the pool public
+        // again would add a getter here or flip its field's modifier below. (The constructor
+        // still takes the pool — that is the factory's hand-off, not an accessor a caller can
+        // reach through an instance.)
         leakingMethods.shouldBeEmpty()
 
         val guardedFields = H2Staging::class.java.declaredFields.filter { it.type in GUARDED_TYPES }
-        // Guard the guard: if the fields were renamed away, "all of none are private" is vacuous.
-        guardedFields.map { it.type }.toSet() shouldBe GUARDED_TYPES
+        // Guard the guard: if the field were renamed away, "all of none are private" is vacuous.
+        // Since #118 the instance holds the POOL and no connection of its own — a Connection
+        // field reappearing here would be a connection outside the lease discipline.
+        guardedFields.map { it.type }.toSet() shouldBe setOf(H2ConnectionPool::class.java)
         guardedFields
+            .filterNot { Modifier.isPrivate(it.modifiers) }
+            .map { it.name }
+            .shouldBeEmpty()
+
+        // And the pool itself: its connections are private fields, and no method returns one.
+        H2ConnectionPool::class.java.methods
+            .filter { it.returnType == Connection::class.java }
+            .map { it.name }
+            .shouldBeEmpty()
+        H2ConnectionPool::class.java.declaredFields
+            .filter { it.type == Connection::class.java || Collection::class.java.isAssignableFrom(it.type) }
             .filterNot { Modifier.isPrivate(it.modifiers) }
             .map { it.name }
             .shouldBeEmpty()
     }
 
     @Test
-    fun `withConnection holds the lock for the whole block, so a concurrent operation waits`() {
+    fun `withConnection owns its connection for the whole block, so at capacity one a concurrent operation waits`() {
         val events = CopyOnWriteArrayList<String>()
 
         runBlocking {
@@ -99,12 +112,13 @@ class StagingConnectionAccessTest {
             awaitAll(holder, contender)
         }
 
-        // Without the lock, "contender" lands inside the delay window, between the two markers.
+        // If the lease were returned at the suspension point, "contender" would land inside the
+        // delay window, between the two markers.
         events.toList() shouldBe listOf("block-start", "block-end", "contender")
     }
 
     @Test
-    fun `two concurrent withConnection blocks do not interleave`() {
+    fun `two concurrent withConnection blocks do not interleave at capacity one`() {
         val events = CopyOnWriteArrayList<String>()
 
         runBlocking {
@@ -129,7 +143,7 @@ class StagingConnectionAccessTest {
     }
 
     private companion object {
-        val GUARDED_TYPES = setOf<Class<*>>(Connection::class.java, Mutex::class.java)
+        val GUARDED_TYPES = setOf<Class<*>>(Connection::class.java, H2ConnectionPool::class.java)
 
         /** Long enough that an unlocked contender would reliably slip in; short enough to be cheap. */
         const val BLOCK_HOLD_MILLIS = 300L

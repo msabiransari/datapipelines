@@ -266,6 +266,7 @@ datapipelines:
       insert-batch-size: ${DATAPIPELINES_STAGING_H2_INSERT_BATCH_SIZE:1000}
       result-batch-size: ${DATAPIPELINES_STAGING_H2_RESULT_BATCH_SIZE:10000}
       query-timeout-seconds: ${DATAPIPELINES_STAGING_H2_QUERY_TIMEOUT_SECONDS:60}
+      max-connections: ${DATAPIPELINES_STAGING_H2_MAX_CONNECTIONS:4}
 
   result:
     ttl-default-seconds: ${DATAPIPELINES_RESULT_TTL_DEFAULT_SECONDS:300}

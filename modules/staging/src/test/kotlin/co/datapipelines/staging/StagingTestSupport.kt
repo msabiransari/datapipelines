@@ -2,6 +2,7 @@ package co.datapipelines.staging
 
 import kotlinx.coroutines.runBlocking
 import java.sql.Connection
+import java.sql.DriverManager
 import java.util.UUID
 
 /*
@@ -11,14 +12,31 @@ import java.util.UUID
  */
 
 /**
- * Runs [read] against the staging connection through the only route there is —
- * [Staging.withConnection], which holds the instance's mutex for the block (§9.2). Tests
+ * Runs [read] against a leased staging connection through the only route there is —
+ * [Staging.withConnection], which owns one physical connection for the block (§9.2). Tests
  * inspect staged state exactly the way a SQL node would; there is no unguarded property.
  *
  * Blocking, so assertions read naturally outside a coroutine. Never call it from inside a
- * `withConnection` block: the mutex is not reentrant.
+ * `withConnection` block: at capacity one a nested lease deadlocks.
  */
 internal fun <T> Staging.readFromStaging(read: (Connection) -> T): T = runBlocking { withConnection { read(it) } }
+
+/**
+ * A staging instance over a pool whose physical connections are `sa` sessions to the
+ * execution's database, each passed through [wrap] — the seam a test uses to count, delay or
+ * break JDBC calls on EVERY connection the pool opens, which the factory does not expose.
+ *
+ * The `sa` login is harness scaffolding, never an endorsement: §9.5 identity is
+ * `H2StagingPrivilegeTest`'s job on a real factory instance.
+ */
+internal fun stagingOverConnections(
+    executionId: UUID,
+    props: H2StagingProperties,
+    wrap: (Connection) -> Connection = { it },
+): Staging {
+    val open = { wrap(DriverManager.getConnection(stagingUrl(executionId, props), "sa", "")) }
+    return H2Staging(executionId, H2ConnectionPool(executionId, open(), open, props.maxConnections), props)
+}
 
 /**
  * The JDBC URL a staging instance for [executionId] uses, for lifecycle assertions.

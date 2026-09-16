@@ -20,6 +20,11 @@ package co.datapipelines.staging
  * @property insertBatchSize rows per `INSERT` batch when streaming source data in (§4.3).
  * @property resultBatchSize JDBC fetch size when reading staged data back out (§3.3, §6.1).
  * @property queryTimeoutSeconds `Statement.setQueryTimeout` applied to staging queries (§3.3).
+ * @property maxConnections the cap on **operational** physical connections one execution's
+ *   staging pool may hold open at once (§9, #118). It is a ceiling, not an eager allocation:
+ *   the pool starts with the single bootstrap-handoff connection and grows on demand. `1`
+ *   is legal and is the diagnosis/comparison setting — every staging operation then queues
+ *   behind one connection, exactly the pre-146 shape minus the global lock.
  */
 data class H2StagingProperties(
     val mode: String = "PostgreSQL",
@@ -27,6 +32,7 @@ data class H2StagingProperties(
     val insertBatchSize: Int = 1000,
     val resultBatchSize: Int = 10_000,
     val queryTimeoutSeconds: Int = 60,
+    val maxConnections: Int = 4,
 ) {
     init {
         require(mode.matches(SAFE_MODE)) {
@@ -36,6 +42,7 @@ data class H2StagingProperties(
         require(insertBatchSize > 0) { "insertBatchSize must be positive, was $insertBatchSize" }
         require(resultBatchSize > 0) { "resultBatchSize must be positive, was $resultBatchSize" }
         require(queryTimeoutSeconds >= 0) { "queryTimeoutSeconds must be non-negative, was $queryTimeoutSeconds" }
+        require(maxConnections > 0) { "maxConnections must be positive, was $maxConnections" }
     }
 
     private companion object {

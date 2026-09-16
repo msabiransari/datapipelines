@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.8 (revised — see Change Log)
+**Status:** v1.9 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-09-03
+**Last updated:** 2026-09-16
 
 ---
 
@@ -621,8 +621,8 @@ For `NodeSource.Datasource`:
 - Pool-acquisition timeout is the datasource's own Hikari setting (`properties.hikari.connectionTimeout`); the executor does not impose a second one. Exceeding it → `pipeline.node.datasource_connection_failed`.
 
 For `NodeSource.Tempdb`:
-- Use the per-execution tempdb connection (already open, single-connection in v1).
-- No pool, no acquisition delay — but access is serialized by the staging `Mutex` (§9). A node reading tempdb may therefore wait behind a concurrent staging write.
+- Lease one connection from the per-execution tempdb pool (bounded by `datapipelines.staging.h2.max-connections`, default 4 — [Staging §9](staging.md#9-connection-model)).
+- Admission suspends when the cap is reached: a node reading tempdb may wait behind other tempdb work of the same execution only when every connection is in use. Independent tempdb work overlaps inside H2 up to the cap.
 
 ### 6.3 Behavior by node `type`
 
@@ -685,7 +685,7 @@ After the staged write returns, the executor re-checks the execution's effective
 
 ##### `tempdb` → `tempdb`: a single `CREATE TABLE … AS`
 
-A DQL node whose source **and** output are both tempdb does **not** run cursor-plus-`stage()`. It cannot: `withConnection`/`withQuery` hold a serialization mutex that is **not reentrant** ([Staging §9.2](staging.md#92-serialization-is-explicit--mutex-not-the-driver)), so calling `stage()` from inside a cursor over the same connection deadlocks by construction. Such a node runs as one statement instead:
+A DQL node whose source **and** output are both tempdb does **not** run cursor-plus-`stage()`. It must not: `withConnection`/`withQuery` lease one connection for their block and a lease must never be nested ([Staging §9.2](staging.md#92-one-owner-per-connection-and-session-state-is-per-lease)) — calling `stage()` from inside a cursor deadlocks at `max-connections = 1` and, above it, holds a connection idle while waiting for another. Such a node runs as one statement instead:
 
 ```kotlin
 staging.withConnection { conn ->                       // one lock acquisition for the whole block
@@ -1164,20 +1164,18 @@ This `StagingFactory.create(executionId, engine)` signature is **canonical here*
 |---|---|
 | `withConnection(block)` is the **only** route to the raw `Connection` | There is no `staging.connection` property to read. Every tempdb statement the executor issues is created inside this block. |
 | `stage(rs, tableName, sourceDialect)` | The source node's dialect is passed explicitly (§6.4.1). |
-| `withQuery(sql, block)` holds the lock across the **whole** cursor drain | The §6.4.2 lock-across-drain guarantee; `withConnection` gives the same coverage, which is why the executor can use it instead (below). |
-| The serialization mutex is **not reentrant** | `stage()` from inside a cursor over the same connection deadlocks — which is why a `tempdb`→`tempdb` DQL node is a single CTAS (§6.4.1). |
+| `withQuery(sql, block)` retains its leased connection across the **whole** cursor drain | The §6.4.2 lease-across-drain guarantee; `withConnection` gives the same coverage, which is why the executor can use it instead (below). |
+| A lease is **never nested** | `stage()` from inside a cursor deadlocks at `max-connections = 1` (and wastes a connection above it) — which is why a `tempdb`→`tempdb` DQL node is a single CTAS (§6.4.1). |
+| Session state is per lease ([Staging §9.2](staging.md#92-one-owner-per-connection-and-session-state-is-per-lease)) | `SET SCHEMA`, `SET @var`, local temporary tables and an open transaction are reset when a block returns; a node passes data to another only through ordinary tables and `depends_on`. |
 | `stats()` is `suspend`; `close()` is not, and must not throw | `close()` is safe to call from `finally` without masking the real outcome. |
 
 **A tempdb read runs through `withConnection` + a registered statement, not `withQuery`.** `withQuery` creates the statement *inside* staging, so the executor never sees it — and a statement the executor cannot see is one it cannot register with `CancellationHandle.withStatement`. The consequence was concrete: a tempdb-sourced caller or write-back node was **uncancellable**, with `DELETE`, the disconnect-grace timer and the execution timeout all reaching the coroutine and none of them reaching the query. The executor therefore opens its own `TYPE_FORWARD_ONLY`/`CONCUR_READ_ONLY` cursor inside `withConnection`. Two differences, both accounted for: it does **not** set `fetchSize`/`closeOnCompletion` (immaterial on in-memory H2 — there is no server round-trip to batch and the statement is closed by its own `use` block, so nothing leaks), and it **does** register the statement for `Statement.cancel()` and apply `node-query-timeout-seconds`, which tempdb reads through `withQuery` never honoured.
 
 **Lifetime.** The executor opens the staging instance at execution start and holds it for the execution's duration. The JDBC URL carries **no** `DB_CLOSE_DELAY` — default H2 semantics (the in-memory database dies when its last connection closes) are exactly what we want for a per-execution scratch database. `close()` in the executor's `finally` block is belt-and-braces: it drops every staged table (enumerated from the catalog and dropped schema-qualified, so a table parked outside `PUBLIC` is still reclaimed) and then closes the connection, so memory is reclaimed at a known point rather than whenever GC happens to run. A drop that fails is logged as `pipeline.staging.cleanup_failed` and never rethrown. See the [Staging spec](staging.md) for engine configuration details.
 
-**Concurrency.** v1 uses a single tempdb connection per execution, and **concurrent access to it does happen**: up to `datapipelines.executor.max-parallel-nodes` node coroutines may reach for tempdb at the same time (two siblings staging their ResultSets, or one staging while another reads a previously staged table). A JDBC `Connection` does not safely serialize concurrent callers on its own, so the staging implementation guards it with an explicit `Mutex` — every `stage` / `withQuery` / `withConnection` / `execute` call takes the lock and holds it for the whole block, and tempdb work therefore serializes even though the nodes run in parallel. The mutex is **not reentrant**, which is a contract the executor must respect rather than a detail (§6.4.1).
+**Concurrency.** Each execution's tempdb is a **bounded pool** of connections (`datapipelines.staging.h2.max-connections`, default 4; #118), and **concurrent access does happen**: up to `datapipelines.executor.max-parallel-nodes` node coroutines may reach for tempdb at the same time (two siblings staging their ResultSets, or one staging while another reads a previously staged table). A JDBC `Connection` does not safely serialize concurrent callers on its own, so every `stage` / `withQuery` / `withConnection` / `execute` call **leases** one connection for exactly its own statements and cursor and returns it sanitized; independent tempdb work overlaps inside H2 across connections up to the cap, and past the cap a node suspends until one is returned. A lease is **never nested**, which is a contract the executor must respect rather than a detail (§6.4.1). The cap is capacity, not parallelism, and promises no speedup — H2's own table and catalog locks still apply ([Staging §9.3](staging.md#93-what-the-pool-does-and-does-not-buy)); `max-connections = 1` restores the single-connection shape for diagnosis.
 
-This is a deliberate v1 trade-off, not an absence of contention:
-
-1. **Single Mutex-guarded connection** — chosen. The slow work in a typical pipeline is fetching from sources (datasource connections, fully parallel); tempdb writes are local and fast.
-2. **Connection pool for tempdb** — would allow parallel staging ops. v1.1, if profiling shows the Mutex is a real bottleneck.
+**Cleanup versus a lease still inside the driver.** `staging.close()` runs in the executor's `finally` after the `coroutineScope` joined every node coroutine — but a node body abandoned by its wall-clock deadline (§5.3) may still be blocked in a driver call holding a lease. `close()` refuses new leases, closes the idle connections and returns without waiting; the abandoned lease is quarantined, and its own eventual return finishes cleanup and closes the last connection ([Staging §3.4](staging.md#34-destruction)).
 
 ---
 
@@ -1270,8 +1268,8 @@ Idempotency cache stored in Redis. Key: `idem:{user_id}:{idempotency_key_hash}`.
 | Template deleted while pipeline referencing it executes | Template versions are immutable; deletion is soft; runtime fetch is consistent |
 | Datasource deleted while pipeline using it executes | Connection already acquired at node start; deletion doesn't release acquired connections |
 | User runs out of execution slots mid-pipeline | Slots acquired at execution start (one per execution, not per node); held until completion |
-| Two parallel nodes touching tempdb at once | **Concurrent access does occur** (up to `max-parallel-nodes` coroutines). The single staging connection is guarded by a `Mutex` (§9), so tempdb operations serialize; a JDBC `Connection` alone would not make this safe |
-| Tempdb cleanup vs. an in-flight query | `staging.close()` runs in the executor's `finally`, i.e. after the `coroutineScope` has joined every node coroutine (including cancelled ones). No node can be mid-query when cleanup runs |
+| Two parallel nodes touching tempdb at once | **Concurrent access does occur** (up to `max-parallel-nodes` coroutines). Each operation leases one connection from the execution's bounded pool (§9), so two nodes run on two connections and no connection ever has two callers; a JDBC `Connection` alone would not make this safe |
+| Tempdb cleanup vs. an in-flight query | `staging.close()` runs in the executor's `finally`, after the `coroutineScope` has joined every node coroutine (including cancelled ones). The one exception is a body abandoned by its node deadline (§5.3) that is still inside a driver call: `close()` does not wait for it, and its lease closes its own connection on return (§9) |
 | Cancellation racing a node that is finishing | `Statement.cancel()` on an already-completed statement is a no-op; the node's `NodeResult` is discarded when the scope unwinds. Terminal-event emission is single-shot — whichever of `pipeline_completed` / `execution_aborted` wins, the other is suppressed |
 
 ### 12.2 Things explicitly NOT safe (and documented)
@@ -1290,7 +1288,7 @@ Idempotency cache stored in Redis. Key: `idem:{user_id}:{idempotency_key_hash}`.
 - **Calculator nodes**: pre-execution transformers that add Context keys (`quarter` from `date`, etc.).
 - **Cycle support (iterative pipelines)**: allow bounded loops for algorithms that converge (ML scoring, etc.). Very different execution model.
 - **Async/scheduled execution**: trigger pipelines on cron schedules, return immediately, deliver results via webhook later.
-- **H2 connection pooling**: parallel staging ops if benchmarks show single-connection serialization is a bottleneck.
+- ~~**H2 connection pooling**~~ — shipped by [#118](https://github.com/msabiransari/datapipelines/issues/118) as `datapipelines.staging.h2.max-connections` (§9).
 
 ---
 
@@ -1303,7 +1301,7 @@ The DAG module and executor must have:
 - **Caller-path tests**: result materialized before the connection closes; `result.too_large` triggered by a result over the cap; `result.storage_unavailable` with Redis down; `data_ready` payload built from the stored result; a **zero-caller** pipeline emits `pipeline_completed` and no `data_ready`.
 - **Deadlock regression test**: a linear chain strictly longer than `max-parallel-nodes` (e.g. 6 nodes with `max-parallel-nodes: 2`) completes. This is the test that fails if the parallelism permit is ever taken before `awaitAll(deps)` (§5.2).
 - **Integration tests** with real H2 + Testcontainers-backed sources (PG, MySQL, etc.): end-to-end pipelines of varying DAG shapes (linear, diamond, fan-out, fan-in, mixed).
-- **Concurrency tests**: parallel executions, parallel nodes within one execution, execution-slot exhaustion (`pipeline.execution.concurrency_limit`), concurrent tempdb access through the staging `Mutex`, per-node query timeouts, and the overall `withTimeout` firing (`pipeline.execution.timeout`).
+- **Concurrency tests**: parallel executions, parallel nodes within one execution, execution-slot exhaustion (`pipeline.execution.concurrency_limit`), concurrent tempdb access through the staging pool (overlap on distinct connections, capacity one, an abandoned lease outliving `close()` — `StagingPoolExecutorTest`), per-node query timeouts, and the overall `withTimeout` firing (`pipeline.execution.timeout`).
 - **Cancellation tests** (§8.3): each of the three triggers ends the execution `ABORTED` with the right `reason`, emits exactly one `execution_aborted`, interrupts an in-flight statement (assert on a deliberately slow query), and releases connections + slot. Also: cancelling an already-terminal execution is a no-op.
 - **Failure-path tests**: every error code in §8.2 exercised by a test that triggers it.
 - **Resource-leak tests**: run 100 executions back-to-back (mixing success, failure, and cancellation), verify staging instances, connections, statements, and semaphore permits are all released (no leaks).
@@ -1450,6 +1448,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v1.9 | 146 / #118 H2 staging pool | §6.3 tempdb source, §6.4.1, §9 (lease contract table, Concurrency, new cleanup-versus-abandoned-lease paragraph), §12.1 two rows, §13 and §14 updated from the single `Mutex`-guarded connection to the bounded per-execution pool: one owner per leased connection, never nested, session state per lease, `close()` never waiting on a lease still inside the driver. Links re-pointed at Staging §9's new anchors. |
 | 2026-09-09 | v1.8 | T202 node query timeout | §8.2 gains the `pipeline.node.query_timeout` row: `CancellationHandle.whileExecuting` converts a driver error that arrives after the statement's own timeout into `NodeQueryTimeoutException`. |
 | 2026-09-07 | v1.7 | 086 cancel race | §8.3.2: the **registration window** named as a defect the executor owns, not a driver caveat — between `withStatement` registering a statement and the runner entering `executeQuery` the driver holds no command, and a `cancel()` landing there is dropped, so the query runs its full length under an already-cancelled coroutine. Two mechanisms close it, both documented: the **cancel latch** (`whileExecuting`, added to `CancellationHandle` in §8.3.1 and wrapping every one of the seven blocking driver calls — it reads the handle's `abortReason` AND the coroutine's liveness, the second being what carries the guard onto a composed child whose own handle a family cancel never touches) and **cancel re-issue** (`cancelStatements()` re-issues `Statement.cancel()` at 25 ms for up to 2 s while a statement stays registered, covering the driver's own parse-and-plan prologue, which no check of ours can see). `node-query-timeout-seconds` is unchanged as the backstop past that window. New MEASURED table: `Statement.cancel()` in flight is honoured by all five bundled dialects (H2, Postgres, MySQL, SQLite, DuckDB) — so the old "some drivers, some statement kinds" caveat describes none of them — and a cancel issued before registration is dropped by all five, so the window is universal rather than an H2 quirk. |
 | 2026-09-02 | v1.4 | 051 auth/config sweep | §8.3 gains the descendant sentence (T20): an in-flight child stopped by an ancestor’s cancellation or expired deadline ends ABORTED — carrying the family’s abort reason (a DELETE’s `cancelled` survives onto every descendant’s row; an ancestor timeout also records `cancelled`, since no catalogued reason exists for it) — never FAILED, which would misattribute the stop to the child’s own pipeline. Scope liveness, not exception shape, tells “my deadline” from “an ancestor’s” |

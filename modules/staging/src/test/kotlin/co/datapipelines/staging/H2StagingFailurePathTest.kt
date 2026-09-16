@@ -245,18 +245,9 @@ class H2StagingFailurePathTest {
         }
     }
 
-    /**
-     * A staging instance whose `prepareStatement` always fails with [failure].
-     *
-     * Built over an instrumented `sa` connection, NOT the factory's restricted one: the proxy has
-     * to wrap the Connection, which the factory does not expose. This test is about the insert
-     * failure path, not §9.5 privilege — that is H2StagingPrivilegeTest's job, on a real factory
-     * instance. The `sa` here is test scaffolding, not an endorsement.
-     */
-    private fun stagingOverFailingInsert(failure: SQLException): Staging {
-        val executionId = UUID.randomUUID()
-        val real = DriverManager.getConnection(stagingUrl(executionId, props), "sa", "")
-        val proxy =
+    /** A staging instance whose every connection fails `prepareStatement` with [failure]. */
+    private fun stagingOverFailingInsert(failure: SQLException): Staging =
+        stagingOverConnections(UUID.randomUUID(), props) { real ->
             Proxy.newProxyInstance(
                 Connection::class.java.classLoader,
                 arrayOf(Connection::class.java),
@@ -269,8 +260,7 @@ class H2StagingFailurePathTest {
                     }
                 },
             ) as Connection
-        return H2Staging(executionId, proxy, props)
-    }
+        }
 
     private companion object {
         const val BYTES_PER_MB = 1024L * 1024L

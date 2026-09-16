@@ -15,16 +15,19 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The read/write surface beyond [Staging.stage]: [Staging.withQuery] draining a cursor under
- * the lock, and [Staging.execute] running DML, both through the mutex-guarded connection.
+ * The read/write surface beyond [Staging.stage]: [Staging.withQuery] draining a cursor on its
+ * own leased connection, and [Staging.execute] running DML.
  *
  * `withQuery` replaced a `query(): ResultSet` that handed a live cursor to a caller who then
  * read it with the lock free (v1.5, ST-SEC-1). Since the caller node's drain is suspending
  * Redis I/O (§6.1), a concurrent `stage`/`execute` could execute on the shared connection mid
- * cursor — the §9.2 corruption case. The lock-holding test below is the regression guard.
+ * cursor — the §9.2 corruption case. The lease-holding test below is the regression guard: at
+ * capacity ONE, a contender must wait for the whole drain, which is only true if the cursor's
+ * connection stays leased across the block's suspension. (At higher capacity the contender
+ * proceeds on another connection — `H2StagingConcurrencyTest` covers that.)
  */
 class H2StagingQueryTest {
-    private val props = H2StagingProperties()
+    private val props = H2StagingProperties(maxConnections = 1)
     private val staging = H2StagingFactory(props).create(UUID.randomUUID())
 
     @AfterEach
@@ -101,7 +104,7 @@ class H2StagingQueryTest {
     }
 
     @Test
-    fun `the lock is held across the whole withQuery block, so a contending stage waits`() {
+    fun `the lease is held across the whole withQuery block, so at capacity one a contending stage waits`() {
         stageThreeRows()
         val events = CopyOnWriteArrayList<String>()
 
@@ -141,8 +144,9 @@ class H2StagingQueryTest {
             }
         }
 
-        // If withQuery released the lock (or handed the cursor out), "staged" lands between the
-        // two drain markers — a statement executing on the shared connection mid-cursor.
+        // If withQuery returned the lease at the suspension point (or handed the cursor out),
+        // "staged" lands between the two drain markers — a statement on the cursor's connection
+        // mid-drain.
         events.toList() shouldBe listOf("drain-start", "drain-end", "staged")
     }
 

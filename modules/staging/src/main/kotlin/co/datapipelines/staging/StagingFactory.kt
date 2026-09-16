@@ -55,30 +55,46 @@ interface StagingFactory {
  * It also lower-cases the catalog's own schema names, which is why the §10/§3.4 catalog
  * projection in [H2Staging] compares them case-insensitively.
  *
- * The factory opens the **single** operational connection and hands it to [H2Staging]; the
- * executor holds that connection open for the whole execution (§3.5) and closes it in a
- * `finally` (§3.4).
+ * The factory opens the **first** operational connection and hands it to a bounded
+ * [H2ConnectionPool] behind [H2Staging]; the pool opens further restricted connections on
+ * demand up to `max-connections` (§9, #118), the executor holds the instance open for the
+ * whole execution (§3.5) and closes it in a `finally` (§3.4).
  *
  * ## Privilege containment (§9.5)
  *
- * The operational connection authenticates as a **non-admin** user, because the SQL it later
+ * Every operational connection authenticates as a **non-admin** user, because the SQL it later
  * runs is pipeline-author-authored. An `sa` session would hand that author H2's admin surface —
  * `FILE_READ('/proc/self/environ')` reads `DATAPIPELINES_DB_ENCRYPTION_KEY` and
  * `DATAPIPELINES_JWT_SECRET`, `CREATE ALIAS` loads arbitrary JVM classes — turning "may write
  * tempdb SQL" into "owns every datasource credential and can forge sessions".
  *
  * So creation is two-phase: a **transient** `sa` bootstrap connection creates the database and
- * the restricted user, the operational connection is opened as that user, and only then does the
- * bootstrap close. The overlap is mandatory, not incidental — with default in-memory semantics
- * (§3.1) the database is discarded the moment its *last* connection closes, so a bootstrap that
- * closed first would take the database with it.
+ * the restricted user, the first operational connection is opened as that user, and only then
+ * does the bootstrap close. The overlap is mandatory, not incidental — with default in-memory
+ * semantics (§3.1) the database is discarded the moment its *last* connection closes, so a
+ * bootstrap that closed first would take the database with it. Every later pool connection is
+ * opened with the same URL, mode, folding and restricted credential, and only while at least
+ * one operational connection is already open — so no connection ever creates a database, and
+ * every one lands in the execution's.
  *
  * @param config the already-resolved effective properties (see [H2StagingProperties] — the
  *   per-pipeline `max_memory_mb` override is applied by the caller before construction).
  */
 class H2StagingFactory(
-    private val config: H2StagingProperties,
+    /** The effective properties every execution's staging is built from; readable so wiring is testable. */
+    val properties: H2StagingProperties,
+    /**
+     * How a JDBC connection is opened — `DriverManager` in production, which the one-argument
+     * constructor supplies. This is a **fault-injection seam for tests**, not a configuration
+     * point: the executor suite (`StagingLostExecutorTest`) wraps the restricted sessions to
+     * fail a reset and refuse the replacement, which is the only way to reach a LOST pool
+     * through the real executor; the staging suite uses it to fail one phase of creation.
+     * Production wiring (`DomainConfiguration.stagingFactory`) never passes it.
+     */
+    private val connect: (url: String, user: String, password: String) -> Connection,
 ) : StagingFactory {
+    constructor(config: H2StagingProperties) : this(config, DriverManager::getConnection)
+
     override fun create(
         executionId: UUID,
         engine: StagingEngine,
@@ -90,30 +106,43 @@ class H2StagingFactory(
             StagingEngine.H2 -> Unit
         }
 
-        val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${config.mode};$LOWER_FOLDING"
-        val connection = openConnection(jdbcUrl, executionId)
-        return H2Staging(executionId, connection, config)
+        val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${properties.mode};$LOWER_FOLDING"
+        return openPool(jdbcUrl, executionId)
     }
 
     /**
-     * Bootstraps the database as `sa` and returns the **restricted** operational connection
-     * (§9.5). Any failure in either phase — the admin connect, the user creation, or the
-     * restricted connect — is one catalogued `creation_failed` (§3.1); the caller cannot act on
-     * the difference, and the phase leaks nothing useful into the message.
+     * Bootstraps the database as `sa`, opens the first **restricted** operational connection
+     * (§9.5) and builds the pool around it. Any failure in any phase — the admin connect, the
+     * user creation, the restricted connect, or the pool's own capture of the session defaults —
+     * is one catalogued `creation_failed` (§3.1); the caller cannot act on the difference, and
+     * the phase leaks nothing useful into the message. A failure AFTER the operational
+     * connection opened closes it, so the half-built database dies with the failure instead of
+     * outliving it.
      */
-    private fun openConnection(
+    private fun openPool(
         jdbcUrl: String,
         executionId: UUID,
-    ): Connection =
+    ): Staging =
         try {
             val password = newExecUserPassword()
             // `use` closes the bootstrap on every path, including the one where opening the
             // operational connection throws — and it closes it only AFTER that connection exists,
             // which is what keeps the in-memory database alive across the handover.
-            DriverManager.getConnection(jdbcUrl, BOOTSTRAP_USER, BOOTSTRAP_PASSWORD).use { bootstrap ->
-                createExecUser(bootstrap, password, executionId)
-                DriverManager.getConnection(jdbcUrl, EXEC_USER, password)
-            }
+            val first =
+                connect(jdbcUrl, BOOTSTRAP_USER, BOOTSTRAP_PASSWORD).use { bootstrap ->
+                    createExecUser(bootstrap, password, executionId)
+                    connect(jdbcUrl, EXEC_USER, password)
+                }
+            val pool =
+                try {
+                    // The opener retains the credential in this closure and nowhere else: it is
+                    // what lets the pool grow on demand as the restricted user (§9.5).
+                    H2ConnectionPool(executionId, first, { connect(jdbcUrl, EXEC_USER, password) }, properties.maxConnections)
+                } catch (e: SQLException) {
+                    first.close()
+                    throw e
+                }
+            H2Staging(executionId, pool, properties)
         } catch (e: SQLException) {
             throw creationFailed(executionId, e.message, e)
         }
@@ -180,10 +209,11 @@ class H2StagingFactory(
     }
 
     /**
-     * A fresh 256-bit password per execution, hex-encoded. It is never stored on the instance,
-     * logged, or returned: the operational connection is the only thing that ever needed it, so
-     * once [create] returns, no code in this process holds the credential to open a second
-     * session as this user.
+     * A fresh 256-bit password per execution, hex-encoded. It is never stored on the factory,
+     * logged, or returned. It IS retained — privately, inside the pool's opener closure — for
+     * the life of that execution's staging, because the pool opens further restricted sessions
+     * on demand (§9); the closure is reachable from nothing an author's SQL can touch, and it
+     * dies with the pool.
      *
      * Note what this does *not* claim: the database's own `sa` account still exists with an empty
      * password for the database's lifetime. That is not reachable from the threat this class

@@ -87,6 +87,8 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.staging.h2.insert-batch-size") shouldBe staging.insertBatchSize.toString()
         documented.getValue("datapipelines.staging.h2.result-batch-size") shouldBe staging.resultBatchSize.toString()
         documented.getValue("datapipelines.staging.h2.query-timeout-seconds") shouldBe staging.queryTimeoutSeconds.toString()
+        // 146 / #118: the per-execution operational-connection cap.
+        documented.getValue("datapipelines.staging.h2.max-connections") shouldBe staging.maxConnections.toString()
         documented.getValue("datapipelines.idempotency.ttl-seconds") shouldBe IdempotencyProperties().ttlSeconds.toString()
     }
 

@@ -300,8 +300,9 @@ semantics; the question's words decide the window.
   evidence is measured — per-node timings, and a reconciliation against the unsplit population
   where one exists. A blind copy-and-parameterise split, or a `UNION ALL` of the same walk, is
   neither. Never add a `depends_on` edge to avoid contention.
-  Source cursors drain in parallel and the staging lock is taken per batch, so independent source
-  nodes really do overlap (measured). `depends_on` is data flow, nothing else.
+  Source cursors drain in parallel, and independent tempdb work may overlap up to the
+  deployment's configured limits, so independent nodes really do run at once. `depends_on` is
+  data flow, nothing else: a node that reads a table another node staged depends on that node.
 - **One warm success near the limit is not reliability.** A node that finished at 90 % of its
   budget once, after a slower run, may have met a warm cache, a quiet box, or a real fix — the
   timings alone do not say which. Report the headroom you measured and the risk that remains.
@@ -309,6 +310,10 @@ semantics; the question's words decide the window.
   the budget — say so: report the effective limit, the shape that needs it and the decision the
   operator has to make (a datasource timeout, a rollup at the source), rather than claiming the
   timeout was fixed.
+- **Cross-node state is a table, never a session.** Each node's tempdb SQL runs in its own
+  session, reset when the node finishes: a `SET SCHEMA`, a `SET @variable`, a local temporary
+  table or an open transaction from one node is not visible to the next, and must not be relied
+  on. Hand data forward with `output: tempdb` tables and read them with `source: "tempdb"`.
 
 ## 4. Get the numbers right — the contract before the arithmetic
 
