@@ -21,6 +21,8 @@ class H2StagingPropertiesTest {
         props.insertBatchSize shouldBe 1000
         props.resultBatchSize shouldBe 10_000
         props.queryTimeoutSeconds shouldBe 60
+        // 146 / #118: the per-execution operational-connection cap (configuration.md §3.3).
+        props.maxConnections shouldBe 4
     }
 
     @Test
@@ -53,6 +55,8 @@ class H2StagingPropertiesTest {
                 "insertBatchSize" to { H2StagingProperties(insertBatchSize = -5) },
                 "resultBatchSize" to { H2StagingProperties(resultBatchSize = 0) },
                 "queryTimeoutSeconds" to { H2StagingProperties(queryTimeoutSeconds = -1) },
+                "maxConnections" to { H2StagingProperties(maxConnections = 0) },
+                "maxConnections" to { H2StagingProperties(maxConnections = -3) },
             )
 
         violations.forEach { (field, construct) ->
@@ -60,6 +64,11 @@ class H2StagingPropertiesTest {
             val message = thrown.message ?: ""
             message shouldContain field
         }
+    }
+
+    @Test
+    fun `a single connection is a legal cap — the diagnosis and comparison setting`() {
+        H2StagingProperties(maxConnections = 1).maxConnections shouldBe 1
     }
 
     @Test

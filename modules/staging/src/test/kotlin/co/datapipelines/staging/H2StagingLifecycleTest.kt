@@ -53,7 +53,8 @@ class H2StagingLifecycleTest {
 
         staging.close()
 
-        staging.readFromStaging { it.isClosed } shouldBe true
+        // No new work after close: a lease is refused rather than reopening the database (§6).
+        shouldThrow<IllegalStateException> { staging.readFromStaging { it.isClosed } }
 
         // The database did not survive its last connection closing — keyed on the STAGING_EXEC
         // user, NOT on emptiness (§12). Since §3.4 now drops the tables before closing, a
