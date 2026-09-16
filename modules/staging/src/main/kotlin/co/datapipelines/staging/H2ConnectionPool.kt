@@ -100,6 +100,7 @@ internal class H2ConnectionPool(
     private var peak = 0
     private var opened = 1
     private var discarded = 0
+    private var closeRefusals = 0
     private var state = State.OPEN
     private var lossCause: String? = null
     private var deferredSweep: ((Connection) -> Unit)? = null
@@ -122,6 +123,12 @@ internal class H2ConnectionPool(
 
     /** Connections closed because their reset failed or they were found closed on return. */
     val discardedConnections: Int get() = synchronized(lock) { discarded }
+
+    /**
+     * Physical closes the driver refused (threw). Each such session's slot was released, but the
+     * raw session may still be live — this is the honest residual, never hidden by the counters.
+     */
+    val refusedCloses: Int get() = synchronized(lock) { closeRefusals }
 
     /** Callers currently suspended in admission. */
     val queuedWaiters: Int get() = waiters.get().toInt()
@@ -148,6 +155,13 @@ internal class H2ConnectionPool(
         kind: LeaseKind,
         block: suspend (Connection) -> T,
     ): T {
+        // A fresh call against a closing, closed or lost pool is refused BEFORE it waits for a
+        // permit — otherwise, with every permit held by a lease the executor has abandoned, it
+        // would park until that lease returned, which may be never. The check is repeated after
+        // admission and after an open, for the races that flip the state meanwhile. Callers
+        // ALREADY waiting when close() runs are not woken by it (a Semaphore has no broadcast):
+        // they are refused when a permit reaches them, or cancelled by their own deadline.
+        synchronized(lock) { refuseUnlessOpen() }
         val started = System.nanoTime()
         waiters.incrementAndGet()
         try {
@@ -224,13 +238,36 @@ internal class H2ConnectionPool(
         }
         // Outside the lock: the sweep is JDBC. Leases are refused from here on, so no borrower
         // can race it, and the idle stack is already empty so no one can draw a connection.
-        val swept = sweepOn?.let { runSweep(it, sweep) } ?: false
-        toClose.forEach { closePhysical(it) }
-        synchronized(lock) {
-            physical -= toClose.size
-            state = State.CLOSED
+        // Exception-safe finalization: whatever the sweep or one close throws, every idle session
+        // is still closed, its slot released, and the pool reaches CLOSED — never stuck CLOSING.
+        var swept = false
+        try {
+            swept = sweepOn?.let { runSweep(it, sweep) } ?: false
+        } finally {
+            try {
+                closeAll(toClose)
+            } finally {
+                synchronized(lock) { state = State.CLOSED }
+            }
         }
         return CloseOutcome(leasesOutstanding = outstanding, sweepRan = swept, alreadyClosed = false)
+    }
+
+    /** Closes each session in turn; one fault does not skip the rest, and every slot is released. */
+    private fun closeAll(sessions: List<Connection>) {
+        var fault: Throwable? = null
+        sessions.forEach { session ->
+            try {
+                closePhysical(session)
+            } catch (
+                @Suppress("TooGenericExceptionCaught") t: Throwable,
+            ) {
+                fault?.addSuppressed(t) ?: run { fault = t }
+            } finally {
+                synchronized(lock) { physical-- }
+            }
+        }
+        fault?.let { throw it }
     }
 
     /** What [close] found and did — the executor logs it; tests assert on it. */
@@ -315,30 +352,66 @@ internal class H2ConnectionPool(
         connection: Connection,
         kind: LeaseKind,
     ) {
-        val usable = sanitise(connection, kind)
-        val decision =
-            synchronized(lock) {
-                leased--
-                when {
-                    usable && state == State.OPEN -> {
-                        idle.addLast(connection)
-                        Decision.RECYCLED
-                    }
+        // Whatever sanitisation throws — including an Error the driver or a proxy raises — the
+        // session is unlinked from its lease here and retired below. The fault is rethrown AFTER
+        // ownership is coherent, so it still reaches the caller (suppressed under the operation's
+        // own failure, or as the result), and never as a session counted leased with no owner.
+        var fault: Throwable? = null
+        val usable =
+            try {
+                sanitise(connection, kind)
+            } catch (
+                @Suppress("TooGenericExceptionCaught") t: Throwable,
+            ) {
+                fault = t
+                false
+            }
+        val decision = decideUnderLock(connection, usable)
+        try {
+            retire(connection, decision)
+        } catch (
+            @Suppress("TooGenericExceptionCaught") t: Throwable,
+        ) {
+            // Retirement itself faulted (a driver's close threw an Error, say): accounting has
+            // already run inside the retirement helpers' own `finally`s; the first fault wins and
+            // the second rides as suppressed.
+            fault?.addSuppressed(t) ?: run { fault = t }
+        }
+        fault?.let { throw it }
+    }
 
-                    usable -> {
-                        Decision.CLOSE_LATE
-                    }
+    /** Unlinks the session from its lease and chooses what becomes of it. */
+    private fun decideUnderLock(
+        connection: Connection,
+        usable: Boolean,
+    ): Decision =
+        synchronized(lock) {
+            leased--
+            when {
+                usable && state == State.OPEN -> {
+                    idle.addLast(connection)
+                    Decision.RECYCLED
+                }
 
-                    idle.size + leased + guardians > 0 || state != State.OPEN -> {
-                        Decision.CLOSE_NOW
-                    }
+                usable -> {
+                    Decision.CLOSE_LATE
+                }
 
-                    else -> {
-                        guardians++
-                        Decision.GUARD
-                    }
+                idle.size + leased + guardians > 0 || state != State.OPEN -> {
+                    Decision.CLOSE_NOW
+                }
+
+                else -> {
+                    guardians++
+                    Decision.GUARD
                 }
             }
+        }
+
+    private fun retire(
+        connection: Connection,
+        decision: Decision,
+    ) {
         when (decision) {
             Decision.RECYCLED -> Unit
             Decision.CLOSE_LATE -> closeLate(connection, usable = true)
@@ -374,10 +447,13 @@ internal class H2ConnectionPool(
 
     /** Drops an unusable session that is not the database's last holder. */
     private fun discardNow(connection: Connection) {
-        closePhysical(connection)
-        synchronized(lock) {
-            physical--
-            discarded++
+        try {
+            closePhysical(connection)
+        } finally {
+            synchronized(lock) {
+                physical--
+                discarded++
+            }
         }
     }
 
@@ -397,10 +473,14 @@ internal class H2ConnectionPool(
             LOG.error("tempdb database for execution {} is LOST: its last connection failed and no replacement opened", executionId)
         }
         // The guardian closes AFTER its successor exists (or after the pool decided nothing can
-        // hold the database any more) — never before.
-        closePhysical(guardian)
-        synchronized(lock) { physical-- }
-        lateReplacement?.let { closeLate(it, usable = true) }
+        // hold the database any more) — never before. Exception-safe: a close that faults still
+        // releases the guardian's slot and still retires a late replacement.
+        try {
+            closePhysical(guardian)
+        } finally {
+            synchronized(lock) { physical-- }
+            lateReplacement?.let { closeLate(it, usable = true) }
+        }
     }
 
     /**
@@ -451,9 +531,16 @@ internal class H2ConnectionPool(
                 val last = leased + opening + guardians == 0
                 if (last && usable) deferredSweep.also { deferredSweep = null } else null
             }
-        sweep?.let { runSweep(connection, it) }
-        closePhysical(connection)
-        synchronized(lock) { physical-- }
+        try {
+            sweep?.let { runSweep(connection, it) }
+        } finally {
+            // The sweep's fault (an Error past runSweep's own catch) must not skip the close.
+            try {
+                closePhysical(connection)
+            } finally {
+                synchronized(lock) { physical-- }
+            }
+        }
     }
 
     private fun runSweep(
@@ -463,20 +550,33 @@ internal class H2ConnectionPool(
         try {
             sweep(connection)
             true
-        } catch (e: SQLException) {
-            // pipeline.staging.cleanup_failed — logged, never rethrown from close() (§3.4).
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            // pipeline.staging.cleanup_failed — logged, never rethrown from close() (§3.4). Any
+            // exception the sweep raises is that one failure; an Error still propagates, past a
+            // `finally` that closes every owned session first.
             LOG.warn("tempdb table cleanup failed for execution {}: {}", executionId, e.message)
             false
         }
 
-    /** Never throws: a close that refuses must not skip the accounting that follows it. */
+    /**
+     * Closes a session the pool has finished with. A close the driver refuses is logged and
+     * COUNTED ([refusedCloses]) rather than thrown: the slot is released either way, but the
+     * counter is what says whether a raw session may still be live — a decremented counter is
+     * not a closed socket. An `Error` from the driver propagates after the count.
+     */
     private fun closePhysical(connection: Connection) {
+        var closed = false
         try {
             connection.close()
+            closed = true
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
             LOG.warn("tempdb connection close failed for execution {}: {}", executionId, e.message)
+        } finally {
+            if (!closed) synchronized(lock) { closeRefusals++ }
         }
     }
 
