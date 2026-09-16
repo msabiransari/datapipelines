@@ -339,7 +339,7 @@ The wiring lives in `app` (it owns the runnable artifact) even though the driver
 
 **Dependencies (external):**
 - `com.h2database:h2`
-- `org.jetbrains.kotlinx:kotlinx-coroutines-core` — the single staging connection is serialized by an explicit `Mutex` ([Staging §9.2](staging.md#92-serialization-is-explicit--mutex-not-the-driver)).
+- `org.jetbrains.kotlinx:kotlinx-coroutines-core` — pool admission is a coroutine `Semaphore` and every staging operation is `suspend` ([Staging §9.2](staging.md#92-one-owner-per-connection-and-session-state-is-per-lease)).
 
 **Public API:**
 - `Staging` interface

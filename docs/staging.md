@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.10 (frozen contract — additive-only changes after this point)
+**Status:** v1.14 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-08-09
+**Last updated:** 2026-09-16
 
 ---
 
@@ -30,7 +30,7 @@ This spec defines:
 2. **In-memory only.** H2 runs in `MEMORY` mode — no disk I/O, no persistence. The cost is RAM; the benefit is speed. Executions that exceed memory limits fail explicitly (rather than silently swapping to disk).
 3. **Created-on-demand, destroyed-on-completion.** The instance is created when the executor starts and destroyed deterministically when the executor finishes, regardless of success/failure. Destruction is an explicit table drop (enumerate + `DROP TABLE`, §3.4) plus a connection close in a `finally` block — **never** a reliance on garbage collection.
 4. **Tables named per the Pipeline Contract.** Tables use the exact `output.table` names declared in the pipeline (`stg_orders`, `int_revenue`). No prefixes, no UUIDs. Downstream template SQL references these names directly.
-5. **Single connection in v1, explicitly serialized.** One JDBC connection per instance, guarded by a `kotlinx.coroutines.sync.Mutex`. A JDBC `Connection` does not safely serialize concurrent callers on its own, and the executor runs nodes concurrently — the mutex is the mechanism, not an implementation detail (§9).
+5. **A bounded pool of connections, one owner per connection.** Each instance holds a small pool of JDBC connections to its database — at most `datapipelines.staging.h2.max-connections` (default 4) — and every operation **leases** exactly one for the span of its own statements and cursor (§9). A JDBC `Connection` does not safely serialize concurrent callers on its own, and the executor runs nodes concurrently: the lease is the mechanism, not an implementation detail. Independent nodes overlap inside H2 across connections; nothing ever touches a leased connection but its lease. (v1.0–v1.13: one connection guarded by a `Mutex`; replaced by #118.)
 6. **Streaming, not buffering.** Source ResultSets stream into H2 via batched inserts — constant memory regardless of result size.
 7. **Every generated identifier is validated and quoted.** Table names are validated at pipeline save time; column names arrive from user-authored SQL at runtime and are validated and double-quoted before they reach any generated DDL or DML (§4.5).
 
@@ -52,11 +52,13 @@ class H2StagingFactory(private val config: H2StagingProperties) : StagingFactory
         require(engine == StagingEngine.H2) { "v1 supports only StagingEngine.H2" }
         val jdbcUrl = "jdbc:h2:mem:exec_${executionId};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
         // Two-phase, non-admin operational connection (§9.5). Bootstrap sa creates the
-        // in-memory DB + a restricted user; the OPERATIONAL connection is opened as that
-        // user BEFORE the bootstrap closes (a bootstrap closing first would take the DB
-        // with it — §3.1 last-connection semantics), then the bootstrap is closed.
-        val operational = openRestrictedConnection(jdbcUrl)   // authenticates as STAGING_EXEC
-        return H2Staging(executionId, operational, config)
+        // in-memory DB + a restricted user; the FIRST operational connection is opened as
+        // that user BEFORE the bootstrap closes (a bootstrap closing first would take the DB
+        // with it — §3.1 last-connection semantics), then the bootstrap is closed. The pool
+        // opens further restricted connections on demand, up to max-connections (§9).
+        val first = openRestrictedConnection(jdbcUrl)          // authenticates as STAGING_EXEC
+        val pool = H2ConnectionPool(executionId, first, opener = { openRestrictedConnection(jdbcUrl) }, config.maxConnections)
+        return H2Staging(executionId, pool, config)
     }
 }
 ```
@@ -68,7 +70,7 @@ Key points:
 - **No `DB_CLOSE_DELAY`.** Default H2 semantics apply: the in-memory database exists only while at least one connection to it is open, and is discarded when the last connection closes. This is exactly the lifetime we want (§3.4). `DB_CLOSE_DELAY=-1` would keep the database alive **until JVM exit**, which in a long-lived server is an unbounded leak — one abandoned staging DB per execution, forever.
 - **`MODE=PostgreSQL`**: H2's PostgreSQL compatibility mode. Makes H2's SQL syntax closer to PG (which most users know), enables some PG-specific functions. **This is a SQL-syntax choice, not a type-system choice** — H2 still uses its own type system internally; we map canonical → H2 explicitly per [Type System §6](type-system.md#6-h2-staging-type-mapping-canonical--h2).
 - **`DATABASE_TO_LOWER=TRUE` is load-bearing, and hardcoded (not a config key).** `MODE=PostgreSQL` alone does **not** make H2 lower-fold *unquoted* identifiers the way PG does — H2 keeps its native upper-folding, so the author style the specs themselves use (`SELECT n FROM stg_orders`, [DAG Executor §6.5](dag-executor.md#65-reading-upstream-data), [Pipeline Contract §10.2](pipeline-contract.md#102-why-stable-names), Templates §11) resolved as `STG_ORDERS` and failed with SQLState `42S03` against the staged quoted-lowercase tables (§4.5): the canonical multi-node pipeline was broken end to end. This parameter is what makes §11.3's "unquoted references to staged tables work" true (verified against the pinned driver, 2.3.232). A deployment that removed it would break every multi-node pipeline, which is why it is a correctness invariant of the identifier scheme rather than an operator choice. Consequence: H2 also lower-cases its **own catalog names** (`information_schema`, `pg_catalog`, user names, schema names), so any staging-internal or test query filtering on catalog values compares them case-insensitively (`UPPER(...)`) rather than against bare upper-case literals.
-- **The operational connection is a non-admin user, not `sa`** (§9.5). A transient `sa` bootstrap creates the database and the restricted user, then closes; author SQL runs de-privileged so it cannot reach the host. (The bootstrap `sa` itself keeps its empty password for the DB's lifetime — acceptable because author SQL can never open a *new* connection to reclaim it: the functions that would let it, `LINK_SCHEMA`/`CREATE ALIAS`, are exactly what the restricted user is refused. The containment target is author SQL, not arbitrary in-JVM code, which is already game-over independent of staging.)
+- **Every operational connection is a non-admin user, not `sa`** (§9.5). A transient `sa` bootstrap creates the database and the restricted user, then closes; author SQL runs de-privileged so it cannot reach the host. Connections the pool opens later use the same URL, mode, folding and restricted credential (retained privately by the pool's opener), and are opened only while another operational connection already holds the database open — so they always land in the execution's database and never create one. (The bootstrap `sa` itself keeps its empty password for the DB's lifetime — acceptable because author SQL can never open a *new* connection to reclaim it: the functions that would let it, `LINK_SCHEMA`/`CREATE ALIAS`, are exactly what the restricted user is refused. The containment target is author SQL, not arbitrary in-JVM code, which is already game-over independent of staging.)
 - **Memory limit resolution.** The effective per-execution limit is the pipeline's `settings.tempdb.config.max_memory_mb` ([Pipeline Contract §5.1](pipeline-contract.md#51-settingstempdb--staging-engine-configuration)) when present, otherwise the global `datapipelines.staging.h2.max-memory-mb` ([Configuration §3.3](configuration.md#33-staging-tempdb)). The factory resolves this once at creation and stores it on the instance; nothing re-reads global config mid-execution.
 
 ### 3.2 Population
@@ -76,9 +78,9 @@ Key points:
 For each node whose `output.target` is `tempdb`, the executor stages the source ResultSet:
 
 ```kotlin
-// Since 108 §B the mutex is taken per batch inside the drain, not around the whole method — see
-// §4.3 and §9.2. The mapping below is unchanged and holds no lock at all: it reads the SOURCE
-// cursor's metadata and touches the staging connection not once.
+// Since 108 §B a connection is taken per batch inside the drain, not around the whole method —
+// see §4.3 and §9.2. The mapping below holds no lease at all: it reads the SOURCE cursor's
+// metadata and touches no staging connection.
 suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult {
     val metadata = resultSet.metaData
     val indices = 1..metadata.columnCount
@@ -103,10 +105,11 @@ suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialec
 
     val h2ColumnDecls = columns.map { c -> "\"${c.name}\" ${H2EgressMapper.toH2Type(c)}" }
 
-    mutex.withLock { createTable(tableName, h2ColumnDecls) }    // rejects a duplicate table — §4.5
-    // The drain takes the lock per BATCH, not for its whole length — §4.3, §9.2 (108 §B).
-    val rowsStaged = drainInto(tableName, columns, mappings, resultSet)
-    mutex.withLock { stagedRowTotal += rowsStaged }
+    reserve(tableName)                                            // the in-process duplicate guard — §4.5
+    pool.lease(INTERNAL) { createTable(it, tableName, h2ColumnDecls) }  // the database's own guard — §4.5
+    // The drain leases a connection per BATCH, not for its whole length — §4.3, §9.2 (108 §B).
+    val rowsStaged = drainInto(tableName, columns, mappings, resultSet) // rolls the partial table back on failure
+    recordStaged(rowsStaged)                                      // the §8.2 counter, under the metadata lock
 
     return StageResult(tableName, rowsStaged, columns)
 }
@@ -116,10 +119,10 @@ suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialec
 
 ### 3.3 Querying
 
-For nodes with `source: "tempdb"`, the executor runs the rendered SQL through `withQuery`, which holds the serialization lock for the **entire** consumption of the cursor — creation, execution, and the caller's row-by-row drain — so the cursor is never read while the lock is free:
+For nodes with `source: "tempdb"`, the executor runs the rendered SQL through `withQuery`, which leases one connection for the **entire** consumption of the cursor — creation, execution, and the caller's row-by-row drain — so the cursor's connection is never touched by anyone else while the cursor is open:
 
 ```kotlin
-suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T = mutex.withLock {
+suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T = pool.lease(AUTHOR) { connection ->
     connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { stmt ->
         stmt.setQueryTimeout(config.queryTimeoutSeconds)
         stmt.fetchSize = config.resultBatchSize
@@ -130,56 +133,46 @@ suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T = mut
 
 The `block` is where the executor does the downstream work:
 - A downstream node's stage operation (streaming into a new H2 table).
-- The caller node's result capture ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)) — materialized to the result store per [REST API §7](rest-api.md#7-result-delivery). That materialization is suspending Redis I/O, and it runs **inside** the lock: on a single shared connection, correctness requires no other statement execute against that connection until the cursor is fully drained.
+- The caller node's result capture ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)) — materialized to the result store per [REST API §7](rest-api.md#7-result-delivery). That materialization is suspending Redis I/O, and it runs **inside** the lease: correctness requires no other statement execute against the cursor's connection until the cursor is fully drained.
 
-This closes by construction the interleaving §9.2 warns about — earlier drafts returned a live `ResultSet` and relied on the caller's discipline to consume it before the next staging op, a guarantee the type system could not enforce (v1.5). The cost is that a large caller-node drain serializes staging for its duration; that is the §9.3 single-writer trade, and the caller node is typically terminal, so little else contends.
+This closes by construction the interleaving §9.2 warns about — earlier drafts returned a live `ResultSet` and relied on the caller's discipline to consume it before the next staging op, a guarantee the type system could not enforce (v1.5). The cost is that a long caller-node drain occupies one of the execution's connections for its duration; since #118 the other connections stay available to independent work, and at `max-connections = 1` the drain serializes staging exactly as it did before.
 
 ### 3.4 Destruction
 
 ```kotlin
 class H2Staging(
     override val executionId: UUID,
-    private val connection: Connection,
+    private val pool: H2ConnectionPool,
     private val config: H2StagingProperties,
 ) : Staging {
-    private val mutex = Mutex()
-
     override fun close() {
-        try {
-            // Non-admin cleanup: DROP ALL OBJECTS requires admin in H2 2.3.232 (§9.5), so
-            // enumerate this schema's tables from INFORMATION_SCHEMA and DROP TABLE each —
-            // both available to the restricted user. This is a belt anyway (see below).
-            dropAllStagedTables(connection)
-        } catch (e: SQLException) {
-            log.warn(
-                "tempdb table cleanup failed for execution {}: {}",
-                executionId, e.message,
-            )   // pipeline.staging.cleanup_failed — logged, never rethrown from close()
-        } finally {
-            try {
-                connection.close()   // last connection closing destroys the in-memory DB
-            } catch (e: SQLException) {
-                log.warn("tempdb connection close failed for execution {}: {}", executionId, e.message)
-            }
-        }
+        // Non-throwing, non-waiting (§6 of #118): the pool refuses new leases, runs the sweep on
+        // one owned connection when no lease is outstanding, closes every idle connection, and
+        // quarantines any lease still inside a driver call — that lease's own return finishes
+        // the sweep and closes its connection. pipeline.staging.cleanup_failed is logged, never
+        // rethrown.
+        val outcome = pool.close { connection -> dropStagedTables(connection) }
+        if (outcome.leasesOutstanding > 0) log.warn("tempdb closed with {} lease(s) in flight …", …)
     }
 }
 ```
 
 Two independent mechanisms, in order:
 
-1. **Enumerate-and-drop** (`INFORMATION_SCHEMA.TABLES` → `DROP TABLE` per table) — releases every staged table's memory immediately and deterministically, before the connection close. Belt. (`DROP ALL OBJECTS` would be simpler but is admin-gated in H2 2.3.232, and the staging user is non-admin by §9.5; the enumerate-and-drop uses only non-admin operations.)
-2. **`connection.close()`** — with default close semantics (§3.1), closing the only connection destroys the in-memory database itself. Braces. This is the primary guarantee; step 1 only accelerates memory release within a long-lived JVM.
+1. **Enumerate-and-drop** (`INFORMATION_SCHEMA.TABLES` → `DROP TABLE` per table) — releases every staged table's memory immediately and deterministically, before the last connection close. Belt. (`DROP ALL OBJECTS` would be simpler but is admin-gated in H2 2.3.232, and the staging user is non-admin by §9.5; the enumerate-and-drop uses only non-admin operations.) The sweep runs only when it cannot race an active borrower: on a connection the pool owns, after leases are refused, when none is outstanding — otherwise it is deferred to the last late return.
+2. **Closing every owned connection** — with default close semantics (§3.1), closing the *last* connection destroys the in-memory database itself. Braces. This is the primary guarantee; step 1 only accelerates memory release within a long-lived JVM.
 
 Neither step depends on garbage collection. `close()` never throws: it is invoked from the executor's `finally` block, where an exception would mask the execution's real failure. A failed cleanup is logged and surfaces as `pipeline.staging.cleanup_failed` (§7.2) in the execution's error detail when the execution is otherwise successful.
+
+**`close()` never waits for a lease still inside the driver.** The executor's node deadline can abandon a body that is blocked in a JDBC call the driver refuses to interrupt ([DAG Executor §5.3](dag-executor.md#53-concurrency-controls)); waiting for it in `close()` would turn one unresponsive statement into an unbounded shutdown wait, and closing or resetting the connection under it would corrupt a call in progress. Such a lease is quarantined: it keeps its connection — and with it the database — until the call returns, at which point the return runs the deferred sweep once and closes the connection. The residual is stated honestly: a driver call that *never* returns keeps one connection and one in-memory database alive; the executor logs the abandonment (`node.statement_abandoned`) and the pool logs the outstanding lease count at close.
 
 ### 3.5 Lifecycle guarantee
 
 The H2 instance **cannot outlive the execution**:
 
-- **Opened at execution start.** The executor calls `StagingFactory.create(executionId)` and holds the single connection open for the whole execution — including the periods when no node is touching staging. This is what keeps the database alive: default H2 semantics discard an in-memory DB the moment its last connection closes, so a "open a connection per operation" model would destroy the staged tables between nodes.
+- **Opened at execution start.** The executor calls `StagingFactory.create(executionId)`, and the instance's pool keeps at least one operational connection open for the whole execution — including the periods when no node is touching staging. This is what keeps the database alive: default H2 semantics discard an in-memory DB the moment its last connection closes, so an "open a connection per operation" model would destroy the staged tables between nodes. Idle pooled connections are never closed while the instance is open; a broken connection is replaced before it is closed (§9.2).
 - **Held in a local** inside `PipelineExecutor.execute(...)`; no reference escapes to a long-lived object, cache, or registry.
-- **Closed in the `finally`** of that same function ([DAG Executor §5](dag-executor.md#5-execution-lifecycle), [§9](dag-executor.md#9-tempdb-lifecycle-integration)) — on success, on node failure, on execution timeout, and on cancellation (client disconnect beyond grace, `DELETE /api/v1/executions/{id}`, or shutdown).
+- **Closed in the `finally`** of that same function ([DAG Executor §5](dag-executor.md#5-execution-lifecycle), [§9](dag-executor.md#9-tempdb-lifecycle-integration)) — on success, on node failure, on execution timeout, and on cancellation (client disconnect beyond grace, `DELETE /api/v1/executions/{id}`, or shutdown). The pool, not a single connection, is the lifetime owner: `close()` closes every connection it holds (§3.4).
 - **No GC dependency anywhere.** The previous version of this spec claimed the `-1` close-delay flag tied the database's lifetime to open connections. That was factually wrong (§3.1), and the flag is gone.
 
 A JVM crash mid-execution abandons the in-memory DB, which is fine — it is process memory, reclaimed by the OS.
@@ -221,27 +214,31 @@ Notes:
 
 ### 4.3 Batch inserts
 
-**The source cursor is drained outside the mutex (108 §B).** The loop below is the shape: read up
-to `insert-batch-size` rows from the source cursor holding no lock, then take the lock for the
-`INSERT` and the throttled budget check. The materialised batch is the cost, and it is bounded by
-`insert-batch-size`; what it buys is that the per-execution staging lock is never held across a
-network wait on the source database.
+**The source cursor is drained holding no lease (108 §B, #118).** The loop below is the shape: read
+up to `insert-batch-size` rows from the source cursor holding nothing, lease a connection for the
+`INSERT`, close the statement, return the lease, read the next batch. The materialised batch is the
+cost, and it is bounded by `insert-batch-size`; what it buys is that none of the execution's few
+connections is ever held across a network wait on the source database. A `PreparedStatement` never
+crosses a returned lease — the next batch may land on a different physical connection — so the
+insert is re-prepared per batch (H2's per-session query cache makes that a lookup after the first).
+`stageRows` pulls its child-row sequence in the same batches, holding no lease between them.
 
 ```kotlin
 private suspend fun drainBatches(...): Long {
     var rowCount = 0L
     while (true) {
-        val batch = readBatch(rs, mappings, config.insertBatchSize)   // NO lock held here
+        ensureActive()                                                   // a cancelled node stops at the batch boundary
+        val batch = readBatch(rs, mappings, config.insertBatchSize)      // NO lease held here
         if (batch.isNotEmpty() || rowCount == 0L) {
-            mutex.withLock {                                          // the connection, serialized
-                insertBatch(tableName, stmt, batch, sqlTypes)
-                checkBudgetIfDue(...)
+            pool.lease(INTERNAL) { connection ->                         // one connection, this batch only
+                insertBatch(connection, tableName, columns, sqlTypes, batch)   // prepare, bind, executeBatch, close
             }
+            checkBudgetIfDue(...)                                        // the JVM's reading — no connection needed
         }
         rowCount += batch.size
         if (batch.size < config.insertBatchSize) break
     }
-    mutex.withLock { checkMemoryBudget() }
+    checkMemoryBudget()
     return rowCount
 }
 ```
@@ -478,6 +475,7 @@ Keys consumed by this spec:
 | `datapipelines.staging.h2.insert-batch-size` | Rows per INSERT batch (§4.3) |
 | `datapipelines.staging.h2.result-batch-size` | Fetch size when reading staged data out (§3.3, §6.1) |
 | `datapipelines.staging.h2.query-timeout-seconds` | `Statement.setQueryTimeout` on staging queries (§3.3) |
+| `datapipelines.staging.h2.max-connections` | Cap on operational connections per execution's pool (§9) |
 
 **Per-pipeline override.** `settings.tempdb.engine` selects the engine and `settings.tempdb.config.max_memory_mb` overrides `max-memory-mb` for that pipeline ([Pipeline Contract §5.1](pipeline-contract.md#51-settingstempdb--staging-engine-configuration), precedence per [Configuration §4](configuration.md#4-precedence)). No other staging key is per-pipeline overridable in v1.
 
@@ -549,49 +547,53 @@ If the JVM OOMs mid-execution, the in-memory staging database dies with the proc
 
 ---
 
-## 9. Single-Connection Model (v1)
+## 9. Connection Model
 
 ### 9.1 The choice
 
-Each staging instance is backed by **one** operational JDBC connection, opened at execution start and held until the executor's `finally` (§3.5). This means:
-- Every node that touches staging — staging in, querying out, DML against tempdb — uses that one connection.
-- The connection is also what keeps the in-memory database alive; it cannot be opened and closed per operation.
+Each staging instance is backed by a **bounded pool** of operational JDBC connections to its database — at most `datapipelines.staging.h2.max-connections` (default **4**, `1` allowed), the bootstrap-handoff connection included ([Configuration §3.3](configuration.md#33-staging-tempdb); #118). This means:
+- Every node that touches staging — staging in, querying out, DML against tempdb — **leases** one connection for the span of its own statements and cursor, and returns it.
+- The pool grows on demand from the one bootstrap-handoff connection; four is a ceiling, not an eager allocation. At least one connection stays open for the whole execution, which is what keeps the in-memory database alive (§3.5).
+- The cap is **capacity, not parallelism**: it bounds how many of one execution's tempdb operations can be inside H2 at the same instant. It creates no additional eligible DAG nodes (`executor.max-parallel-nodes` does) and promises no speedup — H2 keeps its own transaction, row and catalog locks, so two nodes touching one table still serialize inside the engine. A cap below `max-parallel-nodes` queues nodes safely; a cap above it is never fully opened.
 
-That operational connection authenticates as a **non-admin H2 user** (§9.5) — the transient admin connection that creates the database also creates the restricted user, and is closed before the module does any work.
+Every operational connection authenticates as the same **non-admin H2 user** (§9.5) — the transient admin connection that creates the database also creates the restricted user, and is closed before the module does any work. Connections opened later reuse that credential, which the pool's opener retains privately for the execution's lifetime.
 
-### 9.2 Serialization is explicit — `Mutex`, not the driver
+v1.0–v1.13 held **one** connection guarded by a `kotlinx.coroutines.sync.Mutex`; the pool replaced it because the executor runs up to `max-parallel-nodes` nodes concurrently and their tempdb work — CTAS chains, DML, staging inserts — could not overlap at all.
 
-The executor runs nodes **concurrently** (up to `datapipelines.executor.max-parallel-nodes`), so concurrent access to the staging connection genuinely happens; two nodes can complete their source fetches at the same time and both try to stage. A JDBC `Connection` is **not** required by the JDBC spec to serialize concurrent callers safely, and H2's connection is not a safe multiplexing point: interleaved statement execution on one connection can corrupt statement state, scramble results, or throw obscure driver errors.
+### 9.2 One owner per connection, and session state is per lease
+
+The executor runs nodes **concurrently** (up to `datapipelines.executor.max-parallel-nodes`), so concurrent access to staging genuinely happens; two nodes can complete their source fetches at the same time and both try to stage. A JDBC `Connection` is **not** required by the JDBC spec to serialize concurrent callers safely, and H2's connection is not a safe multiplexing point: interleaved statement execution on one connection can corrupt statement state, scramble results, or throw obscure driver errors.
 
 Therefore:
 
-- `H2Staging` owns a `kotlinx.coroutines.sync.Mutex` (`kotlinx.coroutines.sync.Mutex`, **not** a `java.util.concurrent.locks.Lock` — the callers are coroutines and must suspend, not block an executor thread).
-- Every method that touches the connection — `stage`, `withQuery`, `execute`, `stats` — acquires the mutex. These methods are `suspend` functions for that reason (§10).
-- **The invariant is about the CONNECTION, not about the network (108 §B).** `stage()` no longer holds the mutex for its whole drain: it reads a batch from the source cursor holding NO lock, takes the lock for the `INSERT`, releases it, and reads the next batch. Every *use* of the staging connection is still inside the lock — the `CREATE TABLE`, every `executeBatch`, the budget check, the rollback, the statement close — so no two callers are ever inside the connection at once. What changed is that the per-execution lock is no longer held across a network wait on someone else's database. Until 108 it was, and two independent source nodes of one pipeline therefore staged strictly one after the other; a tempdb SELECT queued behind a multi-million-row fetch it did not depend on, and pipeline authors were adding artificial `depends_on` edges because they could see the contention. `H2StagingConcurrencyTest` asserts BOTH halves: the two source cursors' read windows must intersect (timestamps, not a green suite), and the connection's peak concurrent-call count must stay 1.
-- One `PreparedStatement` therefore stays open across several lock acquisitions. That is legal and is what makes the drain cheap; the guard that used to read "statement created until closed" now brackets each CALL instead, because the old formulation would have read 2 for a perfectly serialized run.
-- Consumption discipline for cursors is enforced by construction, not convention: `withQuery(sql) { rs -> … }` (§3.3, §10) holds the mutex for the whole lifetime of the cursor, including the caller node's suspending drain to the result store (§6.1). There is no API that returns a live `ResultSet` to be read after the lock is released, so a downstream `stage`/`execute` on the shared connection cannot interleave with an open cursor — the state-corruption case this section warns about is unreachable.
-- Direct SQL access goes through `withConnection(block)` (§10), which acquires this same mutex for the duration of the block: the connection is never handed out unguarded, and the mutex itself is not reachable — or even observable — from outside the implementation. (The v1.2 contract exposed a `connection` property and made callers "responsible for taking the mutex"; that contract was unsatisfiable — the mutex is private, so no caller could ever take it — and is corrected here.) Two rules bind the block: it must not re-enter any staging operation (the lock is not reentrant, so `stage`/`query`/`execute`/`stats`/`withConnection` from inside the block deadlocks), and nothing derived from the connection (statements, cursors) may outlive the block.
+- **A lease exclusively owns one physical connection** through its statements and result sets, from checkout to the end of its `finally`, on every exit — value, exception, cancellation, a failed checkout. Nothing outside the lease touches that connection: not the reset, not `close()`. Admission past the cap is a cancellable coroutine `Semaphore` — a waiter **suspends** on the executor's bounded dispatcher rather than blocking a thread the lease holders need, and a waiter cancelled by its node or execution deadline never runs SQL and never strands a permit.
+- **Independent work overlaps across connections.** Two nodes inside H2 at the same instant run on two different connections; `H2StagingConcurrencyTest` proves it with a barrier *inside* a driver call on two leases — a global lock around SQL, batches or cursor consumption reintroduced anywhere makes that guard fail. The per-connection half is the old invariant unchanged: no physical connection ever has two callers inside it.
+- **The invariant is about the CONNECTION, not about the network (108 §B).** `stage()` reads a batch from the source cursor holding no lease, leases a connection for the `INSERT` and closes its statement before returning it, then reads the next batch (§4.3). A network wait on someone else's database never holds one of this execution's connections. `stageRows` pulls its child-row sequence the same way.
+- **Cursor consumption is enforced by construction, not convention:** `withQuery(sql) { rs -> … }` (§3.3, §10) retains its lease for the whole lifetime of the cursor, including the caller node's suspending drain to the result store (§6.1). There is no API that returns a live `ResultSet` to be read after the lease is returned. Other connections remain available to independent work during a long drain.
+- **Direct SQL access goes through `withConnection(block)`** (§10), which leases one connection for the duration of the block: the connection is never handed out unguarded, and the pool itself is not reachable — or even observable — from outside the implementation. Two rules bind the block: it must **not re-enter** any staging operation (`stage`/`withQuery`/`execute`/`stats`/`withConnection` from inside the block deadlocks at `max-connections = 1` and, above it, holds one connection idle while waiting for another), and nothing derived from the connection (statements, cursors) may outlive the block.
+- **What is still coordinated, and how narrowly.** Two things are shared across leases and guarded by one short metadata lock that never covers JDBC, a source read, a result-store write, a callback, a suspension or a wait for a lease: the set of **table-name reservations** (the deterministic `table_already_exists` guard, §4.5) and the **successful staged-row total** `stats()` reports (§8.2). A name is reserved before `CREATE TABLE`, so the loser of a duplicate race is refused at the reservation and never reaches the database — it cannot drop the winner's table. A failure after `CREATE TABLE` rolls the partial table back on a fresh, bounded lease (`NonCancellable`, because the node's own deadline is the usual cause) and frees the reservation **only when the drop succeeded**: a name whose partial table could not be removed stays owned, so a retry meets `table_already_exists` rather than silently reusing dirty data. `stats()` reads each figure once, on its own; it does not claim a transactionally frozen snapshot of a database other nodes are writing to.
+- **Ordinary staged tables are execution-wide database objects.** Every statement runs in autocommit, so a producer node's `CREATE TABLE` and every flushed batch are committed before the node completes, and the executor starts a dependent node only after its dependencies completed — a dependent therefore sees the whole table whichever physical connection it draws. `depends_on` expresses real data dependencies; there is no implicit global SQL queue and no promised ordering between independent nodes that touch the same table.
+- **Session state is per lease, never a cross-node channel.** Each callback or node SQL operation gets one session for its own statement/cursor lifetime. When a lease returns, the connection is sanitized against the pinned driver before anyone else can draw it: an open transaction is **rolled back, never committed** (`setAutoCommit(true)` mid-transaction would commit, so the rollback runs first); the isolation level, current schema and schema search path go back to their captured defaults; session variables (`SET @var`), local temporary tables and a session time zone are enumerated from `INFORMATION_SCHEMA.SESSION_STATE`'s `STATE_KEY` — H2's own discriminator for exactly these kinds of state, so this is a catalog enumeration, not a parser over SQL — and undone one by one; `QUERY_TIMEOUT` and `LOCK_TIMEOUT` go back to the driver's defaults. Statements within one callback keep their session, as before. Any other `SET` an author can issue (`VARIABLE_BINARY`, `NON_KEYWORDS`, `THROTTLE`, …) is **not** restored and is unsupported across nodes: whichever idle connection a later node draws, it must not depend on what an earlier node left there — cross-node communication is ordinary tables plus `depends_on`, whatever the cap. `max-connections = 1` selects capacity; it is not a promise to preserve leaked session state.
+- **A failed reset is a discarded connection.** A connection whose sanitation throws, or that is found closed on return, is never offered to another node. If it is the last physical connection while the instance is open, its replacement is opened **before** it is closed — closing the last connection would destroy the database with every staged table on it — so the cap on *usable* connections holds while the process briefly carries one extra dead session. Session sanitation is documented and tested in `H2SessionReset` / `H2ConnectionPoolTest` (a dirtied session is returned at capacity one, forcibly reused, and shown clean; two fresh connections would prove nothing).
 
-This corrects the earlier claim (and [DAG Executor §12.1](dag-executor.md#121-race-conditions-considered)) that there is "no concurrent tempdb access." There is; it is serialized by this mutex.
+This corrects the earlier claim (and [DAG Executor §12.1](dag-executor.md#121-race-conditions-considered)) that there is "no concurrent tempdb access." There is; it is bounded by the pool and safe because each connection has one owner at a time.
 
-### 9.3 Why single-connection for v1
+### 9.3 What the pool does and does not buy
 
-- **Simpler semantics.** One writer at a time; no isolation-level questions, no in-database deadlocks between our own nodes.
-- **Sufficient performance for v1.** The slow part of a node is fetching from source databases (network + remote DB processing). Staging into H2 is local and fast; serializing it adds little wall-clock time.
-- **Cleaner lifecycle.** One connection to hold and close — and holding exactly one connection is what defines the database's lifetime (§3.5).
-
-The cost is real and named: with N source nodes finishing simultaneously, their staging inserts run one after another. That is the trade accepted for v1.
+- **Overlap, not a multiplier.** Independent CTAS/DML/staging inserts of one execution now run inside H2 at the same time, bounded by the cap. Whether that is faster depends on the pipeline: H2's DDL takes a database-wide meta lock, inserts into one table contend on that table, and the JVM's CPUs are shared. Measured figures live with the change's evidence, not in this spec; nothing here promises a speedup.
+- **Aggregate cost.** Every connection is one H2 session with its own query working memory; `max-concurrent-executions-per-instance` executions can each hold up to `max-connections` of them. The staged tables themselves are shared by an execution's connections and are **not** multiplied, and the §8.2 budget check keeps its cadence (per drain, not per connection) and its process-wide reading.
+- **Simpler where it counts.** No validation queries, no maximum lifetime, no eviction, no threads of its own: the database the pool fronts lives exactly as long as the pool does, so the general-purpose machinery has nothing to do here. H2's bundled `JdbcConnectionPool` was read against the pinned driver and not used: its exhausted checkout busy-polls on the caller's thread, its return reset is partial (`rollback` + autocommit) and swallows failures, and it has no discard or ownership model — the adapter needed around it would have been larger than the pool that replaced it.
 
 ### 9.4 When to revisit
 
-If profiling shows staging serialization is a bottleneck (likely only on pipelines with many parallel source nodes and small per-source data), v1.1 can switch to a small H2 connection pool. Note this changes the lifecycle rule too: with a pool, the database lives as long as *any* pooled connection is open, so the pool — not a single connection — becomes the lifetime owner, and the `finally` must close the pool. The `Staging` interface does not change.
+If profiling shows the cap itself is the bottleneck (many independent tempdb-heavy nodes, `max-parallel-nodes` raised above four), raise `max-connections` for that deployment — it is a runtime setting. A per-pipeline override, connection validation or an acquisition-timeout knob are deliberately absent: the node and execution deadlines already bound every wait, and evidence, not anticipation, adds knobs.
 
 ### 9.5 Privilege containment — author SQL runs de-privileged (normative)
 
 The rendered SQL that `withQuery`/`execute` run is **author-authored** (a pipeline author's template body, §4.4 of [Templates](templates.md)). H2's admin-only surface reaches the host: `FILE_READ`/`FILE_WRITE`/`CSVWRITE`/`CSVREAD` read and write server files, `CREATE ALIAS`/`CREATE TRIGGER … AS` load JVM classes, `RUNSCRIPT`/`LINK_SCHEMA` fetch and execute. An `sa` (admin) staging session therefore turns "author may write tempdb SQL" into "author may read `/proc/self/environ`" — where `DATAPIPELINES_DB_ENCRYPTION_KEY` and `DATAPIPELINES_JWT_SECRET` live ([Configuration §2](configuration.md#2-required-configuration)). That is privilege escalation from `author` to all-datasource-credentials and session forgery, and it is **not** an accepted trade (contrast §4.4's SQL-injection note, which concerns the author's *own* authorized datasources, not the server's secrets).
 
 Therefore:
-- The database is created by a **transient bootstrap** admin (`sa`) connection, which immediately creates a restricted user (`CREATE USER STAGING_EXEC PASSWORD '<256-bit random hex>'` + `GRANT ALTER ANY SCHEMA` — no admin right) and is then **closed**. The one operational connection the module holds (§9.1) authenticates as that restricted user, and is what keeps the in-memory database alive thereafter. (`ALTER ANY SCHEMA` is the least grant that lets the user do PUBLIC DDL — `GRANT ALL ON SCHEMA PUBLIC` alone leaves `CREATE TABLE` refused; a user-owned schema forces `SET SCHEMA` and rewrites. It also permits DDL inside `INFORMATION_SCHEMA`, which is accepted: the database is a throwaway per-execution in-memory instance with no host reach, and author SQL can already `CREATE TABLE` in it — a junk table in a schema about to be dropped is not an escalation.)
+- The database is created by a **transient bootstrap** admin (`sa`) connection, which immediately creates a restricted user (`CREATE USER STAGING_EXEC PASSWORD '<256-bit random hex>'` + `GRANT ALTER ANY SCHEMA` — no admin right) and is then **closed**. Every operational connection the module holds (§9.1) authenticates as that restricted user; the pool's connections are what keep the in-memory database alive thereafter, and connections opened after the bootstrap closed are still that user — `H2StagingPoolLifecycleTest` runs the refusals on three concurrent physical connections. (`ALTER ANY SCHEMA` is the least grant that lets the user do PUBLIC DDL — `GRANT ALL ON SCHEMA PUBLIC` alone leaves `CREATE TABLE` refused; a user-owned schema forces `SET SCHEMA` and rewrites. It also permits DDL inside `INFORMATION_SCHEMA`, which is accepted: the database is a throwaway per-execution in-memory instance with no host reach, and author SQL can already `CREATE TABLE` in it — a junk table in a schema about to be dropped is not an escalation.)
 - Under that user, every host-reaching function is refused with SQLState 90040 ("Admin rights are required") — **empirically verified against H2 2.3.232**: `FILE_READ`, `FILE_WRITE`, `CSVREAD`, `CSVWRITE`, `CREATE ALIAS`, `RUNSCRIPT`, `LINK_SCHEMA`, `CREATE TRIGGER … AS`, plus the self-escalation routes `ALTER USER … ADMIN TRUE` / `CREATE USER` / `SET`. So author SQL cannot reach the host filesystem, load a class, or grant itself admin.
 - **The staging layer avoids the two admin-gated operations it would otherwise use.** `MEMORY_USED()` and `DROP ALL OBJECTS` are *also* admin-gated (90040) in this H2 version — so accounting uses an in-process heap reading (§8.2) and cleanup enumerates `INFORMATION_SCHEMA.TABLES` and drops each table (§3.4), both non-admin. `CREATE`/`INSERT`/`SELECT`/`DROP TABLE` and reading `INFORMATION_SCHEMA` — everything the staging layer needs — are available to the restricted user.
 - The admin-gating is **guarded by a test** (`h2` in `libs.versions.toml`): it runs `FILE_READ`, `CSVWRITE`, and `CREATE ALIAS` as the restricted user and asserts each is refused. A driver upgrade re-runs it; if a future H2 un-gates one for non-admin users, the test fails and the containment is revisited before shipping.
@@ -606,9 +608,9 @@ The interface is engine-agnostic, allowing DuckDB (or other engines) to be plugg
 ```kotlin
 interface Staging : AutoCloseable {
     val executionId: UUID
-    // Direct SQL for SQL nodes: runs block with the serialization lock held throughout (§9.2).
-    // block must not re-enter staging operations (the lock is not reentrant), and nothing
-    // derived from the Connection may escape the block.
+    // Direct SQL for SQL nodes: runs block on one leased connection, owned throughout (§9.2).
+    // block must not re-enter staging operations (never nest a lease), and nothing derived
+    // from the Connection may escape the block. Session state is reset when the lease returns.
     suspend fun <T> withConnection(block: suspend (Connection) -> T): T
 
     suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult
@@ -619,10 +621,11 @@ interface Staging : AutoCloseable {
     // budget check; warnings always empty — the source-dialect mapping already happened
     // in the child's executor.
     suspend fun stageRows(tableName: String, columns: List<ColumnSchema>, rows: Sequence<List<Any?>>): StageResult
-    // Runs block against the cursor with the serialization lock held for the WHOLE consumption
-    // (§3.3/§9.2). The cursor is never handed out to be read after the lock is released, so a
-    // concurrent stage()/execute() on the shared connection cannot interleave. block must fully
-    // consume (or abandon) the cursor before it returns; nothing derived from it escapes.
+    // Runs block against the cursor with its connection leased for the WHOLE consumption
+    // (§3.3/§9.2). The cursor is never handed out to be read after the lease is returned, so
+    // nothing can interleave on the cursor's connection; other connections stay available.
+    // block must fully consume (or abandon) the cursor before it returns; nothing derived
+    // from it escapes.
     suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T
     suspend fun execute(sql: String): Long    // INSERT/UPDATE/DELETE/DDL against staging; returns row count
 
@@ -652,7 +655,7 @@ data class StagingStats(
 For analytical workloads (large joins, aggregations on wide tables), DuckDB would outperform H2. The interface above is designed so that `DuckDbStaging` could be a drop-in replacement. Differences:
 - JDBC URL: `jdbc:duckdb:memory:exec_{id}`.
 - Type mapping: similar but DuckDB has `HUGEINT`, native nested types.
-- Parallelism: DuckDB is internally parallel (one connection parallelizes queries), so the mutex could be relaxed — but only after verifying DuckDB's JDBC connection is documented thread-safe for concurrent statements.
+- Parallelism: DuckDB is internally parallel (one connection parallelizes queries), so the lease model could be revisited — but only after verifying DuckDB's JDBC connection is documented thread-safe for concurrent statements.
 - Memory accounting: DuckDB has its own `memory_limit` setting and `duckdb_memory()` view; `MEMORY_USED()` is H2-specific.
 
 Marked as v2 candidate, not v1. Requesting an engine that is not on the classpath fails with `pipeline.staging.engine_unavailable`.
@@ -694,8 +697,10 @@ These are documented in the authoring guide (future).
 - **Duplicate-table test**: staging the same table name twice in one execution → `pipeline.staging.table_already_exists`, first table's rows intact.
 - **Integration tests** for staging: stage a ResultSet from a mock source, query it back, verify round-trip (type fidelity + row count + value equality).
 - **Streaming tests**: stage 1M rows with limited JVM heap; verify constant transfer memory.
-- **Concurrency test**: two coroutines calling `stage()` on the same instance simultaneously complete correctly and serialize (both tables present, correct row counts, no driver errors) — the test must fail if the mutex is removed. Since 108 it asserts the other half too: the two source cursors' read windows must OVERLAP in wall-clock time. Both assertions are needed and neither implies the other — a green row count is satisfied by strict serialization, and overlapping reads are satisfied by a removed mutex.
-- **Lifecycle tests**: after `close()`, `connection.isClosed` is true AND a fresh connection to the same `jdbc:h2:mem:exec_{id}` URL finds the **`STAGING_EXEC` user gone** (`SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME)='STAGING_EXEC'` = 0 — case-insensitively, because `DATABASE_TO_LOWER=TRUE` stores the unquoted-created user as `staging_exec`; the bare literal would count 0 while the user was alive, exactly the vacuous shape this test exists to rule out) — this is the regression test for `DB_CLOSE_DELAY=-1` ever returning. It must key on something the §3.4 cleanup does **not** remove: an *empty* fresh database no longer distinguishes "destroyed" from "survived-but-emptied" now that cleanup drops the tables before closing, so the old "sees an empty database" assertion is satisfied even if the DB survived — the user (dropped only when the DB itself dies) is the falsifiable signal. Separately, prove the §3.4 enumerate+`DROP TABLE` belt actually runs: hold a second peer connection open to the same URL so the DB survives `connection.close()`, `close()` the instance, then assert **through the peer** that the staged tables are gone. Also: `close()` on a connection already broken does not throw.
+- **Concurrency tests** (§9.2): two coroutines calling `stage()` on the same instance simultaneously complete correctly on distinct physical connections, and no physical connection ever has two callers inside it (a per-connection gauge). Real overlap is proved by an event, not a timing: two author blocks meet on a barrier *inside* a driver call, which only both can reach on two leases — a global lock reintroduced around SQL makes that guard red. The 108 half stays: the two source cursors' read windows must OVERLAP in wall-clock time, at capacity one too. Plus: a cursor blocked in result delivery does not stop an independent operation; a duplicate name raced by two stages has exactly one winner and an intact table; `stats()` under concurrent writers counts every completed stage once; a table committed by one connection is visible to a read on another.
+- **Pool tests** (`H2ConnectionPoolTest`): the cap is never exceeded and waiters queue; capacity one makes progress under more ready tasks than dispatcher threads; a waiter cancelled in the queue leaves capacity for the next caller; a dirtied session (schema, search path, variable, local temporary table, time zone, timeouts, isolation, an uncommitted insert) is forcibly reused at capacity one and shown clean with the insert rolled back, not committed; a failed reset discards the connection and replaces it before closing when it is the last; close is idempotent, refuses new leases, never waits for an active lease, and the late return finishes cleanup exactly once; an opener failure returns its permit; no method returns a connection.
+- **Lifecycle tests beyond §3.4** (`H2StagingPoolLifecycleTest`): close against an open cursor; creation failure after the operational connection opened destroys the half-built database; a database shut down under a lease fails that lease and `close()` still does not throw; a partial table whose drop refuses keeps its name owned; a stage cancelled mid-drain at capacity one still rolls back; child rows are pulled between leases, never inside one; two executions cannot see each other's objects; every physical connection is the restricted user.
+- **Lifecycle tests**: after `close()`, a new lease is refused AND a fresh connection to the same `jdbc:h2:mem:exec_{id}` URL finds the **`STAGING_EXEC` user gone** (`SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME)='STAGING_EXEC'` = 0 — case-insensitively, because `DATABASE_TO_LOWER=TRUE` stores the unquoted-created user as `staging_exec`; the bare literal would count 0 while the user was alive, exactly the vacuous shape this test exists to rule out) — this is the regression test for `DB_CLOSE_DELAY=-1` ever returning. It must key on something the §3.4 cleanup does **not** remove: an *empty* fresh database no longer distinguishes "destroyed" from "survived-but-emptied" now that cleanup drops the tables before closing, so the old "sees an empty database" assertion is satisfied even if the DB survived — the user (dropped only when the DB itself dies) is the falsifiable signal. Separately, prove the §3.4 enumerate+`DROP TABLE` belt actually runs: hold a second peer connection open to the same URL so the DB survives `connection.close()`, `close()` the instance, then assert **through the peer** that the staged tables are gone. Also: `close()` on a connection already broken does not throw.
 - **Memory-limit test**: stage past a deliberately small `max_memory_mb`; assert `pipeline.staging.memory_limit_exceeded` and that the measured in-process JVM-heap reading (not an estimate) drove the decision — with the budget anchored to a measured baseline + headroom, since the reading is JVM-heap-wide (§8.2).
 - **Type round-trip tests** for every canonical type:
   - Source value → staged → queried back → wire-encoded → asserted equal to source.
@@ -708,8 +713,8 @@ These are documented in the authoring guide (future).
 ### 13.1 Frozen in v1
 
 - The `Staging` interface and `StagingFactory.create(executionId, engine)` signature.
-- The lifecycle: single (non-admin, §9.5) connection opened at execution start, held for the execution, table drop (enumerate + `DROP TABLE`, §3.4) + close in `finally`, no GC reliance.
-- The single-connection + explicit-`Mutex` serialization model.
+- The lifecycle: a bounded pool of non-admin (§9.5) connections, the first opened at execution start and at least one held for the execution, table drop (enumerate + `DROP TABLE`, §3.4) + close of every connection in `finally`, no GC reliance, no waiting on a lease still inside the driver.
+- The one-owner-per-connection lease model and per-lease session state (§9.2).
 - Identifier safety: column-name regex, duplicate rejection, unconditional double-quoting, no sanitizing.
 - The canonical → H2 type mapping (per [Type System §6](type-system.md#6-h2-staging-type-mapping-canonical--h2)).
 - Table names = `output.table` from pipeline nodes (no prefixes).
@@ -718,7 +723,7 @@ These are documented in the authoring guide (future).
 
 - H2 mode (`PostgreSQL` today, could switch).
 - Batch sizes and timeouts (configuration, per [Configuration §3.3](configuration.md#33-staging-tempdb)).
-- Single-connection model (could become a pool in v1.1 — see §9.4 for the lifecycle consequence).
+- The default and ceiling of `max-connections` (configuration; the model is frozen, the number is not — §9.4).
 - Memory-polling granularity (per staging operation today; could tighten).
 - The H2-specific class names (only the `Staging` interface is the contract).
 
@@ -740,6 +745,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v1.14 | 146 / #118 bounded H2 connection pool | The single operational connection and its global `Mutex` are replaced by a bounded per-execution **pool** with one owner per connection (§2 principle 5, §3.1, §3.3, §3.4, §3.5, §4.3, §7.1, §9 rewritten, §10 comments, §12, §13). New key `datapipelines.staging.h2.max-connections` (default 4, `1` allowed). Leases replace lock acquisitions; a `PreparedStatement` never crosses a returned lease; session state is per lease and sanitized on return against the pinned driver (`INFORMATION_SCHEMA.SESSION_STATE`); a failed reset discards and replaces the connection; name reservations and the row total keep one short metadata lock; `close()` never waits for a lease still inside the driver and the late return finishes cleanup once. H2's bundled `JdbcConnectionPool` read and not used (§9.3). |
 | 2026-09-04 | v1.13 | sample metrics authoring | §11.3 two new measured gotchas from the NYC sample pipelines: (1) a `:bind` parameter inside a GROUP BY expression defeats H2's expression matching (`90016`) — author classify-then-group as a derived table; (2) DECIMAL/DECIMAL division collapses scale (a distance/duration ratio returned 0) — tempdb templates must `CAST(... AS DOUBLE)` every ratio operand. Both measured on the pinned 2.3.232. |
 | 2026-09-02 | v1.12 | 051 auth/config sweep | §10’s `stageRows` note now names the column-label validation (T20): the same §4.5 refusal `stage()` applies — a malformed or case-insensitively duplicated label fails the node; labels are never trusted, never sanitised. (Wording only — `StagingIdentifiers.validateColumnNames` already ran on this path, per its @throws.) |
 | 2026-08-05 | v1.0 | initial draft | Initial staging spec: per-execution H2 lifecycle, table naming, type mapping, streaming, single-connection model, engine-agnostic interface |

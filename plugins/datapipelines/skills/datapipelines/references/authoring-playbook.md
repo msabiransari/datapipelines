@@ -274,8 +274,13 @@ semantics; the question's words decide the window.
   pruning on the partition column. Capped at `node-timeout-max-seconds` (900), refused at SAVE
   above it. A raised timeout you cannot justify in one sentence is a slow pipeline you agreed to.
 - **Never slice a scan to fit a budget, and never add a `depends_on` edge to avoid contention.**
-  Source cursors drain in parallel and the staging lock is taken per batch, so independent source
-  nodes really do overlap (measured). `depends_on` is data flow, nothing else.
+  Source cursors drain in parallel, and independent tempdb work may overlap up to the
+  deployment's configured limits, so independent nodes really do run at once. `depends_on` is
+  data flow, nothing else: a node that reads a table another node staged depends on that node.
+- **Cross-node state is a table, never a session.** Each node's tempdb SQL runs in its own
+  session, reset when the node finishes: a `SET SCHEMA`, a `SET @variable`, a local temporary
+  table or an open transaction from one node is not visible to the next, and must not be relied
+  on. Hand data forward with `output: tempdb` tables and read them with `source: "tempdb"`.
 
 ## 4. Get the numbers right
 
