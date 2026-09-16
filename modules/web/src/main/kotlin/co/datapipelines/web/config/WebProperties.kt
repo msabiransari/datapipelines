@@ -199,7 +199,13 @@ data class PipelineProperties(
     }
 }
 
-/** The `datapipelines.staging.h2.*` subset `web` must pass to the executor (Configuration §3.3). */
+/**
+ * The `datapipelines.staging.h2.*` subset `web` must pass to the executor (Configuration §3.3).
+ *
+ * `maxConnections` (146 / #118) is the cap on operational connections one execution's staging
+ * pool may hold — a positive integer, `1` included; the staging module re-validates it, and
+ * refusing it here too means a bad value stops startup rather than the first execution.
+ */
 @ConfigurationProperties(prefix = "datapipelines.staging.h2")
 data class StagingH2Properties(
     val maxMemoryMb: Long = 1024,
@@ -207,7 +213,12 @@ data class StagingH2Properties(
     val resultBatchSize: Int = 10_000,
     val queryTimeoutSeconds: Int = 60,
     val mode: String = "PostgreSQL",
-)
+    val maxConnections: Int = 4,
+) {
+    init {
+        require(maxConnections >= 1) { "datapipelines.staging.h2.max-connections must be >= 1, was $maxConnections" }
+    }
+}
 
 /** The `datapipelines.idempotency.*` keys (Configuration §3.8). */
 @ConfigurationProperties(prefix = "datapipelines.idempotency")

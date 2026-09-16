@@ -93,6 +93,9 @@ Read downward. The statement bound is the driver's and drivers honour it unevenl
 | `datapipelines.staging.h2.insert-batch-size` | `1000` | Rows per INSERT batch when staging source data |
 | `datapipelines.staging.h2.result-batch-size` | `10000` | Rows per fetch batch when reading staged data out |
 | `datapipelines.staging.h2.query-timeout-seconds` | `60` | H2 query timeout |
+| `datapipelines.staging.h2.max-connections` | `4` | Cap on the **operational** H2 connections one execution's staging pool may hold open at once ([Staging §9](staging.md#9-connection-model)). A ceiling, not an allocation: the pool starts with one connection and grows on demand. `1` is legal and is the diagnosis/comparison setting — every tempdb operation then queues behind one connection |
+
+> **`max-connections` is capacity, not parallelism.** It bounds how many tempdb operations of ONE execution can be inside H2 at the same instant; it creates no extra eligible DAG nodes (`executor.max-parallel-nodes` decides those) and promises no speedup — H2 keeps its own transaction, row and catalog locks, so two nodes touching one table still serialise inside the engine. Set it lower than `max-parallel-nodes` and nodes queue safely for a connection; set it higher and the surplus is never opened. Aggregate cost: every connection is one H2 session with its own query working memory, and `max-concurrent-executions-per-instance` executions can each hold up to this many — the staged tables themselves are shared by the connections of one execution and are not multiplied. Session state (`SET SCHEMA`, `SET @var`, local temporary tables, an open transaction) is per operation and is reset when a connection is returned; a node must not rely on it from another node — express data flow through ordinary tables and `depends_on`, whatever the cap ([Staging §9.2](staging.md#92-one-owner-per-connection-and-session-state-is-per-lease)).
 
 > **`max-memory-mb` is a *per-execution* ceiling, not a process-wide one.** Every concurrent execution gets its own tempdb with its own budget, so the aggregate tempdb heap a node can reach on ONE INSTANCE is `max-memory-mb` × `datapipelines.executor.max-concurrent-executions-per-instance` — with the defaults, 1024 MB × 100 **per instance** (050/R2: the multiplier is per-instance; N replicas multiply it again — [Deployment §6.6](deployment.md#66-resource-sizing)). Size the two **together** against the container's heap; setting `max-memory-mb` alone bounds one execution, not the box. A process-wide staging gate is deferred ([ROADMAP](ROADMAP.md)).
 >
@@ -584,6 +587,7 @@ datapipelines:
       insert-batch-size: ${DATAPIPELINES_STAGING_H2_INSERT_BATCH_SIZE:1000}
       result-batch-size: ${DATAPIPELINES_STAGING_H2_RESULT_BATCH_SIZE:10000}
       query-timeout-seconds: ${DATAPIPELINES_STAGING_H2_QUERY_TIMEOUT_SECONDS:60}
+      max-connections: ${DATAPIPELINES_STAGING_H2_MAX_CONNECTIONS:4}
 
   result:
     ttl-default-seconds: ${DATAPIPELINES_RESULT_TTL_DEFAULT_SECONDS:300}

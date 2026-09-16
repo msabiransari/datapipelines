@@ -425,7 +425,8 @@ class DomainConfiguration {
      *
      * The properties are the **already-resolved** effective values; the per-pipeline
      * `max_memory_mb` override is applied by the executor, clamped to this ceiling
-     * (configuration.md §3.3).
+     * (configuration.md §3.3). `maxConnections` (146 / #118) travels here too — this hand-written
+     * copy is the hop a new knob silently misses, which `StagingH2WiringTest` guards.
      */
     @Bean
     fun stagingFactory(properties: StagingH2Properties): StagingFactory =
@@ -436,6 +437,7 @@ class DomainConfiguration {
                 insertBatchSize = properties.insertBatchSize,
                 resultBatchSize = properties.resultBatchSize,
                 queryTimeoutSeconds = properties.queryTimeoutSeconds,
+                maxConnections = properties.maxConnections,
             ),
         )
 

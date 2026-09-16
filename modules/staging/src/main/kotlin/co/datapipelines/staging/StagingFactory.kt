@@ -81,7 +81,8 @@ interface StagingFactory {
  *   per-pipeline `max_memory_mb` override is applied by the caller before construction).
  */
 class H2StagingFactory internal constructor(
-    private val config: H2StagingProperties,
+    /** The effective properties every execution's staging is built from; readable so wiring is testable. */
+    val properties: H2StagingProperties,
     /**
      * How a JDBC connection is opened — `DriverManager` in production. The seam exists so a
      * test can make one phase of creation fail (a restricted connect that opens but cannot
@@ -102,7 +103,7 @@ class H2StagingFactory internal constructor(
             StagingEngine.H2 -> Unit
         }
 
-        val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${config.mode};$LOWER_FOLDING"
+        val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${properties.mode};$LOWER_FOLDING"
         return openPool(jdbcUrl, executionId)
     }
 
@@ -133,12 +134,12 @@ class H2StagingFactory internal constructor(
                 try {
                     // The opener retains the credential in this closure and nowhere else: it is
                     // what lets the pool grow on demand as the restricted user (§9.5).
-                    H2ConnectionPool(executionId, first, { connect(jdbcUrl, EXEC_USER, password) }, config.maxConnections)
+                    H2ConnectionPool(executionId, first, { connect(jdbcUrl, EXEC_USER, password) }, properties.maxConnections)
                 } catch (e: SQLException) {
                     first.close()
                     throw e
                 }
-            H2Staging(executionId, pool, config)
+            H2Staging(executionId, pool, properties)
         } catch (e: SQLException) {
             throw creationFailed(executionId, e.message, e)
         }
