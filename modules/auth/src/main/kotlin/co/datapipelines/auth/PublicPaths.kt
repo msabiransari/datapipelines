@@ -180,6 +180,19 @@ object PublicPaths {
                 "Site v2 intent page: GET-only constant content, no datastore and no principal on the request.",
                 "119",
             ),
+            // 145: the website transition's two hub pages — the use-cases hub and the
+            // generated directory. Same shape and reasoning as every row above; /explore's
+            // one input beyond the registry is the packaged docs catalog /sitemap.xml reads.
+            PublicPath(
+                "/use-cases",
+                "Site v3 hub page: GET-only constant content, no datastore and no principal on the request.",
+                "145",
+            ),
+            PublicPath(
+                "/explore",
+                "Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal.",
+                "145",
+            ),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.

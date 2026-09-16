@@ -2,13 +2,9 @@ package co.datapipelines.web.ui.site
 
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.ObjectProvider
-import org.springframework.boot.info.BuildProperties
 import org.springframework.http.HttpHeaders
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.web.bind.annotation.GetMapping
-import java.time.Instant
-import java.util.Properties
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
@@ -27,7 +23,7 @@ class SitemapControllerTest {
 
     @Test
     fun `every registry page, the docs index and every packaged doc are listed exactly once`() {
-        val locations = controller(buildTime = null).locations()
+        val locations = controller().locations()
 
         // Non-vacuity before equality: an empty catalog would make "no duplicates" trivially true.
         check(docSlugs.size >= MIN_DOCS) { "only ${docSlugs.size} packaged docs — the catalog is not loading" }
@@ -47,7 +43,7 @@ class SitemapControllerTest {
     @Test
     fun `every route the site controller serves appears in the sitemap`() {
         val routes =
-            listOf(SitePagesController::class, SiteV2Batch2Controller::class)
+            listOf(SitePagesController::class, SiteV2Batch2Controller::class, SiteHubController::class)
                 .flatMap { controller -> controller.java.declaredMethods.toList() }
                 .mapNotNull { it.getAnnotation(GetMapping::class.java)?.value?.firstOrNull() }
                 .flatMap { path ->
@@ -57,14 +53,14 @@ class SitemapControllerTest {
         // Non-vacuity: seven handlers, of which one templated route expands to the engine pages.
         check(routes.size >= MIN_ROUTES) { "the reflection scan found only ${routes.size} routes" }
 
-        val locations = controller(buildTime = null).locations()
+        val locations = controller().locations()
         routes.filterNot { "$SITE_ORIGIN$it" in locations } shouldBe emptyList()
     }
 
     @Test
     fun `the response is a parseable urlset with one loc per location`() {
         val response = MockHttpServletResponse()
-        val xml = controller(buildTime = null).sitemap(response)
+        val xml = controller().sitemap(response)
 
         val document =
             DocumentBuilderFactory
@@ -74,59 +70,22 @@ class SitemapControllerTest {
                 .parse(xml.byteInputStream())
 
         document.documentElement.localName shouldBe "urlset"
-        document.getElementsByTagNameNS(SITEMAP_NS, "url").length shouldBe controller(null).locations().size
-        document.getElementsByTagNameNS(SITEMAP_NS, "loc").length shouldBe controller(null).locations().size
-        // No build-info on the classpath here, so lastmod is omitted rather than invented.
+        document.getElementsByTagNameNS(SITEMAP_NS, "url").length shouldBe controller().locations().size
+        document.getElementsByTagNameNS(SITEMAP_NS, "loc").length shouldBe controller().locations().size
+        // 145 §7: no lastmod anywhere — the build time stamped every URL as modified on every
+        // deploy, and there is no per-page date to give instead. Live and export now agree.
         document.getElementsByTagNameNS(SITEMAP_NS, "lastmod").length shouldBe 0
         response.getHeader(HttpHeaders.CACHE_CONTROL) shouldBe "max-age=86400, public"
     }
 
+    /** 145: the two hub routes are registry rows and sitemap entries like every other page. */
     @Test
-    fun `with build info present every url carries that build's lastmod`() {
-        val built = Instant.parse("2026-09-04T10:15:30Z")
-        val xml = controller(buildTime = built).sitemap(MockHttpServletResponse())
-
-        val document =
-            DocumentBuilderFactory
-                .newInstance()
-                .also { it.isNamespaceAware = true }
-                .newDocumentBuilder()
-                .parse(xml.byteInputStream())
-
-        val lastmods = document.getElementsByTagNameNS(SITEMAP_NS, "lastmod")
-        lastmods.length shouldBe controller(null).locations().size
-        lastmods.item(0).textContent shouldBe "2026-09-04T10:15:30Z"
+    fun `the 145 hub pages are listed`() {
+        val locations = controller().locations()
+        listOf(SitePages.USE_CASES, SitePages.EXPLORE).map { it.canonical }.filterNot { it in locations } shouldBe emptyList()
     }
 
-    private fun controller(buildTime: Instant?): SitemapController = SitemapController(docs, buildPropertiesProvider(buildTime))
-
-    /**
-     * A minimal [ObjectProvider] over an optional bean — the production wiring's shape, so the
-     * "no build-info on the classpath" branch is exercised by the same code path that runs
-     * under `bootRun`, not by a special case.
-     */
-    private fun buildPropertiesProvider(time: Instant?): ObjectProvider<BuildProperties> =
-        object : ObjectProvider<BuildProperties> {
-            private val value: BuildProperties? =
-                time?.let {
-                    BuildProperties(
-                        Properties().apply {
-                            setProperty("group", "co.datapipelines")
-                            setProperty("artifact", "datapipelines-app")
-                            setProperty("version", "1.0.0")
-                            setProperty("time", it.toEpochMilli().toString())
-                        },
-                    )
-                }
-
-            override fun getObject(vararg args: Any?): BuildProperties = getObject()
-
-            override fun getObject(): BuildProperties = checkNotNull(value) { "no BuildProperties" }
-
-            override fun getIfAvailable(): BuildProperties? = value
-
-            override fun getIfUnique(): BuildProperties? = value
-        }
+    private fun controller(): SitemapController = SitemapController(docs)
 
     private companion object {
         const val SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"

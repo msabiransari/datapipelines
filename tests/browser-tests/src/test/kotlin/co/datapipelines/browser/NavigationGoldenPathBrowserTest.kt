@@ -17,8 +17,8 @@ class NavigationGoldenPathBrowserTest : BrowserSuite() {
         startTrace()
         page.navigate("$baseUrl/")
 
-        // 115: the buyer's H1 — the engineering page is /how-it-works, one nav item away.
-        page.locator("#hero-title").innerText() shouldContain "Show your customers their data. No data team required."
+        // 115/145: the buyer's H1 speaks the outcome — the engineering page is /how-it-works, one nav item away.
+        page.locator("#hero-title").innerText() shouldContain "Clear answers."
     }
 
     @Test

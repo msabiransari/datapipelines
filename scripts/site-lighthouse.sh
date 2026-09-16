@@ -2,9 +2,11 @@
 # site-lighthouse.sh — the marketing site's Lighthouse budget, as a guard.
 #
 # What it measures: Lighthouse's performance, accessibility, best-practices and
-# SEO categories, on seven pages of the exported static site:
+# SEO categories, on eleven pages of the exported static site:
 #   /  /how-it-works  /demo-data  /faq  /tableau  /published-api  /for/saas-teams  /pricing
-# (115 §C added /how-it-works; 116 added /demo-data; 119 added /pricing and /semantic-layer.)
+#   /semantic-layer  /use-cases  /explore
+# (115 §C added /how-it-works; 116 added /demo-data; 119 added /pricing and /semantic-layer;
+# 145 added /use-cases and /explore.)
 #
 # The floor is 95 in every audited category on every page. Any score below the
 # floor names the page, the category and the score, and the script exits 1.
@@ -32,7 +34,7 @@ FLOOR=95
 EXPORT_DIR="modules/web/build/website-export"
 # Trailing slashes: the export is a directory tree, and python's http.server answers a
 # slash-less directory path with a redirect — one wasted round trip on the critical chain.
-PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/" "/semantic-layer/")
+PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/" "/semantic-layer/" "/use-cases/" "/explore/")
 CATEGORIES=("performance" "accessibility" "best-practices" "seo")
 
 command -v python3 >/dev/null || { echo "site-lighthouse: python3 is required to serve the export" >&2; exit 1; }
@@ -173,68 +175,12 @@ if [ "$FAILED" -ne 0 ]; then
   echo "site-lighthouse: FAIL — at least one page scored below the floor; fix the cause, never lower the floor" >&2
   exit 1
 fi
-echo "site-lighthouse: OK — nine pages, four categories, all >= $FLOOR"
+echo "site-lighthouse: OK — eleven pages, four categories, all >= $FLOOR"
 
 # ---------------------------------------------------------------------------
-# 133 §D — the DARK pass: accessibility >= the floor in BOTH themes. The site
-# persists the theme in localStorage (dp-site-theme), so a bootstrap page on
-# the same origin (dropped into the export AFTER websiteExport — a harness
-# fixture, never a shipped page) sets `dark`, and the four pages the brief
-# names then audit against a profile that already holds it. Performance is
-# theme-independent and the light pass above already holds it.
+# 133 §D ran a second, DARK-theme accessibility pass here. 145 made the public site
+# light-only (no theme swap, no toggle, no saved-theme restore), so there is no second
+# presentation to audit: the light pass above is the whole surface. The light lock
+# itself is held in a real browser by SiteInteractionBrowserTest (a dark colour scheme
+# plus a saved dark theme still paint the approved light ground).
 # ---------------------------------------------------------------------------
-DARK_PAGES=("/" "/how-it-works/" "/semantic-layer/" "/demo-data/")
-DARK_PROFILE="$WORK_DIR/dark-profile"
-mkdir -p "$DARK_PROFILE"
-cat > "$EXPORT_DIR/__theme-dark.html" <<'HTML'
-<!DOCTYPE html><meta charset="utf-8"><title>theme fixture</title>
-<script>localStorage.setItem('dp-site-theme', 'dark'); document.title = 'dark armed';</script>
-HTML
-trap 'kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$WORK_DIR"; rm -f "$EXPORT_DIR/__theme-dark.html"' EXIT
-
-# Arm the profile: one Lighthouse run against the fixture page with the profile dir.
-npx --yes "lighthouse@$LIGHTHOUSE_VERSION" \
-  "http://127.0.0.1:$PORT/__theme-dark.html" \
-  --quiet \
-  --chrome-flags="--headless=new --no-sandbox --disable-gpu --user-data-dir=$DARK_PROFILE" \
-  --only-categories=accessibility \
-  --output=json \
-  --output-path="$WORK_DIR/__arm.json" \
-  >/dev/null 2>&1 || true
-
-echo "site-lighthouse: dark-theme accessibility pass (floor $FLOOR)"
-printf "%-22s %-14s\n" "page" "accessibility"
-printf "%-22s %-14s\n" "----" "-------------"
-
-for page in "${DARK_PAGES[@]}"; do
-  OUT="$WORK_DIR/dark-$(echo "$page" | tr '/ ' '__').json"
-  npx --yes "lighthouse@$LIGHTHOUSE_VERSION" \
-    "http://127.0.0.1:$PORT$page" \
-    --quiet \
-    --chrome-flags="--headless=new --no-sandbox --disable-gpu --user-data-dir=$DARK_PROFILE" \
-    --only-categories=accessibility \
-    --output=json \
-    --output-path="$OUT" \
-    >/dev/null 2>&1
-
-  if ! python3 - "$page" "$OUT" "$FLOOR" <<'PY'
-import json, sys
-
-page, path, floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
-value = json.load(open(path))["categories"]["accessibility"]["score"]
-value = None if value is None else round(value * 100)
-print("%-22s %-14s" % (page, "n/a" if value is None else value))
-if value is None or value < floor:
-    print(f"site-lighthouse: FAIL {page} accessibility (dark) = {value} (floor {floor})", file=sys.stderr)
-    sys.exit(1)
-PY
-  then
-    FAILED=1
-  fi
-done
-
-if [ "$FAILED" -ne 0 ]; then
-  echo "site-lighthouse: FAIL — dark-theme accessibility below the floor; fix the cause, never lower the floor" >&2
-  exit 1
-fi
-echo "site-lighthouse: OK — dark accessibility >= $FLOOR on the four 133 pages"

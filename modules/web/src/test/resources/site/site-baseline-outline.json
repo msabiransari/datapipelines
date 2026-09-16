@@ -1,0 +1,3412 @@
+{
+ "_": "Lane 145 migration guard. Derived from the frozen 2026-09-16 source baseline (59 routes) by make-outline-fixture.py in the private design records; edit deliberately — SiteRouteFloorTest fails when a route, an anchor or a heading listed here stops rendering.",
+ "capturedAt": "2026-09-16T14:22:04.065Z",
+ "routes": {
+  "/": {
+   "status": "rewritten",
+   "anchors": [
+    "hero-title",
+    "faq",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H2",
+     "text": "Questions people ask before they run it"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I need a data engineer?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Where does my data go?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do I know the numbers are right?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can each customer see only their own rows?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I have to use an AI agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does it cost?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which databases?"
+    }
+   ],
+   "retired": {
+    "anchors": {
+     "before-after": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "ba-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "artifact": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "artifact-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "trust": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "trust-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "outcomes": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "outcomes-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "who": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "who-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "demo": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "demo-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "open-source": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "oss-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "roadmap": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "roadmap-title": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)"
+    },
+    "headings": {
+     "Show your customers their data. No data team required.": "145: the H1 is the approved outcome line 'Your data. Clear answers. Ready to share.'",
+     "What it costs today, and what it costs here": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "This is the product": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "Why you can put these numbers in front of a customer": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "Two things today, two next month": "145 §4: replaced by 'Useful today. A clear direction for tomorrow.' — no dated promise",
+     "An API your product calls": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "Your data in Tableau, governed": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "A dataset that stays current": "145 §4: a planned item, listed as planned without a date",
+     "A dashboard inside your app": "145 §4: a planned item, listed as planned without a date",
+     "Three teams, one short list": "145: the three audiences are the benefits cards linking /use-cases",
+     "Founders and product owners": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "Teams whose data lives in more than one database": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "Engineers who would rather review SQL than write another service": "145: the page is rewritten to the approved 2026-09-16 preview; the section's content is mapped in the lane's section reconciliation (design-records/website-transition-2026-09-16/lane-145/section-reconciliation.json)",
+     "Real data, one command, three families": "145: the demo quickstart moved to /how-it-works#quickstart; /demo-data keeps the families",
+     "Open source, honestly licensed": "145: the licence signals live in the hero support line, the footer and /pricing",
+     "Roadmap": "145 §4: the planned list replaces the dated roadmap summary; /roadmap keeps the dates",
+     "What do I get on day one, and what comes next month?": "145 §4: the question was corrected against docs/ROADMAP.md §2 — no dated promise; now 'What do I get today, and what is planned?'"
+    }
+   }
+  },
+  "/mcp-server-for-sql-databases": {
+   "status": "unchanged",
+   "anchors": [
+    "pillar-title",
+    "pain-title",
+    "gov-title",
+    "engines-title",
+    "tools-title",
+    "next-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "One SQL MCP server for eight database engines"
+    },
+    {
+     "level": "H2",
+     "text": "Don't point an agent at production with write credentials"
+    },
+    {
+     "level": "H2",
+     "text": "Read-only by default, scoped keys, every call audited"
+    },
+    {
+     "level": "H3",
+     "text": "Read-only is enforced, not advisory"
+    },
+    {
+     "level": "H3",
+     "text": "And the credential still does the real work"
+    },
+    {
+     "level": "H3",
+     "text": "One scoped key per agent"
+    },
+    {
+     "level": "H3",
+     "text": "Revocation is a checkbox, not a rotation"
+    },
+    {
+     "level": "H3",
+     "text": "Every tool call is audited"
+    },
+    {
+     "level": "H3",
+     "text": "API keys only on /mcp"
+    },
+    {
+     "level": "H3",
+     "text": "Credentials never sit on a laptop"
+    },
+    {
+     "level": "H3",
+     "text": "Cross-database joins land nothing"
+    },
+    {
+     "level": "H2",
+     "text": "Connect Claude Code to Postgres, Oracle, SQL Server, MySQL, H2, DuckDB, SQLite and dp-lake"
+    },
+    {
+     "level": "H3",
+     "text": "Postgres MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "SQL Server MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "MySQL MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "Oracle MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "SQLite MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "DuckDB MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "H2 MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "dp-lake MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "The 41 MCP tools an agent gets"
+    },
+    {
+     "level": "H2",
+     "text": "Where to go next"
+    },
+    {
+     "level": "H2",
+     "text": "The MCP server, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which databases can one MCP server reach?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the agent ever see a database password?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What stops a write against a read-only source?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do I revoke one agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is every tool call audited?"
+    },
+    {
+     "level": "H2",
+     "text": "Point your agent at the demo first"
+    }
+   ]
+  },
+  "/mcp-server/postgres": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "demo-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Postgres MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A Postgres datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "A seeded pipeline that reads this engine"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/sql-server": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "SQL Server MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A SQL Server datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/mysql": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "demo-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "MySQL MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A MySQL datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "A seeded pipeline that reads this engine"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/oracle": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Oracle MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A Oracle datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/sqlite": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "demo-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "SQLite MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A SQLite datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "A seeded pipeline that reads this engine"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/duckdb": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "DuckDB MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A DuckDB datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/h2": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "H2 MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A H2 datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/mcp-server/dp-lake": {
+   "status": "unchanged",
+   "anchors": [
+    "engine-title",
+    "facts-title",
+    "connect-title",
+    "register-title",
+    "demo-title",
+    "other-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "dp-lake MCP server"
+    },
+    {
+     "level": "H2",
+     "text": "What ships, and what you supply"
+    },
+    {
+     "level": "H2",
+     "text": "Connect your agent"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H2",
+     "text": "A dp-lake datasource, read-only, credentials encrypted"
+    },
+    {
+     "level": "H3",
+     "text": "The read-only flag refuses writes"
+    },
+    {
+     "level": "H3",
+     "text": "Use a SELECT-only login as well"
+    },
+    {
+     "level": "H3",
+     "text": "The password is encrypted at rest"
+    },
+    {
+     "level": "H3",
+     "text": "The agent introspects, but never registers"
+    },
+    {
+     "level": "H2",
+     "text": "A seeded pipeline that reads this engine"
+    },
+    {
+     "level": "H2",
+     "text": "The other engines"
+    },
+    {
+     "level": "H2",
+     "text": "This engine, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the JDBC driver ship in the published image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the agent authenticate to this engine?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the database credential exposed to the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can the agent register the datasource itself?"
+    },
+    {
+     "level": "H2",
+     "text": "Connect an agent to this engine today"
+    }
+   ]
+  },
+  "/add-mcp-server-to-claude-code": {
+   "status": "unchanged",
+   "anchors": [
+    "add-title",
+    "step1-title",
+    "step2-title",
+    "step3-title",
+    "step4-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Add an MCP server to Claude Code, Cursor or Copilot"
+    },
+    {
+     "level": "H2",
+     "text": "Have a server to point at"
+    },
+    {
+     "level": "H2",
+     "text": "Mint a key for that one agent"
+    },
+    {
+     "level": "H2",
+     "text": "Paste one config block"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Code"
+    },
+    {
+     "level": "H3",
+     "text": "Cursor — ~/.cursor/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+    },
+    {
+     "level": "H3",
+     "text": "Claude Desktop and other JSON-configured clients"
+    },
+    {
+     "level": "H2",
+     "text": "Check that the tools came back"
+    },
+    {
+     "level": "H3",
+     "text": "If it does not connect"
+    },
+    {
+     "level": "H2",
+     "text": "Client setup, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which MCP client should I use?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What scope should the agent's key carry?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which database drivers ship in the image?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "The tools did not come back — what now?"
+    },
+    {
+     "level": "H2",
+     "text": "Do the whole loop on the demo"
+    }
+   ]
+  },
+  "/ai-data-pipeline": {
+   "status": "unchanged",
+   "anchors": [
+    "ai-title",
+    "schema-title",
+    "artefact-title",
+    "version-title",
+    "run-title",
+    "not-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "An AI data pipeline you would let someone else run"
+    },
+    {
+     "level": "H2",
+     "text": "The agent reads your real schema before it writes SQL"
+    },
+    {
+     "level": "H2",
+     "text": "What it produces is a JSON contract, not a transcript"
+    },
+    {
+     "level": "H2",
+     "text": "Every change is a version, and a release is immutable"
+    },
+    {
+     "level": "H2",
+     "text": "It runs governed, and the failure is readable"
+    },
+    {
+     "level": "H3",
+     "text": "Read-only unless you said otherwise"
+    },
+    {
+     "level": "H3",
+     "text": "Every call is in the audit log"
+    },
+    {
+     "level": "H3",
+     "text": "Execution is observable while it runs"
+    },
+    {
+     "level": "H3",
+     "text": "Failures carry stable codes"
+    },
+    {
+     "level": "H3",
+     "text": "Results come back as rows"
+    },
+    {
+     "level": "H3",
+     "text": "Multi-source joins land nothing"
+    },
+    {
+     "level": "H2",
+     "text": "What this is not"
+    },
+    {
+     "level": "H2",
+     "text": "AI data pipeline questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does the agent read before it writes SQL?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do parameter values reach the SQL?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can an agent change a released pipeline?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does the audit log record for agent runs?"
+    },
+    {
+     "level": "H2",
+     "text": "Watch an agent build one on the demo"
+    }
+   ]
+  },
+  "/text-to-sql-agent": {
+   "status": "unchanged",
+   "anchors": [
+    "tts-title",
+    "gap-title",
+    "four-title",
+    "cross-title",
+    "honest-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "From a question to a pipeline your team can rerun"
+    },
+    {
+     "level": "H2",
+     "text": "The gap a text-to-SQL tool leaves"
+    },
+    {
+     "level": "H2",
+     "text": "Real schemas, a versioned artefact, readable failures, history"
+    },
+    {
+     "level": "H3",
+     "text": "Your actual schema, before the query"
+    },
+    {
+     "level": "H3",
+     "text": "The answer becomes an artefact"
+    },
+    {
+     "level": "H3",
+     "text": "And a version history"
+    },
+    {
+     "level": "H3",
+     "text": "Failures the agent can act on"
+    },
+    {
+     "level": "H3",
+     "text": "The rows themselves"
+    },
+    {
+     "level": "H3",
+     "text": "A prompt for the debugging loop"
+    },
+    {
+     "level": "H2",
+     "text": "And the question that crosses two databases"
+    },
+    {
+     "level": "H2",
+     "text": "Being straight about it"
+    },
+    {
+     "level": "H2",
+     "text": "Text-to-SQL questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does datapipelines generate the SQL?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What happens to the query after it answers once?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does the agent get when a query fails?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can it join two databases in one question?"
+    },
+    {
+     "level": "H2",
+     "text": "Ask the question that keeps coming back"
+    }
+   ]
+  },
+  "/compare/airflow": {
+   "status": "unchanged",
+   "anchors": [
+    "cmp-title",
+    "use-airflow-title",
+    "use-us-title",
+    "together-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "datapipelines.co vs Apache Airflow"
+    },
+    {
+     "level": "H2",
+     "text": "Use Airflow instead when…"
+    },
+    {
+     "level": "H2",
+     "text": "Use this instead when…"
+    },
+    {
+     "level": "H3",
+     "text": "The data is in several operational databases"
+    },
+    {
+     "level": "H3",
+     "text": "An agent should be able to author, not just trigger"
+    },
+    {
+     "level": "H3",
+     "text": "Giving an agent database access has to be safe"
+    },
+    {
+     "level": "H3",
+     "text": "Every actor needs its own revocable credential"
+    },
+    {
+     "level": "H3",
+     "text": "You want a small deployment"
+    },
+    {
+     "level": "H3",
+     "text": "Reruns must be reproducible by construction"
+    },
+    {
+     "level": "H2",
+     "text": "They compose"
+    },
+    {
+     "level": "H2",
+     "text": "The Airflow comparison, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does this replace Airflow's scheduler?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can Airflow trigger these pipelines?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can an agent author the work?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Are reruns reproducible?"
+    },
+    {
+     "level": "H2",
+     "text": "Keep Airflow. Give it something worth orchestrating."
+    }
+   ]
+  },
+  "/compare/dbt": {
+   "status": "unchanged",
+   "anchors": [
+    "cmp-title",
+    "use-dbt-title",
+    "use-us-title",
+    "not-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "datapipelines.co vs dbt"
+    },
+    {
+     "level": "H2",
+     "text": "Use dbt instead when…"
+    },
+    {
+     "level": "H2",
+     "text": "Use this instead when…"
+    },
+    {
+     "level": "H3",
+     "text": "There is no warehouse, and you do not want one yet"
+    },
+    {
+     "level": "H3",
+     "text": "The sources are operational databases"
+    },
+    {
+     "level": "H3",
+     "text": "An agent is the author"
+    },
+    {
+     "level": "H3",
+     "text": "The credential story has to hold up"
+    },
+    {
+     "level": "H2",
+     "text": "What we deliberately do not claim"
+    },
+    {
+     "level": "H2",
+     "text": "The dbt comparison, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I need a warehouse for this?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which sources can it read?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is an agent the author here?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What is the credential story?"
+    },
+    {
+     "level": "H2",
+     "text": "See the no-warehouse join on real data"
+    }
+   ]
+  },
+  "/federated-query": {
+   "status": "unchanged",
+   "anchors": [
+    "fq-title",
+    "how-title",
+    "worked-title",
+    "honest-title",
+    "faq-title",
+    "cta-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Federated query across databases, without a warehouse"
+    },
+    {
+     "level": "H2",
+     "text": "Cross-database joins in an in-memory staging area"
+    },
+    {
+     "level": "H3",
+     "text": "Read each source in place"
+    },
+    {
+     "level": "H3",
+     "text": "Stage the result sets"
+    },
+    {
+     "level": "H3",
+     "text": "Join in staging"
+    },
+    {
+     "level": "H3",
+     "text": "Return rows, drop the staging database"
+    },
+    {
+     "level": "H2",
+     "text": "Join Postgres and SQLite in one query: nyc/mobility/revenue_by_borough"
+    },
+    {
+     "level": "H3",
+     "text": "Node 1 — the trips, from Postgres"
+    },
+    {
+     "level": "H3",
+     "text": "Node 2 — the zones, from SQLite"
+    },
+    {
+     "level": "H3",
+     "text": "Node 3 — the join, in staging"
+    },
+    {
+     "level": "H2",
+     "text": "And where it does not"
+    },
+    {
+     "level": "H2",
+     "text": "Federated query, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Where does the cross-engine join actually run?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is anything copied between the engines?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I try it without my own data?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Will staging always be in-memory H2?"
+    },
+    {
+     "level": "H2",
+     "text": "Run the join on the demo, then on your databases"
+    }
+   ]
+  },
+  "/dp-lake": {
+   "status": "unchanged",
+   "anchors": [
+    "lake-title",
+    "ships-title",
+    "demo-title",
+    "honest-title",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Your data is already in S3. Ask it a question."
+    },
+    {
+     "level": "H2",
+     "text": "Exactly this, and nothing more"
+    },
+    {
+     "level": "H3",
+     "text": "Parquet and Iceberg, on S3 or S3-compatible"
+    },
+    {
+     "level": "H3",
+     "text": "Read in place — no warehouse, no loader"
+    },
+    {
+     "level": "H3",
+     "text": "Read-only, by design"
+    },
+    {
+     "level": "H3",
+     "text": "DuckDB as the engine"
+    },
+    {
+     "level": "H3",
+     "text": "dp-catalog — our own registry"
+    },
+    {
+     "level": "H3",
+     "text": "Partition pruning"
+    },
+    {
+     "level": "H3",
+     "text": "Joined to the databases you already run"
+    },
+    {
+     "level": "H3",
+     "text": "From the UI, from an agent, or as an API"
+    },
+    {
+     "level": "H2",
+     "text": "Half a billion rideshare trips, read in place"
+    },
+    {
+     "level": "H2",
+     "text": "And where it does not"
+    },
+    {
+     "level": "H2",
+     "text": "dp-lake, in three questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What is dp-lake?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does dp-lake copy my data out of S3?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do I register an Iceberg table in dp-lake?"
+    }
+   ]
+  },
+  "/faq": {
+   "status": "rewritten",
+   "anchors": [
+    "faq-title",
+    "for-the-buyer",
+    "what-it-is",
+    "agents-and-security",
+    "apis-and-operations",
+    "demo-data",
+    "tableau",
+    "pricing",
+    "the-semantic-layer",
+    "support-and-feedback",
+    "faq-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Frequently asked questions"
+    },
+    {
+     "level": "H2",
+     "text": "For the buyer"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I need a data engineer?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Where does my data go?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do I know the numbers are right?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can each customer see only their own rows?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I have to use an AI agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does it cost?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which databases?"
+    },
+    {
+     "level": "H2",
+     "text": "What it is"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What is datapipelines.co, in one sentence?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What is a pipeline here — a DAG, a notebook, a dbt project?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Which databases does it talk to?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I need a data warehouse?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is it open source, and what may I do with it?"
+    },
+    {
+     "level": "H2",
+     "text": "Agents and security"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does my agent get my database password?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How is this different from a Postgres MCP server?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What can an agent do, and what can it never do?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is every agent action logged?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can an agent release a pipeline to production?"
+    },
+    {
+     "level": "H2",
+     "text": "APIs and operations"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does “published endpoint” mean?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "From data to an API in a day — is that real?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Where does it run?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What happens when a query is too slow?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is it a Tableau or dbt replacement?"
+    },
+    {
+     "level": "H2",
+     "text": "Demo data"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the demo data real?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I use the demo data in my own product?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How big is the demo on disk?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I add my own data next to it?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the demo need internet access?"
+    },
+    {
+     "level": "H2",
+     "text": "Tableau"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can Tableau read what datapipelines produces?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is this a Tableau alternative?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Why not just build the dashboard in Tableau?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does datapipelines replace Tableau Prep?"
+    },
+    {
+     "level": "H2",
+     "text": "Pricing"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is it really free?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does AGPL require of me?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Will there be a hosted version?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I pay for support?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What about the demo data's licences?"
+    },
+    {
+     "level": "H2",
+     "text": "The semantic layer"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is this a data catalog?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can a wrong fact poison the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I have to write anything?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What happens when my schema changes?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does it work on my own warehouse?"
+    },
+    {
+     "level": "H2",
+     "text": "Support and feedback"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Something broke — where do I report it?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Where do I ask a question or float an idea?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do I report a security problem?"
+    },
+    {
+     "level": "H2",
+     "text": "Run it on your own data in a few minutes"
+    }
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "What do I get on day one, and what comes next month?": "145 §4: the question was corrected against docs/ROADMAP.md §2 — no dated promise; now 'What do I get today, and what is planned?'"
+    }
+   }
+  },
+  "/roadmap": {
+   "status": "unchanged",
+   "anchors": [
+    "rm-title",
+    "rm-shipped",
+    "known-limitations",
+    "rm-limits",
+    "rm-next",
+    "rm-later",
+    "rm-tableau"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Roadmap"
+    },
+    {
+     "level": "H2",
+     "text": "In the current release"
+    },
+    {
+     "level": "H3",
+     "text": "The MCP server"
+    },
+    {
+     "level": "H3",
+     "text": "Eight engines, one pipeline"
+    },
+    {
+     "level": "H3",
+     "text": "Joins without a warehouse"
+    },
+    {
+     "level": "H3",
+     "text": "Draft → release, by a person"
+    },
+    {
+     "level": "H3",
+     "text": "Published endpoints"
+    },
+    {
+     "level": "H3",
+     "text": "Agent probes"
+    },
+    {
+     "level": "H2",
+     "text": "Known limitations"
+    },
+    {
+     "level": "H2",
+     "text": "Designed, in progress"
+    },
+    {
+     "level": "H3",
+     "text": "Scheduler"
+    },
+    {
+     "level": "H3",
+     "text": "Dashboards"
+    },
+    {
+     "level": "H3",
+     "text": "JSONata and JavaScript nodes"
+    },
+    {
+     "level": "H2",
+     "text": "The next layer"
+    },
+    {
+     "level": "H3",
+     "text": "Scheduled extracts to your lake"
+    },
+    {
+     "level": "H3",
+     "text": "Email alerts"
+    },
+    {
+     "level": "H3",
+     "text": "Metrics"
+    },
+    {
+     "level": "H2",
+     "text": "What this means beside Tableau"
+    }
+   ]
+  },
+  "/security": {
+   "status": "unchanged",
+   "anchors": [
+    "sec-title",
+    "sec-model",
+    "sec-keys",
+    "sec-blast",
+    "sec-ops",
+    "sec-report",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Letting an AI agent near your databases, without handing it a password"
+    },
+    {
+     "level": "H2",
+     "text": "Five boundaries, each enforced by the server, not by a prompt"
+    },
+    {
+     "level": "H3",
+     "text": "The agent never holds a credential"
+    },
+    {
+     "level": "H3",
+     "text": "One key, a scope, a workspace"
+    },
+    {
+     "level": "H3",
+     "text": "Read-only where you say so"
+    },
+    {
+     "level": "H3",
+     "text": "Agents leave drafts; people release"
+    },
+    {
+     "level": "H3",
+     "text": "Everything is audited"
+    },
+    {
+     "level": "H3",
+     "text": "Secured by default, public by allowlist"
+    },
+    {
+     "level": "H2",
+     "text": "What a key can reach is a property of the key, not of the caller"
+    },
+    {
+     "level": "H2",
+     "text": "What a runaway agent can and cannot do"
+    },
+    {
+     "level": "H2",
+     "text": "Your infrastructure, your keys, your logs"
+    },
+    {
+     "level": "H3",
+     "text": "Encryption keys you control"
+    },
+    {
+     "level": "H3",
+     "text": "Your identity provider"
+    },
+    {
+     "level": "H3",
+     "text": "Open source, self-hosted"
+    },
+    {
+     "level": "H2",
+     "text": "Report a vulnerability"
+    },
+    {
+     "level": "H2",
+     "text": "Security questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does my agent get my database password?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How is this different from a Postgres MCP server?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What can an agent do, and what can it never do?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is every agent action logged?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can an agent release a pipeline to production?"
+    }
+   ]
+  },
+  "/published-api": {
+   "status": "unchanged",
+   "anchors": [
+    "pa-title",
+    "pa-how",
+    "pa-shape",
+    "pa-not",
+    "pa-story",
+    "pa-shot",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Turn a SQL query into an API — versioned, parameterised, scoped by key"
+    },
+    {
+     "level": "H2",
+     "text": "A release, a path, a key"
+    },
+    {
+     "level": "H3",
+     "text": "Release the pipeline"
+    },
+    {
+     "level": "H3",
+     "text": "Publish it under a path"
+    },
+    {
+     "level": "H3",
+     "text": "Bind a key to the path"
+    },
+    {
+     "level": "H3",
+     "text": "Call it"
+    },
+    {
+     "level": "H2",
+     "text": "The result, paged, with a cursor — never a cached one"
+    },
+    {
+     "level": "H2",
+     "text": "A read surface, by construction"
+    },
+    {
+     "level": "H3",
+     "text": "GET only"
+    },
+    {
+     "level": "H3",
+     "text": "Not enumerable"
+    },
+    {
+     "level": "H3",
+     "text": "Never a browser session"
+    },
+    {
+     "level": "H3",
+     "text": "Rate- and concurrency-limited"
+    },
+    {
+     "level": "H2",
+     "text": "The API was always the expensive part"
+    },
+    {
+     "level": "H2",
+     "text": "The API section: endpoints, keys, the MCP server — one screen"
+    },
+    {
+     "level": "H2",
+     "text": "Published endpoints, in two questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does “published endpoint” mean?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "From data to an API in a day — is that real?"
+    }
+   ]
+  },
+  "/mcp-tools": {
+   "status": "unchanged",
+   "anchors": [
+    "mt-title",
+    "mt-groups",
+    "mt-probes",
+    "mt-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "The MCP tools: everything an agent can do against your databases"
+    },
+    {
+     "level": "H2",
+     "text": "Read what it may, write only drafts"
+    },
+    {
+     "level": "H3",
+     "text": "Pipelines — author, run, inspect"
+    },
+    {
+     "level": "H3",
+     "text": "Templates — the SQL an agent writes"
+    },
+    {
+     "level": "H3",
+     "text": "Datasources — what the agent may see"
+    },
+    {
+     "level": "H3",
+     "text": "dp-lake — tables over your bucket"
+    },
+    {
+     "level": "H3",
+     "text": "The SQL probe"
+    },
+    {
+     "level": "H3",
+     "text": "Executions — results and cancellation"
+    },
+    {
+     "level": "H3",
+     "text": "Published endpoints"
+    },
+    {
+     "level": "H3",
+     "text": "Calculators"
+    },
+    {
+     "level": "H3",
+     "text": "docs"
+    },
+    {
+     "level": "H3",
+     "text": "semantics"
+    },
+    {
+     "level": "H2",
+     "text": "Statistics before the predicate, a plan before the timeout"
+    },
+    {
+     "level": "H3",
+     "text": "datasources_get_table_stats"
+    },
+    {
+     "level": "H3",
+     "text": "sql_probe"
+    },
+    {
+     "level": "H3",
+     "text": "What is missing on purpose"
+    },
+    {
+     "level": "H2",
+     "text": "Give your agent the skill, not just the tools"
+    }
+   ]
+  },
+  "/tableau": {
+   "status": "unchanged",
+   "anchors": [
+    "tb-title",
+    "tb-story",
+    "tb-two",
+    "tb-prep",
+    "tb-shots",
+    "faq-title",
+    "tb-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Using datapipelines with Tableau: what it does today, and what next month adds"
+    },
+    {
+     "level": "H2",
+     "text": "Six figures for a workbook nobody can embed"
+    },
+    {
+     "level": "H2",
+     "text": "What ships today, and what is October 2026"
+    },
+    {
+     "level": "H3",
+     "text": "Ships today Beside Tableau"
+    },
+    {
+     "level": "H3",
+     "text": "Next month · October 2026 The parts Tableau does that we will"
+    },
+    {
+     "level": "H2",
+     "text": "Where a flow stops and a pipeline starts"
+    },
+    {
+     "level": "H2",
+     "text": "The dataset behind the chart, as the reviewer sees it"
+    },
+    {
+     "level": "H2",
+     "text": "Tableau questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can Tableau read what datapipelines produces?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is this a Tableau alternative?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Why not just build the dashboard in Tableau?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does datapipelines replace Tableau Prep?"
+    },
+    {
+     "level": "H2",
+     "text": "Try the shipped half on your own databases"
+    }
+   ]
+  },
+  "/tableau/governed-dataset": {
+   "status": "unchanged",
+   "anchors": [
+    "gd-title",
+    "gd-steps",
+    "gd-why",
+    "gd-shots",
+    "gd-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Publish a governed dataset for Tableau from Postgres, MySQL and S3 — without a warehouse"
+    },
+    {
+     "level": "H2",
+     "text": "From four sources to one dataset Tableau trusts"
+    },
+    {
+     "level": "H3",
+     "text": "Register the sources, read-only"
+    },
+    {
+     "level": "H3",
+     "text": "Ask the agent for the dataset"
+    },
+    {
+     "level": "H3",
+     "text": "Review the draft, then release it"
+    },
+    {
+     "level": "H3",
+     "text": "Publish the endpoint — or write the table"
+    },
+    {
+     "level": "H3",
+     "text": "Scope a key to the path"
+    },
+    {
+     "level": "H3",
+     "text": "Connect Tableau"
+    },
+    {
+     "level": "H2",
+     "text": "Governance is a release step, not a permission matrix"
+    },
+    {
+     "level": "H2",
+     "text": "The screens you will actually see"
+    },
+    {
+     "level": "H2",
+     "text": "Run it on the demo first"
+    }
+   ]
+  },
+  "/compare/fivetran-airbyte": {
+   "status": "unchanged",
+   "anchors": [
+    "fa-title",
+    "fa-jobs",
+    "fa-cost",
+    "fa-stops",
+    "fa-choose",
+    "fa-shot",
+    "faq-title",
+    "fa-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "The Fivetran alternative that skips the copy: a query at the source, not a warehouse"
+    },
+    {
+     "level": "H2",
+     "text": "Two products that share a vocabulary and not a job"
+    },
+    {
+     "level": "H2",
+     "text": "What the nightly copy adds — and what answering in place removes"
+    },
+    {
+     "level": "H3",
+     "text": "Freshness"
+    },
+    {
+     "level": "H3",
+     "text": "A second store to run"
+    },
+    {
+     "level": "H3",
+     "text": "Your data in two places"
+    },
+    {
+     "level": "H3",
+     "text": "The API is still a second project"
+    },
+    {
+     "level": "H2",
+     "text": "The four things to not ask of this tool"
+    },
+    {
+     "level": "H2",
+     "text": "Choose by the job in front of you"
+    },
+    {
+     "level": "H3",
+     "text": "Choose Fivetran or Airbyte when…"
+    },
+    {
+     "level": "H3",
+     "text": "Choose datapipelines when…"
+    },
+    {
+     "level": "H2",
+     "text": "The answer, where the copy would have been"
+    },
+    {
+     "level": "H2",
+     "text": "Fivetran and Airbyte questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does datapipelines copy my data?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can it replace a nightly sync?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What about history the source overwrites?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I use both?"
+    },
+    {
+     "level": "H2",
+     "text": "Point it at your two databases this afternoon"
+    }
+   ]
+  },
+  "/compare/postgres-only": {
+   "status": "unchanged",
+   "anchors": [
+    "po-title",
+    "po-enough",
+    "po-four",
+    "po-adds",
+    "po-split",
+    "po-shot",
+    "faq-title",
+    "po-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Do I need a data warehouse? When Postgres alone is enough, and what comes next"
+    },
+    {
+     "level": "H2",
+     "text": "When Postgres alone is enough"
+    },
+    {
+     "level": "H2",
+     "text": "What shows up with the second source — and the agent, and the partner"
+    },
+    {
+     "level": "H3",
+     "text": "The second database"
+    },
+    {
+     "level": "H3",
+     "text": "The agent that needs access"
+    },
+    {
+     "level": "H3",
+     "text": "The partner who wants an API"
+    },
+    {
+     "level": "H3",
+     "text": "The release step nobody wrote"
+    },
+    {
+     "level": "H2",
+     "text": "datapipelines adds the four without taking Postgres away"
+    },
+    {
+     "level": "H2",
+     "text": "Stay alone, or add the four"
+    },
+    {
+     "level": "H3",
+     "text": "Stay Postgres-only when…"
+    },
+    {
+     "level": "H3",
+     "text": "Add datapipelines when…"
+    },
+    {
+     "level": "H2",
+     "text": "Postgres as a datasource, the agent as a reader"
+    },
+    {
+     "level": "H2",
+     "text": "Postgres-only questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "When is Postgres alone the right call?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What actually arrives with the second source?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does datapipelines take Postgres away?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Who is allowed to change what runs?"
+    },
+    {
+     "level": "H2",
+     "text": "Meet the arrivals on the demo, not in production"
+    }
+   ]
+  },
+  "/tableau/prep-vs-pipelines-as-code": {
+   "status": "unchanged",
+   "anchors": [
+    "tp-title",
+    "tp-artefact",
+    "tp-six",
+    "tp-better",
+    "tp-migrate",
+    "tp-shot",
+    "faq-title",
+    "tp-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Tableau Prep alternative: a flow is a file, a pipeline is code you can release"
+    },
+    {
+     "level": "H2",
+     "text": "Same job, different artefact — and the artefact decides the second week"
+    },
+    {
+     "level": "H2",
+     "text": "Six things a flow cannot do"
+    },
+    {
+     "level": "H3",
+     "text": "Diff in a pull request"
+    },
+    {
+     "level": "H3",
+     "text": "Carry a draft a reviewer runs"
+    },
+    {
+     "level": "H3",
+     "text": "Be written by an agent"
+    },
+    {
+     "level": "H3",
+     "text": "Show why a node is slow"
+    },
+    {
+     "level": "H3",
+     "text": "Write its result back"
+    },
+    {
+     "level": "H3",
+     "text": "Publish as an API"
+    },
+    {
+     "level": "H2",
+     "text": "What Prep does better"
+    },
+    {
+     "level": "H2",
+     "text": "Migrating a flow, step by step"
+    },
+    {
+     "level": "H3",
+     "text": "Inventory the flow's sources"
+    },
+    {
+     "level": "H3",
+     "text": "Register them as datasources"
+    },
+    {
+     "level": "H3",
+     "text": "Describe the transformation to the agent"
+    },
+    {
+     "level": "H3",
+     "text": "Run it and compare against the flow's output"
+    },
+    {
+     "level": "H3",
+     "text": "Release it"
+    },
+    {
+     "level": "H2",
+     "text": "The pipeline a flow became"
+    },
+    {
+     "level": "H2",
+     "text": "Prep questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is a pipeline here really code?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does Tableau Prep still do better?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can an agent build the pipeline for me?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How do I migrate an existing flow?"
+    },
+    {
+     "level": "H2",
+     "text": "Bring one flow over and compare"
+    }
+   ]
+  },
+  "/tableau/extracts-alerts-dashboards": {
+   "status": "unchanged",
+   "anchors": [
+    "tr-title",
+    "tr-dash",
+    "tr-extract",
+    "tr-alerts",
+    "tr-not",
+    "tr-today",
+    "faq-title",
+    "tr-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Embedded dashboards, scheduled extracts to S3, data-driven alerts — the roadmap"
+    },
+    {
+     "level": "H2",
+     "text": "Dashboards you embed"
+    },
+    {
+     "level": "H2",
+     "text": "Scheduled extracts to your own bucket"
+    },
+    {
+     "level": "H2",
+     "text": "Email alerts"
+    },
+    {
+     "level": "H2",
+     "text": "What this is not"
+    },
+    {
+     "level": "H3",
+     "text": "Not a Tableau Server replacement"
+    },
+    {
+     "level": "H3",
+     "text": "No Slack, by name"
+    },
+    {
+     "level": "H3",
+     "text": "No hosted plan"
+    },
+    {
+     "level": "H3",
+     "text": "Not a wait, if the API is the need"
+    },
+    {
+     "level": "H2",
+     "text": "The half that is not waiting"
+    },
+    {
+     "level": "H3",
+     "text": "The endpoint a dashboard will consume"
+    },
+    {
+     "level": "H3",
+     "text": "The per-viewer mechanism"
+    },
+    {
+     "level": "H3",
+     "text": "Write-back, the extract's small sibling"
+    },
+    {
+     "level": "H3",
+     "text": "Transform nodes, designed"
+    },
+    {
+     "level": "H2",
+     "text": "Roadmap questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Are the embedded dashboards available today?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "When do scheduled extracts to my own S3 bucket arrive?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Will there be Slack alerts?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does filtered per viewer mean?"
+    },
+    {
+     "level": "H2",
+     "text": "Build on the shipped half while the dates move"
+    }
+   ]
+  },
+  "/for/agencies": {
+   "status": "unchanged",
+   "anchors": [
+    "ag-title",
+    "ag-isolation",
+    "ag-agent",
+    "ag-flow",
+    "ag-release",
+    "ag-embed",
+    "ag-shot",
+    "faq-title",
+    "ag-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "A client reporting API per client: one pipeline each, one key each, a release you can invoice"
+    },
+    {
+     "level": "H2",
+     "text": "One workspace per client, one key per client"
+    },
+    {
+     "level": "H2",
+     "text": "The agent does the first draft of every client's pipeline"
+    },
+    {
+     "level": "H2",
+     "text": "Onboarding a new client, as a ritual"
+    },
+    {
+     "level": "H3",
+     "text": "Open the workspace"
+    },
+    {
+     "level": "H3",
+     "text": "Register the client's sources, read-only"
+    },
+    {
+     "level": "H3",
+     "text": "Mint the working keys"
+    },
+    {
+     "level": "H3",
+     "text": "Let the agent draft, run, and compare"
+    },
+    {
+     "level": "H3",
+     "text": "Release, publish, hand over the key"
+    },
+    {
+     "level": "H2",
+     "text": "A release per client, with a version you can name in the invoice itself"
+    },
+    {
+     "level": "H2",
+     "text": "What you embed in the client's portal: the API today, the dashboard next month"
+    },
+    {
+     "level": "H3",
+     "text": "Ships today The endpoint in their portal"
+    },
+    {
+     "level": "H3",
+     "text": "Roadmap · October 2026 The dashboard beside it"
+    },
+    {
+     "level": "H2",
+     "text": "The client's endpoint, the key, the version"
+    },
+    {
+     "level": "H2",
+     "text": "Agency questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can each client be kept separate from the others?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can a client's key reach only that client's numbers?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Who does the work, and who signs it off?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What do we put in the client's portal today?"
+    },
+    {
+     "level": "H2",
+     "text": "Pilot it on one real client this week"
+    }
+   ]
+  },
+  "/for/saas-teams": {
+   "status": "unchanged",
+   "anchors": [
+    "st-title",
+    "st-story",
+    "st-shipped",
+    "st-call",
+    "st-dash",
+    "st-security",
+    "st-shot",
+    "faq-title",
+    "st-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Embedded analytics without a warehouse: customers see their own numbers, in your app"
+    },
+    {
+     "level": "H2",
+     "text": "The dashboard was never the expensive part"
+    },
+    {
+     "level": "H2",
+     "text": "From data to an API in a day — the shipped half"
+    },
+    {
+     "level": "H2",
+     "text": "What the call from your app looks like"
+    },
+    {
+     "level": "H2",
+     "text": "The dashboards, next month"
+    },
+    {
+     "level": "H2",
+     "text": "Security your reviewer will accept"
+    },
+    {
+     "level": "H3",
+     "text": "No credential reaches the customer path"
+    },
+    {
+     "level": "H3",
+     "text": "Keys are scoped, small and revocable"
+    },
+    {
+     "level": "H3",
+     "text": "A person controls what customers see"
+    },
+    {
+     "level": "H3",
+     "text": "Every call is audited, values are not"
+    },
+    {
+     "level": "H3",
+     "text": "Bounded by construction"
+    },
+    {
+     "level": "H2",
+     "text": "The two screens the flow runs through"
+    },
+    {
+     "level": "H2",
+     "text": "Embedded analytics questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is this embedded analytics?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does each customer see only their own rows?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What can a customer-facing key reach?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Who controls what customers see?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does the audit log record about a customer request?"
+    },
+    {
+     "level": "H2",
+     "text": "Serve one customer number this week"
+    }
+   ]
+  },
+  "/for/analysts": {
+   "status": "unchanged",
+   "anchors": [
+    "an-title",
+    "an-ask",
+    "an-morning",
+    "an-join",
+    "an-probe",
+    "an-release",
+    "faq-title",
+    "an-next"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "The AI SQL assistant with governance: ask in your words, get a pipeline you can read"
+    },
+    {
+     "level": "H2",
+     "text": "Ask in your words, get a pipeline you can read"
+    },
+    {
+     "level": "H2",
+     "text": "A morning with five databases, as it goes now"
+    },
+    {
+     "level": "H3",
+     "text": "Ask the question in your words"
+    },
+    {
+     "level": "H3",
+     "text": "The agent reads before it writes"
+    },
+    {
+     "level": "H3",
+     "text": "The pipeline runs where the data lives"
+    },
+    {
+     "level": "H3",
+     "text": "You read the SQL, not a vibe"
+    },
+    {
+     "level": "H3",
+     "text": "Release it, and Monday stops asking"
+    },
+    {
+     "level": "H2",
+     "text": "The join you could never do in one tool"
+    },
+    {
+     "level": "H2",
+     "text": "The probe that says why it is slow"
+    },
+    {
+     "level": "H2",
+     "text": "Release when you trust it — and it is an API"
+    },
+    {
+     "level": "H2",
+     "text": "Analyst questions, answered plainly"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I have to write the SQL myself?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does the join across five databases work?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "A query is slow — how do I find out why?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How does a query become something my team can rerun?"
+    },
+    {
+     "level": "H2",
+     "text": "Give the agent your Monday question"
+    }
+   ]
+  },
+  "/how-it-works": {
+   "status": "rewritten",
+   "anchors": [
+    "hiw-title",
+    "hiw-mechanism",
+    "engines-title",
+    "how-it-works",
+    "how-title",
+    "flow-title",
+    "flow-desc",
+    "dg-arrowhead",
+    "capabilities",
+    "cap-title",
+    "security",
+    "sec-title",
+    "next",
+    "next-title",
+    "faq",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "How it works, for the engineer who has to run it"
+    },
+    {
+     "level": "H2",
+     "text": "The whole mechanism in one paragraph"
+    },
+    {
+     "level": "H2",
+     "text": "An MCP server for your SQL database"
+    },
+    {
+     "level": "H2",
+     "text": "How it works"
+    },
+    {
+     "level": "H3",
+     "text": "Mint an API key"
+    },
+    {
+     "level": "H3",
+     "text": "Point the agent at /mcp"
+    },
+    {
+     "level": "H3",
+     "text": "Author as a JSON contract"
+    },
+    {
+     "level": "H3",
+     "text": "Execute and watch"
+    },
+    {
+     "level": "H3",
+     "text": "Read row-level results"
+    },
+    {
+     "level": "H2",
+     "text": "What's in the box"
+    },
+    {
+     "level": "H3",
+     "text": "Author"
+    },
+    {
+     "level": "H3",
+     "text": "Versioned JSON contracts"
+    },
+    {
+     "level": "H3",
+     "text": "Freemarker SQL templates"
+    },
+    {
+     "level": "H3",
+     "text": "Template versions, pinned by hash"
+    },
+    {
+     "level": "H3",
+     "text": "Names are paths, and a folder is mandatory"
+    },
+    {
+     "level": "H3",
+     "text": "Draft → release → discard"
+    },
+    {
+     "level": "H3",
+     "text": "Used-by: impact before you change"
+    },
+    {
+     "level": "H3",
+     "text": "Run"
+    },
+    {
+     "level": "H3",
+     "text": "Eight engines, one contract"
+    },
+    {
+     "level": "H3",
+     "text": "dp-lake: Parquet and Iceberg, read in place"
+    },
+    {
+     "level": "H3",
+     "text": "Cross-engine staging joins"
+    },
+    {
+     "level": "H3",
+     "text": "Pipeline composition"
+    },
+    {
+     "level": "H3",
+     "text": "The pipeline editor"
+    },
+    {
+     "level": "H3",
+     "text": "Failures you can actually read"
+    },
+    {
+     "level": "H3",
+     "text": "Live execution streams, and a cancel that means it"
+    },
+    {
+     "level": "H3",
+     "text": "Operate"
+    },
+    {
+     "level": "H3",
+     "text": "Promotion between environments"
+    },
+    {
+     "level": "H3",
+     "text": "Multi-instance ready"
+    },
+    {
+     "level": "H3",
+     "text": "One API section"
+    },
+    {
+     "level": "H3",
+     "text": "Connection pools you can see and set"
+    },
+    {
+     "level": "H3",
+     "text": "A saved datasource never kills a running query"
+    },
+    {
+     "level": "H3",
+     "text": "Append-only audit log"
+    },
+    {
+     "level": "H3",
+     "text": "Catalogued error contract"
+    },
+    {
+     "level": "H3",
+     "text": "Govern"
+    },
+    {
+     "level": "H3",
+     "text": "Workspaces & team isolation"
+    },
+    {
+     "level": "H3",
+     "text": "A key has a kind, and the kind decides its reach"
+    },
+    {
+     "level": "H3",
+     "text": "The agent never sees a credential"
+    },
+    {
+     "level": "H3",
+     "text": "OIDC SSO + scoped agent keys"
+    },
+    {
+     "level": "H3",
+     "text": "Local password accounts"
+    },
+    {
+     "level": "H3",
+     "text": "Read-only datasource governance"
+    },
+    {
+     "level": "H3",
+     "text": "Encrypted datasource credentials"
+    },
+    {
+     "level": "H2",
+     "text": "Security & self-hosting"
+    },
+    {
+     "level": "H2",
+     "text": "From here"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does “published endpoint” mean?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "From data to an API in a day — is that real?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Where does it run?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What happens when a query is too slow?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is it a Tableau or dbt replacement?"
+    }
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "The operational questions": "145: the FAQ block opens with three practical questions; its heading is 'A few practical questions'"
+    }
+   }
+  },
+  "/demo-data": {
+   "status": "unchanged",
+   "anchors": [
+    "dd-title",
+    "dd-ships",
+    "dd-nyc",
+    "dd-trade",
+    "dd-lake",
+    "dd-ask",
+    "dd-licence",
+    "dd-reproduce",
+    "faq",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "The demo data, table by table"
+    },
+    {
+     "level": "H2",
+     "text": "Published artifacts, not fixtures"
+    },
+    {
+     "level": "H2",
+     "text": "NYC mobility: one question, three engines"
+    },
+    {
+     "level": "H2",
+     "text": "US trade: Census facts, mirrored and priced"
+    },
+    {
+     "level": "H2",
+     "text": "dp-lake: the rideshare census, read in place"
+    },
+    {
+     "level": "H3",
+     "text": "The objects, exactly"
+    },
+    {
+     "level": "H2",
+     "text": "Pipelines the demo ships, and the question each answers"
+    },
+    {
+     "level": "H2",
+     "text": "Every source, and the terms it ships under"
+    },
+    {
+     "level": "H3",
+     "text": "mobility (v8)"
+    },
+    {
+     "level": "H3",
+     "text": "trade (v4)"
+    },
+    {
+     "level": "H3",
+     "text": "lake (v1)"
+    },
+    {
+     "level": "H2",
+     "text": "You do not have to trust the bucket"
+    },
+    {
+     "level": "H2",
+     "text": "About the demo data"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is the demo data real?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I use the demo data in my own product?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "How big is the demo on disk?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I add my own data next to it?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does the demo need internet access?"
+    }
+   ]
+  },
+  "/pricing": {
+   "status": "rewritten",
+   "anchors": [
+    "pricing-title",
+    "free-means",
+    "free-costs",
+    "agpl-plain",
+    "support-title",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "Free. Open source. Yours to run."
+    },
+    {
+     "level": "H2",
+     "text": "Every feature, every row, every deployment"
+    },
+    {
+     "level": "H3",
+     "text": "No seat count"
+    },
+    {
+     "level": "H3",
+     "text": "No feature gate"
+    },
+    {
+     "level": "H3",
+     "text": "No account with us"
+    },
+    {
+     "level": "H2",
+     "text": "AGPL-3.0, in two sentences"
+    },
+    {
+     "level": "H3",
+     "text": "Running it inside your company"
+    },
+    {
+     "level": "H3",
+     "text": "Offering it to others as a service"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is it really free?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What does AGPL require of me?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Will there be a hosted version?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can I pay for support?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What about the demo data's licences?"
+    }
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "You own the operations": "145: the costs are the 'What your team provides.' card (infrastructure, AI access, operations and review)",
+     "A person answers": "145: the support section is the navy band 'You can talk to the person building it.'",
+     "Pricing questions, answered plainly": "145: the FAQ heading is 'Clear expectations from the start'"
+    }
+   }
+  },
+  "/semantic-layer": {
+   "status": "unchanged",
+   "anchors": [
+    "sl-title",
+    "sl-what",
+    "sl-rot",
+    "sl-learned",
+    "sl-scopes",
+    "sl-trust",
+    "sl-drift",
+    "sl-now",
+    "sl-next",
+    "sl-compare",
+    "sl-engineer",
+    "faq-title"
+   ],
+   "headings": [
+    {
+     "level": "H1",
+     "text": "A semantic layer that learns, instead of one you write"
+    },
+    {
+     "level": "H2",
+     "text": "What a semantic layer is, in the searcher's words"
+    },
+    {
+     "level": "H2",
+     "text": "Why written models rot"
+    },
+    {
+     "level": "H2",
+     "text": "A semantic model you do not write"
+    },
+    {
+     "level": "H3",
+     "text": "The agent reads the schema and probes the rows"
+    },
+    {
+     "level": "H3",
+     "text": "It establishes a fact introspection cannot state"
+    },
+    {
+     "level": "H3",
+     "text": "It records the fact with the query that proved it"
+    },
+    {
+     "level": "H3",
+     "text": "The next agent sees it inline, where it is looking"
+    },
+    {
+     "level": "H2",
+     "text": "Two scopes of fact: a business glossary that maintains itself"
+    },
+    {
+     "level": "H2",
+     "text": "Trust is earned, not assumed"
+    },
+    {
+     "level": "H2",
+     "text": "Schema drift is detected, never guessed"
+    },
+    {
+     "level": "H2",
+     "text": "What ships now"
+    },
+    {
+     "level": "H3",
+     "text": "Three MCP tools"
+    },
+    {
+     "level": "H3",
+     "text": "Facts on MCP and REST introspection"
+    },
+    {
+     "level": "H3",
+     "text": "Drift at read"
+    },
+    {
+     "level": "H3",
+     "text": "The facts list, read-only"
+    },
+    {
+     "level": "H2",
+     "text": "What is next"
+    },
+    {
+     "level": "H2",
+     "text": "How this differs from the dbt semantic layer and Cube"
+    },
+    {
+     "level": "H2",
+     "text": "For the engineer: the tools, the kinds, the rules"
+    },
+    {
+     "level": "H3",
+     "text": "The kinds of fact"
+    },
+    {
+     "level": "H2",
+     "text": "The semantic layer, in questions"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Is this a data catalog?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Can a wrong fact poison the agent?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Do I have to write anything?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "What happens when my schema changes?"
+    },
+    {
+     "level": "SUMMARY",
+     "text": "Does it work on my own warehouse?"
+    }
+   ]
+  },
+  "/docs": {
+   "status": "doc"
+  },
+  "/docs/deployment": {
+   "status": "doc"
+  },
+  "/docs/environments": {
+   "status": "doc"
+  },
+  "/docs/configuration": {
+   "status": "doc"
+  },
+  "/docs/auth": {
+   "status": "doc"
+  },
+  "/docs/datasources": {
+   "status": "doc"
+  },
+  "/docs/key-providers": {
+   "status": "doc"
+  },
+  "/docs/observability": {
+   "status": "doc"
+  },
+  "/docs/mcp-server": {
+   "status": "doc"
+  },
+  "/docs/pipeline-contract": {
+   "status": "doc"
+  },
+  "/docs/templates": {
+   "status": "doc"
+  },
+  "/docs/versioning": {
+   "status": "doc"
+  },
+  "/docs/rest-api": {
+   "status": "doc"
+  },
+  "/docs/type-system": {
+   "status": "doc"
+  },
+  "/docs/enums": {
+   "status": "doc"
+  },
+  "/docs/staging": {
+   "status": "doc"
+  },
+  "/docs/dag-executor": {
+   "status": "doc"
+  },
+  "/docs/calculators": {
+   "status": "doc"
+  },
+  "/docs/metadata-db": {
+   "status": "doc"
+  },
+  "/docs/module-structure": {
+   "status": "doc"
+  },
+  "/docs/pipeline-editor": {
+   "status": "doc"
+  },
+  "/docs/ui-screens": {
+   "status": "doc"
+  },
+  "/docs/roadmap": {
+   "status": "doc"
+  },
+  "/docs/readme": {
+   "status": "doc"
+  }
+ }
+}

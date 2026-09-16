@@ -12,23 +12,28 @@ import org.junit.jupiter.api.Test
  * (`getComputedStyle`/`getBoundingClientRect`, Playwright, real viewports), because the
  * spacing defects that round found were only visible as computed geometry:
  *
- *  - **(a)** every `.section` h2 → next-element gap equals the one head→body token
- *    (`--site-gap-head`: the 133 mock's clamp — 44px at 1440 / 28px at 390, ± 1px) —
- *    the rule that replaced the five different gaps the measurement found (0, 16, 20,
- *    24 and 32px);
+ *  - **(a)** every SECTION headline's gap to its body equals the one head→body token
+ *    (`--site-gap-head`: 44px at 1440 / 28px at 390, ± 1px) — the rule that replaced the
+ *    five different gaps the measurement found (0, 16, 20, 24 and 32px). 145 scopes the
+ *    sweep to the structures the rule governs: an h2 that is a `.container`'s own child,
+ *    the FAQ block's h2, and the approved preview's `.section-title` opener (whose h2 → p
+ *    gap is the LEDE gap, 16px, like a `.section-lede`). A walkthrough step's or a card's
+ *    own h2 has its component's rhythm and is not a section headline;
  *  - **(b)** every `.card` carries the token padding (24px from 64rem, 20px below);
  *  - **(c)** on `/how-it-works` no two cards sharing a grid row differ in height by more
  *    than 40% unless both are ≤ 260px — the stretch is gone (`align-items: start`) AND the
  *    90-word body budget keeps neighbours comparable;
- *  - **(d)** on `/` the proof strip's top edge is inside the fold (1440×1000 and 390×844) —
- *    the hero shot may never push the buyer numbers off the first screen;
+ *  - **(d)** on `/` the worked example (`#example`, the recorded run) starts inside the
+ *    fold at 1440×1000, and at 390×844 the hero's primary call to action does — the hero
+ *    may never push what the buyer came for off the first screen (145: the proof strip
+ *    became the worked example; the invariant is the same);
  *  - **(e)** no page scrolls sideways (`scrollWidth == clientWidth` on the document) — the
  *    phone check that pins the "390 was the window-minimum artefact" finding.
  *
  * Anonymous throughout: the site's pages are public by construction, so no seeding.
  */
 class SiteRhythmBrowserTest : BrowserSuite() {
-    private val sitePages = listOf("/", "/how-it-works", "/demo-data", "/faq")
+    private val sitePages = listOf("/", "/how-it-works", "/demo-data", "/faq", "/use-cases", "/pricing", "/explore")
     private val viewports = listOf(1440 to 1000, 390 to 844)
 
     @Test
@@ -90,17 +95,19 @@ class SiteRhythmBrowserTest : BrowserSuite() {
             }
         }
         withClue("the walk measured something") { (pairsSeen > 0) shouldBe true }
+        // Every offender on stdout: the assertion below names only the first.
+        offenders.forEach { println("119 (f) $it") }
         withClue("block siblings touching (< 8px)") { offenders.shouldBeEmpty() }
     }
 
     @Test
-    fun `the proof strip is above the fold and no page scrolls sideways`() {
+    fun `the worked example and the primary call are above the fold and no page scrolls sideways`() {
         startTrace()
         val offenders = mutableListOf<String>()
         viewports.forEach { (w, h) ->
             page.setViewportSize(w, h)
             sitePages.forEach { route -> sideways(route, w, h, offenders) }
-            stripAboveFold(w, h, offenders)
+            aboveFold(w, h, offenders)
         }
         withClue("fold / overflow offenders") { offenders.shouldBeEmpty() }
     }
@@ -221,21 +228,26 @@ class SiteRhythmBrowserTest : BrowserSuite() {
                 """.trimIndent(),
             ).toString()
 
-    /** (d) — on `/`, the strip's TOP edge must start inside the viewport. */
-    private fun stripAboveFold(
+    /** (d) — on `/`, the worked example's TOP edge (wide) or the primary call's (phone) must start inside the viewport. */
+    private fun aboveFold(
         w: Int,
         h: Int,
         offenders: MutableList<String>,
     ) {
         page.navigate("$baseUrl/")
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
-        val stripTop =
-            (page.evaluate("() => { const s = document.querySelector('.strip'); return s ? s.getBoundingClientRect().top : -1 }") as Number)
-                .toDouble()
-        withClue("/ at ${w}x$h: no .strip rendered — the fold check would be vacuous") {
-            (stripTop >= 0) shouldBe true
+        val selector = if (w >= 768) "#example" else ".hero-copy .btn-primary"
+        val top =
+            (
+                page.evaluate(
+                    "(sel) => { const s = document.querySelector(sel); return s ? s.getBoundingClientRect().top : -1 }",
+                    selector,
+                ) as Number
+            ).toDouble()
+        withClue("/ at ${w}x$h: no $selector rendered — the fold check would be vacuous") {
+            (top >= 0) shouldBe true
         }
-        if (stripTop > h) offenders += "/ at ${w}x$h: proof strip starts at ${stripTop}px, below the ${h}px fold"
+        if (top > h) offenders += "/ at ${w}x$h: $selector starts at ${top}px, below the ${h}px fold"
     }
 
     private companion object {
@@ -270,7 +282,7 @@ class SiteRhythmBrowserTest : BrowserSuite() {
                      const gap = b.getBoundingClientRect().top - a.getBoundingClientRect().bottom;
                      if (gap < 8) {
                        const name = x => x.tagName + (x.className ? '.' + String(x.className).trim().split(/\s+/)[0] : '');
-                       tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + Math.round(gap) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
+                       tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + gap.toFixed(2) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
                      }
                    }
                  }
@@ -284,16 +296,18 @@ class SiteRhythmBrowserTest : BrowserSuite() {
         const val MAX_ROW_RATIO = 1.4
         const val SHORT_CARD_PX = 260.0
 
-        /** Every `.section` h2 that has a following element sibling, with the rendered gap
-         *  and whether that sibling is the section lede (the 16px carve-out). */
+        /** Every section headline that has a following element sibling — a `.container`'s own
+         *  h2, the FAQ block's, or a `.section-title`'s — with the rendered gap and whether
+         *  that sibling is a lede (the `.section-lede` carve-out, or any `.section-title` p). */
         private const val HEAD_GAPS_JS =
-            """() => Array.from(document.querySelectorAll('.section h2'))
+            """() => Array.from(document.querySelectorAll('.section .container > h2, .faq-block > h2, .faq-group > h2, .section-title > h2'))
                  .map(h2 => ({ h2: h2, next: h2.nextElementSibling }))
                  .filter(function (x) { return x.next })
                  .map(function (x) {
                    const label = x.h2.id || (x.h2.textContent || '').trim().slice(0, 40);
                    const gap = Math.round(x.next.getBoundingClientRect().top - x.h2.getBoundingClientRect().bottom);
-                   const lede = x.next.classList ? x.next.classList.contains('section-lede') : false;
+                   const inTitle = x.h2.parentElement.classList.contains('section-title') && x.next.tagName === 'P';
+                   const lede = inTitle || (x.next.classList ? x.next.classList.contains('section-lede') : false);
                    return { id: label, gap: gap, nextIsLede: lede };
                  })"""
 

@@ -291,6 +291,10 @@ abstract class BrowserSuite {
         @JvmStatic
         protected fun newBrowserContext(): BrowserContext = browser.newContext()
 
+        /** A context with options — a public-site arm's reduced motion, dark scheme or no-JS posture (145). */
+        @JvmStatic
+        protected fun newBrowserContext(options: Browser.NewContextOptions): BrowserContext = browser.newContext(options)
+
         private val browser: Browser
             get() {
                 if (browserHolder == null) {

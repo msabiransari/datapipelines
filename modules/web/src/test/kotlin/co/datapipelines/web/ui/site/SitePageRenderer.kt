@@ -138,10 +138,15 @@ object SitePageRenderer {
             put(SitePages.DEMO_DATA.path, pagesController::demoData)
             put(SitePages.PRICING.path, batch2Controller::pricing)
             put(SitePages.SEMANTIC_LAYER.path, batch2Controller::semanticLayer)
+            // 145: the two hub pages, through their own controller (the docs catalog is its input).
+            put(SitePages.USE_CASES.path, hubController::useCases)
+            put(SitePages.EXPLORE.path, hubController::explore)
         }
     }
 
     private val batch2Controller = SiteV2Batch2Controller()
+
+    private val hubController by lazy { SiteHubController(docs) }
 
     /** The paths the v2 dispatch knows — the set the main [render] when matches against. */
     private val SITE_V2: Set<String> get() = siteV2Handlers.keys
@@ -189,6 +194,10 @@ object SitePageRenderer {
         context.setVariable("releaseStage", RELEASE_STAGE)
         context.setVariable("releaseStageCta", RELEASE_STAGE_CTA)
         context.setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
+        // 145 — the footer's source, support and advisory links, from the same constants.
+        context.setVariable("repoUrl", REPO_URL)
+        context.setVariable("discussionsUrl", DISCUSSIONS_URL)
+        context.setVariable("advisoryUrl", ADVISORY_URL)
         return engine.process(view, context)
     }
 

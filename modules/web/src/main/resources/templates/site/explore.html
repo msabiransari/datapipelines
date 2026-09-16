@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Explore</li>
+    </ol>
+  </nav>
+
+  <!--/* 145 §2 — the directory. GENERATED: the groups and every link render from
+       SiteExplore.groups(), which reads the page registry (SitePages.ALL) and the packaged
+       docs catalog — the two lists that already decide what is public and what the sitemap
+       lists. Nothing is typed here; a page added to the registry is in the directory the
+       moment it exists, and SiteExploreTest holds the directory equal to both sources. */-->
+  <!-- claim: docs/deployment.md §10 (the documentation ships inside the product and in the AGPL repository) -->
+
+  <section class="section page-hero" aria-labelledby="explore-title">
+    <div class="container">
+      <p class="eyebrow">Go deeper when you need to</p>
+      <h1 id="explore-title" class="ds-display">A clearer introduction.<br>The detail is still here.</h1>
+      <p class="lede">Every page on this site, grouped: the product story, the SQL MCP server and each supported engine, the comparisons and the Tableau guides, and the technical documentation packaged with the running version.</p>
+      <ul class="pill-list" aria-label="On this page">
+        <li th:each="g : ${exploreGroups}"><a th:href="'#' + ${g.id}" th:text="${g.name}">Group</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section border" th:each="g : ${exploreGroups}" th:id="${g.id}" th:attr="aria-labelledby=${g.id + '-title'}">
+    <div class="container">
+      <div class="section-title">
+        <h2 th:id="${g.id + '-title'}" th:text="${g.name}">Group</h2>
+        <p th:text="${g.blurb}">Blurb.</p>
+      </div>
+      <ul class="resource-grid">
+        <li th:each="l : ${g.links}"><a th:href="@{${l.path}}"><span th:remove="tag" th:text="${l.title}">Title</span><span aria-hidden="true">&rarr;</span></a></li>
+      </ul>
+    </div>
+  </section>
+
+</th:block>
+</html>

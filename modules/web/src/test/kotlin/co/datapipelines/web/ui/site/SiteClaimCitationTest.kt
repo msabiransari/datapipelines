@@ -49,6 +49,7 @@ class SiteClaimCitationTest {
                 "demo-data.html",
                 "dp-lake.html",
                 "engine.html",
+                "explore.html",
                 "faq.html",
                 "federated-query.html",
                 "for-agencies.html",
@@ -68,6 +69,7 @@ class SiteClaimCitationTest {
                 "tableau-prep-vs-pipelines.html",
                 "tableau.html",
                 "text-to-sql-agent.html",
+                "use-cases.html",
             )
     }
 

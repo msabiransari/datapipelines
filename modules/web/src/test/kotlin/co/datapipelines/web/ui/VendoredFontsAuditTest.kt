@@ -197,14 +197,14 @@ class VendoredFontsAuditTest {
     }
 
     /**
-     * Site v2: the marketing site declares ITS faces in site.css — Manrope for body
-     * (optional, the 090 §B policy: a late face must not reflow) and, since 133, IBM
-     * Plex Mono for DISPLAY (h1–h3, kickers, strip values) at `swap` — the owner's
-     * ruling overrides the optional policy for the display face only, because the h1
-     * is the LCP element and an invisible headline is worse than a swapped one. The
-     * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the
-     * SITE-ONLY latin subsets, 39 KB vs 186 KB). The app keeps Inter; the two sheets
-     * never load together.
+     * Site v2: the marketing site declares ITS faces in site.css. Since 145 that is ONE
+     * family — Manrope, the approved preview's display AND body face, at `swap`: the h1 is
+     * the LCP element and a fallback headline for a beat beats an invisible one (the 133
+     * ruling that put the display face on `swap`, now applied to the one face there is).
+     * The IBM Plex Mono display faces 133 vendored are no longer referenced by the site
+     * (the files and their manifest rows stay until a vendoring round removes them). The
+     * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the SITE-ONLY
+     * latin subsets). The app keeps Inter; the two sheets never load together.
      */
     @Test
     fun `site css declares the marketing faces against the vendored files`() {
@@ -225,14 +225,11 @@ class VendoredFontsAuditTest {
             .keys
             .filter { it.endsWith(".woff2") }
             .forEach { path -> site shouldContain "url(\"../../${path}\")" }
-        declaredHashes("ibm-plex-mono")
-            .keys
-            .filter { it.endsWith(".woff2") }
-            .forEach { path -> site shouldContain "url(\"../../${path}\")" }
         site.split("@font-face").size - 1 shouldBe EXPECTED_SITE_FACES
-        // The display policy, split exactly along the ruling: Manrope optional, Plex swap.
-        site.split("font-display: optional;").size - 1 shouldBe EXPECTED_SITE_OPTIONAL_FACES
-        site.split("font-display: swap;").size - 1 shouldBe EXPECTED_SITE_SWAP_FACES
+        // 145: one face, the display face's policy — swap; nothing optional, nothing Plex.
+        site.split("font-display: swap;").size - 1 shouldBe EXPECTED_SITE_FACES
+        site shouldNotContain "font-display: optional;"
+        site shouldNotContain "ibm-plex-mono"
 
         declaredHashes("jetbrains-mono")
             .keys
@@ -261,14 +258,8 @@ class VendoredFontsAuditTest {
         /** The app-side sheet still declares all four faces (the app keeps Inter; the two sheets never load together). */
         const val EXPECTED_FACES = 4
 
-        /** site.css: 2 Manrope + 6 IBM Plex Mono (500/600/700 × latin/latin-ext). */
-        const val EXPECTED_SITE_FACES = 8
-
-        /** The Manrope pair keeps the 090 §B `optional` policy. */
-        const val EXPECTED_SITE_OPTIONAL_FACES = 2
-
-        /** The Plex display faces carry the 133 `swap` ruling. */
-        const val EXPECTED_SITE_SWAP_FACES = 6
+        /** site.css: the Manrope pair (latin, latin-ext) — the one family the site says everything in (145). */
+        const val EXPECTED_SITE_FACES = 2
         const val EXPECTED_MONO_FACES = 2
         const val MIN_LICENCE_CHARS = 3_000
         const val MIN_SWEPT_SOURCES = 30

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Use cases</li>
+    </ol>
+  </nav>
+
+  <!--/* 145 §2 — the use-cases hub (the approved 2026-09-16 preview): one worked example
+       each for business operations, product teams and analytics teams, with its illustration
+       beside it. The figures are FICTIONAL and say so; the mechanism behind each example
+       cites the contract it rests on. The hub links ON to the specialist audience pages
+       (/for/agencies, /for/saas-teams, /for/analysts) and the Tableau hub — it complements
+       them, it does not absorb their detail. */-->
+
+  <section class="section page-hero" aria-labelledby="uc-title">
+    <div class="container">
+      <p class="eyebrow">Different teams. The same data problem.</p>
+      <h1 id="uc-title" class="ds-display">Make the data useful<br>to the people who need it.</h1>
+      <p class="lede">Start with one recurring question, one application endpoint, or one dataset your BI team keeps rebuilding. These examples show where datapipelines can fit.</p>
+      <ul class="pill-list" aria-label="On this page">
+        <li><a href="#operations">Business operations</a></li>
+        <li><a href="#product">Product teams</a></li>
+        <li><a href="#analytics">Analytics teams</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="examples" aria-label="Three worked examples">
+    <div class="container">
+      <div class="use-card" id="operations">
+        <div>
+          <p class="eyebrow">Business operations</p>
+          <h2 id="operations-title">Which orders still need attention?</h2>
+          <!-- claim: docs/staging.md §3 (the join across two databases happens in the per-run staging database), docs/ui-screens.md §4.4 (the steps and totals are on screen before release) -->
+          <p>Sales sits in one database. Fulfilment lives in another. Ask for a combined view your team can inspect before its next decision.</p>
+          <!-- claim: docs/pipeline-contract.md §3.1 (a declared reporting-period parameter), docs/versioning.md §3 (the saved pipeline runs again unchanged) -->
+          <p>Agree on what counts as fulfilled, join the relevant records and review the totals. Save the pipeline with a reporting-period parameter, then run the same logic for the next review.</p>
+          <div class="output-chips"><span>Cross-database analysis</span><span>Reusable definitions</span></div>
+          <p><a class="text-link" th:href="@{/for/analysts}">One analyst, several databases <span aria-hidden="true">&rarr;</span></a></p>
+        </div>
+        <div class="use-visual">
+          <span class="subtle-label">Illustrative business output</span>
+          <h3>Weekly orders by region</h3>
+          <table class="mini-table">
+            <thead><tr><th scope="col">Region</th><th scope="col">Orders</th><th scope="col">Fulfilled</th></tr></thead>
+            <tbody>
+              <tr><td>North</td><td>1,240</td><td><strong>94%</strong></td></tr>
+              <tr><td>South</td><td>980</td><td><strong>91%</strong></td></tr>
+              <tr><td>West</td><td>1,110</td><td><strong>96%</strong></td></tr>
+            </tbody>
+          </table>
+          <p class="caption">Fictional figures to illustrate a use case, not a customer result or native dashboard.</p>
+        </div>
+      </div>
+
+      <div class="use-card" id="product">
+        <div>
+          <p class="eyebrow">Product teams</p>
+          <h2 id="product-title">Put customer usage inside your product.</h2>
+          <!-- claim: docs/rest-api.md §19 (a released pipeline as an authenticated GET endpoint; each call executes the released SQL) -->
+          <p>Combine usage and account data into a reviewed pipeline, then publish it as an API. Your backend requests the data; your product controls how customers see it. Each call runs released SQL without another AI authoring step.</p>
+          <!-- claim: docs/rest-api.md §19.3 (declared parameters from the query string), docs/auth.md §7.7 (an endpoint key is bound to paths, not rows) -->
+          <p>Your backend controls customer identity and parameter values. Endpoint keys restrict allowed paths; they do not automatically turn arbitrary customer IDs into row-level authorization.</p>
+          <div class="output-chips"><span>Published APIs</span><span>Versioned logic</span><span>Scoped keys</span></div>
+          <p><a class="text-link" th:href="@{/for/saas-teams}">Embedded analytics for SaaS teams <span aria-hidden="true">&rarr;</span></a> · <a class="text-link" th:href="@{/for/agencies}">A reporting API per client <span aria-hidden="true">&rarr;</span></a></p>
+        </div>
+        <div class="use-visual">
+          <span class="subtle-label">Illustrative application integration</span>
+          <h3>Your product. A useful data endpoint.</h3>
+          <div class="api-demo">
+            <pre class="code">GET /api/x/product/usage
+
+{
+  "period": "2026-08",
+  "active_seats": 28,
+  "requests": 18420
+}</pre>
+          </div>
+          <p class="caption">Fictional endpoint and output showing the integration pattern. The chart or customer screen is built in your application.</p>
+        </div>
+      </div>
+
+      <div class="use-card" id="analytics">
+        <div>
+          <p class="eyebrow">Analytics teams</p>
+          <h2 id="analytics-title">Prepare the dataset once.<br>Use it where you already work.</h2>
+          <!-- claim: docs/templates.md §5 (versioned templates reused across pipelines), docs/datasources.md §7E (definitions recorded beside the data) -->
+          <p>Use one reviewed pipeline for the revenue dataset behind your Tableau workbook. Keep the chosen exclusions and definitions with the data, and reuse versioned SQL templates as more reports need the same logic.</p>
+          <!-- claim: docs/pipeline-contract.md §8 (write-back to a datasource), docs/rest-api.md §19 (the endpoint a connector reads), docs/ROADMAP.md §2 (scheduling is planned) -->
+          <p>Write the result into a database Tableau connects to, or connect to the published API through an appropriate web data connector. Run the pipeline when you need an updated result; native scheduling is planned.</p>
+          <div class="output-chips"><span>Tableau-ready data</span><span>Reviewable SQL</span><span>Human release</span></div>
+          <p><a class="text-link" th:href="@{/tableau}">Using datapipelines with Tableau <span aria-hidden="true">&rarr;</span></a> · <a class="text-link" th:href="@{/tableau/governed-dataset}">A governed dataset, step by step <span aria-hidden="true">&rarr;</span></a></p>
+        </div>
+        <div class="use-visual">
+          <span class="subtle-label">A dataset your BI tool can use</span>
+          <div class="metric-row"><span>Inputs</span><b>Multiple sources</b></div>
+          <div class="metric-row"><span>Logic</span><b>Readable SQL</b></div>
+          <div class="metric-row"><span>Output</span><b>Your BI dataset</b></div>
+          <p class="caption">Data preparation is available today. Visualization remains in Tableau or your own application.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="fit" aria-labelledby="fit-title">
+    <div class="container">
+      <div class="dark-band">
+        <div class="dark-grid">
+          <div>
+            <p class="eyebrow">Is it a fit?</p>
+            <h2 id="fit-title">Best when your team needs control over the answer.</h2>
+          </div>
+          <div>
+            <!-- claim: docs/deployment.md §4 (someone runs the server), docs/datasources.md §4 (the supported engines) -->
+            <p>A good starting point: supported databases, someone who can run the server, and a recurring question worth turning into a reviewed dataset.</p>
+            <!-- claim: docs/ROADMAP.md §2 (dashboards are planned), docs/ROADMAP.md §3 (no hosted plan) -->
+            <p>If you need a hosted, ready-made dashboard with no technical setup today, this beta won’t meet that need yet.</p>
+            <a class="btn btn-light" th:href="@{/how-it-works}">See the setup and workflow <span aria-hidden="true">&rarr;</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section border" id="faq" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked by each team</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Three questions before you start')}"></div>
+    </div>
+  </section>
+
+  <section class="section" id="start" aria-labelledby="start-title">
+    <div class="container">
+      <div class="final-cta">
+        <h2 id="start-title">Start with one question your team needs answered.</h2>
+        <!-- claim: docs/deployment.md Appendix B (the demo quickstart) -->
+        <p>Explore the sample data first. Connect your own databases when you’re ready.</p>
+        <div class="actions">
+          <a class="btn btn-primary" th:href="@{/how-it-works#quickstart}">Try the self-hosted demo <span aria-hidden="true">&rarr;</span></a>
+          <a class="btn btn-secondary" th:href="'mailto:' + ${contactEmail}">Talk to the founder</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</th:block>
+</html>

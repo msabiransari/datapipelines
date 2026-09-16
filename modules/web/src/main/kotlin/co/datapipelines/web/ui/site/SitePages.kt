@@ -140,22 +140,21 @@ object SitePages {
     private val facts: SiteFacts = SiteFacts.current()
 
     /**
-     * `GET /` — the homepage. 115 retargeted it from the engineer to the buyer: the title and
-     * H1 speak "no data team required" (the pillar page keeps "SQL MCP server" in its own
-     * title and H1, so the keyword moved rather than vanished).
+     * `GET /` — the homepage. 145 retargeted it from the customer-facing-data buyer to the
+     * small or medium-sized organisation that struggles to understand its data: the title and
+     * H1 speak the OUTCOME (clear answers from the data they already have) and the engineering
+     * mechanism stays one hop away on /how-it-works. The old primary phrase ("no data team
+     * required") was a 115 measurement; the 145 approved preview's title is the searcher's
+     * plain question, and the pillar page keeps "SQL MCP server" as before.
      */
     val HOME =
         SitePage(
             path = "/",
-            // 115 §A.1: the brief's first choice ("Show your customers their data — no data
-            // team required | datapipelines.co") is 73 chars and SiteSeoMetaTest's pin is 70,
-            // so the brief's sanctioned fallback runs instead.
-            title = "Customer-facing data, no data team required | datapipelines.co",
-            // 115 §A.1's sentence, tail-trimmed (the "embedded analytics" tail took it to 172
-            // chars against the 155 pin; the SaaS-teams page owns that phrase anyway).
+            title = "Clear answers from your business data | datapipelines.co",
+            // ≤ 155 (SiteSeoMetaTest): the preview's sentence, with the audience clause kept.
             description =
-                "Describe a dataset in a sentence. An AI agent builds it on your real databases, " +
-                    "you verify the numbers, your app calls the API. Open source, self-hosted.",
+                "Turn database data into reviewed datasets, APIs and inputs for your BI tool. " +
+                    "Open-source, self-hosted data pipelines for small and medium-sized teams.",
             view = "site/index",
         )
 
@@ -472,6 +471,36 @@ object SitePages {
             view = "site/semantic-layer",
         )
 
+    /**
+     * 145 §2 — the use-cases hub: operations, product and analytics teams, one worked
+     * example each, linking on to the existing audience pages (/for/agencies, /for/saas-teams,
+     * /for/analysts) and the Tableau hub rather than absorbing their specialist detail.
+     */
+    val USE_CASES =
+        SitePage(
+            path = "/use-cases",
+            title = "Use cases — operations, product and analytics teams | datapipelines.co",
+            description =
+                "Where datapipelines fits: a combined operations view, a data API inside your product, " +
+                    "and a reviewed dataset behind your Tableau workbook.",
+            view = "site/use-cases",
+        )
+
+    /**
+     * 145 §2 — the directory. Generated from THIS registry and the packaged docs catalog
+     * ([SiteExplore]), never typed: a page added here is in the directory the moment it
+     * exists, and `SiteExploreTest` holds the directory equal to the registry plus the docs.
+     */
+    val EXPLORE =
+        SitePage(
+            path = "/explore",
+            title = "Explore — product, engines, comparisons and docs | datapipelines.co",
+            description =
+                "Every page on the site, generated from its registry: product pages, the SQL MCP server " +
+                    "and each engine, comparisons and Tableau, and the packaged docs.",
+            view = "site/explore",
+        )
+
     /** The route prefix the engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -628,6 +657,8 @@ object SitePages {
                 DEMO_DATA,
                 PRICING,
                 SEMANTIC_LAYER,
+                USE_CASES,
+                EXPLORE,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

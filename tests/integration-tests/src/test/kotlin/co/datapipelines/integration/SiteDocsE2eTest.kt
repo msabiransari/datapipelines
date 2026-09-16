@@ -50,8 +50,8 @@ class SiteDocsE2eTest {
                 .get("/")
 
         response.statusCode shouldBe 200
-        // 115: the H1 speaks to the buyer; the engineering story lives on /how-it-works.
-        response.asString() shouldContain "Show your customers their data. No data team required."
+        // 115/145: the H1 speaks the buyer's outcome; the engineering story lives on /how-it-works.
+        response.asString() shouldContain "Clear answers."
         response.header("Cache-Control") shouldContain "public"
 
         // The fact is derived, not transcribed: asserted against the catalog in

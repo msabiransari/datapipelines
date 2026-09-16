@@ -114,9 +114,9 @@ class SiteAssetAuditTest {
         // index + 8 cluster templates (089) + 7 site-v2 intent pages + _layout + 7 batch-2
         // pages (111) + the engineering page (115) + the demo-data page (116) + the pricing
         // page (119), the semantic-layer page (119 §B), the four 133 demo partials (the
-        // console, the DAG, the endpoint panel and the datasource roster), and the two
-        // public docs views.
-        const val PUBLIC_TEMPLATES = 35
+        // console, the DAG, the endpoint panel and the datasource roster), the two 145 hub
+        // pages (use-cases, explore), and the two public docs views.
+        const val PUBLIC_TEMPLATES = 37
 
         val ASSET_TAG = Regex("""<(?:link|script|img)\b[^>]*>""")
         val ATTR = Regex("""\b(?:th:)?(?:href|src)="([^"]*)"""")
