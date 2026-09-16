@@ -16,7 +16,6 @@ import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.matchers.maps.shouldNotContainKey
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -30,7 +29,7 @@ import java.sql.SQLException
 
 /**
  * `sql_probe` (§7D, 107) — the tool's translation layer: argument binding (typed parameters,
- * clamped limits), the `tempdb` refusal, the §5.3 gate and the four-way error mapping. The
+ * clamped limits), the `tempdb` scratch shaping, the §5.3 gate and the four-way error mapping. The
  * classifier, the EXPLAIN-first read and the timebox are pinned in the datasources module's
  * SqlProbe suites.
  */
@@ -175,14 +174,17 @@ class SqlProbeToolTest {
     }
 
     /**
-     * 2026-09-11 — `tempdb` is a syntax-and-names check against an empty scratch H2, never a
-     * gated datasource read: the registry is not consulted and the real probe never runs. The
-     * scratch outcome is the service's; the tool shapes it (`parsed`, `missing_table`, `note`).
+     * 2026-09-11 — `tempdb` is a scratch check against an empty H2, never a gated datasource
+     * read: the registry is not consulted and the real probe never runs. The scratch outcome is
+     * the service's; the tool shapes it. #119 (2026-09-16): a missing table is an INCOMPLETE
+     * validation — `validation_status: "incomplete"`, `parsed` present and null (the key keeps
+     * its place, the affirmative is withdrawn), the note saying what was not checked. The engine
+     * premise itself is proven on real H2 in [SqlProbeTempdbWireTest]; this pins the shaping.
      */
     @Test
-    fun `tempdb runs the scratch check and never touches the registry or the real probe`() {
+    fun `tempdb shapes a missing-table outcome as incomplete validation and never touches the registry`() {
         every { probe.probeScratch(any(), any(), any(), any(), any()) } returns
-            ScratchProbeOutcome.Parsed(missingTable = "stg_orders", wallMs = 3)
+            ScratchProbeOutcome.Incomplete(missingTable = "stg_orders", wallMs = 3)
 
         @Suppress("UNCHECKED_CAST")
         val payload =
@@ -190,12 +192,38 @@ class SqlProbeToolTest {
 
         assertAll(
             { payload["check"] shouldBe "syntax_and_names" },
-            { payload["parsed"] shouldBe true },
+            { payload["validation_status"] shouldBe "incomplete" },
+            { payload.containsKey("parsed") shouldBe true },
+            { payload["parsed"] shouldBe null },
             { payload["missing_table"] shouldBe "stg_orders" },
-            { (payload["note"] as String) shouldContain "exists only inside a full execution" },
+            { payload["wall_ms"] shouldBe 3L },
+            { payload.containsKey("rows") shouldBe false },
+            { (payload["note"] as String) shouldContain "INCOMPLETE" },
+            { (payload["note"] as String) shouldContain "Nothing after that point was checked" },
+            { (payload["note"] as String) shouldContain "not proof the SQL is sound" },
+            { (payload["note"] as String) shouldContain "VALUES" },
+            { (payload["note"] as String) shouldContain "pipelines_execute_node" },
         )
         verify(exactly = 0) { datasources.getVisible(any(), any()) }
         verify(exactly = 0) { probe.probe(any(), any(), any(), any(), any()) }
+    }
+
+    /** #119 — a self-contained statement that ran is `executed`, `parsed: true`, plus the ordinary payload. */
+    @Test
+    fun `tempdb shapes a self-contained run as executed with rows`() {
+        every { probe.probeScratch(any(), any(), any(), any(), any()) } returns ScratchProbeOutcome.Rows(result())
+
+        @Suppress("UNCHECKED_CAST")
+        val payload =
+            tool.call(McpArguments(mapOf("name" to "tempdb", "sql" to "SELECT 'acme' AS city")), ctx) as Map<String, Any?>
+
+        assertAll(
+            { payload["validation_status"] shouldBe "executed" },
+            { payload["parsed"] shouldBe true },
+            { payload["row_count_returned"] shouldBe 1 },
+            { payload.containsKey("missing_table") shouldBe false },
+            { (payload["note"] as String) shouldContain "not the real staged inputs" },
+        )
     }
 
     /** An H2 error in the scratch check is the same catalogued refusal a real probe reports. */

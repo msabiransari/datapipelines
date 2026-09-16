@@ -33,7 +33,7 @@ internal val PROBE_TYPE_ENUM_JSON: String =
  * answering rows + canonical schema + the EXPLAIN plan captured BEFORE the query ran (so the
  * plan survives the timeout it explains). The gate, the plan-first read and the timebox all
  * live in [SqlProbe]; this tool is the translation layer: argument binding, the §5.3 visibility
- * gate, the `tempdb` refusal, and the error mapping below.
+ * gate, the `tempdb` scratch branch ([scratchWireMap]), and the error mapping below.
  *
  * ## Error surface
  *
@@ -68,10 +68,14 @@ class SqlProbeTool(
                     "verb (INSERT, DROP, ATTACH, EXPLAIN, INTO, ...) anywhere in it, is refused without touching " +
                     "the datasource. Parameters bind as named :name placeholders through the same binder pipeline " +
                     "SQL uses; every referenced name must be supplied in `parameters` with its canonical type. " +
-                    "`tempdb` is a SYNTAX-AND-NAMES check: the statement runs against an EMPTY scratch H2 in the " +
-                    "staging mode (no staged tables, no data) — `parsed: true` with `missing_table` means the SQL is " +
-                    "sound and only its staged input is absent; an error is a real H2 error (a syntax slip, a " +
-                    "`VALUES` column named column1 where H2 says C1) found in milliseconds instead of a full run. " +
+                    "`tempdb` is a scratch check, not an execution: the statement is prepared against an EMPTY " +
+                    "scratch H2 in the staging mode (no staged tables, no data). Read `validation_status`: " +
+                    "`executed` (`parsed: true`, rows) means a self-contained statement ran; `incomplete` " +
+                    "(`parsed: null`, `missing_table`) means H2 stopped at the first staged table it could not find " +
+                    "and NOTHING after that point — syntax or names — was checked; an error is a real H2 error (a " +
+                    "syntax slip, a `VALUES` column named column1 where H2 says C1) found in milliseconds instead " +
+                    "of a full run. To finish an incomplete check, restate the suspect construct over typed, " +
+                    "aliased `VALUES` inputs so it executes here, or run the node with its real staged inputs. " +
                     "On a timeout the error details carry wall_ms and the plan, " +
                     "so the plan that explains the timeout survives it. A statement the database refuses " +
                     "for lack of privilege on an existing table is datasource.table_forbidden. The sql text " +
@@ -83,7 +87,7 @@ class SqlProbeTool(
                   "required": ["name", "sql"],
                   "additionalProperties": false,
                   "properties": {
-                    "name": {"type": "string", "description": "Datasource name, or the reserved name tempdb for a syntax-and-names check of a staging (H2) statement against an empty scratch engine — parsed: true with missing_table is the pass; staged tables only exist inside a full execution."},
+                    "name": {"type": "string", "description": "Datasource name, or the reserved name tempdb to prepare a staging (H2) statement against an empty scratch engine. validation_status executed means it ran; incomplete with missing_table means H2 stopped at a staged table that exists only inside a full execution, and the rest of the statement is unverified."},
                     "sql": {"type": "string", "description": "ONE SELECT or WITH statement. A second statement or a denylisted verb is refused before any connection opens."},
                     "parameters": {
                       "type": "object",
@@ -122,7 +126,8 @@ class SqlProbeTool(
             // by a FULL DAG run (the pipeline-3 audit: five source nodes green, the caller node
             // dead on an H2 name H2 itself defines). The probe now runs the statement against
             // an EMPTY scratch H2 in the staging mode: no data, no gate to pass, and a syntax or
-            // self-contained-name error surfaces in milliseconds. "Table not found" is the pass.
+            // self-contained-name error surfaces in milliseconds. "Table not found" is NOT a pass
+            // (#119, 2026-09-16): H2 stops preparing there, so the check is reported incomplete.
             return probing(name) { scratchWireMap(probe.probeScratch(sql, parameters, tempdbMode, limit, timeout)) }
         }
         val gated = datasources.requireVisible(name, ctx)
@@ -217,38 +222,66 @@ class SqlProbeTool(
         }
 
     /**
-     * The tempdb payload: `check: "syntax_and_names"` + `engine`, then EITHER `parsed: true` with
-     * the staged table H2 could not find (the statement is sound; only the input is absent —
-     * the note says so, because an agent reading "not found" will otherwise chase it) OR the
-     * ordinary probe payload when the statement was self-contained and produced rows.
+     * The tempdb payload: `check: "syntax_and_names"` (the check that was ATTEMPTED) + `engine`,
+     * then `validation_status` saying how far the engine got (#119, 2026-09-16):
+     *
+     *  - `"incomplete"` — H2 stopped at the first staged table it could not find. `parsed` is
+     *    `null`, deliberately: the key keeps its place for readers that look for it, and the
+     *    value withdraws the affirmative the pre-#119 payload made (`true`, "the SQL is sound").
+     *    A missing input tells the engine nothing about the syntax or names AFTER it, and the
+     *    note says so and names the two honest ways to finish the check. No rows are invented.
+     *  - `"executed"` — the statement was self-contained and ran: `parsed: true` plus the
+     *    ordinary probe payload. That validates the executed statement, not every future
+     *    parameter value or the real staged dataset.
+     *
+     * A statement H2 refuses outright is not shaped here at all — it is the catalogued error
+     * [probing] maps, exactly as before.
      */
     private fun scratchWireMap(outcome: ScratchProbeOutcome): Map<String, Any?> =
         buildMap {
             put("check", "syntax_and_names")
             put("engine", "H2 empty scratch, MODE=$tempdbMode — no staged tables exist here")
             when (outcome) {
-                is ScratchProbeOutcome.Parsed -> {
-                    put("parsed", true)
+                is ScratchProbeOutcome.Incomplete -> {
+                    put("validation_status", VALIDATION_INCOMPLETE)
+                    put("parsed", null)
                     put("missing_table", outcome.missingTable)
                     put("wall_ms", outcome.wallMs)
-                    put(
-                        "note",
-                        "The statement parsed and every name it defines itself resolved. H2 stopped at the first " +
-                            "staged table it could not find (" + (outcome.missingTable ?: "unknown") + "), which is " +
-                            "expected in a scratch probe: that table exists only inside a full execution. Nothing " +
-                            "about the SQL needs to change for this reason alone.",
-                    )
+                    put("note", incompleteNote(outcome.missingTable))
                 }
 
                 is ScratchProbeOutcome.Rows -> {
+                    put("validation_status", VALIDATION_EXECUTED)
                     put("parsed", true)
                     putAll(outcome.result.toWireMap())
+                    put(
+                        "note",
+                        "The statement was self-contained and executed here. That validates this statement as " +
+                            "written — not other parameter values, and not the real staged inputs a full run supplies.",
+                    )
                 }
             }
         }
 
+    /** The incomplete-validation note: what was NOT checked, and the two ways to check it. */
+    private fun incompleteNote(missingTable: String?): String =
+        "Validation is INCOMPLETE. H2 stopped preparing the statement at the first staged table it could not " +
+            "find (" + (missingTable ?: "unknown") + "), which exists only inside a full execution. Nothing after " +
+            "that point was checked: a later syntax error, an unsupported join form or a misspelt column is " +
+            "hidden behind this same result (measured on the pinned H2). This is not proof the SQL is sound, " +
+            "and not proof it is wrong. To finish the check, either (a) restate the suspect construct as a " +
+            "self-contained statement — replace each staged table with a typed, aliased VALUES derived table " +
+            "of the same column shape — so it EXECUTES here (that validates the construct, not the real column " +
+            "types or data), or (b) run the node with its real staged inputs (pipelines_execute_node after the " +
+            "nodes it depends on, or pipelines_execute), which validates the statement against the real " +
+            "schema at the cost of a run. templates_render checks what the template emits, not whether it runs."
+
     private companion object {
         /** The reserved staging-datasource name (pipeline-contract §5.4). */
         const val TEMPDB = "tempdb"
+
+        /** `validation_status` values of the tempdb payload (#119). */
+        const val VALIDATION_INCOMPLETE = "incomplete"
+        const val VALIDATION_EXECUTED = "executed"
     }
 }

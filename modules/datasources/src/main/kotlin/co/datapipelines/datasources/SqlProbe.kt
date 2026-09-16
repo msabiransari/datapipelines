@@ -77,20 +77,34 @@ class SqlProbe(
     }
 
     /**
-     * The tempdb SYNTAX-AND-NAMES check (2026-09-11): the statement runs against a FRESH, EMPTY
-     * in-memory H2 opened in the staging engine's own `MODE` and lower-folding — the same URL
-     * shape `StagingFactory` builds, minus the execution. Staging tables do not exist here, so
-     * the outcomes are:
+     * The tempdb scratch check (2026-09-11; its contract corrected 2026-09-16, #119): the
+     * statement is PREPARED against a FRESH, EMPTY in-memory H2 opened in the staging engine's
+     * own `MODE` and lower-folding — the same URL shape `StagingFactory` builds, minus the
+     * execution. Staging tables do not exist here, so the outcomes are:
      *
-     *  - **H2 reports a missing table** (`42102`, the first `FROM` it could not resolve) → the
-     *    statement PARSED and every name it defines itself resolved; only the staged input is
-     *    absent. That is the pass signal — [ScratchProbeOutcome.Parsed] names the table.
+     *  - **H2 reports a missing table** (`42102`/`42103`/`42104`, the first `FROM` it could not
+     *    resolve) → validation is INCOMPLETE: H2 stops preparing at that name, so whatever
+     *    follows it — a join keyword it does not support, a misspelt clause, a column that
+     *    does not exist — has NOT been checked. [ScratchProbeOutcome.Incomplete] names the
+     *    missing table and claims nothing else. Measured on the pinned driver 2.3.232
+     *    ([SqlProbeH2Test]): a `FULL OUTER JOIN` over two absent tables reports the missing
+     *    table; the same statement with both tables present is a `42000` syntax error at
+     *    `OUTER`. The earlier contract ("parsed, every self-defined name resolved") was
+     *    exactly that false affirmative, and an acceptance run built a wrong diagnosis on it.
      *  - **The statement ran** (a self-contained `VALUES` spine, a constant expression) → rows,
-     *    exactly as a real probe returns them ([ScratchProbeOutcome.Rows]).
-     *  - **Anything else** (a syntax error, a `VALUES` column named `column1` that H2 calls
-     *    `C1`, a bad cast) → [SqlProbeExecutionException] with H2's message — the error that
-     *    used to cost a full DAG run to see (the `pipeline-3` audit: five source nodes green,
-     *    the caller node dead on `Column "column1" not found`).
+     *    exactly as a real probe returns them ([ScratchProbeOutcome.Rows]). That validates the
+     *    executed statement — not every future parameter value, not the staged dataset.
+     *  - **Anything else the engine reaches** (a syntax error, a `VALUES` column named
+     *    `column1` that H2 calls `C1`, an unknown function, a bad cast) →
+     *    [SqlProbeExecutionException] with H2's message — the error that used to cost a full
+     *    DAG run to see (the `pipeline-3` audit: five source nodes green, the caller node dead
+     *    on `Column "column1" not found`).
+     *
+     * Deliberately NOT done here: creating the missing tables from a guessed shape (a wrong
+     * shape validates the wrong statement), a second SQL parser (there is none in this repo by
+     * design), or reading another execution's tempdb. The two honest next steps are the
+     * caller's — a self-contained restatement over typed, aliased `VALUES` inputs, or a real
+     * execution with staged inputs — and the tool's response names both.
      *
      * No registry, no lease, no visibility gate: nothing here can read data. The database is
      * discarded when the connection closes (no `DB_CLOSE_DELAY`, the staging rule).
@@ -125,7 +139,7 @@ class SqlProbe(
                 }
             } catch (e: SQLException) {
                 if (e.errorCode in H2_TABLE_NOT_FOUND_CODES) {
-                    return ScratchProbeOutcome.Parsed(missingTable = missingTableOf(e), wallMs = wallMs(startedAt))
+                    return ScratchProbeOutcome.Incomplete(missingTable = missingTableOf(e), wallMs = wallMs(startedAt))
                 }
                 throw SqlProbeExecutionException(scratch.name, e)
             }
@@ -328,15 +342,24 @@ class SqlProbe(
     }
 }
 
-/** What [SqlProbe.probeScratch] found — the statement parsed and resolved (a staged input is absent), or it ran. */
+/**
+ * What [SqlProbe.probeScratch] found — the engine stopped at a missing input (validation
+ * incomplete), or the statement was self-contained and ran. A genuine engine failure is not an
+ * outcome; it is [SqlProbeExecutionException].
+ */
 sealed interface ScratchProbeOutcome {
-    /** Parsed; every self-defined name resolved; [missingTable] is the staged table H2 could not find. */
-    data class Parsed(
+    /**
+     * H2 stopped preparing the statement at [missingTable] (the first staged table it could not
+     * find; null when the driver text carried no name). Everything after that point is
+     * UNVERIFIED — syntax and names alike — so this outcome asserts only that the statement was
+     * accepted up to the missing dependency (#119).
+     */
+    data class Incomplete(
         val missingTable: String?,
         val wallMs: Long,
     ) : ScratchProbeOutcome
 
-    /** The statement was self-contained and produced rows. */
+    /** The statement was self-contained and produced rows: the executed statement is validated. */
     data class Rows(
         val result: SqlProbeResult,
     ) : ScratchProbeOutcome

@@ -206,12 +206,15 @@ semantics; the question's words decide the window.
   contention" — you make the critical path longer and hide the real problem. Independent
   nodes run in parallel by design. (Real miss: four source slices chained behind an
   unrelated lake read.)
-- **A timeout is a signal, not an obstacle.** A node that hits a timeout is doing too much
-  work in the wrong place: pre-aggregate at the source, use a rollup table, filter earlier.
-  Never split one scan into N slices with N parameter pairs to dodge the limit — it ships the
-  same rows, adds parameters that can drift from the window, and the next run under load fails
-  anyway. If a single scan legitimately needs longer, set THAT node's own
-  `settings.timeout_seconds` and say why in your handback — see Timeouts below.
+- **A timeout is a signal, not an obstacle.** A node that hits a timeout is usually doing too
+  much work in the wrong place: pre-aggregate at the source, use a rollup table, filter earlier,
+  read the plan. Only after that, and only when the data or workload genuinely has a natural
+  partition (a period, a key range), may one scan become several — under the rules in §3a:
+  exact disjoint coverage of the window, a recombination that is additive at the answer's grain,
+  bounded concurrency, and measured evidence. A blind split into N parameter pairs ships the same
+  rows N times, adds inputs that drift from the door, and fails under load anyway. If a single
+  scan legitimately needs longer, set THAT node's own `settings.timeout_seconds` and say why in
+  your handback — see §3a.
 - **One template, bound per node.** If two nodes run the same SQL over different values,
   that is one template with parameters, not two copies. Copies drift.
 - **On a lake table, read the stats first — a table with no `partition` index has no
@@ -232,10 +235,17 @@ semantics; the question's words decide the window.
   the run, so it survives the timeout it explains); then `templates_render`; then
   `pipelines_execute_node` on the one node; only then `pipelines_execute` the whole DAG.
   Each rung is cheaper than the next and isolates a different fault class. **The tempdb
-  (H2) rung is different:** H2 has no schema to learn and `sql_probe` accepts `tempdb` only
-  for a *syntax and self-contained* check against an empty engine — a statement that parses
-  and fails with "table not found" has passed that check; one that fails on a name it
-  defines itself (a `VALUES` column, an alias) has not. Use it before every full run.
+  (H2) rung is different:** H2 has no schema to learn, and `sql_probe {"name": "tempdb"}`
+  prepares the statement against an EMPTY engine — read its `validation_status`.
+  `executed` means a self-contained statement ran: that statement, as written, is valid.
+  `incomplete` with `missing_table` means H2 stopped at the first staged table it could not
+  find, and nothing after that point — a join form, a clause, a column — was checked; it is not
+  a pass and not a failure. Finish it before the run: restate the suspect construct over typed,
+  aliased `VALUES` inputs of the staged tables' shape so it executes on the scratch (that proves
+  the construct, not the real column types), or run the node with its real staged inputs
+  (`pipelines_execute_node`, which proves the statement against the real schema at the cost of
+  a run). An error is a real H2 error. Rendering, an incomplete preparation and an execution are
+  three different pieces of evidence; only the last one says the node runs.
   What the probe rung settles about the DATA — a unit, a time zone, what a coded value
   means — is a fact: `semantics_record` it with that SELECT as `evidence_sql` (SKILL.md
   step 1). A LAKE table's ref takes `schema` as the DOTTED string — `{"schema": "lake.mart",
@@ -253,7 +263,8 @@ semantics; the question's words decide the window.
   and the plan (`sql_probe` the node's SELECT against the source — `plan.scan`, and on a
   lake `partitions_scanned`/`partitions_total`; the node's `node_stats` carries the
   timing), ask one question of every SOURCE node: *is the predicate and join
-  key index-supported on that table?* If not — a date range filtered by a second column
+  key index-supported on that table?* Name the access path the plan shows, never a join
+  algorithm you did not see in a plan. If not — a date range filtered by a second column
   through a single-column index, a join key with no index, a lake read that did not prune —
   write it into your handback as a concrete suggestion: the exact `CREATE INDEX …` (or the
   partition column to filter on), the table, why (rows scanned vs rows kept), and what it would
@@ -269,62 +280,108 @@ semantics; the question's words decide the window.
   ≥ one STATEMENT (the datasource's `query_timeout_seconds`, else `node-query-timeout-seconds`, 60).
 - **Two different failures.** `pipeline.node.query_timeout` is the driver stopping one statement;
   `pipeline.node.timeout` is the executor stopping the whole node, whatever the driver does. Read
-  its `phase`: `execute` → cheaper QUERY; `stage` → FEWER ROWS; `connect` → the pool or network.
+  its `phase`: `execute` → cheaper QUERY; `stage` → FEWER ROWS, usually — but read the error and
+  the elapsed time too: a `stage`-phase timeout can still be the CTAS query itself (the staging
+  statement runs the SELECT), not the row count. Read the EFFECTIVE limits before you reason
+  about them: a datasource with no `query_timeout_seconds` runs under the application default,
+  and a node's wall-clock override never changes the statement timeout. Never report an override
+  that does not exist.
 - **Reach for the node's own budget LAST**, after pre-aggregating, pushing the filter down and
   pruning on the partition column. Capped at `node-timeout-max-seconds` (900), refused at SAVE
   above it. A raised timeout you cannot justify in one sentence is a slow pipeline you agreed to.
-- **Never slice a scan to fit a budget, and never add a `depends_on` edge to avoid contention.**
+- **Partition a scan only when it is the data's own shape, and prove it.** Optimize first (the
+  rules above). If the workload still does not fit and the data has a natural partition — a
+  period, a key range — several nodes may each read one partition, under four conditions: the
+  partitions cover the window exactly and do not overlap; the answer recombines additively at
+  its grain (a count or a sum per partition adds up; a distinct count, a median or a ratio does
+  not — recombine the inputs, never the outputs); concurrency is bounded and understood (the
+  partitions run at once against the same source, each its own statement under the same
+  statement timeout — N partitions are N concurrent loads, and each still has to fit); and the
+  evidence is measured — per-node timings, and a reconciliation against the unsplit population
+  where one exists. A blind copy-and-parameterise split, or a `UNION ALL` of the same walk, is
+  neither. Never add a `depends_on` edge to avoid contention.
   Source cursors drain in parallel and the staging lock is taken per batch, so independent source
   nodes really do overlap (measured). `depends_on` is data flow, nothing else.
+- **One warm success near the limit is not reliability.** A node that finished at 90 % of its
+  budget once, after a slower run, may have met a warm cache, a quiet box, or a real fix — the
+  timings alone do not say which. Report the headroom you measured and the risk that remains.
+  When no in-scope plan is robust — the query is as cheap as the source allows and still near
+  the budget — say so: report the effective limit, the shape that needs it and the decision the
+  operator has to make (a datasource timeout, a rollup at the source), rather than claiming the
+  timeout was fixed.
 
-## 4. Get the numbers right
+## 4. Get the numbers right — the contract before the arithmetic
 
-- **Cast what you ship across engines.** `SUM`, `AVG` and arithmetic over a `NUMERIC(p,s)`
-  lose their declared scale on the wire (Postgres reports "unknown"); make the type
-  explicit: `SUM(x)::NUMERIC(14,2)`, `CAST(AVG(x) AS DECIMAL(14,4))`. It is the readable
-  contract for the next reader even where the platform stores the value exactly.
-- **Never compare a sample with a census.** A sampled feed cannot be compared to a full
-  count as a share: you get "99.9%" for the census side. Either scale by the sample rate —
-  when the description, a remark or a metadata table states it — or compare *within-mode*
-  ratios (a rate computed inside the sample against the same rate inside the census) — a
-  ratio of a sample to itself is unbiased. Say which you did in the description.
-- **A ratio's denominator is the rows that CAN carry the numerator.** When a component is
-  recorded only for a subset — card tips, app tips, a fee some rows carry — the ratio's
-  DENOMINATOR is that subset: card tips over card fares, not over all fares. One acceptance
-  run's tip rate was 18.98% over every fare and 23.83% over card-paid fares for the same
-  cell; the first number is the cash share in disguise. Say which denominator you used in
-  the description, beside the window.
-- **Decide the missing-data policy on purpose — one policy for numerators and denominators.**
-  Every measure has an expected population and an expected time coverage: name them (which
-  keys, which periods), then probe for what is absent — the keys with no rows, the periods
-  with no data. A missing period is not a zero: a day with no reading is unknown, not dry; an
-  entity with no rows is absent from the table, not a zero row. Choose the policy per measure —
-  report as unknown, exclude with the exclusion written into the description, or impute only
-  with the justification written down — and apply the SAME policy on both sides of every ratio:
-  a share whose denominator quietly counts periods the numerator treats as missing is two
-  different answers glued together. Prove the coverage: a denominator coverage check or a
-  verification query — periods present against periods expected over the window — belongs
-  beside the measure. An empty bucket or a gap you found is a fact about the population to
-  report, never an error to smooth over. Then exercise it: run the draft over a period the
-  population does not cover, and once with an alternate parameter set — an empty answer with
-  the policy stated is the pipeline working; a quietly plausible number is not.
-- **Ties and exclusions are part of the answer.** `RANK()` can return two rows for one
-  group on a tie — say so in the description or use `ROW_NUMBER()` with a stated
-  tie-break. Filters like `distance > 0 AND distance < 100` are assumptions; write them into
-  the description.
-- **When the top of a ranking sits on its eligibility floor, the floor is wrong.** A ranking
-  by share gain, growth or rate over a floor of a few sampled events per unit lets every
-  leader be a unit with a base of a few dozen — noise won, whatever the numbers say. State the
-  floor in the question's own unit of time (events per day, not per year), look at the
-  leaders' bases, and raise the floor until they are bases you would defend in front of the
-  person; a parameter the reader can raise is not a substitute for a default that is right.
-  (Real miss: a floor of fifty sampled events a year — about two population events a day —
-  cleared twenty thousand pairs, and every leader had a base of fifty to a hundred.)
-- **Validate against an independent number** before you call it done: one group's total
-  from a direct query on the source, compared to the pipeline's row. Row counts agreeing
-  between two versions of *your* pipeline proves consistency, not correctness.
-- H2 specifics that bite: no `:bind` inside a `GROUP BY` expression; cast DECIMAL ratio
-  operands to DOUBLE; `VALUES` rows are named `C1, C2…` — or alias them (§6.1–6.3).
+Every number the pipeline emits is the end of a chain: what is counted, over which rows, in
+which unit, weighted how, computed at what precision, ranked by what rule. Decide the chain in
+this order, write each decision into the description (§5), and verify the DECISIONS before you
+verify the arithmetic — a formula that reproduces its own output proves consistency, not that
+the right quantity was computed.
+
+1. **State the measurement contract before you write a formula.** For every quantity: the
+   population (which rows are eligible, and which are excluded — a distance or price filter is an
+   eligibility rule, not a cleanup), the time window, the unit, the sampling basis (sample or
+   census, at what stated rate), and the output grain. Where a material ambiguity remains — two
+   readings of the question, two candidate denominators, a filter that moves the answer — resolve
+   it with the person, not by choosing quietly. Reuse a recorded `definition` only when it answers
+   THIS question; a rule chosen for another measure is not automatically yours. Counting and
+   measuring may need different eligibility: a row can count as an event and still be unfit for a
+   per-mile or per-minute metric — separate the two populations when they differ, and say so.
+2. **Normalize before you combine.** Two quantities enter one total, one share, one comparison
+   or one ranking only when they are the same kind of thing. A sampled count and a census count
+   are not: apply the stated sampling weight to every sampled count BEFORE the sum, the share and
+   the rank. A constant multiplier preserves order only when it multiplies the whole score; applied
+   to one summand it reorders — so "scaling this component cannot change the ranking" is a claim
+   to disprove, never to assume. Keep three quantities distinct in the output and its labels:
+   observed sample support (rows you saw), the estimated population count (support × weight) and a
+   census count. When no rate is stated, a sample can be compared only with itself, and a
+   within-sample ratio equals the population's only under an assumption you name (that the
+   sampling is independent of the quantity) — say which you did, and what it assumes.
+3. **Reuse a helper by its formula, not its name.** Before importing a shared macro or metric,
+   read what it computes: its numerator and denominator, its precision, and what it does with a
+   missing value. A helper that ROUNDS is a presentation helper — reused inside a difference, a
+   rank or a threshold it changes the answer (rule 4). Match the numerator's population to the
+   denominator's: a component recorded only for a subset is a ratio over that subset (a fee some
+   rows carry, over the rows that carry it), and a sum of per-row ratios is a different measure
+   from a ratio of sums — pick one, name it, and do not label the other "avg". When two sources
+   carry different components of a cost or a price (one all-in, one a base amount), they are not
+   comparable until a decision makes them so: agree the basis, or keep them as two labelled
+   columns; a caveat in the description does not make them one measure. Do not clip, cap or
+   impute a monetary or physical value by default — a long duration or a large amount is a source
+   fact until a rule you wrote and justified says otherwise.
+4. **Carry precision to the output boundary.** Differences, growth, shares of shares, rank
+   scores, thresholds and top-N cutoffs are computed at full precision and rounded once, for
+   display, at the end — and a displayed difference is the ROUNDED TRUE DIFFERENCE, never the
+   difference of two rounded values. Ranking a rounded score manufactures ties and moves the
+   cutoff. Ties are a decision: `ROW_NUMBER()` with a stated, deterministic tie-break (a second
+   key, then a stable id), or `RANK()` with the expansion written into the description — never a
+   window with no secondary key. Verify the membership of the top N and the rows on either side
+   of the cutoff, not only the winner.
+5. **Support and missingness are part of the answer.** A floor on a combined or estimated
+   volume does not give every contributing group its own support: inspect the observed rows per
+   source, per mode, per requested subgroup, and show that support beside the estimate. No sampled
+   row for a group is not evidence of no population events — it is unknown support: distinguish
+   an absent group from a true zero, in the missing-data policy and in the output (a cell that is
+   absent, null or flagged, never a silent zero or a point estimate of 100 % / 0 % from one side).
+   A numerical gap at the cutoff, or the floor you chose, is not statistical stability; a sampled
+   estimate carries uncertainty, and the reply says so instead of calling the ranking stable.
+   A threshold the person approved is theirs: keep it, show the leaders' support under it, and
+   recommend a different one with the evidence — never raise it silently to make a ranking look
+   defensible. Then, per measure, choose the policy for what is absent — report as unknown,
+   exclude with the exclusion written down, or impute with the justification written down — and
+   apply the SAME policy on both sides of every ratio: a share whose denominator counts periods the
+   numerator treats as missing is two answers glued together. Prove coverage — groups and periods
+   present against those expected — beside the measure, and exercise it (§5): a run over a period
+   the population does not cover, and one with an alternate parameter set.
+6. **Cast what you ship across engines.** `SUM`, `AVG` and arithmetic over a `NUMERIC(p,s)` lose
+   their declared scale on the wire (Postgres reports "unknown"); make the type explicit:
+   `SUM(x)::NUMERIC(14,2)`, `CAST(AVG(x) AS DECIMAL(14,4))`. Before you divide, look at MIN/MAX of
+   every column you divide by (§3). H2 specifics that bite: no `:bind` inside a `GROUP BY`
+   expression; cast DECIMAL ratio operands to DOUBLE; `VALUES` rows are named `C1, C2…` — or
+   alias them (§6.1–6.3).
+
+Then verify the QUESTION (§5): derive the check from the question and the source facts —
+population, weights, denominators and all — never from the SQL you just wrote.
 
 ## 5. Finish like a professional
 
@@ -354,8 +411,23 @@ semantics; the question's words decide the window.
   large tool result: if the execute reply reports more rows than you can see, or your client
   shows a truncation notice, page the rows with `executions_get_result` (`limit`, `offset`)
   and reason over what the server returned, never over a partial view.
+- **Verify the question, not the SQL you wrote.** Independent means derived again from the
+  question and the source facts — the population, the weights, the denominators, the window —
+  never by re-running the pipeline's own formula or reading its staged tables. Re-running your
+  formula checks arithmetic; only a second derivation can challenge the interpretation, and the
+  interpretation is where the answer goes wrong (§4). Then cover what the question asked for:
+  every requested dimension (each period, each mode, each subgroup — a combined total that
+  agrees says nothing about how it splits), and the vulnerable rows — the rank cutoff and the
+  rows on both sides of it, the sparsest groups, the groups that are absent, the window's
+  boundaries. Where the result is small, reconcile all of it; where it is not, one winner's total
+  is the weakest possible sample — a winner rarely moves, the cutoff does. Compare like with like
+  at the declared precision, and report exactly what was compared: which rows, which quantity,
+  what matched, what did not.
 - **Report what you did not verify.** "Row counts match the previous version" is not
-  "the numbers are right". Name the independent check you ran — or that you ran none.
+  "the numbers are right". Name the independent check you ran — or that you ran none. A proxy
+  is reported as what it proves: a non-empty count for one period and one source shows that
+  period and that source have rows — not that the combined, multi-period eligibility pool is
+  right; a source-only check never validates an output ranking.
 - **Verify three ways — two are checks, and the server is their judge.** A `checks[]` entry is
   ONE datasource, ONE read-only statement, ONE expectation (`value`, `range` or `rows` — a
   `rows` expectation counts the statement's rows, so an assertion need not return a single
@@ -380,13 +452,17 @@ semantics; the question's words decide the window.
     lie everywhere else.
   - **Independent output reconciliation — the recipe, not a check.** A source check cannot
     prove the OUTPUT right — it never sees it, and no `checks[]` entry reads the pipeline's
-    result. Recompute one meaningful output group independently from the source — joins,
-    filters and denominator included — and compare it against the pipeline's actual result
-    for the same group. That comparison is usually more than one query, sometimes more than
-    one engine, plus an explicit side-by-side: it lives in the numbered Verification recipe,
-    never in `checks[]`. A source assertion that DOES fit the one-datasource, one-statement
-    shape (a raw total the group's number must equal) is a check of one of the two kinds
-    above — link it in the recipe by check-id.
+    result. Recompute the output groups the bullet above names independently from the source —
+    joins, filters, weights and denominator included — and compare them against the pipeline's
+    actual result rows for the same groups. That comparison is usually more than one query,
+    sometimes more than one engine, plus an explicit side-by-side: it lives in the numbered
+    Verification recipe, never in `checks[]`, with the SQL, the parameter values, the observed
+    numbers, the comparison and its limits (§5 Describe). A source assertion that DOES fit the
+    one-datasource, one-statement shape (a raw total the group's number must equal) is a check
+    of one of the two kinds above — link it in the recipe by check-id. A shared literal list
+    copied into several templates is verified the same way: the run compares the copies (§3),
+    and the recipe shows the comparison — a check that counts one copy proves nothing about
+    the others.
 
   Two honest limits, by design. Expectations are STATIC — the server compares the observed
   value against the value, range or row count you declared; there is no dynamic expectation.
@@ -395,6 +471,26 @@ semantics; the question's words decide the window.
   fixed-literal baseline check proves its own named baseline, whatever the defaults are. What
   the defaults cannot prove stays in the Verification recipe as measured observations; the
   server remains the only source of a check run's observed values.
+- **Exercise the door, then say what it accepts.** Before you hand back, run the draft with a
+  valid input other than the defaults, and with an input the data does not cover or the
+  pipeline should refuse — an empty answer with the policy stated is the pipeline working; a
+  quietly plausible number is not. A period the question names is exactly that period in
+  every node: a two-period comparison reads each period as asked, never one period as
+  "everything up to" the other (which folds intervening periods into one side) and never the
+  same period twice; when two sources read the window differently, make the formulas agree or
+  document and restrict the combinations the door supports. Write the supported inputs into the
+  description.
+- **Leave what you learned where the next session looks.** A rule the person approved — a
+  threshold, an eligibility filter, a price basis — is a `definition` recorded through
+  `semantics_record` (SKILL.md rule 13), with the evidence probe where one shows it; a note in
+  your own client's memory or in the reply is invisible to every other session and every other
+  client. Keep a fact about the platform (a tool's behavior, a timeout you met) out of the
+  datasource's facts — it describes the server, not the data — and keep a diagnosis to what you
+  observed: one failure is one observation, not a universal explanation.
+- **The person's constraints are part of the task.** If the person said no delegation, no
+  sub-agents, read-only, or MCP-only, that holds for the whole task, including anything you would
+  have handed to a helper. The server sees only what you call, never how you work, so nothing
+  in this document or on the server enforces it — you do.
 - **Report the index analysis** (§3): for every source node, one line — supported by
   `<index>` / *not supported — suggest `CREATE INDEX … ON table (cols)`* / *lake: filters on
   the partition column, `partitions_scanned`/`partitions_total` from `sql_probe`'s plan*.
@@ -449,11 +545,13 @@ FROM (VALUES (0),(1))` fails at execution with `Column "column1" not found` afte
 other node ran green. Dialect-safe form: alias the derived table's columns —
 `FROM (VALUES (0),(1)) AS t(hr)` — or spell a small spine as `SELECT 0 AS hr UNION ALL
 SELECT 1 …`. H2 has no schema to introspect, so check every tempdb statement with
-`sql_probe {"name": "tempdb"}` (an empty engine: syntax and self-contained errors
-surface in milliseconds; "table not found" means the statement parsed) before you pay a
-full DAG run to find out — passing `parameters` for every `:name` the statement binds
-(else `invalid_params`; tempdb checks syntax and names, not values, so any representative
-value of the right type will do). And `rows` is a reserved word on MySQL and DuckDB —
+`sql_probe {"name": "tempdb"}` (an empty engine: a self-contained error surfaces in
+milliseconds) before you pay a full DAG run to find out — passing `parameters` for every
+`:name` the statement binds (else `invalid_params`; the scratch checks the statement, not
+values, so any representative value of the right type will do). Read `validation_status`:
+`executed` validated the statement; `incomplete` means H2 stopped at a missing staged table
+and checked nothing after it — finish it as §3's ladder says (a `VALUES` restatement, or the
+node run with its real inputs). And `rows` is a reserved word on MySQL and DuckDB —
 alias a count `AS n`, never `AS rows`.
 
 ### 6.4 A source node sees only its own datasource
@@ -499,14 +597,19 @@ the general one.
 | Aggregate and filter at the source; ship the answer's grain | Stage raw rows into H2 and aggregate there |
 | Load → `DDL` index on the join key → query, for large staged tables | Index small tables, or index before loading |
 | `depends_on` = the tables and context values a node reads | Chain nodes to "reduce load" |
-| Treat a timeout as "wrong place for this work" | Slice one scan into N parameterised copies |
+| Treat a timeout as "wrong place for this work"; partition a scan only with exact disjoint coverage, additive recombination and measured evidence | Split a scan blindly to dodge a budget, or call one warm run near the limit "fixed" |
 | Look the phrase up in the catalog and say which reading you chose | Decide what "last quarter" means yourself |
 | Name the window the same way in the pipeline and every template | Three phrasings for one window |
 | Cast aggregates you ship (`::NUMERIC(14,2)`) | Trust the driver's guess at the scale |
-| Compare a sample within itself, or scale by a stated rate | Compare a sample to a census as a share |
+| State each quantity's population, unit, window and weight before combining; weight every sampled count by its stated rate before totals, shares and rankings | Add a sample count to a census count, or scale one summand and call the order unchanged |
+| Rank and select at full precision with a stated tie-break; round once, at the output | Rank the difference of two rounded display values, or leave `ROW_NUMBER()` without a secondary key |
+| Read a shared helper's formula, precision and missing-value behavior before reusing it | Rank with a rounded presentation macro because it is reusable |
+| Show observed support per source and subgroup beside the estimate; keep the person's threshold and recommend changes with evidence | Report an absent sample group as zero, call a cutoff gap "stable", or raise a user-approved floor silently |
 | Exclude the lookup's catch-all rows when the question names the real groups | Group by whatever the lookup contains |
-| `sql_probe` a tempdb statement against the empty engine before a full run | Pay a full DAG run to find an H2 syntax error |
-| Validate one number independently | Call two runs of your own pipeline "verified" |
+| `sql_probe` a tempdb statement and read `validation_status`; finish an `incomplete` one before the run | Read a missing-table result as proof the statement is sound |
+| Derive the check from the question; reconcile every requested dimension and the rows at the cutoff | Recompute your own formula, check one winner, and call the ranking verified |
+| Run an alternate valid input and an uncovered one; read each named period exactly | Fold intervening periods into one side of a comparison, or count a period twice |
+| Record an approved rule with `semantics_record` | Keep the rule in client memory or the reply, where no other session finds it |
 | Name the baseline in a fixed-baseline check's `name` | Bind a changing parameter beside an unrelated fixed expected total |
 | Keep every reconciliation query in the numbered Verification recipe, check-id beside the query that is also a check | Force a two-engine reconciliation into one `checks[]` entry, or write "validated" where the rerunnable SQL should be |
 | Choose and state the missing-data policy — one policy for numerators and denominators, coverage proven | Treat a missing period as a zero, or glue two population definitions into one share |
