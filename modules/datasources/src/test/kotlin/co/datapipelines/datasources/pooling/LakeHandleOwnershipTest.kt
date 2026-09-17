@@ -115,6 +115,7 @@ class LakeHandleOwnershipTest {
 
         val observedWhileHeld: Pair<Boolean, Int>
         val closerAliveWhileHeld: Boolean
+        val releasedUnderMonitor: List<String>
         synchronized(handles) {
             closer.start()
             // The driver's close runs OUTSIDE the monitor — so the raw handle closes while we
@@ -123,6 +124,12 @@ class LakeHandleOwnershipTest {
             Thread.sleep(SETTLE_MS) // give a removal that ignored the monitor every chance to land
             observedWhileHeld = factory.duplicate.isClosed to owner.liveDuplicates
             closerAliveWhileHeld = closer.isAlive
+            // The review's own next step: release the generation while still holding the monitor
+            // (reentrant for this thread). The snapshot still contains the handle — its forget is
+            // waiting behind us — but its phase is already CLOSED, so the release confirms it
+            // rather than counting it as a closure of its own.
+            owner.retire()
+            releasedUnderMonitor = capturingLogs { owner.close() }
         }
         closer.join(TimeUnit.SECONDS.toMillis(WAIT_S))
 
@@ -131,9 +138,12 @@ class LakeHandleOwnershipTest {
             { withClue("the registry was NOT mutated while the monitor was held") { observedWhileHeld.second shouldBe 1 } },
             { withClue("the releasing thread was waiting for the monitor") { closerAliveWhileHeld shouldBe true } },
             { withClue("and completed once it was free") { closer.isAlive shouldBe false } },
+            {
+                releasedUnderMonitor.single { it.startsWith("event=lake.instance_handles_closed") } shouldContainAll
+                    listOf(" handles=1 ", " closed=0 ", " already_closed=1 ")
+            },
             { owner.liveDuplicates shouldBe 0 },
         )
-        owner.close()
         factory.close()
     }
 

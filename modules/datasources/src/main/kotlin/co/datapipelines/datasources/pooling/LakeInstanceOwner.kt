@@ -112,14 +112,27 @@ class LakeInstanceOwner private constructor(
      */
     private fun track(raw: Connection): Connection {
         val tracked = TrackedDuplicate(raw, registry)
-        val refused =
+        val refusedAfterRelease: Boolean? =
             synchronized(handles) {
-                val gone = retired.get() || closed.get()
-                if (!gone) handles.add(tracked)
-                gone
+                // Registered EITHER way (protocol A1/A2): an admitted handle for its holder, a
+                // refused one for accounting — its creator closes it below, and if that close
+                // fails the generation's release (not yet run: closed=false) will visit it, or,
+                // when the release has already passed (closed=true), the creator is the holder of
+                // last resort and takes the hand-off retry itself. Both facts are read under the
+                // same monitor the release sets `closed` and snapshots under, so they cannot cross.
+                handles.add(tracked)
+                if (retired.get() || closed.get()) closed.get() else null
             }
-        if (refused) {
-            runCatching { raw.close() }
+        if (refusedAfterRelease != null) {
+            runCatching { tracked.closeAsRefused(generationAlreadyReleased = refusedAfterRelease) }
+                .onFailure {
+                    LOG.debug(
+                        "event=lake.instance_refused_duplicate_close_failed datasource={} generation={} error=\"{}\"",
+                        datasourceName,
+                        generation,
+                        it.message,
+                    )
+                }
             throw retiring()
         }
         return tracked
@@ -133,7 +146,30 @@ class LakeInstanceOwner private constructor(
      */
     private val handles = HashSet<TrackedDuplicate>()
 
-    private val registry = TrackedDuplicate.Registry { handle -> synchronized(handles) { handles.remove(handle) } }
+    private val registry =
+        object : TrackedDuplicate.Registry {
+            override fun forget(handle: TrackedDuplicate) {
+                synchronized(handles) { handles.remove(handle) }
+            }
+
+            /**
+             * A handle's permitted attempts are all refused and no actor is left (protocol F1/F3
+             * after the release, or G3): it stays registered and counted; this is the report.
+             */
+            override fun exhausted(
+                handle: TrackedDuplicate,
+                error: Exception,
+            ) {
+                LOG.warn(
+                    "event=lake.instance_handle_exhausted datasource={} generation={} attempts={} error=\"{}\" " +
+                        "message=\"a physical connection refused every permitted close; it stays counted as this generation's residual\"",
+                    datasourceName,
+                    generation,
+                    handle.closeAttempts,
+                    error.message,
+                )
+            }
+        }
 
     /**
      * How many physical duplicates the generation still owns — registered, and not confirmed
@@ -201,7 +237,14 @@ class LakeInstanceOwner private constructor(
         // is confirmed, so whatever a failed or in-flight close leaves behind stays counted.
         val remaining = synchronized(handles) { handles.toList() }
         if (remaining.isNotEmpty()) {
-            val outcomes = remaining.groupingBy { it.releaseByGeneration() }.eachCount()
+            // releaseByGeneration never throws for a driver exception (that is a FAILED outcome);
+            // the runCatching is the belt for anything else nonfatal, so one handle can never
+            // stop the others or the retained owner's close below.
+            val outcomes =
+                remaining
+                    .groupingBy { handle ->
+                        runCatching { handle.releaseByGeneration() }.getOrDefault(TrackedDuplicate.ReleaseOutcome.FAILED)
+                    }.eachCount()
             val failed = outcomes[TrackedDuplicate.ReleaseOutcome.FAILED] ?: 0
             val inFlight = outcomes[TrackedDuplicate.ReleaseOutcome.IN_FLIGHT] ?: 0
             LOG.warn(

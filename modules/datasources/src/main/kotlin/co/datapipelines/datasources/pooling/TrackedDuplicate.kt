@@ -1,139 +1,207 @@
 package co.datapipelines.datasources.pooling
 
 import java.sql.Connection
-import java.sql.SQLException
 import java.util.concurrent.Executor
-import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 152 (R152-2/3/4) — a physical duplicate of a LAKE generation's instance, registered with the
- * [LakeInstanceOwner] that created it until its closure is CONFIRMED.
+ * 152 (R152-2 … R152-7) — a physical duplicate of a LAKE generation's instance, owned by an
+ * identifiable actor at every instant until its closure is CONFIRMED or its close attempts are
+ * exhausted and reported.
  *
  * HikariCP holds it from `DataSource.getConnection()` on: through its own JDBC setup
  * (`isReadOnly`, auto-commit, validation), bag admission, every lease, and the close or abort
  * at shutdown. All of that passes through here unchanged — this wrapper adds one thing: it
- * keeps the generation's registry truthful about whether the raw connection is still open.
+ * keeps the generation's registry truthful about whether the raw connection is still open, and
+ * it knows, at every point, WHO owes the next close attempt.
  *
- * ## Ownership state
+ * ## The protocol (design record: evidence `12-ownership-protocol.md`)
  *
- * A handle is [State.OPEN], [State.CLOSING] (exactly one thread is inside the driver's close)
- * or [State.CLOSED] (the driver returned from `close()` without throwing — the only thing that
- * counts as closure). Unregistering happens ONLY on that transition to CLOSED, inside the
- * owner's registry monitor ([Registry.forget]). A driver that throws puts the handle back to
- * OPEN, still registered: the generation's release will try it again, and its counts say what
- * actually closed. `abort()` is passed through and never unregisters — JDBC's abort is allowed
- * to be asynchronous (and the pinned DuckDB driver refuses it outright, after which HikariCP
- * falls back to `close()`); only a confirmed close moves the state.
+ * ONE per-handle [lock] guards every field below; every exit of every driver call is a
+ * transition taken under it; no driver call ever runs under it. The phase is `OPEN` (nobody is
+ * inside the driver; closure not confirmed), `CLOSING` (exactly one actor is inside the
+ * driver's close) or `CLOSED` (the driver returned from `close()` without throwing — the only
+ * thing that counts as closure). The registry forgets the handle only on the transition to
+ * `CLOSED` ([Registry.forget]); a handle whose permitted attempts are all refused stays
+ * registered, and the owner is told ([Registry.exhausted]) so the residual is counted and
+ * logged, never silent.
  *
- * ## The one hand-off
+ * Attempt bound, exactly: every explicit `close()` call makes at most ONE driver attempt of its
+ * own, plus at most ONE hand-off retry over the handle's whole life; the generation's release
+ * makes at most ONE attempt per handle. The hand-off: if the release finds the handle
+ * `CLOSING`, it marks it [transferred] and reports `IN_FLIGHT` — true by construction, because
+ * the actor inside the driver is alive, and on failure it decides its retry in the SAME
+ * critical section that records the failure, so the release can never outrun it (R152-5).
+ * `SQLException` and a nonfatal `RuntimeException` from the driver take the same transitions —
+ * an exception is not a closure, and it never leaves the phase at `CLOSING` with its actor gone
+ * (R152-6). `abort()` is passed through and never confirms anything: JDBC's abort may be
+ * asynchronous, and the pinned DuckDB driver refuses it outright (after which HikariCP falls
+ * back to `close()`).
  *
- * If the generation's release finds a handle CLOSING — a borrower's close is mid-flight on
- * another thread — it does not double-close and it does not wait; it marks the handle
- * [transferred], and the in-flight closer, should its driver call fail, retries ONCE more before
- * giving up, because after the release nobody else will. Bounded: one extra attempt, no lock
- * held across driver work, no coordination beyond an atomic flag.
- *
- * `unwrap` still reaches the driver's connection (the identity tests and any driver-specific
- * caller see the real thing); `isWrapperFor` says so.
+ * `unwrap` still reaches the driver's connection; `isWrapperFor` says so.
  */
 internal class TrackedDuplicate(
     private val delegate: Connection,
     private val registry: Registry,
 ) : Connection by delegate {
-    /** What a [TrackedDuplicate] needs from its owner: to be forgotten once closure is confirmed. */
-    fun interface Registry {
+    /** What a handle needs from its owner: to be forgotten on confirmed closure, or reported when its attempts are exhausted. */
+    interface Registry {
         fun forget(handle: TrackedDuplicate)
+
+        fun exhausted(
+            handle: TrackedDuplicate,
+            error: Exception,
+        )
     }
 
-    internal enum class State { OPEN, CLOSING, CLOSED }
+    internal enum class Phase { OPEN, CLOSING, CLOSED }
 
-    private val state = AtomicReference(State.OPEN)
+    /** What the generation's release found and did for one handle. */
+    enum class ReleaseOutcome { CLOSED, ALREADY_CLOSED, IN_FLIGHT, FAILED }
 
-    /** Set by the generation's release when it found this handle mid-close and left it to that closer. */
-    @Volatile
+    private val lock = Any()
+
+    // --- all guarded by [lock] ---
+    private var phase = Phase.OPEN
+    private var released = false
     private var transferred = false
+    private var retried = false
+    private var attempts = 0
+    private var lastFailure: Exception? = null
 
-    /** The driver's most recent refusal to close this handle — what the owner's release reports for the residual. */
-    @Volatile
-    var lastCloseFailure: SQLException? = null
-        private set
+    /** Driver close attempts so far — diagnostics and tests. */
+    val closeAttempts: Int get() = synchronized(lock) { attempts }
 
-    override fun close() = closeOnce(finalAttempt = false)
+    /** The driver's most recent refusal to close this handle — what the residual reports. */
+    val lastCloseFailure: Exception? get() = synchronized(lock) { lastFailure }
 
     /**
-     * JDBC's abort is asynchronous by contract, so nothing here is treated as closure; whatever
-     * the driver does, the handle stays registered until a `close()` confirms it, or the
-     * generation's release observes `isClosed` and forgets it.
+     * The holder's close (C1–C3, S, F1–F3). At most one driver attempt of this call's own, plus
+     * the one hand-off retry if the generation's release passed while it was inside the driver.
      */
+    override fun close() {
+        if (!enterClosing()) return
+        runAttempts()
+    }
+
+    /**
+     * The creator's close of a duplicate that was REFUSED at registration (R152-7, protocol A2):
+     * the handle is registered for accounting; if the generation has already released, the
+     * creator is the holder of last resort and takes the hand-off retry itself.
+     */
+    fun closeAsRefused(generationAlreadyReleased: Boolean) {
+        synchronized(lock) {
+            if (generationAlreadyReleased) {
+                released = true
+                transferred = true
+            }
+        }
+        close()
+    }
+
+    /** Passed through; never a closure — see the class KDoc. */
     override fun abort(executor: Executor?) = delegate.abort(executor)
 
     /**
-     * The generation's release: closes the handle if it is OPEN; if it is CLOSING on another
-     * thread, hands the last responsibility to that thread (see the class KDoc) and reports
-     * [ReleaseOutcome.IN_FLIGHT]; if it is CLOSED already, nothing to do.
+     * The generation's ONE visit (G0–G4). Runs at most one driver attempt; never throws — a
+     * nonfatal driver exception is a `FAILED` outcome, so the release continues with the next
+     * handle and the retained owner.
      */
     fun releaseByGeneration(): ReleaseOutcome {
-        if (state.get() == State.CLOSED) return ReleaseOutcome.ALREADY_CLOSED
-        if (runCatching { delegate.isClosed }.getOrDefault(false)) {
-            // Closed by something this wrapper did not see (an executor-driven abort, a driver
-            // fault): confirm and forget — that is a closure, not an attempt.
-            confirmClosedByOthers()
-            return ReleaseOutcome.ALREADY_CLOSED
-        }
-        return when {
-            state.compareAndSet(State.OPEN, State.CLOSING) -> {
-                try {
-                    delegate.close()
-                    markClosed()
-                    ReleaseOutcome.CLOSED
-                } catch (e: SQLException) {
-                    lastCloseFailure = e
-                    state.set(State.OPEN)
-                    ReleaseOutcome.FAILED
+        val driverSaysClosed = runCatching { delegate.isClosed }.getOrDefault(false)
+        val found =
+            synchronized(lock) {
+                released = true
+                when {
+                    phase == Phase.CLOSED -> {
+                        ReleaseOutcome.ALREADY_CLOSED
+                    }
+
+                    driverSaysClosed -> {
+                        // Closed by something this wrapper never saw (an executor-driven abort, a
+                        // driver fault): a closure to confirm, not an attempt to make.
+                        phase = Phase.CLOSED
+                        ReleaseOutcome.ALREADY_CLOSED
+                    }
+
+                    phase == Phase.CLOSING -> {
+                        transferred = true
+                        ReleaseOutcome.IN_FLIGHT
+                    }
+
+                    else -> {
+                        phase = Phase.CLOSING
+                        attempts++
+                        null // the generation's own attempt, below
+                    }
                 }
             }
-
-            else -> {
-                transferred = true
-                // Re-check after the flag: if the closer finished between the CAS and the flag,
-                // the outcome is already final and the flag is harmless.
-                if (state.get() == State.CLOSED) ReleaseOutcome.ALREADY_CLOSED else ReleaseOutcome.IN_FLIGHT
+        if (found == ReleaseOutcome.ALREADY_CLOSED && driverSaysClosed) registry.forget(this)
+        if (found != null) return found
+        return try {
+            delegate.close()
+            confirmClosed()
+            ReleaseOutcome.CLOSED
+        } catch (
+            // SQLException, or a nonfatal RuntimeException the driver surfaces (the module's
+            // DS-SEC-6 rule): both are the FAILED transition, never an exit from the release.
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            synchronized(lock) {
+                phase = Phase.OPEN
+                lastFailure = e
             }
+            registry.exhausted(this, e)
+            ReleaseOutcome.FAILED
         }
     }
 
-    enum class ReleaseOutcome { CLOSED, ALREADY_CLOSED, IN_FLIGHT, FAILED }
+    /** C1–C3: true when this call now owns the driver attempt. */
+    private fun enterClosing(): Boolean =
+        synchronized(lock) {
+            if (phase != Phase.OPEN) return false
+            phase = Phase.CLOSING
+            attempts++
+            true
+        }
 
     /**
-     * Exactly one thread runs the driver's close: the CAS loser returns — CLOSED means a
-     * second close is the no-op the driver's own would be, CLOSING means the other thread owns
-     * the outcome and this one must not report a closure it did not confirm. A driver failure
-     * puts the handle back to OPEN, still registered; if the generation has meanwhile handed
-     * this thread the last word ([transferred]), one more attempt is made, then the failure is
-     * the caller's.
+     * One driver attempt, then — under the lock, together with the failure record — the
+     * decision whether this actor owes the hand-off retry (F2) or the failure is final (F1/F3).
      */
-    private fun closeOnce(finalAttempt: Boolean) {
-        if (!state.compareAndSet(State.OPEN, State.CLOSING)) return
-        try {
-            delegate.close()
-        } catch (e: SQLException) {
-            lastCloseFailure = e
-            state.set(State.OPEN)
-            if (transferred && !finalAttempt) {
-                closeOnce(finalAttempt = true)
-                return
+    private fun runAttempts() {
+        while (true) {
+            try {
+                delegate.close()
+            } catch (
+                // SQLException, or a nonfatal RuntimeException the driver surfaces (the module's
+                // DS-SEC-6 rule): the same transition either way; the exception still propagates.
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
+                val (retry, exhausted) =
+                    synchronized(lock) {
+                        lastFailure = e
+                        val retry = transferred && !retried
+                        if (retry) {
+                            retried = true
+                            attempts++
+                        } else {
+                            phase = Phase.OPEN
+                        }
+                        // Final only when nobody is left: the release has passed (or this IS the
+                        // last-resort creator) and no retry remains.
+                        retry to (!retry && released)
+                    }
+                if (retry) continue
+                if (exhausted) registry.exhausted(this, e)
+                throw e
             }
-            throw e
+            confirmClosed()
+            return
         }
-        markClosed()
     }
 
-    private fun confirmClosedByOthers() {
-        if (state.getAndSet(State.CLOSED) != State.CLOSED) registry.forget(this)
-    }
-
-    private fun markClosed() {
-        state.set(State.CLOSED)
+    private fun confirmClosed() {
+        synchronized(lock) { phase = Phase.CLOSED }
         registry.forget(this)
     }
 
