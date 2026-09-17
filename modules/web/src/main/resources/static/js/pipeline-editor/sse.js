@@ -200,6 +200,28 @@
         editor.announceStatus("Node " + payload.node_id + " started");
         break;
 
+      case "node_progress":
+        // 135: a terminal sample (state "aborted"/"failed") is the ONLY node-level
+        // terminal signal a CANCELLED node gets — PipelineExecutor emits no node
+        // event for a cancellation ("Cancellation is not a node failure"), so the
+        // #125 operation sample is all that arrives before pipeline_failed. Map it
+        // onto the graph exactly when THIS sample is what sealed the operation (the
+        // reducer already ran, above): a node-level event keeps precedence, so a
+        // sample replayed after node_failed — or a lower-sequence straggler the
+        // reducer ignored — changes nothing, and a mid-run sample (writing, …) is
+        // not terminal and never moves the graph. setNodeState stops the pulse,
+        // clears the incoming flow and mirrors minimap + a11y.
+        if (
+          payload && payload.node_id && (payload.state === "aborted" || payload.state === "failed") &&
+          editor.graph && editor.nodeOps && typeof editor.nodeOps.get === "function"
+        ) {
+          var sealed = editor.nodeOps.get(payload.node_id);
+          if (sealed && sealed.terminal && sealed.state === payload.state) {
+            editor.graph.setNodeState(payload.node_id, payload.state);
+          }
+        }
+        break;
+
       case "node_completed":
         // 080 §A: success turns the incoming edges --edge-done inside setNodeState.
         if (editor.graph) {
@@ -288,6 +310,11 @@
         self.terminalSeen = true;
         editor.isExecuting = false;
         if (editor.stopRunClock) editor.stopRunClock("failed");
+        // 135: the executor cancels running siblings and never starts queued ones
+        // when a node fails, emitting no node event for either — what it records in
+        // node_stats is ABORTED. Sweep them here so the on-screen states equal
+        // node_stats at the end of the run, exactly as execution_aborted already did.
+        self.abortUnfinishedNodes();
         // 057: the FULL payload goes to the result panel's failure mode — the code, the
         // message, the correlation id, the rendered SQL and the exception chain, on the
         // screen the engineer is already looking at. The modal keeps a one-line summary
@@ -310,15 +337,7 @@
         self.terminalSeen = true;
         editor.isExecuting = false;
         if (editor.stopRunClock) editor.stopRunClock("aborted");
-        if (editor.graph) {
-          editor.graph.cy.nodes().forEach(function (node) {
-            var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
-            if (!state || state === "idle" || state === "running") {
-              editor.graph.setNodeState(node.id(), "aborted");
-              if (editor.nodeStates) editor.nodeStates[node.id()] = "aborted";
-            }
-          });
-        }
+        self.abortUnfinishedNodes();
         var abortReason = payload && payload.reason ? String(payload.reason) : null;
         if (window.DpToast && window.DpToast.show) {
           window.DpToast.show("warning", "Execution aborted", abortReason || "The execution was aborted");
@@ -329,6 +348,25 @@
       default:
         break;
     }
+  };
+
+  /**
+   * 135: every node still idle or running when the execution ends aborted or
+   * failed is, by the server's own bookkeeping, ABORTED — the executor cancels
+   * running siblings and never starts queued ones, and it emits no node event
+   * for either. setNodeState carries the whole transition: the pulse stops, the
+   * incoming flow clears, and the minimap/a11y mirrors follow. Nodes that
+   * reached a real terminal state (success/failed) are not touched.
+   */
+  SseHandler.prototype.abortUnfinishedNodes = function () {
+    var editor = this.editor;
+    if (!editor.graph || !editor.graph.cy) return;
+    editor.graph.cy.nodes().forEach(function (node) {
+      var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
+      if (!state || state === "idle" || state === "running") {
+        editor.graph.setNodeState(node.id(), "aborted");
+      }
+    });
   };
 
   /**
