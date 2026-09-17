@@ -35,6 +35,17 @@ The workflow is three steps:
    pipeline over it. A lake node stages into tempdb and joins Postgres/MySQL/SQLite nodes in
    the same pipeline like any other source.
 
+**One engine per datasource, warm across connections — but not across changes.** A LAKE
+datasource's pool runs ONE embedded engine that every pooled connection shares: the engine's
+memory and thread limits are one budget for the whole datasource (more connections do not add
+capacity, they share it), and its cache of the remote objects it has scanned is kept across
+the pool's routine connection replacement. Two consequences for how you read a timing: a
+probe that ran fast may be fast because an earlier query already pulled those objects —
+never infer the steady-state cost of a cold read from one warm measurement, and expect the
+FIRST scan after a datasource edit or a table registration to be cold again, because those
+rebuild the pool and start a fresh engine. Partition pruning (below) is what bounds the cold
+cost; the cache only removes the repeat.
+
 **Bare vs qualified table names.** When ALL of the datasource's registered tables share
 exactly ONE namespace, the server sets the search path at connect, so a template reads
 `FROM events_by_day` bare. With several namespaces there is no default —

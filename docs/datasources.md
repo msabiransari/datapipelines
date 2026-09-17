@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.31 (frozen contract — additive-only changes after this point)
+**Status:** v2.32 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-09-16
@@ -365,6 +365,20 @@ Until 094 a save or delete removed the pool from the map and `close()`d it in th
 
 Retiring pools are held in a **queue, not a map keyed by name**: a datasource saved twice in quick succession, with a lease in between, legitimately has two pools draining at once, and a name-keyed map would drop the first one un-closed. Application shutdown closes everything at once — `ExecutionDrainLifecycle` has already cancelled the live statements by then.
 
+#### A LAKE pool generation owns its engine (152, #128)
+
+For a `LAKE` datasource the pool is more than a set of connections: it OWNS one embedded DuckDB instance. Each pool build — the first lease, and every rebuild after a retire — is a **generation**: it opens ONE retained owner connection on the datasource's URL, initializes the instance on it exactly once (extensions, the S3 secret, ATTACHes, the engine limits of §8C.4, the per-table views of §8C.2), and keeps that connection open, never leased, for the generation's life. Every physical connection HikariCP opens is the driver's `duplicate()` of that owner — a second connection to the SAME instance — plus the session-scoped search path. Hikari's own lifecycle is unchanged: leases, validation, `maxLifetime` and idle replacement all still happen, but replacing a physical connection no longer discards the engine, its catalog or its **external-file cache** — until 152 every physical connection was its own instance, so a routine replacement (every 22.5–30 min by Hikari's defaults) sent the next scan of the same objects back to a cold read (the #128 timeouts).
+
+The ownership rules, each pinned by a test that its inverse turns red:
+
+- **One owner = one generation = one instance.** A rebuild opens a NEW owner, so a retiring generation and its replacement never share catalog, secret or cache state, and two datasources never share an instance — the anonymous `jdbc:duckdb::memory:` URL has no process-global name to collide on. An in-flight reader on the old generation keeps its snapshot; new leases see the new rows.
+- **Retire leaves the owner alive; reap closes it.** The old generation's instance lives while its leases drain under the rules above and is released by the reaper's close — Hikari first (its existing abort-at-the-ceiling policy for a stuck borrower), then the owner. A borrower Hikari abandoned keeps its own handle until it actually closes; the owner's close only drops the retained handle. Repeated close is a no-op.
+- **Fully initialized or not at all.** A strict-init failure (adapter init, prelude) or a failed Hikari construction closes the owner before the error propagates; no half-initialized instance is ever handed to a pool. A per-table view failure is isolated as before (§8C.2).
+- **No silent reconnect.** If the owner is ever lost, new leases fail with a connection exception (SQLSTATE `08003`) naming the datasource and generation, logged once — the pool never opens a fresh engine behind the caller's back, because that engine would carry none of the generation's views or secrets. Retire-and-rebuild is the remedy.
+- **The owner is not a borrower.** It occupies no `maximumPoolSize` slot and is not an active connection in the reaper's count or the metrics.
+
+**Scope of the shared instance.** Every shipped and documented LAKE URL is the anonymous in-memory form, and the isolation above is exactly that form's. A `jdbc:duckdb:memory:<label>` or file-backed `jdbc:duckdb:/path.db` URL passes validation and takes the same owner path, but those URLs name a JVM-wide instance the driver shares by name/path — two datasources on the same label, or a retiring and a fresh generation of one, share it. That sharing pre-dates 152 and is not changed by it; the anonymous URL is the supported shape. Saved URLs are never rewritten. The registration pre-flight, the §8.1 probe and the save-time test build (§5.4) each open their own scratch engine and never join a live generation.
+
 **Reconcile on (re)subscribe.** §5.7's Redis channel is fire-and-forget: a message published while an instance was disconnected is gone, and pub/sub has no replay. So every instance also implements the subscription callback its listener container fires on the initial subscribe AND after every reconnect, and each callback compares the `updated_at` its live pools were built from against the rows — retiring every pool whose row has moved or gone. One two-column query, no Redis key, no TTL, nothing to expire wrong. A missed ping is caught at reconnect, by comparison rather than by replay.
 
 **Concurrency.** `poolFor(datasource)` (§6.1) is called from many executor coroutines at once, so lazy initialization must be **atomic**: pools live in a `ConcurrentHashMap<String, ConnectionPool>` keyed by datasource name and are created with `computeIfAbsent`, so exactly one `HikariDataSource` is constructed per datasource even under a concurrent first-lease burst. Two consequences the implementation must respect:
@@ -452,7 +466,7 @@ A datasource flagged `is_readonly` (metadata-db §4.10, V4; workspaces design 20
 
 1. **Save-time validation** (primary UX): `pipeline.validation.datasource_readonly` (HTTP 400, [Pipeline Contract §12.5](pipeline-contract.md#125-datasource-validations)) — one code, `details` carrying node id + datasource name + which shape fired. **Reads the LIVE row, past the §6.3 metadata cache** (044 F4): the resolver behind the contract registry (`getVisibleLive` / `getLive`) answers from the same row the executor's live backstop answers from, so a row-level flag flip — either direction — is honored by the next save, not by the next cache expiry. A cached read here would have refused VALID saves in the un-flip direction with a wrong 400 that no other layer covered. Cost: one indexed PK read per referenced datasource per save; the REST GET hot path keeps the §6.3 cache.
 2. **Executor backstop** (the D10 flip window): `pipeline.node.datasource_readonly` (HTTP 500, [Pipeline Contract §13.4](pipeline-contract.md#134-node-execution)) — the executor re-checks the live registry entry at node execution time, past the §6.3 metadata cache, so a datasource flipped readonly after a pipeline version was saved fails at the NEXT execution, not at the next cache expiry. Covers all three shapes and a composed PIPELINE node's child nodes (each child node passes the same backstop in its own execution). The read is **flag-only** (`isReadonlyLive` — one indexed `SELECT is_readonly`, no credential ciphertext, no properties parse) per write-shaped node execution, and a DQL node whose `output.target: "datasource"` names a readonly datasource is refused at the CONNECT phase, **before** its source query runs (044 F9) — the write-back shell re-checks at write time and remains authoritative.
-3. **Pool-level connections** (defense in depth): the dialect adapter builds every pool for a readonly datasource with Hikari `readOnly = true` — the pool-level flag, proven on the real pool build. Treated as defense in depth, not proof, for two stated reasons: JDBC read-only enforcement strength varies by driver (the Postgres driver enforces read-only transactions; others are advisory), and pool→connection propagation of the flag is not guaranteed either (verified against the pinned HikariCP 6.3.0 + H2 2.3.232: the flag reaches the pool, not the leased connection). `properties.hikari.readOnly` is §5.6-refused in both directions for exactly this reason (§5.6, above). **DuckDB-family exception (089, corrected 2026-09-08):** the DuckDB driver refuses to CHANGE a connection's read-only state, and HikariCP calls `setReadOnly` exactly when the connection's own `isReadOnly()` differs from the pool flag — so for `DUCKDB` and `LAKE` the pool flag MIRRORS the state the connection opens in (`properties.jdbc.access_mode: READ_ONLY` ⇒ `true`, otherwise `false`) instead of following `readonly`; the D6 layer-2a executor backstop is the enforcement that remains. Forcing it either way fails the whole pool build: forced on broke the `:memory:` lake (089 §F), forced off broke every `--demo trade` datasource (093 §2). **Cross-instance eviction (050/R1, M3 closed for registry-mediated writes):** every registry save/delete publishes the datasource name on the Redis channel `dp:datasource-invalidated` after the row commits, beside the synchronous local eviction; every instance subscribes (Spring's `RedisMessageListenerContainer`, subscribed before the instance serves traffic) and evicts its pool for that name, so the **next use rebuilds from the row** — an operator repointing a datasource or rotating a password through instance A no longer leaves instance B on stale credentials/URL until restart. The publishing instance does not act on its own message (local eviction already ran); a Redis fault at publish degrades to a WARN, never a failed save. Global datasources (`workspace = null`) ride the same channel — instances stay symmetric, deliberately (R1 rejected workspace→instance affinity). **Sizing under replication:** with N instances a datasource has N pools, so `properties.hikari.maximumPoolSize × replicas ≤ the customer database's connection limit` must hold for every datasource. **Known residual window (044 F5, narrowed):** a **row-level** flip written out of band (manual SQL/restore, the D10 channel — not a registry save) still publishes nothing and leaves pre-flip pools serving until the next registry save/delete on that datasource or a restart; the window is bounded in practice: every write-shaped path crosses layer 2's live check first, so a stale **writable** pool cannot ship a write layer 2 refuses — the stale pool only serves reads the flag never forbade. This is the same mechanism the architecture audit tracked as M3, resolved 050 ([ARCH-AUDIT-2026-08](ARCH-AUDIT-2026-08.md#m3--datasource-connection-pools-never-expire-cross-instance--critical-verified)).
+3. **Pool-level connections** (defense in depth): the dialect adapter builds every pool for a readonly datasource with Hikari `readOnly = true` — the pool-level flag, proven on the real pool build. Treated as defense in depth, not proof, for two stated reasons: JDBC read-only enforcement strength varies by driver (the Postgres driver enforces read-only transactions; others are advisory), and pool→connection propagation of the flag is not guaranteed either (verified against the pinned HikariCP 6.3.0 + H2 2.3.232: the flag reaches the pool, not the leased connection). `properties.hikari.readOnly` is §5.6-refused in both directions for exactly this reason (§5.6, above). **DuckDB-family exception (089, corrected 2026-09-08):** the DuckDB driver refuses to CHANGE a connection's read-only state, and HikariCP calls `setReadOnly` exactly when the connection's own `isReadOnly()` differs from the pool flag — so for `DUCKDB` and `LAKE` the pool flag MIRRORS the state the connection opens in (`properties.jdbc.access_mode: READ_ONLY` ⇒ `true`, otherwise `false`) instead of following `readonly`; the D6 layer-2a executor backstop is the enforcement that remains. For `LAKE` that opening state is the pool generation's (§5.2, 152): every physical connection is a duplicate of the generation's owner and reports the access mode the owner opened with, so the flag is one value per generation, never per connection. Forcing it either way fails the whole pool build: forced on broke the `:memory:` lake (089 §F), forced off broke every `--demo trade` datasource (093 §2). **Cross-instance eviction (050/R1, M3 closed for registry-mediated writes):** every registry save/delete publishes the datasource name on the Redis channel `dp:datasource-invalidated` after the row commits, beside the synchronous local eviction; every instance subscribes (Spring's `RedisMessageListenerContainer`, subscribed before the instance serves traffic) and evicts its pool for that name, so the **next use rebuilds from the row** — an operator repointing a datasource or rotating a password through instance A no longer leaves instance B on stale credentials/URL until restart. The publishing instance does not act on its own message (local eviction already ran); a Redis fault at publish degrades to a WARN, never a failed save. Global datasources (`workspace = null`) ride the same channel — instances stay symmetric, deliberately (R1 rejected workspace→instance affinity). **Sizing under replication:** with N instances a datasource has N pools, so `properties.hikari.maximumPoolSize × replicas ≤ the customer database's connection limit` must hold for every datasource. **Known residual window (044 F5, narrowed):** a **row-level** flip written out of band (manual SQL/restore, the D10 channel — not a registry save) still publishes nothing and leaves pre-flip pools serving until the next registry save/delete on that datasource or a restart; the window is bounded in practice: every write-shaped path crosses layer 2's live check first, so a stale **writable** pool cannot ship a write layer 2 refuses — the stale pool only serves reads the flag never forbade. This is the same mechanism the architecture audit tracked as M3, resolved 050 ([ARCH-AUDIT-2026-08](ARCH-AUDIT-2026-08.md#m3--datasource-connection-pools-never-expire-cross-instance--critical-verified)).
 
 **The backstop's null semantics (044, normative).** The live read is three-valued, and all three values are decisions — "I could not read the row" is **never** "there is no restriction":
 
@@ -1160,29 +1174,38 @@ Every successful registry write **evicts the datasource's connection pool and pu
 pool on the next lease — so a table registered on instance A is visible on instance B's next
 execution — and registry-backed introspection (§8C.3) catches up within its 60 s cache TTL.
 
-### 8C.2 A view per registered table, built at connect — and isolated per table
+### 8C.2 A view per registered table, built once per pool generation — and isolated per table
 
-A pooled connection on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB
-instance (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection
-are invisible to a second, while both are open). Every new physical connection therefore
-builds its own catalog/schema/view set — which is also why nothing here can leak across
-datasources.
+A raw open on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB instance
+(verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection are
+invisible to a second, while both are open). Since 152 (#128) a LAKE pool generation opens
+exactly ONE such instance and every physical connection HikariCP creates is the driver's
+`duplicate()` of the generation's retained owner (§5.2): the catalog/schema/view set is built
+ONCE, on the owner, and shared by every connection of that generation. Isolation across
+datasources — and across a retiring generation and its replacement — is the generation's:
+each has its own instance, and the anonymous URL has no name for two to collide on. The one
+per-connection statement is the search path (below), which the engine keeps per session.
 
 **Per-table isolation (109 §A).** The views do NOT ride HikariCP's `connectionInitSql` — one
 string, no try/catch, so a single failing `CREATE VIEW` (a bad prefix, a wrong format, a
 file that is not Parquet) used to fail the whole pool build and make EVERY registered table
-unreachable. Instead the pool's driver DataSource is wrapped (`LakeViewApplyingDataSource`):
-on each new physical connection the adapter's own `connectionInit` statements (§4.2A) and
-the shared prelude (extension loads, ATTACHes, schema creations) run STRICTLY — a failure
-there is a datasource fault and fails the connect as before — and then each table's view
-runs **independently**: a failing view is caught, recorded on the table's registry row
-(`last_error` / `last_error_at`, bounded to 2000 characters) and **skipped**, and the
-connect succeeds with the surviving views. The same isolation covers the SQL-emission
+unreachable. Instead the generation's initializer (`LakeInstanceInitializer`, run on the
+owner before Hikari opens its first connection) applies the adapter's own `connectionInit`
+statements (§4.2A) and the shared prelude (extension loads, ATTACHes, schema creations)
+STRICTLY — a failure there is a datasource fault and fails the pool build as before — and
+then each table's view **independently**: a failing view is caught, recorded on the table's
+registry row (`last_error` / `last_error_at`, bounded to 2000 characters) and **skipped**,
+and the build succeeds with the surviving views. The same isolation covers the SQL-emission
 boundary's own refusals (an unmappable 3+-segment namespace, a location that fails the
 grammar, an unknown format): the refusal is captured per table and recorded, never thrown
-into the pool build. Recording is **transition-only** — the applier compares against the
-state the pool was built with, so an unchanged outcome writes nothing and the hot path
-carries no per-connection write; a success after a failure CLEARS the row's `last_error`.
+into the pool build. Recording is **transition-only** — the initializer compares against the
+state the pool was built with, so an unchanged outcome writes nothing; a success after a
+failure CLEARS the row's `last_error`. A recorder that itself fails (the registry write) is
+logged and never fails the build. Because the statements run once per generation, no
+`CREATE OR REPLACE VIEW` and no global `SET` ever runs beside an active reader on routine
+connection creation; a registry change reaches readers through a NEW generation (§5.2's
+retire-and-rebuild), which is the supported refresh boundary — there is no cache TTL and no
+promise of automatic remote-object freshness inside a generation.
 
 **The broken table at query time.** A node whose rendered SQL references a table with a
 recorded `last_error` fails at the CONNECT phase with the catalogued
@@ -1250,7 +1273,10 @@ a footer read over the network, which is what the cache is for.
 
 ### 8C.4 Engine limits — compute is on the app's box
 
-Every lake connection gets the engine limits as `SET` statements ([configuration.md §3.24](configuration.md#324-lake-datasource-engine-limits-dp-lake)
+Every lake pool generation gets the engine limits as `SET` statements, applied ONCE on the
+instance every pooled connection shares (152, §5.2) — they are ONE budget for the pool, not
+one per connection, and the pool size does not multiply them
+([configuration.md §3.24](configuration.md#324-lake-datasource-engine-limits-dp-lake)
 is the operator paragraph): `dialect.memory_limit` (default **25 % of the container's memory
 as the cgroup-aware JVM reports it**, floored at 64 MiB and hard-capped at 4 GiB — an
 explicit value is the operator's own number and is not capped), `dialect.threads`,
@@ -1258,7 +1284,10 @@ explicit value is the operator's own number and is not capped), `dialect.threads
 insertion order costs memory and temp-file discipline the engine would otherwise spend on a
 guarantee a read-only lake never asks for. DuckDB shares the box with the JVM, which is what
 the default's cap exists for. The existing row cap and `node-query-timeout-seconds` apply
-unchanged.
+unchanged. Concurrent queries on one lake share that one budget: an over-budget query fails
+with the engine's out-of-memory error on its own connection while its siblings keep working,
+and a host running N lake datasources holds N such budgets (plus, briefly, a retiring
+generation's while it drains).
 
 ### 8C.5 Extensions, bundled in the image
 
@@ -1566,6 +1595,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v2.32 | 152 one DuckDB instance per LAKE pool generation (#128) | **§5.2 gains "A LAKE pool generation owns its engine"**: each pool build opens one retained owner connection, initializes the instance once and hands HikariCP duplicates of it, so routine physical replacement keeps the generation's catalog and external-file cache (until now every physical connection was its own instance and every `maxLifetime` replacement went cold — the #128 timeouts); the ownership rules (one owner per generation, retire keeps it, reap closes it after Hikari, fully-initialized-or-closed, no silent reconnect with SQLSTATE `08003`, the owner is not a borrower) and the named/file-URL scope caveat. **§8C.2** restated: views are built once per generation by `LakeInstanceInitializer` (the renamed 109 §A seam), per-table isolation and transition-only recording unchanged, a failing recorder no longer fails the build, and the retire-and-rebuild generation is the stated refresh boundary. **§8C.4**: the limits are one budget per generation, shared by concurrent queries. **§5.7**: the DuckDB-family access-mode mirror is one value per LAKE generation. Measured on the lane's loopback witness: after a physical replacement the same scan reads 0 file bytes (12.7 MB before). |
 | 2026-09-16 | v2.31 | 147 tempdb probe is incomplete validation (#119) | **§7D**: the sentence claiming `tempdb` is refused (stale since 2026-09-11) replaced by the scratch-check contract — `validation_status` `executed`/`incomplete`, `parsed: null` when H2 stopped at a missing staged table and the rest of the statement is unverified — with the pointer to MCP §6.2.34 for the measurement and the next steps. No code change in this module's contract beyond `SqlProbe.probeScratch`'s outcome rename (`Incomplete`). |
 | 2026-09-15 | v2.30 | 139 §F min/max are catalog estimates | **§7C**: the per-column `min`/`max` are stated to be the catalog's ESTIMATES, not a scan — the planner's histogram ends from the last `ANALYZE` (parquet footer bounds for a lake) — with the pointer to `sql_probe` for the exact bound. A 2026-09-14 acceptance run read "max 260" as a data oddity when the true max was 265 and zones 261–263 carried 184k rows. The MCP tool description and `references/tools.md` carry the same clause (drift-pinned); no code change. |
 | 2026-09-14 | v2.29 | 136 §B a rule may carry no refs | **§7E** gains the pure-rule bullet: a WORKSPACE-scope `definition`/`exclusion`/`preference` may carry no refs (bound to a datasource, names no table, never stale); DATASOURCE kinds unchanged. Pointer to V26 and Pipeline Contract §13.15. |

@@ -55,10 +55,11 @@ datasources:
       These records are generated from the FHV Trip Record submissions made by
       bases, so we cannot guarantee or confirm their accuracy or completeness.
     dialect: LAKE
-    # DuckDB is the engine; an in-memory instance per pooled connection. The
-    # per-table views are created at connect from this datasource's registry
-    # rows (089 §B), and the single-namespace search path is what lets the
-    # demo templates read bare table names.
+    # DuckDB is the engine; ONE in-memory instance per pool build, shared by
+    # every pooled connection (152) — its file cache survives connection
+    # replacement. The per-table views are created once per pool build from
+    # this datasource's registry rows (089 §B), and the single-namespace search
+    # path is what lets the demo templates read bare table names.
     jdbc_url: "jdbc:duckdb::memory:"
     credential:
       kind: none
