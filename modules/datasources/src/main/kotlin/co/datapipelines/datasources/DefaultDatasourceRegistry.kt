@@ -75,6 +75,15 @@ class DefaultDatasourceRegistry(
      * egress-free deployment never issues an `INSTALL`, on a test-connection click either.
      */
     private val duckdbExtensionDirectory: String? = null,
+    /**
+     * The deployment's operator default `memory_limit` for every LAKE engine build (153,
+     * configuration.md §3.25), bound once from `datapipelines.duckdb.memory-limit` at wiring
+     * and forwarded to the pool factory, [probe] and [preflightLakeTable] alongside
+     * [duckdbExtensionDirectory] — the same three call sites, the same reason: a bundled or
+     * memory-tuned deployment must see the identical adapter on a test-connection click and a
+     * table pre-flight, not just on the live pool.
+     */
+    private val duckdbMemoryLimit: String? = null,
     private val poolMetrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
     private val retireCeiling: Duration = ConnectionPoolManager.DEFAULT_RETIRE_CEILING,
 ) : DatasourceRegistry {
@@ -128,6 +137,7 @@ class DefaultDatasourceRegistry(
                 ConnectionPoolManager.buildHikariPool(
                     withCredential,
                     duckdbExtensionDirectory = duckdbExtensionDirectory,
+                    duckdbMemoryLimit = duckdbMemoryLimit,
                     lakeViews = lakeViewInit(withCredential),
                 )
             },
@@ -181,7 +191,7 @@ class DefaultDatasourceRegistry(
         val withCredential =
             repository.findByName(datasource.name)?.let { it.toDatasource(decryptOrNull(it)) }
                 ?: datasource
-        return LakeTablePreflight.check(withCredential, table, duckdbExtensionDirectory)
+        return LakeTablePreflight.check(withCredential, table, duckdbExtensionDirectory, duckdbMemoryLimit)
     }
 
     /** 109 §A — the executor's pre-execution read: the datasource's registered tables whose view creation last FAILED. */
@@ -553,8 +563,9 @@ class DefaultDatasourceRegistry(
     @Suppress("TooGenericExceptionCaught")
     private fun probe(datasource: Datasource): TestResult =
         try {
+            val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory, duckdbMemoryLimit)
             val config =
-                DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory).buildHikariConfig(datasource).apply {
+                adapter.buildHikariConfig(datasource).apply {
                     maximumPoolSize = 1
                     connectionTimeout = PROBE_CONNECTION_TIMEOUT_MS
                     initializationFailTimeout = -1

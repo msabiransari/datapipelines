@@ -380,6 +380,14 @@ datapipelines:
   # LOADs — never an INSTALL, so a lake pool connects with zero egress.
   duckdb:
     extension-directory: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:}
+    # 153 (#136) — the operator default `memory_limit` every LAKE engine build gets when a
+    # datasource declares none of its own (configuration.md §3.25). EMPTY IS THE SHIPPED
+    # DEFAULT and keeps today's derived value exactly (25% of the container's memory, clamped
+    # 64 MiB-4 GiB) — nothing changes for a deployment that does not set it. A non-empty value
+    # is a DuckDB size string (e.g. `8GB`), used verbatim with no cap, validated at startup;
+    # an invalid value fails fast rather than falling back silently. Read once at wiring, so a
+    # restart is required to pick up a change — bound alongside extension-directory above.
+    memory-limit: ${DATAPIPELINES_DUCKDB_MEMORY_LIMIT:}
   # 094 — the connection-pool retirement ceiling (configuration.md §3.26, datasources §5.2).
   # Appended after the whole datapipelines: tree on purpose: a block inserted between two
   # existing ones reparents its followers silently (MISTAKES.md, the YAML entry).

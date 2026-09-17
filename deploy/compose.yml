@@ -223,6 +223,10 @@ services:
       # compose-env-audit.sh's IMAGE_DEFAULT_VARS; set the variable in deploy/secrets.env
       # to point at a self-populated directory instead.
       DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:-/opt/duckdb/extensions}
+      # 153 (#136) — the operator default memory_limit every LAKE engine build gets when a
+      # datasource declares none (configuration.md §3.25). Empty = unset, application.yml's
+      # own default — mirrors it exactly, unlike the extension directory above.
+      DATAPIPELINES_DUCKDB_MEMORY_LIMIT: ${DATAPIPELINES_DUCKDB_MEMORY_LIMIT:-}
       # 137 — outbound mail (configuration.md §3.27). Mail is ON exactly when HOST and FROM
       # are both set; there is no flag. Any SMTP server; Postmark's endpoint is one.
       DATAPIPELINES_MAIL_HOST: ${DATAPIPELINES_MAIL_HOST:-}

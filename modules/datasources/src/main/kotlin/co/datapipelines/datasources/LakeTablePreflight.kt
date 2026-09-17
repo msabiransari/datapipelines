@@ -33,8 +33,9 @@ object LakeTablePreflight {
         datasource: Datasource,
         table: LakeRegisteredTable,
         duckdbExtensionDirectory: String? = null,
+        duckdbMemoryLimit: String? = null,
     ): String? {
-        val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory)
+        val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory, duckdbMemoryLimit)
         val plan = LakeViewStatements.planForTables(listOf(table), adapter, duckdbExtensionDirectory)
         val view = plan.views.single()
         // The SQL-emission boundary's refusal (an unmappable namespace, an unutterable

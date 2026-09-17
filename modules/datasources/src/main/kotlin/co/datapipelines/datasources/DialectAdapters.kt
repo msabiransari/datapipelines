@@ -556,13 +556,17 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  * order costs the engine memory and temp-file discipline it would otherwise spend on a
  * guarantee a read-only lake never asks for.
  *
- * The DEFAULT memory limit, when `memory_limit` is unset, is **25 % of the container's memory
- * as DuckDB sees it**: the cgroup limit reported by the container-aware
- * `OperatingSystemMXBean.totalMemorySize` (the same figure DuckDB's own 80 % default reads),
- * hard-capped at 4 GiB and floored at 64 MiB — DuckDB shares the box with the JVM, and an
- * uncapped fraction of a large host would let one lake query evict the app itself. The
- * computation is injectable ([containerMemoryBytes]) so tests pin it; the operator paragraph
- * with the numbers lives in configuration.md's lake-limits section.
+ * The DEFAULT memory limit, when `memory_limit` is unset, is either the operator's
+ * [defaultMemoryLimit] (`datapipelines.duckdb.memory-limit`, configuration.md §3.25) verbatim,
+ * or — when that is also unset — **25 % of the container's memory as DuckDB sees it**: the
+ * cgroup limit reported by the container-aware `OperatingSystemMXBean.totalMemorySize` (the
+ * same figure DuckDB's own 80 % default reads), hard-capped at 4 GiB and floored at 64 MiB —
+ * DuckDB shares the box with the JVM, and an uncapped fraction of a large host would let one
+ * lake query evict the app itself. Precedence is datasource `properties.dialect.memory_limit`
+ * (this adapter's per-instance grammar) > [defaultMemoryLimit] (the deployment's own number,
+ * used exactly as supplied, no cap) > the derived 25 % default. The computation is injectable
+ * ([containerMemoryBytes]) so tests pin it; the operator paragraph with the numbers lives in
+ * configuration.md's lake-limits section.
  *
  * ## Credentials (§3.4)
  *
@@ -583,6 +587,13 @@ class LakeDialectAdapter(
      */
     private val extensionDirectory: String? = null,
     /**
+     * The deployment's operator-level default `memory_limit` (configuration.md §3.25,
+     * `datapipelines.duckdb.memory-limit`), used verbatim — no cap — when a datasource sets
+     * no `properties.dialect.memory_limit` of its own. Null (the shipped default) keeps the
+     * derived 25 %-of-container computation exactly as before this key existed.
+     */
+    private val defaultMemoryLimit: String? = null,
+    /**
      * The container's total memory in bytes, read once per pool build when `memory_limit` is
      * unset — injectable so tests pin the default computation (see the class KDoc's §D block).
      */
@@ -596,6 +607,13 @@ class LakeDialectAdapter(
         require(extensionDirectory == null || isSafeExtensionDirectory(extensionDirectory)) {
             "datapipelines.duckdb.extension-directory must be an absolute path with no quotes, " +
                 "backslashes, whitespace or control characters; '$extensionDirectory' is not."
+        }
+        // Refuse at the entry point: an operator typo in the env var must fail the deployment's
+        // boot (DomainConfiguration.kt validates this eagerly at context start), not silently
+        // fall back to the derived default and surface only when someone reads a SET statement.
+        require(defaultMemoryLimit == null || MEMORY_LIMIT_VALUE.matches(defaultMemoryLimit.trim())) {
+            "datapipelines.duckdb.memory-limit must be a size like '512MB' or '2GB' " +
+                "(B, KB, MB, GB or TB); '$defaultMemoryLimit' is not."
         }
     }
 
@@ -682,7 +700,7 @@ class LakeDialectAdapter(
         buildList {
             val properties = datasource.properties.dialect
             val memoryLimit = properties["memory_limit"]?.toString()?.trim()
-            add("SET memory_limit = '${memoryLimit ?: "${defaultMemoryLimitMb()}MB"}'")
+            add("SET memory_limit = '${memoryLimit ?: defaultMemoryLimit?.trim() ?: "${defaultMemoryLimitMb()}MB"}'")
             properties["threads"]?.toString()?.trim()?.let { add("SET threads = $it") }
             // DuckDB's relative .tmp default fails in the non-root image's working directory.
             // Each anonymous engine gets an isolated engine-owned path, created lazily on spill
@@ -973,19 +991,22 @@ object DialectAdapters {
 
     /**
      * The adapter for [dialect], bound to the deployment's bundled DuckDB extension directory
-     * (089 §D, configuration.md §3.25). Only [Dialect.LAKE] honors the directory — it is the
-     * only DuckDB-family dialect whose connection setup loads extensions — so every other
-     * dialect gets the same singleton [forDialect] returns, directory or not. A LAKE lookup
-     * with a null directory also returns the singleton: the save-time config check (§5.4,
-     * which never connects) and every non-pool caller see the same statements either way.
+     * (089 §D, configuration.md §3.25) and its operator default `memory_limit`
+     * (configuration.md §3.25, `datapipelines.duckdb.memory-limit`). Only [Dialect.LAKE] honors
+     * either — it is the only DuckDB-family dialect whose connection setup loads extensions or
+     * sets engine limits — so every other dialect gets the same singleton [forDialect] returns,
+     * either value or not. A LAKE lookup with both null also returns the singleton: the
+     * save-time config check (§5.4, which never connects) and every non-pool caller see the
+     * same statements either way.
      */
     fun forDialect(
         dialect: Dialect,
         duckdbExtensionDirectory: String?,
+        duckdbMemoryLimit: String? = null,
     ): DialectAdapter =
         when {
-            dialect == Dialect.LAKE && duckdbExtensionDirectory != null -> {
-                LakeDialectAdapter(extensionDirectory = duckdbExtensionDirectory)
+            dialect == Dialect.LAKE && (duckdbExtensionDirectory != null || duckdbMemoryLimit != null) -> {
+                LakeDialectAdapter(extensionDirectory = duckdbExtensionDirectory, defaultMemoryLimit = duckdbMemoryLimit)
             }
 
             else -> {
