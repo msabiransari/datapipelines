@@ -182,8 +182,9 @@ for p, t in texts.items():
 # `mail` joined the alternation in 137 so the mail.* AUDIT events (enums §15) and the mail.*
 # STRUCTURED LOG events (observability §3.4B) are checked like every other namespace — before
 # that a doc could cite `mail.sent` freely with nothing defining it.
+# `lake` joins for the LAKE instance lifecycle events defined in observability §3.4C.
 CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
-           r"idempotency|type_mapping|mcp|endpoint|mail)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
+           r"idempotency|type_mapping|mcp|endpoint|mail|lake)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9
 # as the defining list, so codes defined there join the catalog.
@@ -208,13 +209,13 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # STRUCTURED LOG events (094). enums.md §15 catalogues AUDIT events — rows written to the
 # audit log — and a structured log line's `event=` name is a different thing that would be a
 # lie in that table. observability.md is their authority, the way it already is for metric
-# names in check B, and §3.4A / §3.4B are the sections that name them (137 added 3.4B, the
-# mail events). Extracted from those sections only, so a typo anywhere else still fails: the
+# names in check B, and §3.4A / §3.4B / §3.4C name them (mail and LAKE lifecycle events
+# extend the original pool events). Extracted from those sections only, so a typo elsewhere fails: the
 # name has to be DEFINED before it is cited.
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
-    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail)\.[a-z0-9_]+)`", sec34.group(0)))
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake)\.[a-z0-9_]+)`", sec34.group(0)))
 # lines stating a removal/rename may cite old spellings
 NEGATION = re.compile(r"removed|renamed|deleted|replaced|superseded|folded|"
                       r"does not exist|no longer|instead of|there is no|no `|"
