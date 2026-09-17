@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Test
  * assertion here is red on the pre-fix markup (the rail rendered empty but present).
  */
 class TemplateEditorRailBrowserTest : BrowserSuite() {
-
     // ------------------------------------------------------------------ the collapsed rail
 
     @Test

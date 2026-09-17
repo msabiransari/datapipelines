@@ -96,8 +96,14 @@ class SuperAdminRecoveryE2eTest {
             .then()
             .statusCode(200)
 
+        assertWorkspaceSideStaysClosed()
+        assertNoWorkspacePages()
+    }
+
+    /** The refusal half, green on BOTH trees: the allowance is no null-context skeleton key. */
+    private fun assertWorkspaceSideStaysClosed() {
         // Workspace-scoped operations keep the D-R5 answer, super admin or not — the recovery
-        // allowance is for INSTANCE verbs, not a null-context skeleton key.
+        // allowance is for INSTANCE verbs.
         given()
             .port(port)
             .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "default"))
@@ -134,9 +140,11 @@ class SuperAdminRecoveryE2eTest {
             .then()
             .statusCode(404)
             .body("error.code", Matchers.equalTo("workspace.not_found"))
+    }
 
-        // The browser's explanation state: the no-workspace page renders, WITH the create form
-        // for the super admin (canCreate) and WITHOUT it for the non-admin.
+    /** The browser's explanation state: the no-workspace page renders — WITH the create form
+     * for the super admin (canCreate), WITHOUT it for the non-admin. */
+    private fun assertNoWorkspacePages() {
         given()
             .port(port)
             .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "default"))
