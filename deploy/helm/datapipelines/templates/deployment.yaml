@@ -64,3 +64,15 @@ spec:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: temporary-storage
+              mountPath: /tmp
+      volumes:
+        - name: temporary-storage
+          # Disk-backed: DuckDB spills must not consume the pod's memory budget.
+          emptyDir:
+            {{- if .Values.temporaryStorage.sizeLimit }}
+            sizeLimit: {{ .Values.temporaryStorage.sizeLimit | quote }}
+            {{- else }}
+            {}
+            {{- end }}

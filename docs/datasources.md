@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.37 (frozen contract — additive-only changes after this point)
+**Status:** v2.38 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-09-16
+**Last updated:** 2026-09-17
 
 ---
 
@@ -1281,14 +1281,18 @@ one per connection, and the pool size does not multiply them
 is the operator paragraph): `dialect.memory_limit` (default **25 % of the container's memory
 as the cgroup-aware JVM reports it**, floored at 64 MiB and hard-capped at 4 GiB — an
 explicit value is the operator's own number and is not capped), `dialect.threads`,
-`dialect.temp_directory` when declared, and `preserve_insertion_order = false` ALWAYS —
+`dialect.temp_directory` (explicit, or a unique absolute `datapipelines-lake-<UUID>` path
+under the JVM temporary directory), and `preserve_insertion_order = false` ALWAYS —
 insertion order costs memory and temp-file discipline the engine would otherwise spend on a
 guarantee a read-only lake never asks for. DuckDB shares the box with the JVM, which is what
 the default's cap exists for. The existing row cap and `node-query-timeout-seconds` apply
 unchanged. Concurrent queries on one lake share that one budget: an over-budget query fails
 with the engine's out-of-memory error on its own connection while its siblings keep working,
 and a host running N lake datasources holds N such budgets (plus, briefly, a retiring
-generation's while it drains).
+generation's while it drains). The default spill path survives physical connection replacement,
+is isolated between independent in-memory generations, and is created and removed by DuckDB
+on spill and normal instance shutdown respectively. The JVM temporary directory must be writable
+and disk-backed; explicit overrides, crash cleanup, and sizing are described in configuration §3.24.
 
 ### 8C.5 Extensions, bundled in the image
 
@@ -1596,6 +1600,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v2.38 | Writable LAKE spill default (#133) | §8C.4: isolated default spill directories under the JVM temporary directory, retained through physical connection replacement and removed by the engine on normal shutdown. |
 | 2026-09-17 | v2.37 | 152 R152-8: the retained owner's close contained (#128) | **§5.2**: the retained owner connection's close takes the duplicates' nonfatal-exception policy — one attempt, `SQLException` or `RuntimeException` reported and contained (v2.36 caught only the former, and the escape reached the shared manager's loop and skipped the next retired pool); a refused physical close is reported, never called a closure. |
 | 2026-09-17 | v2.36 | 152 R152-5/6/7: the ownership protocol made one critical section (#128) | **§5.2**: the hand-off to an in-flight closer is decided in that closer's own failure transition (v2.35's separate flag could be outrun and left a handle reported in flight with nobody in it); a nonfatal `RuntimeException` from the driver is the same transition as an `SQLException` (v2.35 caught only the latter, stranding the phase and escaping the release); a duplicate refused at registration is registered and owned by its creator (v2.35 discarded its close failure). The attempt bound is stated exactly; the residual is reported as `lake.instance_handle_exhausted`. |
 | 2026-09-17 | v2.35 | 152 R152-3/4: ownership until confirmed closure (#128) | **§5.2**: a duplicate leaves the generation's registry only when the driver has CONFIRMED its close (v2.34 unregistered before the driver call, so a first close that threw left a real open handle the release no longer knew about); every registry access takes one monitor (v2.34's release callback bypassed it); a close in flight at release is handed to its closer with one retry; a driver refusing every close is the counted, still-registered residual. No wait, no lock across driver work. |

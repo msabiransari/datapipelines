@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.20 (single source of truth for every config key)
+**Status:** v1.21 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-17
 
@@ -367,7 +367,9 @@ A `LAKE` datasource runs its queries **on the app's own box** — DuckDB is embe
 |---|---|---|
 | `properties.dialect.memory_limit` | 25 % of the container's memory, clamped to 64 MiB – 4 GiB | The engine's memory budget, e.g. `512MB` or `2GB` (B, KB, MB, GB, TB — a `%` is refused). The default reads the container limit the container-aware JVM reports (`OperatingSystemMXBean.totalMemorySize`, the same figure DuckDB's own default reads), takes a quarter of it because the engine shares the box with the JVM, and **hard-caps at 4 GiB** so a large host does not hand one lake query enough to evict the app itself. An explicit value is the operator's own number and is not capped |
 | `properties.dialect.threads` | (engine default — no statement emitted) | The engine's worker threads — a positive integer, e.g. `4`. Unset means DuckDB chooses (its own default tracks the box's cores) |
-| `properties.dialect.temp_directory` | (engine default — no statement emitted) | Where oversized operators spill, e.g. `/data/spill`. Must be an absolute path **under the app's data volume** — inside the container the path means nothing unless the volume backs it — with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement, and a value that would need escaping is refused, matching the lake-table location grammar) |
+| `properties.dialect.temp_directory` | Unique `datapipelines-lake-<UUID>` directory under the absolute JVM `java.io.tmpdir` (normally `/tmp`) | Where oversized operators spill, e.g. `/data/spill`. Must be an absolute path **under the app's data volume** — inside the container the path means nothing unless the volume backs it — with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement, and a value that would need escaping is refused, matching the lake-table location grammar) |
+
+The default spill directory belongs to one engine initialization: pooled connections share it, while independent in-memory pool generations receive different paths. DuckDB creates it lazily when spilling and removes it on normal instance shutdown. The parent directory must exist, be writable by the application user, and have enough disk space for concurrent queries; the Helm chart provides disk-backed `/tmp`. A bare JVM can select the parent with `-Djava.io.tmpdir=/writable/path`. An explicit override is used exactly as supplied: dedicate that directory to the engine, keep unrelated files out, and avoid sharing it between independent engines or overlapping generations. A crash or a driver that refuses shutdown can leave spill files behind; reclaim them only after the owning process has stopped.
 
 **`threads` is deliberately left unset, and the measurement is why — though not the way the
 hypothesis expected (108 §C).** In-process DuckDB shares the JVM's CPUs with the executor, so the
@@ -771,6 +773,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.21 | Writable LAKE spill default (#133) | §3.24: unique engine-owned absolute path under `java.io.tmpdir`; writable disk requirement, explicit override and cleanup semantics. |
 | 2026-09-17 | v1.20 | 152 LAKE engine scope (#128) | **§3.24 gains the resource-scope paragraph**: a LAKE datasource pool owns ONE embedded DuckDB instance shared by all its pooled connections, so `memory_limit` / `threads` / `temp_directory` are one budget per datasource pool (not per connection, not multiplied by `maximumPoolSize`), the sizing rule is per LAKE datasource on the instance plus a draining generation's headroom, and the file cache survives Hikari's connection replacement but not a pool rebuild. No key added or changed. Status line re-synced to the changelog (it read v1.1 above rows that ended at v1.18) |
 | 2026-09-16 | v1.19 | 149 / #125 node_progress cadence | §3.2 gains **`datapipelines.executor.progress-sample-interval-seconds`** (`1`): the floor between two periodic `node_progress` samples of one operation; first entries into a state and the terminal sample are never throttled by it. Mirrored in `application.yml`, `defaults.env`, `secrets.env.example`, `compose.yml`; `WebPropertiesSpecDriftTest` pins the default. |
 | 2026-09-14 | v1.18 | 137 mail notices | New **§3.27 Mail**: `datapipelines.mail.host` / `port` (587) / `username` / `password` / `starttls` (true, required-not-opportunistic) / `from` / `reply-to` (empty = from) / `ops-to` (comma list) / `message-stream` (Postmark's optional header). **No `enabled` key — mail is on exactly when `host` and `from` are both set.** §5 template block appended after `duckdb:`; §7 gains the shape rules (host↔from, ops-to without host, mail on without `auth.base-url`, port range, from is an address) and the two `hardened` refusals (`starttls` must be true; a username needs a password) — checks 23 and 24 |

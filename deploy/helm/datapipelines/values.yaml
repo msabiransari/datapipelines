@@ -36,6 +36,13 @@ service:
 # than none.
 resources: {}
 
+# Writable disk-backed /tmp for JVM native libraries and LAKE spill files while
+# keeping the root filesystem read-only. Size for concurrent queries; an empty
+# limit uses the node's ephemeral storage capacity. Set pod ephemeral-storage
+# requests/limits in resources when needed.
+temporaryStorage:
+  sizeLimit: ""
+
 autoscaling:
   enabled: true
   minReplicas: 2

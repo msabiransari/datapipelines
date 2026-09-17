@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.20
+**Status:** v1.22
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-17
 
 ---
 
@@ -340,6 +340,16 @@ Reference Helm chart in `deploy/helm/`. Includes:
 - Externalized Redis (managed recommended).
 - `HorizontalPodAutoscaler` (scales on CPU + memory).
 - `PodDisruptionBudget` (availability during node drains).
+
+The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
+This supports JVM native libraries and the default LAKE spill directories. Set
+`temporaryStorage.sizeLimit` to bound the volume (empty by default), and set ephemeral-storage
+requests/limits through `resources` for the workload. Do not use a memory-backed volume for
+large LAKE spills: that would consume the memory budget spilling is intended to relieve.
+Each pod has its own volume; Kubernetes removes it with the pod. Size it for concurrent
+queries and see [Configuration §3.24](configuration.md#324-lake-datasource-engine-limits-dp-lake)
+for explicit paths and cleanup after a process crash. Docker Compose uses the image's writable
+`/tmp`; custom read-only deployments must mount a writable temporary directory too.
 
 No sticky session affinity needed. Standard `ClusterIP` service with round-robin or random load balancing.
 
@@ -948,6 +958,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.22 | Writable temporary storage (#133) | §6.4: disk-backed `/tmp` emptyDir with optional size limit while preserving the read-only root filesystem; LAKE disk sizing and cleanup requirements. |
 | 2026-09-14 | v1.21 | 137 mail notices | §5.1: the first-admin story no longer says "no SMTP" — with `DATAPIPELINES_MAIL_HOST` + `_FROM` set the one-time credential is emailed to the user and sys-ops (`DATAPIPELINES_MAIL_OPS_TO`) is told about every new user ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)); the variables are catalogued in [Configuration §3.27](configuration.md#327-mail) and named in `deploy/secrets.env.example`, per this doc's no-restated-keys rule. |
 | 2026-09-10 | v1.20 | 109 §E mobility v7 | **The nyc family pins `SAMPLE_VERSION=v7`** — a new immutable version directory carrying ONE change over v6: the `trips` table gains the composite index `(pu_location_id, pickup_date)` (`idx_trips_pu_location_pickup_date`, DDL beside the two singles), measured ~90× on the year-2024 airport shape (8.1 s sized seq scan → 0.09 s index-only). The other three artifacts are byte-identical v6 copies and every table content-checksum is unchanged — the v2 precedent's restore-and-redump shape. The v7 set (pg-trips.dump 117,733,060 bytes, sha256 `02627d0846…`, plus manifest) is handed to the owner in `handbacks/109-artifacts/mobility-v7/` for publishing; a fresh `--demo nyc` start needs v7 published to load. |
 | 2026-09-09 | v1.19 | 109 §E demo Postgres sizing | **New "Demo Postgres sizing" subsection (Appendix B)**: the nyc family's `trips` table (~804 MB) meets sized-for-the-data flags — `shared_buffers=512MB`, `effective_cache_size=1536MB`, `work_mem=32MB`, `random_page_cost=1.1` (SSD) — with the container memory reservation raised to 1 GB and the "demo sizing, not production advice — the operator's own datasource is their own DBA's" boundary stated. The compose change itself is `cfb65c9c`; this section is the rationale the compose comment points at. |

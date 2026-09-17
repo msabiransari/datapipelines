@@ -125,9 +125,8 @@ class LakeDialectAdapterTest {
         // `INSTALL httpfs` would need egress to DuckDB's extension repository, and `TYPE s3`
         // needs httpfs loaded. Emitting either for a lake over paths the process can already
         // reach would turn a working air-gapped configuration into a connect failure.
-        // The trailing two SETs are 089 §D's always-on engine limits (memory default pinned
-        // by lakeFixed; preserve_insertion_order unconditional).
-        lakeFixed.connectionInit(attachLake()) shouldContainExactly
+        // The randomized spill path is exercised through the real pool in LakeSpillIntegrationTest.
+        lakeFixed.connectionInit(attachLake()).withoutGeneratedSpill() shouldContainExactly
             listOf(
                 "ATTACH '${tempDir.resolve("one.db")}' AS \"a1\" (READ_ONLY)",
                 "ATTACH '${tempDir.resolve("two.db")}' AS \"a2\" (READ_ONLY)",
@@ -146,7 +145,7 @@ class LakeDialectAdapterTest {
                 ),
             )
 
-        init shouldContainExactly
+        init.withoutGeneratedSpill() shouldContainExactly
             listOf(
                 "INSTALL httpfs",
                 "LOAD httpfs",
@@ -170,7 +169,7 @@ class LakeDialectAdapterTest {
 
         // The extensions still load — only the secret is gone. On a credentials-free box the
         // credential_chain CREATE fails pool init (089 live gate); a public object needs no secret.
-        init shouldContainExactly
+        init.withoutGeneratedSpill() shouldContainExactly
             listOf(
                 "INSTALL httpfs",
                 "LOAD httpfs",
@@ -228,7 +227,7 @@ class LakeDialectAdapterTest {
                 ),
             )
 
-        init shouldContainExactly
+        init.withoutGeneratedSpill() shouldContainExactly
             listOf(
                 "SET extension_directory = '/opt/duckdb/extensions'",
                 "LOAD httpfs",
@@ -342,7 +341,7 @@ class LakeDialectAdapterTest {
     fun `the pool config carries the init statements joined into HikariCP's single slot`() {
         val config = lakeFixed.buildHikariConfig(attachLake())
 
-        config.connectionInitSql shouldBe
+        requireNotNull(config.connectionInitSql).replace(Regex("SET temp_directory = '[^']*'; "), "") shouldBe
             "ATTACH '${tempDir.resolve("one.db")}' AS \"a1\" (READ_ONLY); " +
             "ATTACH '${tempDir.resolve("two.db")}' AS \"a2\" (READ_ONLY); " +
             "SET memory_limit = '2048MB'; " +
@@ -391,6 +390,8 @@ class LakeDialectAdapterTest {
     }
 
     // ---------------------------------------------------------- 089 §D: engine limits
+
+    private fun List<String>.withoutGeneratedSpill(): List<String> = filterNot { it.startsWith("SET temp_directory = ") }
 
     @Test
     fun `declared limit properties become SET statements after the attach setup`() {

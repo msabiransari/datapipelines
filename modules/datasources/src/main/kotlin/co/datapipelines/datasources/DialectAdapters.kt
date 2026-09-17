@@ -6,7 +6,9 @@ import co.datapipelines.typesystem.IngressTypeMapper
 import co.datapipelines.typesystem.TypeMappers
 import com.zaxxer.hikari.HikariConfig
 import java.lang.management.ManagementFactory
+import java.nio.file.Path
 import java.util.Properties
+import java.util.UUID
 
 /**
  * Shared [DialectAdapter] behavior. A concrete adapter declares only what actually differs
@@ -547,9 +549,9 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  *
  * ## Limits (089 §D — compute is on the app's box)
  *
- * Every connection a lake pool builds gets the engine limits as `SET` statements (after the
- * extension/secret/attach setup, before phase B's views): `memory_limit`, `threads` and
- * `temp_directory` when declared, and `preserve_insertion_order = false` ALWAYS — insertion
+ * Every lake pool generation gets the engine limits as `SET` statements (after the
+ * extension/secret/attach setup, before phase B's views): `memory_limit`, optional `threads`,
+ * `temp_directory` (a unique path under the JVM temp directory by default), and `preserve_insertion_order = false` ALWAYS — insertion
  * order costs the engine memory and temp-file discipline it would otherwise spend on a
  * guarantee a read-only lake never asks for.
  *
@@ -669,7 +671,7 @@ class LakeDialectAdapter(
 
     /**
      * §D's engine limits as `SET` statements, in a fixed order: `memory_limit` (explicit, or
-     * the class-KDoc default), `threads` and `temp_directory` when declared, and
+     * the class-KDoc default), optional `threads`, explicit or generated `temp_directory`, and
      * `preserve_insertion_order = false` always. Every value reached here already passed
      * [validateDialectProperties] at save — the memory-limit regex admits no quote, `threads`
      * is a bare integer, and `temp_directory` carries none of the refused characters — so the
@@ -680,7 +682,18 @@ class LakeDialectAdapter(
             val memoryLimit = properties["memory_limit"]?.toString()?.trim()
             add("SET memory_limit = '${memoryLimit ?: "${defaultMemoryLimitMb()}MB"}'")
             properties["threads"]?.toString()?.trim()?.let { add("SET threads = $it") }
-            properties["temp_directory"]?.toString()?.trim()?.let { add("SET temp_directory = '$it'") }
+            // DuckDB's relative .tmp default fails in the non-root image's working directory.
+            // Each initialization gets an isolated engine-owned path, created lazily on spill
+            // and removed by DuckDB when that instance closes. Do not delete it at pool release:
+            // a driver that refused close can still own files there.
+            val spillDirectory =
+                properties["temp_directory"]?.toString()?.trim()
+                    ?: Path
+                        .of(System.getProperty("java.io.tmpdir"))
+                        .toAbsolutePath()
+                        .resolve("datapipelines-lake-${UUID.randomUUID()}")
+                        .toString()
+            add("SET temp_directory = '${spillDirectory.replace("'", "''")}'")
             add("SET preserve_insertion_order = false")
         }
 
