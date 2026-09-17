@@ -1174,10 +1174,11 @@ Every successful registry write **evicts the datasource's connection pool and pu
 pool on the next lease — so a table registered on instance A is visible on instance B's next
 execution — and registry-backed introspection (§8C.3) catches up within its 60 s cache TTL.
 
-### 8C.2 A view per registered table, built once per pool generation — and isolated per table
+### 8C.2 A view per registered table, built at connect — and isolated per table
 
-A raw open on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB instance
-(verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection are
+("Built at connect" means at the generation's connect — once per pool build, not once per
+physical connection, since 152.) A raw open on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its
+OWN in-memory DuckDB instance (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection are
 invisible to a second, while both are open). Since 152 (#128) a LAKE pool generation opens
 exactly ONE such instance and every physical connection HikariCP creates is the driver's
 `duplicate()` of the generation's retained owner (§5.2): the catalog/schema/view set is built

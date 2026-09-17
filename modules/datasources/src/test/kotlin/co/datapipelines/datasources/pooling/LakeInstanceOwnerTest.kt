@@ -1,5 +1,7 @@
 package co.datapipelines.datasources.pooling
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.util.DriverDataSource
@@ -9,8 +11,11 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.SQLException
+import java.sql.SQLFeatureNotSupportedException
 import java.sql.SQLNonTransientConnectionException
 import java.util.Properties
 import javax.sql.DataSource
@@ -144,6 +149,120 @@ class LakeInstanceOwnerTest {
             { closeOrder shouldBe listOf("owner-after-hikari") },
             { pool.isClosed shouldBe true },
         )
+    }
+
+    @Test
+    fun `an owner lost OUTSIDE its own close is reported once - and every later duplicate refuses`() {
+        val delegate = RememberingDataSource(driver())
+        val owner = LakeInstanceOwner.open(delegate, "lake_lost") {}
+        val dataSource = LakeInstanceDataSource(owner, sessionInit = emptyList())
+
+        // A driver fault, not our close: the retained connection is closed under the owner.
+        delegate.handedOut.close()
+        val logged =
+            capturingLogs {
+                shouldThrow<SQLNonTransientConnectionException> { dataSource.connection }
+                shouldThrow<SQLNonTransientConnectionException> { dataSource.connection }
+            }
+
+        assertAll(
+            { owner.isOpen shouldBe false },
+            { logged.count { it.startsWith("event=lake.instance_owner_lost datasource=lake_lost") } shouldBe 1 },
+        )
+        owner.close() // still a no-throw close on an already-dead connection
+    }
+
+    @Test
+    @Suppress("ThrowsCount") // three DIFFERENT driver faults, one per branch of the owner's unwrapping
+    fun `the driver's own duplicate failure surfaces as the driver's exception - wrapped only when it is not SQL`() {
+        val sqlFault = FaultyConnection(driver().connection, onDuplicate = { throw SQLException("duplicate refused") })
+        val runtimeFault = FaultyConnection(driver().connection, onDuplicate = { throw IllegalStateException("native fault") })
+        val dyingFault =
+            FaultyConnection(driver().connection).also { c ->
+                c.onDuplicate = {
+                    c.close()
+                    throw SQLException("gone")
+                }
+            }
+
+        assertAll(
+            { shouldThrow<SQLException> { ownerOf(sqlFault).duplicate() }.message shouldBe "duplicate refused" },
+            {
+                val wrapped = shouldThrow<SQLException> { ownerOf(runtimeFault).duplicate() }
+                wrapped.message.orEmpty() shouldContain "duplicate() on datasource 'lake_faulty' failed"
+                wrapped.cause?.message shouldBe "native fault"
+            },
+            // The fault took the owner with it: named as an owner loss, cause attached.
+            {
+                val lost = shouldThrow<SQLNonTransientConnectionException> { ownerOf(dyingFault).duplicate() }
+                lost.cause?.message shouldBe "gone"
+            },
+        )
+    }
+
+    @Test
+    fun `a close that throws is logged - never propagated`() {
+        val connection = FaultyConnection(driver().connection, onClose = { throw SQLException("close refused") })
+        val owner = ownerOf(connection)
+
+        val logged = capturingLogs { owner.close() }
+
+        logged.count { it.startsWith("event=lake.instance_owner_close_failed datasource=lake_faulty") } shouldBe 1
+    }
+
+    @Test
+    fun `the DataSource plumbing is the minimal honest surface`() {
+        val owner = LakeInstanceOwner.open(driver(), "lake_plumbing") {}
+        owner.use {
+            val dataSource = LakeInstanceDataSource(owner, sessionInit = emptyList())
+            dataSource.setLogWriter(null)
+            dataSource.loginTimeout = 5
+            assertAll(
+                { dataSource.logWriter shouldBe null },
+                { dataSource.loginTimeout shouldBe 0 },
+                { dataSource.isWrapperFor(DataSource::class.java) shouldBe false },
+                { shouldThrow<SQLFeatureNotSupportedException> { dataSource.parentLogger } },
+                { shouldThrow<SQLFeatureNotSupportedException> { dataSource.unwrap(DataSource::class.java) } },
+            )
+        }
+    }
+
+    private fun ownerOf(connection: Connection): LakeInstanceOwner =
+        LakeInstanceOwner.open(
+            object : DataSource by driver() {
+                override fun getConnection(): Connection = connection
+            },
+            "lake_faulty",
+        ) {}
+
+    /**
+     * A driver-shaped connection for the reflective seam: `DuckDBConnection` is final, so the
+     * failure branches of `duplicate()`/`close()` are reached through a delegate that carries a
+     * `duplicate()` of its own — the owner resolves it by name, exactly as it does the driver's.
+     */
+    @Suppress("unused") // duplicate() is called reflectively
+    private class FaultyConnection(
+        private val delegate: Connection,
+        var onDuplicate: () -> Connection = { delegate },
+        private val onClose: () -> Unit = { delegate.close() },
+    ) : Connection by delegate {
+        fun duplicate(): Connection = onDuplicate()
+
+        override fun close() = onClose()
+    }
+
+    /** Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses. */
+    private fun capturingLogs(block: () -> Unit): List<String> {
+        val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        root.addAppender(appender)
+        try {
+            block()
+        } finally {
+            root.detachAppender(appender)
+            appender.stop()
+        }
+        return appender.list.map { it.formattedMessage }
     }
 
     private fun answerOn(connection: Connection): Int =

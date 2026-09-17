@@ -236,7 +236,7 @@ class LakeInstanceLifecycleIntegrationTest {
 
     @Test
     fun `a pool whose first physical connection fails leaves no owner behind`() {
-        // Pre-existing edge, used here as the deterministic trigger: a single-namespace registry
+        // Pre-existing edge (#129), used here as the deterministic trigger: a single-namespace registry
         // whose ONLY table is emission-refused creates no schema but still emits the search-path
         // postlude, so the session init of the first physical connection fails and Hikari's
         // fail-fast construction throws — after the owner was opened. The build must close it.
@@ -315,6 +315,22 @@ class LakeInstanceLifecycleIntegrationTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `the strict and the isolated compositions cannot be passed together`() {
+        val trips = parquet("trips.parquet", "SELECT 1 AS id")
+        val rows = listOf(table("hvfhv_trips", trips))
+
+        val refusal =
+            shouldThrow<IllegalArgumentException> {
+                ConnectionPoolManager.buildHikariPool(
+                    lakeDatasource("lake_both"),
+                    additionalConnectionInit = LakeViewStatements.forTables(rows, adapter),
+                    lakeViews = LakeViewInit("lake_both", LakeViewStatements.planForTables(rows, adapter), LakeViewOutcomeRecorder.NONE),
+                )
+            }
+        refusal.message.orEmpty() shouldContain "pass exactly one"
     }
 
     // ------------------------------------------------------------------ helpers
