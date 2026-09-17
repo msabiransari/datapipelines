@@ -148,7 +148,10 @@ class SecurityConfig(
         val chain = http.build()
         // An SSE worker can write while the servlet thread unwinds its filters. Finish
         // security headers before that handoff; deferred writes race Tomcat's header map.
-        chain.filters.filterIsInstance<HeaderWriterFilter>().single().setShouldWriteHeadersEagerly(true)
+        chain.filters
+            .filterIsInstance<HeaderWriterFilter>()
+            .single()
+            .setShouldWriteHeadersEagerly(true)
         return chain
     }
 
