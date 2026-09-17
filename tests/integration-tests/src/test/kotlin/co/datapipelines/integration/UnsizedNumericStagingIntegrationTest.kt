@@ -3,6 +3,7 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
@@ -60,16 +61,19 @@ class UnsizedNumericStagingIntegrationTest {
 
         val events =
             assertTimeoutPreemptively(EXECUTION_BUDGET) { consumeExecutionStream(pipelineId) }
-        events.lifecycleNames() shouldContainExactly
-            listOf(
-                "execution_started",
-                "node_started",
-                "node_completed",
-                "node_started",
-                "node_completed",
-                "pipeline_completed",
-                "data_ready",
-            )
+        // A failed node reads as "wrong sequence" here; the clue names its code (154, #137).
+        withClue({ events.failureClue() }) {
+            events.lifecycleNames() shouldContainExactly
+                listOf(
+                    "execution_started",
+                    "node_started",
+                    "node_completed",
+                    "node_started",
+                    "node_completed",
+                    "pipeline_completed",
+                    "data_ready",
+                )
+        }
         val executionId = events.last().second["execution_id"].asText()
 
         val result =
