@@ -42,6 +42,14 @@
   position: relative;
 }
 
+/* #112 — a rail with nothing to show (a reader on an imports-less template: the Render
+   Context panel is author-only, the Imports table follows the template) is not rendered,
+   and the body collapses to one column so the source takes the width. The remembered
+   --te-side-w is untouched: it applies again whenever the rail returns. */
+.te-body.te-body-no-rail {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* ---- The rail's resize handle (141 §B) ----
  * The `.tplx-splitter` shape (104 §C). Unlike the explorer there is no border here, so the
  * 12px hit area is centred in the gap between the rail and the source column. The grip is
