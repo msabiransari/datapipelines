@@ -14,6 +14,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
+import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
@@ -34,6 +35,7 @@ import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
@@ -286,6 +288,18 @@ class DomainConfiguration {
             // has nothing bundled); the shipped image sets it via the Dockerfile's ENV.
             duckdbExtensionDirectory =
                 environment.getProperty("datapipelines.duckdb.extension-directory")?.ifBlank { null },
+            // configuration.md §3.25 (153, #136): the operator default `memory_limit` every LAKE
+            // engine build gets when a datasource declares none. Empty = unset — the adapter
+            // keeps its derived 25 %-of-container default; a restart is required to change it
+            // because it is read once here, at wiring, not per pool build.
+            duckdbMemoryLimit =
+                environment.getProperty("datapipelines.duckdb.memory-limit")?.ifBlank { null }.also { value ->
+                    // Refuse at the entry point: an operator typo must fail THIS bean's eager
+                    // construction at context start (LakeDialectAdapter's own init-block grammar
+                    // check, DialectAdapters.kt), never surface only when the first LAKE pool
+                    // happens to build lazily.
+                    DialectAdapters.forDialect(Dialect.LAKE, null, value)
+                },
             poolMetrics = poolMetrics,
             // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
             // why the two properties meet here rather than inside either binding class.

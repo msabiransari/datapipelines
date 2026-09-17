@@ -380,17 +380,20 @@ class ConnectionPoolManager(
          * strict composition stays one-instance-per-connection, as its callers expect.
          *
          * [duckdbExtensionDirectory] is the deployment's bundled DuckDB extension directory
-         * (089 §D, configuration.md §3.25): forwarded to [DialectAdapters.forDialect], which
-         * only a LAKE build honors — the adapter then SETs `extension_directory` and emits bare
-         * `LOAD`s, never an `INSTALL`.
+         * (089 §D, configuration.md §3.25) and [duckdbMemoryLimit] is its operator default
+         * `memory_limit` (153, configuration.md §3.25): both forwarded to
+         * [DialectAdapters.forDialect], which only a LAKE build honors — the adapter then SETs
+         * `extension_directory` and emits bare `LOAD`s, never an `INSTALL`, and SETs
+         * `memory_limit` to the deployment's number when a datasource declares none of its own.
          */
         fun buildHikariPool(
             datasource: Datasource,
             additionalConnectionInit: List<String> = emptyList(),
             duckdbExtensionDirectory: String? = null,
+            duckdbMemoryLimit: String? = null,
             lakeViews: LakeViewInit? = null,
         ): ConnectionPool {
-            val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory)
+            val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory, duckdbMemoryLimit)
             val config = adapter.buildHikariConfig(datasource)
             if (lakeViews != null) {
                 require(additionalConnectionInit.isEmpty()) {

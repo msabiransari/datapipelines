@@ -312,6 +312,26 @@ class LakeDialectAdapterTest {
     }
 
     @Test
+    fun `DialectAdapters binds the operator memory limit only for LAKE and only when set - either param alone still builds`() {
+        assertAll(
+            // LAKE + memory limit, no directory -> still the bundled (non-singleton) adapter.
+            {
+                DialectAdapters
+                    .forDialect(Dialect.LAKE, null, "8GB")
+                    .connectionInit(lakeDatasource())
+                    .single { it.startsWith("SET memory_limit") } shouldBe "SET memory_limit = '8GB'"
+            },
+            // LAKE with neither -> the directory-free, memory-limit-free singleton.
+            { DialectAdapters.forDialect(Dialect.LAKE, null, null) shouldBe DialectAdapters.forDialect(Dialect.LAKE) },
+            // Every other dialect ignores the parameter outright, same as the directory.
+            {
+                DialectAdapters.forDialect(Dialect.POSTGRES, null, "8GB") shouldBe
+                    DialectAdapters.forDialect(Dialect.POSTGRES)
+            },
+        )
+    }
+
+    @Test
     fun `an explicit key pair travels in the credential, quote-escaped, and never in properties`() {
         val init =
             lake.connectionInit(
@@ -433,6 +453,48 @@ class LakeDialectAdapterTest {
             { defaultFor(128L * 1024 * 1024) shouldBe "SET memory_limit = '64MB'" },
         )
     }
+
+    // ------------------------------------------------------- 153 (#136): operator default
+
+    @Test
+    fun `the operator default memory limit - empty keeps the derived default exactly`() {
+        // Guard (1): empty (the shipped default) must not change today's behavior at all —
+        // 8 GiB / 4 = 2048MB, the same figure the derived-default test above pins.
+        LakeDialectAdapter(defaultMemoryLimit = null) { 8L * 1024 * 1024 * 1024 }
+            .connectionInit(lakeDatasource())
+            .single { it.startsWith("SET memory_limit") } shouldBe "SET memory_limit = '2048MB'"
+    }
+
+    @Test
+    fun `the operator default memory limit is used verbatim, uncapped, when no datasource value is set`() {
+        // Guard (2): 8GB stays 8GB — no MB conversion, no 4 GiB cap (the cap is only on the
+        // DERIVED default; an explicit number, operator or datasource, is not capped). Pinned
+        // at 64 GiB container so an uncapped derived default (16 GiB) would visibly differ from
+        // the operator's 8GB if the wiring were wrong.
+        LakeDialectAdapter(defaultMemoryLimit = "8GB") { 64L * 1024 * 1024 * 1024 }
+            .connectionInit(lakeDatasource())
+            .single { it.startsWith("SET memory_limit") } shouldBe "SET memory_limit = '8GB'"
+    }
+
+    @Test
+    fun `a datasource's own memory_limit still wins over the operator default`() {
+        // Guard (3): precedence is datasource property > operator default > derived default.
+        LakeDialectAdapter(defaultMemoryLimit = "8GB") { 8L * 1024 * 1024 * 1024 }
+            .connectionInit(lakeDatasource(dialectProperties = mapOf("memory_limit" to "512MB")))
+            .single { it.startsWith("SET memory_limit") } shouldBe "SET memory_limit = '512MB'"
+    }
+
+    @Test
+    fun `an invalid operator default memory limit is refused at construction, naming the key`() {
+        // Guard (4): the same grammar as properties.dialect.memory_limit, but this is an
+        // OPERATOR value — refused at construction (DomainConfiguration.kt eagerly constructs
+        // one at Spring context start, so this is also the startup failure path).
+        val failure = shouldThrow<IllegalArgumentException> { LakeDialectAdapter(defaultMemoryLimit = "notasize") }
+        withClue("refusal for 'notasize' names the key") {
+            failure.message.orEmpty() shouldContain "datapipelines.duckdb.memory-limit"
+        }
+    }
+
 
     @Test
     fun `bad limit values are refused at validation, and the valid ones pass`() {

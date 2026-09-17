@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.21 (single source of truth for every config key)
+**Status:** v1.22 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-17
 
@@ -365,7 +365,7 @@ A `LAKE` datasource runs its queries **on the app's own box** — DuckDB is embe
 
 | Datasource property | Default | Semantics |
 |---|---|---|
-| `properties.dialect.memory_limit` | 25 % of the container's memory, clamped to 64 MiB – 4 GiB | The engine's memory budget, e.g. `512MB` or `2GB` (B, KB, MB, GB, TB — a `%` is refused). The default reads the container limit the container-aware JVM reports (`OperatingSystemMXBean.totalMemorySize`, the same figure DuckDB's own default reads), takes a quarter of it because the engine shares the box with the JVM, and **hard-caps at 4 GiB** so a large host does not hand one lake query enough to evict the app itself. An explicit value is the operator's own number and is not capped |
+| `properties.dialect.memory_limit` | `datapipelines.duckdb.memory-limit` if set, else 25 % of the container's memory, clamped to 64 MiB – 4 GiB | The engine's memory budget, e.g. `512MB` or `2GB` (B, KB, MB, GB, TB — a `%` is refused). Precedence: this per-datasource property, if set, always wins; otherwise the deployment's operator default (§3.25) applies verbatim; otherwise the default reads the container limit the container-aware JVM reports (`OperatingSystemMXBean.totalMemorySize`, the same figure DuckDB's own default reads), takes a quarter of it because the engine shares the box with the JVM, and **hard-caps at 4 GiB** so a large host does not hand one lake query enough to evict the app itself. An explicit value — this property or the operator default — is not capped |
 | `properties.dialect.threads` | (engine default — no statement emitted) | The engine's worker threads — a positive integer, e.g. `4`. Unset means DuckDB chooses (its own default tracks the box's cores) |
 | `properties.dialect.temp_directory` | Anonymous in-memory URL: unique `datapipelines-lake-<UUID>` directory under absolute JVM `java.io.tmpdir` (normally `/tmp`); named/file URL: retain engine setting | Where oversized operators spill, e.g. `/data/spill`. Must be an absolute path **under the app's data volume** — inside the container the path means nothing unless the volume backs it — with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement, and a value that would need escaping is refused, matching the lake-table location grammar) |
 
@@ -403,6 +403,9 @@ A `LAKE` datasource whose data is on S3 needs DuckDB's `httpfs` and `aws` extens
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
 | `datapipelines.duckdb.extension-directory` | `DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` | (empty) | A directory holding pre-populated DuckDB extensions in the engine's own layout (`<dir>/v<core-version>/<platform>/<name>.duckdb_extension`). Must be an absolute path with no quotes, backslashes, whitespace or control characters (it is interpolated into a `SET` statement; a value that would need escaping is refused, matching the `temp_directory` grammar) |
+| `datapipelines.duckdb.memory-limit` | `DATAPIPELINES_DUCKDB_MEMORY_LIMIT` | (empty) | (153, #136) The deployment-wide default `memory_limit` every `LAKE` engine build gets when a datasource declares no `properties.dialect.memory_limit` of its own — likewise **operator-level**, restart-to-change, deliberately not a datasource property: it is a capacity decision about the box, not row data. Empty keeps §3.24's derived 25 %-of-container default exactly. A non-empty value is a DuckDB size string, the same grammar as `properties.dialect.memory_limit` (`512MB`, `2GB`, …; a `%` is refused), used **verbatim, with no cap** — the operator's own number. **Validated at startup**: an invalid value fails fast at context start naming this key and the grammar, rather than silently falling back to the derived default. Precedence is §3.24's per-datasource `properties.dialect.memory_limit` first, then this key, then the derived default |
+
+**Operator instruction:** set `DATAPIPELINES_DUCKDB_MEMORY_LIMIT=8GB` in `deploy/secrets.env` (or the deployment's own env file) and restart the app — the value is read once at wiring, not per pool build, so every `LAKE` datasource without its own `properties.dialect.memory_limit` picks it up on its next pool build after the restart (a fresh cold engine; the first query after restart is cold, the next warm). Confirm it took effect over a `LAKE` connection with `SELECT current_setting('memory_limit')` (reports the exact configured value, e.g. `8.0GB`) or `SELECT * FROM duckdb_memory()` (the engine's own memory-accounting view, `docs/staging.md` §"Memory accounting" — its buffer manager budget reflects the same limit).
 
 **Set (the shipped image):** every lake connection runs `SET extension_directory = '<dir>'` followed by bare `LOAD`s — `LOAD httpfs; LOAD aws` for `catalog.kind: s3`, plus `LOAD avro; LOAD iceberg` for the Iceberg kinds — and **never an `INSTALL`**. In DuckDB v1.5.5 `LOAD` strictly loads already-present files (no download code path runs at all — measured in the 089 §7.3 spike against this exact base image with `--network none`), so a lake pool connects with **zero egress**. The published image bundles the four extensions for DuckDB core **v1.5.5** under `/opt/duckdb/extensions/v1.5.5/<platform>/`, the `<platform>` following the image build's architecture (`linux_amd64` or `linux_arm64` — the Dockerfile maps BuildKit's `TARGETARCH`; hard-coding one architecture leaves the other LOAD-only against an empty directory, a pool-init failure at connect — found by the 089 live gate), and exports this variable from the Dockerfile; `deploy/compose.yml` defaults to the same path. The bundle adds ~108 MB uncompressed to the image (~39 MB downloaded at build). **A hardened dp-lake deployment with the bundled directory needs no egress to `extensions.duckdb.org` at all.**
 
@@ -663,6 +666,9 @@ datapipelines:
   # (a bare jar has nothing bundled); the shipped image exports the variable itself.
   duckdb:
     extension-directory: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:}
+    # §3.25 — the operator default memory_limit every LAKE engine build gets when a
+    # datasource declares none. Empty = the derived 25%-of-container default.
+    memory-limit: ${DATAPIPELINES_DUCKDB_MEMORY_LIMIT:}
 
   # §3.27 — outbound mail. NO `enabled` key: on exactly when host AND from are set.
   mail:
@@ -773,6 +779,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.22 | 153 operator memory-limit config (#136) | New **§3.25 row**: `datapipelines.duckdb.memory-limit` (`DATAPIPELINES_DUCKDB_MEMORY_LIMIT`, default empty). Deployment-wide default `memory_limit` for every LAKE engine build when a datasource sets none, restart-to-change, validated at startup with `properties.dialect.memory_limit`'s own grammar. §3.24's `memory_limit` row gains the three-way precedence sentence (datasource property > this key > derived 25%). §3.25's title and intro widened to cover both operator keys. §5 template block appended after `extension-directory` (same block, not a new one). |
 | 2026-09-17 | v1.21 | Writable LAKE spill default (#133) | §3.24: unique engine-owned absolute path under `java.io.tmpdir`; writable disk requirement, explicit override and cleanup semantics. |
 | 2026-09-17 | v1.20 | 152 LAKE engine scope (#128) | **§3.24 gains the resource-scope paragraph**: a LAKE datasource pool owns ONE embedded DuckDB instance shared by all its pooled connections, so `memory_limit` / `threads` / `temp_directory` are one budget per datasource pool (not per connection, not multiplied by `maximumPoolSize`), the sizing rule is per LAKE datasource on the instance plus a draining generation's headroom, and the file cache survives Hikari's connection replacement but not a pool rebuild. No key added or changed. Status line re-synced to the changelog (it read v1.1 above rows that ended at v1.18) |
 | 2026-09-16 | v1.19 | 149 / #125 node_progress cadence | §3.2 gains **`datapipelines.executor.progress-sample-interval-seconds`** (`1`): the floor between two periodic `node_progress` samples of one operation; first entries into a state and the terminal sample are never throttled by it. Mirrored in `application.yml`, `defaults.env`, `secrets.env.example`, `compose.yml`; `WebPropertiesSpecDriftTest` pins the default. |
