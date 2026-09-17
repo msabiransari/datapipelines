@@ -122,8 +122,10 @@ class WorkspacesUiController(
         //
         // Reachable because `ScopeMatrix.allowed` lets a SESSION through `WORKSPACES_READ`
         // with no workspace context (auth.md §11A.1) — "list the workspaces you belong to" is
-        // the one operation that is meaningful with none. Every other governed route still
-        // answers such a principal `404 workspace.not_found` before any handler runs.
+        // one of two things meaningful with none. The other is #113's recovery carve-out: a
+        // SUPER ADMIN with no reachable workspace keeps the instance verbs (this screen's
+        // create form among them), while every workspace-scoped route still answers the 404
+        // below any handler.
         if (memberships.none { it.workspaceActive }) return "workspaces/none"
         return "workspaces/index"
     }

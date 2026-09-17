@@ -175,6 +175,45 @@ class RoleMatrixTest {
         (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
     }
 
+    /**
+     * #113 — the empty-instance recovery carve-out. A super admin SESSION with no reachable
+     * workspace (every workspace deactivated) keeps exactly the instance verbs — the
+     * `SUPER_ADMIN`-capability operations, instance-level by construction — so the deployment
+     * can always be repaired: reactivate or create a workspace, administer users. Every
+     * workspace-scoped operation stays the D-R5 404 even for that principal, and a key gets
+     * the exception NEVER (its `admin`-scope floor is unobtainable since O-2, and the branch
+     * is session-only besides).
+     */
+    @Test
+    fun `a super admin with no reachable workspace keeps the instance verbs - and nothing else`() {
+        val superAdminSession = superAdminSessionWithoutWorkspace()
+
+        SUPER_ADMIN_ONLY.forEach { op ->
+            ScopeMatrix.allowed(superAdminSession, op, context = null) shouldBe ScopeMatrix.Decision.Allowed
+        }
+        (Op.entries.toSet() - SUPER_ADMIN_ONLY - Op.WORKSPACES_READ).forEach { op ->
+            val decision = ScopeMatrix.allowed(superAdminSession, op, context = null)
+            (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
+        }
+
+        // The key twin: a super admin's key with no context is refused the same instance verb —
+        // the exception is a property of the SESSION, never of the credential class.
+        val keyPrincipal =
+            AuthenticatedPrincipal(
+                userId = UUID.randomUUID(),
+                email = "agent@company.com",
+                displayName = "Agent",
+                scopes = setOf(Scope.ADMIN),
+                authMethod = AuthMethod.API_KEY,
+                keyId = "dpk_TEST",
+                superAdmin = true,
+            )
+        SUPER_ADMIN_ONLY.forEach { op ->
+            val decision = ScopeMatrix.allowed(keyPrincipal, op, context = null)
+            (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
+        }
+    }
+
     // ------------------------------------------------------------------ exhaustiveness
 
     @Test
@@ -222,6 +261,18 @@ class RoleMatrixTest {
             as ScopeMatrix.Decision.Refused
 
     private fun context(flags: MembershipFlags) = WorkspaceContext(workspaceId, "acme", flags)
+
+    /** A super admin session whose workspace resolution found NOTHING (the #113 empty instance). */
+    private fun superAdminSessionWithoutWorkspace() =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "root@company.com",
+            displayName = "Root",
+            scopes = emptySet(),
+            authMethod = AuthMethod.OIDC,
+            workspace = null,
+            superAdmin = true,
+        )
 
     private fun session(flags: MembershipFlags) =
         AuthenticatedPrincipal(
