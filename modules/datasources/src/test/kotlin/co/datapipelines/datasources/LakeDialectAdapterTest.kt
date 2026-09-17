@@ -495,7 +495,6 @@ class LakeDialectAdapterTest {
         }
     }
 
-
     @Test
     fun `bad limit values are refused at validation, and the valid ones pass`() {
         val validator = DatasourceValidator()
