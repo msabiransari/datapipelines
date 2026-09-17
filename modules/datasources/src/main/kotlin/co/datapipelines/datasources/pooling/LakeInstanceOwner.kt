@@ -39,11 +39,14 @@ import javax.sql.DataSource
  * - The owner is retired then closed by ONE caller of [HikariConnectionPool.close]: [retire]
  *   before Hikari's shutdown (no new duplicate may join a generation being torn down), [close]
  *   AFTER it — the last handle drops and the instance is freed. [close] is idempotent.
- * - **Every physical duplicate has an owner until it is closed.** [duplicate] hands out a
- *   [TrackedDuplicate] registered with the generation; Hikari closes or aborts the ones it accepted
- *   (the wrapper unregisters itself), and [close] closes the ones Hikari never accepted — a
- *   creation that straddled the shutdown is refused at the bag, and HikariCP does not close what
- *   it refuses — or abandoned at its own ceiling. Registration is atomic with [retire]. (R152-2)
+ * - **Every physical duplicate has an owner until its closure is CONFIRMED.** [duplicate] hands
+ *   out a [TrackedDuplicate] registered with the generation; it leaves the registry only when the
+ *   driver has returned from `close()` without throwing (an abort, a throwing close or a close
+ *   still in flight leave it registered), and [close] releases whatever is still registered —
+ *   a creation Hikari's closed bag refused (HikariCP does not close what it refuses), a borrower
+ *   abandoned at Hikari's ceiling, a handle whose first close the driver refused — retrying
+ *   once and counting what actually closed. Registration is atomic with [retire]; every registry
+ *   access takes the same monitor; no driver work ever runs under it. (R152-2/3/4)
  * - **No silent reconnect.** If the owner is lost (closed by a driver fault, or a bug), every
  *   subsequent [duplicate] fails with an [SQLNonTransientConnectionException] naming the
  *   datasource and generation; the pool does NOT open a fresh engine behind the caller's back,
@@ -108,7 +111,7 @@ class LakeInstanceOwner private constructor(
      * Hikari (through the wrapper's own close/abort), or this generation.
      */
     private fun track(raw: Connection): Connection {
-        val tracked = TrackedDuplicate(raw) { handles.remove(it) }
+        val tracked = TrackedDuplicate(raw, registry)
         val refused =
             synchronized(handles) {
                 val gone = retired.get() || closed.get()
@@ -122,10 +125,21 @@ class LakeInstanceOwner private constructor(
         return tracked
     }
 
-    /** Physical duplicates this generation created and has not yet seen closed — see [track]. */
+    /**
+     * Physical duplicates this generation created whose closure it has not yet seen CONFIRMED —
+     * see [track]. EVERY access — insert, forget, count, the release's snapshot — takes this
+     * set's monitor (R152-3); nothing else is ever done under it, so no driver work is ever
+     * inside the lock. A handle leaves the set only through [registry], on a confirmed close.
+     */
     private val handles = HashSet<TrackedDuplicate>()
 
-    /** How many physical duplicates are currently alive under this generation (tests, diagnostics). */
+    private val registry = TrackedDuplicate.Registry { handle -> synchronized(handles) { handles.remove(handle) } }
+
+    /**
+     * How many physical duplicates the generation still owns — registered, and not confirmed
+     * closed. After [close] this is the honest residual: handles whose close the driver refused,
+     * or whose in-flight close on another thread has not yet reported (tests, diagnostics).
+     */
     val liveDuplicates: Int get() = synchronized(handles) { handles.size }
 
     /** The driver's own exception out of the reflective call; an owner lost mid-call is named as such. */
@@ -183,16 +197,25 @@ class LakeInstanceOwner private constructor(
      */
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        val orphans = synchronized(handles) { handles.toList().also { handles.clear() } }
-        if (orphans.isNotEmpty()) {
-            val failed = orphans.count { runCatching { it.closeUnowned() }.isFailure }
+        // Snapshot under the monitor, never clear: a handle leaves the set only when its closure
+        // is confirmed, so whatever a failed or in-flight close leaves behind stays counted.
+        val remaining = synchronized(handles) { handles.toList() }
+        if (remaining.isNotEmpty()) {
+            val outcomes = remaining.groupingBy { it.releaseByGeneration() }.eachCount()
+            val failed = outcomes[TrackedDuplicate.ReleaseOutcome.FAILED] ?: 0
+            val inFlight = outcomes[TrackedDuplicate.ReleaseOutcome.IN_FLIGHT] ?: 0
             LOG.warn(
-                "event=lake.instance_handles_closed datasource={} generation={} handles={} close_failures={} " +
-                    "message=\"physical connections the pool never accepted or abandoned were closed with the generation\"",
+                "event=lake.instance_handles_closed datasource={} generation={} handles={} closed={} already_closed={} " +
+                    "in_flight={} close_failures={} error=\"{}\" " +
+                    "message=\"physical connections the pool never accepted or abandoned were released with the generation\"",
                 datasourceName,
                 generation,
-                orphans.size,
+                remaining.size,
+                outcomes[TrackedDuplicate.ReleaseOutcome.CLOSED] ?: 0,
+                outcomes[TrackedDuplicate.ReleaseOutcome.ALREADY_CLOSED] ?: 0,
+                inFlight,
                 failed,
+                remaining.firstNotNullOfOrNull { it.lastCloseFailure }?.message.orEmpty(),
             )
         }
         try {
