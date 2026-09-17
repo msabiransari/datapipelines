@@ -37,6 +37,11 @@ interface WritebackRunner {
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
         workspaceId: UUID,
+        /**
+         * Told each measured boundary (149): the target checkout (waiting), each batch's fetch
+         * and insert, the commit, and a rollback. [OperationObserver.NONE] by default.
+         */
+        observer: OperationObserver = OperationObserver.NONE,
     ): Long
 
     /**
@@ -57,6 +62,8 @@ interface WritebackRunner {
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
         workspaceId: UUID,
+        /** As [writeback]; the "fetch" is the pull from [rows]. */
+        observer: OperationObserver = OperationObserver.NONE,
     ): Long
 }
 
@@ -84,10 +91,11 @@ class JdbcWritebackRunner(
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
         workspaceId: UUID,
+        observer: OperationObserver,
     ): Long {
         val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
-        return writeAll(output, workspaceId, columns) { connection, table, dialect ->
-            streamInsert(connection, table, columns, resultSet, dialect)
+        return writeAll(output, workspaceId, columns, observer) { connection, table, dialect ->
+            streamInsert(connection, table, columns, resultSet, dialect, observer)
         }
     }
 
@@ -96,9 +104,10 @@ class JdbcWritebackRunner(
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
         workspaceId: UUID,
+        observer: OperationObserver,
     ): Long =
-        writeAll(output, workspaceId, schema) { connection, table, dialect ->
-            insertRows(connection, table, schema, rows, dialect)
+        writeAll(output, workspaceId, schema, observer) { connection, table, dialect ->
+            insertRows(connection, table, schema, rows, dialect, observer)
         }
 
     /**
@@ -114,6 +123,7 @@ class JdbcWritebackRunner(
         output: NodeOutput.Datasource,
         workspaceId: UUID,
         columns: List<ColumnSchema>,
+        observer: OperationObserver,
         insert: (Connection, String, Dialect) -> Long,
     ): Long {
         val datasource =
@@ -131,15 +141,24 @@ class JdbcWritebackRunner(
         // adapter cannot know, and MSSQL needs brackets. Resolved from the datasource the gate
         // above returned, so the quoting and the connection can never describe different engines.
         val dialect = datasource.dialect
+        // 149 §3: requesting the target connection is `waiting_output`; holding it and clearing
+        // the table is `writing`; the commit is `finalizing`. Reported around the JDBC calls,
+        // never inside a pool's own lock.
+        observer.phase(OperationPhase.WAITING_OUTPUT)
         return registry.poolFor(datasource).leaseConnection().use { connection ->
             connection.autoCommit = false
             try {
-                if (output.mode == WriteMode.REPLACE) clearTarget(connection, table, dialect)
+                if (output.mode == WriteMode.REPLACE) {
+                    observer.phase(OperationPhase.WRITING)
+                    clearTarget(connection, table, dialect)
+                }
                 val written = insert(connection, table, dialect)
+                observer.phase(OperationPhase.FINALIZING)
                 connection.commit()
+                observer.committed()
                 written
             } catch (e: SQLException) {
-                rollbackQuietly(connection)
+                if (rollbackQuietly(connection)) observer.rolledBack()
                 throw mapWriteFailure(e, output)
             }
         }
@@ -193,6 +212,7 @@ class JdbcWritebackRunner(
         columns: List<ColumnSchema>,
         resultSet: ResultSet,
         dialect: Dialect,
+        observer: OperationObserver,
     ): Long {
         val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name, dialect) }
         val placeholders = columns.joinToString(", ") { "?" }
@@ -200,18 +220,37 @@ class JdbcWritebackRunner(
         return connection.prepareStatement(sql).use { statement ->
             var pending = 0
             var written = 0L
+            observer.phase(OperationPhase.FETCHING)
             while (resultSet.next()) {
                 bindRow(statement, columns, resultSet)
                 statement.addBatch()
                 pending++
                 if (pending >= batchSize) {
-                    written += rowsWritten(statement.executeBatch(), pending)
+                    written += executeBatch(statement, pending, observer)
                     pending = 0
                 }
             }
-            if (pending > 0) written += rowsWritten(statement.executeBatch(), pending)
+            if (pending > 0) written += executeBatch(statement, pending, observer)
             written
         }
+    }
+
+    /**
+     * One batch's boundaries (149): the rows bound so far were FETCHED; the `executeBatch` is
+     * the WRITE; the count the driver reports is what the target accepted. The observer is
+     * returned to `fetching` afterwards because the next cursor read follows at once.
+     */
+    private fun executeBatch(
+        statement: PreparedStatement,
+        pending: Int,
+        observer: OperationObserver,
+    ): Long {
+        observer.fetched(pending.toLong())
+        observer.phase(OperationPhase.WRITING)
+        val written = rowsWritten(statement.executeBatch(), pending)
+        observer.written(written)
+        observer.phase(OperationPhase.FETCHING)
+        return written
     }
 
     /**
@@ -255,6 +294,7 @@ class JdbcWritebackRunner(
         columns: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         dialect: Dialect,
+        observer: OperationObserver,
     ): Long {
         val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name, dialect) }
         val placeholders = columns.joinToString(", ") { "?" }
@@ -262,6 +302,7 @@ class JdbcWritebackRunner(
         return connection.prepareStatement(sql).use { statement ->
             var pending = 0
             var written = 0L
+            observer.phase(OperationPhase.FETCHING)
             rows.forEach { row ->
                 require(row.size == columns.size) {
                     "Row has ${row.size} values for ${columns.size} columns of '$table'"
@@ -272,11 +313,11 @@ class JdbcWritebackRunner(
                 statement.addBatch()
                 pending++
                 if (pending >= batchSize) {
-                    written += rowsWritten(statement.executeBatch(), pending)
+                    written += executeBatch(statement, pending, observer)
                     pending = 0
                 }
             }
-            if (pending > 0) written += rowsWritten(statement.executeBatch(), pending)
+            if (pending > 0) written += executeBatch(statement, pending, observer)
             written
         }
     }
@@ -298,13 +339,14 @@ class JdbcWritebackRunner(
      * the author cannot act on.
      */
     @Suppress("SwallowedException")
-    private fun rollbackQuietly(connection: Connection) {
+    private fun rollbackQuietly(connection: Connection): Boolean =
         try {
             connection.rollback()
+            true
         } catch (e: SQLException) {
             LOG.warn("Write-back rollback failed (SQLState {}): {}", e.sqlState, e.message)
+            false
         }
-    }
 
     private fun mapWriteFailure(
         cause: SQLException,

@@ -252,6 +252,7 @@ class CallerResultPathTest {
             resultSet: java.sql.ResultSet,
             sourceDialect: co.datapipelines.typesystem.Dialect,
             ttlSeconds: Long,
-        ): StoredResult = delegate.materialize(executionId, resultSet, sourceDialect, ttlSeconds)
+            observer: OperationObserver,
+        ): StoredResult = delegate.materialize(executionId, resultSet, sourceDialect, ttlSeconds, observer)
     }
 }

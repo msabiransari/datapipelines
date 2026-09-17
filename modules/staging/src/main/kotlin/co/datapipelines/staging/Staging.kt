@@ -81,15 +81,14 @@ interface Staging : AutoCloseable {
         tableName: String,
         sourceDialect: Dialect,
         /**
-         * Called after each inserted batch with the rows staged SO FAR (108 §D).
-         *
-         * The one thing an operator watching a long node wants to know is how far it has got, and
-         * this is the only place that knows. Defaulted to a no-op so every existing caller and
-         * every fixture is unchanged, and deliberately non-suspending: it is invoked from inside
-         * the drain, between leases, and a suspending callback there would let a caller's slow
-         * I/O stall the drain — the exact defect §B removed.
+         * Told each measured boundary of the drain (149; [StageObserver]): the batch fetch, the
+         * lease request and acquisition, and each accepted batch with the rows staged SO FAR —
+         * the 108 §D progress figure. Defaulted to [StageObserver.NONE] so every existing caller
+         * and every fixture is unchanged, and deliberately non-suspending: it is invoked from
+         * inside the drain, between leases, and a suspending callback there would let a
+         * caller's slow I/O stall the drain — the exact defect §B removed.
          */
-        onProgress: (Long) -> Unit = {},
+        observer: StageObserver = StageObserver.NONE,
     ): StageResult
 
     /**
@@ -116,6 +115,8 @@ interface Staging : AutoCloseable {
         tableName: String,
         columns: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
+        /** As on [stage]: the drain's measured boundaries; the "fetch" is the pull from [rows]. */
+        observer: StageObserver = StageObserver.NONE,
     ): StageResult
 
     /**

@@ -40,6 +40,13 @@ interface ResultStore {
         resultSet: ResultSet,
         sourceDialect: Dialect,
         ttlSeconds: Long,
+        /**
+         * Told the store's measured boundaries (149): each page write, the meta finalization,
+         * and the commit. Cursor advancement is the CALLER's to observe — it wraps the cursor —
+         * so an implementation reports only what it does with the rows. [OperationObserver.NONE]
+         * by default.
+         */
+        observer: OperationObserver = OperationObserver.NONE,
     ): StoredResult
 
     /**
@@ -61,6 +68,8 @@ interface ResultStore {
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         ttlSeconds: Long,
+        /** As [materialize]; here the pull from [rows] is reported as the fetch. */
+        observer: OperationObserver = OperationObserver.NONE,
     ): StoredResult
 
     /**

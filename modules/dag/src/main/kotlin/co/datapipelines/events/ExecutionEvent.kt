@@ -3,6 +3,7 @@ package co.datapipelines.events
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.MappedError
 import co.datapipelines.executor.NodeStats
+import co.datapipelines.executor.OperationSnapshot
 import co.datapipelines.executor.StoredResultView
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.TypeMappingWarning
@@ -24,6 +25,12 @@ enum class SseEventType(
 ) {
     EXECUTION_STARTED("execution_started"),
     NODE_STARTED("node_started"),
+
+    /**
+     * A measured operation sample (149, rest-api §6.4.9): zero or more per node, strictly between
+     * its `node_started` and its `node_completed`/`node_failed`. Never terminal on the wire.
+     */
+    NODE_PROGRESS("node_progress"),
     NODE_COMPLETED("node_completed"),
     NODE_FAILED("node_failed"),
     PIPELINE_COMPLETED("pipeline_completed"),
@@ -40,8 +47,9 @@ enum class SseEventType(
  * the executor emits *where*, and carries the data each payload needs.
  *
  * The emission rules the executor must honour (§10):
- *  - per node: exactly one `node_started`, then exactly one of `node_completed` **or**
- *    `node_failed` — never both;
+ *  - per node: exactly one `node_started`, then zero or more `node_progress` (149), then exactly
+ *    one of `node_completed` **or** `node_failed` — never both; no `node_progress` follows the
+ *    node's own terminal event or the execution's;
  *  - exactly one terminal event per execution: `pipeline_completed` (optionally followed by
  *    `data_ready`), `pipeline_failed`, or `execution_aborted`;
  *  - `data_ready` is built from the **stored** result and is skipped entirely for a pipeline with
@@ -78,6 +86,25 @@ data class NodeStarted(
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = startedAt
     override val type: SseEventType get() = SseEventType.NODE_STARTED
+}
+
+/**
+ * One measured sample of a node's operation (149, rest-api §6.4.9): which operation, where its
+ * output goes, which state it is in at [observedAt], its cumulative counts and per-state wall
+ * time. The executor's pump emits samples on the documented cadence; the node coroutine emits
+ * the terminal sample (`completed`/`failed`/`aborted`) before the node's own terminal event.
+ *
+ * Identifiers and metrics only — no rows, no SQL, no connection strings (observability §9.3).
+ */
+data class NodeProgress(
+    override val executionId: UUID,
+    val snapshot: OperationSnapshot,
+) : ExecutionEvent() {
+    val nodeId: String get() = snapshot.nodeId
+
+    /** The ORIGINAL observation instant — replay preserves it (rest-api §10.3). */
+    override val timestamp: Instant get() = snapshot.observedAt
+    override val type: SseEventType get() = SseEventType.NODE_PROGRESS
 }
 
 /** A node finished **successfully** — never emitted for a failed node (rest-api §6.4.3). */

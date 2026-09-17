@@ -402,6 +402,7 @@ class StagingPoolMeasurement {
             resultSet: ResultSet,
             sourceDialect: Dialect,
             ttlSeconds: Long,
+            observer: co.datapipelines.executor.OperationObserver,
         ): StoredResult {
             val schema = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect)
             var rows = 0L
@@ -435,6 +436,7 @@ class StagingPoolMeasurement {
             schema: List<ColumnSchema>,
             rows: Sequence<List<Any?>>,
             ttlSeconds: Long,
+            observer: co.datapipelines.executor.OperationObserver,
         ): StoredResult = error("not used by these shapes")
 
         override fun keyFor(executionId: UUID): String = "m:$executionId"

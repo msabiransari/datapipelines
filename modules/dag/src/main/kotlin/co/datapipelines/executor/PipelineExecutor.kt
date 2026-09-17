@@ -9,6 +9,7 @@ import co.datapipelines.events.ExecutionEvent
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.NodeCompleted
 import co.datapipelines.events.NodeFailed
+import co.datapipelines.events.NodeProgress
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
@@ -36,6 +37,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -188,12 +190,14 @@ class PipelineExecutor(
                     handle.bind(coroutineContext.job)
                     val poller = launch(dispatcher.context) { pollCancelFlag(run, handle) }
                     val beat = launch(dispatcher.context) { heartbeat(run) }
+                    val pump = launch(dispatcher.context) { pumpProgress(run, ctx) }
                     try {
                         val results = runNodes(plan.dag, ctx, run)
                         succeed(run, results)
                     } finally {
                         poller.cancel()
                         beat.cancel()
+                        pump.cancel()
                     }
                 }
             }
@@ -273,6 +277,10 @@ class PipelineExecutor(
             // cancel-induced driver error, and carries the original as a suppressed exception —
             // the stats still record it. Suppressing the event is right; losing the reason is not.
             recordSuppressedFailure(node, run, e)
+            // 149: the operation's terminal sample is not a node event — it is the observation
+            // "this write stopped here, uncommitted", which is exactly what a watcher of an
+            // aborted run needs. One bounded emit under NonCancellable, then the seal.
+            withContext(NonCancellable) { flushOperation(node, ctx, run, OperationOutcome.ABORTED) }
             throw e
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
@@ -466,6 +474,8 @@ class PipelineExecutor(
         val result = runWithNodeDeadline(node, ctx, run, startedAt)
         run.stats.completed(result)
         metrics.nodeFinished(run.request.pipelineId, node.id, node.source, Duration.ofMillis(result.durationMs), result.rowsOut)
+        // 149: the terminal progress sample precedes the node's own terminal event, always.
+        flushOperation(node, ctx, run, OperationOutcome.COMPLETED)
         emit(NodeCompleted(run.executionId, node.id, NodeStats.of(result)))
         recordProgress(run)
         return result
@@ -493,10 +503,12 @@ class PipelineExecutor(
         // it was stopped by the execution ending, not by a fault of its own.
         ctx.handle.abortReason?.let {
             run.stats.abortedWithCause(node.id, mapped)
+            flushOperation(node, ctx, run, OperationOutcome.ABORTED)
             return ExecutionAbortedException(it)
         }
         if (run.unwinding.get()) {
             run.stats.abortedWithCause(node.id, mapped)
+            flushOperation(node, ctx, run, OperationOutcome.ABORTED)
             // The scope is already unwinding and this node's statement was interrupted by
             // [pollCancelFlag]'s cleanup to make that unwind actually stop the source query. The
             // resulting driver error is a *consequence* of the decided outcome, not an independent
@@ -524,6 +536,7 @@ class PipelineExecutor(
             run.request.correlationId,
             cause.cause ?: cause,
         )
+        flushOperation(node, ctx, run, OperationOutcome.FAILED)
         emit(NodeFailed(run.executionId, node.id, failure, run.stats.snapshot(listOf(node.id)).first()))
         return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause, failure)
     }
@@ -831,6 +844,62 @@ class PipelineExecutor(
         }
     }
 
+    /**
+     * The `node_progress` pump (149 §4): every [PROGRESS_PUMP_TICK_MS] it asks each tracker for
+     * a due sample and emits it. The tick decides only how promptly a state change is NOTICED;
+     * how many samples exist is the tracker's rule (first sample, first entry into a state,
+     * then at most once per `progress-write-interval-seconds`). A tracker whose terminal sample
+     * the node coroutine already published is skipped, and the per-tracker lock means a pump
+     * sample can never follow that terminal one on the wire.
+     *
+     * Cancelled from the same `finally` as the poller, so it stops before any terminal event.
+     */
+    private suspend fun pumpProgress(
+        run: ExecutionRun,
+        ctx: NodeExecutionContext,
+    ) {
+        while (true) {
+            delay(PROGRESS_PUMP_TICK_MS)
+            ctx.operations.all().forEach { tracked ->
+                if (tracked.terminalPublished) return@forEach
+                tracked.publishLock.withLock {
+                    if (!tracked.terminalPublished) {
+                        tracked.tracker.sampleIfDue()?.let { emit(NodeProgress(run.executionId, it)) }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The terminal `node_progress` sample (149 §2): exactly once per started operation, emitted
+     * by the node's own coroutine BEFORE its `node_completed`/`node_failed` — the tracker is
+     * sealed here, so an abandoned driver body's later observations publish nothing.
+     *
+     * `committed` is the writer's own report ([NodeOperationTracker.wasCommitted]) on success,
+     * false on every other outcome, and absent for a destination with nothing to commit.
+     */
+    private suspend fun flushOperation(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+        outcome: OperationOutcome,
+    ) {
+        val tracked = ctx.operations.tracked(node.id) ?: return
+        tracked.publishLock.withLock {
+            if (tracked.terminalPublished) return
+            tracked.terminalPublished = true
+            val tracker = tracked.tracker
+            val committed =
+                when {
+                    tracker.destination.kind == OperationDestination.Kind.NONE -> null
+                    outcome == OperationOutcome.COMPLETED -> tracker.wasCommitted
+                    else -> false
+                }
+            emit(NodeProgress(run.executionId, tracker.finish(outcome, committed)))
+        }
+    }
+
     /** Writes the execution's live per-node state (108 §D) — node boundaries, unthrottled. */
     private fun recordProgress(run: ExecutionRun) {
         progress.record(run.executionId, run.stats.liveSnapshot(run.plan.dag.nodeIds))
@@ -949,6 +1018,8 @@ class PipelineExecutor(
                     run.stats.progress(nodeId, rows)
                     progress.recordThrottled(run.executionId) { run.stats.liveSnapshot(run.plan.dag.nodeIds) }
                 },
+            // 149: the periodic-sample cadence reuses the DB progress row's — one operator knob.
+            operations = NodeOperations(sampleIntervalMs = Duration.ofSeconds(config.progressWriteIntervalSeconds).toMillis()),
         )
     }
 
@@ -967,6 +1038,13 @@ class PipelineExecutor(
 
         /** Bound on [familyAbortReason]'s cause walk — one link per composition generation, plus slack. */
         const val MAX_CAUSE_DEPTH = 32
+
+        /**
+         * How often the progress pump looks for a due sample (149 §4) — a constant, not an
+         * operator control: it bounds the LATENCY of noticing a state change, never the number of
+         * samples, which `progress-write-interval-seconds` and the first-entry rule bound.
+         */
+        const val PROGRESS_PUMP_TICK_MS = 250L
     }
 }
 

@@ -51,9 +51,10 @@ class RedisResultStore(
         resultSet: ResultSet,
         sourceDialect: Dialect,
         ttlSeconds: Long,
+        observer: OperationObserver,
     ): StoredResult {
         val schema = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect)
-        return storeRows(executionId, schema, resultSetRows(resultSet, schema.columns), Duration.ofSeconds(ttlSeconds))
+        return storeRows(executionId, schema, resultSetRows(resultSet, schema.columns), Duration.ofSeconds(ttlSeconds), observer)
     }
 
     override suspend fun materializeRows(
@@ -61,7 +62,22 @@ class RedisResultStore(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         ttlSeconds: Long,
-    ): StoredResult = storeRows(executionId, ResultSchema(schema, warnings = emptyList()), rows.iterator(), Duration.ofSeconds(ttlSeconds))
+        observer: OperationObserver,
+    ): StoredResult {
+        // The decoded twin has no cursor for the caller to wrap: the pull from the sequence IS
+        // the fetch here, so it is reported by this store.
+        val pulled = rows.iterator()
+        val counted =
+            iterator {
+                while (pulled.hasNext()) {
+                    observer.phase(OperationPhase.FETCHING)
+                    val row = pulled.next()
+                    observer.fetched(1)
+                    yield(row)
+                }
+            }
+        return storeRows(executionId, ResultSchema(schema, warnings = emptyList()), counted, Duration.ofSeconds(ttlSeconds), observer)
+    }
 
     /**
      * The write path both entry points share: discard any previous result for the execution, drain
@@ -72,13 +88,18 @@ class RedisResultStore(
         schema: ResultSchema,
         rows: Iterator<List<Any?>>,
         ttl: Duration,
+        observer: OperationObserver,
     ): StoredResult {
         val key = baseKey(executionId)
         discard(key)
         return try {
-            writePages(key, schema, rows, ttl)
-                .also { writeMeta(key, executionId, schema, it, ttl) }
-                .also { metrics.resultWritten(ExecutorMetrics.OUTCOME_STORED, it.bytes) }
+            writePages(key, schema, rows, ttl, observer)
+                .also {
+                    // 149: the meta key is what makes the result readable — the finalization.
+                    observer.phase(OperationPhase.FINALIZING)
+                    writeMeta(key, executionId, schema, it, ttl)
+                    observer.committed()
+                }.also { metrics.resultWritten(ExecutorMetrics.OUTCOME_STORED, it.bytes) }
         } catch (e: DataAccessException) {
             discard(key)
             metrics.resultWritten(ExecutorMetrics.OUTCOME_STORAGE_UNAVAILABLE, 0)
@@ -200,6 +221,7 @@ class RedisResultStore(
         schema: ResultSchema,
         rows: Iterator<List<Any?>>,
         ttl: Duration,
+        observer: OperationObserver,
     ): StoredResult {
         val batch = ArrayList<String>(PUSH_BATCH_ROWS)
         var rowCount = 0L
@@ -226,12 +248,20 @@ class RedisResultStore(
             batch += encoded
             rowCount++
             if (batch.size >= PUSH_BATCH_ROWS) {
+                // 149: the page push is the WRITE boundary; the rows it carries are what the
+                // store accepted. The cursor pull that follows re-enters `fetching` by itself.
+                observer.phase(OperationPhase.WRITING)
                 redis.opsForList().rightPushAll(rowsKey(key), batch)
                 if (!ttlApplied) ttlApplied = redis.expire(rowsKey(key), ttl) == true
+                observer.written(batch.size.toLong())
                 batch.clear()
             }
         }
-        if (batch.isNotEmpty()) redis.opsForList().rightPushAll(rowsKey(key), batch)
+        if (batch.isNotEmpty()) {
+            observer.phase(OperationPhase.WRITING)
+            redis.opsForList().rightPushAll(rowsKey(key), batch)
+            observer.written(batch.size.toLong())
+        }
         redis.expire(rowsKey(key), ttl)
 
         return StoredResult(key, rowCount, bytes, Instant.now().plus(ttl), schema.warnings)

@@ -20,7 +20,6 @@ import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.TypeMappingWarning
 import kotlinx.coroutines.CancellationException
 import java.sql.Connection
-import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Statement
 import java.time.Instant
@@ -120,6 +119,12 @@ data class NodeExecutionContext(
      * existing construction site and every fixture is unchanged.
      */
     val nodeProgress: NodeProgressSink = NodeProgressSink.NONE,
+    /**
+     * The measured operation of each node (149) — written by the runner and the writers, read
+     * by the executor's pump and terminal flush. Defaulted so every construction site and
+     * fixture is unchanged.
+     */
+    val operations: NodeOperations = NodeOperations(),
 )
 
 /**
@@ -217,6 +222,9 @@ class NodeRunner(
         // BEFORE render/source dispatch (design §4.1): a PIPELINE node carries neither a
         // template nor a source, so it never enters the SQL paths below.
         if (node.type == NodeType.PIPELINE) {
+            // 149: the child execution is the parent node's operation; the composition runner
+            // reports the child id and the parent's own output write onto this tracker.
+            ctx.operations.begin(node.id, OperationKind.CHILD, NodeOperations.destinationOf(node.output)).enter(OperationPhase.EXECUTING)
             return subPipelineRunner?.run(node, ctx)
                 ?: throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED,
@@ -251,6 +259,10 @@ class NodeRunner(
             // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
             // never on a statement that half-executed with a silent null.
             val bound = phase(ctx, NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
+            // 149: the operation's kind and real destination are decided from the node's shape,
+            // before any connection is leased; every boundary below reports onto this tracker.
+            val (kind, destination) = NodeOperations.operationFor(node)
+            ctx.operations.begin(node.id, kind, destination)
             when (node.source) {
                 is NodeSource.Tempdb -> runOnTempdb(node, bound, ctx, startedAt)
                 is NodeSource.Datasource -> runOnDatasource(node, node.source.name, bound, ctx, startedAt)
@@ -349,7 +361,9 @@ class NodeRunner(
             is NodeOutput.Datasource -> {
                 phase(ctx, NodePhase.WRITEBACK, node.id) {
                     tempdbCursor(node, bound, ctx, timeout) { rs ->
-                        NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId), startedAt)
+                        val op = ctx.operations.observerFor(node.id)
+                        val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
+                        NodeResult.of(node.id, written, startedAt)
                     }
                 }
             }
@@ -387,15 +401,20 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         timeout: Int,
         block: suspend (ResultSet) -> T,
-    ): T =
-        ctx.staging.withConnection { connection ->
-            statementFor(connection, bound).use { statement ->
+    ): T {
+        // 149: a tempdb READ lease is a source connection (connecting), then the query executes.
+        val op = ctx.operations.observerFor(node.id)
+        op.phase(OperationPhase.CONNECTING)
+        return ctx.staging.withConnection { connection ->
+            BoundStatements.statementFor(connection, bound).use { statement ->
                 statement.queryTimeout = timeout
                 ctx.handle.withStatement(node.id, statement) {
-                    ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) }.use { rs -> block(rs) }
+                    op.phase(OperationPhase.EXECUTING)
+                    ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }.use { rs -> block(rs) }
                 }
             }
         }
+    }
 
     /**
      * `CREATE TABLE <table> AS <sql>` on the staging connection.
@@ -440,11 +459,18 @@ class NodeRunner(
                 // statement actually sent. The missing-parameter gate already ran in [run], so a
                 // name cannot fail it twice.
                 val fullBound = SqlBindTranslator.translate("CREATE TABLE $table AS ${bound.originalSql}", ctx.values)
+                // 149: the lease is an OUTPUT wait; the CTAS itself is one combined, indivisible
+                // executing interval (query and materialisation are the same statement); the
+                // count is the finalization.
+                val op = ctx.operations.observerFor(node.id)
+                op.phase(OperationPhase.WAITING_OUTPUT)
                 ctx.staging.withConnection { connection ->
-                    statementFor(connection, fullBound).use { statement ->
+                    BoundStatements.statementFor(connection, fullBound).use { statement ->
                         statement.queryTimeout = timeout
                         ctx.handle.withStatement(node.id, statement) {
-                            ctx.handle.whileExecuting(node.id, statement) { update(statement, fullBound) }
+                            op.phase(OperationPhase.EXECUTING)
+                            ctx.handle.whileExecuting(node.id, statement) { BoundStatements.update(statement, fullBound) }
+                            op.phase(OperationPhase.FINALIZING)
                             // The row count runs on its OWN statement: H2 (and other drivers)
                             // refuse Statement-level `executeQuery(String)` on a prepared
                             // statement, so the count cannot ride the one that executed the CTAS.
@@ -459,6 +485,10 @@ class NodeRunner(
                 }
             }
         checkStagingBudget(node, ctx)
+        ctx.operations.observerFor(node.id).let {
+            it.written(rows)
+            it.committed()
+        }
         // `datapipelines.staging.rows` counts rows staged across ALL executions, and a
         // tempdb→tempdb CTAS stages just as surely as `stage()` does — it simply does it inside H2
         // rather than through a cursor. Counting only the `stage()` path left the metric blind to
@@ -485,17 +515,20 @@ class NodeRunner(
         startedAt: Instant,
         timeout: Int,
     ): NodeResult {
+        val op = ctx.operations.observerFor(node.id)
+        op.phase(OperationPhase.WAITING_OUTPUT)
         val affected =
             phase(ctx, NodePhase.EXECUTE, node.id) {
                 ctx.staging.withConnection { connection ->
-                    statementFor(connection, bound).use { statement ->
+                    BoundStatements.statementFor(connection, bound).use { statement ->
                         statement.queryTimeout = timeout
                         ctx.handle.withStatement(node.id, statement) {
+                            op.phase(OperationPhase.EXECUTING)
                             ctx.handle.whileExecuting(node.id, statement) {
                                 if (node.type == NodeType.DML) {
-                                    update(statement, bound).toLong()
+                                    BoundStatements.update(statement, bound).toLong()
                                 } else {
-                                    executeDdl(statement, bound)
+                                    BoundStatements.executeDdl(statement, bound)
                                 }
                             }
                         }
@@ -503,6 +536,7 @@ class NodeRunner(
                 }
             }
         checkStagingBudget(node, ctx)
+        recordStatement(op, node, affected)
         return NodeResult.of(node.id, affected, startedAt)
     }
 
@@ -539,7 +573,7 @@ class NodeRunner(
         // existence oracle), instead of executing against a row the workspace cannot see.
         val datasource =
             phase(ctx, NodePhase.CONNECT, node.id) {
-                datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw datasourceNotFound(name)
+                datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw NodeRefusals.datasourceNotFound(name)
             }
         return withResolvedDatasource(node, datasource, bound, ctx, startedAt)
     }
@@ -609,6 +643,7 @@ class NodeRunner(
             phase(ctx, NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
         }
         val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
+        ctx.operations.observerFor(node.id).phase(OperationPhase.CONNECTING)
         val connection =
             phase(ctx, NodePhase.CONNECT, node.id) {
                 // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
@@ -671,8 +706,8 @@ class NodeRunner(
         node: ExecutableNode,
     ) {
         when (ReadonlyBackstop.signal(datasourceRegistry, name)) {
-            ReadonlySignal.READONLY -> throw datasourceReadonly(name, node.type)
-            ReadonlySignal.ABSENT -> throw datasourceNotFound(name)
+            ReadonlySignal.READONLY -> throw NodeRefusals.datasourceReadonly(name, node.type)
+            ReadonlySignal.ABSENT -> throw NodeRefusals.datasourceNotFound(name)
             ReadonlySignal.WRITABLE -> Unit
         }
     }
@@ -680,8 +715,8 @@ class NodeRunner(
     /** The write-back TARGET leg (020 F9): same backstop, at CONNECT, before the source query. */
     private fun enforceWritebackTargetReadonly(target: NodeOutput.Datasource) {
         when (ReadonlyBackstop.signal(datasourceRegistry, target.datasource)) {
-            ReadonlySignal.READONLY -> throw writebackTargetReadonly(target)
-            ReadonlySignal.ABSENT -> throw datasourceNotFound(target.datasource)
+            ReadonlySignal.READONLY -> throw NodeRefusals.writebackTargetReadonly(target)
+            ReadonlySignal.ABSENT -> throw NodeRefusals.datasourceNotFound(target.datasource)
             ReadonlySignal.WRITABLE -> Unit
         }
     }
@@ -724,13 +759,14 @@ class NodeRunner(
         timeout: Int,
         dialect: Dialect,
     ): NodeResult =
-        statementFor(conn, bound).use { statement ->
+        BoundStatements.statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             SourceStreaming.fetchSizeFor(dialect, config.sourceFetchSize)?.let { statement.fetchSize = it }
             ctx.handle.withStatement(node.id, statement) {
+                ctx.operations.observerFor(node.id).phase(OperationPhase.EXECUTING)
                 val rs =
                     phase(ctx, NodePhase.EXECUTE, node.id) {
-                        ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) }
+                        ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
                     }
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
@@ -743,8 +779,9 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
         dialect: Dialect,
-    ): NodeResult =
-        when (val output = requireOutput(node)) {
+    ): NodeResult {
+        val op = ctx.operations.observerFor(node.id)
+        return when (val output = requireOutput(node)) {
             is NodeOutput.Tempdb -> {
                 val staged =
                     phase(ctx, NodePhase.STAGE, node.id) {
@@ -752,7 +789,7 @@ class NodeRunner(
                         // or Oracle cursor through H2's table picks the wrong storage type and
                         // loses data before egress re-derivation can see it.
                         ctx.staging
-                            .stage(rs, output.table, dialect) { rows -> ctx.nodeProgress.staged(node.id, rows) }
+                            .stage(rs, output.table, dialect, StagingObserverBridge(node.id, op, ctx.nodeProgress))
                             .also { ctx.warnings.addAll(it.warnings) }
                     }
                 // B2 (second half): staging enforces the budget it was CONSTRUCTED with — the
@@ -761,7 +798,9 @@ class NodeRunner(
                 // Re-checking here closes that without a staging signature change: the effective
                 // (already clamped, possibly lower) budget is enforced by the executor after every
                 // staged write, exactly as it is after every `withConnection` write.
+                op.phase(OperationPhase.FINALIZING)
                 checkStagingBudget(node, ctx)
+                op.committed()
                 metrics.rowsStaged(staged.rowsStaged)
                 NodeResult.of(node.id, staged.rowsStaged, startedAt)
             }
@@ -772,10 +811,11 @@ class NodeRunner(
 
             is NodeOutput.Datasource -> {
                 phase(ctx, NodePhase.WRITEBACK, node.id) {
-                    NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect, ctx.workspaceId), startedAt)
+                    NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect, ctx.workspaceId, op), startedAt)
                 }
             }
         }
+    }
 
     /**
      * The caller-output fork (design §4.2): with a [NodeExecutionContext.directSink] the result
@@ -788,10 +828,14 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
         dialect: Dialect,
-    ): NodeResult =
-        ctx.directSink
-            ?.let { streamToSink(node, rs, ctx, startedAt, dialect, it) }
-            ?: materialize(node, rs, ctx, startedAt, dialect)
+    ): NodeResult {
+        // 149: the store (or the parent) consumes the cursor; only this wrapper sees it advance,
+        // so fetch counts and the fetching boundary are measured here on both branches.
+        val observed = FetchObservingResultSet(rs, ctx.operations.observerFor(node.id))
+        return ctx.directSink
+            ?.let { streamToSink(node, observed, ctx, startedAt, dialect, it) }
+            ?: materialize(node, observed, ctx, startedAt, dialect)
+    }
 
     /**
      * `direct` delivery: the caller result streams to the execution's [DirectResultSink] instead
@@ -822,6 +866,12 @@ class NodeRunner(
             }
         sink.accept(schema.columns, rows)
         ctx.warnings.addAll(schema.warnings)
+        // `direct` delivery: every yielded row was accepted by the parent's sink (design §4.2);
+        // the parent's own write is the PARENT node's operation.
+        ctx.operations.observerFor(node.id).let {
+            it.written(rowsOut)
+            it.committed()
+        }
         return NodeResult.of(nodeId = node.id, rowsOut = rowsOut, startedAt = startedAt, callerResultRef = null)
     }
 
@@ -832,7 +882,7 @@ class NodeRunner(
         startedAt: Instant,
         dialect: Dialect,
     ): NodeResult {
-        val stored = resultStore.materialize(ctx.executionId, rs, dialect, ctx.resultTtlSeconds)
+        val stored = resultStore.materialize(ctx.executionId, rs, dialect, ctx.resultTtlSeconds, ctx.operations.observerFor(node.id))
         ctx.warnings.addAll(stored.warnings)
         return NodeResult.of(
             nodeId = node.id,
@@ -857,10 +907,13 @@ class NodeRunner(
             // unchanged; binding is the one thing the parameter case adds (042 C1/C4).
             if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
             ctx.handle.withStatement(node.id, statement) {
+                val op = ctx.operations.observerFor(node.id)
+                op.phase(OperationPhase.EXECUTING)
                 val affected =
                     phase(ctx, NodePhase.EXECUTE, node.id) {
                         ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
                     }
+                recordStatement(op, node, affected)
                 NodeResult.of(node.id, affected, startedAt)
             }
         }
@@ -873,120 +926,35 @@ class NodeRunner(
         startedAt: Instant,
         timeout: Int,
     ): NodeResult =
-        statementFor(conn, bound).use { statement ->
+        BoundStatements.statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                phase(ctx, NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { executeDdl(statement, bound) } }
+                val op = ctx.operations.observerFor(node.id)
+                op.phase(OperationPhase.EXECUTING)
+                phase(ctx, NodePhase.EXECUTE, node.id) {
+                    ctx.handle.whileExecuting(node.id, statement) { BoundStatements.executeDdl(statement, bound) }
+                }
+                recordStatement(op, node, affected = 0L)
                 NodeResult.of(node.id, 0L, startedAt)
             }
         }
 
-    /** DDL reports success, not rows (§6.3.3). */
-    private fun executeDdl(
-        statement: Statement,
-        bound: SqlBindTranslator.BoundSql,
-    ): Long {
-        executeOf(statement, bound)
-        return 0L
-    }
-
-    // ---------------------------------------------------- bound execution helpers
-
     /**
-     * The statement [bound] executes on [connection] (042 C1): prepared and bound when the
-     * rendered SQL uses `:name` parameters, otherwise created exactly as this class created
-     * statements before the round. Parameterless templates therefore keep their existing
-     * statement semantics byte-for-byte — including multi-statement author SQL, which a
-     * prepared statement would refuse.
+     * 149: a DML statement's update count is what its destination accepted (autocommitted by
+     * the driver on return); DDL invents no row write — its destination is `none`.
      */
-    private fun statementFor(
-        connection: Connection,
-        bound: SqlBindTranslator.BoundSql,
-        resultSetType: Int = ResultSet.TYPE_FORWARD_ONLY,
-        resultSetConcurrency: Int = ResultSet.CONCUR_READ_ONLY,
-    ): Statement =
-        if (bound.hasBindParameters) {
-            connection
-                .prepareStatement(bound.sql, resultSetType, resultSetConcurrency)
-                .also { SqlBindTranslator.bind(it, bound.bindValues) }
-        } else {
-            connection.createStatement(resultSetType, resultSetConcurrency)
-        }
-
-    /** `executeQuery` in the shape [bound] needs — a prepared statement already carries its SQL. */
-    private fun query(
-        statement: Statement,
-        bound: SqlBindTranslator.BoundSql,
-    ): ResultSet =
-        if (bound.hasBindParameters) {
-            (statement as PreparedStatement).executeQuery()
-        } else {
-            statement.executeQuery(bound.sql)
-        }
-
-    /** `executeUpdate` in the shape [bound] needs. */
-    private fun update(
-        statement: Statement,
-        bound: SqlBindTranslator.BoundSql,
-    ): Int =
-        if (bound.hasBindParameters) {
-            (statement as PreparedStatement).executeUpdate()
-        } else {
-            statement.executeUpdate(bound.sql)
-        }
-
-    /** `execute` in the shape [bound] needs. */
-    private fun executeOf(
-        statement: Statement,
-        bound: SqlBindTranslator.BoundSql,
-    ): Boolean =
-        if (bound.hasBindParameters) {
-            (statement as PreparedStatement).execute()
-        } else {
-            statement.execute(bound.sql)
-        }
+    private fun recordStatement(
+        op: OperationObserver,
+        node: ExecutableNode,
+        affected: Long,
+    ) {
+        if (node.type == NodeType.DML) op.written(affected)
+        op.committed()
+    }
 
     /** DQL always has a concrete output by deserialization time (§4.1). */
     private fun requireOutput(node: ExecutableNode): NodeOutput =
         requireNotNull(node.output) { "DQL node '${node.id}' reached the executor with no output block" }
-
-    private fun datasourceNotFound(name: String) =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND,
-            message = "Datasource '$name' is not registered in this environment.",
-            details = mapOf("datasource" to name),
-        )
-
-    /**
-     * §13.4 sibling of `datasource_not_found`: the datasource resolved at write-time, but its
-     * live entry is readonly now — the stored version predates the flag, or the flag flipped
-     * between save and run (D10). Same HTTP class and shape as its sibling.
-     */
-    private fun datasourceReadonly(
-        name: String,
-        type: NodeType,
-    ) = DatapipelinesException(
-        code = PipelineErrorCodes.Node.DATASOURCE_READONLY,
-        message =
-            "Datasource '$name' is readonly — its ${type.wire} use is forbidden " +
-                "(the flag was set after this pipeline version was saved, or the version predates it).",
-        details = mapOf("datasource" to name, "node_type" to type.wire),
-    )
-
-    /**
-     * The write-back shape of [datasourceReadonly] (§13.4, 020 F9): raised at the CONNECT-phase
-     * pre-check of a DQL node's `output.target: "datasource"`, with the same message the
-     * write-back shell's own authoritative check raises — the author gets the identical error
-     * either side of the source query.
-     */
-    private fun writebackTargetReadonly(target: NodeOutput.Datasource) =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Node.DATASOURCE_READONLY,
-            message =
-                "Write-back target datasource '${target.datasource}' is readonly — writing '${target.table}' to it is forbidden " +
-                    "(the flag was set after this pipeline version was saved, or the version predates it).",
-            details = mapOf("datasource" to target.datasource, "table" to target.table),
-        )
 
     /**
      * Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code —
