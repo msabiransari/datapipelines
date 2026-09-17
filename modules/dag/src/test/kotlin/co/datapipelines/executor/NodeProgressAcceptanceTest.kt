@@ -54,7 +54,10 @@ class NodeProgressAcceptanceTest {
     // ------------------------------------------------------------------ gates and fixtures
 
     /** A one-shot gate a driver call parks on; `cancel()` on the parked statement releases it with 57014. */
-    private class Gate {
+    private class Gate(
+        /** A driver that drops `cancel()` on the floor: the park ends only when the test opens it. */
+        private val ignoresCancel: Boolean = false,
+    ) {
         val reached = CountDownLatch(1)
         private val release = CountDownLatch(1)
         val cancelled = AtomicBoolean()
@@ -68,6 +71,7 @@ class NodeProgressAcceptanceTest {
         }
 
         fun cancel() {
+            if (ignoresCancel) return
             cancelled.set(true)
             release.countDown()
         }
@@ -80,6 +84,14 @@ class NodeProgressAcceptanceTest {
         private val fetchGateAfterRows: Pair<Int, Gate>? = null,
         private val batchGate: Gate? = null,
         private val batchGateFor: String? = null,
+        /** Parks `commit()` on the named target's connections (the commit boundary, R149-1). */
+        private val commitGate: Gate? = null,
+        /** Parks `close()` on the named target's connections AFTER the real close ran. */
+        private val closeGate: Gate? = null,
+        /** The named target's `close()` throws after the real close ran — cleanup failing after commit. */
+        private val closeThrowsFor: String? = null,
+        /** Counts down when a gated target connection has been closed (the body unwound). */
+        private val closed: CountDownLatch? = null,
     ) : DatasourceRegistry by inner {
         override fun poolFor(datasource: Datasource): ConnectionPool {
             val pool = inner.poolFor(datasource)
@@ -92,6 +104,24 @@ class NodeProgressAcceptanceTest {
             private val c: Connection,
             private val name: String,
         ) : Connection by c {
+            private val gated = batchGateFor == null || batchGateFor == name
+
+            override fun commit() {
+                if (gated) commitGate?.park()
+                c.commit()
+            }
+
+            override fun close() {
+                c.close()
+                if (!gated) return
+                try {
+                    closeGate?.park()
+                    if (closeThrowsFor == name) throw SQLException("connection cleanup failed after commit", "08006")
+                } finally {
+                    closed?.countDown()
+                }
+            }
+
             override fun createStatement(
                 type: Int,
                 concurrency: Int,
@@ -182,6 +212,17 @@ class NodeProgressAcceptanceTest {
             ): Staging = GatedWriteStaging(real.create(executionId, engine), inside)
         }
     }
+
+    /** The target's row count read on a fresh JDBC connection — evidence independent of the events. */
+    private fun targetRows(target: Datasource): Int =
+        java.sql.DriverManager.getConnection(target.jdbcUrl, target.username, "").use { c ->
+            c.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM tgt").use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
 
     private fun source(rows: Int = ROWS) =
         h2Datasource("src", listOf("CREATE TABLE t (id INT)", """INSERT INTO t SELECT "X" FROM SYSTEM_RANGE(1, $rows)"""))
@@ -434,6 +475,126 @@ class NodeProgressAcceptanceTest {
             }
         }
 
+    // ------------------------------------------------------ commit evidence vs node status (R149-1)
+
+    @Test
+    fun `a commit followed by a failing connection close is kept — the node fails, the sample says committed, the rows are durable`() =
+        runBlocking<Unit> {
+            val target = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+            val registry =
+                GatedRegistry(
+                    FakeDatasourceRegistry(mapOf("src" to source(), "wb" to target)),
+                    batchGateFor = "wb",
+                    closeThrowsFor = "wb",
+                )
+            val node = Fixtures.node("wb", source = "src", output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND))
+            harness(registry).use { h ->
+                shouldThrow<PipelineExecutionFailed> { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(node)))) }
+                val terminal = h.emitter.samples("wb").last()
+                terminal.state shouldBe OperationState.FAILED
+                terminal.committed shouldBe true
+                terminal.rolledBack.shouldBeNull()
+                terminal.rowsWritten shouldBe ROWS.toLong()
+                // Independently of the events: the target holds the rows the failed node wrote.
+                targetRows(target) shouldBe ROWS
+            }
+        }
+
+    @Test
+    fun `a cancellation AT the commit rolls back and reads false, one AFTER it keeps committed`() =
+        runBlocking<Unit> {
+            // (a) at the commit: the parked commit() is cancelled → 57014 → rollback observed.
+            val atCommit = Gate()
+            val targetA = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+            val registryA =
+                GatedRegistry(FakeDatasourceRegistry(mapOf("src" to source(), "wb" to targetA)), batchGateFor = "wb", commitGate = atCommit)
+            val node = Fixtures.node("wb", source = "src", output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND))
+            harness(registryA).use { h ->
+                val run = async(Dispatchers.IO) { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(node)))) }
+                atCommit.reached.await(GATE_S, TimeUnit.SECONDS).shouldBeTrue()
+                h.emitter.awaitState("wb", OperationState.FINALIZING)
+                val executionId =
+                    h.emitter.events
+                        .first()
+                        .executionId
+                h.cancellations.cancel(executionId, AbortReason.CANCELLED).shouldBeTrue()
+                atCommit.cancel()
+                shouldThrow<ExecutionAbortedException> { run.await() }
+                val terminal = h.emitter.samples("wb").last()
+                terminal.state shouldBe OperationState.ABORTED
+                terminal.committed shouldBe false
+                terminal.rolledBack shouldBe true
+                targetRows(targetA) shouldBe 0
+            }
+            // (b) after the commit: commit() returned, close() is parked and then cancelled —
+            //     the node is aborted, the write is durable, and the sample says so.
+            val afterCommit = Gate()
+            val targetB = h2Datasource("wb2", listOf("CREATE TABLE tgt (id INT)"))
+            val registryB =
+                GatedRegistry(
+                    FakeDatasourceRegistry(mapOf("src" to source(), "wb2" to targetB)),
+                    batchGateFor = "wb2",
+                    closeGate = afterCommit,
+                )
+            val nodeB = Fixtures.node("wb", source = "src", output = NodeOutput.Datasource("wb2", "tgt", WriteMode.APPEND))
+            harness(registryB).use { h ->
+                val run = async(Dispatchers.IO) { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(nodeB)))) }
+                afterCommit.reached.await(GATE_S, TimeUnit.SECONDS).shouldBeTrue()
+                val executionId =
+                    h.emitter.events
+                        .first()
+                        .executionId
+                h.cancellations.cancel(executionId, AbortReason.CANCELLED).shouldBeTrue()
+                afterCommit.cancel()
+                shouldThrow<ExecutionAbortedException> { run.await() }
+                val terminal = h.emitter.samples("wb").last()
+                terminal.state shouldBe OperationState.ABORTED
+                terminal.committed shouldBe true
+                terminal.rolledBack.shouldBeNull()
+                targetRows(targetB) shouldBe ROWS
+            }
+        }
+
+    @Test
+    fun `a commit the driver never confirms before the deadline is UNKNOWN and may still land later, sealed out of the stream`() =
+        runBlocking<Unit> {
+            val commit = Gate(ignoresCancel = true)
+            val unwound = CountDownLatch(1)
+            val target = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+            val registry =
+                GatedRegistry(
+                    FakeDatasourceRegistry(mapOf("src" to source(), "wb" to target)),
+                    batchGateFor = "wb",
+                    commitGate = commit,
+                    closed = unwound,
+                )
+            val node =
+                Fixtures.node(
+                    "wb",
+                    source = "src",
+                    output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                    timeoutSeconds = 1,
+                )
+            val config = ExecutorConfig(executionTimeoutSeconds = 60, progressSampleIntervalSeconds = 1, cancelGraceSeconds = 1)
+            harness(registry, config = config).use { h ->
+                val failed = shouldThrow<PipelineExecutionFailed> { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(node)))) }
+                failed.errorCode shouldBe PipelineErrorCodes.Node.TIMEOUT
+                val terminal = h.emitter.samples("wb").last()
+                terminal.state shouldBe OperationState.FAILED
+                terminal.committed.shouldBeNull()
+                terminal.rolledBack.shouldBeNull()
+                val countAtTerminal = h.emitter.events.size
+                // The documented limit: the abandoned driver body finishes its commit later. The
+                // rows ARE durable; the sealed tracker publishes nothing about it.
+                commit.open()
+                unwound.await(GATE_S, TimeUnit.SECONDS).shouldBeTrue()
+                Thread.sleep(SETTLE_MS)
+                targetRows(target) shouldBe ROWS
+                h.emitter.events.size shouldBe countAtTerminal
+                h.emitter.types().last() shouldBe SseEventType.PIPELINE_FAILED
+            }
+        }
+
     @Test
     fun `an abandoned driver body publishes nothing after the node deadline`() =
         runBlocking<Unit> {
@@ -468,7 +629,10 @@ class NodeProgressAcceptanceTest {
                 failed.errorCode shouldBe PipelineErrorCodes.Node.TIMEOUT
                 val terminal = h.emitter.samples("a").last()
                 terminal.state shouldBe OperationState.FAILED
-                terminal.committed shouldBe false
+                // R149-1: nobody witnessed a commit OR a rollback — the abandoned body is still
+                // parked — so the outcome is UNKNOWN, never "false": the body may yet finish.
+                terminal.committed.shouldBeNull()
+                terminal.rolledBack.shouldBeNull()
                 val countAtTerminal = h.emitter.events.size
                 h.emitter.events
                     .last()

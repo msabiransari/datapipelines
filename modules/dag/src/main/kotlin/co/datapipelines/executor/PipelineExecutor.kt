@@ -878,8 +878,9 @@ class PipelineExecutor(
      * by the node's own coroutine BEFORE its `node_completed`/`node_failed` — the tracker is
      * sealed here, so an abandoned driver body's later observations publish nothing.
      *
-     * `committed` is the writer's own report ([NodeOperationTracker.wasCommitted]) on success,
-     * false on every other outcome, and absent for a destination with nothing to commit.
+     * `committed` is commit EVIDENCE decided by the tracker from the writer's own reports — a
+     * confirmed commit survives a node that fails afterwards, a confirmed rollback reads false,
+     * and an unobserved outcome stays absent ([NodeOperationTracker.finish], review R149-1).
      */
     private suspend fun flushOperation(
         node: ExecutableNode,
@@ -894,13 +895,7 @@ class PipelineExecutor(
             val tracker = tracked.tracker
             // First-entry samples the pump has not collected yet go out first, in sequence.
             tracker.drainPending().forEach { emit(NodeProgress(run.executionId, it)) }
-            val committed =
-                when {
-                    tracker.destination.kind == OperationDestination.Kind.NONE -> null
-                    outcome == OperationOutcome.COMPLETED -> tracker.wasCommitted
-                    else -> false
-                }
-            emit(NodeProgress(run.executionId, tracker.finish(outcome, committed)))
+            emit(NodeProgress(run.executionId, tracker.finish(outcome)))
         }
     }
 

@@ -100,7 +100,7 @@ test("execution_aborted aborts every open operation and execution_started resets
   handler.dispatch("node_progress", JSON.stringify(SAMPLE));
   handler.dispatch("execution_aborted", JSON.stringify({ execution_id: "e1", reason: "cancelled" }));
   assert.equal(editor.nodeOps.get("stage_trips").state, "aborted");
-  assert.equal(editor.nodeOps.get("stage_trips").committed, false);
+  assert.equal(editor.nodeOps.get("stage_trips").committed, null);
   handler.dispatch("execution_started", JSON.stringify({ execution_id: "e2", parameters: {} }));
   assert.equal(editor.nodeOps.get("stage_trips"), null);
 });

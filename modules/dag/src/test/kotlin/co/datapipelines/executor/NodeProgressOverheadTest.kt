@@ -119,7 +119,7 @@ class NodeProgressOverheadTest {
         var n = 0
         while (tracker.sampleIfDue() != null) n++
         n += 1 // terminal
-        tracker.finish(OperationOutcome.COMPLETED, committed = true)
+        tracker.finish(OperationOutcome.COMPLETED)
         return n + (elapsedMs / INTERVAL_MS).toInt()
     }
 

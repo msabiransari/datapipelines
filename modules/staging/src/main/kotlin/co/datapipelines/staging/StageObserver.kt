@@ -9,7 +9,8 @@ package co.datapipelines.staging
  *  2. [fetchFinished] — the batch is in memory; how many rows it holds;
  *  3. [connectionRequested] — a staging connection is being asked for (admission may suspend);
  *  4. [connectionAcquired] — the lease is held; the `INSERT` follows on it;
- *  5. [batchWritten] — the batch is accepted by tempdb and the lease was returned.
+ *  5. [batchWritten] — the batch is accepted by tempdb and the lease was returned;
+ *  6. [partialTableDropped] — only on FAILURE: the partial table was dropped (the confirmed undo).
  *
  * Every call is made OUTSIDE the pool's metadata lock and, except [connectionAcquired], outside
  * the lease. Implementations must be non-suspending and must return promptly: they run on the
@@ -30,6 +31,13 @@ interface StageObserver {
         rows: Int,
         rowsSoFar: Long,
     ) = Unit
+
+    /**
+     * The stage FAILED and its partial table was dropped on a fresh lease (the confirmed undo).
+     * Not reported when the drop itself failed or timed out — that write's fate is then unknown,
+     * and the observer must not be told otherwise.
+     */
+    fun partialTableDropped() = Unit
 
     companion object {
         val NONE: StageObserver = object : StageObserver {}

@@ -3,6 +3,7 @@ package co.datapipelines.staging
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -45,6 +46,10 @@ class H2StagingObserverTest {
         ) {
             calls += "written:$rows"
             this.rowsSoFar += rowsSoFar
+        }
+
+        override fun partialTableDropped() {
+            calls += "dropped"
         }
     }
 
@@ -120,6 +125,36 @@ class H2StagingObserverTest {
                 "acquired",
                 "written:1",
             )
+    }
+
+    @Test
+    fun `a failed stage reports its partial table dropped, after the batches it did write`() {
+        val observer = Recording()
+        stagingOverConnections(UUID.randomUUID(), H2StagingProperties(insertBatchSize = 2)).use { staging ->
+            val columns = listOf(ColumnSchema("n", LogicalType.INTEGER))
+            // Two full batches land, then the source dies mid-fetch of the third.
+            val rows =
+                sequence<List<Any?>> {
+                    (1..4).forEach { yield(listOf(it)) }
+                    error("source died")
+                }
+            shouldThrow<IllegalStateException> { runBlocking { staging.stageRows("stg", columns, rows, observer) } }
+            // The partial table is gone: the name can be staged again without a collision.
+            runBlocking { staging.stageRows("stg", columns, sequenceOf(listOf<Any?>(9)), Recording()) }.rowsStaged shouldBe 1
+        }
+        observer.calls.count { it == "dropped" } shouldBe 1
+        observer.calls.last() shouldBe "dropped"
+        observer.calls.filter { it.startsWith("written") } shouldContainExactly listOf("written:2", "written:2")
+    }
+
+    @Test
+    fun `a successful stage never reports a drop`() {
+        val observer = Recording()
+        stagingOverConnections(UUID.randomUUID(), H2StagingProperties(insertBatchSize = 2)).use { staging ->
+            val columns = listOf(ColumnSchema("n", LogicalType.INTEGER))
+            runBlocking { staging.stageRows("stg", columns, (1..3).map { listOf<Any?>(it) }.asSequence(), observer) }
+        }
+        observer.calls.none { it == "dropped" }.shouldBeTrue()
     }
 
     @Test

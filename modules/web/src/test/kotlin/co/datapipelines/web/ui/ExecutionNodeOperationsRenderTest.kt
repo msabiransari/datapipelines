@@ -49,6 +49,11 @@ class ExecutionNodeOperationsRenderTest {
                 ),
                 NodeOperationRow("wb", "writeback", "pg.out", "failed", true, 3000, 3000, 900, false, true, "write 800 ms", null),
                 NodeOperationRow("late", "materialize", "caller", "writing", false, 100, null, 50, null, false, null, null),
+                // A commit the driver never confirmed before the node's deadline (R149-1).
+                NodeOperationRow("unknown", "writeback", "pg.out", "failed", true, 3000, 3000, 1200, null, false, "write 1.1 s", null),
+                // A node that failed AFTER its commit: the rows are durable and the row says so.
+                NodeOperationRow("kept", "writeback", "pg.out", "failed", true, 3000, 3000, 1300, true, false, "write 1.2 s", null),
+                NodeOperationRow("ddl", "statement", "no output", "completed", true, null, null, 5, null, false, "query 5 ms", null),
             )
         val html = engine.process("partials/execution-node-operations", webContext().apply { setVariable("nodeOperations", rows) })
 
@@ -61,8 +66,13 @@ class ExecutionNodeOperationsRenderTest {
         html shouldContain "ds-badge-danger\">rolled back</span>"
         html shouldContain "data-node-id=\"late\" data-state=\"writing\""
         html shouldContain "(not observed to end)"
-        // The unfinished row carries NO commit badge: nothing was observed.
-        (html.split("ds-badge-success").size - 1) shouldBe 1
+        // The unfinished row carries NO commit badge: nothing was observed. The failed node whose
+        // commit WAS observed carries the success badge — two in total.
+        (html.split("ds-badge-success").size - 1) shouldBe 2
+        // The terminal row without commit evidence says "not observed" — never "not committed".
+        html shouldContain "data-node-id=\"unknown\" data-state=\"failed\""
+        (html.split("not observed</span>").size - 1) shouldBe 1
+        (html.split("ds-badge-danger").size - 1) shouldBe 1
         html shouldNotContain "%"
     }
 

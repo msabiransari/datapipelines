@@ -103,6 +103,18 @@ class NodeProgressProjectionTest {
     }
 
     @Test
+    fun `a failed terminal sample keeps a confirmed commit, and an unobserved commit is absent, not false`() {
+        val kept = projection.payload(NodeProgress(executionId, snapshot(OperationState.FAILED, committed = true)))
+        kept["state"] shouldBe "failed"
+        kept["committed"] shouldBe true
+        kept.containsKey("rolled_back") shouldBe false
+        val unknown = projection.payload(NodeProgress(executionId, snapshot(OperationState.ABORTED)))
+        unknown["state"] shouldBe "aborted"
+        unknown.containsKey("committed") shouldBe false
+        unknown.containsKey("rolled_back") shouldBe false
+    }
+
+    @Test
     fun `datasource destinations name the datasource and optional table only`() {
         val event =
             NodeProgress(

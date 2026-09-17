@@ -140,6 +140,8 @@ class StagingObserverBridge(
         observer.written(rows.toLong())
         this.rowsSoFar.staged(nodeId, rowsSoFar)
     }
+
+    override fun partialTableDropped() = observer.rolledBack()
 }
 
 /**

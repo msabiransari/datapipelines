@@ -243,6 +243,55 @@ class RedisResultStoreIntegrationTest {
             redis.hasKey("dp:result:$executionId:meta") shouldBe false
         }
 
+    @Test
+    fun `a lazy source's read inside hasNext is timed as fetching, not as the page write it follows (R149-3)`() =
+        runBlocking<Unit> {
+            // A tracker on a fake clock: the producer advances it by one second INSIDE `hasNext()`
+            // of the row that follows a full page — exactly where the composition stream reads its
+            // child — so the phase open at that instant is the one that pays for the second.
+            var nanos = 0L
+            val tracker =
+                NodeOperationTracker(
+                    nodeId = "caller",
+                    attempt = 1,
+                    kind = OperationKind.MATERIALIZE,
+                    destination = OperationDestination.CALLER,
+                    sampleIntervalMs = 60_000,
+                    nanoTime = { nanos },
+                )
+            val phaseAtSlowRead = mutableListOf<OperationPhase?>()
+            val observing =
+                object : OperationObserver by tracker {
+                    @Volatile
+                    var last: OperationPhase? = null
+
+                    override fun phase(phase: OperationPhase) {
+                        last = phase
+                        tracker.enter(phase)
+                    }
+                }
+            val schema = listOf(ColumnSchema("n", LogicalType.INTEGER))
+            val rows =
+                sequence<List<Any?>> {
+                    (1..7).forEach { n ->
+                        if (n == 4) {
+                            // The 4th pull comes right after page 1 (3 rows) was pushed to Redis.
+                            phaseAtSlowRead += observing.last
+                            nanos += SLOW_READ_NANOS
+                        }
+                        yield(listOf(n))
+                    }
+                }
+            val store = store(ResultConfig(pageSizeRows = 3))
+
+            store.materializeRows(UUID.randomUUID(), schema, rows, TTL_SECONDS, observing).totalRows shouldBe 7
+
+            phaseAtSlowRead shouldBe listOf(OperationPhase.FETCHING)
+            val timings = tracker.finish(OperationOutcome.COMPLETED).timingsMs
+            (timings.getValue(OperationPhase.FETCHING) >= SLOW_READ_NANOS / NANOS_PER_MILLI).shouldBeTrue()
+            ((timings[OperationPhase.WRITING] ?: 0L) < SLOW_READ_NANOS / NANOS_PER_MILLI).shouldBeTrue()
+        }
+
     // ------------------------------------------------------------------ helpers
 
     private fun store(config: ResultConfig = ResultConfig()) = RedisResultStore(redis, config)
@@ -267,6 +316,8 @@ class RedisResultStoreIntegrationTest {
             )
 
     private companion object {
+        const val SLOW_READ_NANOS = 1_000_000_000L
+        const val NANOS_PER_MILLI = 1_000_000L
         const val TTL_SECONDS = 300L
     }
 }

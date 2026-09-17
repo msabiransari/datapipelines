@@ -65,12 +65,16 @@ class RedisResultStore(
         observer: OperationObserver,
     ): StoredResult {
         // The decoded twin has no cursor for the caller to wrap: the pull from the sequence IS
-        // the fetch here, so it is reported by this store.
+        // the fetch here, so it is reported by this store. FETCHING is entered BEFORE `hasNext()`
+        // (R149-3): a lazy producer — the composition row stream above all — does its source read
+        // inside `hasNext()`, and reporting after it would time that read as the page write it
+        // interrupted.
         val pulled = rows.iterator()
         val counted =
             iterator {
-                while (pulled.hasNext()) {
+                while (true) {
                     observer.phase(OperationPhase.FETCHING)
+                    if (!pulled.hasNext()) break
                     val row = pulled.next()
                     observer.fetched(1)
                     yield(row)

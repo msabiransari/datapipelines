@@ -33,7 +33,10 @@
         <td>
           <span th:if="${op.committed == true}" class="ds-badge ds-badge-success">committed</span>
           <span th:if="${op.committed == false}" class="ds-badge ds-badge-danger" th:text="${op.rolledBack} ? 'rolled back' : 'not committed'">not committed</span>
-          <span th:if="${op.committed == null}" class="u-muted">—</span>
+          <!-- A terminal operation with NO commit evidence: the node ended around it without a
+               witnessed commit or rollback (R149-1) — said as such, never as "not committed". -->
+          <span th:if="${op.committed == null and op.terminal and op.destination != 'no output'}" class="u-muted">not observed</span>
+          <span th:if="${op.committed == null and (!op.terminal or op.destination == 'no output')}" class="u-muted">—</span>
         </td>
         <td class="u-text-xs u-secondary" th:text="${op.timings != null} ? ${op.timings} : '—'">timings</td>
       </tr>

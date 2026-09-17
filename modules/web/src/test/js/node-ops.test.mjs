@@ -94,18 +94,29 @@ test("a node terminal event without a terminal sample closes the operation with 
   assert.equal(failed.get("stage_trips").committed, null);
 });
 
-test("an execution terminal event aborts every open operation without claiming an observation", () => {
-  const ops = load().createNodeOps();
-  ops.reduce("node_progress", sample({ node_id: "a", sequence: 1, state: "writing", rows_written: 100 }));
-  ops.reduce("node_progress", sample({ node_id: "b", sequence: 3, state: "completed", committed: true, rows_written: 5 }));
-  ops.reduce("execution_aborted", { execution_id: "e", reason: "cancelled" });
-  assert.equal(ops.get("a").state, "aborted");
-  assert.equal(ops.get("a").committed, false);
-  assert.equal(ops.get("a").observed, false);
-  assert.equal(ops.get("a").rowsWritten, 100);
-  assert.equal(ops.get("b").state, "completed");
-  assert.equal(ops.get("b").committed, true);
-});
+for (const terminal of ["execution_aborted", "pipeline_failed", "pipeline_completed"]) {
+  test(`${terminal} aborts every open operation with commit UNKNOWN and leaves an observed terminal untouched (R149-2)`, () => {
+    const ops = load().createNodeOps();
+    ops.reduce("node_progress", sample({ node_id: "a", sequence: 1, state: "writing", rows_written: 100 }));
+    ops.reduce("node_progress", sample({ node_id: "b", sequence: 3, state: "completed", committed: true, rows_written: 5 }));
+    ops.reduce("node_progress", sample({ node_id: "c", sequence: 2, state: "failed", committed: false, rolled_back: true }));
+    ops.reduce(terminal, { execution_id: "e", reason: "cancelled" });
+    const a = ops.get("a");
+    assert.equal(a.state, "aborted");
+    assert.equal(a.terminal, true);
+    assert.equal(a.observed, false);
+    // 100 rows were ACCEPTED; whether they are durable was never observed — not "false".
+    assert.equal(a.committed, null);
+    assert.equal(a.rowsWritten, 100);
+    assert.equal(load().describe(a).commitText, "Commit not observed");
+    // Observed terminals are facts and stay exactly as observed.
+    assert.equal(ops.get("b").state, "completed");
+    assert.equal(ops.get("b").committed, true);
+    assert.equal(ops.get("c").state, "failed");
+    assert.equal(ops.get("c").committed, false);
+    assert.equal(ops.get("c").rolledBack, true);
+  });
+}
 
 test("execution_started resets the previous run's operations", () => {
   const ops = load().createNodeOps();

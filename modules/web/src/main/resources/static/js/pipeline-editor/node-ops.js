@@ -108,13 +108,17 @@
           case "pipeline_completed":
           case "pipeline_failed":
           case "execution_aborted":
+            // The execution ended around an operation that never got its terminal sample: it
+            // is aborted from the CLIENT's point of view, and nothing was observed about its
+            // commit — so committed stays UNKNOWN (null → "Commit not observed"), exactly as
+            // the node-terminal fallback above does. "false" would be a claim (R149-2).
             Object.keys(ops).forEach(function (id) {
               var op = ops[id];
               if (op.terminal) return;
               op.state = "aborted";
               op.terminal = true;
               op.observed = false;
-              op.committed = false;
+              op.committed = null;
             });
             break;
           default:

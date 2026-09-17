@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.12 (revised — see Change Log)
+**Status:** v1.13 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-09-06
@@ -1059,7 +1059,7 @@ of two.
 | Calculator | `node.kind`, `node.inputs`, `node.context_key` | Kind / Inputs (expression → resolved) / Writes / Value |
 | Child | `node.pipeline`, `node.parameters` | Child `@ v`, the mapping passed down, the child execution id |
 | Last run | `nodeStates[node.id]` | Present only after a run touched the node |
-| Operation · Progress · Rows · Time in · Commit · Child execution | `nodeOps.get(node.id)` via `PENodeOps.describe` (§10.7) | 149: `stage → tempdb.trips`; `Writing · 5.3 s` / `Completed · 6.1 s`; `12,000 fetched · 11,000 written`; `connect 12 ms · query 410 ms · fetch 3.4 s · wait 22 ms · write 1.5 s`; `Committed · 12,453 rows` / `Not committed · rolled back` / `Commit not observed` (a node event closed the operation before its terminal sample); rows absent when nothing was measured |
+| Operation · Progress · Rows · Time in · Commit · Child execution | `nodeOps.get(node.id)` via `PENodeOps.describe` (§10.7) | 149: `stage → tempdb.trips`; `Writing · 5.3 s` / `Completed · 6.1 s`; `12,000 fetched · 11,000 written`; `connect 12 ms · query 410 ms · fetch 3.4 s · wait 22 ms · write 1.5 s`; `Committed · 12,453 rows` (also on a failed node whose commit was confirmed) / `Not committed · rolled back` (only a confirmed undo) / `Commit not observed` (a node or execution event closed the operation before its terminal sample, or the terminal sample carried no commit evidence); rows absent when nothing was measured |
 
 Long values wrap via `overflow-wrap: anywhere` rather than widening the pane; every
 value also rides on its element's `title` (the §9.4 rule — the truncated text is never
@@ -1333,8 +1333,13 @@ and must not estimate a phase from a node's status on its own.
 The honesty rules the wire imposes, kept here: samples apply in `sequence` order and a late,
 lower sequence is ignored; the terminal sample (`completed`/`failed`/`aborted`) seals the
 operation; a `node_completed`/`node_failed` arriving WITHOUT a terminal sample closes it with
-`committed: null` — "not observed", never "committed"; an execution terminal event aborts every
-open operation with `observed: false`; there is no percentage. `describe(op)` renders the honest
+`committed: null` — "not observed", never "committed"; an execution terminal event
+(`pipeline_completed`/`pipeline_failed`/`execution_aborted`) aborts every open operation with
+`observed: false` and the SAME `committed: null` — the client saw no commit evidence and claims
+none (never "Not committed"); an operation whose terminal sample was observed is untouched by
+it; a terminal sample without a `committed` key reads as "Commit not observed" too, and one
+with `committed: true` on a `failed` state reads "Committed" — the node failed after its
+write became durable; there is no percentage. `describe(op)` renders the honest
 labels — `stateLabel`, `destinationText`, `countsText`, `phaseText` (the per-state share),
 `commitText` (only what the terminal sample said), `elapsedText`, the card's `cardLine` and
 `cardCounts`, and `a11yText` ("Writing to tempdb.trips, 12,000 fetched · 11,000 written, elapsed
@@ -1870,6 +1875,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.13 | 149 correction / #125 review R149-2 | §10.7: the execution-terminal fallback closes open operations with `committed: null` ("Commit not observed"), never `false`; observed terminals untouched; §8.1 Commit row wording. |
 | 2026-09-16 | v1.12 | 149 / #125 measured node operations | **New §10.7 the node-operation reducer** (`node-ops.js`, pure): one view model per node from `node_progress` and the lifecycle events — sequence-ordered, sealed by the terminal sample, closed by node/execution terminal events with `committed` UNKNOWN rather than invented; the interface 151's output connector consumes. §5.3: while a node runs the footer is the measured operation (state word left, live count right, `pe-card-op-<state>` dot colours through tokens; one line, T251 kept). §6.2: the `node_progress` row. §8.1: Operation / Progress / Rows / Time in / Commit / Child execution rows. §10.6: the Events tab sentence. §12.1: `node-ops.js`. §14: the node row's accessible description carries the operation. No edge, arrow, row-label or Start/End change (#127, #126). |
 | 2026-09-13 | v1.11 | T251 calculator card footer | §5.3 footer + §6.2 `node_completed`: **a calculator's footer and edge label COUNT what it wrote** (`2 keys · 2 ms`, edge `2 keys`); the values stay in the Details pane and the Events tab. The owner's screenshot: the multi-output window calculator's footer inlined `= last_quarter_end="2024-12-31", last_quarter_start="2024-10-01" · 2 ms`, wrapped to three lines in a footer laid out for one, floated the Done dot mid-card, and its edge read `0 rows`. `graph.js`: `keysWritten`/`countLabel`, `edgeLabelFor` (a calculator's edge never says rows); `.pe-card-rt` is `nowrap` + ellipsis as the belt. Pinned in `graph-card.test.mjs` (footer count forms, edge label per kind) and in the browser on a real calculator run. |
 | 2026-09-06 | v1.10 | wide-stage card scale and the stray node list (082) | **§5.3/§4.3: the card steps up on a wide stage.** "At 2560 the cards read small" cannot be a zoom change — the owner's ruling caps fit at 1.0 and forbids zooming IN — so `.pe-stage` became a `container-type: inline-size` container and a stage ≥ 1200px wide gets `--pe-card-w: 272px`, `--pe-card-h: 170px` and the card type scale (now tokenised as `--pe-card-fs-*`) a pixel larger. The declarations land on `#cy-canvas` because a container cannot style itself and because `readDesignTokens(containerId)` now reads the geometry from that element — reading `documentElement` would keep the Cytoscape node box at 236px while the HTML card grew. A `ResizeObserver` on the stage re-runs layout when the threshold is crossed live. **§14.1: the node picker is a KEYBOARD surface again** — every pointer route selects with `moveFocus = false`, and the picker now shares one bottom-anchored column with the legend (`.pe-stage-bl`) instead of being anchored to the same corner, which is what put it on top of the legend in 080's dark Details shot. New guards: `card-scale.test.mjs`, `node-picker-focus.test.mjs`, an `EditorLayoutRenderTest` nesting assertion and a `PipelineEditorDetailsBrowserTest` geometry assertion. No wire contract moved. **Addendum (owner's first walk of the merged UI), two P1s:** *the dark theme broke the canvas* — TWO causes, both measured live rather than assumed. (1) `readDesignTokens` handed Cytoscape the raw custom-property text, and four canvas tokens are `color-mix()` bridges it cannot parse; every colour is now resolved through a probe element and normalised to `rgb(…)` — Chrome answers `color(srgb …)`, not `rgb()`, which the first cut of the fix rejected. (2) `updateTheme()` re-applied with `cy.style(array)`, which RESETS a live graph to Cytoscape's defaults (#999 lines, 30px edges, #999 fills — the owner's grey bands); the re-apply is `cy.style().fromJson(sheet).update()`, and because `fromJson` drops function values the per-node card height became an element bypass. 080's `wheelSensitivity` (warned on every init) is gone. *The card footer painted outside the card* — `--pe-card-h` was a fixed height that three fact lines overflow; it is a `min-height` now and `syncCardHeights()` hands each measured height to Cytoscape so the node box, the ports and the minimap follow the real card. Guards: `graph-colour-tokens.test.mjs`, `card-height.test.mjs`, and a live theme-switch browser test demanding zero Cytoscape complaints. |

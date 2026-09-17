@@ -153,12 +153,28 @@ class NodeOperationTracker(
      * The terminal sample — exactly one per tracker. The first call decides; every later call
      * returns that same snapshot unchanged.
      *
-     * @param committed null when the destination has nothing to commit (DDL, a child with no
-     *   output); otherwise whether the destination's write is durable now.
+     * `committed` is COMMIT EVIDENCE, decided here from the writer's own reports and never from
+     * [outcome] (review R149-1): a node can fail AFTER its write became durable — a connection
+     * close that throws once `commit()` returned, a cancellation that lands between the commit
+     * and the node's completion — and a failed node is not evidence that its side effects were
+     * undone. So:
+     *
+     * - `true` — the writer reported [committed]: the write is durable, whatever the node did next;
+     * - `false` — the writer reported [rolledBack] (or the caller confirms an undo): the write is
+     *   known to be gone;
+     * - absent — neither was observed: the outcome is UNKNOWN (a driver that never confirmed
+     *   the commit before the node's deadline, a cancellation before the commit whose implicit
+     *   rollback nobody witnessed) — and absent for a destination with nothing to commit.
+     *
+     * A completed operation whose writer never reported a commit is also absent, not `true`:
+     * every production writer reports, so that case is a defect, and "unknown" is the honest
+     * label for it.
+     *
+     * @param rolledBack a caller-confirmed undo (a partial table dropped after the writer's own
+     *   report could no longer reach this tracker); OR-ed with the writer's report.
      */
     fun finish(
         outcome: OperationOutcome,
-        committed: Boolean?,
         rolledBack: Boolean = false,
     ): OperationSnapshot =
         synchronized(lock) {
@@ -166,12 +182,20 @@ class NodeOperationTracker(
             val t = nanoTime()
             closeOpenPhase(t)
             currentPhase = null
+            val undone = rolledBack || rolledBackFlag
+            val committed =
+                when {
+                    destination.kind == OperationDestination.Kind.NONE -> null
+                    committedFlag -> true
+                    undone -> false
+                    else -> null
+                }
             val snapshot =
                 take(
                     t,
                     OperationState.of(outcome),
                     committed = committed,
-                    rolledBack = (rolledBack || rolledBackFlag).takeIf { it },
+                    rolledBack = undone.takeIf { it },
                 )
             terminal = snapshot
             snapshot

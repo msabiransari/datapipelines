@@ -67,7 +67,7 @@ class NodeOperationTrackerTest {
         // The terminal flush drains what the pump has not collected, in sequence.
         t.enter(OperationPhase.FINALIZING)
         t.drainPending().map { it.state } shouldContainExactly listOf(OperationState.FINALIZING)
-        t.finish(OperationOutcome.COMPLETED, committed = true).sequence shouldBe 5
+        t.finish(OperationOutcome.COMPLETED).sequence shouldBe 5
     }
 
     @Test
@@ -124,7 +124,8 @@ class NodeOperationTrackerTest {
         t.written(1000)
         t.written(7)
         t.fetched(2007)
-        val s = t.finish(OperationOutcome.COMPLETED, committed = true)
+        t.committed()
+        val s = t.finish(OperationOutcome.COMPLETED)
         s.rowsWritten shouldBe 2007
         s.rowsFetched shouldBe 2007
         s.batchesWritten shouldBe 3
@@ -137,13 +138,14 @@ class NodeOperationTrackerTest {
         val t = tracker()
         t.enter(OperationPhase.WRITING)
         t.written(10)
-        t.finish(OperationOutcome.FAILED, committed = false, rolledBack = true)
+        t.finish(OperationOutcome.FAILED, rolledBack = true)
         t.isSealed.shouldBeTrue()
         t.written(500)
         t.enter(OperationPhase.FINALIZING)
         t.dropped shouldBe 2
         t.sampleIfDue().shouldBeNull()
-        val again = t.finish(OperationOutcome.COMPLETED, committed = true)
+        t.committed()
+        val again = t.finish(OperationOutcome.COMPLETED)
         // The first terminal outcome stands; a second finish is a no-op returning the sealed snapshot.
         again.state shouldBe OperationState.FAILED
         again.rowsWritten shouldBe 10
@@ -161,7 +163,7 @@ class NodeOperationTrackerTest {
             .shouldNotBeNull()
             .committed
             .shouldBeNull()
-        t.finish(OperationOutcome.COMPLETED, committed = true).committed shouldBe true
+        t.finish(OperationOutcome.COMPLETED).committed shouldBe true
     }
 
     @Test
@@ -171,7 +173,8 @@ class NodeOperationTrackerTest {
         t.fetched(0)
         t.enter(OperationPhase.WRITING)
         t.written(0)
-        val s = t.finish(OperationOutcome.COMPLETED, committed = true)
+        t.committed()
+        val s = t.finish(OperationOutcome.COMPLETED)
         s.rowsFetched shouldBe 0
         s.rowsWritten shouldBe 0
         s.batchesWritten shouldBe 1
@@ -182,7 +185,7 @@ class NodeOperationTrackerTest {
         val t = tracker()
         t.enter(OperationPhase.EXECUTING)
         t.sampleIfDue()
-        t.finish(OperationOutcome.ABORTED, committed = false)
+        t.finish(OperationOutcome.ABORTED)
         // The pump must not re-send a sealed tracker's sample: the node coroutine flushed it.
         t.sampleIfDue().shouldBeNull()
         t.isSealed.shouldBeTrue()
@@ -197,7 +200,7 @@ class NodeOperationTrackerTest {
         clock.advanceMs(2)
         t.fetched(1)
         seqs += t.sampleIfDue().shouldNotBeNull().sequence
-        seqs += t.finish(OperationOutcome.COMPLETED, committed = true).sequence
+        seqs += t.finish(OperationOutcome.COMPLETED).sequence
         seqs shouldContainExactly listOf(1, 2, 3)
     }
 
@@ -223,13 +226,13 @@ class NodeOperationTrackerTest {
         t.childExecution(child)
         clock.advanceMs(5_000)
         t.sampleIfDue().shouldNotBeNull().childExecutionId shouldBe child
-        t.finish(OperationOutcome.COMPLETED, committed = false).childExecutionId shouldBe child
+        t.finish(OperationOutcome.COMPLETED).childExecutionId shouldBe child
     }
 
     @Test
     fun `an operation that never entered a state still finishes honestly`() {
         val t = tracker()
-        val s = t.finish(OperationOutcome.ABORTED, committed = false)
+        val s = t.finish(OperationOutcome.ABORTED)
         s.state shouldBe OperationState.ABORTED
         s.timingsMs.isEmpty().shouldBeTrue()
         s.elapsedMs shouldBe 0
@@ -262,6 +265,87 @@ class NodeOperationTrackerTest {
         fun advanceMs(ms: Long) {
             nanosNow += ms * 1_000_000
             instantNow = instantNow.plusMillis(ms)
+        }
+    }
+
+    // ---------------------------------------------------------------- commit evidence (R149-1)
+
+    @Test
+    fun `a confirmed commit survives a node that fails afterwards`() {
+        val t = tracker()
+        t.enter(OperationPhase.FINALIZING)
+        t.written(300)
+        t.committed()
+        // The connection close threw after commit(); the node is FAILED — the rows are durable.
+        val s = t.finish(OperationOutcome.FAILED)
+        s.state shouldBe OperationState.FAILED
+        s.committed shouldBe true
+        s.rolledBack.shouldBeNull()
+    }
+
+    @Test
+    fun `a confirmed commit survives an abort that lands after it`() {
+        val t = tracker()
+        t.enter(OperationPhase.FINALIZING)
+        t.committed()
+        val s = t.finish(OperationOutcome.ABORTED)
+        s.state shouldBe OperationState.ABORTED
+        s.committed shouldBe true
+    }
+
+    @Test
+    fun `a confirmed rollback reads false and names itself, from the writer or from the caller`() {
+        val a = tracker()
+        a.enter(OperationPhase.WRITING)
+        a.rolledBack()
+        a.finish(OperationOutcome.FAILED).let {
+            it.committed shouldBe false
+            it.rolledBack shouldBe true
+        }
+        val b = tracker()
+        b.enter(OperationPhase.WRITING)
+        b.finish(OperationOutcome.FAILED, rolledBack = true).let {
+            it.committed shouldBe false
+            it.rolledBack shouldBe true
+        }
+    }
+
+    @Test
+    fun `an unobserved commit on a failed or aborted outcome is absent, never false`() {
+        listOf(OperationOutcome.FAILED, OperationOutcome.ABORTED).forEach { outcome ->
+            val t = tracker()
+            t.enter(OperationPhase.FINALIZING)
+            // The driver never returned from commit() before the deadline: nobody knows.
+            val s = t.finish(outcome)
+            s.committed.shouldBeNull()
+            s.rolledBack.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `a completed outcome without a commit report is absent, not true`() {
+        val t = tracker()
+        t.enter(OperationPhase.WRITING)
+        t.written(1)
+        t.finish(OperationOutcome.COMPLETED).committed.shouldBeNull()
+    }
+
+    @Test
+    fun `a destination with nothing to commit reports no commit on any outcome`() {
+        OperationOutcome.entries.forEach { outcome ->
+            val t =
+                NodeOperationTracker(
+                    nodeId = "ddl",
+                    attempt = 1,
+                    kind = OperationKind.STATEMENT,
+                    destination = OperationDestination.NONE,
+                    sampleIntervalMs = 5_000,
+                    nanoTime = clock::nanos,
+                    now = clock::instant,
+                )
+            t.enter(OperationPhase.EXECUTING)
+            t.committed()
+            t.finish(outcome).committed.shouldBeNull()
         }
     }
 }

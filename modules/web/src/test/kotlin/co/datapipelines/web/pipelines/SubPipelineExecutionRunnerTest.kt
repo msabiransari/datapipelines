@@ -671,7 +671,7 @@ class SubPipelineExecutionRunnerTest {
 
             runner(stub).run(pipelineNode(output = NodeOutput.Tempdb("stg_traced")), ctx)
 
-            val terminal = tracker.finish(OperationOutcome.COMPLETED, committed = tracker.wasCommitted)
+            val terminal = tracker.finish(OperationOutcome.COMPLETED)
             terminal.childExecutionId shouldBe stub.captured.single().executionId
             terminal.rowsFetched shouldBe 2
             terminal.rowsWritten shouldBe 2
