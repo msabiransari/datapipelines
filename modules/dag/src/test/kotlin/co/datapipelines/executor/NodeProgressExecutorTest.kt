@@ -38,7 +38,7 @@ class NodeProgressExecutorTest {
     ) = ExecutorHarness(
         templateEngine = Fixtures.templateEngine(sql),
         registry = registry,
-        config = ExecutorConfig(executionTimeoutSeconds = 60, progressWriteIntervalSeconds = 1),
+        config = ExecutorConfig(executionTimeoutSeconds = 60, progressSampleIntervalSeconds = 1),
         stagingFactory = H2StagingFactory(H2StagingProperties(maxConnections = maxConnections, insertBatchSize = 100)),
     )
 

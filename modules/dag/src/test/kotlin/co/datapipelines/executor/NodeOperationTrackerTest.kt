@@ -49,6 +49,28 @@ class NodeOperationTrackerTest {
     }
 
     @Test
+    fun `a first entry is sampled at the entry instant even when the pump only asks later`() {
+        val t = tracker(intervalMs = 5_000)
+        t.enter(OperationPhase.EXECUTING)
+        clock.advanceMs(100)
+        t.enter(OperationPhase.WRITING)
+        t.written(10)
+        clock.advanceMs(40)
+        t.enter(OperationPhase.FETCHING)
+        // A writing interval of 40 ms, shorter than any tick, is still on the wire as WRITING,
+        // observed when it began — never lost to sampling.
+        val samples = generateSequence { t.sampleIfDue() }.toList()
+        samples.map { it.state } shouldContainExactly listOf(OperationState.EXECUTING, OperationState.WRITING, OperationState.FETCHING)
+        samples[1].observedAt shouldBe Instant.parse("2026-09-16T10:00:00.100Z")
+        samples[1].rowsWritten.shouldBeNull()
+        samples[2].rowsWritten shouldBe 10
+        // The terminal flush drains what the pump has not collected, in sequence.
+        t.enter(OperationPhase.FINALIZING)
+        t.drainPending().map { it.state } shouldContainExactly listOf(OperationState.FINALIZING)
+        t.finish(OperationOutcome.COMPLETED, committed = true).sequence shouldBe 5
+    }
+
+    @Test
     fun `a state entered for the first time is due immediately, a repeat is throttled`() {
         val t = tracker(intervalMs = 5_000)
         t.enter(OperationPhase.EXECUTING)
@@ -79,12 +101,19 @@ class NodeOperationTrackerTest {
         clock.advanceMs(20)
         t.enter(OperationPhase.FETCHING)
         clock.advanceMs(10)
+        // The three first-entry samples were taken at their entry instants; drain them.
+        val entries = generateSequence { t.sampleIfDue() }.take(3).toList()
+        entries.map { it.state } shouldContainExactly listOf(OperationState.EXECUTING, OperationState.FETCHING, OperationState.WRITING)
+        entries[1].timingsMs[OperationPhase.EXECUTING] shouldBe 100
+        entries[2].timingsMs[OperationPhase.FETCHING] shouldBe 30
+        // Then the periodic rule, with the open phase counted up to the observation.
+        clock.advanceMs(5_000)
         val s = t.sampleIfDue().shouldNotBeNull()
         s.timingsMs[OperationPhase.EXECUTING] shouldBe 100
-        s.timingsMs[OperationPhase.FETCHING] shouldBe 40
+        s.timingsMs[OperationPhase.FETCHING] shouldBe 5_040
         s.timingsMs[OperationPhase.WRITING] shouldBe 20
         s.timingsMs.shouldNotContainKey(OperationPhase.WAITING_OUTPUT)
-        s.elapsedMs shouldBe 160
+        s.elapsedMs shouldBe 5_160
     }
 
     @Test
@@ -185,8 +214,14 @@ class NodeOperationTrackerTest {
                 now = clock::instant,
             )
         t.enter(OperationPhase.EXECUTING)
+        t
+            .sampleIfDue()
+            .shouldNotBeNull()
+            .childExecutionId
+            .shouldBeNull()
         val child = java.util.UUID.randomUUID()
         t.childExecution(child)
+        clock.advanceMs(5_000)
         t.sampleIfDue().shouldNotBeNull().childExecutionId shouldBe child
         t.finish(OperationOutcome.COMPLETED, committed = false).childExecutionId shouldBe child
     }
@@ -208,8 +243,9 @@ class NodeOperationTrackerTest {
         t.written(5)
         t.enter(OperationPhase.FINALIZING)
         t.committed()
-        val s = t.sampleIfDue().shouldNotBeNull()
+        val s = generateSequence { t.sampleIfDue() }.toList().last()
         s.committed.shouldBeNull()
+        s.state shouldBe OperationState.FINALIZING
         s.timingsMs shouldContainKey OperationPhase.FINALIZING
         t.wasCommitted.shouldBeTrue()
         t.wasRolledBack.shouldBeFalse()

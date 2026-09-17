@@ -848,7 +848,7 @@ class PipelineExecutor(
      * The `node_progress` pump (149 §4): every [PROGRESS_PUMP_TICK_MS] it asks each tracker for
      * a due sample and emits it. The tick decides only how promptly a state change is NOTICED;
      * how many samples exist is the tracker's rule (first sample, first entry into a state,
-     * then at most once per `progress-write-interval-seconds`). A tracker whose terminal sample
+     * then at most once per `progress-sample-interval-seconds`). A tracker whose terminal sample
      * the node coroutine already published is skipped, and the per-tracker lock means a pump
      * sample can never follow that terminal one on the wire.
      *
@@ -863,8 +863,10 @@ class PipelineExecutor(
             ctx.operations.all().forEach { tracked ->
                 if (tracked.terminalPublished) return@forEach
                 tracked.publishLock.withLock {
-                    if (!tracked.terminalPublished) {
-                        tracked.tracker.sampleIfDue()?.let { emit(NodeProgress(run.executionId, it)) }
+                    // Drains the queued first-entry samples, then at most one periodic one.
+                    while (!tracked.terminalPublished) {
+                        val sample = tracked.tracker.sampleIfDue() ?: break
+                        emit(NodeProgress(run.executionId, sample))
                     }
                 }
             }
@@ -890,6 +892,8 @@ class PipelineExecutor(
             if (tracked.terminalPublished) return
             tracked.terminalPublished = true
             val tracker = tracked.tracker
+            // First-entry samples the pump has not collected yet go out first, in sequence.
+            tracker.drainPending().forEach { emit(NodeProgress(run.executionId, it)) }
             val committed =
                 when {
                     tracker.destination.kind == OperationDestination.Kind.NONE -> null
@@ -1018,8 +1022,8 @@ class PipelineExecutor(
                     run.stats.progress(nodeId, rows)
                     progress.recordThrottled(run.executionId) { run.stats.liveSnapshot(run.plan.dag.nodeIds) }
                 },
-            // 149: the periodic-sample cadence reuses the DB progress row's — one operator knob.
-            operations = NodeOperations(sampleIntervalMs = Duration.ofSeconds(config.progressWriteIntervalSeconds).toMillis()),
+            // 149: the periodic-sample cadence of `node_progress` (configuration §3.2).
+            operations = NodeOperations(sampleIntervalMs = Duration.ofSeconds(config.progressSampleIntervalSeconds).toMillis()),
         )
     }
 
@@ -1042,7 +1046,7 @@ class PipelineExecutor(
         /**
          * How often the progress pump looks for a due sample (149 §4) — a constant, not an
          * operator control: it bounds the LATENCY of noticing a state change, never the number of
-         * samples, which `progress-write-interval-seconds` and the first-entry rule bound.
+         * samples, which `progress-sample-interval-seconds` and the first-entry rule bound.
          */
         const val PROGRESS_PUMP_TICK_MS = 250L
     }

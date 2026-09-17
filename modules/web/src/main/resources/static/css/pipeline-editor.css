@@ -744,6 +744,12 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  /* 149: the live state word shares the one-line footer with the count on the right; a
+     long label clips rather than folding the footer (the T251 belt, applied to both slots). */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pe-card-state i {

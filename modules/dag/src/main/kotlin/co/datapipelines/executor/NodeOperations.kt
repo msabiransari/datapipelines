@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
  * fixture is unchanged; an executor that never starts the pump simply never emits.
  *
  * @param sampleIntervalMs the periodic-sample cadence — the executor passes
- *   `progress-write-interval-seconds`, the same cadence the DB progress row uses.
+ *   `progress-sample-interval-seconds` (configuration §3.2).
  */
 class NodeOperations(
     private val sampleIntervalMs: Long = DEFAULT_SAMPLE_INTERVAL_MS,
@@ -64,7 +64,7 @@ class NodeOperations(
     fun all(): Collection<Tracked> = trackers.values
 
     companion object {
-        const val DEFAULT_SAMPLE_INTERVAL_MS = 5_000L
+        const val DEFAULT_SAMPLE_INTERVAL_MS = 1_000L
 
         /** v1 has no per-node retries (dag-executor §11.1): the attempt `node_started` carries. */
         const val FIRST_ATTEMPT = 1

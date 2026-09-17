@@ -93,6 +93,7 @@ class EngineConfiguration {
             cancelGraceSeconds = executor.cancelGraceSeconds,
             sourceFetchSize = executor.sourceFetchSize,
             progressWriteIntervalSeconds = executor.progressWriteIntervalSeconds,
+            progressSampleIntervalSeconds = executor.progressSampleIntervalSeconds,
             heartbeatSeconds = executor.heartbeatSeconds,
             stagingMaxMemoryMb = staging.maxMemoryMb,
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a

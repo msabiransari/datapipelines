@@ -18,10 +18,12 @@ import java.util.UUID
  *
  * ## The rules that bound the volume
  *
- * A sample is DUE when (1) none has been taken yet, (2) a phase was entered for the first time
- * since the last sample, or (3) [sampleIntervalMs] has elapsed since the last sample and
- * something changed. Per operation that is at most `1 + phases + duration / interval` events
- * plus the terminal one — never per row, never per batch.
+ * A sample is DUE when (1) a phase was entered for the FIRST time — that sample is taken AT
+ * the entry, so a `writing` interval shorter than the pump's tick is still seen on the wire
+ * as `writing`, with its own observation instant — or (2) [sampleIntervalMs]
+ * (`progress-sample-interval-seconds`) has elapsed since the last sample and something changed. Per operation that is at most `phases + duration /
+ * interval` events plus the terminal one — never per row, never per batch. First-entry
+ * samples wait in a queue no longer than the number of phases until the pump collects them.
  *
  * ## The seal
  *
@@ -56,9 +58,11 @@ class NodeOperationTracker(
     private var sequence = 0
     private var lastSampleNanos = Long.MIN_VALUE
     private var changedSinceSample = true
-    private var newPhaseSinceSample = false
     private var terminal: OperationSnapshot? = null
     private var droppedCount = 0
+
+    /** First-entry samples taken at the entry instant, awaiting the pump (≤ one per phase). */
+    private val pendingEntries = ArrayDeque<OperationSnapshot>()
 
     /** True once [finish] ran. */
     val isSealed: Boolean get() = synchronized(lock) { terminal != null }
@@ -78,11 +82,12 @@ class NodeOperationTracker(
             closeOpenPhase(t)
             currentPhase = phase
             phaseEnteredNanos = t
+            changedSinceSample = true
             if (timings[phase] == null) {
                 timings[phase] = 0L
-                newPhaseSinceSample = true
+                // Sampled NOW, not at the next tick: the observation instant is the entry.
+                pendingEntries.addLast(take(t, OperationState.of(phase), committed = null, rolledBack = null))
             }
-            changedSinceSample = true
         }
     }
 
@@ -119,19 +124,28 @@ class NodeOperationTracker(
     }
 
     /**
-     * The pump's question: a snapshot when one is due by the rules above, else null. Never a
-     * terminal sample — [finish] is the only source of those.
+     * The pump's question: the oldest first-entry sample still waiting, else a fresh snapshot
+     * when one is due by the periodic rule, else null. Never a terminal sample — [finish] is
+     * the only source of those. Called again until it answers null, it drains the queue in
+     * sequence order.
      */
     fun sampleIfDue(): OperationSnapshot? =
         synchronized(lock) {
+            // Sealed: whatever was queued went out with the terminal flush (or never will).
             if (terminal != null) return null
+            pendingEntries.removeFirstOrNull()?.let { return it }
             val t = nanoTime()
-            val due =
-                sequence == 0 ||
-                    newPhaseSinceSample ||
-                    (changedSinceSample && t - lastSampleNanos >= sampleIntervalMs * NANOS_PER_MILLI)
+            val due = changedSinceSample && (sequence == 0 || t - lastSampleNanos >= sampleIntervalMs * NANOS_PER_MILLI)
             if (!due) return null
             take(t, currentPhase?.let { OperationState.of(it) } ?: OperationState.CONNECTING, committed = null, rolledBack = null)
+        }
+
+    /** The first-entry samples not yet collected — the terminal flush emits them before [finish]. */
+    fun drainPending(): List<OperationSnapshot> =
+        synchronized(lock) {
+            val drained = pendingEntries.toList()
+            pendingEntries.clear()
+            drained
         }
 
     /**
@@ -189,7 +203,6 @@ class NodeOperationTracker(
         sequence++
         lastSampleNanos = t
         changedSinceSample = false
-        newPhaseSinceSample = false
         val observed = EnumMap(timings)
         currentPhase?.let { open -> observed[open] = (observed[open] ?: 0L) + (t - phaseEnteredNanos) }
         return OperationSnapshot(

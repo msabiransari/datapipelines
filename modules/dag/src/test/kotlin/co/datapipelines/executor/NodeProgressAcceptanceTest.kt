@@ -189,7 +189,7 @@ class NodeProgressAcceptanceTest {
     private fun harness(
         registry: DatasourceRegistry,
         stagingFactory: StagingFactory = H2StagingFactory(H2StagingProperties(maxConnections = 4, insertBatchSize = BATCH)),
-        config: ExecutorConfig = ExecutorConfig(executionTimeoutSeconds = 60, progressWriteIntervalSeconds = 1),
+        config: ExecutorConfig = ExecutorConfig(executionTimeoutSeconds = 60, progressSampleIntervalSeconds = 1),
         sql: Map<String, String> = mapOf("a" to "SELECT id FROM t", "b" to "SELECT id FROM t", "wb" to "SELECT id FROM t"),
     ) = ExecutorHarness(
         templateEngine = Fixtures.templateEngine(sql),
@@ -204,13 +204,18 @@ class NodeProgressAcceptanceTest {
     private fun RecordingEmitter.awaitState(
         nodeId: String,
         state: OperationState,
+    ): OperationSnapshot = awaitSample(nodeId) { it.state == state }
+
+    private fun RecordingEmitter.awaitSample(
+        nodeId: String,
+        matching: (OperationSnapshot) -> Boolean,
     ): OperationSnapshot {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(GATE_S)
         while (System.nanoTime() < deadline) {
-            samples(nodeId).firstOrNull { it.state == state }?.let { return it }
+            samples(nodeId).firstOrNull(matching)?.let { return it }
             Thread.sleep(POLL_MS)
         }
-        error("no $state sample for $nodeId within ${GATE_S}s; saw ${samples(nodeId).map { it.state }}")
+        error("no matching sample for $nodeId within ${GATE_S}s; saw ${samples(nodeId).map { "${it.state}/${it.rowsWritten}" }}")
     }
 
     private fun stageNode(id: String) = Fixtures.node(id, source = "src", output = NodeOutput.Tempdb(id))
@@ -250,12 +255,12 @@ class NodeProgressAcceptanceTest {
             harness(registry).use { h ->
                 val run = async(Dispatchers.IO) { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(stageNode("a"))))) }
                 gate.reached.await(GATE_S, TimeUnit.SECONDS).shouldBeTrue()
-                val live = h.emitter.awaitState("a", OperationState.FETCHING)
-                // The wire must not call the 50 rows read so far "written": exactly one batch is.
-                val latest = h.emitter.samples("a").last()
-                latest.state shouldBe OperationState.FETCHING
-                latest.rowsWritten shouldBe BATCH.toLong()
-                latest.batchesWritten shouldBe 1
+                // The periodic sample taken while the cursor is parked mid-batch 2: the wire
+                // must not call the 50 rows read so far "written" — exactly one batch is.
+                val live = h.emitter.awaitSample("a") { it.state == OperationState.FETCHING && it.rowsWritten != null }
+                live.rowsWritten shouldBe BATCH.toLong()
+                live.batchesWritten shouldBe 1
+                live.rowsFetched shouldBe BATCH.toLong()
                 live.committed.shouldBeNull()
                 gate.open()
                 run.await().status shouldBe ExecutionStatus.SUCCESS
@@ -454,7 +459,7 @@ class NodeProgressAcceptanceTest {
                     nodeTimeoutSeconds = 1,
                     cancelGraceSeconds = 1,
                     executionTimeoutSeconds = 60,
-                    progressWriteIntervalSeconds = 1,
+                    progressSampleIntervalSeconds = 1,
                     nodeQueryTimeoutSeconds = 300,
                 )
             harness(registry, config = config).use { h ->

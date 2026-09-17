@@ -36,7 +36,7 @@ function fakeEditor(win) {
       resetAll() {},
       setNodeState() {},
       setNodeStats() {},
-      setNodeOperation(id, view) { cardOps.push([id, view ? view.cardLine : null]); },
+      setNodeOperation(id, view) { cardOps.push([id, view ? view.cardLine + " | " + view.cardCounts : null]); },
       cy: { nodes: () => [] },
     },
     cardOps,
@@ -76,7 +76,7 @@ test("node_progress reduces into editor.nodeOps and hands the card its operation
   const op = editor.nodeOps.get("stage_trips");
   assert.equal(op.state, "writing");
   assert.equal(op.rowsWritten, 11000);
-  assert.deepEqual(editor.cardOps.at(-1), ["stage_trips", "Writing → tempdb.trips · 11,000 written"]);
+  assert.deepEqual(editor.cardOps.at(-1), ["stage_trips", "Writing | 11,000 written"]);
   // Progress is not announced per sample — the live region is for node lifecycle only.
   assert.equal(editor.announced.some((m) => /Writing/.test(m)), false);
 });

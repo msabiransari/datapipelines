@@ -150,6 +150,8 @@ data class ExecutorProperties(
     val sourceFetchSize: Int = 1000,
     /** `progress-write-interval-seconds` (108) — the floor between two throttled live-progress writes. */
     val progressWriteIntervalSeconds: Long = 5,
+    /** `progress-sample-interval-seconds` (149) — the floor between two periodic `node_progress` samples of one operation. */
+    val progressSampleIntervalSeconds: Long = 1,
     /** `heartbeat-seconds` (108) — how often a running execution stamps `heartbeat_at`; the sweep reaps at 3×. */
     val heartbeatSeconds: Long = 15,
 ) {
@@ -178,6 +180,7 @@ data class ExecutorProperties(
         // 0 is legal and means "do not stream" — see ExecutorConfig's init for why it exists.
         require(sourceFetchSize >= 0) { "datapipelines.executor.source-fetch-size must be >= 0" }
         require(progressWriteIntervalSeconds > 0) { "datapipelines.executor.progress-write-interval-seconds must be > 0" }
+        require(progressSampleIntervalSeconds > 0) { "datapipelines.executor.progress-sample-interval-seconds must be > 0" }
         require(heartbeatSeconds > 0) { "datapipelines.executor.heartbeat-seconds must be > 0" }
     }
 }

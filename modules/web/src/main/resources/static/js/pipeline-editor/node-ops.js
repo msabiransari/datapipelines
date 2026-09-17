@@ -221,17 +221,23 @@
     return op.observed ? null : "Commit not observed";
   }
 
-  /* The card's one-line footer text while the operation is live; null when there is nothing measured. */
+  /*
+   * The card's footer while the operation is live — laid out for ONE line (T251): the state
+   * word on the left (`cardLine`), the cumulative count on the right (`cardCounts`). The
+   * destination is the card's own fact line already, so it is not repeated here; the Details
+   * pane and the a11y description carry the long form.
+   */
   function cardLine(op) {
     if (op.state === "started") return null;
-    var label = stateLabel(op);
-    var dest = destinationText(op.destination);
-    if (op.state === "writing" && dest) label += " → " + dest;
-    if (op.state === "waiting_output") return label;
-    var written = op.rowsWritten !== null && op.rowsWritten > 0 ? count(op.rowsWritten) + " written" : null;
-    var fetched = op.rowsFetched !== null && op.rowsFetched > 0 ? count(op.rowsFetched) + " fetched" : null;
-    var tail = written || (op.state === "fetching" ? fetched : null);
-    return tail ? label + " · " + tail : label;
+    if (op.state === "waiting_output") return "Waiting for " + destinationNoun(op.destination);
+    return stateLabel(op);
+  }
+
+  function cardCounts(op) {
+    if (op.state === "started" || op.terminal) return null;
+    if (op.rowsWritten !== null && op.rowsWritten > 0) return count(op.rowsWritten) + " written";
+    if (op.rowsFetched !== null && op.rowsFetched > 0) return count(op.rowsFetched) + " fetched";
+    return null;
   }
 
   function a11yText(op) {
@@ -258,6 +264,7 @@
       commitText: commitText(op),
       elapsedText: op.elapsedMs !== null ? ms(op.elapsedMs) : null,
       cardLine: cardLine(op),
+      cardCounts: cardCounts(op),
       a11yText: a11yText(op),
       terminal: op.terminal,
       state: op.state,

@@ -126,7 +126,8 @@ test("describe: honest labels, counts, destination, phase share — never a perc
   assert.equal(d.phaseText, "connect 12 ms · query 410 ms · fetch 3.4 s · wait 22 ms · write 1.5 s");
   assert.equal(d.commitText, null);
   assert.equal(d.percent, undefined);
-  assert.equal(d.cardLine, "Writing → tempdb.trips · 11,000 written");
+  assert.equal(d.cardLine, "Writing");
+  assert.equal(d.cardCounts, "11,000 written");
   assert.match(d.a11yText, /Writing to tempdb\.trips/);
 });
 
@@ -136,7 +137,8 @@ test("describe: waiting for an output connection reads as waiting, not writing",
   ops.reduce("node_progress", sample({ sequence: 2, state: "waiting_output", rows_fetched: 100 }));
   const d = describe(ops.get("stage_trips"));
   assert.equal(d.stateLabel, "Waiting for tempdb connection");
-  assert.equal(d.cardLine, "Waiting for tempdb connection");
+  assert.equal(d.cardLine, "Waiting for tempdb");
+  assert.equal(d.cardCounts, "100 fetched");
 });
 
 test("describe: committed only when the terminal sample said so; rolled back names itself", () => {
@@ -179,4 +181,5 @@ test("describe: a node that only started has a started view and no invented stat
   assert.equal(d.stateLabel, "Running");
   assert.equal(d.countsText, null);
   assert.equal(d.cardLine, null);
+  assert.equal(d.cardCounts, null);
 });

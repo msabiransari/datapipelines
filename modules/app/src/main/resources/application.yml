@@ -222,6 +222,9 @@ datapipelines:
     cancel-grace-seconds: ${DATAPIPELINES_EXECUTOR_CANCEL_GRACE_SECONDS:5}
     source-fetch-size: ${DATAPIPELINES_EXECUTOR_SOURCE_FETCH_SIZE:1000}
     progress-write-interval-seconds: ${DATAPIPELINES_EXECUTOR_PROGRESS_WRITE_INTERVAL_SECONDS:5}
+    # 149 — the floor between two PERIODIC node_progress samples of one operation (rest-api
+    # §6.4.9); first entries into a state and the terminal sample are never throttled by it.
+    progress-sample-interval-seconds: ${DATAPIPELINES_EXECUTOR_PROGRESS_SAMPLE_INTERVAL_SECONDS:1}
     heartbeat-seconds: ${DATAPIPELINES_EXECUTOR_HEARTBEAT_SECONDS:15}
 
   pipelines:

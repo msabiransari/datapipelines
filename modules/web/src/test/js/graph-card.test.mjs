@@ -433,24 +433,26 @@ test("a node_completed frame for a PIPELINE node records the child execution it 
   assert.equal(editor.childExecutions.rainy_vs_dry, "a91f0c2e-1234", "the Details pane's Execution row reads this");
 });
 
-// 149 — the card's operation line: while a node runs, the footer's state label is the
+// 149 — the card's operation line: while a node runs, the footer's state word is the
 // MEASURED operation (node-ops.js `cardLine`) rather than a bare "Running…", tagged
-// with the operation state for the stylesheet; a terminal state keeps the run line
-// and drops the live line; resetAll clears it for the next run.
-test("a running card shows its measured operation line, tagged by state, and a done card does not", () => {
+// with the operation state for the stylesheet, with the live count in the right slot;
+// a terminal state keeps the run line and drops both; resetAll clears them.
+test("a running card shows its measured operation and live count, tagged by state; a done card does not", () => {
   const g = loadGraph();
-  const running = g.buildCardHtml({ ...DQL_CARD, state: "running", op: "Writing → tempdb.trips · 11,000 written", opState: "writing" });
-  assert.match(running, /class="pe-card-st">Writing → tempdb\.trips · 11,000 written</);
+  const running = g.buildCardHtml({ ...DQL_CARD, state: "running", op: "Writing", opCounts: "11,000 written", opState: "writing" });
+  assert.match(running, /class="pe-card-st">Writing</);
+  assert.match(running, /class="pe-card-rt">11,000 written</);
   assert.match(running, /pe-card-op-writing/);
-  const waiting = g.buildCardHtml({ ...DQL_CARD, state: "running", op: "Waiting for tempdb connection", opState: "waiting_output" });
+  const waiting = g.buildCardHtml({ ...DQL_CARD, state: "running", op: "Waiting for tempdb", opState: "waiting_output" });
   assert.match(waiting, /pe-card-op-waiting_output/);
-  assert.match(waiting, /Waiting for tempdb connection/);
-  // No operation line yet: the plain running label, as before.
+  assert.match(waiting, /class="pe-card-st">Waiting for tempdb</);
+  // No operation line yet: the plain running label, an empty right slot.
   assert.match(g.buildCardHtml({ ...DQL_CARD, state: "running", op: null }), /class="pe-card-st">Running…</);
-  // Terminal: the state word and the run numbers, never a stale live line.
-  const done = g.buildCardHtml({ ...DQL_CARD, state: "success", run: "11,000 rows · 6.0 s", op: "Completed", opState: "completed" });
+  assert.match(g.buildCardHtml({ ...DQL_CARD, state: "running", op: null, run: "stale" }), /class="pe-card-rt"></);
+  // Terminal: the state word and the run numbers, never a stale live line or count.
+  const done = g.buildCardHtml({ ...DQL_CARD, state: "success", run: "11,000 rows · 6.0 s", op: "Completed", opCounts: "9 written", opState: "completed" });
   assert.match(done, /class="pe-card-st">Done</);
   assert.match(done, /class="pe-card-rt">11,000 rows · 6\.0 s</);
-  // User-authored table names are escaped in the operation line too.
-  assert.match(g.buildCardHtml({ ...DQL_CARD, state: "running", op: 'Writing → tempdb.<b>"x"</b>', opState: "writing" }), /&lt;b&gt;/);
+  // User-authored text is escaped in both slots.
+  assert.match(g.buildCardHtml({ ...DQL_CARD, state: "running", op: 'Writing <b>"x"</b>', opCounts: "<i>", opState: "writing" }), /&lt;b&gt;.*&lt;i&gt;/s);
 });
