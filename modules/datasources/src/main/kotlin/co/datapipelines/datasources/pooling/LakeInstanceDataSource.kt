@@ -3,7 +3,6 @@ package co.datapipelines.datasources.pooling
 import java.io.PrintWriter
 import java.sql.Connection
 import java.sql.SQLFeatureNotSupportedException
-import java.sql.SQLNonTransientConnectionException
 import java.util.logging.Logger
 import javax.sql.DataSource
 
@@ -38,9 +37,9 @@ class LakeInstanceDataSource(
      * pinned 6.3.3) and reads it back at shutdown as the bound on how long it waits for a
      * physical connection that is mid-creation on its creator thread before closing the bag —
      * a connection created after that point can no longer be added and would leak. Honouring
-     * the value (rather than answering 0, which makes that wait zero) is what keeps the close/
-     * open interleaving bounded: an in-flight duplicate is either handed over in time and then
-     * aborted with the rest, or refused/closed by the retire check below.
+     * the value (rather than answering 0, which makes that wait zero) keeps that wait real;
+     * ownership of a duplicate that outlasts it is the owner's ([LakeInstanceOwner] registers
+     * every duplicate and closes at its release the ones Hikari never accepted — R152-2).
      */
     @Volatile
     private var loginTimeoutSeconds: Int = 0
@@ -49,9 +48,6 @@ class LakeInstanceDataSource(
         val connection = owner.duplicate()
         try {
             sessionInit.forEach { statement -> connection.createStatement().use { it.execute(statement) } }
-            // Shutdown began while this duplicate was being set up: it must not be handed to a
-            // pool that is closing (Hikari would abort it, or — after its bag closed — lose it).
-            if (owner.isRetired) throw retiring()
         } catch (
             // SQLException from the driver or a RuntimeException DuckDB surfaces (the probe's
             // DS-SEC-6 rule): either way the duplicate is closed, never handed out half-set-up.
@@ -62,13 +58,6 @@ class LakeInstanceDataSource(
         }
         return connection
     }
-
-    private fun retiring(): SQLNonTransientConnectionException =
-        SQLNonTransientConnectionException(
-            "the DuckDB instance owner for datasource '${owner.datasourceName}' (generation ${owner.generation}) " +
-                "is shutting down; the connection was closed instead of joining it",
-            SQLSTATE_CONNECTION_FAILURE,
-        )
 
     override fun getConnection(
         username: String?,
@@ -90,9 +79,4 @@ class LakeInstanceDataSource(
     override fun <T : Any?> unwrap(iface: Class<T>?): T = throw SQLFeatureNotSupportedException("not a wrapper")
 
     override fun isWrapperFor(iface: Class<*>?): Boolean = false
-
-    private companion object {
-        /** SQL standard class 08 — the connection-exception family every lease boundary already classifies. */
-        const val SQLSTATE_CONNECTION_FAILURE = "08003"
-    }
 }

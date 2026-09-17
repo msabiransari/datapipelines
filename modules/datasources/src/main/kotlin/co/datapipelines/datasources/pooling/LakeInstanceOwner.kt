@@ -39,6 +39,11 @@ import javax.sql.DataSource
  * - The owner is retired then closed by ONE caller of [HikariConnectionPool.close]: [retire]
  *   before Hikari's shutdown (no new duplicate may join a generation being torn down), [close]
  *   AFTER it — the last handle drops and the instance is freed. [close] is idempotent.
+ * - **Every physical duplicate has an owner until it is closed.** [duplicate] hands out a
+ *   [TrackedDuplicate] registered with the generation; Hikari closes or aborts the ones it accepted
+ *   (the wrapper unregisters itself), and [close] closes the ones Hikari never accepted — a
+ *   creation that straddled the shutdown is refused at the bag, and HikariCP does not close what
+ *   it refuses — or abandoned at its own ceiling. Registration is atomic with [retire]. (R152-2)
  * - **No silent reconnect.** If the owner is lost (closed by a driver fault, or a bug), every
  *   subsequent [duplicate] fails with an [SQLNonTransientConnectionException] naming the
  *   datasource and generation; the pool does NOT open a fresh engine behind the caller's back,
@@ -86,12 +91,42 @@ class LakeInstanceOwner private constructor(
      */
     fun duplicate(): Connection {
         refusal()?.let { throw it }
-        return try {
-            duplicateMethod.invoke(connection) as Connection
-        } catch (e: InvocationTargetException) {
-            throw unwrapped(e)
-        }
+        val raw =
+            try {
+                duplicateMethod.invoke(connection) as Connection
+            } catch (e: InvocationTargetException) {
+                throw unwrapped(e)
+            }
+        return track(raw)
     }
+
+    /**
+     * Registration is atomic with retirement (R152-2): the driver call above ran outside any
+     * lock, and here — a set insert under the handles lock, no driver work — a retire that landed
+     * meanwhile finds the handle and it closes at once; a retire that lands later finds it in
+     * the set and [close] takes it. From this point the handle has an owner for its whole life:
+     * Hikari (through the wrapper's own close/abort), or this generation.
+     */
+    private fun track(raw: Connection): Connection {
+        val tracked = TrackedDuplicate(raw) { handles.remove(it) }
+        val refused =
+            synchronized(handles) {
+                val gone = retired.get() || closed.get()
+                if (!gone) handles.add(tracked)
+                gone
+            }
+        if (refused) {
+            runCatching { raw.close() }
+            throw retiring()
+        }
+        return tracked
+    }
+
+    /** Physical duplicates this generation created and has not yet seen closed — see [track]. */
+    private val handles = HashSet<TrackedDuplicate>()
+
+    /** How many physical duplicates are currently alive under this generation (tests, diagnostics). */
+    val liveDuplicates: Int get() = synchronized(handles) { handles.size }
 
     /** The driver's own exception out of the reflective call; an owner lost mid-call is named as such. */
     private fun unwrapped(e: InvocationTargetException): SQLException {
@@ -135,9 +170,31 @@ class LakeInstanceOwner private constructor(
         )
     }
 
-    /** Closes the retained connection once; later calls are no-ops. Never throws. */
+    /**
+     * Closes, once, every physical handle this generation still owns and then the retained
+     * connection; later calls are no-ops. Never throws.
+     *
+     * By now the pool has shut Hikari down, so a handle still in [handles] is one Hikari never
+     * accepted (its creation straddled the shutdown — the bag was already closed when the creator
+     * tried to add it, and Hikari does not close what it refuses) or one Hikari abandoned to a
+     * borrower at its own shutdown ceiling. Neither may outlive the generation: an open duplicate
+     * keeps the whole instance alive. They are closed here, the count logged — a non-zero count is
+     * the rare event, and the only residual is the driver refusing a close.
+     */
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        val orphans = synchronized(handles) { handles.toList().also { handles.clear() } }
+        if (orphans.isNotEmpty()) {
+            val failed = orphans.count { runCatching { it.closeUnowned() }.isFailure }
+            LOG.warn(
+                "event=lake.instance_handles_closed datasource={} generation={} handles={} close_failures={} " +
+                    "message=\"physical connections the pool never accepted or abandoned were closed with the generation\"",
+                datasourceName,
+                generation,
+                orphans.size,
+                failed,
+            )
+        }
         try {
             connection.close()
         } catch (e: SQLException) {

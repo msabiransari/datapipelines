@@ -21,6 +21,11 @@ import java.util.concurrent.atomic.AtomicLong
  */
 internal class CountingParquetServer(
     private val file: File,
+    /**
+     * Called on EVERY request before it is served — the engine's first touch of the file is
+     * the witness that a statement has entered the engine.
+     */
+    private val onRequest: () -> Unit = {},
 ) : AutoCloseable {
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
 
@@ -45,6 +50,7 @@ internal class CountingParquetServer(
     }
 
     private fun serve(exchange: HttpExchange) {
+        onRequest()
         val bytes = file.readBytes()
         exchange.responseHeaders.add("Accept-Ranges", "bytes")
         exchange.responseHeaders.add("Content-Type", "application/octet-stream")

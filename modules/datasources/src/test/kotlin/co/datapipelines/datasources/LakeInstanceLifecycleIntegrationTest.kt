@@ -264,68 +264,103 @@ class LakeInstanceLifecycleIntegrationTest {
     }
 
     /**
-     * Cancellation isolation on one shared instance, synchronised on the EVENTS, not on time:
-     * the victim's long scan and the sibling's are started on their own threads; the cancel is
-     * issued only once BOTH statements have been handed to the engine (a latch each side counts
-     * down immediately before `executeQuery`), so the victim is observably running when its
-     * statement is cancelled and the sibling is running beside it. The victim's `INTERRUPT`
-     * error is itself the proof it was mid-execution — a finished query cannot be interrupted —
-     * and the sibling's correct sum is the proof the cancel reached one statement, not the
-     * instance. The victim's next statement proves the connection is reusable.
+     * Cancellation isolation on one shared instance, synchronised on ENGINE ENTRY, not on time
+     * and not on the call site: each statement's scan starts with a `read_parquet` of its own
+     * loopback file, and the server's first request for that file is the engine's own signal
+     * that it has bound and begun executing the statement (a call-site latch, the earlier
+     * version, only proved the threads had reached `executeQuery`). The cancel is issued once
+     * BOTH engines' requests have arrived; the victim's `INTERRUPT` proves it was mid-execution
+     * (a finished statement cannot be interrupted), and the sibling — whose statement entered
+     * the engine before the cancel and, by its own timestamp, returned after it — ran through
+     * the cancel with the right answer. The victim's next statement proves reuse.
      */
     @Test
     @Suppress("NestedBlockDepth") // nested `use` blocks are the leases' lifetimes — flattening would hide them
     fun `cancelling one running query leaves the concurrently running sibling and the victim's next statement healthy`() {
-        val ds = lakeDatasource("lake_cancel", dialect = mapOf("threads" to "2"))
-        val longScan = "SELECT sum(i) FROM range($LONG_SCAN_ROWS) t(i)"
+        val victimFile = parquet("victim.parquet", "SELECT 1 AS id")
+        val siblingFile = parquet("sibling.parquet", "SELECT 1 AS id")
+        val victimEntered = java.util.concurrent.CountDownLatch(1)
+        val siblingEntered = java.util.concurrent.CountDownLatch(1)
+        val ds =
+            lakeDatasource(
+                "lake_cancel",
+                dialect =
+                    mapOf(
+                        "catalog.kind" to "s3",
+                        "region" to "us-east-1",
+                        "unsigned" to "true",
+                        "threads" to "2",
+                    ),
+            )
         val expectedSum = (LONG_SCAN_ROWS / 2) * (LONG_SCAN_ROWS - 1) // halve first: n·(n−1) overflows a Long
 
-        ConnectionPoolManager.buildHikariPool(ds).use { pool ->
-            pool.leaseConnection().use { victim ->
-                pool.leaseConnection().use { sibling ->
-                    val bothStarted = java.util.concurrent.CountDownLatch(2)
-                    val victimStatement = victim.createStatement()
-                    val victimOutcome = java.util.concurrent.CompletableFuture<Throwable?>()
-                    val siblingOutcome = java.util.concurrent.CompletableFuture<Long>()
-                    Thread {
-                        bothStarted.countDown()
-                        victimOutcome.complete(
-                            runCatching { victimStatement.executeQuery(longScan).use { it.next() } }.exceptionOrNull(),
-                        )
-                    }.start()
-                    Thread {
-                        sibling.createStatement().use { st ->
-                            bothStarted.countDown()
-                            siblingOutcome.complete(
-                                st.executeQuery(longScan).use { rs ->
-                                    rs.next()
-                                    rs.getLong(1)
+        CountingParquetServer(victimFile, onRequest = { victimEntered.countDown() }).use { victimServer ->
+            CountingParquetServer(siblingFile, onRequest = { siblingEntered.countDown() }).use { siblingServer ->
+                ConnectionPoolManager.buildHikariPool(ds).use { pool ->
+                    pool.leaseConnection().use { victim ->
+                        pool.leaseConnection().use { sibling ->
+                            val victimStatement = victim.createStatement()
+                            val victimOutcome = scanOnThread(victimStatement, longScan(victimServer.url))
+                            val siblingOutcome = scanOnThread(sibling.createStatement(), longScan(siblingServer.url))
+
+                            withClue("both statements entered the engine (each engine fetched its file)") {
+                                victimEntered.await(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+                                siblingEntered.await(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+                            }
+                            val cancelledAt = System.nanoTime()
+                            victimStatement.cancel()
+                            val interrupted = victimOutcome.get(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS).exceptionOrNull()
+                            val (siblingSum, siblingFinishedAt) =
+                                siblingOutcome.get(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS).getOrThrow()
+
+                            assertAll(
+                                {
+                                    withClue("the victim was running and was interrupted") {
+                                        interrupted?.message.orEmpty() shouldContain
+                                            "INTERRUPT"
+                                    }
                                 },
+                                {
+                                    withClue("the sibling was still running when the cancel was issued") {
+                                        (siblingFinishedAt > cancelledAt) shouldBe
+                                            true
+                                    }
+                                },
+                                { withClue("the sibling ran through beside the cancel") { siblingSum shouldBe expectedSum } },
+                                { countOf(victim, "SELECT 7") shouldBe 7 },
+                                { countOf(sibling, "SELECT 10") shouldBe 10 },
                             )
                         }
-                    }.start()
-
-                    withClue("both statements were handed to the engine") {
-                        bothStarted.await(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
                     }
-                    victimStatement.cancel()
-                    val interrupted = victimOutcome.get(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS)
-                    val siblingSum = siblingOutcome.get(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS)
-
-                    assertAll(
-                        {
-                            withClue(
-                                "the victim was running and was interrupted",
-                            ) { interrupted?.message.orEmpty() shouldContain "INTERRUPT" }
-                        },
-                        { withClue("the sibling ran through beside it") { siblingSum shouldBe expectedSum } },
-                        { countOf(victim, "SELECT 7") shouldBe 7 },
-                        { countOf(sibling, "SELECT 10") shouldBe 10 },
-                    )
                 }
             }
         }
     }
+
+    /** Runs [sql] on [statement] on its own thread: the sum and the nanoTime it returned, or the failure. */
+    private fun scanOnThread(
+        statement: java.sql.Statement,
+        sql: String,
+    ): java.util.concurrent.CompletableFuture<Result<Pair<Long, Long>>> {
+        val outcome = java.util.concurrent.CompletableFuture<Result<Pair<Long, Long>>>()
+        Thread {
+            outcome.complete(
+                runCatching {
+                    val sum =
+                        statement.executeQuery(sql).use { rs ->
+                            rs.next()
+                            rs.getLong(1)
+                        }
+                    sum to System.nanoTime()
+                },
+            )
+        }.start()
+        return outcome
+    }
+
+    /** A statement that touches [url] first (engine entry, observable at the server) and then scans for seconds. */
+    private fun longScan(url: String) =
+        "SELECT sum(i) FROM range($LONG_SCAN_ROWS) t(i) WHERE (SELECT count(*) FROM read_parquet('$url')) = 1"
 
     @Test
     fun `the memory limit is ONE shared budget - an over-budget query fails honestly and the sibling survives`() {

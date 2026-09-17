@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.7 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.8 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-16
@@ -128,7 +128,7 @@ The notices of [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-
 
 #### 3.4C The LAKE instance events (152)
 
-A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation ([Datasources §5.2](datasources.md#52-pool-lifecycle)): a retained owner connection is opened at pool build, initialized once, and released after the Hikari pool has shut down. Six events name that lifecycle and its failures; the ERROR is the one that means a pool needs rebuilding, and the two WARNs the operator should read.
+A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation ([Datasources §5.2](datasources.md#52-pool-lifecycle)): a retained owner connection is opened at pool build, initialized once, and released after the Hikari pool has shut down. Seven events name that lifecycle and its failures; the ERROR is the one that means a pool needs rebuilding, and the WARNs are what the operator should read.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
@@ -136,6 +136,7 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 | INFO | `lake.instance_closed` | The generation's owner was released, after the Hikari pool's shutdown — the instance is freed once the last handle drops | `datasource`, `generation` |
 | **ERROR** | **`lake.instance_owner_lost`** | **The retained owner connection is closed while the pool is still live (a driver fault, not a retire); every new lease is refused with SQLSTATE `08003` until the pool is rebuilt — logged once per generation** | `datasource`, `generation`, `message` |
 | WARN | `lake.instance_owner_close_failed` | The driver refused to close the retained owner at release; the release proceeds, the handle is the driver's residual | `datasource`, `generation`, `error` |
+| WARN | `lake.instance_handles_closed` | At the generation's release, physical connections were still registered to it — ones HikariCP never accepted (their creation straddled the shutdown and the closed bag refused them) or abandoned to a borrower at its shutdown ceiling — and the generation closed them; `close_failures` counts the ones the driver refused | `datasource`, `generation`, `handles`, `close_failures`, `message` |
 | WARN | `lake.view_failed` | One registered table's view could not be created at instance init (109 §A); it is recorded on the table's registry row and skipped, the surviving views serve | `datasource`, `table`, `error`, `message` |
 | WARN | `lake.view_outcome_record_failed` | The registry write of a view outcome threw; the instance still serves the surviving views, the row keeps its previous state | `datasource`, `table`, `error`, `message` |
 
@@ -391,6 +392,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.8 | 152 R152-2 handle accounting (#128) | §3.4C gains `lake.instance_handles_closed` (WARN, `handles` + `close_failures`): a generation now closes, at its own release, every physical connection it created that HikariCP never accepted or abandoned — a non-zero count is the rare shutdown race, not a leak. |
 | 2026-09-16 | v1.7 | 152 LAKE instance events (#128) | New **§3.4C the LAKE instance events**: `lake.instance_opened` / `lake.instance_closed` (one per pool generation), the ERROR `lake.instance_owner_lost` (a live pool's engine went away; leases refused with `08003` until rebuild), the WARNs `lake.instance_owner_close_failed`, `lake.view_failed` (109 §A, previously undocumented) and `lake.view_outcome_record_failed`. `docs-audit.sh` check C does not yet extract the `lake.*` namespace (its alternation is `scripts/`, outside lane 152's fence) — a follow-up. |
 | 2026-09-14 | v1.6 | 137 mail notices | New **§3.4B the mail events**: `mail.configured` / `mail.disabled` at boot, `mail.skipped` (mail off), `mail.already_claimed`, and the WARNs `mail.send_failed` / `mail.dispatch_failed`; domains and counts only, never an address or a body. `docs-audit.sh` check C now extracts `mail.*` log events from this section and `mail.*` audit events from Enums §15, so a misspelt name fails the audit. |
 | 2026-08-05 | v1.0 draft | initial draft | Initial observability spec sketch — logs, metrics, traces, health, audit log |

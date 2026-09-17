@@ -69,11 +69,15 @@ class LakeInstanceOwnerTest {
             }
         val dataSource = LakeInstanceDataSource(owner, sessionInit = emptyList())
 
-        val survivor = dataSource.connection
-        answerOn(survivor) shouldBe 42
+        val abandoned = dataSource.connection
+        answerOn(abandoned) shouldBe 42
+        owner.liveDuplicates shouldBe 1
 
-        owner.close()
-        owner.close() // idempotent — the second call is a no-op, not a second close
+        val logged =
+            capturingLogs {
+                owner.close()
+                owner.close() // idempotent — the second call is a no-op, not a second close
+            }
         val refusal = shouldThrow<SQLNonTransientConnectionException> { dataSource.connection }
 
         assertAll(
@@ -81,11 +85,16 @@ class LakeInstanceOwnerTest {
             { refusal.sqlState shouldBe "08003" },
             { refusal.message.orEmpty() shouldContain "lake_owner" },
             { refusal.message.orEmpty() shouldContain owner.generation },
-            // The borrower that was already out keeps its instance: the driver's native holder
-            // outlives the owner handle, and nothing pulled the engine from under it.
-            { withClue("an existing borrower is unaffected by the owner's close") { answerOn(survivor) shouldBe 42 } },
+            // R152-2: a duplicate still registered at the generation's release is one nobody else
+            // will close (the pool's close runs Hikari's shutdown — abort of every borrower —
+            // BEFORE this point, so what is left was never accepted or was abandoned): the
+            // generation closes it, counts it, and no unowned handle keeps the instance alive.
+            { withClue("the abandoned duplicate was closed with the generation") { abandoned.isClosed shouldBe true } },
+            { owner.liveDuplicates shouldBe 0 },
+            {
+                logged.count { it.startsWith("event=lake.instance_handles_closed datasource=lake_owner") && " handles=1 " in it } shouldBe 1
+            },
         )
-        survivor.close()
     }
 
     @Test
@@ -223,8 +232,14 @@ class LakeInstanceOwnerTest {
             val dataSource = LakeInstanceDataSource(owner, sessionInit = emptyList())
             dataSource.setLogWriter(null)
             dataSource.loginTimeout = 5
+            val duplicate = dataSource.connection
             assertAll(
                 { dataSource.logWriter shouldBe null },
+                // The tracked duplicate still unwraps to the driver's own connection, and says so.
+                { duplicate.unwrap(Connection::class.java).javaClass.name shouldBe "org.duckdb.DuckDBConnection" },
+                { duplicate.isWrapperFor(Connection::class.java) shouldBe true },
+                { duplicate.isWrapperFor(String::class.java) shouldBe false },
+                { shouldThrow<SQLException> { duplicate.unwrap(String::class.java) } },
                 // The one REAL knob: Hikari sets it from connectionTimeout and waits on it at shutdown.
                 { dataSource.loginTimeout shouldBe 5 },
                 { dataSource.isWrapperFor(DataSource::class.java) shouldBe false },

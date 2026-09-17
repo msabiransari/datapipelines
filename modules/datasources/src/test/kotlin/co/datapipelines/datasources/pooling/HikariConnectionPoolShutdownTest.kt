@@ -86,6 +86,52 @@ class HikariConnectionPoolShutdownTest {
         }
     }
 
+    /**
+     * A duplicate that HOLDS inside one of Hikari's own setup calls (`isReadOnly`, `getAutoCommit`)
+     * — the review's adverse scheduling: not a claim that the getter is slow, a hook to freeze the
+     * creator after the datasource has returned. [Factory] is the owner's retained connection,
+     * whose reflective `duplicate()` opens the real duplicate and wraps it.
+     */
+    private class HoldingSetupConnection(
+        private val raw: Connection,
+        private val holdOn: String,
+        private val entered: CountDownLatch,
+        private val release: CountDownLatch,
+    ) : Connection by raw {
+        private fun hold(method: String) {
+            if (method == holdOn) {
+                entered.countDown()
+                release.await(WAIT_S, TimeUnit.SECONDS) shouldBe true
+            }
+        }
+
+        override fun isReadOnly(): Boolean {
+            hold("isReadOnly")
+            return raw.isReadOnly
+        }
+
+        override fun getAutoCommit(): Boolean {
+            hold("getAutoCommit")
+            return raw.autoCommit
+        }
+
+        class Factory(
+            private val raw: Connection,
+            private val holdOn: String,
+            private val entered: CountDownLatch,
+            private val release: CountDownLatch,
+        ) : Connection by raw {
+            lateinit var duplicate: Connection
+
+            @Suppress("unused") // reached reflectively by LakeInstanceOwner
+            fun duplicate(): Connection {
+                val real = raw.javaClass.getMethod("duplicate").invoke(raw) as Connection
+                duplicate = real
+                return HoldingSetupConnection(real, holdOn, entered, release)
+            }
+        }
+    }
+
     private fun duckdb(): DataSource = DriverDataSource("jdbc:duckdb::memory:", "org.duckdb.DuckDBDriver", Properties(), null, null)
 
     private fun hikari(
@@ -240,6 +286,76 @@ class HikariConnectionPoolShutdownTest {
             { pool.isClosed shouldBe true },
             { logged.count { it.startsWith("event=lake.instance_opened") } shouldBe 0 },
             { logged.count { it.startsWith("event=lake.instance_closed datasource=lake_straddle") } shouldBe 1 },
+        )
+        raw.close()
+    }
+
+    /**
+     * R152-2, the review's witness made a guard: the datasource has RETURNED the duplicate and
+     * Hikari is inside its own JDBC setup on it (`isReadOnly`, then `getAutoCommit` — the
+     * pinned 6.3.3 `PoolBase.setupConnection` order) when the pool closes. Hikari stops waiting
+     * after the login timeout and closes its bag; when setup resumes, the bag refuses the handle
+     * and HikariCP does not close what it refuses. The generation must: registration made the
+     * handle the owner's, so the owner's close — the last step of the pool's close — closes it
+     * BEFORE `close()` returns, and the resumed setup finds a dead connection.
+     */
+    @Test
+    fun `a duplicate held inside Hikari's setup when the pool closes is closed by the generation before close returns`() =
+        heldInHikariSetupIsClosedByTheGeneration(holdOn = "isReadOnly")
+
+    /** The same, held at the LAST driver call of setup — the handover to the bag is what is delayed. */
+    @Test
+    fun `a duplicate whose handover to the bag is delayed past the shutdown is closed by the generation`() =
+        heldInHikariSetupIsClosedByTheGeneration(holdOn = "getAutoCommit")
+
+    @Suppress("NestedBlockDepth") // the holds are the interleaving under test
+    private fun heldInHikariSetupIsClosedByTheGeneration(holdOn: String) {
+        val setupEntered = CountDownLatch(1)
+        val releaseSetup = CountDownLatch(1)
+        val raw = duckdb().connection
+        val gate = HoldingSetupConnection.Factory(raw, holdOn, setupEntered, releaseSetup)
+        val owner =
+            LakeInstanceOwner.open(
+                object : DataSource by duckdb() {
+                    override fun getConnection(): Connection = gate
+                },
+                "lake_late_setup_$holdOn",
+            ) {}
+        val lakeSource = LakeInstanceDataSource(owner, sessionInit = emptyList())
+        val hikari = hikari(lakeSource)
+        val pool = HikariConnectionPool("lake_late_setup", hikari, owner)
+
+        val lease = Thread { runCatching { pool.leaseConnection() } }.apply { start() }
+        withClue("Hikari must be inside its setup on the returned duplicate") { setupEntered.await(WAIT_S, TimeUnit.SECONDS) shouldBe true }
+        val liveWhileHeld = owner.liveDuplicates
+        val retiredWhileHeld = owner.isRetired
+
+        val logged = capturingLogs { pool.close() } // returns after Hikari's bounded wait — setup is STILL held
+        val closedWhenCloseReturned = gate.duplicate.isClosed
+        val liveWhenCloseReturned = owner.liveDuplicates
+        releaseSetup.countDown()
+        lease.join(TimeUnit.SECONDS.toMillis(WAIT_S))
+
+        assertAll(
+            { liveWhileHeld shouldBe 1 },
+            { retiredWhileHeld shouldBe false },
+            { withClue("the generation closed the held duplicate before its close returned") { closedWhenCloseReturned shouldBe true } },
+            { liveWhenCloseReturned shouldBe 0 },
+            { owner.isOpen shouldBe false },
+            {
+                logged.count {
+                    it.startsWith(
+                        "event=lake.instance_handles_closed datasource=lake_late_setup_$holdOn",
+                    ) && " handles=1 " in it
+                } shouldBe
+                    1
+            },
+            {
+                withClue("no unowned duplicate executes SQL") {
+                    shouldThrow<SQLException> { gate.duplicate.createStatement().use { it.executeQuery("SELECT 42") } }
+                }
+            },
+            { withClue("Hikari's creator finished") { lease.isAlive shouldBe false } },
         )
         raw.close()
     }
