@@ -1,0 +1,169 @@
+package co.datapipelines.datasources.pooling
+
+import org.slf4j.LoggerFactory
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
+import java.sql.Connection
+import java.sql.SQLException
+import java.sql.SQLNonTransientConnectionException
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.sql.DataSource
+
+/**
+ * 152 (#128) — the retained OWNER of one LAKE pool generation's DuckDB instance.
+ *
+ * ## Why an owner exists
+ *
+ * On `jdbc:duckdb::memory:` every `DriverManager`/`DriverDataSource` open creates a NEW engine
+ * instance, and the instance dies with its last connection — so with one open per physical
+ * connection, HikariCP's routine replacement (`maxLifetime`, idle eviction, a failed
+ * validation) threw away the engine's external-file cache every 22.5–30 min and the next scan
+ * of the same objects was cold again (the 128 investigation's Hikari witness: 2.1 MB cached →
+ * 0 on the replacement, 23 s later). The remedy is ownership: ONE raw driver connection is
+ * opened per pool generation, the instance is initialized on it exactly once (extensions,
+ * secret, ATTACHes, engine limits, per-table views), and it is then RETAINED, never leased and
+ * never queried again — its only job is to keep the instance alive. Every physical connection
+ * Hikari opens is a [duplicate] of it: the pinned driver's `DuckDBConnection.duplicate()`
+ * opens a second connection to the SAME native instance (verified 2026-09-16 on duckdb_jdbc
+ * 1.5.5.1: catalog, secrets, `memory_limit`/`threads` and the file cache are shared;
+ * `search_path` is per connection; a duplicate outlives a closed owner; `duplicate()` on a
+ * closed owner throws `"Connection was closed"`).
+ *
+ * ## Ownership rules (datasources.md §5.2, §8C.2)
+ *
+ * - One owner = one generation = one instance. A rebuilt pool (registry change, credential
+ *   rotation, reconcile) opens a NEW owner, so a retiring generation and its replacement never
+ *   share catalog or credential state; two datasources never share an instance either — the
+ *   anonymous URL has no process-global name to collide on.
+ * - The owner is closed exactly once, by the pool's [HikariConnectionPool.close], AFTER the
+ *   Hikari pool has shut down — the last handle drops and the instance is freed. [close] is
+ *   idempotent.
+ * - **No silent reconnect.** If the owner is lost (closed by a driver fault, or a bug), every
+ *   subsequent [duplicate] fails with an [SQLNonTransientConnectionException] naming the
+ *   datasource and generation; the pool does NOT open a fresh engine behind the caller's back,
+ *   because that engine would carry none of the generation's views or secrets. The existing
+ *   retire-and-rebuild path (§5.2) is the remedy, and the failure is logged once per owner.
+ *
+ * The driver is reached REFLECTIVELY: this module never compiles against a JDBC driver
+ * (datasources.md §10.3), and `duplicate()` is DuckDB's own method, not a `java.sql` one.
+ */
+class LakeInstanceOwner private constructor(
+    /** The datasource this generation serves — for logs and failure messages. */
+    val datasourceName: String,
+    private val connection: Connection,
+    private val duplicateMethod: Method,
+) : AutoCloseable {
+    /** This generation's identity — distinct per pool build, carried in every lifecycle log line. */
+    val generation: String = UUID.randomUUID().toString().substring(0, GENERATION_CHARS)
+
+    private val closed = AtomicBoolean(false)
+    private val lossLogged = AtomicBoolean(false)
+
+    /** True while the retained connection is open — the generation is alive. */
+    val isOpen: Boolean
+        get() = !closed.get() && runCatching { !connection.isClosed }.getOrDefault(false)
+
+    /**
+     * A NEW connection to this generation's instance — what every physical Hikari connection is.
+     *
+     * @throws SQLNonTransientConnectionException when the owner is closed or lost — the caller
+     *   (Hikari's connection creation) surfaces it as a lease failure; nothing reconnects.
+     */
+    fun duplicate(): Connection {
+        if (!isOpen) throw ownerLost()
+        return try {
+            duplicateMethod.invoke(connection) as Connection
+        } catch (e: InvocationTargetException) {
+            throw unwrapped(e)
+        }
+    }
+
+    /** The driver's own exception out of the reflective call; an owner lost mid-call is named as such. */
+    private fun unwrapped(e: InvocationTargetException): SQLException {
+        val cause = e.targetException
+        return when {
+            cause is SQLException && !isOpen -> ownerLost(cause)
+            cause is SQLException -> cause
+            else -> SQLException("duplicate() on datasource '$datasourceName' failed", cause)
+        }
+    }
+
+    private fun ownerLost(cause: Throwable? = null): SQLNonTransientConnectionException {
+        if (lossLogged.compareAndSet(false, true) && !closed.get()) {
+            LOG.error(
+                "event=lake.instance_owner_lost datasource={} generation={} " +
+                    "message=\"the retained DuckDB instance owner is closed; new connections are refused until the pool is rebuilt\"",
+                datasourceName,
+                generation,
+            )
+        }
+        return SQLNonTransientConnectionException(
+            "the DuckDB instance owner for datasource '$datasourceName' (generation $generation) is closed; " +
+                "no new connection can join it — the pool must be rebuilt",
+            SQLSTATE_CONNECTION_FAILURE,
+            cause,
+        )
+    }
+
+    /** Closes the retained connection once; later calls are no-ops. Never throws. */
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        try {
+            connection.close()
+        } catch (e: SQLException) {
+            LOG.warn(
+                "event=lake.instance_owner_close_failed datasource={} generation={} error=\"{}\"",
+                datasourceName,
+                generation,
+                e.message,
+            )
+        }
+        LOG.info("event=lake.instance_closed datasource={} generation={}", datasourceName, generation)
+    }
+
+    companion object {
+        private val LOG = LoggerFactory.getLogger(LakeInstanceOwner::class.java)
+
+        /** SQL standard class 08 — the connection-exception family every lease boundary already classifies. */
+        private const val SQLSTATE_CONNECTION_FAILURE = "08003"
+
+        private const val GENERATION_CHARS = 8
+
+        /**
+         * Opens the owner connection through [delegate] — the pool's own driver `DataSource`,
+         * so the instance opens exactly as a pooled connection would — resolves the driver's
+         * `duplicate()`, then runs [initialize] on it ONCE. A failure anywhere after the open
+         * closes the connection before rethrowing: an owner either exists fully initialized or
+         * not at all, and no half-initialized instance is ever handed to a pool.
+         */
+        fun open(
+            delegate: DataSource,
+            datasourceName: String,
+            initialize: (Connection) -> Unit,
+        ): LakeInstanceOwner {
+            val connection = delegate.connection
+            val owner =
+                try {
+                    val method =
+                        runCatching { connection.javaClass.getMethod("duplicate") }.getOrNull()
+                            ?: throw SQLNonTransientConnectionException(
+                                "datasource '$datasourceName': driver ${connection.javaClass.name} has no duplicate() — " +
+                                    "a LAKE pool needs the DuckDB driver's shared-instance connection",
+                            )
+                    initialize(connection)
+                    LakeInstanceOwner(datasourceName, connection, method)
+                } catch (
+                    // The probe's DS-SEC-6 rule: a driver reports failure as SQLException, but
+                    // DuckDB also surfaces internal faults as RuntimeExceptions — both must close
+                    // the half-initialized instance before propagating.
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    runCatching { connection.close() }
+                    throw e
+                }
+            LOG.info("event=lake.instance_opened datasource={} generation={}", datasourceName, owner.generation)
+            return owner
+        }
+    }
+}

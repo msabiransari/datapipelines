@@ -3,6 +3,9 @@ package co.datapipelines.datasources.pooling
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DialectAdapter
 import co.datapipelines.datasources.DialectAdapters
+import co.datapipelines.datasources.LakeViewOutcomeRecorder
+import co.datapipelines.datasources.LakeViewPlan
+import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.util.DriverDataSource
@@ -12,6 +15,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * One pooled connection source for a single **user** datasource. Distinct from the metadata-DB
@@ -43,13 +47,26 @@ interface ConnectionPool : AutoCloseable {
     val activeConnections: Int get() = 0
 }
 
-/** A [ConnectionPool] backed by one [HikariDataSource]. */
+/**
+ * A [ConnectionPool] backed by one [HikariDataSource].
+ *
+ * [instanceOwner] is 152's one generic seam: the resource a pool generation OWNS beyond its
+ * physical connections — for a LAKE pool the retained [LakeInstanceOwner] whose DuckDB instance
+ * every physical connection is a duplicate of; `null` for every other dialect, whose pools are
+ * byte-for-byte what they were. It is closed exactly once, by [close], AFTER the Hikari pool has
+ * shut down, so the instance outlives every lease Hikari could still abort and dies with the
+ * generation, never before it (§5.2 retirement leaves both alive until the reaper's close).
+ */
 class HikariConnectionPool(
     override val name: String,
     private val dataSource: HikariDataSource,
+    private val instanceOwner: AutoCloseable? = null,
 ) : ConnectionPool {
     /** Whether the underlying pool has been shut down — the observable half of retirement (§5.2). */
     val isClosed: Boolean get() = dataSource.isClosed
+
+    /** [instanceOwner] is released on the FIRST [close] only; Hikari's own close is already a no-op after the first. */
+    private val ownerReleased = AtomicBoolean(false)
 
     override fun leaseConnection(): Connection = dataSource.connection
 
@@ -76,7 +93,19 @@ class HikariConnectionPool(
     override val activeConnections: Int
         get() = if (dataSource.isClosed) 0 else dataSource.hikariPoolMXBean.activeConnections
 
-    override fun close() = dataSource.close()
+    /**
+     * Hikari first — it aborts the leases still out once its shutdown grace expires (the
+     * existing §5.2 hard-close policy) — then the generation's owner. A borrower Hikari abandoned
+     * keeps its own handle on the instance until it actually closes; the owner's close only
+     * drops the retained handle, it never pulls the engine out from under a running statement.
+     */
+    override fun close() {
+        try {
+            dataSource.close()
+        } finally {
+            if (ownerReleased.compareAndSet(false, true)) instanceOwner?.close()
+        }
+    }
 }
 
 /**
@@ -307,13 +336,18 @@ class ConnectionPoolManager(
          * which passes none — stays byte-identical to the pre-view config (§4.2's "built the
          * same way" invariant covers the adapter's half; views are runtime-only).
          *
-         * [lakeViews] is 109 §A's per-table-isolation path: when present, the pool's physical
-         * connections are created through a [LakeViewApplyingDataSource] wrapping the driver's
-         * own DataSource — the adapter init and the plan's prelude stay strict, each table's
-         * view is applied independently, and a failing view is recorded and skipped rather
-         * than failing the connect. Mutually exclusive with [additionalConnectionInit]: the two
-         * are strict-vs-isolated compositions of the SAME statements, and passing both would
-         * create every view twice.
+         * [lakeViews] is 109 §A's per-table-isolation path, and since 152 (#128) it rides the
+         * SHARED-INSTANCE build: a LAKE pool that passes no [additionalConnectionInit] — the
+         * production factory's shape, tableless or not — opens ONE retained owner connection
+         * ([LakeInstanceOwner]), initializes the instance on it exactly once (the adapter init
+         * and the plan's prelude strict, each table's view independently, a failing view recorded
+         * and skipped), and hands HikariCP a [LakeInstanceDataSource] whose every physical
+         * connection is a `duplicate()` of that owner plus the session-scoped postlude. Routine
+         * physical replacement therefore keeps the generation's catalog AND its external-file
+         * cache; a tableless lake takes the same path with an empty plan. Mutually exclusive
+         * with [additionalConnectionInit]: the two are strict-vs-isolated compositions of the
+         * SAME statements, and passing both would create every view twice — the legacy
+         * strict composition stays one-instance-per-connection, as its callers expect.
          *
          * [duckdbExtensionDirectory] is the deployment's bundled DuckDB extension directory
          * (089 §D, configuration.md §3.25): forwarded to [DialectAdapters.forDialect], which
@@ -332,22 +366,41 @@ class ConnectionPoolManager(
                 require(additionalConnectionInit.isEmpty()) {
                     "lake view isolation and additionalConnectionInit compose the same statements — pass exactly one"
                 }
-                applyLakeViews(config, adapter, datasource, lakeViews)
-            } else if (additionalConnectionInit.isNotEmpty()) {
+            }
+            if (additionalConnectionInit.isNotEmpty()) {
                 config.connectionInitSql =
                     listOfNotNull(config.connectionInitSql, additionalConnectionInit.joinToString("; "))
                         .joinToString("; ")
+                return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }
-            return HikariConnectionPool(datasource.name, HikariDataSource(config))
+            if (datasource.dialect != Dialect.LAKE) {
+                return HikariConnectionPool(datasource.name, HikariDataSource(config))
+            }
+            val owner = openLakeInstance(config, adapter, datasource, lakeViews)
+            val hikari =
+                try {
+                    HikariDataSource(config)
+                } catch (
+                    // PoolInitializationException, or validate()'s IllegalArgument/IllegalState:
+                    // whichever it is, the owner must not outlive a pool that never existed —
+                    // the same "fully built or not at all" rule LakeInstanceOwner.open applies.
+                    @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+                ) {
+                    owner.close()
+                    throw e
+                }
+            return HikariConnectionPool(datasource.name, hikari, owner)
         }
 
         /**
-         * Rewires [config] from driver-URL pooling to a wrapped DataSource (109 §A). The adapter
+         * Opens the pool generation's instance owner and rewires [config] from driver-URL
+         * pooling to the [LakeInstanceDataSource] (109 §A's seam, 152's ownership). The adapter
          * init statements come back OUT of the `connectionInitSql` slot — re-derived as the LIST
          * from [DialectAdapter.connectionInit], never split back out of the joined string (a
          * credential containing `; ` would survive the join but not a re-split) — and become the
-         * wrapper's strict half. `DriverDataSource` is HikariCP's own driver delegate, so the
-         * raw connection is opened exactly as the jdbcUrl path would open it.
+         * initializer's strict half, run ONCE on the owner. `DriverDataSource` is HikariCP's own
+         * driver delegate, so the owner connection is opened exactly as the jdbcUrl path would
+         * have opened every pooled connection.
          *
          * The captured `jdbcUrl`/`driverClassName` are deliberately LEFT on the config:
          * `HikariConfig.validate()` skips every field check once `dataSource` is set with no
@@ -355,14 +408,15 @@ class ConnectionPoolManager(
          * `setDriverClassName(null)` that "clearing" would require loads a class whose name is
          * null — an unconditional `NullPointerException` on HikariCP 6.3.x. Only
          * `connectionInitSql` is nulled, so the pool cannot re-run the joined init on the
-         * wrapper's connections (the wrapper owns initialization now).
+         * duplicates (global SETs and `CREATE OR REPLACE VIEW` beside active readers are exactly
+         * what the once-per-generation rule removes).
          */
-        private fun applyLakeViews(
+        private fun openLakeInstance(
             config: HikariConfig,
             adapter: DialectAdapter,
             datasource: Datasource,
-            lakeViews: LakeViewInit,
-        ) {
+            lakeViews: LakeViewInit?,
+        ): LakeInstanceOwner {
             val delegate =
                 DriverDataSource(
                     config.jdbcUrl,
@@ -371,15 +425,17 @@ class ConnectionPoolManager(
                     config.username,
                     config.password,
                 )
-            config.connectionInitSql = null
-            config.dataSource =
-                LakeViewApplyingDataSource(
-                    delegate = delegate,
+            val initializer =
+                LakeInstanceInitializer(
                     adapterInit = adapter.connectionInit(datasource),
-                    plan = lakeViews.plan,
-                    datasourceName = lakeViews.datasourceName,
-                    recorder = lakeViews.recorder,
+                    plan = lakeViews?.plan ?: LakeViewPlan(emptyList(), emptyList(), emptyList()),
+                    datasourceName = datasource.name,
+                    recorder = lakeViews?.recorder ?: LakeViewOutcomeRecorder.NONE,
                 )
+            val owner = LakeInstanceOwner.open(delegate, datasource.name, initializer::initialize)
+            config.connectionInitSql = null
+            config.dataSource = LakeInstanceDataSource(owner, initializer.sessionInit)
+            return owner
         }
     }
 }
