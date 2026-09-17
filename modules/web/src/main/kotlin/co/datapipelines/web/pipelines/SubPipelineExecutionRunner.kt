@@ -18,10 +18,12 @@ import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.NodeExecutionContext
 import co.datapipelines.executor.NodeResult
+import co.datapipelines.executor.OperationPhase
 import co.datapipelines.executor.PipelineExecutionFailed
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.executor.StagingObserverBridge
 import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
@@ -152,6 +154,9 @@ class SubPipelineExecutionRunner(
         // Minted before execution starts: the parent's node stats and any failure detail must be
         // able to name the child execution even when it never completes.
         val childExecutionId = UUID.randomUUID()
+        // 149: the node's operation (begun by NodeRunner as `child`) learns the child's id now,
+        // and the sinks below report the parent's own output write onto it.
+        ctx.operations.tracker(node.id)?.childExecution(childExecutionId)
         val outcome = SinkOutcome()
         val request = childRequest(node, ctx, ref, record, child, childExecutionId, outcome)
         val result = executeChild(node, record, request, workspaceId)
@@ -524,9 +529,12 @@ class SubPipelineExecutionRunner(
 
             is NodeOutput.Tempdb -> {
                 DirectResultSink { schema, rows ->
-                    val staged = ctx.staging.stageRows(output.table, schema, rows)
+                    val op = ctx.operations.observerFor(node.id)
+                    val staged = ctx.staging.stageRows(output.table, schema, rows, StagingObserverBridge(node.id, op, ctx.nodeProgress))
                     ctx.warnings.addAll(staged.warnings)
+                    op.phase(OperationPhase.FINALIZING)
                     checkStagingBudget(ctx)
+                    op.committed()
                     // F6: the same instrument `NodeRunner.dispatchOutput`'s Tempdb branch records.
                     // Without it every row staged through a PIPELINE node was invisible to
                     // `datapipelines.staging.rows` — the metric this repo already had to rescue
@@ -545,13 +553,21 @@ class SubPipelineExecutionRunner(
                     // identical post-node behavior). Nothing is stored under this execution.
                     DirectResultSink { schema, rows ->
                         var count = 0L
+                        val op = ctx.operations.observerFor(node.id)
+                        op.phase(OperationPhase.FETCHING)
                         upstream.accept(schema, rows.onEach { count++ })
+                        // Onward delivery: every row the invoker's sink accepted is written from
+                        // this node's point of view; the invoker's own write is ITS operation.
+                        op.fetched(count)
+                        op.written(count)
+                        op.committed()
                         outcome.rowsOut = count
                         outcome.delivered = true
                     }
                 } else {
                     DirectResultSink { schema, rows ->
-                        val stored = resultStore.materializeRows(ctx.executionId, schema, rows, ctx.resultTtlSeconds)
+                        val op = ctx.operations.observerFor(node.id)
+                        val stored = resultStore.materializeRows(ctx.executionId, schema, rows, ctx.resultTtlSeconds, op)
                         ctx.warnings.addAll(stored.warnings)
                         outcome.rowsOut = stored.totalRows
                         outcome.callerResultRef = stored.key
@@ -563,7 +579,8 @@ class SubPipelineExecutionRunner(
 
             is NodeOutput.Datasource -> {
                 DirectResultSink { schema, rows ->
-                    outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId)
+                    val op = ctx.operations.observerFor(node.id)
+                    outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId, op)
                     outcome.delivered = true
                 }
             }

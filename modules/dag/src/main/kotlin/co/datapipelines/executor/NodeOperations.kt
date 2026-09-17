@@ -117,9 +117,10 @@ class NodeOperations(
 
 /**
  * Bridges staging's own observer type (staging cannot depend on `dag`) onto the tracker, and
- * keeps the 108 §D rows-so-far sink fed from the same batch boundary it always was.
+ * keeps the 108 §D rows-so-far sink fed from the same batch boundary it always was. Public
+ * because the composition runner in `web` stages a child's rows through the same bridge.
  */
-internal class StagingObserverBridge(
+class StagingObserverBridge(
     private val nodeId: String,
     private val observer: OperationObserver,
     private val rowsSoFar: NodeProgressSink,

@@ -81,7 +81,10 @@ class NodeProgressProjectionTest {
 
     @Test
     fun `unobserved counts are absent, not minus one`() {
-        val payload = projection.payload(NodeProgress(executionId, snapshot(OperationState.EXECUTING, rowsFetched = null, rowsWritten = null)))
+        val payload =
+            projection.payload(
+                NodeProgress(executionId, snapshot(OperationState.EXECUTING, rowsFetched = null, rowsWritten = null)),
+            )
         payload.containsKey("rows_fetched") shouldBe false
         payload.containsKey("rows_written") shouldBe false
     }
@@ -90,7 +93,9 @@ class NodeProgressProjectionTest {
     fun `a terminal sample carries committed and rolled_back and the child id when known`() {
         val child = UUID.randomUUID()
         val payload =
-            projection.payload(NodeProgress(executionId, snapshot(OperationState.FAILED, committed = false, rolledBack = true, child = child)))
+            projection.payload(
+                NodeProgress(executionId, snapshot(OperationState.FAILED, committed = false, rolledBack = true, child = child)),
+            )
         payload["state"] shouldBe "failed"
         payload["committed"] shouldBe false
         payload["rolled_back"] shouldBe true
@@ -102,7 +107,9 @@ class NodeProgressProjectionTest {
         val event =
             NodeProgress(
                 executionId,
-                snapshot(OperationState.CONNECTING).copy(kind = OperationKind.STATEMENT, destination = OperationDestination.datasource("pg")),
+                snapshot(
+                    OperationState.CONNECTING,
+                ).copy(kind = OperationKind.STATEMENT, destination = OperationDestination.datasource("pg")),
             )
         projection.payload(event)["destination"] shouldBe mapOf("kind" to "datasource", "datasource" to "pg")
         projection.payload(event)["operation"] shouldBe "statement"
