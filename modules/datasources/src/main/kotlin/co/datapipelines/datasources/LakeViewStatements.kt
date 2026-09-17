@@ -8,16 +8,22 @@ import co.datapipelines.typesystem.DatapipelinesException
  * registered table a **view**, appended to the adapter's own `connectionInit` statements when a
  * pool is built (`DefaultDatasourceRegistry`'s pool factory — the seam).
  *
- * ## Why views, and why per connection
+ * ## Why views, and why once per pool generation
  *
- * A pooled connection on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB
- * instance (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection
- * are invisible to a second, while both are open). HikariCP runs `connectionInitSql` on every
- * new physical connection, so each connection builds its own catalog/schema/view set — which is
- * also why nothing here can leak across datasources. A template then reads
- * `SELECT … FROM nyc.mobility.hvfhv_zone_day`, or the bare `FROM hvfhv_zone_day` under the
- * search-path rule below, and the engine's partition pruning applies to the underlying
- * `read_parquet` scan unchanged.
+ * A raw open on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB instance
+ * (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection are
+ * invisible to a second, while both are open). Until 152 (#128) every physical Hikari
+ * connection was such an open, so each built its own catalog/schema/view set — and lost its
+ * engine cache whenever Hikari replaced it. Now a LAKE pool generation opens ONE retained owner
+ * connection, applies these statements to it once, and every physical connection is a
+ * `duplicate()` on the same instance ([co.datapipelines.datasources.pooling.LakeInstanceOwner]);
+ * the per-connection part is only the search-path postlude, which the driver keeps per
+ * session. Datasource isolation is
+ * the generation's: two datasources, or a retiring generation and its replacement, never share
+ * an instance, because the anonymous URL has no process-global name to collide on. A template
+ * then reads `SELECT … FROM nyc.mobility.hvfhv_zone_day`, or the bare `FROM hvfhv_zone_day`
+ * under the search-path rule below, and the engine's partition pruning applies to the
+ * underlying `read_parquet` scan unchanged.
  *
  * ## The namespace mapping (NamespaceShape.CATALOG_AND_SCHEMA)
  *

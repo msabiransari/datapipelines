@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.1 (single source of truth for every config key)
+**Status:** v1.20 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-08-07
+**Last updated:** 2026-09-17
 
 ---
 
@@ -360,6 +360,8 @@ The contract is environment variables, in **two files**: `deploy/env/defaults.en
 ### 3.24 Lake datasource engine limits (dp-lake)
 
 A `LAKE` datasource runs its queries **on the app's own box** — DuckDB is embedded in the app process, so its memory, threads and spill disk are operator knobs, not someone else's infrastructure. These are **datasource properties** (`properties.dialect.*`, set per datasource through the REST API or a bootstrap datasources file — [Datasources §12.1](datasources.md)), **not** `datapipelines.*` keys: they do not belong in `application.yml` or an env file, they are validated per key at save time (an unknown key or a bad value is refused), and a change takes effect at the datasource's next pool build, with no app restart. The existing execution bounds apply unchanged beside them: the result row cap and `node-query-timeout-seconds`.
+
+**Scope: one engine per datasource pool, shared by its connections (152).** Each LAKE datasource pool build opens ONE embedded DuckDB instance that every pooled connection joins ([Datasources §5.2](datasources.md#52-pool-lifecycle)); the three properties below are applied once to that instance and are ONE budget for the pool — `properties.hikari.maximumPoolSize` does not multiply them, and concurrent queries on the datasource share them. Size the box for `memory_limit` × the number of LAKE datasources on the instance (each has its own engine), with headroom for a retiring pool's engine while it drains after a datasource save. The engine's file cache lives with that instance, so a warm lake stays warm across HikariCP's routine connection replacement; a datasource save or a lake-table registration rebuilds the pool and starts a fresh engine, cold.
 
 | Datasource property | Default | Semantics |
 |---|---|---|
@@ -769,6 +771,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.20 | 152 LAKE engine scope (#128) | **§3.24 gains the resource-scope paragraph**: a LAKE datasource pool owns ONE embedded DuckDB instance shared by all its pooled connections, so `memory_limit` / `threads` / `temp_directory` are one budget per datasource pool (not per connection, not multiplied by `maximumPoolSize`), the sizing rule is per LAKE datasource on the instance plus a draining generation's headroom, and the file cache survives Hikari's connection replacement but not a pool rebuild. No key added or changed. Status line re-synced to the changelog (it read v1.1 above rows that ended at v1.18) |
 | 2026-09-16 | v1.19 | 149 / #125 node_progress cadence | §3.2 gains **`datapipelines.executor.progress-sample-interval-seconds`** (`1`): the floor between two periodic `node_progress` samples of one operation; first entries into a state and the terminal sample are never throttled by it. Mirrored in `application.yml`, `defaults.env`, `secrets.env.example`, `compose.yml`; `WebPropertiesSpecDriftTest` pins the default. |
 | 2026-09-14 | v1.18 | 137 mail notices | New **§3.27 Mail**: `datapipelines.mail.host` / `port` (587) / `username` / `password` / `starttls` (true, required-not-opportunistic) / `from` / `reply-to` (empty = from) / `ops-to` (comma list) / `message-stream` (Postmark's optional header). **No `enabled` key — mail is on exactly when `host` and `from` are both set.** §5 template block appended after `duckdb:`; §7 gains the shape rules (host↔from, ops-to without host, mail on without `auth.base-url`, port range, from is an address) and the two `hardened` refusals (`starttls` must be true; a username needs a password) — checks 23 and 24 |
 | 2026-09-08 | v1.17 | 091 keys | **§3.19: `datapipelines.deployment.promotion.server-key` is DEPRECATED** in favour of a `server`-kind API key ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) — mintable by an admin on the API screen, expiring, revocable, rotatable without a restart, and visible in the key list. Both credentials are accepted for one release; the configured value is compared FIRST (so a deployment that has not migrated pays no database read) and its presence raises one WARN at boot. §7 gains that rule (check 23). Fail-closed is unchanged and now has two halves: no configured value AND no live `server` key ⇒ every push refused. |

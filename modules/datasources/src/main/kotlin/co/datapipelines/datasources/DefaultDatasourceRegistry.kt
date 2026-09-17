@@ -63,8 +63,8 @@ class DefaultDatasourceRegistry(
     private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
     /**
      * 109 §A — the write seam for per-table view-creation outcomes, recorded from inside the
-     * pool build on TRANSITIONS only (the applier in `LakeViewApplyingDataSource` compares
-     * against the state the pool was built with). The assembling layer implements it over
+     * pool build on TRANSITIONS only (the `LakeInstanceInitializer` compares against the state
+     * the pool was built with). The assembling layer implements it over
      * `LakeTableRepository.recordViewOutcome`.
      */
     private val lakeViewRecorder: LakeViewOutcomeRecorder = LakeViewOutcomeRecorder.NONE,
@@ -97,14 +97,15 @@ class DefaultDatasourceRegistry(
      * and the `pool_build` audit event is emitted exactly there, on the same at-most-once path.
      *
      * For a LAKE datasource the factory also reads the dp-lake registry ([lakeTables]) and
-     * builds 109 §A's per-table-isolated view init ([LakeViewStatements.planForTables] applied
-     * by `LakeViewApplyingDataSource` per physical connection, a failing view recorded on its
-     * registry row through [lakeViewRecorder] and skipped) — captured into the pool HERE, at
-     * pool build, which is exactly why a registry mutation must retire the pool for a new table
-     * to become visible: [retirePool] drops the cached pool and the next [poolFor] re-runs this
-     * factory against the fresh rows. Nothing else caches the init plan — this method bypasses
-     * the metadata cache by design (the credential reason above), so retirement alone is the
-     * whole rebuild mechanism.
+     * builds 109 §A's per-table-isolated view init ([LakeViewStatements.planForTables], applied
+     * ONCE per pool generation on the generation's retained DuckDB instance owner — 152, #128 —
+     * a failing view recorded on its registry row through [lakeViewRecorder] and skipped) —
+     * captured into the pool HERE, at pool build, which is exactly why a registry mutation must
+     * retire the pool for a new table to become visible: [retirePool] drops the cached pool and
+     * the next [poolFor] re-runs this factory, opening a NEW instance generation against the
+     * fresh rows. Nothing else caches the init plan — this method bypasses the metadata cache
+     * by design (the credential reason above), so retirement alone is the whole rebuild
+     * mechanism: the old generation's instance drains under §5.2 and is released with it.
      */
     private val poolManager =
         ConnectionPoolManager(
