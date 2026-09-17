@@ -188,28 +188,7 @@ class WebEventEmitterTest {
                     persistenceDispatcher = Dispatchers.Default,
                 )
             emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
-            val snapshot =
-                co.datapipelines.executor.OperationSnapshot(
-                    nodeId = "n1",
-                    attempt = 1,
-                    sequence = 1,
-                    kind = co.datapipelines.executor.OperationKind.STAGE,
-                    destination =
-                        co.datapipelines.executor.OperationDestination
-                            .tempdb("t"),
-                    state = co.datapipelines.executor.OperationState.WRITING,
-                    startedAt = NOW,
-                    observedAt = NOW.plusMillis(400),
-                    elapsedMs = 400,
-                    timingsMs = mapOf(co.datapipelines.executor.OperationPhase.WRITING to 300L),
-                    rowsFetched = 10,
-                    rowsWritten = 10,
-                    batchesWritten = 1,
-                    committed = null,
-                    rolledBack = null,
-                    childExecutionId = null,
-                )
-            emitter.emit(co.datapipelines.events.NodeProgress(executionId, snapshot))
+            emitter.emit(co.datapipelines.events.NodeProgress(executionId, writingSample()))
 
             types shouldBe listOf(SseEventType.EXECUTION_STARTED, SseEventType.NODE_PROGRESS)
             payloads[1].contains("\"state\":\"writing\"") shouldBe true
@@ -219,6 +198,28 @@ class WebEventEmitterTest {
             stream.isTerminal shouldBe false
             verify(exactly = 0) { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
         }
+
+    private fun writingSample() =
+        co.datapipelines.executor.OperationSnapshot(
+            nodeId = "n1",
+            attempt = 1,
+            sequence = 1,
+            kind = co.datapipelines.executor.OperationKind.STAGE,
+            destination =
+                co.datapipelines.executor.OperationDestination
+                    .tempdb("t"),
+            state = co.datapipelines.executor.OperationState.WRITING,
+            startedAt = NOW,
+            observedAt = NOW.plusMillis(400),
+            elapsedMs = 400,
+            timingsMs = mapOf(co.datapipelines.executor.OperationPhase.WRITING to 300L),
+            rowsFetched = 10,
+            rowsWritten = 10,
+            batchesWritten = 1,
+            committed = null,
+            rolledBack = null,
+            childExecutionId = null,
+        )
 
     @Test
     fun `error_json is the same error object the wire carried - record, catalog fields and correlation id`() =

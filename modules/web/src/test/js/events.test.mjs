@@ -152,3 +152,34 @@ test("the auto-scroll pin: set by the scroll listener, read by the appender", ()
   log.setPinned(false);
   assert.equal(log.userPinned, false, "back at the bottom — following resumes");
 });
+
+// 149 — a node_progress row names the measured state, the destination and the counts.
+test("node_progress: state, destination and counts; a terminal sample names the commit", () => {
+  const ev = loadEvents();
+  const live = ev.formatEvent("node_progress", {
+    node_id: "trips_by_borough",
+    operation: "stage",
+    destination: { kind: "tempdb", table: "trips_by_borough" },
+    state: "writing",
+    rows_fetched: 12000,
+    rows_written: 11000,
+    elapsed_ms: 5301,
+  }, CTX);
+  assert.equal(live.node, "trips_by_borough");
+  assert.equal(live.text, "writing → tempdb.trips_by_borough · 12,000 fetched · 11,000 written");
+  assert.equal(live.duration, "5.3 s");
+  const waiting = ev.formatEvent("node_progress", { node_id: "x", operation: "stage", destination: { kind: "tempdb", table: "t" }, state: "waiting_output" }, CTX);
+  assert.equal(waiting.text, "waiting for tempdb connection");
+  const done = ev.formatEvent("node_progress", {
+    node_id: "x", operation: "writeback", destination: { kind: "datasource", datasource: "pg", table: "out" },
+    state: "completed", rows_written: 42, committed: true, elapsed_ms: 900,
+  }, CTX);
+  assert.equal(done.text, "completed → pg.out · 42 written · committed");
+  const rolled = ev.formatEvent("node_progress", {
+    node_id: "x", operation: "writeback", destination: { kind: "datasource", datasource: "pg", table: "out" },
+    state: "failed", rows_written: 3000, committed: false, rolled_back: true,
+  }, CTX);
+  assert.equal(rolled.text, "failed → pg.out · 3,000 written · not committed, rolled back");
+  const ctas = ev.formatEvent("node_progress", { node_id: "x", operation: "ctas", destination: { kind: "tempdb", table: "t" }, state: "executing" }, CTX);
+  assert.equal(ctas.text, "querying and materializing (one statement) → tempdb.t");
+});

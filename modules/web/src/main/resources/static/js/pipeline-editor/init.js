@@ -114,6 +114,10 @@
          is gone; Details is the dock's landing tab. */
       dock: window.PEDock.createDock(),
       eventsLog: window.PEEvents.createEventsLog(),
+      // 149: the node-operation view model (node-ops.js) — every lifecycle and
+      // node_progress event reduces into it (sse.js); the cards, the Details pane and
+      // the a11y list read it; 151's output connector will too.
+      nodeOps: window.PENodeOps ? window.PENodeOps.createNodeOps() : null,
       isExecuting: false,
       executionId: null,
       /* 080 §D: the top bar's run status — dot + elapsed while running, the
@@ -465,6 +469,27 @@
         rows.push(["Timeout", self.nodeTimeoutText(node)]);
         var state = self.nodeStates[node.id];
         if (state && state !== "idle") rows.push(["Last run", state]);
+        // 149: the measured operation — what the node is doing (or did), where its output
+        // went, the cumulative counts, the per-state time share and whether the write
+        // committed. Only what was observed: an operation without a terminal sample says
+        // "Commit not observed", never "Committed"; there is no percentage to show.
+        self.operationRows(node.id).forEach(function (row) { rows.push(row); });
+        return rows;
+      },
+
+      /** The Details pane's operation rows for one node (149), from node-ops.js. */
+      operationRows: function (nodeId) {
+        var self = this;
+        var op = self.nodeOps && self.nodeOps.get ? self.nodeOps.get(nodeId) : null;
+        if (!op || !window.PENodeOps || op.state === "started") return [];
+        var d = window.PENodeOps.describe(op);
+        var rows = [];
+        rows.push(["Operation", (op.kind || "—") + (d.destinationText ? " → " + d.destinationText : "")]);
+        rows.push(["Progress", d.stateLabel + (d.elapsedText ? " · " + d.elapsedText : "")]);
+        if (d.countsText) rows.push(["Rows", d.countsText]);
+        if (d.phaseText) rows.push(["Time in", d.phaseText]);
+        if (d.commitText) rows.push(["Commit", d.commitText]);
+        if (op.childExecutionId) rows.push(["Child execution", op.childExecutionId]);
         return rows;
       },
 

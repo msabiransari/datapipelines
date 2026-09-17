@@ -63,7 +63,14 @@ class ExecutionControllerTest {
     private val browse = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
     private val pageController = ExecutionHistoryController(pipelines, browse)
     private val partialController = ExecutionHistoryPartialController(browse)
-    private val detailController = ExecutionDetailController(executions, pipelines, resultStore, resultUrls)
+    private val detailController =
+        ExecutionDetailController(
+            executions,
+            pipelines,
+            resultStore,
+            resultUrls,
+            mockk<co.datapipelines.executor.ExecutionEventRepository>().also { every { it.findByExecution(any()) } returns emptyList() },
+        )
     private val detailPartialController = ExecutionDetailPartialController(executions, resultStore, cursor, cancellation)
 
     private val owner = UUID.randomUUID()

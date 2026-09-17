@@ -4,6 +4,7 @@ import co.datapipelines.auth.Capability
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -28,6 +29,7 @@ class ExecutionDetailController(
     private val pipelines: PipelineRepository,
     private val resultStore: ResultStore,
     private val resultUrlFactory: ResultUrlFactory,
+    private val events: ExecutionEventRepository,
 ) {
     @GetMapping("/executions/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -68,6 +70,11 @@ class ExecutionDetailController(
 
         val nodeStats = record.nodeStatsJson?.let { ExecutorJson.mapper.readTree(it) }
         model.addAttribute("nodeStats", nodeStats)
+        // 149: what each node did, from the durable `node_progress` record. The row is
+        // workspace-scoped above (a 404 never reaches this read) and the event table is keyed
+        // by the execution, so the read adds no visibility question of its own. Beyond event
+        // retention the list is empty and the page says "not recorded" — never a guess.
+        model.addAttribute("nodeOperations", NodeOperationHistory.from(events.findByExecution(record.executionId)))
 
         // Design D6: children are ordinary execution rows, linked by the lineage columns — the
         // detail page shows the whole family (root + descendants) via the root's index.

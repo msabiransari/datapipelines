@@ -119,6 +119,18 @@
   </div>
 
   <div class="ds-card u-mb-lg">
+    <h2 class="ds-title u-mb-md">Node Operations</h2>
+    <th:block th:if="${nodeOperations != null && !nodeOperations.isEmpty()}">
+      <div th:replace="~{partials/execution-node-operations :: operations(${nodeOperations})}">node operations</div>
+    </th:block>
+    <th:block th:unless="${nodeOperations != null && !nodeOperations.isEmpty()}">
+      <div class="ds-empty">
+        <div class="ds-empty-description">No node operations recorded (the events have expired, or no node ran an operation).</div>
+      </div>
+    </th:block>
+  </div>
+
+  <div class="ds-card u-mb-lg">
     <h2 class="ds-title u-mb-md">Result</h2>
 
     <th:block th:if="${resultState == 'not-applicable'}">

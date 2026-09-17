@@ -169,6 +169,12 @@
     // the log and starts the top bar's clock (init.js owns both DOM effects).
     if (editor.logEvent) editor.logEvent(eventType, payload);
 
+    // 149: EVERY lifecycle event also reduces into the node-operation view model
+    // (node-ops.js) — the one place the cards, the Details pane and 151's output
+    // connector read what a node is doing. Reduced BEFORE the switch so a node's
+    // terminal event closes its operation before the card re-renders for it.
+    self.reduceOperation(eventType, payload);
+
     switch (eventType) {
       case "execution_started":
         if (payload.execution_id) self.executionId = payload.execution_id;
@@ -322,6 +328,31 @@
 
       default:
         break;
+    }
+  };
+
+  /**
+   * 149: feed the reducer and re-paint the node's operation line. Tolerant of a page
+   * without the reducer (the module is optional to this handler) and of a payload
+   * without a node id (execution-level events reduce for their side effect only).
+   */
+  SseHandler.prototype.reduceOperation = function (eventType, payload) {
+    var editor = this.editor;
+    var ops = editor.nodeOps;
+    if (!ops || typeof ops.reduce !== "function" || !payload || typeof payload !== "object") return;
+    ops.reduce(eventType, payload);
+    var describe = window.PENodeOps && window.PENodeOps.describe;
+    var paint = function (nodeId) {
+      var op = ops.get(nodeId);
+      var view = op && describe ? describe(op) : null;
+      if (editor.graph && editor.graph.setNodeOperation) editor.graph.setNodeOperation(nodeId, view);
+      if (window.a11yNodeOperation) window.a11yNodeOperation(nodeId, view ? view.a11yText : null);
+    };
+    if (payload.node_id) {
+      paint(payload.node_id);
+    } else {
+      // An execution-level event may have closed every open operation.
+      Object.keys(ops.all()).forEach(paint);
     }
   };
 
