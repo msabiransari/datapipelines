@@ -58,9 +58,12 @@ class H2StagingObserverTest {
                 val result = runBlocking { staging.stage(src.query("SELECT id FROM t ORDER BY id"), "stg", Dialect.H2, observer) }
                 result.rowsStaged shouldBe 5
             }
-            // 5 rows in batches of 2: three inserted batches, the last (1 row) short — exhausted.
+            // The CREATE TABLE lease first; then 5 rows in batches of 2: three inserted batches,
+            // the last (1 row) short — exhausted.
             observer.calls shouldContainExactly
                 listOf(
+                    "request",
+                    "acquired",
                     "fetch",
                     "fetched:2",
                     "request",
@@ -89,7 +92,7 @@ class H2StagingObserverTest {
             stagingOverConnections(UUID.randomUUID(), H2StagingProperties()).use { staging ->
                 runBlocking { staging.stage(src.query("SELECT id FROM t"), "stg", Dialect.H2, observer) }.rowsStaged shouldBe 0
             }
-            observer.calls shouldContainExactly listOf("fetch", "fetched:0", "request", "acquired", "written:0")
+            observer.calls shouldContainExactly listOf("request", "acquired", "fetch", "fetched:0", "request", "acquired", "written:0")
             observer.rowsSoFar shouldContainExactly listOf(0L)
         }
     }
@@ -103,7 +106,20 @@ class H2StagingObserverTest {
             runBlocking { staging.stageRows("stg", columns, rows, observer) }.rowsStaged shouldBe 4
         }
         observer.calls shouldContainExactly
-            listOf("fetch", "fetched:3", "request", "acquired", "written:3", "fetch", "fetched:1", "request", "acquired", "written:1")
+            listOf(
+                "request",
+                "acquired",
+                "fetch",
+                "fetched:3",
+                "request",
+                "acquired",
+                "written:3",
+                "fetch",
+                "fetched:1",
+                "request",
+                "acquired",
+                "written:1",
+            )
     }
 
     @Test

@@ -1,7 +1,8 @@
 package co.datapipelines.staging
 
 /**
- * What the batched drain reports at its measured boundaries (149; staging.md §4.3):
+ * What a stage reports at its measured boundaries (149; staging.md §4.3). The `CREATE TABLE`
+ * takes a lease first and reports it as steps 3–4; then, per batch:
  *
  *  1. [fetchStarted] — about to read the next batch off the SOURCE cursor (or the decoded
  *     sequence), holding no staging connection;

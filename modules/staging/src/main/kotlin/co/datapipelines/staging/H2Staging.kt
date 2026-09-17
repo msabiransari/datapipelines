@@ -97,7 +97,7 @@ class H2Staging internal constructor(
         val warnings = mapped.flatMap { it.warnings }.map { it.withBoundedSourceType() }
         val mappings = columns.map { LogicalTypeMapping(it.type, it.precision, it.scale) }
 
-        createStagedTable(tableName, columns)
+        createStagedTable(tableName, columns, observer)
         val rowsStaged = guardingPartialTable(tableName) { drainInto(tableName, columns, mappings, resultSet, observer) }
         recordStaged(rowsStaged)
         return StageResult(tableName, rowsStaged, columns, warnings)
@@ -113,7 +113,7 @@ class H2Staging internal constructor(
         // removed — the CHILD's caller-node result labels, read off a `SELECT … AS "whatever the
         // author typed"`. `total` + `TOTAL` must fail here exactly as they fail through a DQL node.
         StagingIdentifiers.validateColumnNames(columns.map { it.name })
-        createStagedTable(tableName, columns)
+        createStagedTable(tableName, columns, observer)
         // The sequence is lazy over the CHILD's result, so it is pulled in batches holding no
         // lease, exactly like a source cursor — a child-side fault of any shape surfaces
         // mid-insert and rolls the partial table back like every other failure.
@@ -193,15 +193,26 @@ class H2Staging internal constructor(
 
     // ------------------------------------------------------------ table ownership
 
-    /** Reserves [tableName] and creates it on a fresh lease; a refused create frees the reservation. */
+    /**
+     * Reserves [tableName] and creates it on a fresh lease; a refused create frees the reservation.
+     *
+     * The lease is reported to [observer] like an insert's (149): at capacity one, a node whose
+     * sibling holds the pool's only connection waits HERE, before its first batch, and an
+     * unobserved wait would read as a slow source query.
+     */
     private suspend fun createStagedTable(
         tableName: String,
         columns: List<ColumnSchema>,
+        observer: StageObserver,
     ) {
         synchronized(bookkeeping) { if (!stagedTables.add(tableName)) throw StagingTableAlreadyExistsException(tableName) }
         var created = false
         try {
-            pool.lease(LeaseKind.INTERNAL) { connection -> H2StagingSql.createTable(connection, tableName, columns) }
+            observer.connectionRequested()
+            pool.lease(LeaseKind.INTERNAL) { connection ->
+                observer.connectionAcquired()
+                H2StagingSql.createTable(connection, tableName, columns)
+            }
             created = true
         } finally {
             // Nothing was created (or it was someone else's table, §4.5): give the name back so the
