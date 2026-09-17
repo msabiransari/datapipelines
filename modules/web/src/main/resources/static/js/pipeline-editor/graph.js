@@ -13,6 +13,69 @@
    * apologise for. */
   var TYPE_ICONS = { DQL: "db", DML: "table", DDL: "boxes", PIPELINE: "workflow", CALCULATOR: "calculator" };
 
+  /* 150 — the execution boundaries (issue #126): view-only Start and End markers,
+   * derived from the authored graph, never authored. Roots are nodes with no
+   * depends_on, leaves nodes with no dependents; Start connects to every root,
+   * every leaf connects to End. They are NOT executable nodes: no NodeType, no
+   * authored JSON, no scheduling, no statistics — and no user-facing controls
+   * (nothing to select into Details, no template/edit affordances).
+   *
+   * Identities are collision-safe BY CONSTRUCTION, not by convention: a reserved
+   * base name grown with a leading "_" while it collides with an authored id.
+   * An authored node literally named "__execution_start__" merely shifts the
+   * synthetic's id; the element KIND is always data (`kind: "boundary"`), never
+   * guessed from id text. Synthetic ids never enter editor.nodeStates — marker
+   * state is internal to the graph (setMarkerState), so the 135 sweep and every
+   * nodeStates consumer see authored nodes only. */
+  var BOUNDARY_BASE = { start: "__execution_start__", end: "__execution_end__" };
+
+  /* The End marker's word is the AUTHORITATIVE execution outcome; it never moves
+   * on a node event (a finished branch is not a finished execution). */
+  var MARKER_LABELS = {
+    start: { idle: "Start", running: "Start", success: "Start", failed: "Start", aborted: "Start" },
+    end: { idle: "End", running: "End", success: "Finished", failed: "Failed", aborted: "Stopped" },
+  };
+
+  var MARKER_ICONS = { start: "play", end: "square" };
+
+  /** Deterministic collision-safe synthetic id for a reserved base name. */
+  function syntheticId(nodes, base) {
+    var taken = {};
+    for (var i = 0; i < nodes.length; i++) taken[nodes[i].id] = true;
+    var id = base;
+    while (taken[id]) id = "_" + id;
+    return id;
+  }
+
+  /** The synthetic ids for one authored set — pure, so tests and render agree. */
+  function boundaryIdsFor(nodes) {
+    return {
+      start: syntheticId(nodes, BOUNDARY_BASE.start),
+      end: syntheticId(nodes, BOUNDARY_BASE.end),
+    };
+  }
+
+  /** Roots have no dependencies; leaves have no dependents. Authored nodes only. */
+  function rootsAndLeaves(nodes) {
+    var hasDeps = {};
+    var dependedOn = {};
+    var i, j;
+    for (i = 0; i < nodes.length; i++) {
+      var deps = nodes[i].depends_on;
+      if (deps && deps.length) {
+        hasDeps[nodes[i].id] = true;
+        for (j = 0; j < deps.length; j++) dependedOn[deps[j]] = true;
+      }
+    }
+    var roots = [];
+    var leaves = [];
+    for (i = 0; i < nodes.length; i++) {
+      if (!hasDeps[nodes[i].id]) roots.push(nodes[i].id);
+      if (!dependedOn[nodes[i].id]) leaves.push(nodes[i].id);
+    }
+    return { roots: roots, leaves: leaves };
+  }
+
   /* The tile's accent pair per node type, as the CSS custom-property suffixes of the
    * 080 app-token block. The card sets `--type`/`--type-bg` from these and every
    * state/rule below reads the pair back — the card never names a colour itself. */
@@ -460,6 +523,8 @@
    */
   function buildCardHtml(data) {
     if (!data) return "";
+    // 150: the boundaries render their own pill, never a node card.
+    if (data.kind === "boundary") return buildMarkerHtml(data);
     var esc = escapeHtml;
     var state = data.state || "idle";
     var h =
@@ -518,6 +583,35 @@
   }
 
   /**
+   * 150 — the boundary marker's pill. Distinct from a node card ON PURPOSE: one
+   * row (glyph, state dot, word), no ports, no open button, no facts, no progress
+   * line, no run numbers — a marker has nothing to open and nothing that ran. The
+   * `.pe-card` root class is deliberate: syncCardHeights measures `.pe-card`s to
+   * size the Cytoscape box, and the pill must be its own measured box. The state
+   * class (`pe-card-success` …) drives the same accent tokens as the cards; the
+   * `aria-label` names the boundary and its outcome for the accessible tree.
+   * Pure: driven from the element data like the card.
+   */
+  function buildMarkerHtml(data) {
+    var esc = escapeHtml;
+    var state = data.state || "idle";
+    var side = data.boundary === "end" ? "end" : "start";
+    var word = (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state;
+    var aria =
+      side === "start"
+        ? "Execution start" + (state === "idle" ? "" : " — running")
+        : "Execution end" + (state === "idle" ? "" : " — " + word.toLowerCase());
+    return (
+      '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + ' pe-card-' + esc(state) +
+      '" data-node-id="' + esc(data.id) + '" role="img" aria-label="' + esc(aria) + '">' +
+      '<div class="pe-marker-row"><span class="pe-marker-icon">' + iconSvg(MARKER_ICONS[side], "ds-icon-xs") +
+      "</span>" +
+      '<span class="pe-card-state"><i></i><span class="pe-card-st">' + esc(word) + "</span></span></div>" +
+      "</div>"
+    );
+  }
+
+  /**
    * What flowed OUT of a completed node, for the edge label: a SQL node's rows
    * (`0 rows` is a fact worth showing — the node ran and emitted nothing), a
    * calculator's keys (its rows_out is 0 by construction and would have read
@@ -561,6 +655,10 @@
   PipelineGraph.prototype.render = function () {
     var self = this;
     var elements = this.buildElements();
+    // 150: the synthetic ids this render derives — setMarkerState resolves the
+    // markers through them. Recomputed per render; the authored set is fixed by
+    // the time a run streams.
+    this._boundaryIds = boundaryIdsFor(this.nodes);
 
     this.cy = cytoscape({
       container: document.getElementById(this.containerId),
@@ -1352,6 +1450,39 @@
       }
     }
 
+    // 150: the execution boundaries — view-only, derived, never authored. Only a
+    // graph WITH nodes has boundaries: an empty or invalid draft keeps its honest
+    // empty/validation view. The authored array above is untouched; the markers
+    // exist only as elements of the rendered graph.
+    if (nodes.length) {
+      var ids = boundaryIdsFor(nodes);
+      var bounds = rootsAndLeaves(nodes);
+      elements.push({
+        group: "nodes",
+        data: { id: ids.start, kind: "boundary", boundary: "start", state: "idle" },
+        classes: "idle boundary",
+      });
+      elements.push({
+        group: "nodes",
+        data: { id: ids.end, kind: "boundary", boundary: "end", state: "idle" },
+        classes: "idle boundary",
+      });
+      bounds.roots.forEach(function (rootId) {
+        elements.push({
+          group: "edges",
+          data: { id: ids.start + "->" + rootId, source: ids.start, target: rootId, kind: "boundary" },
+          classes: "boundary",
+        });
+      });
+      bounds.leaves.forEach(function (leafId) {
+        elements.push({
+          group: "edges",
+          data: { id: leafId + "->" + ids.end, source: leafId, target: ids.end, kind: "boundary" },
+          classes: "boundary",
+        });
+      });
+    }
+
     return elements;
   }
 
@@ -1414,6 +1545,10 @@
     var label = edgeLabelFor(stats);
     if (label !== null) {
       node.outgoers("edge").forEach(function (e) {
+        // 150: a boundary connector is not a transfer — the rows flowing out of a
+        // leaf say nothing about what reached End, and a count on the leaf→End
+        // line is exactly the misread 151 exists to prevent.
+        if (e.data("kind") === "boundary") return;
         e.data("rowLabel", label);
         e.addClass("rows");
       });
@@ -1486,9 +1621,19 @@
       node.data("op", null);
       node.data("opCounts", null);
       node.data("opState", null);
-      if (self.editor && self.editor.nodeStates) self.editor.nodeStates[node.id()] = "idle";
+      // 150: the markers reset with everything else — Start goes neutral until
+      // execution_started re-arms it, End loses the previous run's outcome word.
+      if (node.data("kind") === "boundary") {
+        var side = node.data("boundary") === "end" ? "end" : "start";
+        node.data("label", MARKER_LABELS[side].idle);
+      }
+      if (self.editor && self.editor.nodeStates && node.data("kind") !== "boundary") {
+        self.editor.nodeStates[node.id()] = "idle";
+      }
       self.updateMinimapNode(node.id(), "idle");
-      if (typeof window !== "undefined" && window.a11yNodeState) window.a11yNodeState(node.id(), "idle");
+      if (typeof window !== "undefined" && window.a11yNodeState && node.data("kind") !== "boundary") {
+        window.a11yNodeState(node.id(), "idle");
+      }
     });
     self.cy.edges().forEach(function (edge) {
       edge.removeClass("active");
@@ -1496,6 +1641,28 @@
       edge.removeClass("rows");
       edge.data("rowLabel", "");
     });
+  };
+
+  /**
+   * 150: the boundaries' state, internal to the graph. The End marker moves ONLY
+   * on the execution's authoritative terminal event — never on a node event —
+   * and its word is that outcome (Finished / Failed / Stopped). Start runs while
+   * the execution does. Deliberately NOT editor.nodeStates: the markers are not
+   * nodes, the 135 sweep must not sweep them, and no nodeStates consumer may see
+   * a synthetic id. The minimap bar follows (it is keyed by node id), the a11y
+   * node list stays authored-only.
+   */
+  PipelineGraph.prototype.setMarkerState = function (side, state) {
+    if (!this.cy || !this._boundaryIds) return;
+    var id = this._boundaryIds[side];
+    if (!id) return;
+    var node = this.findNode(id);
+    if (!node || node.data("kind") !== "boundary") return;
+    NODE_STATES.forEach(function (s) { node.removeClass(s); });
+    node.addClass(state);
+    node.data("state", state);
+    node.data("label", (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state);
+    this.updateMinimapNode(id, state);
   };
 
   PipelineGraph.prototype.setEdgesToNodeActive = function (nodeId, active) {
@@ -1606,6 +1773,10 @@
     edgeControlPoints: edgeControlPoints,
     edgeRouteFor: edgeRouteFor,
     projectControlPoints: projectControlPoints,
+    syntheticId: syntheticId,
+    boundaryIdsFor: boundaryIdsFor,
+    rootsAndLeaves: rootsAndLeaves,
+    MARKER_LABELS: MARKER_LABELS,
     ARROW_SCALE: ARROW_SCALE,
     ARROW_BASE_PX: ARROW_BASE_PX,
     EDGE_FORWARD_MIN_DX: EDGE_FORWARD_MIN_DX,

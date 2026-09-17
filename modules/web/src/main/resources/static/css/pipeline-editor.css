@@ -836,6 +836,54 @@
   border-color: var(--edge-done, #15803d);
 }
 
+/* ---- Execution boundary markers (150) ----
+ * View-only Start and End pills, derived from the graph — never authored, never
+ * executable, nothing to open. Distinct from a card ON PURPOSE: opaque pill with
+ * a dashed border (a boundary is not a thing), one row — glyph, state dot, word.
+ * The state dot rides the same `.pe-card-state` accent tokens as the cards, so
+ * End's word colours with the authoritative outcome (Finished/Failed/Stopped)
+ * and reduced-motion stops the Start pulse with every other animation. */
+.pe-card-boundary {
+  min-height: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--surface-raised, #fff);
+  border: 1px dashed var(--border-default, #8e94a1);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(15 23 42 / 0.06));
+}
+
+.pe-marker-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pe-marker-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted, #64748b);
+}
+
+.pe-card-boundary-start .pe-marker-icon {
+  color: var(--brand, #2563eb);
+}
+
+.pe-card-boundary .pe-card-state {
+  font-size: var(--pe-card-fs-sm, 11.5px);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--text-secondary, #334155);
+}
+
+.pe-card-boundary .pe-card-state i {
+  width: 6px;
+  height: 6px;
+}
+
 /* The expand affordance: the route into the dock's Details tab, visible on hover
    (the JS-toggled class) and on focus. */
 .pe-card-open {

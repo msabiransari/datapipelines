@@ -53,7 +53,9 @@ test("buildElements: every edge runs dependency -> dependent, for every node kin
     { id: "answer3", type: "PIPELINE", pipeline: { name: "child2", version: 1 }, output: { target: "caller" }, depends_on: ["src_pipeline"] },
     { id: "uses_calc", type: "DQL", source: "tempdb", depends_on: ["src_calc"], output: { target: "tempdb", table: "t2" } },
   ];
-  const edges = buildElements(nodes).filter((e) => e.group === "edges");
+  // 150: the derived boundary connectors are a different element kind — this file's
+  // invariant is about the TRANSFER edges depends_on produces.
+  const edges = buildElements(nodes).filter((e) => e.group === "edges" && e.data.kind !== "boundary");
   assert.equal(edges.length, 5, "one edge per depends_on entry");
   const byId = Object.fromEntries(edges.map((e) => [e.data.id, e.data]));
   assert.deepEqual(byId["src_dql->answer"], { id: "src_dql->answer", source: "src_dql", target: "answer" });
@@ -82,7 +84,7 @@ test("buildElements: a CALCULATOR's $ref inputs emit NO edge on their own", () =
     { id: "reads_ref_only", type: "CALCULATOR", kind: "const", context_key: "c", inputs: { q: "$f" }, depends_on: [] },
     { id: "reads_ref_declared", type: "CALCULATOR", kind: "const", context_key: "c2", inputs: { q: "$f" }, depends_on: ["fiscal"] },
   ];
-  const edges = buildElements(nodes).filter((e) => e.group === "edges");
+  const edges = buildElements(nodes).filter((e) => e.group === "edges" && e.data.kind !== "boundary");
   assert.equal(edges.length, 1);
   assert.equal(edges[0].data.id, "fiscal->reads_ref_declared");
 });

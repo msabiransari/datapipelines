@@ -71,7 +71,11 @@ test("buildElements emits a type class per node type", () => {
   assert.match(els[1].classes, /\btype-dml\b/);
   assert.match(els[2].classes, /\btype-ddl\b/);
   assert.match(els[3].classes, /\bpipeline-node\b/);
-  els.forEach((e) => assert.match(e.classes, /\bidle\b/));   // §6.2: idle is explicit
+  // 150: the derived Start/End markers are elements too — this invariant is about
+  // the AUTHORED nodes.
+  els
+    .filter((e) => e.group === "nodes" && e.data.kind !== "boundary")
+    .forEach((e) => assert.match(e.classes, /\bidle\b/));   // §6.2: idle is explicit
 });
 
 test("the caller node is marked — omitted output means caller (contract §4.7)", () => {
@@ -111,7 +115,7 @@ test("edges are still built from depends_on", () => {
   const els = loadGraph().buildElements([
     { id: "a", type: "DQL" }, { id: "b", type: "DQL", depends_on: ["a"] },
   ]);
-  const edges = els.filter((e) => e.group === "edges");
+  const edges = els.filter((e) => e.group === "edges" && e.data.kind !== "boundary");
   assert.equal(edges.length, 1);
   assert.deepEqual([edges[0].data.source, edges[0].data.target], ["a", "b"]);
 });
