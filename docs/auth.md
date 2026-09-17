@@ -1373,6 +1373,8 @@ The rule is mechanical, not a convention: every repository read that a caller-su
 
 `workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect. One operation is judged WITHOUT a workspace context for a session: `WORKSPACES_READ` — "which workspaces do I belong to" is meaningful when the answer is none, and it is how a zero-membership person reaches the no-workspace page ([UI §4.13](ui-screens.md#413-workspaces-workspaces-design-9-members-and-deactivation-rewritten-by-114)) instead of a JSON 404. A key never gets that exception: a key with no context is a key whose workspace is gone, and it stays the 404.
 
+A second null-context exception stands beside it (#113): a **super admin session** keeps the INSTANCE verbs — the operations whose capability is `super_admin` (create / deactivate / reactivate / delete a workspace, user administration, instance datasources and their grants) — when NO workspace is reachable at all. Those operations are instance-level by construction: none of them reads or writes a workspace's content, and refusing them stranded the one principal who could repair an empty deployment (deactivate the last active workspace, and even the reactivate verb answered `workspace.not_found`). The capability evidence is the user row's `is_admin` flag, re-read per request through the auth cache — not a context the request does not have. Every workspace-scoped operation stays the 404 for that principal, and a key never gets this exception either: the `admin` scope floor is unobtainable by a key (§7.5), so the credential axis refuses first.
+
 ### 11A.2 Super admins
 
 A super admin is an **implicit member of every workspace** (D-R8) and resolves any workspace through the SAME path everyone else does — no bypass branch, so there is no second code path to keep correct. Every action they take in a workspace where they hold no explicit membership is audited as `auth.super_admin_acting` with `acting_via=super_admin`, reads included (§10.1 says why).
@@ -1390,6 +1392,8 @@ A deactivated workspace is not selectable by a super admin either: [§11A.3](#11
 5. a super admin's listing shows it greyed with the date.
 
 To a MEMBER a deactivated workspace is indistinguishable from one that never existed, so deactivation is not a signal anybody can read. Reactivation is a super-admin verb and is audited.
+
+There is deliberately NO last-active-workspace guard: decommissioning the final workspace is a legitimate operator act, and it is recoverable — with zero active workspaces the super admin's session resolves no workspace at all, and §11A.1's second null-context exception (#113) keeps the instance verbs, reactivation included, available to exactly that principal.
 
 ### 11A.4 Keys
 

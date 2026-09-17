@@ -419,7 +419,11 @@ object ScopeMatrix {
      *
      * A null [context] means the principal resolved no workspace — zero memberships, or a
      * deactivated one. Every workspace-scoped operation is refused, with `workspace.not_found`:
-     * D-R5's rule is that a workspace you cannot reach is a workspace that does not exist.
+     * D-R5's rule is that a workspace you cannot reach is a workspace that does not exist. Two
+     * session-only exceptions stand beside it: `WORKSPACES_READ` ("which workspaces do I belong
+     * to" is meaningful when the answer is none — how the no-workspace page is reached), and the
+     * super admin's INSTANCE verbs (the `SUPER_ADMIN`-capability operations — #113's
+     * empty-instance recovery path; workspace-scoped operations stay refused even for them).
      */
     fun allowed(
         principal: AuthenticatedPrincipal,
@@ -482,12 +486,32 @@ object ScopeMatrix {
 
         // D-R5: no reachable workspace means the workspace does not exist, for this caller.
         //
+        // Both null-context exceptions below are SESSIONS-ONLY: a key always pins a context, so
+        // a key never arrives here, and on a key the 404 the rule promises stays.
+        val sessionWithoutContext = context == null && principal.authMethod != AuthMethod.API_KEY
+
         // ONE operation is meaningful with no workspace at all: listing the workspaces you
         // belong to — which is also how a zero-membership person reaches the no-workspace page
         // (ui-screens §4.13, 114 §C.3a) instead of a JSON 404 on the only screen that could
-        // explain their state. Sessions only: a key always pins a context, so a key never
-        // arrives here, and `WORKSPACES_READ` on a key stays the 404 the rule promises.
-        if (context == null && operationName == RestOperation.WORKSPACES_READ.name && principal.authMethod != AuthMethod.API_KEY) {
+        // explain their state.
+        if (sessionWithoutContext && operationName == RestOperation.WORKSPACES_READ.name) {
+            return Decision.Allowed
+        }
+
+        // #113 — the empty-instance recovery carve-out. A super admin with NO reachable
+        // workspace (every workspace deactivated — D-R10 has no last-active guard, and that is
+        // deliberate: decommissioning the final workspace is a legitimate operator act) keeps
+        // the INSTANCE verbs. The operations whose capability is SUPER_ADMIN are instance-level
+        // by construction — create / deactivate / reactivate / delete a workspace, user
+        // administration, instance datasources and their grants; none reads or writes a
+        // workspace's content — and refusing them stranded the one principal who can repair an
+        // empty deployment behind the 404 below (witnessed end-to-end by
+        // SuperAdminRecoveryE2eTest: deactivate the last active workspace, then be unable to
+        // reactivate or create one). The capability evidence is the user row's admin flag, not
+        // a context this request does not have. A key holding `admin` scope is impossible since
+        // O-2, so the credential-axis check has already refused every one of these operations
+        // to a key. Workspace-scoped operations keep the 404.
+        if (sessionWithoutContext && capability == Capability.SUPER_ADMIN && principal.isSuperAdmin) {
             return Decision.Allowed
         }
         if (context == null) {

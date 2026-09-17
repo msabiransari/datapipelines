@@ -101,10 +101,15 @@
     </div>
   </div>
 
-  <div class="te-body">
+  <div class="te-body"
+       th:with="railVisible=${canAuthor == true or (template?.imports != null and !template.imports.isEmpty())}"
+       th:classappend="${railVisible} ? '' : 'te-body-no-rail'">
     <!-- LEFT: the render-context rail. Keyboard/focus order is context → source →
-         Preview (041 gate 4) — this rail precedes the source column in the DOM. -->
-    <div class="te-rail">
+         Preview (041 gate 4) — this rail precedes the source column in the DOM.
+         #112: when the rail would have NO content (a reader — the Render Context panel is
+         author-only — on a template with no imports), it is not rendered at all and
+         `.te-body-no-rail` collapses the grid to one column, so the source takes the width. -->
+    <div class="te-rail" th:if="${railVisible}">
       <!-- 143 (T315): the render context is an AUTHOR's panel — it exists to feed Preview,
            whose POST is MUTATE. A reader's rail keeps the Imports table below (a read). -->
       <div th:if="${canAuthor == true}">
@@ -158,8 +163,11 @@
     <!-- 141 §B — the rail's resize handle, centred in the gap between the rail and the
          source column. The `.tplx-splitter` contract (104 §C): `role="separator"` with the
          orientation set here so the control is correct in the DOM the moment it exists;
-         splitter.js keeps aria-valuemin/max/now moving and sets the shared drag/reset hint. -->
+         splitter.js keeps aria-valuemin/max/now moving and sets the shared drag/reset hint.
+         #112: no rail, no handle — a separator with one pane would be a control that
+         resizes nothing. -->
     <div class="te-side-splitter" data-splitter="template-editor-side" role="separator"
+         th:if="${railVisible}"
          aria-orientation="vertical" tabindex="0" aria-label="Resize context rail"></div>
 
     <!-- RIGHT: the source column — the editor (~2/3) and, below it sharing the

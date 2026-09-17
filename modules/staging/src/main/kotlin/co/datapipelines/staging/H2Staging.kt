@@ -398,8 +398,11 @@ class H2Staging internal constructor(
     }
 
     /**
-     * Compares the **measured** footprint against the budget (§8.2), polled once after a staging
-     * operation completes — not per batch. The reading is kilobytes; the budget is megabytes.
+     * Compares the **measured** footprint against the budget (§8.2) with the accurate,
+     * post-GC reading. Called after each [execute] and unconditionally at drain completion;
+     * mid-drain it runs only when [checkBudgetIfDue]'s cheap non-collecting reading says the
+     * budget might be blown — never per batch, because THIS reading forces a `System.gc()`.
+     * The reading is kilobytes; the budget is megabytes.
      */
     private fun checkMemoryBudget() {
         val usedKb = measureUsedHeapKb()
