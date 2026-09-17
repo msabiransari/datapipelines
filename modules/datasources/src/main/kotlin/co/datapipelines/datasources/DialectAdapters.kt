@@ -551,7 +551,8 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  *
  * Every lake pool generation gets the engine limits as `SET` statements (after the
  * extension/secret/attach setup, before phase B's views): `memory_limit`, optional `threads`,
- * `temp_directory` (a unique path under the JVM temp directory by default), and `preserve_insertion_order = false` ALWAYS — insertion
+ * `temp_directory` (a unique path under the JVM temp directory for anonymous engines by default),
+ * and `preserve_insertion_order = false` ALWAYS — insertion
  * order costs the engine memory and temp-file discipline it would otherwise spend on a
  * guarantee a read-only lake never asks for.
  *
@@ -648,7 +649,7 @@ class LakeDialectAdapter(
             addAll(extensionStatements(dialectProperties))
             secretStatement(datasource, dialectProperties)?.let { add(it) }
             addAll(attachStatements(dialectProperties))
-            addAll(limitStatements(dialectProperties))
+            addAll(limitStatements(datasource))
         }
 
     override fun validateDialectProperties(properties: Map<String, Any?>): ValidationResult {
@@ -677,23 +678,31 @@ class LakeDialectAdapter(
      * is a bare integer, and `temp_directory` carries none of the refused characters — so the
      * interpolation into the two string literals cannot break out of them.
      */
-    private fun limitStatements(properties: Map<String, Any?>): List<String> =
+    private fun limitStatements(datasource: Datasource): List<String> =
         buildList {
+            val properties = datasource.properties.dialect
             val memoryLimit = properties["memory_limit"]?.toString()?.trim()
             add("SET memory_limit = '${memoryLimit ?: "${defaultMemoryLimitMb()}MB"}'")
             properties["threads"]?.toString()?.trim()?.let { add("SET threads = $it") }
             // DuckDB's relative .tmp default fails in the non-root image's working directory.
-            // Each initialization gets an isolated engine-owned path, created lazily on spill
+            // Each anonymous engine gets an isolated engine-owned path, created lazily on spill
             // and removed by DuckDB when that instance closes. Do not delete it at pool release:
             // a driver that refused close can still own files there.
-            val spillDirectory =
-                properties["temp_directory"]?.toString()?.trim()
-                    ?: Path
+            // Named/file URLs can join an already-spilling engine: retain its directory unless
+            // the operator explicitly sets one. DuckDB refuses changing a directory in use.
+            val spillDirectory = properties["temp_directory"]?.toString()?.trim()
+            val anonymous = datasource.jdbcUrl == "jdbc:duckdb:" || datasource.jdbcUrl == "jdbc:duckdb::memory:"
+            val effectiveSpillDirectory =
+                spillDirectory ?: if (anonymous) {
+                    Path
                         .of(System.getProperty("java.io.tmpdir"))
                         .toAbsolutePath()
                         .resolve("datapipelines-lake-${UUID.randomUUID()}")
                         .toString()
-            add("SET temp_directory = '${spillDirectory.replace("'", "''")}'")
+                } else {
+                    null
+                }
+            effectiveSpillDirectory?.let { add("SET temp_directory = '${it.replace("'", "''")}'") }
             add("SET preserve_insertion_order = false")
         }
 

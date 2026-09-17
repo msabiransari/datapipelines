@@ -170,8 +170,10 @@ class LakeHandleProtocolTest {
     /**
      * A supplement, not the guard: the review's race harness shape — a transient first refusal,
      * closer and release started together — for a bounded number of iterations. Whatever the
-     * interleaving, after BOTH actors return the raw duplicate is closed and the generation owns
-     * nothing. It cannot prove the protocol (the forced tests above do); it can only fail it.
+     * interleaving, after BOTH actors return the raw duplicate is closed OR the generation won
+     * the sole attempted close and its refusal is still owned and reported. A concurrent holder
+     * that arrives during that attempt returns without waiting (LakeGenerationCloseRaceTest).
+     * It cannot prove the protocol (the forced tests do); it can only fail it.
      */
     @Test
     fun `stress supplement - a transient first refusal racing the release never leaves an unowned open duplicate`() {
@@ -190,9 +192,19 @@ class LakeHandleProtocolTest {
             owner.retire()
             val logged = capturingLogs { owner.close() }
             closer.join(TimeUnit.SECONDS.toMillis(WAIT_S))
+            closer.isAlive shouldBe false
             if (logged.any { " in_flight=1 " in it }) inFlightSeen++
-            withClue("iteration $i: raw duplicate closed after both actors returned") { factory.duplicate.isClosed shouldBe true }
-            withClue("iteration $i: nothing left owned") { owner.liveDuplicates shouldBe 0 }
+            if (factory.duplicate.isClosed) {
+                withClue("iteration $i: confirmed closed, nothing left owned") { owner.liveDuplicates shouldBe 0 }
+            } else {
+                // No lost holder-to-generation hand-off may pass this branch: those make TWO
+                // attempts. This is exclusively the generation-first, coalesced-holder order.
+                withClue("iteration $i: only the generation attempted close") { factory.closeAttempts.get() shouldBe 1 }
+                owner.liveDuplicates shouldBe 1
+                logged.single { it.startsWith("event=lake.instance_handle_exhausted") } shouldContain " attempts=1 "
+                logged.single { it.startsWith("event=lake.instance_handles_closed") } shouldContain " close_failures=1 "
+                factory.duplicate.close() // Test-owned fault-injection residual, now observed and accounted for.
+            }
             factory.close()
         }
         println("stress supplement: $STRESS_ITERATIONS iterations, $inFlightSeen observed the hand-off")

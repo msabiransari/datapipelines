@@ -8,6 +8,8 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
@@ -17,9 +19,10 @@ class LakeSpillIntegrationTest {
     @TempDir
     lateinit var temporaryDirectory: Path
 
-    @Test
-    fun `default spill paths are absolute and isolated across overlapping pool generations`() {
-        val datasource = lake()
+    @ParameterizedTest
+    @ValueSource(strings = ["jdbc:duckdb:", "jdbc:duckdb::memory:"])
+    fun `default spill paths are absolute and isolated across overlapping pool generations`(url: String) {
+        val datasource = lake().copy(jdbcUrl = url)
         val first = ConnectionPoolManager.buildHikariPool(datasource)
         val second = ConnectionPoolManager.buildHikariPool(datasource)
         lateinit var firstPath: Path
@@ -65,6 +68,42 @@ class LakeSpillIntegrationTest {
         Files.exists(configured) shouldBe false
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `a named or file engine already spilling keeps its path when a second pool joins`(fileBacked: Boolean) {
+        val configured = temporaryDirectory.resolve("shared-spill")
+        val url =
+            if (fileBacked) {
+                "jdbc:duckdb:${temporaryDirectory.resolve("lake.db")}"
+            } else {
+                "jdbc:duckdb::memory:${temporaryDirectory.fileName}"
+            }
+        val datasource = lake(mapOf("temp_directory" to configured.toString())).copy(jdbcUrl = url)
+        ConnectionPoolManager.buildHikariPool(datasource).use { first ->
+            first.leaseConnection().use { original ->
+                // File-backed permanent tables flush to the database file; a TEMP table forces
+                // spill storage instead. Keep its creating session alive across the second open.
+                spill(original, temporary = fileBacked)
+                verifyJoiningPool(url, configured, readTable = !fileBacked)
+                verifyRows(original)
+            }
+        }
+        Files.exists(configured) shouldBe false
+    }
+
+    private fun verifyJoiningPool(
+        url: String,
+        configured: Path,
+        readTable: Boolean,
+    ) {
+        ConnectionPoolManager.buildHikariPool(lake().copy(jdbcUrl = url)).use { second ->
+            second.leaseConnection().use { connection ->
+                spillPath(connection) shouldBe configured
+                if (readTable) verifyRows(connection)
+            }
+        }
+    }
+
     private fun lake(overrides: Map<String, String> = emptyMap()) =
         Datasource(
             name = "spill_test",
@@ -83,9 +122,13 @@ class LakeSpillIntegrationTest {
             }
         }
 
-    private fun spill(connection: Connection) {
+    private fun spill(
+        connection: Connection,
+        temporary: Boolean = false,
+    ) {
         connection.createStatement().use { statement ->
-            statement.execute("CREATE TABLE spilling AS SELECT i, md5(i::VARCHAR) payload FROM range(1000000) t(i)")
+            val kind = if (temporary) "TEMP TABLE" else "TABLE"
+            statement.execute("CREATE $kind spilling AS SELECT i, md5(i::VARCHAR) payload FROM range(1000000) t(i)")
             statement.executeQuery("SELECT coalesce(sum(size), 0) FROM duckdb_temporary_files()").use { rows ->
                 rows.next() shouldBe true
                 rows.getLong(1).shouldBeGreaterThan(0L)
