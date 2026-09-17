@@ -107,7 +107,7 @@ class PipelineCompositionE2eTest {
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
                 consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, correlationId)
             }
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
         val parentExecutionId = events.last().second["execution_id"].asText()
 

@@ -178,7 +178,7 @@ class WorkspacesReadonlyE2eTest {
                 consumeExecutionStream(pipelineId, UUID.randomUUID().toString())
             }
 
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_failed", "pipeline_failed")
         val nodeFailed = events.single { it.first == "node_failed" }.second
         nodeFailed["node_id"].asText() shouldBe "flip_insert"

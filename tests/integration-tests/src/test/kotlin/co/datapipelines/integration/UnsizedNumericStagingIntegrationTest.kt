@@ -60,7 +60,7 @@ class UnsizedNumericStagingIntegrationTest {
 
         val events =
             assertTimeoutPreemptively(EXECUTION_BUDGET) { consumeExecutionStream(pipelineId) }
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf(
                 "execution_started",
                 "node_started",

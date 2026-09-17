@@ -174,7 +174,7 @@ class TracerBulletE2eTest {
         events: List<Pair<String, JsonNode>>,
         correlationId: String,
     ): String {
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
         events.forEach { (_, payload) -> payload["correlation_id"].asText() shouldBe correlationId }
 
