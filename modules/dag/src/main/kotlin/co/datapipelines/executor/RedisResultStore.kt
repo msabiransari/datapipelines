@@ -383,15 +383,16 @@ class RedisResultStore(
         val warnings: List<TypeMappingWarning> = emptyList(),
     )
 
-    private companion object {
+    internal companion object {
         const val KEY_PREFIX = "dp:result:"
 
         /**
          * Rows per `RPUSH`. Large enough that a wide result is not one round-trip per row, small
          * enough that the in-flight batch is never the thing that exhausts heap — the drain's
-         * whole point is constant memory (staging §6.1).
+         * whole point is constant memory (staging §6.1). Internal so the fetch-boundary test can
+         * cross exactly one push.
          */
-        const val PUSH_BATCH_ROWS = 500
+        internal const val PUSH_BATCH_ROWS = 500
 
         /** UTF-8 code-unit boundaries — the encoding's own definition, not tunable values. */
         const val ONE_BYTE_CEILING = 0x80
