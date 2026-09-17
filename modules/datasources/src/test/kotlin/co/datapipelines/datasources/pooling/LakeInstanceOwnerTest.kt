@@ -137,8 +137,14 @@ class LakeInstanceOwnerTest {
                 },
             )
         val owner =
-            AutoCloseable {
-                closeOrder += if (hikari.isClosed) "owner-after-hikari" else "owner-BEFORE-hikari"
+            object : PoolInstanceOwner {
+                override fun retire() {
+                    closeOrder += "retired"
+                }
+
+                override fun close() {
+                    closeOrder += if (hikari.isClosed) "owner-after-hikari" else "owner-BEFORE-hikari"
+                }
             }
         val pool = HikariConnectionPool("lake_order", hikari, owner)
 
@@ -146,7 +152,7 @@ class LakeInstanceOwnerTest {
         pool.close()
 
         assertAll(
-            { closeOrder shouldBe listOf("owner-after-hikari") },
+            { closeOrder shouldBe listOf("retired", "owner-after-hikari") },
             { pool.isClosed shouldBe true },
         )
     }
@@ -219,7 +225,8 @@ class LakeInstanceOwnerTest {
             dataSource.loginTimeout = 5
             assertAll(
                 { dataSource.logWriter shouldBe null },
-                { dataSource.loginTimeout shouldBe 0 },
+                // The one REAL knob: Hikari sets it from connectionTimeout and waits on it at shutdown.
+                { dataSource.loginTimeout shouldBe 5 },
                 { dataSource.isWrapperFor(DataSource::class.java) shouldBe false },
                 { shouldThrow<SQLFeatureNotSupportedException> { dataSource.parentLogger } },
                 { shouldThrow<SQLFeatureNotSupportedException> { dataSource.unwrap(DataSource::class.java) } },

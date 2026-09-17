@@ -36,9 +36,9 @@ import javax.sql.DataSource
  *   rotation, reconcile) opens a NEW owner, so a retiring generation and its replacement never
  *   share catalog or credential state; two datasources never share an instance either — the
  *   anonymous URL has no process-global name to collide on.
- * - The owner is closed exactly once, by the pool's [HikariConnectionPool.close], AFTER the
- *   Hikari pool has shut down — the last handle drops and the instance is freed. [close] is
- *   idempotent.
+ * - The owner is retired then closed by ONE caller of [HikariConnectionPool.close]: [retire]
+ *   before Hikari's shutdown (no new duplicate may join a generation being torn down), [close]
+ *   AFTER it — the last handle drops and the instance is freed. [close] is idempotent.
  * - **No silent reconnect.** If the owner is lost (closed by a driver fault, or a bug), every
  *   subsequent [duplicate] fails with an [SQLNonTransientConnectionException] naming the
  *   datasource and generation; the pool does NOT open a fresh engine behind the caller's back,
@@ -53,10 +53,11 @@ class LakeInstanceOwner private constructor(
     val datasourceName: String,
     private val connection: Connection,
     private val duplicateMethod: Method,
-) : AutoCloseable {
+) : PoolInstanceOwner {
     /** This generation's identity — distinct per pool build, carried in every lifecycle log line. */
     val generation: String = UUID.randomUUID().toString().substring(0, GENERATION_CHARS)
 
+    private val retired = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private val lossLogged = AtomicBoolean(false)
 
@@ -64,14 +65,27 @@ class LakeInstanceOwner private constructor(
     val isOpen: Boolean
         get() = !closed.get() && runCatching { !connection.isClosed }.getOrDefault(false)
 
+    /** True once the pool's shutdown has begun: no further physical connection may join. */
+    val isRetired: Boolean get() = retired.get()
+
+    /**
+     * The pool is shutting down (the FIRST step of [HikariConnectionPool.close], before Hikari's
+     * own shutdown): from here every [duplicate] is refused, so a physical connection Hikari's
+     * creator thread was about to open cannot join a generation that is being torn down. The
+     * retained connection stays open — Hikari still has borrowers to abort — until [close].
+     */
+    override fun retire() {
+        retired.set(true)
+    }
+
     /**
      * A NEW connection to this generation's instance — what every physical Hikari connection is.
      *
-     * @throws SQLNonTransientConnectionException when the owner is closed or lost — the caller
-     *   (Hikari's connection creation) surfaces it as a lease failure; nothing reconnects.
+     * @throws SQLNonTransientConnectionException when the owner is retired, closed or lost — the
+     *   caller (Hikari's connection creation) surfaces it as a lease failure; nothing reconnects.
      */
     fun duplicate(): Connection {
-        if (!isOpen) throw ownerLost()
+        refusal()?.let { throw it }
         return try {
             duplicateMethod.invoke(connection) as Connection
         } catch (e: InvocationTargetException) {
@@ -88,6 +102,21 @@ class LakeInstanceOwner private constructor(
             else -> SQLException("duplicate() on datasource '$datasourceName' failed", cause)
         }
     }
+
+    /** Why no duplicate may be opened right now — retiring first, then lost — or null when one may. */
+    private fun refusal(): SQLNonTransientConnectionException? =
+        when {
+            retired.get() -> retiring()
+            !isOpen -> ownerLost()
+            else -> null
+        }
+
+    private fun retiring(): SQLNonTransientConnectionException =
+        SQLNonTransientConnectionException(
+            "the DuckDB instance owner for datasource '$datasourceName' (generation $generation) is shutting down; " +
+                "no new connection can join it",
+            SQLSTATE_CONNECTION_FAILURE,
+        )
 
     private fun ownerLost(cause: Throwable? = null): SQLNonTransientConnectionException {
         if (lossLogged.compareAndSet(false, true) && !closed.get()) {

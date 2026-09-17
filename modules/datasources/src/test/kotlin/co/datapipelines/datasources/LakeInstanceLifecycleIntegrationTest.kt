@@ -263,29 +263,64 @@ class LakeInstanceLifecycleIntegrationTest {
         events shouldBe listOf("event=lake.instance_opened", "event=lake.instance_closed")
     }
 
+    /**
+     * Cancellation isolation on one shared instance, synchronised on the EVENTS, not on time:
+     * the victim's long scan and the sibling's are started on their own threads; the cancel is
+     * issued only once BOTH statements have been handed to the engine (a latch each side counts
+     * down immediately before `executeQuery`), so the victim is observably running when its
+     * statement is cancelled and the sibling is running beside it. The victim's `INTERRUPT`
+     * error is itself the proof it was mid-execution — a finished query cannot be interrupted —
+     * and the sibling's correct sum is the proof the cancel reached one statement, not the
+     * instance. The victim's next statement proves the connection is reusable.
+     */
     @Test
     @Suppress("NestedBlockDepth") // nested `use` blocks are the leases' lifetimes — flattening would hide them
-    fun `cancelling one connection's query leaves its sibling and its own next statement healthy`() {
-        val ds = lakeDatasource("lake_cancel", dialect = mapOf("threads" to "1"))
+    fun `cancelling one running query leaves the concurrently running sibling and the victim's next statement healthy`() {
+        val ds = lakeDatasource("lake_cancel", dialect = mapOf("threads" to "2"))
+        val longScan = "SELECT sum(i) FROM range($LONG_SCAN_ROWS) t(i)"
+        val expectedSum = (LONG_SCAN_ROWS / 2) * (LONG_SCAN_ROWS - 1) // halve first: n·(n−1) overflows a Long
 
         ConnectionPoolManager.buildHikariPool(ds).use { pool ->
             pool.leaseConnection().use { victim ->
                 pool.leaseConnection().use { sibling ->
-                    val slow = victim.createStatement()
-                    val canceller =
-                        Thread {
-                            Thread.sleep(CANCEL_AFTER_MS)
-                            slow.cancel()
-                        }.apply { start() }
-                    val interrupted =
-                        shouldThrow<SQLException> {
-                            slow.executeQuery("SELECT sum(i) FROM range(4000000000) t(i)").use { it.next() }
+                    val bothStarted = java.util.concurrent.CountDownLatch(2)
+                    val victimStatement = victim.createStatement()
+                    val victimOutcome = java.util.concurrent.CompletableFuture<Throwable?>()
+                    val siblingOutcome = java.util.concurrent.CompletableFuture<Long>()
+                    Thread {
+                        bothStarted.countDown()
+                        victimOutcome.complete(
+                            runCatching { victimStatement.executeQuery(longScan).use { it.next() } }.exceptionOrNull(),
+                        )
+                    }.start()
+                    Thread {
+                        sibling.createStatement().use { st ->
+                            bothStarted.countDown()
+                            siblingOutcome.complete(
+                                st.executeQuery(longScan).use { rs ->
+                                    rs.next()
+                                    rs.getLong(1)
+                                },
+                            )
                         }
-                    canceller.join()
+                    }.start()
+
+                    withClue("both statements were handed to the engine") {
+                        bothStarted.await(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+                    }
+                    victimStatement.cancel()
+                    val interrupted = victimOutcome.get(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS)
+                    val siblingSum = siblingOutcome.get(SCAN_WAIT_S, java.util.concurrent.TimeUnit.SECONDS)
+
                     assertAll(
-                        { interrupted.message.orEmpty() shouldContain "INTERRUPT" },
-                        { countOf(sibling, "SELECT 10") shouldBe 10 },
+                        {
+                            withClue(
+                                "the victim was running and was interrupted",
+                            ) { interrupted?.message.orEmpty() shouldContain "INTERRUPT" }
+                        },
+                        { withClue("the sibling ran through beside it") { siblingSum shouldBe expectedSum } },
                         { countOf(victim, "SELECT 7") shouldBe 7 },
+                        { countOf(sibling, "SELECT 10") shouldBe 10 },
                     )
                 }
             }
@@ -387,6 +422,8 @@ class LakeInstanceLifecycleIntegrationTest {
         }
 
     private companion object {
-        const val CANCEL_AFTER_MS = 300L
+        /** Long enough that the scan is still running when the cancel arrives, on any box (≈2.5 s at 2 threads on the dev box). */
+        const val LONG_SCAN_ROWS = 2_000_000_000L
+        const val SCAN_WAIT_S = 60L
     }
 }

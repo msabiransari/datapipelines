@@ -48,25 +48,41 @@ interface ConnectionPool : AutoCloseable {
 }
 
 /**
+ * 152 — the resource a pool generation OWNS beyond its physical connections: for a LAKE pool
+ * the retained [LakeInstanceOwner] whose DuckDB instance every physical connection is a
+ * duplicate of. The pool drives it through exactly two calls, in this order and from ONE
+ * caller: [retire] as shutdown begins (no NEW physical connection may join the generation from
+ * here on — one that is mid-creation closes itself instead of being handed to a pool that is
+ * closing), then [close] after the Hikari pool has fully shut down.
+ */
+interface PoolInstanceOwner : AutoCloseable {
+    /** Shutdown has begun: refuse every further physical connection; existing ones are Hikari's to abort. */
+    fun retire()
+}
+
+/**
  * A [ConnectionPool] backed by one [HikariDataSource].
  *
- * [instanceOwner] is 152's one generic seam: the resource a pool generation OWNS beyond its
- * physical connections — for a LAKE pool the retained [LakeInstanceOwner] whose DuckDB instance
- * every physical connection is a duplicate of; `null` for every other dialect, whose pools are
- * byte-for-byte what they were. It is closed exactly once, by [close], AFTER the Hikari pool has
- * shut down, so the instance outlives every lease Hikari could still abort and dies with the
- * generation, never before it (§5.2 retirement leaves both alive until the reaper's close).
+ * [instanceOwner] is 152's one generic seam; `null` for every other dialect, whose pools are
+ * byte-for-byte what they were. **One caller owns the whole shutdown sequence**: the first
+ * [close] retires the owner, shuts Hikari down and then releases the owner; any concurrent or
+ * later [close] returns at once — the same contract `HikariDataSource.close` has for its own
+ * second caller, and the reason the guard sits BEFORE the Hikari close rather than around the
+ * owner release (a guard after it let a second, immediately-returning caller release the owner
+ * while the first was still draining physical connections). So the instance outlives every
+ * lease Hikari could still abort and dies with the generation, never before it (§5.2
+ * retirement leaves both alive until the reaper's close).
  */
 class HikariConnectionPool(
     override val name: String,
     private val dataSource: HikariDataSource,
-    private val instanceOwner: AutoCloseable? = null,
+    private val instanceOwner: PoolInstanceOwner? = null,
 ) : ConnectionPool {
     /** Whether the underlying pool has been shut down — the observable half of retirement (§5.2). */
     val isClosed: Boolean get() = dataSource.isClosed
 
-    /** [instanceOwner] is released on the FIRST [close] only; Hikari's own close is already a no-op after the first. */
-    private val ownerReleased = AtomicBoolean(false)
+    /** Won by the ONE caller that runs the whole retire → Hikari close → owner release sequence. */
+    private val closing = AtomicBoolean(false)
 
     override fun leaseConnection(): Connection = dataSource.connection
 
@@ -94,16 +110,21 @@ class HikariConnectionPool(
         get() = if (dataSource.isClosed) 0 else dataSource.hikariPoolMXBean.activeConnections
 
     /**
-     * Hikari first — it aborts the leases still out once its shutdown grace expires (the
-     * existing §5.2 hard-close policy) — then the generation's owner. A borrower Hikari abandoned
-     * keeps its own handle on the instance until it actually closes; the owner's close only
-     * drops the retained handle, it never pulls the engine out from under a running statement.
+     * Retire the owner, Hikari shutdown — it waits (bounded by the DataSource's login timeout,
+     * which Hikari itself sets from `connectionTimeout`) for a physical connection mid-creation,
+     * then aborts the leases still out once its shutdown grace expires (the existing §5.2
+     * hard-close policy) — then the owner's release. A borrower Hikari abandoned keeps its own
+     * handle on the instance until it actually closes; the owner's close only drops the retained
+     * handle, it never pulls the engine out from under a running statement. No lock is held
+     * across any of it: the losing caller does not wait, it returns.
      */
     override fun close() {
+        if (!closing.compareAndSet(false, true)) return
+        instanceOwner?.retire()
         try {
             dataSource.close()
         } finally {
-            if (ownerReleased.compareAndSet(false, true)) instanceOwner?.close()
+            instanceOwner?.close()
         }
     }
 }
