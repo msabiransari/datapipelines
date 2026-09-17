@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.7 (frozen contract — additive-only changes after this point)
+**Status:** v2.15 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-16
 
 ---
 
@@ -796,15 +796,58 @@ Terminal event when an execution is cancelled: explicit `DELETE /executions/{id}
 }
 ```
 
+#### 6.4.9 `node_progress`
+
+A **measured sample of a node's operation** (149): what the node is doing, where its output goes, the state it is in at the observation instant, its cumulative counts and the wall time spent in each state so far. Zero or more per node, strictly between that node's `node_started` and its `node_completed`/`node_failed` (or the execution's terminal event when the node ends by cancellation). Never terminal on the wire; `event_id` continues to count it like any other event. Additive: a client on the eight-event vocabulary sees exactly the events it always did, in the same order, with these interleaved.
+
+```json
+{
+  "execution_id": "exec-uuid",
+  "node_id": "fetch_orders",
+  "attempt": 1,
+  "sequence": 3,
+  "operation": "stage",
+  "destination": {"kind": "tempdb", "table": "orders"},
+  "state": "writing",
+  "started_at": "2026-08-05T14:30:00.234Z",
+  "observed_at": "2026-08-05T14:30:05.535Z",
+  "elapsed_ms": 5301,
+  "timings_ms": {"connecting": 12, "executing": 410, "fetching": 3400, "waiting_output": 22, "writing": 1457},
+  "rows_fetched": 12000,
+  "rows_written": 11000,
+  "batches_written": 11,
+  "correlation_id": "corr-uuid"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `sequence` | Ordinal of this sample within the operation — strictly increasing per (`execution_id`, `node_id`, `attempt`). Repeated batches and statements are distinguished by `sequence` and `batches_written`, never by a second destination. |
+| `operation` | `stage` (source cursor → tempdb table), `ctas` (tempdb `CREATE TABLE … AS` — query and materialisation are ONE indivisible statement), `materialize` (caller result → the result store, or `direct` to an invoking PIPELINE node), `writeback` (cursor → external datasource table, one transaction), `statement` (DML/DDL), `child` (a PIPELINE node: the child execution, then the parent's own output write). CALCULATOR nodes have no operation and emit no samples. |
+| `destination` | The REAL output destination: `{"kind":"tempdb","table":…}`, `{"kind":"datasource","datasource":…,"table":…}` (`table` absent on a DML/DDL statement — no SQL lineage is inferred), `{"kind":"caller"}`, `{"kind":"parent"}` (a child's caller rows streamed to the invoking node), `{"kind":"none"}` (DDL, or a node that writes nothing). Identifiers only — never a connection string ([Observability §9.3](observability.md)). |
+| `state` | `connecting` (a SOURCE connection is being obtained), `executing` (the statement is submitted and has not returned — a returned cursor is not a fetched row), `fetching` (advancing the source cursor / decoding rows), `waiting_output` (an OUTPUT connection was requested and is not yet held), `writing` (inside a destination write, holding its connection), `finalizing` (commit, row count, budget check, result meta), then exactly one terminal `completed` \| `failed` \| `aborted`. |
+| `started_at`, `observed_at`, `elapsed_ms` | Operation start; this sample's ORIGINAL observation instant (replay preserves it); the honest wall time between them. |
+| `timings_ms` | Cumulative measured wall time per state actually observed, the open state counted up to `observed_at`. A state never entered is absent — not zero. Wall time at the executor's boundary, never engine CPU or exclusive network time. |
+| `rows_fetched` | Rows read off the source cursor (or received from the child) so far. ABSENT when not observed (`ctas`, `statement`). |
+| `rows_written` | Rows ACCEPTED by the destination so far — a tempdb batch inserted, a write-back batch executed, a result-store page pushed, a DML update count. Absent when not observed (DDL; a CTAS until its count). Accepted is not committed: see `committed`. |
+| `batches_written` | Destination batches executed so far. |
+| `committed` | **Terminal samples only**, and only for a destination that has something to commit: `true` on `completed` when the write is durable at that moment (write-back after `commit()`, tempdb after the last batch and the budget check, the result store after its meta key, DML after autocommit); `false` on `failed`/`aborted`. Absent while running — there is no "committed" before the commit — and absent for DDL or a child with no output. |
+| `rolled_back` | Present (`true`) only when a failed write-back transaction was rolled back or a failed stage's partial table was dropped. |
+| `child_execution_id` | `child` operations, once the child's id is minted. |
+
+There is no percentage: no operation knows its total. A slow source query is `executing` (or `fetching`) time, a full tempdb pool is `waiting_output` time, a slow destination is `writing` time — the split is measured, not inferred. The measurement limits are stated in [DAG Executor §10](dag-executor.md#10-sse-event-integration): the source's server-side time is inside `executing` until the driver returns the first result, a driver that pre-buffers (`source-fetch-size: 0`, MySQL without streaming) moves source time into `executing`, and `fetching` for `materialize` includes JSON encoding.
+
+**Cadence.** A sample is emitted at each FIRST entry into a state (taken at the entry instant, so a `writing` interval shorter than the executor's 250 ms pump tick is still seen), then at most once per `datapipelines.executor.progress-sample-interval-seconds` (default 1) while something changed, then exactly one terminal sample. Per operation that is at most `states + duration / interval + 1` events — never per row, never per batch. Every sample is persisted like every other event (§10.3).
+
 ### 6.5 Event ordering guarantee
 
 Within a single execution stream, events are ordered:
 1. Exactly one `execution_started` (first).
-2. For each node: zero or one `node_started` → zero or one of (`node_completed` | `node_failed`).
+2. For each node: zero or one `node_started` → zero or more `node_progress` (§6.4.9) → zero or one of (`node_completed` | `node_failed`). A node's terminal `node_progress` sample (`completed`/`failed`/`aborted`) precedes its `node_completed`/`node_failed`; no `node_progress` for a node follows the node's terminal event, and none follows the execution's.
 3. Exactly one terminal sequence: (`pipeline_completed` [→ `data_ready` if a caller node exists]) | `pipeline_failed` | `execution_aborted`.
 4. Stream closes after the terminal event.
 
-For parallel nodes, events are emitted in real-time as they occur (interleaved). Order between parallel nodes is non-deterministic.
+For parallel nodes, events are emitted in real-time as they occur (interleaved). Order between parallel nodes is non-deterministic — on the live stream and, independently, in the §10.3 replay, whose order between parallel nodes is the persistence order; a node's own events keep their order in both.
 
 ### 6.6 Heartbeat (keepalive)
 
@@ -1433,7 +1476,7 @@ GET /executions/{execution_id}/events
 Accept: text/event-stream
 ```
 
-Re-emits the SSE event stream from the Redis event log, in original order with original timestamps. Useful for debugging pipelines after the fact.
+Re-emits the SSE event stream from the Redis event log, in original order with original timestamps — `node_progress` samples included, each with the `observed_at` it was taken at (§6.4.9). Useful for debugging pipelines after the fact.
 
 Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour.
 
@@ -1954,6 +1997,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v2.15 | 149 / #125 node_progress | New **§6.4.9 `node_progress`** (additive): a measured sample of a node's operation — `operation` (stage/ctas/materialize/writeback/statement/child), the real `destination`, one lifecycle `state`, `started_at`/`observed_at`/`elapsed_ms`, per-state `timings_ms`, `rows_fetched`/`rows_written`/`batches_written` (absent when unobserved), `committed`/`rolled_back` on the terminal sample only, `child_execution_id`; never a percentage. §6.5: zero or more per node between `node_started` and the node's terminal event, the terminal sample first; §10.3 replays them with their original `observed_at`. Cadence: first entry per state, then `datapipelines.executor.progress-sample-interval-seconds`. |
 | 2026-09-15 | v2.14 | 142 release cascade | §5.10 gains `?release_pinned_templates=true`: consent to release the DRAFT template versions the body pins in the same transaction as the pipeline flip (templates first; any refusal rolls all back); the refusal's `details` gain `pins_not_released`; audit `template.version.released` per cascaded template (`cascade_from_pipeline_id`, `cascade_from_version`) and `templates_released` on `pipeline.version.released`. Additive; no route removed; no MCP tool releases anything. |
 | 2026-09-14 | v2.13 | 140 release checks | New **§5.16** — `POST /pipelines/{id}/versions/{version}/checks/run` (`execute` scope; writes `pipeline_check_runs`; optional `parameters` body; `pass`/`fail`/`error` verdicts) and `GET …/checks` (`read`; definitions with the latest run per check). §5.10 gains the **release-check gate**: a body with `checks[]` releases only past an all-pass fresh run, else `409 pipeline.check.failed` with `details.checks`; `override_checks_reason` (≥ 10 chars, audited as `checks_overridden` + `override_reason` on `pipeline.version.released`) is the only way past. Only the server's run produces `observed` — no endpoint records one from a caller. All additive; no route removed. |
 | 2026-09-08 | v2.8 | 099 draft-first (D55/D56) | **§5.1** — `POST /pipelines` lands v1 as a **DRAFT**: `status: "DRAFT"`, `current_version: null`, the `draft` pointer, and release is `POST …/release` like any other draft ([Versioning §3.2](versioning.md)). **New §6.1.1** — execute with no `version` runs the WORKING version (the draft when one exists, else the latest release); an explicit version stays exact and never clamped. **§5.7** — listing rows carry the working `version` plus a new `status` field. **§5.9** — export is released-only and refuses a never-released pipeline with `409 pipeline.promotion.not_released`. §8.1 (templates) mirrors §5.1. Response VALUES change; no request shape and no route does. |

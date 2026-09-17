@@ -157,7 +157,8 @@ curl -s http://localhost:8080/api/v1/templates/render -X POST \
 `POST /api/v1/templates/release` and `/draft/discard` with `{"name": ...}` in the body.
 
 The execution endpoint answers with an SSE stream of events
-(`execution_started`, `node_started`, `node_completed`, `pipeline_completed`,
+(`execution_started`, `node_started`, `node_progress` — measured per-node operation
+samples: state, destination, cumulative counts — `node_completed`, `pipeline_completed`,
 `data_ready`, …) — the agent-facing MCP tool turns that into one blocking call with
 `node_stats` in the result. Everything the MCP tools do is a thin adapter over these
 endpoints; error codes are identical.

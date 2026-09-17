@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.11 (revised — see Change Log)
+**Status:** v1.12 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-09-06
@@ -301,6 +301,7 @@ Authentication: session cookie carrying the internal JWT (browser flow). See [Au
     <script src="/vendor/alpinejs/alpine.min.js" defer></script>
 
     <!-- Editor logic -->
+    <script src="/js/pipeline-editor/node-ops.js"></script>
     <script src="/js/pipeline-editor/graph.js"></script>
     <script src="/js/pipeline-editor/sse.js"></script>
     <script src="/js/pipeline-editor/execute.js"></script>
@@ -516,7 +517,7 @@ Every node is a 236px rectangular card — 272px on a wide stage (082 §A, below
 
 1. **The head** — an icon **tile** (34px rounded square) washed in the node type's accent pair (`--type` on `--type-bg`, set inline per card), the node **id** (semibold, one line, right-edge ellipsis), and the **type eyebrow** (11px uppercase, `.06em` tracking, in the type colour). The tile's glyph is the card's **ONE** glyph (059b's rule survives): `db` / `table` / `boxes` / `workflow` / `file` from the vendored sprite — generic, never a vendor logo; the engine's identity is the source fact's TEXT.
 2. **Up to three fact lines in mono** (11.5px, a muted CSS bullet for a marker — the mock's small kind icons have no glyph in the fenced sprite, and reusing `#db` would duplicate the DQL tile): source · dialect / template `@ v` / output for SQL types; `kind → context_key` and the input names for a CALCULATOR; child `@ v` and the parameter names for a PIPELINE. The dialect is resolved client-side from the workspace's datasource listing (the body is portable across environments, contract §11.1) and upgrades in place when the listing lands. Template paths truncate from the LEFT (the leaf identifies).
-3. **The footer** — state dot + label (`Pending` / `Running…` / `Done` / `Failed` / `Aborted`) on the left, the last run's numbers on the right (`5 rows · 37 ms`, tabular; a CALCULATOR counts what it wrote — `1 key · 1 ms`, `2 keys · 2 ms` — and never inlines the values, which are the Details pane's and the Events tab's: inlined, a two-key window wrapped the footer to three lines and floated the state dot mid-card, T251 2026-09-13). The run numbers are one line by CSS too (`nowrap` + ellipsis on `.pe-card-rt`). The wire carries `duration_ms` and `rows_out` only (SseEventProjection) — there is no `rows_in`, so the mock's `in → out` collapses to the out count. Before any run the numbers are absent, never a placeholder.
+3. **The footer** — state dot + label (`Pending` / `Running…` / `Done` / `Failed` / `Aborted`) on the left, the last run's numbers on the right (`5 rows · 37 ms`, tabular; a CALCULATOR counts what it wrote — `1 key · 1 ms`, `2 keys · 2 ms` — and never inlines the values, which are the Details pane's and the Events tab's: inlined, a two-key window wrapped the footer to three lines and floated the state dot mid-card, T251 2026-09-13). The run numbers are one line by CSS too (`nowrap` + ellipsis on `.pe-card-rt`). The wire carries `duration_ms` and `rows_out` only (SseEventProjection) — there is no `rows_in`, so the mock's `in → out` collapses to the out count. Before any run the numbers are absent, never a placeholder. **While the node runs (149)** the footer is the MEASURED operation from `node_progress` ([REST API §6.4.9](rest-api.md#649-node_progress)) through `node-ops.js` (§10.7): the state word on the left — `Connecting to source`, `Querying` (`Querying and materializing (one statement)` for a tempdb CTAS, `Child execution running`), `Fetching`, `Waiting for tempdb` / `Waiting for <datasource>`, `Writing`, `Finalizing` / `Committing` — tagged `pe-card-op-<state>` so the dot is amber and still while waiting for an output connection and green while writing; the live cumulative count on the right (`11,000 written`, else `12,000 fetched`). Both slots stay one line (`nowrap` + ellipsis on `.pe-card-state` too). The destination is not repeated in the footer — it is the card's own output fact line. A terminal node drops the live line and shows the plain word and the run numbers; a node whose operation was never sampled shows `Running…` exactly as before. No percentage anywhere: no operation knows its total.
 
 **State encoding (the mock's).** Running: brand border (canvas), a pulsing state dot and an indeterminate progress line (both pure CSS on the card, so `prefers-reduced-motion` stops them with one media query — the 059 JS border pulse is retired). Done: success dot, and the out-port turns `--edge-done`. Failed: danger border and footer. Hover: `translateY(-2px)` + `--shadow-lg` lift and the hover-only **expand affordance** — both CSS, both driven by a JS-toggled `.pe-card-hover` class because the label container is `pointer-events: none` and CSS `:hover` never fires (Cytoscape's own node `mouseover`/`mouseout` stand in). Selection: brand border over a full-opacity `--brand-soft` underlay padded 3px — the mock's `0 0 0 3px var(--brand-soft)` ring; Cytoscape has no box-shadow, and the underlay paints BEHIND the card so nothing dims.
 
@@ -739,6 +740,7 @@ Event payloads are defined in [REST API §6.4](rest-api.md#64-event-types); the 
 |---|---|
 | `execution_started` | Reset all nodes to `idle`, edges to rest. Events log resets; the top bar's clock starts. Disable Execute button. |
 | `node_started` | Node → `running`; incoming edges → `.active` (inside `setNodeState`). |
+| `node_progress` | Reduced into `nodeOps` (§10.7); the card's footer takes the state word and the live count (`setNodeOperation`), the node's a11y row takes the operation as its description, the Events tab formats the row. No edge changes — dependency arrows and their copied row labels are #127's. |
 | `node_completed` | Node → `success`; incoming edges → `.done`; the node's run line fills; outgoing edges take the flow label — `523 rows` for a SQL node (`0 rows` included: it ran and emitted nothing), `2 keys` for a CALCULATOR (its `rows_out` is 0 by construction and used to label every calculator edge `0 rows`, T251). A CALCULATOR's `context_value`/`context_values` reach the Details pane, the Events tab and the Context; the footer counts them. A PIPELINE node's `child_execution_id` reaches the Details pane. |
 | `node_failed` | Node → `failed`; incoming edges clear `.active`. The failure record joins the dock's Errors tab. All pending nodes → `aborted`. |
 | `pipeline_completed` | Terminal. Every node is `success` or `aborted`. The ONE success toast; the top bar's status takes its final text. |
@@ -1057,6 +1059,7 @@ of two.
 | Calculator | `node.kind`, `node.inputs`, `node.context_key` | Kind / Inputs (expression → resolved) / Writes / Value |
 | Child | `node.pipeline`, `node.parameters` | Child `@ v`, the mapping passed down, the child execution id |
 | Last run | `nodeStates[node.id]` | Present only after a run touched the node |
+| Operation · Progress · Rows · Time in · Commit · Child execution | `nodeOps.get(node.id)` via `PENodeOps.describe` (§10.7) | 149: `stage → tempdb.trips`; `Writing · 5.3 s` / `Completed · 6.1 s`; `12,000 fetched · 11,000 written`; `connect 12 ms · query 410 ms · fetch 3.4 s · wait 22 ms · write 1.5 s`; `Committed · 12,453 rows` / `Not committed · rolled back` / `Commit not observed` (a node event closed the operation before its terminal sample); rows absent when nothing was measured |
 
 Long values wrap via `overflow-wrap: anywhere` rather than widening the pane; every
 value also rides on its element's `title` (the §9.4 rule — the truncated text is never
@@ -1289,7 +1292,9 @@ parameter counts; `node_started` says *rendered template, executing on source* /
 *evaluating kind* / *spawning child @v*; `node_completed` says *rows → output* /
 *key = "value"* / *child id completed*; `node_failed` leads with the error code;
 `data_ready` reports rows · columns; the terminal events carry the summary and the
-total duration.
+total duration; `node_progress` (149) says *state → destination · N fetched · M written*
+(`waiting for tempdb connection`, `querying and materializing (one statement) → tempdb.t`)
+and, on the terminal sample, *committed* / *not committed, rolled back*.
 
 The tab carries a **live count badge**. The list **auto-scrolls while running** and
 yields the moment the user scrolls up (the pin releases when they return to the bottom)
@@ -1314,6 +1319,27 @@ before re-binding. `editor-toast-once.test.mjs` is the falsifier — two lifecyc
 and one stream produce exactly one toast.
 
 ---
+
+### 10.7 The node-operation reducer (149) — the one view model of what a node is doing
+
+`node-ops.js` (`window.PENodeOps`, pure, `node --test`: `node-ops.test.mjs`) reduces EVERY
+lifecycle event and every `node_progress` sample into one operation view per node —
+`createNodeOps()` → `{ reduce(kind, payload), get(nodeId), all(), reset() }`. `sse.js` feeds it
+before its own `switch` so a node's terminal event closes its operation before the card
+re-renders. The cards (§5.3), the Details pane (§8.1), the Events tab (§10.6) and the a11y
+node list (§14) all read it; **151's output connector reads `editor.nodeOps.get(nodeId)`**
+and must not estimate a phase from a node's status on its own.
+
+The honesty rules the wire imposes, kept here: samples apply in `sequence` order and a late,
+lower sequence is ignored; the terminal sample (`completed`/`failed`/`aborted`) seals the
+operation; a `node_completed`/`node_failed` arriving WITHOUT a terminal sample closes it with
+`committed: null` — "not observed", never "committed"; an execution terminal event aborts every
+open operation with `observed: false`; there is no percentage. `describe(op)` renders the honest
+labels — `stateLabel`, `destinationText`, `countsText`, `phaseText` (the per-state share),
+`commitText` (only what the terminal sample said), `elapsedText`, the card's `cardLine` and
+`cardCounts`, and `a11yText` ("Writing to tempdb.trips, 12,000 fetched · 11,000 written, elapsed
+5.3 s"). Dependency arrows, copied edge row labels and arrow drawing are untouched (#127); no
+synthetic Start/End marker exists (#126).
 
 ## 11. Editing Scope
 
@@ -1383,6 +1409,7 @@ modules/web/src/main/resources/static/
         ├── details.js                      (DetailsPanel class + PEErrorDetails — §9.1)
         ├── dock.js                         (bottom dock state machine, PURE — §10)
         ├── events.js                       (Events tab log + per-kind text, PURE — §10.6)
+        ├── node-ops.js                     (node-operation reducer + describe(), PURE — §10.7)
         ├── error.js                        (ErrorModal class)
         ├── result.js                       (ResultPanel class — §10)
         ├── sql-highlight.js                (zero-dependency SQL tokenizer + highlighter — §8.3)
@@ -1487,6 +1514,8 @@ No `npm install` in CI, no `package-lock.json`, no transitive dependency resolut
 ---
 
 ## 14. Accessibility
+
+**The operation as an accessible description (149).** `a11y.js`'s `a11yNodeOperation(nodeId, text)` writes `describe(op).a11yText` onto the node row as `aria-description` (and `data-operation`), so the measured state a sighted user reads off the card's footer and dot — "Writing to tempdb.trips, 12,000 fetched · 11,000 written, elapsed 5.3 s", later "Completed … Committed · 12,453 rows" — is available without colour or animation. Cleared for a new run; nothing is announced per sample (the live region stays for node lifecycle).
 
 **The constraint that shapes this whole section:** Cytoscape.js renders the graph into a **single `<canvas>` element**. There are no per-node DOM elements, no SVG shapes, nothing for a screen reader or the browser's focus engine to reach. Per-node ARIA (`role="button"` on a node, a per-node `aria-label`, tabbing "into" the graph) is **not implementable** on this renderer — v1.1 of this spec required it and was wrong.
 
@@ -1841,6 +1870,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v1.12 | 149 / #125 measured node operations | **New §10.7 the node-operation reducer** (`node-ops.js`, pure): one view model per node from `node_progress` and the lifecycle events — sequence-ordered, sealed by the terminal sample, closed by node/execution terminal events with `committed` UNKNOWN rather than invented; the interface 151's output connector consumes. §5.3: while a node runs the footer is the measured operation (state word left, live count right, `pe-card-op-<state>` dot colours through tokens; one line, T251 kept). §6.2: the `node_progress` row. §8.1: Operation / Progress / Rows / Time in / Commit / Child execution rows. §10.6: the Events tab sentence. §12.1: `node-ops.js`. §14: the node row's accessible description carries the operation. No edge, arrow, row-label or Start/End change (#127, #126). |
 | 2026-09-13 | v1.11 | T251 calculator card footer | §5.3 footer + §6.2 `node_completed`: **a calculator's footer and edge label COUNT what it wrote** (`2 keys · 2 ms`, edge `2 keys`); the values stay in the Details pane and the Events tab. The owner's screenshot: the multi-output window calculator's footer inlined `= last_quarter_end="2024-12-31", last_quarter_start="2024-10-01" · 2 ms`, wrapped to three lines in a footer laid out for one, floated the Done dot mid-card, and its edge read `0 rows`. `graph.js`: `keysWritten`/`countLabel`, `edgeLabelFor` (a calculator's edge never says rows); `.pe-card-rt` is `nowrap` + ellipsis as the belt. Pinned in `graph-card.test.mjs` (footer count forms, edge label per kind) and in the browser on a real calculator run. |
 | 2026-09-06 | v1.10 | wide-stage card scale and the stray node list (082) | **§5.3/§4.3: the card steps up on a wide stage.** "At 2560 the cards read small" cannot be a zoom change — the owner's ruling caps fit at 1.0 and forbids zooming IN — so `.pe-stage` became a `container-type: inline-size` container and a stage ≥ 1200px wide gets `--pe-card-w: 272px`, `--pe-card-h: 170px` and the card type scale (now tokenised as `--pe-card-fs-*`) a pixel larger. The declarations land on `#cy-canvas` because a container cannot style itself and because `readDesignTokens(containerId)` now reads the geometry from that element — reading `documentElement` would keep the Cytoscape node box at 236px while the HTML card grew. A `ResizeObserver` on the stage re-runs layout when the threshold is crossed live. **§14.1: the node picker is a KEYBOARD surface again** — every pointer route selects with `moveFocus = false`, and the picker now shares one bottom-anchored column with the legend (`.pe-stage-bl`) instead of being anchored to the same corner, which is what put it on top of the legend in 080's dark Details shot. New guards: `card-scale.test.mjs`, `node-picker-focus.test.mjs`, an `EditorLayoutRenderTest` nesting assertion and a `PipelineEditorDetailsBrowserTest` geometry assertion. No wire contract moved. **Addendum (owner's first walk of the merged UI), two P1s:** *the dark theme broke the canvas* — TWO causes, both measured live rather than assumed. (1) `readDesignTokens` handed Cytoscape the raw custom-property text, and four canvas tokens are `color-mix()` bridges it cannot parse; every colour is now resolved through a probe element and normalised to `rgb(…)` — Chrome answers `color(srgb …)`, not `rgb()`, which the first cut of the fix rejected. (2) `updateTheme()` re-applied with `cy.style(array)`, which RESETS a live graph to Cytoscape's defaults (#999 lines, 30px edges, #999 fills — the owner's grey bands); the re-apply is `cy.style().fromJson(sheet).update()`, and because `fromJson` drops function values the per-node card height became an element bypass. 080's `wheelSensitivity` (warned on every init) is gone. *The card footer painted outside the card* — `--pe-card-h` was a fixed height that three fact lines overflow; it is a `min-height` now and `syncCardHeights()` hands each measured height to Cytoscape so the node box, the ports and the minimap follow the real card. Guards: `graph-colour-tokens.test.mjs`, `card-height.test.mjs`, and a live theme-switch browser test demanding zero Cytoscape complaints. |
 | 2026-09-05 | v1.9 | editor v2 canvas and dock (080) | The owner-approved mock (`2026-09-05-editor-canvas-v2.html`) becomes the editor. **§5.3 rewritten: the v2 canvas** — dotted-grid stage, the mock's card anatomy (type-accent icon tile, id + type eyebrow, up to three mono facts, footer with state dot + run numbers, ports, hover lift + hover-only expand, running progress line), bezier edges with three states (`--edge` rest / `--edge-active` dashed + JS-stepped flow while the target runs / `--edge-done` after), row counts riding the edge behind the `rows` class, controls + minimap bottom-right, legend bottom-left, keyboard hint top-left, and the fit ceiling: fit never zooms IN past 1.0 (the 059 0.75 floor stays). Canvas tokens are ONE new block in `app.css` (the five node-type accent pairs + `--brand(-soft)` + `--border-faint` + `--grid-dot` + `--edge*`), bridged to the design system so all nine themes re-skin the canvas. The 065 inspector overlay is DELETED — **§8 rewritten: Details is a tab of the dock** (owner ruling 2026-09-05), with per-type meta and the rendered SQL / calculator evaluation / child mapping; the per-node Failure section merged into the per-run Errors tab. **§10 rewritten: the dock is Details \| Results \| Errors \| Events**, always present (`hidden` died with the overlay), `collapsed` the only contraction, still no close; **§10.6 new: the Events tab** — every SSE event in arrival order with a live count badge and a yielding auto-scroll. **The exactly-once toast:** "many success toasts" was the 076 afterSettle rescue stacking Alpine components on a history-restored root (one click → N executions → N terminal toasts); the rescue now destroys the stale tree before re-binding (`editor-toast-once.test.mjs` falsifies the old shape). §4.2/§4.3/§5.4/§6.2/§6.3/§9.1/§12.1/§14 updated to match; `events.js` in, `inspector.js` out. Top bar gains the mock's crumb (folder muted + name bold), version chip and run-status clock (§4.2). No wire contract moved. |

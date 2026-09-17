@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.12 (living document — updated as enums evolve)
+**Status:** v1.14 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -288,6 +288,7 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 |---|---|---|
 | `execution_started` | Execution begins | First event, exactly once |
 | `node_started` | A node begins executing | After its dependencies completed |
+| `node_progress` | A measured sample of the node's operation — state, destination, cumulative counts, per-state wall time ([REST API §6.4.9](rest-api.md#649-node_progress)) | Zero or more, strictly between the node's `node_started` and its `node_completed`/`node_failed`; never terminal |
 | `node_completed` | A node finishes successfully | After matching `node_started` |
 | `node_failed` | A node fails | After matching `node_started`; pipeline then halts |
 | `pipeline_completed` | All nodes succeeded; final result imminent | After all `node_completed` |
@@ -625,6 +626,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v1.14 | 149 / #125 node_progress | §11 gains **`node_progress`** — the measured per-node operation sample ([REST API §6.4.9](rest-api.md#649-node_progress)); zero or more between a node's `node_started` and its terminal event, never terminal. |
 | 2026-09-15 | v1.12 | 142 release cascade | §15's `pipeline.version.released` row gains `templates_released`; `template.version.released` gains the cascade source (`cascade_from_pipeline_id`, `cascade_from_version`) when the pipeline release made it. |
 | 2026-09-14 | v1.11 | 140 release checks | New **§20 `CheckRunVerdict`** (`pass` \| `fail` \| `error`) and **§21 `CheckRunVia`** (`mcp` \| `rest` \| `ui` \| `release`) — the wire values of `pipeline_check_runs` (metadata-db §4.20, V28), authored in pipeline-contract `ReleaseCheckGate.kt`. §15's `pipeline.version.released` row gains the override record (`checks_overridden`, `override_reason`); §16 registers the `pipeline.check.*` domain (pipeline-contract §13.17). |
 | 2026-09-14 | v1.10 | 137 mail notices | §15 gains the **mail audit events** sub-table: `mail.sent` / `mail.failed` (`MailAuditEvents`, drift-guarded by `MailAuditEventsSpecDriftTest`) — kind, recipients, act and Message-ID or error in `details`; never a body, never a password. |

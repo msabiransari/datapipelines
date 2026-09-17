@@ -1,6 +1,6 @@
 # Staging (H2) Specification
 
-**Status:** v1.16 (frozen contract — additive-only changes after this point)
+**Status:** v1.17 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
 **Last updated:** 2026-09-16
@@ -222,6 +222,8 @@ connections is ever held across a network wait on the source database. A `Prepar
 crosses a returned lease — the next batch may land on a different physical connection — so the
 insert is re-prepared per batch (H2's per-session query cache makes that a lookup after the first).
 `stageRows` pulls its child-row sequence in the same batches, holding no lease between them.
+
+**The drain reports its boundaries (149).** `stage` and `stageRows` take a `StageObserver` (default `NONE`): `connectionRequested`/`connectionAcquired` around the `CREATE TABLE` lease and around each batch's insert lease, `fetchStarted`/`fetchFinished(rows)` around each batch read, `batchWritten(rows, rowsSoFar)` after the lease has RETURNED — the 108 §D rows-so-far figure rides that last call. Every call is made outside the pool's metadata lock and, except `connectionAcquired` (the boundary that says "holding"), outside the lease; the observer must be non-suspending and prompt, since it runs on the drain's own path. The executor bridges it onto the node's operation tracker ([DAG Executor §10](dag-executor.md#10-sse-event-integration)); at capacity one, a node whose sibling holds the pool's only connection is seen WAITING at the `CREATE TABLE` lease, before its first batch — an unobserved wait there read as a slow source query.
 
 ```kotlin
 private suspend fun drainBatches(...): Long {
@@ -616,14 +618,18 @@ interface Staging : AutoCloseable {
     // from the Connection may escape the block. Session state is reset when the lease returns.
     suspend fun <T> withConnection(block: suspend (Connection) -> T): T
 
-    suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult
+    // observer (149, §4.3): the drain's measured boundaries — the CREATE TABLE lease, each
+    // batch's fetch / lease request / lease held / accepted batch — default NONE.
+    suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect,
+                      observer: StageObserver = StageObserver.NONE): StageResult
     // The already-decoded twin of stage(): canonical columns + rows (composition's direct
     // delivery — a parent PIPELINE node's child rows). Same column-label validation
     // (§4.5: a malformed or case-insensitively duplicated label fails the node — labels
     // are never trusted, never sanitised), same partial-table rollback, same post-write
     // budget check; warnings always empty — the source-dialect mapping already happened
     // in the child's executor.
-    suspend fun stageRows(tableName: String, columns: List<ColumnSchema>, rows: Sequence<List<Any?>>): StageResult
+    suspend fun stageRows(tableName: String, columns: List<ColumnSchema>, rows: Sequence<List<Any?>>,
+                          observer: StageObserver = StageObserver.NONE): StageResult
     // Runs block against the cursor with its connection leased for the WHOLE consumption
     // (§3.3/§9.2). The cursor is never handed out to be read after the lease is returned, so
     // nothing can interleave on the cursor's connection; other connections stay available.
@@ -748,6 +754,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-16 | v1.17 | 149 / #125 measured node operations | §4.3: `stage`/`stageRows` take a **`StageObserver`** (replacing the 108 `onProgress` lambda; default `NONE`): the CREATE TABLE lease and each batch's fetch, lease request, lease held and accepted batch, reported outside the lease and never under the pool lock. §10 signature updated. |
 | 2026-09-16 | v1.16 | 146c / #118 second review | §9.2: the ownership invariant holds across exception boundaries (a sanitisation fault of any kind still unlinks and retires the session; operation failure wins, cleanup fault suppressed) and terminal admission is refused before waiting for a permit (already-waiting callers are refused on admission or cancelled by their deadline — stated exactly). §3.4: `close()` finalizes sweep and physical closes in nested `finally` blocks (a cleanup fault cannot strand an idle session or the closing state), a refused physical close is counted rather than reported closed, and the "never throws" claim is narrowed to SQL/runtime failures (a JVM `Error` propagates after finalization). Three review-reproduced findings fixed and pinned; an actually-lost pool proved through the real executor. |
 | 2026-09-16 | v1.15 | 146b / #118 review correction | §9.2: the ownership invariant stated explicitly — opening/idle/leased/guardian/closing, one owner per session always; a checkout's reservation counted before the lock is released and every open reconciled with close before publication; retirement counts only real holders (a guardian keeps the database alive until its replacement is adopted); continuity failure is explicit (**lost** pool, every later lease refused, no silent reconnection to an empty database). §3.4: late opens and guardians close themselves like quarantined leases; the last out runs the deferred sweep. Two review-reproduced races (replacement published into a closed pool; concurrent failed resets destroying the database) fixed and pinned. |
 | 2026-09-16 | v1.14 | 146 / #118 bounded H2 connection pool | The single operational connection and its global `Mutex` are replaced by a bounded per-execution **pool** with one owner per connection (§2 principle 5, §3.1, §3.3, §3.4, §3.5, §4.3, §7.1, §9 rewritten, §10 comments, §12, §13). New key `datapipelines.staging.h2.max-connections` (default 4, `1` allowed). Leases replace lock acquisitions; a `PreparedStatement` never crosses a returned lease; session state is per lease and sanitized on return against the pinned driver (`INFORMATION_SCHEMA.SESSION_STATE`); a failed reset discards and replaces the connection; name reservations and the row total keep one short metadata lock; `close()` never waits for a lease still inside the driver and the late return finishes cleanup once. H2's bundled `JdbcConnectionPool` read and not used (§9.3). |
