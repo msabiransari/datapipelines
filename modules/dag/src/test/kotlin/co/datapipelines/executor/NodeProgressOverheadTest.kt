@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StageObserver
@@ -10,6 +11,7 @@ import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.util.UUID
 
 /**
@@ -52,21 +54,7 @@ class NodeProgressOverheadTest {
                     } else {
                         StageObserver.NONE
                     }
-                val staging = factory.create(UUID.randomUUID(), StagingEngine.H2)
-                val (millis, checksum) =
-                    staging.use { st ->
-                        DriverManager.getConnection(source.jdbcUrl, source.username, "").use { c ->
-                            c.createStatement().use { stmt ->
-                                stmt.executeQuery("SELECT id, v FROM t").use { rs ->
-                                    val started = System.nanoTime()
-                                    val staged = runBlocking { st.stage(rs, "stg", Dialect.H2, observer) }
-                                    val elapsed = (System.nanoTime() - started) / NANOS_PER_MILLI
-                                    staged.rowsStaged shouldBe ROWS.toLong()
-                                    elapsed to runBlocking { st.withConnection { checksum(it) } }
-                                }
-                            }
-                        }
-                    }
+                val (millis, checksum) = stageOnce(source, factory, observer)
                 if (instrumented) {
                     on += millis
                     checksumOn = checksum
@@ -85,9 +73,41 @@ class NodeProgressOverheadTest {
         val medianOff = off.sorted()[off.size / 2]
         val medianOn = on.sorted()[on.size / 2]
         println(
-            "MEASUREMENT stage $ROWS rows × ${ROWS / BATCH} batches: observer OFF median=${medianOff}ms runs=$off; observer ON median=${medianOn}ms runs=$on; samples/op ≤ $samples",
+            "MEASUREMENT stage $ROWS rows × ${ROWS / BATCH} batches: observer OFF median=${medianOff}ms runs=$off; " +
+                "observer ON median=${medianOn}ms runs=$on; samples/op ≤ $samples",
         )
         (samples <= 1 + OperationPhase.entries.size + (medianOn / INTERVAL_MS).toInt() + 2).shouldBeTrue()
+    }
+
+    /** One full stage of the source into a fresh tempdb: wall time in ms, and the staged table's checksum. */
+    private fun stageOnce(
+        source: Datasource,
+        factory: H2StagingFactory,
+        observer: StageObserver,
+    ): Pair<Long, Long> =
+        factory.create(UUID.randomUUID(), StagingEngine.H2).use { st ->
+            SourceCursor(source).use { cursor ->
+                val started = System.nanoTime()
+                val staged = runBlocking { st.stage(cursor.rows, "stg", Dialect.H2, observer) }
+                val elapsed = (System.nanoTime() - started) / NANOS_PER_MILLI
+                staged.rowsStaged shouldBe ROWS.toLong()
+                elapsed to runBlocking { st.withConnection { checksum(it) } }
+            }
+        }
+
+    /** The source cursor over `t`, owning its connection and statement so one `use` closes all three. */
+    private class SourceCursor(
+        source: Datasource,
+    ) : AutoCloseable {
+        private val connection = DriverManager.getConnection(source.jdbcUrl, source.username, "")
+        private val statement = connection.createStatement()
+        val rows: ResultSet = statement.executeQuery("SELECT id, v FROM t")
+
+        override fun close() {
+            rows.close()
+            statement.close()
+            connection.close()
+        }
     }
 
     private fun countSamples(

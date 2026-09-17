@@ -21,8 +21,9 @@ import java.util.UUID
  * A sample is DUE when (1) a phase was entered for the FIRST time — that sample is taken AT
  * the entry, so a `writing` interval shorter than the pump's tick is still seen on the wire
  * as `writing`, with its own observation instant — or (2) [sampleIntervalMs]
- * (`progress-sample-interval-seconds`) has elapsed since the last sample and something changed. Per operation that is at most `phases + duration /
- * interval` events plus the terminal one — never per row, never per batch. First-entry
+ * (`progress-sample-interval-seconds`) has elapsed since the last sample and something changed.
+ * Per operation that is at most `phases + duration / interval` events plus the terminal one —
+ * never per row, never per batch. First-entry
  * samples wait in a queue no longer than the number of phases until the pump collects them.
  *
  * ## The seal
