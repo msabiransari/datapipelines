@@ -188,6 +188,8 @@
         if (editor.contextValues) editor.contextValues = payload.parameters || {};
         editor.isExecuting = true;
         editor.setBanner("", "");
+        // 150: the entry boundary is armed; End was reset to neutral by resetAll above.
+        self.setMarker("start", "running");
         break;
 
       case "node_started":
@@ -198,6 +200,28 @@
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "running";
         editor.announceStatus("Node " + payload.node_id + " started");
+        break;
+
+      case "node_progress":
+        // 135: a terminal sample (state "aborted"/"failed") is the ONLY node-level
+        // terminal signal a CANCELLED node gets — PipelineExecutor emits no node
+        // event for a cancellation ("Cancellation is not a node failure"), so the
+        // #125 operation sample is all that arrives before pipeline_failed. Map it
+        // onto the graph exactly when THIS sample is what sealed the operation (the
+        // reducer already ran, above): a node-level event keeps precedence, so a
+        // sample replayed after node_failed — or a lower-sequence straggler the
+        // reducer ignored — changes nothing, and a mid-run sample (writing, …) is
+        // not terminal and never moves the graph. setNodeState stops the pulse,
+        // clears the incoming flow and mirrors minimap + a11y.
+        if (
+          payload && payload.node_id && (payload.state === "aborted" || payload.state === "failed") &&
+          editor.graph && editor.nodeOps && typeof editor.nodeOps.get === "function"
+        ) {
+          var sealed = editor.nodeOps.get(payload.node_id);
+          if (sealed && sealed.terminal && sealed.state === payload.state) {
+            editor.graph.setNodeState(payload.node_id, payload.state);
+          }
+        }
         break;
 
       case "node_completed":
@@ -271,6 +295,9 @@
       case "pipeline_completed":
         self.terminalSeen = true;
         editor.isExecuting = false;
+        // 150: the boundaries read the authoritative outcome — never a node event.
+        self.setMarker("start", "idle");
+        self.setMarker("end", "success");
         // 080 §D: the top bar's status takes its terminal text (elapsed from the
         // clock, the row count data_ready left on runStatus.rows).
         if (editor.stopRunClock) editor.stopRunClock("done");
@@ -288,6 +315,15 @@
         self.terminalSeen = true;
         editor.isExecuting = false;
         if (editor.stopRunClock) editor.stopRunClock("failed");
+        // 135: the executor cancels running siblings and never starts queued ones
+        // when a node fails, emitting no node event for either — what it records in
+        // node_stats is ABORTED. Sweep them here so the on-screen states equal
+        // node_stats at the end of the run, exactly as execution_aborted already did.
+        self.abortUnfinishedNodes();
+        // 150: End reads the authoritative outcome — a failure is Failed, and a
+        // root that never started stays aborted beside it, not rewritten.
+        self.setMarker("start", "idle");
+        self.setMarker("end", "failed");
         // 057: the FULL payload goes to the result panel's failure mode — the code, the
         // message, the correlation id, the rendered SQL and the exception chain, on the
         // screen the engineer is already looking at. The modal keeps a one-line summary
@@ -310,15 +346,11 @@
         self.terminalSeen = true;
         editor.isExecuting = false;
         if (editor.stopRunClock) editor.stopRunClock("aborted");
-        if (editor.graph) {
-          editor.graph.cy.nodes().forEach(function (node) {
-            var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
-            if (!state || state === "idle" || state === "running") {
-              editor.graph.setNodeState(node.id(), "aborted");
-              if (editor.nodeStates) editor.nodeStates[node.id()] = "aborted";
-            }
-          });
-        }
+        self.abortUnfinishedNodes();
+        // 150: the owner's cancel is Stopped at the boundary — the marker's word,
+        // not a control (the boundaries are never buttons).
+        self.setMarker("start", "idle");
+        self.setMarker("end", "aborted");
         var abortReason = payload && payload.reason ? String(payload.reason) : null;
         if (window.DpToast && window.DpToast.show) {
           window.DpToast.show("warning", "Execution aborted", abortReason || "The execution was aborted");
@@ -328,6 +360,42 @@
 
       default:
         break;
+    }
+  };
+
+  /**
+   * 135: every node still idle or running when the execution ends aborted or
+   * failed is, by the server's own bookkeeping, ABORTED — the executor cancels
+   * running siblings and never starts queued ones, and it emits no node event
+   * for either. setNodeState carries the whole transition: the pulse stops, the
+   * incoming flow clears, and the minimap/a11y mirrors follow. Nodes that
+   * reached a real terminal state (success/failed) are not touched.
+   */
+  SseHandler.prototype.abortUnfinishedNodes = function () {
+    var editor = this.editor;
+    if (!editor.graph || !editor.graph.cy) return;
+    editor.graph.cy.nodes().forEach(function (node) {
+      // 150: the Start/End markers are not nodes — nothing about them ever ran,
+      // and End's one terminal word is the execution outcome, set by its own case.
+      if (node.data && node.data("kind") === "boundary") return;
+      var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
+      if (!state || state === "idle" || state === "running") {
+        editor.graph.setNodeState(node.id(), "aborted");
+      }
+    });
+  };
+
+  /**
+   * 150: the boundary markers' lifecycle, from the same authoritative events
+   * every other state reads. Start arms on execution_started and goes neutral at
+   * the execution's terminal event; End moves ONLY here — the authoritative
+   * execution outcome — never on a node event (a finished branch is not a
+   * finished execution). Guarded: the marker API is graph-internal and optional.
+   */
+  SseHandler.prototype.setMarker = function (side, state) {
+    var editor = this.editor;
+    if (editor.graph && typeof editor.graph.setMarkerState === "function") {
+      editor.graph.setMarkerState(side, state);
     }
   };
 
