@@ -222,7 +222,10 @@ class LakeInstanceOwner private constructor(
 
     /**
      * Closes, once, every physical handle this generation still owns and then the retained
-     * connection; later calls are no-ops. Never throws.
+     * connection; later calls are no-ops. Never throws — not for an SQLException and not for a
+     * nonfatal RuntimeException from the driver, on the duplicates or on the retained connection
+     * (the caller is the pool's close, and beyond it the shared manager's queue loop and the
+     * reaper, which visit every retired pool in turn).
      *
      * By now the pool has shut Hikari down, so a handle still in [handles] is one Hikari never
      * accepted (its creation straddled the shutdown — the bag was already closed when the creator
@@ -261,18 +264,46 @@ class LakeInstanceOwner private constructor(
                 remaining.firstNotNullOfOrNull { it.lastCloseFailure }?.message.orEmpty(),
             )
         }
-        try {
-            connection.close()
-        } catch (e: SQLException) {
-            LOG.warn(
-                "event=lake.instance_owner_close_failed datasource={} generation={} error=\"{}\"",
-                datasourceName,
-                generation,
-                e.message,
-            )
-        }
-        LOG.info("event=lake.instance_closed datasource={} generation={}", datasourceName, generation)
+        // The retained connection: ONE attempt, and the same nonfatal-exception policy as the
+        // duplicates' — an SQLException or a RuntimeException the driver surfaces is contained
+        // here and reported, never propagated: this runs inside HikariConnectionPool.close's
+        // finally, and from there through ConnectionPoolManager.close's queue loop and the
+        // reaper, where an escaping exception would stop the cleanup of UNRELATED pools
+        // (R152-8). A refused close is not called a closure: the WARN carries the error and
+        // the closing line says whether the physical owner actually closed.
+        val ownerClosed =
+            try {
+                connection.close()
+                true
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
+                ownerCloseFailure = e
+                LOG.warn(
+                    "event=lake.instance_owner_close_failed datasource={} generation={} error=\"{}\" " +
+                        "message=\"the retained DuckDB owner connection refused to close; it is the driver's residual, reported once\"",
+                    datasourceName,
+                    generation,
+                    e.message,
+                )
+                false
+            }
+        LOG.info(
+            "event=lake.instance_closed datasource={} generation={} retained_owner_closed={}",
+            datasourceName,
+            generation,
+            ownerClosed,
+        )
     }
+
+    /** The driver's refusal to close the retained connection at release, if any — the residual's diagnostic. */
+    @Volatile
+    var ownerCloseFailure: Exception? = null
+        private set
+
+    /** The physical truth about the retained connection — never inferred from [close] having run. */
+    val isRetainedConnectionOpen: Boolean
+        get() = runCatching { !connection.isClosed }.getOrDefault(false)
 
     companion object {
         private val LOG = LoggerFactory.getLogger(LakeInstanceOwner::class.java)

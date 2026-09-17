@@ -56,8 +56,15 @@ interface ConnectionPool : AutoCloseable {
  * closing), then [close] after the Hikari pool has fully shut down.
  */
 interface PoolInstanceOwner : AutoCloseable {
-    /** Shutdown has begun: refuse every further physical connection; existing ones are Hikari's to abort. */
+    /** Shutdown has begun: refuse every further physical connection; existing ones are Hikari's to abort. Never throws. */
     fun retire()
+
+    /**
+     * Release the generation's resources after Hikari has shut down. Never throws: the caller is
+     * a pool's close inside the shared manager's loop over every pool, and one generation's
+     * driver fault must not stop the next pool's cleanup — a refusal is reported, not propagated.
+     */
+    override fun close()
 }
 
 /**
@@ -113,10 +120,12 @@ class HikariConnectionPool(
      * Retire the owner, Hikari shutdown — it waits (bounded by the DataSource's login timeout,
      * which Hikari itself sets from `connectionTimeout`) for a physical connection mid-creation,
      * then aborts the leases still out once its shutdown grace expires (the existing §5.2
-     * hard-close policy) — then the owner's release. A borrower Hikari abandoned keeps its own
-     * handle on the instance until it actually closes; the owner's close only drops the retained
-     * handle, it never pulls the engine out from under a running statement. No lock is held
-     * across any of it: the losing caller does not wait, it returns.
+     * hard-close policy) — then the owner's release, which closes every physical handle the
+     * generation still owns (one Hikari abandoned at that ceiling included: a duplicate does not
+     * outlive its generation) and the retained connection. Neither step throws: Hikari's close
+     * contains its own failures, and [PoolInstanceOwner.close] contains the driver's, so this
+     * method is safe inside [ConnectionPoolManager.close]'s and the reaper's loops over every
+     * pool. No lock is held across any of it: the losing caller does not wait, it returns.
      */
     override fun close() {
         if (!closing.compareAndSet(false, true)) return
