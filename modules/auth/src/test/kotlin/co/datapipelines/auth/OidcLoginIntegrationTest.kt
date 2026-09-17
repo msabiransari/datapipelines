@@ -11,6 +11,10 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.header.HeaderWriterFilter
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.net.URI
@@ -56,6 +60,31 @@ class OidcLoginIntegrationTest {
     @Autowired private lateinit var jwtService: JwtService
 
     @Autowired private lateinit var jdbc: NamedParameterJdbcTemplate
+
+    @Autowired private lateinit var securityFilterChain: SecurityFilterChain
+
+    @Test
+    fun `security headers finish before downstream work can own an asynchronous response`() {
+        val filter = securityFilterChain.filters.filterIsInstance<HeaderWriterFilter>().single()
+        var downstreamOwnsResponse = false
+        val response =
+            object : MockHttpServletResponse() {
+                override fun containsHeader(name: String): Boolean {
+                    check(!downstreamOwnsResponse) { "Late security-header access after async handoff" }
+                    return super.containsHeader(name)
+                }
+            }
+        val request = MockHttpServletRequest("POST", "/api/v1/pipelines/example/execute")
+        request.addHeader("Accept", "text/event-stream")
+        filter.doFilter(request, response) { _, _ ->
+            // Force the servlet-unwind order: downstream work already owns the response.
+            // Deferred headers must not inspect its mutable header collection at this point.
+            downstreamOwnsResponse = true
+        }
+        response.getHeader("X-Content-Type-Options") shouldBe "nosniff"
+        response.getHeader("X-Frame-Options") shouldBe "DENY"
+        response.getHeader("Cache-Control") shouldBe "no-cache, no-store, max-age=0, must-revalidate"
+    }
 
     private val jar = mutableMapOf<String, String>()
     private val http: HttpClient =

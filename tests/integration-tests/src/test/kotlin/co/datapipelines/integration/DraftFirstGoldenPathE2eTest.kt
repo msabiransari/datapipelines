@@ -70,6 +70,19 @@ class DraftFirstGoldenPathE2eTest {
     private val mapper = ObjectMapper()
 
     @Test
+    @Order(7)
+    fun `early security headers retain explicit public caching and protect unauthenticated refusals`() {
+        given().port(port).get("/site/css/site.css").then()
+            .statusCode(200)
+            .header("Cache-Control", org.hamcrest.Matchers.equalTo("max-age=3600, public"))
+            .header("X-Content-Type-Options", org.hamcrest.Matchers.equalTo("nosniff"))
+        given().port(port).accept(ContentType.JSON).get("/api/v1/executions").then()
+            .statusCode(401)
+            .header("Cache-Control", org.hamcrest.Matchers.containsString("no-store"))
+            .header("X-Frame-Options", org.hamcrest.Matchers.equalTo("DENY"))
+    }
+
+    @Test
     @Order(1)
     fun `an agent creates a pipeline and gets a DRAFT it can run, not a release`() {
         E2eClean.beforeSeeding()

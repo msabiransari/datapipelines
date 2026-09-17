@@ -16,6 +16,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler
+import org.springframework.security.web.header.HeaderWriterFilter
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
@@ -144,7 +145,11 @@ class SecurityConfig(
                     .logoutSuccessUrl("/login")
             }
 
-        return http.build()
+        val chain = http.build()
+        // An SSE worker can write while the servlet thread unwinds its filters. Finish
+        // security headers before that handoff; deferred writes race Tomcat's header map.
+        chain.filters.filterIsInstance<HeaderWriterFilter>().single().setShouldWriteHeadersEagerly(true)
+        return chain
     }
 
     /**

@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.19 (revised — see Change Log)
+**Status:** v2.20 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-17
 
 ---
 
@@ -929,6 +929,8 @@ Rotation, which the config value never had: mint a second `server` key, set it o
 
 ### 8.1 Filter chain
 
+Security headers are written before the downstream filter chain starts. An SSE worker may write the response while the original servlet thread unwinds; deferred security-header inspection at that point would race the container's mutable headers. `HeaderWriterFilter` therefore uses eager writing. The default security and private-cache headers remain enabled; an explicit application `Cache-Control` value (including public page/asset TTLs) overrides that header afterward. This changes header timing, not authentication, authorization or CSRF rules.
+
 The sketch below is the shape of `SecurityConfig.securityFilterChain` as it is actually
 assembled, not a simplification: the three `addFilterBefore` calls read in the REVERSE of
 the order they produce, which is why the resulting order is spelled out under §8.2 rather
@@ -993,7 +995,9 @@ class SecurityConfig(
                        .logoutSuccessUrl("/login")
             }
 
-        return http.build()
+        val chain = http.build()
+        chain.filters.filterIsInstance<HeaderWriterFilter>().single().setShouldWriteHeadersEagerly(true)
+        return chain
     }
 
     // Two MVC interceptors, registered as WebMvcConfigurer beans: the scope interceptor on
@@ -1471,6 +1475,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v2.20 | SSE response headers (#131) | §8.1: configure eager security headers before asynchronous response handoff; retain security defaults and explicit application caching. Guarded at the configured filter boundary and by real HTTP/OIDC tests. |
 | 2026-09-14 | v2.19 | 140 release checks over MCP | §7.6 MCP table: `pipelines_run_checks` joins the `execute`/`execute` row (40 → 41 tools) — the D-R3 verb, the same floor as the `EXECUTE_PIPELINE` REST twin (`POST …/checks/run`): a viewer runs what they can read, and a check run returns no row data beyond the one observed cell per check. Both `ScopeMatrixSpecDriftTest` counts moved 40 → 41 in the same commit. The status line had drifted a version behind the rows again (the v2.16 note's pattern); now current. |
 | 2026-09-14 | v2.18 | 137 mail notices | New **§5A.8 Mail**: the welcome mail (login URL + one-time password) at local-account creation, the reset mail at an admin reset, and the sys-ops "New user" notice (no password) at every creation — local or the OIDC callback's create branch (§5.5: `findOrCreateByEmail` answers `Provisioned(user, created)`). Enabled exactly when configured ([Configuration §3.27](configuration.md#327-mail)); claimed before sent (`mail_sends`, [Metadata DB §4.19](metadata-db.md#419-mail_sends)) so a password mail never goes twice; sent after commit off the request thread; `mail.sent` / `mail.failed` audited without a body. §5A.1's "no email flow — the product has no SMTP" is gone: there is still no self-service reset, but the credential an admin mints is mailed, and the admin screen shows where it went instead of what it was ([UI §4.12](ui-screens.md#412-admin-user-management-admin-scope-only)). |
 | 2026-09-14 | v2.17 | 134 MCP save sees workspace datasources | §8.5: the principal reaches an MCP tool through the transport context, not the thread — the SDK's scheduler thread has an empty `SecurityContextHolder`, so anything reachable from a tool takes principal and workspace as arguments (the save-time datasource port did not, and every MCP save saw owner-less datasources only). No matrix change. |
