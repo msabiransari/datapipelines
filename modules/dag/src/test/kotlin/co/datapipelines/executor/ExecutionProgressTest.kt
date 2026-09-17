@@ -6,8 +6,12 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -69,18 +73,23 @@ class ExecutionProgressTest {
     /**
      * The heartbeat beats while the execution runs, and stops when it ends.
      *
-     * At a one-second interval a node doing ~2 s of real work must produce at least two beats.
-     * Asserted as a floor rather than an exact count because the tick is a `delay`, not a clock;
-     * the claim under test is "it beats repeatedly while work is in flight", which a floor states
-     * exactly and an equality would state as a flake.
+     * The node's query blocks INSIDE the source (an H2 alias, [HeartbeatRendezvous]) until the
+     * sink has counted the second beat, so "two beats arrived while work was in flight" is a
+     * property of the construction, never of the clock. The first draft ran ~2 s of real H2 work
+     * against the one-second cadence and asserted `beats >= 2` — a fixed-cadence expectation that
+     * held on the dev box and lost on a CI runner whose core finished the query in under two
+     * ticks (#114, run 35039260539). The rendezvous is bounded by a hang guard, not a cadence: a
+     * heartbeat that never comes lets the query return 0 and the assertions below go red.
      */
     @Test
     fun `the heartbeat beats repeatedly while the execution runs and stops with it`() =
         runBlocking<Unit> {
             val progress = RecordingProgress()
-            val source = h2Datasource("beat", listOf("CREATE TABLE beat (n INT)"))
+            val rendezvous = HeartbeatRendezvous.arm(beats = 2, hangGuard = HEARTBEAT_HANG_GUARD)
+            progress.onBeat = rendezvous::beat
+            val source = h2Datasource("beat", listOf(HeartbeatRendezvous.CREATE_ALIAS))
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(mapOf("slow" to TWO_SECOND_SQL)),
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to HeartbeatRendezvous.SQL)),
                 registry = FakeDatasourceRegistry(mapOf("beat" to source)),
                 config = ExecutorConfig(heartbeatSeconds = 1, executionTimeoutSeconds = 60, nodeTimeoutSeconds = 60),
                 progress = progress,
@@ -88,6 +97,8 @@ class ExecutionProgressTest {
                 val nodes = listOf(Fixtures.node("slow", source = "beat"))
                 h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
 
+                // The query returned because the second beat arrived — not because the guard gave up.
+                rendezvous.met().shouldBeTrue()
                 (progress.beats.get() >= 2).shouldBeTrue()
                 val afterRun = progress.beats.get()
                 // The beat coroutine is cancelled with the poller, so nothing arrives after the
@@ -136,6 +147,9 @@ class ExecutionProgressTest {
         val beats = AtomicInteger()
         val forgotten = AtomicInteger()
 
+        /** Told of every beat as it lands — the heartbeat test's rendezvous hangs off it. */
+        var onBeat: () -> Unit = {}
+
         override fun record(
             executionId: UUID,
             nodeStats: List<NodeStats>,
@@ -157,6 +171,7 @@ class ExecutionProgressTest {
 
         override fun heartbeat(executionId: UUID) {
             beats.incrementAndGet()
+            onBeat()
         }
 
         override fun forget(executionId: UUID) {
@@ -165,14 +180,65 @@ class ExecutionProgressTest {
     }
 
     private companion object {
-        /** ~2 s of real H2 work — see `ConcurrencyTest.MEDIUM_SQL` for the calibration. */
-        const val TWO_SECOND_SQL =
-            """SELECT COUNT(*) AS c FROM SYSTEM_RANGE(1, 5600) a, SYSTEM_RANGE(1, 5600) b WHERE MOD(a."X" + b."X", 7) = 0"""
-
         /** Five default-sized batches, so "mid-flight" is a real claim and not one report. */
         const val STAGED_ROWS = 5000L
 
         /** Long enough that a beat that was NOT cancelled would certainly have fired. */
         const val HEARTBEAT_QUIET_MS = 1_500L
+
+        /**
+         * How long the node's query waits for the second beat before giving up. At a one-second
+         * cadence the wait is ~2 s; only a heartbeat that never comes can exhaust this, and that
+         * is a red test, not a slow one.
+         */
+        val HEARTBEAT_HANG_GUARD: Duration = Duration.ofSeconds(30)
+    }
+}
+
+/**
+ * The rendezvous the heartbeat test puts INSIDE its node's query — [NodeRendezvous]'s shape, one
+ * party: H2 calls [await] through the `heartbeat_rendezvous` alias on the thread executing the
+ * statement, and the call returns when the recording sink has counted the armed number of beats.
+ * The node therefore cannot finish before the beats it is asserted to have produced, whatever the
+ * runner's speed. A public object with a `@JvmStatic` method because that is the shape H2 can
+ * load and invoke reflectively. One rendezvous armed per run, exactly as [NodeRendezvous].
+ */
+object HeartbeatRendezvous {
+    /** The DDL that binds the alias in a fresh H2 source, for [h2Datasource]. */
+    const val CREATE_ALIAS = """CREATE ALIAS heartbeat_rendezvous FOR "co.datapipelines.executor.HeartbeatRendezvous.await""""
+
+    /** The node's query: returns 1 when the beats arrived, 0 when the hang guard gave up. */
+    const val SQL = "SELECT heartbeat_rendezvous() AS met"
+
+    @Volatile
+    private var current: Armed? = null
+
+    /** Arms a fresh latch of [beats] whose wait gives up after [hangGuard]. */
+    fun arm(
+        beats: Int,
+        hangGuard: Duration,
+    ): Armed = Armed(CountDownLatch(beats), hangGuard).also { current = it }
+
+    /** What H2 calls. Returns 1 when the armed beats arrived, 0 when the guard gave up. */
+    @JvmStatic
+    fun await(): Int = checkNotNull(current) { "heartbeat_rendezvous() called with no rendezvous armed" }.await()
+
+    class Armed(
+        private val latch: CountDownLatch,
+        private val hangGuard: Duration,
+    ) {
+        private val met = AtomicBoolean(false)
+
+        /** One beat landed — called from the recording sink on the executor's own thread. */
+        fun beat() = latch.countDown()
+
+        fun await(): Int {
+            val arrived = latch.await(hangGuard.toMillis(), TimeUnit.MILLISECONDS)
+            met.set(arrived)
+            return if (arrived) 1 else 0
+        }
+
+        /** Whether the query returned because the beats arrived, not because the guard expired. */
+        fun met(): Boolean = met.get()
     }
 }

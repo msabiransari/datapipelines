@@ -274,6 +274,13 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         admin.page.waitForSelector("$row input[data-flag=admin]")
         admin.page.check("$row input[data-flag=admin]")
         admin.page.click("$row [data-verb='member-flags']")
+        // The write's own completion signal: the POST redirects to `?ok=member_flags` only after
+        // the service has committed (PRG, WorkspacesUiController.action). The first draft waited
+        // on `input[data-flag=admin]:checked` — a box `check()` had already ticked in the OLD
+        // document, so the wait returned before the POST was answered and the row below was read
+        // mid-flight: `(false, true, false)` on CI and once in a local gate (#114, 154).
+        admin.page.waitForURL("**/workspaces?ok=member_flags")
+        // …and the re-rendered row shows what the database now holds.
         admin.page.waitForSelector("$row input[data-flag=admin]:checked")
 
         flagsOf(workspace, member) shouldBe Triple(true, true, true)

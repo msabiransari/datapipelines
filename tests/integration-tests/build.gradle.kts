@@ -72,6 +72,19 @@ tasks.named<Test>("test") {
     // suites (the MinIO suite and the two-context lake registry suite). A ceiling, not an
     // allocation — the JVM takes only what the cache actually needs.
     maxHeapSize = "6g"
+    // The staging budget reads the JVM's live heap (staging.md §8.2: `System.gc()`, then
+    // used heap, compared with `max-memory-mb`) — in production one application's heap, in
+    // THIS JVM thirty-odd cached applications' heap. At the shipped 1024 MB the 32nd suite in
+    // alphabetical order (CI's single fork: dp.test.forks.e2e=1) measured 1 111 595 KB live
+    // before its first two-row stage and got `pipeline.staging.memory_limit_exceeded`
+    // (run 35263013651 on d3c5d811; reproduced locally with the class order pinned, 154/#137).
+    // Two forks halve the retained contexts, which is why the dev-box gate never saw it. The
+    // budget is sized to this JVM through the operator's own key (configuration.md §3.3):
+    // two-thirds of the heap above, so a runaway stage still trips the guard well before the
+    // JVM's ceiling, while the retained contexts (1.1 GB measured with ~28 alive; Spring's
+    // context cache caps them at 32) are not mistaken for one. The jar smoke's child JVM
+    // inherits it and stages nothing.
+    environment("DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB", "4096")
     // Forks are containers AND contexts: each fork boots its own Postgres/Redis/MySQL set and
     // its own Spring contexts (SharedE2e is per JVM). Sized by dp.test.forks.e2e, not the
     // ordinary dp.test.forks — DEVELOPMENT.md §9.5 has the RAM arithmetic.

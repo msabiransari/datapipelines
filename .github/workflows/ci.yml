@@ -24,7 +24,8 @@
 #         test task, so it always exercises the current tree). Deliberately a separate
 #         job, not folded into gate: it adds several GB of images and minutes on top
 #         of the unit suite — keeping it apart is what keeps `gate` fast and
-#         required-check-ready.
+#         required-check-ready. Uploads its test-result XML (the suites' application
+#         logs ride in system-out) as `integration-reports`, pass or fail (154, #137).
 #
 #   cold-verify (E2, the T30 guard; no Docker, NO Gradle cache):
 #     ./gradlew help :modules:app:bootJar resolveDependencyVerificationSurface
@@ -158,6 +159,21 @@ jobs:
           EOF
       - name: integration tests + fat-jar smoke (Testcontainers; Docker required)
         run: ./gradlew integrationTest
+      # The suite's test-result XML, kept for a week, pass or fail (154, #137). Every E2E suite
+      # boots the application in the test JVM, so each file's system-out IS the application log
+      # of that suite; a node_failed whose cause lives only in that log (2026-09-17: run
+      # 35263013651 failed UnsizedNumericStagingIntegrationTest with nothing but the lifecycle
+      # names, and the runner took the log with it) is diagnosable from the artifact alone.
+      # Pass or fail, like gate-reports: a red run is read against the green one before it —
+      # the heap and timing figures that decide an environment-vs-defect question live in both.
+      - name: keep the test-result reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-reports
+          path: tests/integration-tests/build/test-results/test/*.xml
+          retention-days: 7
+          if-no-files-found: warn
 
   cold-verify:
     runs-on: ubuntu-latest
