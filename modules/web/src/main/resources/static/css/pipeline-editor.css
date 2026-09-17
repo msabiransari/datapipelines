@@ -744,6 +744,12 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  /* 149: the live state word shares the one-line footer with the count on the right; a
+     long label clips rather than folding the footer (the T251 belt, applied to both slots). */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pe-card-state i {
@@ -757,6 +763,22 @@
   background: var(--brand, #2563eb);
   box-shadow: 0 0 0 3px var(--brand-soft, #dbeafe);
   animation: pe-pulse 1.2s ease-in-out infinite;
+}
+
+/* 149: the live operation line's dot follows the MEASURED state — a wait for an output
+   connection is amber and still (nothing is moving), a write is the brand pulse, a query
+   or fetch is the plain running pulse. Tokens only; both themes come from the design
+   system's accent pairs. */
+.pe-card-running .pe-card-op-waiting_output i {
+  background: var(--accent-warning, #b45309);
+  box-shadow: 0 0 0 3px var(--accent-warning-bg, #fef3c7);
+  animation: none;
+}
+
+.pe-card-running .pe-card-op-writing i,
+.pe-card-running .pe-card-op-finalizing i {
+  background: var(--accent-success, #15803d);
+  box-shadow: 0 0 0 3px var(--accent-success-bg, #dcfce7);
 }
 
 .pe-card-success .pe-card-state i {

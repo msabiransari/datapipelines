@@ -1,0 +1,45 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="operations(nodeOperations)">
+  <!-- 149: what each node DID, from the durable node_progress record (rest-api §6.4.9):
+       the operation and its real destination, the last observed state, the cumulative
+       counts, the per-state time share and whether the write committed. A node whose
+       last sample is not terminal is shown exactly so — the execution ended around it —
+       and never as committed. Identifier columns are mono, numbers are `.num` (§3.3). -->
+  <table class="ds-table" data-node-operations>
+    <thead>
+      <tr>
+        <th>Node</th>
+        <th>Operation</th>
+        <th>Destination</th>
+        <th>State</th>
+        <th class="num">Fetched</th>
+        <th class="num">Written</th>
+        <th class="num">Elapsed</th>
+        <th>Commit</th>
+        <th>Time in</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr th:each="op : ${nodeOperations}" th:attr="data-node-id=${op.nodeId},data-state=${op.state}">
+        <td class="u-mono" th:text="${op.nodeId}">node</td>
+        <td th:text="${op.operation}">stage</td>
+        <td class="u-mono" th:text="${op.destination}">tempdb.t</td>
+        <td>
+          <span th:text="${op.state}">completed</span>
+          <span class="u-muted u-text-xs" th:unless="${op.terminal}">(not observed to end)</span>
+        </td>
+        <td class="num" th:text="${op.rowsFetched != null} ? ${#numbers.formatInteger(op.rowsFetched, 1, 'COMMA')} : '—'">0</td>
+        <td class="num" th:text="${op.rowsWritten != null} ? ${#numbers.formatInteger(op.rowsWritten, 1, 'COMMA')} : '—'">0</td>
+        <td class="num" th:text="${op.elapsedMs != null} ? ${op.elapsedMs + 'ms'} : '—'">0ms</td>
+        <td>
+          <span th:if="${op.committed == true}" class="ds-badge ds-badge-success">committed</span>
+          <span th:if="${op.committed == false}" class="ds-badge ds-badge-danger" th:text="${op.rolledBack} ? 'rolled back' : 'not committed'">not committed</span>
+          <!-- A terminal operation with NO commit evidence: the node ended around it without a
+               witnessed commit or rollback (R149-1) — said as such, never as "not committed". -->
+          <span th:if="${op.committed == null and op.terminal and op.destination != 'no output'}" class="u-muted">not observed</span>
+          <span th:if="${op.committed == null and (!op.terminal or op.destination == 'no output')}" class="u-muted">—</span>
+        </td>
+        <td class="u-text-xs u-secondary" th:text="${op.timings != null} ? ${op.timings} : '—'">timings</td>
+      </tr>
+    </tbody>
+  </table>
+</th:block>

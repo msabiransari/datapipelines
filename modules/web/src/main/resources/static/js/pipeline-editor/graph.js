@@ -498,10 +498,20 @@
 
     h += '<div class="pe-card-progress" aria-hidden="true"><i></i></div>';
 
+    // 149: while the node RUNS, the footer's state word is the measured operation line
+    // (node-ops.js `describe().cardLine` — "Writing → tempdb.trips · 11,000 written",
+    // "Waiting for tempdb connection", "Querying"), tagged with the operation state so
+    // the stylesheet can colour waiting/writing distinctly. A terminal state keeps the
+    // plain word and the run numbers: a live line on a finished card would be stale.
+    var live = state === "running" && data.op ? data.op : null;
+    var opClass = live && data.opState ? " pe-card-op-" + esc(String(data.opState)) : "";
+    // The right slot: the last run's numbers once the node is done, the live cumulative count
+    // while it runs (149) — one line either way, never both.
+    var right = state === "running" ? data.opCounts || "" : data.run || "";
     h +=
-      '<div class="pe-card-foot"><span class="pe-card-state"><i></i><span class="pe-card-st">' +
-      esc(STATE_LABELS[state] || state) + '</span></span><span class="pe-card-rt">' +
-      (data.run ? esc(data.run) : "") + "</span></div>";
+      '<div class="pe-card-foot"><span class="pe-card-state' + opClass + '"><i></i><span class="pe-card-st">' +
+      esc(live || STATE_LABELS[state] || state) + '</span></span><span class="pe-card-rt">' +
+      esc(right) + "</span></div>";
 
     h += "</div>";
     return h;
@@ -1410,6 +1420,18 @@
     }
   };
 
+  /**
+   * 149: the node's measured operation (node-ops.js `describe()`), written as card data —
+   * the footer re-renders from it while the node runs. `view` null clears the line.
+   */
+  PipelineGraph.prototype.setNodeOperation = function (nodeId, view) {
+    var node = this.findNode(nodeId);
+    if (!node) return;
+    node.data("op", view && view.cardLine ? view.cardLine : null);
+    node.data("opCounts", view && view.cardCounts ? view.cardCounts : null);
+    node.data("opState", view && view.state ? view.state : null);
+  };
+
   /** Reduced motion cannot be read from CSS here — the graph is canvas, not DOM. */
   function pulseEnabled(mql) {
     return !(mql && mql.matches);
@@ -1461,6 +1483,9 @@
       node.addClass("idle");
       node.data("state", "idle");
       node.data("run", null);
+      node.data("op", null);
+      node.data("opCounts", null);
+      node.data("opState", null);
       if (self.editor && self.editor.nodeStates) self.editor.nodeStates[node.id()] = "idle";
       self.updateMinimapNode(node.id(), "idle");
       if (typeof window !== "undefined" && window.a11yNodeState) window.a11yNodeState(node.id(), "idle");

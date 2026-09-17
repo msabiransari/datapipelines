@@ -157,6 +157,26 @@
     if (item) item.setAttribute("data-state", state);
   }
 
+  /**
+   * 149: the node's measured operation as an accessible description on its list row —
+   * "Writing to tempdb.trips, 12,000 fetched · 11,000 written, elapsed 5.3 s" — so the
+   * state a sighted user reads off the card's footer and dot is available without colour
+   * or animation. Null clears it (a new run).
+   */
+  function a11yNodeOperation(nodeId, text) {
+    var list = document.getElementById("pe-node-list");
+    if (!list) return;
+    var item = list.querySelector('[role="option"][data-node-id="' + nodeId + '"]');
+    if (!item) return;
+    if (text) {
+      item.setAttribute("aria-description", text);
+      item.setAttribute("data-operation", text);
+    } else {
+      item.removeAttribute("aria-description");
+      item.removeAttribute("data-operation");
+    }
+  }
+
   function announceStatus(message) {
     var region = document.getElementById("pe-live-region");
     if (!region) return;
@@ -170,5 +190,6 @@
   window.buildNodeList = buildNodeList;
   window.a11ySyncNode = a11ySyncNode;
   window.a11yNodeState = a11yNodeState;
+  window.a11yNodeOperation = a11yNodeOperation;
   window.announceStatus = announceStatus;
 })();

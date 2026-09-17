@@ -51,9 +51,10 @@ class RedisResultStore(
         resultSet: ResultSet,
         sourceDialect: Dialect,
         ttlSeconds: Long,
+        observer: OperationObserver,
     ): StoredResult {
         val schema = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect)
-        return storeRows(executionId, schema, resultSetRows(resultSet, schema.columns), Duration.ofSeconds(ttlSeconds))
+        return storeRows(executionId, schema, resultSetRows(resultSet, schema.columns), Duration.ofSeconds(ttlSeconds), observer)
     }
 
     override suspend fun materializeRows(
@@ -61,7 +62,26 @@ class RedisResultStore(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         ttlSeconds: Long,
-    ): StoredResult = storeRows(executionId, ResultSchema(schema, warnings = emptyList()), rows.iterator(), Duration.ofSeconds(ttlSeconds))
+        observer: OperationObserver,
+    ): StoredResult {
+        // The decoded twin has no cursor for the caller to wrap: the pull from the sequence IS
+        // the fetch here, so it is reported by this store. FETCHING is entered BEFORE `hasNext()`
+        // (R149-3): a lazy producer — the composition row stream above all — does its source read
+        // inside `hasNext()`, and reporting after it would time that read as the page write it
+        // interrupted.
+        val pulled = rows.iterator()
+        val counted =
+            iterator {
+                while (true) {
+                    observer.phase(OperationPhase.FETCHING)
+                    if (!pulled.hasNext()) break
+                    val row = pulled.next()
+                    observer.fetched(1)
+                    yield(row)
+                }
+            }
+        return storeRows(executionId, ResultSchema(schema, warnings = emptyList()), counted, Duration.ofSeconds(ttlSeconds), observer)
+    }
 
     /**
      * The write path both entry points share: discard any previous result for the execution, drain
@@ -72,13 +92,18 @@ class RedisResultStore(
         schema: ResultSchema,
         rows: Iterator<List<Any?>>,
         ttl: Duration,
+        observer: OperationObserver,
     ): StoredResult {
         val key = baseKey(executionId)
         discard(key)
         return try {
-            writePages(key, schema, rows, ttl)
-                .also { writeMeta(key, executionId, schema, it, ttl) }
-                .also { metrics.resultWritten(ExecutorMetrics.OUTCOME_STORED, it.bytes) }
+            writePages(key, schema, rows, ttl, observer)
+                .also {
+                    // 149: the meta key is what makes the result readable — the finalization.
+                    observer.phase(OperationPhase.FINALIZING)
+                    writeMeta(key, executionId, schema, it, ttl)
+                    observer.committed()
+                }.also { metrics.resultWritten(ExecutorMetrics.OUTCOME_STORED, it.bytes) }
         } catch (e: DataAccessException) {
             discard(key)
             metrics.resultWritten(ExecutorMetrics.OUTCOME_STORAGE_UNAVAILABLE, 0)
@@ -200,6 +225,7 @@ class RedisResultStore(
         schema: ResultSchema,
         rows: Iterator<List<Any?>>,
         ttl: Duration,
+        observer: OperationObserver,
     ): StoredResult {
         val batch = ArrayList<String>(PUSH_BATCH_ROWS)
         var rowCount = 0L
@@ -226,12 +252,20 @@ class RedisResultStore(
             batch += encoded
             rowCount++
             if (batch.size >= PUSH_BATCH_ROWS) {
+                // 149: the page push is the WRITE boundary; the rows it carries are what the
+                // store accepted. The cursor pull that follows re-enters `fetching` by itself.
+                observer.phase(OperationPhase.WRITING)
                 redis.opsForList().rightPushAll(rowsKey(key), batch)
                 if (!ttlApplied) ttlApplied = redis.expire(rowsKey(key), ttl) == true
+                observer.written(batch.size.toLong())
                 batch.clear()
             }
         }
-        if (batch.isNotEmpty()) redis.opsForList().rightPushAll(rowsKey(key), batch)
+        if (batch.isNotEmpty()) {
+            observer.phase(OperationPhase.WRITING)
+            redis.opsForList().rightPushAll(rowsKey(key), batch)
+            observer.written(batch.size.toLong())
+        }
         redis.expire(rowsKey(key), ttl)
 
         return StoredResult(key, rowCount, bytes, Instant.now().plus(ttl), schema.warnings)
@@ -349,15 +383,16 @@ class RedisResultStore(
         val warnings: List<TypeMappingWarning> = emptyList(),
     )
 
-    private companion object {
+    internal companion object {
         const val KEY_PREFIX = "dp:result:"
 
         /**
          * Rows per `RPUSH`. Large enough that a wide result is not one round-trip per row, small
          * enough that the in-flight batch is never the thing that exhausts heap — the drain's
-         * whole point is constant memory (staging §6.1).
+         * whole point is constant memory (staging §6.1). Internal so the fetch-boundary test can
+         * cross exactly one push.
          */
-        const val PUSH_BATCH_ROWS = 500
+        internal const val PUSH_BATCH_ROWS = 500
 
         /** UTF-8 code-unit boundaries — the encoding's own definition, not tunable values. */
         const val ONE_BYTE_CEILING = 0x80

@@ -44,6 +44,39 @@ class SseLogStreamerTest {
         emitter.eventIds() shouldBe listOf("1", "2", "3")
     }
 
+    /** 149: replay is byte-faithful for `node_progress` too — original ids, original payloads, original order. */
+    @Test
+    fun `replay serves node_progress samples with their original ids between the node events`() {
+        val progress =
+            LoggedSseEvent(
+                3,
+                "node_progress",
+                mapOf(
+                    "node_id" to "n",
+                    "state" to "writing",
+                    "observed_at" to "2026-09-16T10:00:00.400Z",
+                ),
+            )
+        val stored =
+            listOf(
+                event(1, "execution_started"),
+                event(2, "node_started"),
+                progress,
+                event(4, "node_completed"),
+                event(5, "pipeline_completed"),
+            )
+        val log = mockk<SseEventLog>()
+        every { log.replay(executionId) } returns stored
+        val emitter = CapturingSseEmitter()
+
+        streamer(log, emitter).replay(executionId)
+
+        emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
+        emitter.eventNames() shouldBe listOf("execution_started", "node_started", "node_progress", "node_completed", "pipeline_completed")
+        emitter.eventIds() shouldBe listOf("1", "2", "3", "4", "5")
+        emitter.frames().any { it.contains("\"observed_at\":\"2026-09-16T10:00:00.400Z\"") } shouldBe true
+    }
+
     @Test
     fun `follow serves new events as they land and closes after the terminal sequence`() {
         // A live execution: each read reveals one more scripted event, ending in pipeline_failed.

@@ -6,6 +6,7 @@ import co.datapipelines.events.ExecutionEvent
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.NodeCompleted
 import co.datapipelines.events.NodeFailed
+import co.datapipelines.events.NodeProgress
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
@@ -50,6 +51,7 @@ class SseEventProjection(
             when (event) {
                 is ExecutionStarted -> startedPayload(event)
                 is NodeStarted -> nodeStartedPayload(event)
+                is NodeProgress -> nodeProgressPayload(event)
                 is NodeCompleted -> nodeCompletedPayload(event)
                 is NodeFailed -> nodeFailedPayload(event)
                 is PipelineCompleted -> completedPayload(event)
@@ -78,6 +80,42 @@ class SseEventProjection(
             STARTED_AT to event.startedAt,
             "attempt" to event.attempt,
         )
+
+    /**
+     * `node_progress` (rest-api §6.4.9, 149): the operation snapshot, snake_case, wire enum
+     * values. Unobserved counts are ABSENT — a client must not have to special-case a `-1` on a
+     * payload that never had the §7.1 sentinel — and `committed` / `rolled_back` /
+     * `child_execution_id` appear only when the snapshot carries them, so a running sample can
+     * never read as committed.
+     */
+    private fun nodeProgressPayload(event: NodeProgress) =
+        buildMap {
+            val s = event.snapshot
+            put(EXECUTION_ID, event.executionId)
+            put(NODE_ID, s.nodeId)
+            put("attempt", s.attempt)
+            put("sequence", s.sequence)
+            put("operation", s.kind.wire)
+            put(
+                "destination",
+                buildMap {
+                    put("kind", s.destination.kind.wire)
+                    s.destination.datasource?.let { put("datasource", it) }
+                    s.destination.table?.let { put("table", it) }
+                },
+            )
+            put("state", s.state.wire)
+            put(STARTED_AT, s.startedAt)
+            put("observed_at", s.observedAt)
+            put("elapsed_ms", s.elapsedMs)
+            put("timings_ms", s.timingsMs.entries.associate { (phase, ms) -> phase.wire to ms })
+            s.rowsFetched?.let { put("rows_fetched", it) }
+            s.rowsWritten?.let { put("rows_written", it) }
+            put("batches_written", s.batchesWritten)
+            s.committed?.let { put("committed", it) }
+            s.rolledBack?.let { put("rolled_back", it) }
+            s.childExecutionId?.let { put("child_execution_id", it) }
+        }
 
     private fun nodeCompletedPayload(event: NodeCompleted) =
         buildMap {

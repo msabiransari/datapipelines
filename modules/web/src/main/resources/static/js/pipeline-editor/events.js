@@ -31,6 +31,41 @@
     return r.toLocaleString("en-US") + " rows";
   }
 
+  function rowsCount(n) {
+    return Number(n).toLocaleString("en-US");
+  }
+
+  /** The 149 destination, short: `tempdb.t`, `pg.out`, `caller`, `parent pipeline`, `no output`. */
+  function destinationText(d) {
+    if (!d) return null;
+    if (d.kind === "tempdb") return d.table ? "tempdb." + d.table : "tempdb";
+    if (d.kind === "datasource") return d.table ? d.datasource + "." + d.table : d.datasource || "datasource";
+    if (d.kind === "caller") return "caller";
+    if (d.kind === "parent") return "parent pipeline";
+    if (d.kind === "none") return null;
+    return null;
+  }
+
+  /** The state word of a node_progress sample, lower-case for the timeline's sentence. */
+  function progressStateText(p) {
+    var d = p.destination || {};
+    switch (p.state) {
+      case "executing":
+        if (p.operation === "ctas") return "querying and materializing (one statement)";
+        if (p.operation === "child") return "child execution running";
+        if (p.operation === "statement") return "executing statement";
+        return "querying";
+      case "waiting_output": {
+        var noun = d.kind === "tempdb" ? "tempdb" : d.kind === "datasource" ? d.datasource || "datasource" : "output";
+        return "waiting for " + noun + " connection";
+      }
+      case "finalizing":
+        return p.operation === "writeback" ? "committing" : "finalizing";
+      default:
+        return String(p.state || "progress");
+    }
+  }
+
   /**
    * The `node — text` half of one event, per kind (the mock's copy). `ctx` carries
    * what the payload does not: the pipeline's name/version, the node map (for a
@@ -89,6 +124,21 @@
           var out = c.outputText && n ? c.outputText(n) : null;
           text = (rowsText(p.rows_out) || "done") + (out ? " → " + out : "");
         }
+        break;
+      }
+      case "node_progress": {
+        // 149: the measured operation sample — state, real destination, cumulative counts,
+        // and on the terminal sample whether the write committed. Never a percentage.
+        duration = msText(p.elapsed_ms);
+        var dest = destinationText(p.destination);
+        var stateWord = progressStateText(p);
+        // The waiting sentence already names the destination's connection.
+        var bits = [dest && p.state !== "waiting_output" ? stateWord + " → " + dest : stateWord];
+        if (p.rows_fetched !== undefined && p.rows_fetched !== null) bits.push(rowsCount(p.rows_fetched) + " fetched");
+        if (p.rows_written !== undefined && p.rows_written !== null) bits.push(rowsCount(p.rows_written) + " written");
+        if (p.committed === true) bits.push("committed");
+        else if (p.committed === false) bits.push("not committed" + (p.rolled_back ? ", rolled back" : ""));
+        text = bits.join(" · ");
         break;
       }
       case "node_failed": {

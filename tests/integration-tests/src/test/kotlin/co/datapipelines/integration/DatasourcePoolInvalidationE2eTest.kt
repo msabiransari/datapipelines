@@ -218,7 +218,7 @@ class DatasourcePoolInvalidationE2eTest {
             assertTimeoutPreemptively(Duration.ofSeconds(SLOW_EXECUTION_TIMEOUT_SECONDS)) {
                 consumeExecutionStream(targetPort, pipelineId)
             }
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
         val executionId = events.first().second["execution_id"].asText()
         val result =

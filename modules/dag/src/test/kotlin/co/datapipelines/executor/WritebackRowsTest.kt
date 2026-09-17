@@ -1,5 +1,8 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.WriteMode
@@ -10,7 +13,9 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.util.UUID
 
 /**
@@ -200,6 +205,118 @@ class WritebackRowsTest {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------ commit evidence at the writer (R149-4)
+
+    /** What the writer told its observer about the transaction's fate. */
+    private class CommitEvidence : OperationObserver {
+        var committed = false
+        var rolledBack = false
+
+        override fun phase(phase: OperationPhase) = Unit
+
+        override fun fetched(rows: Long) = Unit
+
+        override fun written(rows: Long) = Unit
+
+        override fun committed() {
+            committed = true
+        }
+
+        override fun rolledBack() {
+            rolledBack = true
+        }
+    }
+
+    /** A registry whose target connections misbehave at the commit boundary, and nowhere else. */
+    private class CommitFaultRegistry(
+        private val inner: FakeDatasourceRegistry,
+        private val commitFault: (Connection) -> Unit,
+    ) : DatasourceRegistry by inner {
+        override fun poolFor(datasource: Datasource): ConnectionPool {
+            val pool = inner.poolFor(datasource)
+            return object : ConnectionPool by pool {
+                override fun leaseConnection(): Connection {
+                    val c = pool.leaseConnection()
+                    return object : Connection by c {
+                        override fun commit() = commitFault(c)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun lostAck() = SQLException("connection lost while awaiting the commit acknowledgement", "08006")
+
+    private fun targetRows(datasource: Datasource): Long =
+        DriverManager.getConnection(datasource.jdbcUrl, datasource.username, "").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT COUNT(*) FROM tgt").use { rs ->
+                    rs.next()
+                    rs.getLong(1)
+                }
+            }
+        }
+
+    private fun writeThrough(
+        registry: DatasourceRegistry,
+        evidence: CommitEvidence,
+    ) = shouldThrow<DatapipelinesException> {
+        JdbcWritebackRunner(registry).writebackRows(
+            listOf(ColumnSchema("id", LogicalType.INTEGER)),
+            (1..3).map { listOf<Any?>(it) }.asSequence(),
+            NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+            workspaceId,
+            evidence,
+        )
+    }
+
+    @Test
+    fun `a commit that became durable before its acknowledgement was lost is UNKNOWN, never rolled back`() {
+        val datasource = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+        // The real commit runs; the driver throws instead of acknowledging; the writer's
+        // rollback() then "succeeds" — against nothing.
+        val registry =
+            CommitFaultRegistry(FakeDatasourceRegistry(mapOf("wb" to datasource))) { c ->
+                c.commit()
+                throw lostAck()
+            }
+        val evidence = CommitEvidence()
+
+        writeThrough(registry, evidence)
+
+        targetRows(datasource) shouldBe 3L
+        evidence.committed shouldBe false
+        evidence.rolledBack shouldBe false
+    }
+
+    @Test
+    fun `a commit that threw before becoming durable is indistinguishable from the writer's seat — also UNKNOWN`() {
+        val datasource = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+        val registry = CommitFaultRegistry(FakeDatasourceRegistry(mapOf("wb" to datasource))) { throw lostAck() }
+        val evidence = CommitEvidence()
+
+        writeThrough(registry, evidence)
+
+        // The fixture knows nothing landed; the writer does not, and must not guess either way.
+        targetRows(datasource) shouldBe 0L
+        evidence.committed shouldBe false
+        evidence.rolledBack shouldBe false
+    }
+
+    @Test
+    fun `a failure BEFORE the commit attempt whose rollback succeeds is a confirmed undo`() {
+        // A primary key the second row violates: executeBatch fails before any commit attempt.
+        val datasource = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT PRIMARY KEY)", "INSERT INTO tgt VALUES (2)"))
+        val registry = CommitFaultRegistry(FakeDatasourceRegistry(mapOf("wb" to datasource))) { c -> c.commit() }
+        val evidence = CommitEvidence()
+
+        writeThrough(registry, evidence)
+
+        targetRows(datasource) shouldBe 1L // the pre-existing row only: the batch was rolled back
+        evidence.committed shouldBe false
+        evidence.rolledBack shouldBe true
     }
 
     /** The mid-stream child failure, as a named type (detekt: no generic throws). */

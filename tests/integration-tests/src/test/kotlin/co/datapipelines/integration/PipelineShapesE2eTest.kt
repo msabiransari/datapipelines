@@ -106,7 +106,7 @@ class PipelineShapesE2eTest {
         )
 
     private fun assertDagEventOrder(events: List<Pair<String, JsonNode>>) {
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf(
                 "execution_started",
                 "node_started",
@@ -171,7 +171,7 @@ class PipelineShapesE2eTest {
         val correlationId = UUID.randomUUID().toString()
         val events = consumeExecutionStream(pipelineId, ADMIN_KEY.plaintext, correlationId)
 
-        events.map { it.first } shouldContainExactly
+        events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed")
 
         assertWritebackResult(events.first().second["execution_id"].asText())

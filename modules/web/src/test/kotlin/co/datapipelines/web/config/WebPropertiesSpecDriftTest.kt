@@ -71,6 +71,10 @@ class WebPropertiesSpecDriftTest {
         props.maxConcurrentExecutionsGlobal shouldBe null
         documented.getValue("datapipelines.executor.node-query-timeout-seconds") shouldBe props.nodeQueryTimeoutSeconds.toString()
         documented.getValue("datapipelines.executor.execution-timeout-seconds") shouldBe props.executionTimeoutSeconds.toString()
+        documented.getValue("datapipelines.executor.progress-write-interval-seconds") shouldBe props.progressWriteIntervalSeconds.toString()
+        // 149: the node_progress periodic cadence — bound, documented and mirrored in the env files.
+        documented.getValue("datapipelines.executor.progress-sample-interval-seconds") shouldBe
+            props.progressSampleIntervalSeconds.toString()
     }
 
     @Test

@@ -149,6 +149,78 @@ class WebEventEmitterTest {
             }
         }
 
+    /**
+     * 149: a `node_progress` sample takes the SAME path every other event does — a durable row,
+     * a log entry, the live stream — and is NOT terminal: it completes no row and does not mark
+     * the stream terminal, so the disconnect-grace rule is untouched by it.
+     */
+    @Test
+    fun `node_progress is persisted, logged and streamed like any event and completes nothing`() =
+        runTest {
+            every { executionRepository.create(any()) } answers { firstArg() }
+            val types = mutableListOf<co.datapipelines.events.SseEventType>()
+            val payloads = mutableListOf<String>()
+            every { eventRepository.append(any<UUID>(), any(), capture(types), any(), capture(payloads)) } just runs
+            val logged = mutableListOf<LoggedSseEvent>()
+            every { eventLog.append(any(), capture(logged)) } just runs
+            val mapper =
+                com.fasterxml.jackson.databind.json.JsonMapper
+                    .builder()
+                    .build()
+            val stream =
+                ExecutionStream(
+                    executionId,
+                    userId,
+                    org.springframework.web.servlet.mvc.method.annotation
+                        .SseEmitter(),
+                    mapper,
+                )
+
+            val emitter =
+                WebEventEmitter(
+                    context =
+                        ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.REST, "{}", workspaceId),
+                    stream = stream,
+                    streams = registry,
+                    eventLog = eventLog,
+                    eventRepository = eventRepository,
+                    executionRepository = executionRepository,
+                    persistenceDispatcher = Dispatchers.Default,
+                )
+            emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+            emitter.emit(co.datapipelines.events.NodeProgress(executionId, writingSample()))
+
+            types shouldBe listOf(SseEventType.EXECUTION_STARTED, SseEventType.NODE_PROGRESS)
+            payloads[1].contains("\"state\":\"writing\"") shouldBe true
+            payloads[1].contains("\"correlation_id\":\"$correlationId\"") shouldBe true
+            logged.map { it.eventName } shouldBe listOf("execution_started", "node_progress")
+            logged[1].eventId shouldBe 2
+            stream.isTerminal shouldBe false
+            verify(exactly = 0) { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        }
+
+    private fun writingSample() =
+        co.datapipelines.executor.OperationSnapshot(
+            nodeId = "n1",
+            attempt = 1,
+            sequence = 1,
+            kind = co.datapipelines.executor.OperationKind.STAGE,
+            destination =
+                co.datapipelines.executor.OperationDestination
+                    .tempdb("t"),
+            state = co.datapipelines.executor.OperationState.WRITING,
+            startedAt = NOW,
+            observedAt = NOW.plusMillis(400),
+            elapsedMs = 400,
+            timingsMs = mapOf(co.datapipelines.executor.OperationPhase.WRITING to 300L),
+            rowsFetched = 10,
+            rowsWritten = 10,
+            batchesWritten = 1,
+            committed = null,
+            rolledBack = null,
+            childExecutionId = null,
+        )
+
     @Test
     fun `error_json is the same error object the wire carried - record, catalog fields and correlation id`() =
         runTest {

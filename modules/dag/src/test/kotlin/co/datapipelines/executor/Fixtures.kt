@@ -208,6 +208,7 @@ class InMemoryResultStore(
         resultSet: java.sql.ResultSet,
         sourceDialect: Dialect,
         ttlSeconds: Long,
+        observer: OperationObserver,
     ): StoredResult {
         failWith?.let { throw it }
         val schema = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect)
@@ -224,6 +225,11 @@ class InMemoryResultStore(
             }
             rows += row
         }
+        // The contract's reporting half (149): one write of everything, then the finalization.
+        observer.phase(OperationPhase.WRITING)
+        observer.written(rows.size.toLong())
+        observer.phase(OperationPhase.FINALIZING)
+        observer.committed()
         val key = keyFor(executionId)
         stored[key] =
             StoredResultView(
@@ -244,9 +250,15 @@ class InMemoryResultStore(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         ttlSeconds: Long,
+        observer: OperationObserver,
     ): StoredResult {
         failWith?.let { throw it }
+        observer.phase(OperationPhase.FETCHING)
         val collected = rows.toList()
+        observer.fetched(collected.size.toLong())
+        observer.phase(OperationPhase.WRITING)
+        observer.written(collected.size.toLong())
+        observer.committed()
         val bytes = collected.sumOf { row -> row.sumOf { (it?.toString() ?: "null").length.toLong() } }
         val key = keyFor(executionId)
         stored[key] =
@@ -827,6 +839,7 @@ class LatchedResultStore(
         resultSet: java.sql.ResultSet,
         sourceDialect: Dialect,
         ttlSeconds: Long,
+        observer: OperationObserver,
     ): StoredResult {
         entered.countDown()
         release.await()
@@ -841,6 +854,7 @@ class LatchedResultStore(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         ttlSeconds: Long,
+        observer: OperationObserver,
     ): StoredResult {
         entered.countDown()
         release.await()

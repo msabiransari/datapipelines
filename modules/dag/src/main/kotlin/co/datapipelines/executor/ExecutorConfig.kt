@@ -78,6 +78,12 @@ data class ExecutorConfig(
     val cancelGraceSeconds: Long = 5,
     val sourceFetchSize: Int = 1000,
     val progressWriteIntervalSeconds: Long = 5,
+    /**
+     * `progress-sample-interval-seconds` (149) — the floor between two PERIODIC `node_progress`
+     * samples of one operation. First entries into a state and the terminal sample are never
+     * throttled by it; it bounds only the cumulative-count refresh.
+     */
+    val progressSampleIntervalSeconds: Long = 1,
     val heartbeatSeconds: Long = 15,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
@@ -116,6 +122,7 @@ data class ExecutorConfig(
         // release weekend needs one env var, not a patch.
         require(sourceFetchSize >= 0) { "sourceFetchSize must not be negative, was $sourceFetchSize" }
         require(progressWriteIntervalSeconds > 0) { "progressWriteIntervalSeconds must be positive" }
+        require(progressSampleIntervalSeconds > 0) { "progressSampleIntervalSeconds must be positive" }
         require(heartbeatSeconds > 0) { "heartbeatSeconds must be positive, was $heartbeatSeconds" }
         require(stagingMaxMemoryMb > 0) { "stagingMaxMemoryMb must be positive" }
         require(cancelPollIntervalSeconds > 0) { "cancelPollIntervalSeconds must be positive" }

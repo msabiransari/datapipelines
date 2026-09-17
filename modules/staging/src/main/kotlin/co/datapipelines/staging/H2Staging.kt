@@ -83,7 +83,7 @@ class H2Staging internal constructor(
         resultSet: ResultSet,
         tableName: String,
         sourceDialect: Dialect,
-        onProgress: (Long) -> Unit,
+        observer: StageObserver,
     ): StageResult {
         // Metadata and type mapping read the SOURCE cursor and touch no staging connection.
         val metadata = resultSet.metaData
@@ -97,8 +97,8 @@ class H2Staging internal constructor(
         val warnings = mapped.flatMap { it.warnings }.map { it.withBoundedSourceType() }
         val mappings = columns.map { LogicalTypeMapping(it.type, it.precision, it.scale) }
 
-        createStagedTable(tableName, columns)
-        val rowsStaged = guardingPartialTable(tableName) { drainInto(tableName, columns, mappings, resultSet, onProgress) }
+        createStagedTable(tableName, columns, observer)
+        val rowsStaged = guardingPartialTable(tableName, observer) { drainInto(tableName, columns, mappings, resultSet, observer) }
         recordStaged(rowsStaged)
         return StageResult(tableName, rowsStaged, columns, warnings)
     }
@@ -107,16 +107,17 @@ class H2Staging internal constructor(
         tableName: String,
         columns: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
+        observer: StageObserver,
     ): StageResult {
         // §4.5, exactly as stage() applies it: these names have the same provenance one execution
         // removed — the CHILD's caller-node result labels, read off a `SELECT … AS "whatever the
         // author typed"`. `total` + `TOTAL` must fail here exactly as they fail through a DQL node.
         StagingIdentifiers.validateColumnNames(columns.map { it.name })
-        createStagedTable(tableName, columns)
+        createStagedTable(tableName, columns, observer)
         // The sequence is lazy over the CHILD's result, so it is pulled in batches holding no
         // lease, exactly like a source cursor — a child-side fault of any shape surfaces
         // mid-insert and rolls the partial table back like every other failure.
-        val rowsStaged = guardingPartialTable(tableName) { drainRows(tableName, columns, rows) }
+        val rowsStaged = guardingPartialTable(tableName, observer) { drainRows(tableName, columns, rows, observer) }
         recordStaged(rowsStaged)
         return StageResult(tableName, rowsStaged, columns)
     }
@@ -192,15 +193,26 @@ class H2Staging internal constructor(
 
     // ------------------------------------------------------------ table ownership
 
-    /** Reserves [tableName] and creates it on a fresh lease; a refused create frees the reservation. */
+    /**
+     * Reserves [tableName] and creates it on a fresh lease; a refused create frees the reservation.
+     *
+     * The lease is reported to [observer] like an insert's (149): at capacity one, a node whose
+     * sibling holds the pool's only connection waits HERE, before its first batch, and an
+     * unobserved wait would read as a slow source query.
+     */
     private suspend fun createStagedTable(
         tableName: String,
         columns: List<ColumnSchema>,
+        observer: StageObserver,
     ) {
         synchronized(bookkeeping) { if (!stagedTables.add(tableName)) throw StagingTableAlreadyExistsException(tableName) }
         var created = false
         try {
-            pool.lease(LeaseKind.INTERNAL) { connection -> H2StagingSql.createTable(connection, tableName, columns) }
+            observer.connectionRequested()
+            pool.lease(LeaseKind.INTERNAL) { connection ->
+                observer.connectionAcquired()
+                H2StagingSql.createTable(connection, tableName, columns)
+            }
             created = true
         } finally {
             // Nothing was created (or it was someone else's table, §4.5): give the name back so the
@@ -217,6 +229,7 @@ class H2Staging internal constructor(
      */
     private suspend inline fun guardingPartialTable(
         tableName: String,
+        observer: StageObserver,
         body: () -> Long,
     ): Long =
         try {
@@ -228,7 +241,7 @@ class H2Staging internal constructor(
             // point before it starts, hence the NonCancellable rollback), a driver fault,
             // `value_overflow`, `memory_limit_exceeded`, or a child-side fault surfacing through the
             // lazy `stageRows` sequence. A partial table must survive none of them.
-            rollbackAfterFailure(tableName)
+            rollbackAfterFailure(tableName, observer)
             throw e
         }
 
@@ -238,11 +251,18 @@ class H2Staging internal constructor(
      * failure it is cleaning up after; a lease that never came leaves the name owned, which is
      * the safe outcome — nothing can reuse a dirty name.
      */
-    private suspend fun rollbackAfterFailure(tableName: String) {
+    private suspend fun rollbackAfterFailure(
+        tableName: String,
+        observer: StageObserver,
+    ) {
         withContext(NonCancellable) {
             val dropped = withTimeoutOrNull(ROLLBACK_LEASE_TIMEOUT_MS) { dropPartialTable(tableName) }
             if (dropped == true) {
                 synchronized(bookkeeping) { stagedTables.remove(tableName) }
+                // Reported AFTER the lease returned (149 §4: never under a pool lock) — the
+                // confirmed undo is what lets the terminal sample say "rolled back" rather than
+                // leaving the partial write's fate unknown (R149-1).
+                observer.partialTableDropped()
             } else {
                 log.warn(
                     "tempdb partial table '{}' of execution {} could not be cleaned up; its name stays reserved",
@@ -275,16 +295,17 @@ class H2Staging internal constructor(
         columns: List<ColumnSchema>,
         mappings: List<LogicalTypeMapping>,
         rs: ResultSet,
-        onProgress: (Long) -> Unit,
-    ): Long = drainBatches(tableName, columns, onProgress) { batchSize -> H2StagingSql.readBatch(rs, mappings, batchSize) }
+        observer: StageObserver,
+    ): Long = drainBatches(tableName, columns, observer) { batchSize -> H2StagingSql.readBatch(rs, mappings, batchSize) }
 
     private suspend fun drainRows(
         tableName: String,
         columns: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
+        observer: StageObserver,
     ): Long {
         val iterator = rows.iterator()
-        return drainBatches(tableName, columns, onProgress = {}) { batchSize ->
+        return drainBatches(tableName, columns, observer) { batchSize ->
             buildList {
                 while (size < batchSize && iterator.hasNext()) {
                     val row = iterator.next()
@@ -303,7 +324,7 @@ class H2Staging internal constructor(
     private suspend fun drainBatches(
         tableName: String,
         columns: List<ColumnSchema>,
-        onProgress: (Long) -> Unit,
+        observer: StageObserver,
         nextBatch: (Int) -> List<List<Any?>>,
     ): Long {
         val sqlTypes = columns.map { H2EgressMapper.h2SqlType(it) }
@@ -315,16 +336,27 @@ class H2Staging internal constructor(
             // A cancelled node stops at the next batch boundary: neither the semaphore's fast path
             // nor a blocking driver call checks for cancellation, so the drain checks itself.
             coroutineContext.ensureActive()
+            // 149 §3: the fetch boundary — holding no lease, so a slow source is measured as
+            // fetching, never as writing.
+            observer.fetchStarted()
             val batch = nextBatch(batchSize)
+            observer.fetchFinished(batch.size)
             val exhausted = batch.size < batchSize
             if (batch.isNotEmpty() || rowCount == 0L) {
-                pool.lease(LeaseKind.INTERNAL) { connection -> H2StagingSql.insertBatch(connection, tableName, columns, sqlTypes, batch) }
+                // The request and the acquisition are two boundaries (requesting ≠ holding):
+                // admission may suspend on the cap, checkout may open a physical connection.
+                observer.connectionRequested()
+                pool.lease(LeaseKind.INTERNAL) { connection ->
+                    observer.connectionAcquired()
+                    H2StagingSql.insertBatch(connection, tableName, columns, sqlTypes, batch)
+                }
+                rowCount += batch.size
+                // Reported AFTER the lease returned: the caller's sink is not this class's to
+                // trust with a lease (108 §B), and it never runs under the pool's lock.
+                observer.batchWritten(batch.size, rowCount)
                 lastBudgetCheckMs = checkBudgetIfDue(batchIndex, lastBudgetCheckMs)
             }
-            rowCount += batch.size
             batchIndex++
-            // The caller's sink is not this class's to trust with a lease.
-            onProgress(rowCount)
             if (exhausted) break
         }
         // The closing check is unconditional, whatever the throttle decided along the way: §8.2's

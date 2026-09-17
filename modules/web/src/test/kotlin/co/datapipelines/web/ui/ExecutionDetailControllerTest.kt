@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -42,7 +43,9 @@ class ExecutionDetailControllerTest {
         }
     private val resultStore = mockk<ResultStore>()
     private val resultUrlFactory = mockk<ResultUrlFactory>(relaxed = true)
-    private val controller = ExecutionDetailController(executions, pipelines, resultStore, resultUrlFactory)
+    private val events =
+        mockk<ExecutionEventRepository>().also { every { it.findByExecution(any()) } returns emptyList() }
+    private val controller = ExecutionDetailController(executions, pipelines, resultStore, resultUrlFactory, events)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -96,6 +99,33 @@ class ExecutionDetailControllerTest {
         every { resultStore.describe("k") } returns view
         every { pipelines.findById(workspaceId, record.pipelineId) } returns mockk()
         every { executions.findByRoot(workspaceId, executionId) } returns listOf(record)
+    }
+
+    @Test
+    fun `the page model carries the node operations derived from the durable events (149)`() {
+        authenticate(setOf(Scope.READ))
+        val record = record(ExecutionStatus.SUCCESS)
+        every { executions.findById(workspaceId, executionId) } returns record
+        stubReads(record, view())
+        every { events.findByExecution(executionId) } returns
+            listOf(
+                co.datapipelines.executor.ExecutionEventRecord(
+                    executionId,
+                    3,
+                    "node_progress",
+                    Instant.EPOCH,
+                    """{"node_id":"a","sequence":2,"operation":"stage","destination":{"kind":"tempdb","table":"t"},
+                       "state":"completed","rows_written":5,"committed":true}""",
+                ),
+            )
+
+        val model = ExtendedModelMap()
+        controller.detail(executionId, model)
+
+        @Suppress("UNCHECKED_CAST")
+        val ops = model["nodeOperations"] as List<NodeOperationRow>
+        ops.single().nodeId shouldBe "a"
+        ops.single().committed shouldBe true
     }
 
     @Test

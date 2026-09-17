@@ -14,6 +14,11 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.executor.NodeExecutionContext
+import co.datapipelines.executor.OperationDestination
+import co.datapipelines.executor.OperationKind
+import co.datapipelines.executor.OperationObserver
+import co.datapipelines.executor.OperationOutcome
+import co.datapipelines.executor.OperationPhase
 import co.datapipelines.executor.PipelineExecutionFailed
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
@@ -644,6 +649,60 @@ class SubPipelineExecutionRunnerTest {
                     }
                 }
             }
+        }
+
+    /**
+     * 149: the PIPELINE node's operation is the child execution, then the parent's own output
+     * write — reported onto the tracker `NodeRunner` began for the node: the child's id, the
+     * pull of the child's rows as the fetch, the parent's staging as the write, then commit.
+     */
+    @Test
+    fun `a tempdb-target node reports the child id and its own staged write onto the node's operation`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+            stub.drive = { request ->
+                request.directSink?.accept(schema, sequenceOf(listOf("EU", 3), listOf("US", 4)))
+                stub.success(request)
+            }
+            val ctx = context()
+            val tracker = ctx.operations.begin("revenue", OperationKind.CHILD, OperationDestination.tempdb("stg_traced"))
+            tracker.enter(OperationPhase.EXECUTING)
+
+            runner(stub).run(pipelineNode(output = NodeOutput.Tempdb("stg_traced")), ctx)
+
+            val terminal = tracker.finish(OperationOutcome.COMPLETED)
+            terminal.childExecutionId shouldBe stub.captured.single().executionId
+            terminal.rowsFetched shouldBe 2
+            terminal.rowsWritten shouldBe 2
+            terminal.committed shouldBe true
+            terminal.timingsMs.keys shouldBe
+                setOf(
+                    OperationPhase.EXECUTING,
+                    OperationPhase.FETCHING,
+                    OperationPhase.WAITING_OUTPUT,
+                    OperationPhase.WRITING,
+                    OperationPhase.FINALIZING,
+                )
+        }
+
+    @Test
+    fun `a datasource-target node hands the node's observer to the write-back runner`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+            stub.drive = { request ->
+                request.directSink?.accept(schema, sequenceOf(listOf("EU", 3)))
+                stub.success(request)
+            }
+            val ctx = context()
+            val tracker = ctx.operations.begin("revenue", OperationKind.CHILD, OperationDestination.datasource("wb", "tgt"))
+            val observers = mutableListOf<OperationObserver>()
+            every { writebackRunner.writebackRows(any(), any(), any(), any(), capture(observers)) } returns 1L
+
+            runner(stub).run(pipelineNode(output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND)), ctx)
+
+            observers.single() shouldBe tracker
         }
 
     /**
