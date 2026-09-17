@@ -69,31 +69,7 @@ class NodeProgressE2eTest {
         names.last() shouldBe "data_ready"
 
         // 1. Per stage node: samples between its lifecycle events, a committed terminal sample.
-        SOURCES.forEach { id ->
-            val samples = events.filter { it.first == "node_progress" && it.second["node_id"].asText() == id }.map { it.second }
-            samples.size shouldBeGreaterThan 0
-            val started = events.indexOfFirst { it.first == "node_started" && it.second["node_id"].asText() == id }
-            val completed = events.indexOfFirst { it.first == "node_completed" && it.second["node_id"].asText() == id }
-            val positions =
-                events
-                    .withIndex()
-                    .filter {
-                        it.value.first == "node_progress" && it.value.second["node_id"].asText() == id
-                    }.map { it.index }
-            positions.all { it > started && it < completed }.shouldBeTrue()
-            samples.map { it["sequence"].asInt() } shouldBe (1..samples.size).toList()
-            val terminal = samples.last()
-            terminal["state"].asText() shouldBe "completed"
-            terminal["operation"].asText() shouldBe "stage"
-            terminal["destination"]["kind"].asText() shouldBe "tempdb"
-            terminal["destination"]["table"].asText() shouldBe "stg_$id"
-            terminal["committed"].asBoolean() shouldBe true
-            terminal["rows_written"].asLong() shouldBe ROWS.toLong()
-            terminal["rows_fetched"].asLong() shouldBe ROWS.toLong()
-            terminal["timings_ms"].fieldNames().asSequence().toList() shouldContainAll listOf("executing", "fetching", "writing")
-            terminal["correlation_id"].asText().isNotBlank().shouldBeTrue()
-            samples.dropLast(1).none { it.has("committed") }.shouldBeTrue()
-        }
+        SOURCES.forEach { id -> assertStageNodeSamples(events, id) }
 
         // 2. Overlap on the wire: each node's first live `writing` sample was observed before the
         //    OTHER node's operation ended.
@@ -137,6 +113,36 @@ class NodeProgressE2eTest {
         SOURCES.forEach { id -> page shouldContain "tempdb.stg_$id" }
         page shouldContain "ds-badge-success\">committed</span>"
         page shouldContain "data-node-id=\"joined\" data-state=\"completed\""
+    }
+
+    /** Assertion 1 for one stage node: its samples sit between its lifecycle events, in sequence, ending committed. */
+    private fun assertStageNodeSamples(
+        events: List<Pair<String, JsonNode>>,
+        id: String,
+    ) {
+        val samples = events.filter { it.first == "node_progress" && it.second["node_id"].asText() == id }.map { it.second }
+        samples.size shouldBeGreaterThan 0
+        val started = events.indexOfFirst { it.first == "node_started" && it.second["node_id"].asText() == id }
+        val completed = events.indexOfFirst { it.first == "node_completed" && it.second["node_id"].asText() == id }
+        val positions =
+            events
+                .withIndex()
+                .filter {
+                    it.value.first == "node_progress" && it.value.second["node_id"].asText() == id
+                }.map { it.index }
+        positions.all { it > started && it < completed }.shouldBeTrue()
+        samples.map { it["sequence"].asInt() } shouldBe (1..samples.size).toList()
+        val terminal = samples.last()
+        terminal["state"].asText() shouldBe "completed"
+        terminal["operation"].asText() shouldBe "stage"
+        terminal["destination"]["kind"].asText() shouldBe "tempdb"
+        terminal["destination"]["table"].asText() shouldBe "stg_$id"
+        terminal["committed"].asBoolean() shouldBe true
+        terminal["rows_written"].asLong() shouldBe ROWS.toLong()
+        terminal["rows_fetched"].asLong() shouldBe ROWS.toLong()
+        terminal["timings_ms"].fieldNames().asSequence().toList() shouldContainAll listOf("executing", "fetching", "writing")
+        terminal["correlation_id"].asText().isNotBlank().shouldBeTrue()
+        samples.dropLast(1).none { it.has("committed") }.shouldBeTrue()
     }
 
     private fun observedAt(
