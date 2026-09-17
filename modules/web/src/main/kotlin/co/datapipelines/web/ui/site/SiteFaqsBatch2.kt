@@ -28,7 +28,7 @@ object SiteFaqsBatch2 {
                 "What about history the source overwrites?",
                 "This does not keep history: the query sees the source as it is now, and the per-run scratch " +
                     "database is dropped after the run. A scheduled extract to your own lake — where that history " +
-                    "would land — is a later roadmap item, and the roadmap page dates it as such. The roadmap is " +
+                    "would land — is a later roadmap item, and the roadmap page labels it as such. The roadmap is " +
                     "docs/ROADMAP.md §3.",
                 "docs/ROADMAP.md §3",
             ),
@@ -111,12 +111,12 @@ object SiteFaqsBatch2 {
             ),
         )
 
-    /** The Tableau roadmap page's four — every answer says roadmap, next month or later in as many words. */
+    /** The Tableau roadmap page's four — every answer says roadmap, planned or later in as many words. */
     val TABLEAU_ROADMAP: List<FaqEntry> =
         listOf(
             FaqEntry(
                 "Are the embedded dashboards available today?",
-                "No — they are roadmap, named for next month (October 2026): dashboards created by your agent, " +
+                "No — they are planned, with no announced release date: dashboards created by your agent, " +
                     "embedded in your own product, fed by released pipelines and APIs, filtered per viewer. What " +
                     "ships today is the released pipeline and the GET endpoint a dashboard will consume. The " +
                     "endpoint contract is docs/rest-api.md §19.",
@@ -124,7 +124,7 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "When do scheduled extracts to my own S3 bucket arrive?",
-                "Later — decided, not dated. The scheduler that would run them is the next-month roadmap item; the " +
+                "Later — decided, not dated. The scheduler that would run them is the planned roadmap item; the " +
                     "extract itself would land a Parquet file on your own bucket, which Tableau reads natively. " +
                     "The scheduler design is docs/superpowers/specs/2026-09-07-scheduler-design.md.",
                 "docs/superpowers/specs/2026-09-07-scheduler-design.md",
@@ -172,7 +172,7 @@ object SiteFaqsBatch2 {
                 "What do we put in the client's portal today?",
                 "The API: a released pipeline published as a GET endpoint returns JSON with the query string bound " +
                     "to its declared parameters — the thing a portal, a scheduled report or a white-label page " +
-                    "calls. Embedded dashboards are the next-month roadmap item. The contract is docs/rest-api.md §19.",
+                    "calls. Embedded dashboards are the planned roadmap item. The contract is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
         )
@@ -184,7 +184,7 @@ object SiteFaqsBatch2 {
                 "Is this embedded analytics?",
                 "The API half of embedded analytics ships today: a released pipeline becomes a versioned GET " +
                     "endpoint your application calls, with per-viewer values bound as parameters. The dashboard " +
-                    "half — created by your agent, embedded in your product — is the next-month roadmap item. " +
+                    "half — created by your agent, embedded in your product — is the planned roadmap item. " +
                     "Publishing is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),

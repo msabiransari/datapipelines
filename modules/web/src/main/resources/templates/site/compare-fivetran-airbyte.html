@@ -119,7 +119,7 @@
           Second, the warehouse itself. Write-back here means a pipeline node can land its result in a table of a
           datasource you already run — useful for feeding a BI tool, and explicitly not a columnar warehouse with a
           modelling layer on top. Third, scheduling: pipelines run on demand, by an agent, a REST call or a person;
-          the scheduler is the next-month roadmap item, and scheduled extracts to your own lake are later. A
+          the scheduler is the planned roadmap item, and scheduled extracts to your own lake are later. A
           roadmap page dates both. Fourth, transformation breadth: the work is SQL, plus JSONata and JavaScript
           transform nodes that are themselves a roadmap item — if the job is Python operators orchestrating a
           platform, the <a th:href="@{/compare/airflow}">Airflow comparison</a> says plainly that Airflow is the

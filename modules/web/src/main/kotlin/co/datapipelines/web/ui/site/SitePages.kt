@@ -264,9 +264,9 @@ object SitePages {
     val ROADMAP =
         SitePage(
             path = "/roadmap",
-            title = "Roadmap — what ships now, next month, and later | datapipelines.co",
+            title = "Roadmap — shipped, planned, and later | datapipelines.co",
             description =
-                "Shipped: MCP server, ${facts.engineCountWord} engines, published APIs. Next month: scheduler, embedded dashboards, " +
+                "Shipped: MCP server, ${facts.engineCountWord} engines, published APIs. Planned: scheduler, embedded dashboards, " +
                     "JSONata and JavaScript nodes. Later: lake extracts, alerts.",
             view = "site/roadmap",
         )
@@ -353,7 +353,7 @@ object SitePages {
 
     /**
      * "scheduled extract to s3" + "data driven alerts from sql" + "embedded dashboards row level
-     * security" — a ROADMAP page: every roadmap item on it says roadmap, next month or later.
+     * security" — a ROADMAP page: every roadmap item on it says roadmap, planned or later.
      */
     val TABLEAU_ROADMAP =
         SitePage(

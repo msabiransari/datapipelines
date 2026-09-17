@@ -12,13 +12,13 @@
   </nav>
 
   <!--/* Site v2 batch 2: the Tableau roadmap page. A ROADMAP page, and it says so in its first
-       paragraph: none of this is shipped; the dates are the roadmap's. The wording is the
+       paragraph: none of this is shipped; release dates are not announced. The wording is the
        owner's, verbatim (2026-09-09). The freshness guard walks this page beside /roadmap —
        the dateline and the Article JSON-LD carry the same date, and an old dateline fails
        the build. */-->
-  <!-- claim: docs/ROADMAP.md §2 — the owner's dashboard wording, next month (October 2026) -->
-  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the scheduler, next month -->
-  <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md — transform nodes, next month -->
+  <!-- claim: docs/ROADMAP.md §2 — the owner's planned dashboard wording -->
+  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the planned scheduler -->
+  <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md — planned transform nodes -->
   <!-- claim: docs/ROADMAP.md §3 — scheduled extracts, email alerts, metrics: later -->
   <!-- claim: docs/rest-api.md §19 — what ships today: the endpoint a dashboard will consume -->
   <!-- claim: docs/templates.md §4.5 — bound parameters, the mechanism per-viewer filtering rides on -->
@@ -29,7 +29,7 @@
     "@type": "Article",
     "headline": "Embedded dashboards, scheduled extracts to your own bucket, email alerts — the roadmap beside Tableau",
     "datePublished": "2026-09-10",
-    "dateModified": "2026-09-10",
+    "dateModified": "2026-09-16",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
     "publisher": { "@type": "Organization", "name": "datapipelines.co" },
     "mainEntityOfPage": "https://datapipelines.co/tableau/extracts-alerts-dashboards"
@@ -38,16 +38,16 @@
 
   <section class="section page-hero" aria-labelledby="tr-title">
     <div class="container">
-      <p class="kicker"><span class="status">Roadmap</span> none of this page is shipped; the dates are the roadmap's</p>
+      <p class="kicker"><span class="status">Roadmap</span> none of this page is shipped; release dates are not announced</p>
       <h1 id="tr-title" class="ds-display">Embedded dashboards, scheduled extracts to S3, data-driven alerts — the roadmap</h1>
       <p class="section-lede">
-        This page exists because searchers ask for these three things by name, and the honest answer is a date, not
-        a feature page. <strong>None of this page is shipped; the dates are the roadmap's.</strong> What ships today
+        This page describes the plans for these three features.
+        <strong>None of this page is shipped; release dates are not announced.</strong> What ships today
         is the half these features stand on: a released pipeline, published as a versioned endpoint, that a
-        dashboard would consume and an extract would materialise. Everything below says roadmap, next month, or
+        dashboard would consume and an extract would materialise. Everything below says roadmap, planned, or
         later — in as many words.
       </p>
-      <p class="dateline" data-roadmap-updated="2026-09-10">Last updated 2026-09-10</p>
+      <p class="dateline" data-roadmap-updated="2026-09-16">Last updated 2026-09-16</p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/roadmap}">The full roadmap, same words</a>
         <a class="btn btn-secondary" th:href="@{/published-api}">What ships today instead</a>
@@ -57,7 +57,7 @@
 
   <section class="section" aria-labelledby="tr-dash">
     <div class="container">
-      <p class="kicker"><span class="status">Next month · October 2026</span></p>
+      <p class="kicker"><span class="status">Planned</span></p>
       <h2 id="tr-dash" class="ds-headline">Dashboards you embed</h2>
       <div class="prose">
         <!-- claim: docs/ROADMAP.md §2 -->
@@ -98,7 +98,7 @@
           The roadmap item: a scheduled pipeline materialises its result as Parquet on your own S3 bucket — the
           lake you already own becomes the extract store, with no second copy of the data anywhere else. Tableau
           reads Parquet natively, so the extract lands where the drawing tool already looks. Two pieces, in order:
-          the <strong>scheduler</strong> is the next-month roadmap item — schedules in folders, fired exactly once
+          the <strong>scheduler</strong> is the planned roadmap item — schedules in folders, fired exactly once
           across instances, every run a first-class execution — and the extract itself is <strong>later</strong>,
           decided but not dated. Until it ships, write-back can land a result in a datasource table a BI tool
           connects to, and the lake reads Parquet and Iceberg on S3 in place.
@@ -185,12 +185,12 @@
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §9 -->
           <h3>Write-back, the extract's small sibling</h3>
-          <p>A node can land its result in a datasource table today — the pattern a scheduled extract generalises to Parquet on your own bucket. One is shipped, one is dated; this page keeps the two apart.</p>
+          <p>A node can land its result in a datasource table today — the pattern a scheduled extract generalises to Parquet on your own bucket. One is shipped, one is planned; this page keeps the two apart.</p>
         </article>
         <article class="card">
           <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
           <h3>Transform nodes, designed</h3>
-          <p>JSONata and JavaScript transform nodes — the shaping SQL is bad at, the pivot Prep did with a click — are the next-month roadmap item beside the scheduler, with a design record on disk. Named as roadmap here; this page does not describe designs as shipped.</p>
+          <p>JSONata and JavaScript transform nodes — the shaping SQL is bad at, the pivot Prep did with a click — are the planned roadmap item beside the scheduler, with a design record on disk. Named as roadmap here; this page does not describe designs as shipped.</p>
         </article>
       </div>
     </div>
@@ -217,7 +217,7 @@
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/published-api}">Publish the endpoint today</a>
-        <a class="btn btn-secondary" th:href="@{/roadmap}">The roadmap, dated</a>
+        <a class="btn btn-secondary" th:href="@{/roadmap}">The roadmap</a>
       </div>
     </div>
   </section>

@@ -11,32 +11,32 @@
   </nav>
 
   <!--/* Site v2: the honest Tableau page (owner 2026-09-09: "Lets be Honest. Talk about Tableau.
-       What we are shipping. What is on the Roadmap"). Two columns — ships today / next month —
+       What we are shipping. What is on the Roadmap"). Two columns — ships today / planned —
        and never the word "alternative" for something that is not one yet. The FAQ block is
        SiteFaqs.TABLEAU. Every ships-today claim cites a packaged spec; every roadmap item cites
-       the design record on disk and says "October 2026". */-->
+       the design record on disk and is labelled planned. */-->
   <!-- claim: docs/rest-api.md §19 — Tableau reads the endpoint's JSON -->
   <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource Tableau connects to -->
   <!-- claim: docs/staging.md §3 — no warehouse between the sources and Tableau -->
   <!-- claim: docs/versioning.md §3 — the dataset a person released -->
   <!-- claim: docs/auth.md §7.7 — path-scoped keys -->
-  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the scheduler (October 2026) -->
-  <!-- claim: docs/ROADMAP.md §2 — dashboards (October 2026) -->
+  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the planned scheduler -->
+  <!-- claim: docs/ROADMAP.md §2 — planned dashboards -->
 
   <section class="section page-hero" aria-labelledby="tb-title">
     <div class="container">
       <p class="kicker">Beside Tableau, not instead of it — yet</p>
-      <h1 id="tb-title" class="ds-display">Using datapipelines with Tableau: what it does today, and what next month adds</h1>
+      <h1 id="tb-title" class="ds-display">Using datapipelines with Tableau: what it does today, and what is planned</h1>
       <p class="section-lede">
         Tableau is very good at drawing. What costs teams the money is everything before the drawing — getting a
         trustworthy, joined, refreshed dataset in front of it from four databases and a bucket — and everything after
         it: putting the result inside their own product instead of a portal. datapipelines does the first part today,
-        with an AI agent doing the authoring and a person doing the releasing. The second part is next month, and this
+        with an AI agent doing the authoring and a person doing the releasing. The second part is planned, and this
         page keeps the two apart.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/tableau/governed-dataset}">Publish a governed dataset for Tableau</a>
-        <a class="btn btn-secondary" th:href="@{/roadmap}">See the roadmap, dated</a>
+        <a class="btn btn-secondary" th:href="@{/roadmap}">See the roadmap</a>
       </div>
     </div>
   </section>
@@ -58,7 +58,7 @@
           The expensive part was never the chart. It was the dataset, the API, and the embedding — three projects
           that each needed a team. datapipelines collapses the first two into something an agent can do in a session
           and a person can review in an afternoon: the dataset is a versioned pipeline across your databases, and the
-          API is one release away. The third — the dashboard you embed — is next month's release, and it is built to
+          API is one release away. The third — the dashboard you embed — is planned, designed to
           be created by the same agent and fed by the same released pipelines.
         </p>
       </div>
@@ -68,7 +68,7 @@
   <section class="section band" aria-labelledby="tb-two">
     <div class="container">
       <p class="kicker">Two columns, honestly</p>
-      <h2 id="tb-two" class="ds-headline">What ships today, and what is October 2026</h2>
+      <h2 id="tb-two" class="ds-headline">What ships today, and what is planned</h2>
       <div class="split">
         <div>
           <h3><span class="status status-shipped">Ships today</span> Beside Tableau</h3>
@@ -86,7 +86,7 @@
           </ul>
         </div>
         <div>
-          <h3><span class="status">Next month · October 2026</span> The parts Tableau does that we will</h3>
+          <h3><span class="status">Planned</span> The parts Tableau does that we will</h3>
           <ul>
             <!-- claim: docs/ROADMAP.md §2 -->
             <li><b>Dashboards, created by your agent, that you embed in your own product</b> — fed by released pipelines and APIs, filtered per viewer. The chart lives in your app, behind your login, showing each user their rows.</li>

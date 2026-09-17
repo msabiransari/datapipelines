@@ -2062,7 +2062,7 @@
    ]
   },
   "/tableau": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "tb-title",
     "tb-story",
@@ -2075,7 +2075,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Using datapipelines with Tableau: what it does today, and what next month adds"
+     "text": "Using datapipelines with Tableau: what it does today, and what is planned"
     },
     {
      "level": "H2",
@@ -2083,7 +2083,7 @@
     },
     {
      "level": "H2",
-     "text": "What ships today, and what is October 2026"
+     "text": "What ships today, and what is planned"
     },
     {
      "level": "H3",
@@ -2091,7 +2091,7 @@
     },
     {
      "level": "H3",
-     "text": "Next month · October 2026 The parts Tableau does that we will"
+     "text": "Planned The parts Tableau does that we will"
     },
     {
      "level": "H2",
@@ -2125,7 +2125,15 @@
      "level": "H2",
      "text": "Try the shipped half on your own databases"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Using datapipelines with Tableau: what it does today, and what next month adds": "#120: removed the release-date promise; replaced by \"Using datapipelines with Tableau: what it does today, and what is planned\" without changing the section anchor.",
+     "What ships today, and what is October 2026": "#120: removed the release-date promise; replaced by \"What ships today, and what is planned\" without changing the section anchor.",
+     "Next month · October 2026 The parts Tableau does that we will": "#120: removed the release-date promise; replaced by \"Planned The parts Tableau does that we will\" without changing the section anchor."
+    }
+   }
   },
   "/tableau/governed-dataset": {
    "status": "unchanged",
@@ -2560,7 +2568,7 @@
    ]
   },
   "/for/agencies": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "ag-title",
     "ag-isolation",
@@ -2615,7 +2623,7 @@
     },
     {
      "level": "H2",
-     "text": "What you embed in the client's portal: the API today, the dashboard next month"
+     "text": "What you embed in the client's portal: the API today, the dashboard planned"
     },
     {
      "level": "H3",
@@ -2623,7 +2631,7 @@
     },
     {
      "level": "H3",
-     "text": "Roadmap · October 2026 The dashboard beside it"
+     "text": "Planned The dashboard beside it"
     },
     {
      "level": "H2",
@@ -2653,10 +2661,17 @@
      "level": "H2",
      "text": "Pilot it on one real client this week"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "What you embed in the client's portal: the API today, the dashboard next month": "#120: removed the release-date promise; replaced by \"What you embed in the client's portal: the API today, the dashboard planned\" without changing the section anchor.",
+     "Roadmap · October 2026 The dashboard beside it": "#120: removed the release-date promise; replaced by \"Planned The dashboard beside it\" without changing the section anchor."
+    }
+   }
   },
   "/for/saas-teams": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "st-title",
     "st-story",
@@ -2687,7 +2702,7 @@
     },
     {
      "level": "H2",
-     "text": "The dashboards, next month"
+     "text": "The planned dashboards"
     },
     {
      "level": "H2",
@@ -2745,7 +2760,13 @@
      "level": "H2",
      "text": "Serve one customer number this week"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "The dashboards, next month": "#120: removed the release-date promise; replaced by \"The planned dashboards\" without changing the section anchor."
+    }
+   }
   },
   "/for/analysts": {
    "status": "unchanged",

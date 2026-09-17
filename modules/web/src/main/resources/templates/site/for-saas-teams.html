@@ -20,7 +20,7 @@
   <!-- claim: docs/versioning.md §3 — a person releases; the release is immutable -->
   <!-- claim: docs/auth.md §10 — the audit log, never the values -->
   <!-- claim: docs/datasources.md §7 — credentials encrypted, never returned -->
-  <!-- claim: docs/ROADMAP.md §2 — the dashboards are next month, named as roadmap -->
+  <!-- claim: docs/ROADMAP.md §2 — the dashboards are planned, named as roadmap -->
 
   <section class="section page-hero" aria-labelledby="st-title">
     <div class="container">
@@ -31,7 +31,7 @@
         product — their usage, their cohort, their region — not a login to somebody else's analytics portal. This
         page is that story: the expensive way it usually goes, and the shorter one — an agent authors the pipeline
         against your databases, a person releases it, and a versioned endpoint serves each customer their own rows.
-        The API half ships today; the dashboard half is next month's roadmap item, and the page keeps them labelled.
+        The API half ships today; the dashboard half is planned, and the page keeps them labelled.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/published-api}">How a release becomes an endpoint</a>
@@ -63,8 +63,8 @@
           datapipelines collapses the first two. The dataset is a versioned pipeline across your databases, drafted
           by an agent that reads your real schemas and released by a person. The API is one step after the release:
           a published endpoint under <code>/api/x</code>, parameters bound from the request, keys scoped to the
-          path. What remains is the embedding — and from next month's roadmap item, the dashboard your agent creates
-          consumes the same contract instead of a hand-built API.
+          path. What remains is the embedding — the dashboard your agent creates is a planned roadmap item.
+          It would consume the same published endpoint contract instead of needing a hand-built API.
         </p>
       </div>
     </div>
@@ -137,8 +137,8 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
 
   <section class="section band" aria-labelledby="st-dash">
     <div class="container">
-      <p class="kicker"><span class="status">Roadmap · October 2026</span></p>
-      <h2 id="st-dash" class="ds-headline">The dashboards, next month</h2>
+      <p class="kicker"><span class="status">Planned</span></p>
+      <h2 id="st-dash" class="ds-headline">The planned dashboards</h2>
       <div class="prose">
         <!-- claim: docs/ROADMAP.md §2 -->
         <p>

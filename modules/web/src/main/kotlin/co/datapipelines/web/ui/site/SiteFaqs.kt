@@ -182,7 +182,7 @@ object SiteFaqs {
                 "Is this a Tableau alternative?",
                 "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there — across " +
                     "Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an agent and " +
-                    "released by a person. Embedded dashboards created by your agent are next month's release; the " +
+                    "released by a person. Embedded dashboards created by your agent are planned; the " +
                     "roadmap page carries the date. What is versioned today is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
@@ -191,7 +191,7 @@ object SiteFaqs {
                 "Because the dashboard usually is not the expensive part — getting a trustworthy, joined, refreshed " +
                     "dataset into it is, and embedding the result in your own product is a second project. datapipelines " +
                     "makes the dataset a versioned pipeline an agent can author and an API you can call from your app " +
-                    "today; the dashboards you embed follow next month. Publishing is docs/rest-api.md §19.",
+                    "today; the dashboards you embed are planned. Publishing is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
             FaqEntry(

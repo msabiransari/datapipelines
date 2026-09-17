@@ -21,8 +21,7 @@ import java.time.temporal.ChronoUnit
  *     question for question, answer for answer. The snippet a search engine shows must be a
  *     sentence on the page.
  *  2. **Roadmap freshness** — a public roadmap older than [ROADMAP_MAX_AGE_DAYS] fails the
- *     build: the page promises months, so it has to be revisited. 115 extended the same clock
- *     to the home page's dated promise (its `data-roadmap-updated` status line).
+ *     build: shipped and planned capabilities must be revisited even without release dates.
  *  3. **Tool-page completeness** — `/mcp-tools` lists every name the catalogue ships, and no
  *     other; the page is generated, and this is the proof it stayed so.
  *  4. **Link graph** — every internal link on every registry page resolves to a registry page,
@@ -61,8 +60,7 @@ class SiteV2GuardsTest {
 
     @Test
     fun `the roadmap pages are younger than the promises they make`() {
-        // Both roadmap pages — /roadmap and the Tableau roadmap page (111) — promise months,
-        // so both are revisited on the same clock and carry the same dateline discipline.
+        // Both roadmap pages are revisited on the same clock, even without release dates.
         // 119 §C.4/§B.7: /pricing promises "no paid tier today" and /semantic-layer dates
         // its today/next list the same way, so both promises are covered by this clock.
         listOf(SitePages.ROADMAP, SitePages.TABLEAU_ROADMAP, SitePages.PRICING, SitePages.SEMANTIC_LAYER).forEach { page ->
@@ -70,7 +68,7 @@ class SiteV2GuardsTest {
             val updated = Regex("""data-roadmap-updated="([0-9-]+)"""").find(html)!!.groupValues[1]
             val age = ChronoUnit.DAYS.between(LocalDate.parse(updated), LocalDate.now())
             val clue =
-                "${page.path} says 'Last updated $updated' — $age days ago; the page names months, " +
+                "${page.path} says 'Last updated $updated' — $age days ago; its feature status changes, " +
                     "so it is revisited at least every $ROADMAP_MAX_AGE_DAYS days"
             withClue(clue) {
                 (age <= ROADMAP_MAX_AGE_DAYS) shouldBe true
@@ -81,17 +79,20 @@ class SiteV2GuardsTest {
     }
 
     /**
-     * 115 §A.2 dated the home page's "next month" promise and put it on the roadmap clock.
-     * 145 §4 replaced the promise: unshipped features on the home page are PLANNED, with no
-     * month and no date — so the invariant inverts. The busiest page may not name a month
-     * for anything it does not ship, and a dateline on it would be a dateline for nothing.
+     * #120 extends the home page's undated roadmap policy to every marketing route, including
+     * metadata and FAQ JSON-LD. A pipeline being reusable next month is not a release promise.
      */
     @Test
-    fun `the home page promises no month for what it does not ship`() {
-        val text = TAG.replace(COMMENT.replace(rendered.getValue(SitePages.HOME), " "), " ")
-        withClue("/: a dated or month-named promise is back on the home page") {
-            DATED_PROMISE.containsMatchIn(text) shouldBe false
+    fun `every marketing page keeps release plans undated`() {
+        rendered.forEach { (page, html) ->
+            // Keep tags so meta descriptions are checked too; normalize wrapped prose.
+            val copy = COMMENT.replace(html, " ").replace(Regex("\\s+"), " ")
+            val releaseCopy = copy.replace("rerun next month", "rerun later")
+            withClue("${page.path}: a dated or month-named release promise is back") {
+                DATED_PROMISE.containsMatchIn(releaseCopy) shouldBe false
+            }
         }
+        val text = TAG.replace(rendered.getValue(SitePages.HOME), " ")
         withClue("/: the planned list is still there (the arm would pass on an empty page)") {
             text shouldContain "Planned"
             text shouldContain "Native embeddable dashboards"
@@ -193,10 +194,10 @@ class SiteV2GuardsTest {
         val TAG = Regex("<[^>]+>")
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
 
-        /** "next month", "this month", a month name with a year, or a data-roadmap-updated stamp. */
+        /** Upcoming-month promises (also hyphenated) and explicit month/year release dates. */
         val DATED_PROMISE =
             Regex(
-                """\b(next month|this month|""" +
+                """\b(next[ -]month|""" +
                     """(January|February|March|April|May|June|July|August|September|October|November|December) 20\d\d)\b""",
                 RegexOption.IGNORE_CASE,
             )

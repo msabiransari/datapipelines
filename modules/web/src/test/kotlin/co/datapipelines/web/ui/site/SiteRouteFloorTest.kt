@@ -20,6 +20,8 @@ import org.springframework.web.util.HtmlUtils
  * for a REWRITTEN page (`/`, `/how-it-works`, `/pricing`; `/faq` for one corrected question)
  * it pins the baseline anchors and headings the redesign RETAINS and names every retirement
  * with its reason. A docs route pins the route — the Markdown owns its own headings.
+ * #120 also replaces dated headings on Tableau, agencies and SaaS pages with undated copy;
+ * their original wording is recorded as retired and all section anchors remain pinned.
  *
  * Three claims, each one a way the migration could silently lose something:
  *  1. **No route disappears.** Every fixture route is in the registry (or the docs catalog)
@@ -166,7 +168,7 @@ class SiteRouteFloorTest {
         const val BASELINE_ROUTES = 59
         const val BASELINE_MARKETING = 35
         const val BASELINE_DOCS = 24
-        const val REWRITTEN_ROUTES = 4
+        const val REWRITTEN_ROUTES = 7
         const val MIN_PINNED_HEADINGS = 400
         const val MIN_ANCHORS = 150
         const val MIN_REASON_CHARS = 20
