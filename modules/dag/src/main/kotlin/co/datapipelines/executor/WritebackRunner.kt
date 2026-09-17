@@ -147,6 +147,7 @@ class JdbcWritebackRunner(
         observer.phase(OperationPhase.WAITING_OUTPUT)
         return registry.poolFor(datasource).leaseConnection().use { connection ->
             connection.autoCommit = false
+            var commitAttempted = false
             try {
                 if (output.mode == WriteMode.REPLACE) {
                     observer.phase(OperationPhase.WRITING)
@@ -154,11 +155,19 @@ class JdbcWritebackRunner(
                 }
                 val written = insert(connection, table, dialect)
                 observer.phase(OperationPhase.FINALIZING)
+                commitAttempted = true
                 connection.commit()
                 observer.committed()
                 written
             } catch (e: SQLException) {
-                if (rollbackQuietly(connection)) observer.rolledBack()
+                // The rollback is attempted on every failure (transaction policy unchanged), but it
+                // is EVIDENCE of an undo only when the failure came BEFORE the commit attempt. A
+                // `commit()` that throws is ambiguous — the transaction may be durable and only its
+                // acknowledgement lost — and a `rollback()` that "succeeds" afterwards undoes
+                // nothing; reporting it would tell the user to retry a write that landed (R149-4).
+                // With no report either way the tracker leaves the outcome UNKNOWN.
+                val undone = rollbackQuietly(connection) && !commitAttempted
+                if (undone) observer.rolledBack()
                 throw mapWriteFailure(e, output)
             }
         }

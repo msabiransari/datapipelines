@@ -90,6 +90,8 @@ class NodeProgressAcceptanceTest {
         private val closeGate: Gate? = null,
         /** The named target's `close()` throws after the real close ran — cleanup failing after commit. */
         private val closeThrowsFor: String? = null,
+        /** The named target's `commit()` runs for real and then throws — the acknowledgement lost (R149-4). */
+        private val commitAckLostFor: String? = null,
         /** Counts down when a gated target connection has been closed (the body unwound). */
         private val closed: CountDownLatch? = null,
     ) : DatasourceRegistry by inner {
@@ -109,6 +111,7 @@ class NodeProgressAcceptanceTest {
             override fun commit() {
                 if (gated) commitGate?.park()
                 c.commit()
+                if (commitAckLostFor == name) throw SQLException("connection lost while awaiting the commit acknowledgement", "08006")
             }
 
             override fun close() {
@@ -501,9 +504,11 @@ class NodeProgressAcceptanceTest {
         }
 
     @Test
-    fun `a cancellation AT the commit rolls back and reads false, one AFTER it keeps committed`() =
+    fun `a cancellation AT the commit is UNKNOWN, one AFTER it keeps committed`() =
         runBlocking<Unit> {
-            // (a) at the commit: the parked commit() is cancelled → 57014 → rollback observed.
+            // (a) at the commit: the parked commit() is cancelled → 57014 out of commit() → the
+            //     writer's rollback "succeeds", but a failure FROM commit() is ambiguous from the
+            //     writer's seat (R149-4): the fixture knows nothing landed; the writer must not.
             val atCommit = Gate()
             val targetA = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
             val registryA =
@@ -522,8 +527,8 @@ class NodeProgressAcceptanceTest {
                 shouldThrow<ExecutionAbortedException> { run.await() }
                 val terminal = h.emitter.samples("wb").last()
                 terminal.state shouldBe OperationState.ABORTED
-                terminal.committed shouldBe false
-                terminal.rolledBack shouldBe true
+                terminal.committed.shouldBeNull()
+                terminal.rolledBack.shouldBeNull()
                 targetRows(targetA) shouldBe 0
             }
             // (b) after the commit: commit() returned, close() is parked and then cancelled —
@@ -552,6 +557,32 @@ class NodeProgressAcceptanceTest {
                 terminal.committed shouldBe true
                 terminal.rolledBack.shouldBeNull()
                 targetRows(targetB) shouldBe ROWS
+            }
+        }
+
+    @Test
+    fun `a commit whose acknowledgement was lost is UNKNOWN — not rolled back — while the target holds every row`() =
+        runBlocking<Unit> {
+            // The review's R149-4 witness, through the real executor: commit() runs, the driver
+            // throws 08006 instead of acknowledging, the writer's rollback() returns against
+            // nothing, close is normal. All ROWS are durable; the terminal sample must say so by
+            // saying NOTHING about the commit — never `rolled_back`.
+            val target = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+            val registry =
+                GatedRegistry(
+                    FakeDatasourceRegistry(mapOf("src" to source(), "wb" to target)),
+                    batchGateFor = "wb",
+                    commitAckLostFor = "wb",
+                )
+            val node = Fixtures.node("wb", source = "src", output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND))
+            harness(registry).use { h ->
+                shouldThrow<PipelineExecutionFailed> { h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(node)))) }
+                val terminal = h.emitter.samples("wb").last()
+                terminal.state shouldBe OperationState.FAILED
+                terminal.committed.shouldBeNull()
+                terminal.rolledBack.shouldBeNull()
+                terminal.rowsWritten shouldBe ROWS.toLong()
+                targetRows(target) shouldBe ROWS
             }
         }
 
