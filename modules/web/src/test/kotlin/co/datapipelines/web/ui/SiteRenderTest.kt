@@ -50,9 +50,10 @@ class SiteRenderTest {
         html shouldContain "src=\"/site/js/site.js\""
         // The app serves this page now — sign-in is a route away.
         html shouldContain "href=\"/login\""
-        // 145 §6: the video slot is a labelled placeholder, never a fake control.
-        html shouldContain "id=\"pipeline-video\""
-        html shouldContain "Video placeholder"
+        // 160: the video placeholder is gone entirely — "recording coming" was a promise on a
+        // marketing page. The slot stays dead until a real recording exists; no fake control.
+        html shouldNotContain "pipeline-video"
+        html shouldNotContain "Recording coming after testing"
         html shouldNotContain "<video"
 
         html shouldNotContain "assets/"

@@ -1,6 +1,5 @@
 package co.datapipelines.web.ui.site
 
-import co.datapipelines.mcp.McpToolCatalog
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
@@ -33,7 +32,9 @@ class SitePagesController(
         model: Model,
         response: HttpServletResponse,
     ): String {
-        model.addAttribute("toolNames", McpToolCatalog.NAMES)
+        // 160: families instead of all 41 names — the full tool list is /mcp-tools' job, and
+        // two pages listing every catalogue name read to a crawler as duplicate content.
+        model.addAttribute("toolGroups", McpToolGroups.groups())
         return PublicPage.render(model, response, SitePages.PILLAR, faq = SiteFaqsCluster.PILLAR)
     }
 

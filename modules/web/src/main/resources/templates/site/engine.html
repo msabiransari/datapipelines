@@ -19,7 +19,7 @@
       <h1 id="engine-title" class="ds-display" th:text="|${engine.displayName} MCP server|">Engine MCP server</h1>
       <p class="section-lede">
         Give Claude Code, Cursor or any MCP client a
-        <span th:text="${engine.displayName}">engine</span> connection it cannot abuse: read-only by default,
+        <span th:text="|${engine.article} ${engine.displayName}|">an Oracle</span> connection it cannot abuse: read-only by default,
         one scoped key per agent, every call audited, and the database password never leaves your deployment.
       </p>
       <div class="btn-row">
@@ -117,7 +117,7 @@
     <div class="container">
       <p class="kicker">Registering the database</p>
       <h2 id="register-title" class="ds-headline">
-        A <span th:text="${engine.displayName}">engine</span> datasource, read-only, credentials encrypted
+        <span th:text="|${#strings.capitalize(engine.article)} ${engine.displayName}|">An Oracle</span> datasource, read-only, credentials encrypted
       </h2>
       <div class="features-grid features-grid--two">
         <article class="card">

@@ -33,7 +33,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases does it talk to?",
-                "${facts.engines} — dp-lake is Parquet, CSV and Iceberg on S3 read in place by an embedded " +
+                "${facts.engines} — dp-lake is Parquet and Iceberg on S3 read in place by an embedded " +
                     "DuckDB. One pipeline can mix all of them; each node runs where its data lives. " +
                     "The dialect matrix with driver and licence notes is docs/datasources.md §4.",
                 "docs/datasources.md §4",
@@ -111,7 +111,7 @@ object SiteFaqs {
                 "From data to an API in a day — is that real?",
                 "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes what fails, " +
                     "you review and release, and the endpoint exists — no deployment, no service to write, no gateway to " +
-                    "configure. Dashboards your agent creates and you embed in your own product are the next release; the " +
+                    "configure. Dashboards your agent creates and you embed in your own product are a planned roadmap item; the " +
                     "roadmap page says so. Publishing is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
@@ -133,7 +133,7 @@ object SiteFaqs {
                 "Is it a Tableau or dbt replacement?",
                 "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or as Parquet on " +
                     "your own bucket, and it replaces the warehouse-plus-dbt step for teams that never wanted one. " +
-                    "Dashboards, scheduling and alerts are on the roadmap page with dates. The comparison pages cite " +
+                    "Dashboards, scheduling and alerts are on the roadmap page, undated. The comparison pages cite " +
                     "docs/versioning.md §3 for what is versioned.",
                 "docs/versioning.md §3",
             ),
@@ -161,7 +161,7 @@ object SiteFaqs {
             FaqEntry(
                 "How do I register an Iceberg table in dp-lake?",
                 "By its current metadata file - s3://bucket/table/metadata/00042-<uuid>.metadata.json - not by the " +
-                    "table root: DuckDB 1.5.5 cannot resolve a pyiceberg table's root, so the registry row names the " +
+                    "table root: DuckDB 1.5.5.1 cannot resolve a pyiceberg table's root, so the registry row names the " +
                     "file, and you re-register when the table commits. See docs/datasources.md section 8C.7.",
                 "docs/datasources.md §8C.7",
             ),
@@ -183,7 +183,7 @@ object SiteFaqs {
                 "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there — across " +
                     "Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an agent and " +
                     "released by a person. Embedded dashboards created by your agent are planned; the " +
-                    "roadmap page carries the date. What is versioned today is docs/versioning.md §3.",
+                    "roadmap page carries the status. What is versioned today is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
             FaqEntry(
@@ -277,7 +277,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases?",
-                "The ${facts.engineCountWord} engines are ${facts.engines} — dp-lake reads Parquet, CSV and " +
+                "The ${facts.engineCountWord} engines are ${facts.engines} — dp-lake reads Parquet and " +
                     "Iceberg on S3 in place — and one dataset can read several of them in the same run " +
                     "(docs/datasources.md §4).",
                 "docs/datasources.md §4",
@@ -363,7 +363,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Will there be a hosted version?",
-                "There is no paid tier today, and nothing hosted is planned this year; if a hosted version ever " +
+                "There is no paid tier today, and nothing hosted is planned; if a hosted version ever " +
                     "exists it will be announced on the roadmap page first — never launched quietly. What is " +
                     "deliberately not planned lives on the roadmap's later band. (Source: docs/ROADMAP.md §3.)",
                 "docs/ROADMAP.md §3",

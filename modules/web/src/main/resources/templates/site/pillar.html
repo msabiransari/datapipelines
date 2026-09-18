@@ -56,7 +56,7 @@
         <article class="card">
           <!-- claim: docs/auth.md §7.1–7.6 -->
           <h3>One scoped key per agent</h3>
-          <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, and carry hierarchical scopes — <code>read</code>, <code>execute</code>, <code>author</code>, <code>admin</code>. A key's scopes can never exceed its creator's at issue time.</p>
+          <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, and carry hierarchical scopes — <code>read</code>, <code>execute</code>, <code>author</code> (admin is for people, never issued to a key). A key's scopes can never exceed its creator's at issue time.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.3, docs/auth.md §11.4 -->
@@ -108,10 +108,14 @@
       <p class="kicker">The surface</p>
       <h2 id="tools-title" class="ds-headline">The <span th:text="${facts.toolCount}">30</span> MCP tools an agent gets</h2>
       <!-- claim: docs/mcp-server.md §6.1 -->
-      <p class="section-lede">Discovery, authoring, execution and result reading — the full lifecycle, in <code>tools/list</code> order. <span th:text="${facts.readToolCount}">24</span> of them read; <span th:text="${facts.mutatingToolCount}">6</span> can write, and those are the ones the audit log flags with <code>mcp.tool.write</code>.</p>
-      <ul class="tool-list">
-        <li th:each="t : ${toolNames}"><code th:text="${t}">tool</code></li>
-      </ul>
+      <p class="section-lede">Discovery, authoring, execution and result reading — the full lifecycle. <span th:text="${facts.readToolCount}">24</span> of them read; <span th:text="${facts.mutatingToolCount}">6</span> can write, and those are the ones the audit log flags with <code>mcp.tool.write</code>.</p>
+      <div th:each="g : ${toolGroups}" class="feature-group">
+        <h3 class="group-title" th:text="${g.title}">Family</h3>
+        <p class="engine-strip-more">
+          <span th:text="${g.tools.size()}">6</span> tools — every name, its scope and whether it writes is listed on
+          <a th:href="@{/mcp-tools}">the tools page</a>.
+        </p>
+      </div>
       <!-- claim: docs/mcp-server.md §3.2 -->
       <p>All of them over one endpoint: <code>POST {host}/mcp</code>, Streamable HTTP, stateless by default.</p>
       <p><a th:href="@{/docs/mcp-server}">Read the MCP server specification &rarr;</a></p>

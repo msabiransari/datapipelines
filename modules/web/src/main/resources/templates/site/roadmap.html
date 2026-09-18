@@ -57,7 +57,7 @@
         <article class="card">
           <!-- claim: docs/datasources.md §4 -->
           <h3 th:text="|${#strings.capitalize(facts.engineCountWord)} engines, one pipeline|">Eight engines, one pipeline</h3>
-          <p th:text="|${facts.engines} — Parquet, CSV and Iceberg on S3, read in place. Each node runs where its data lives.|">PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet, CSV and Iceberg on S3, read in place. Each node runs where its data lives.</p>
+          <p th:text="|${facts.engines} — Parquet and Iceberg on S3, read in place. Each node runs where its data lives.|">PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet and Iceberg on S3, read in place. Each node runs where its data lives.</p>
         </article>
         <article class="card">
           <!-- claim: docs/staging.md §3 -->
@@ -113,7 +113,7 @@
         <li><strong>No audit-log screen yet</strong> — the audit log is written on every call and read
           by SQL today; the filter screen is on the backlog. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
         <li><strong>The v2 band is design-stage</strong> — nested types, conditional execution, per-node
-          retries, SSO and the rest of <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §3</a> are decided
+          retries, SAML, MFA and the rest of <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §3</a> are decided
           direction, not shipped product.</li>
       </ul>
       <p class="how-footnote">
@@ -192,7 +192,7 @@
       </div>
       <p class="how-footnote">
         What is deliberately <em>not</em> on this page: a hosted plan, native mobile apps, a story-points feature, and
-        Slack. The first two are decisions for after the next release; the last two are not planned.
+        Slack. The first two are decisions for after the planned band ships; the last two are not planned.
       </p>
     </div>
   </section>

@@ -37,7 +37,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/deployment.md §3.5 -->
-      <p>For your own databases, register a datasource per engine — Postgres, SQL Server, SQLite and DuckDB drivers ship in the published image; the MySQL and Oracle drivers you supply, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
+      <p>For your own databases, register a datasource per engine — Postgres, SQL Server, SQLite, DuckDB, H2 and dp-lake ship in the published image; the MySQL and Oracle drivers you supply, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
     </div>
   </section>
 
@@ -65,9 +65,10 @@
           <tr><th scope="row"><code>read</code></th><td>browse pipelines, templates, datasources and past executions</td></tr>
           <tr><th scope="row"><code>execute</code></th><td>also run pipelines and read their results</td></tr>
           <tr><th scope="row"><code>author</code></th><td>also create and update pipelines and templates, and introspect schemas</td></tr>
-          <tr><th scope="row"><code>admin</code></th><td>manage users and global datasources — no MCP tool requires it</td></tr>
         </tbody>
       </table>
+      <!-- claim: docs/auth.md §7.5 — admin is not a key scope -->
+      <p>There is no admin scope to pick: administration is for signed-in people, and a key that asked for it would be refused at issuance. The three above are the whole list.</p>
       <!-- claim: docs/ui-screens.md §4.18, docs/auth.md §7.4 -->
       <p>A key's scopes can never exceed the scopes of whoever issued it, and the select you see is filtered to your own — the server refuses a superset regardless, so the filter is convenience rather than the guard. Revoking is per-key and takes effect within about a minute; an expiry does the same thing on a date you set. No shared password to rotate.</p>
     </div>

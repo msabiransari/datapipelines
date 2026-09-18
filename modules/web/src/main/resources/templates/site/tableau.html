@@ -16,7 +16,7 @@
        SiteFaqs.TABLEAU. Every ships-today claim cites a packaged spec; every roadmap item cites
        the design record on disk and is labelled planned. */-->
   <!-- claim: docs/rest-api.md §19 — Tableau reads the endpoint's JSON -->
-  <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource Tableau connects to -->
+  <!-- claim: docs/pipeline-contract.md §8 — write-back to a datasource Tableau connects to -->
   <!-- claim: docs/staging.md §3 — no warehouse between the sources and Tableau -->
   <!-- claim: docs/versioning.md §3 — the dataset a person released -->
   <!-- claim: docs/auth.md §7.7 — path-scoped keys -->
@@ -75,7 +75,7 @@
           <ul>
             <!-- claim: docs/rest-api.md §19 -->
             <li><b>A governed dataset Tableau can read.</b> Release a pipeline, publish it as a <code>GET</code> endpoint under <code>/api/x</code>; the JSON it returns is what a Tableau web data connector reads — versioned, and released by a person.</li>
-            <!-- claim: docs/pipeline-contract.md §9 -->
+            <!-- claim: docs/pipeline-contract.md §8 -->
             <li><b>Or land it where Tableau already looks.</b> A pipeline node can write its result into a datasource — a Postgres table Tableau live-connects to — so the dataset refreshes when the pipeline runs and Tableau never learns a new connector.</li>
             <!-- claim: docs/staging.md §3 -->
             <li><b>The prep step, as reviewable code.</b> Joins across Postgres, MySQL, SQL Server, Oracle, SQLite and Parquet on S3 happen in a scratch database created per run — no warehouse between your sources and Tableau, no flow file nobody can diff.</li>

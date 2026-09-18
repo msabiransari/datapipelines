@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui.site
 
+import co.datapipelines.application.datasources.LakeTableFormat
 import co.datapipelines.mcp.McpToolCatalog
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -99,6 +100,56 @@ class SiteV2GuardsTest {
         }
     }
 
+    /**
+     * 160 — the lake's physical formats are [LakeTableFormat]'s closed set and nothing else:
+     * any page naming one of the format words the copy could drift into (CSV, Avro, ORC,
+     * Delta Lake) fails the build. The words were chosen because on this site they only ever
+     * appear as lake-format claims; if a legitimate other use ever appears (an export-to-CSV
+     * feature, say), this clue is the place the allowlist gets argued, not a silent substring.
+     * Word-boundary matched, so `partner_iso_crosswalk.csv` (a file name) and `ORCLPDB1`
+     * (a JDBC service name) never fire.
+     */
+    @Test
+    fun `the lake formats the site names are exactly the LakeTableFormat enum's`() {
+        val enumFormats = LakeTableFormat.entries.map { it.wire.replaceFirstChar(Char::uppercase) }.toSet()
+        val formatWords = enumFormats + setOf("CSV", "Avro", "ORC", "Delta Lake")
+        val named = Regex(formatWords.joinToString("|") { Regex.escape(it) }.let { """\b($it)\b""" })
+        var pagesNamingAFormat = 0
+        rendered.forEach { (page, html) ->
+            val text = TAG.replace(COMMENT.replace(html, " "), " ")
+            val hit = named.findAll(text).map { it.groupValues[1] }.toSet()
+            if (hit.any { it in enumFormats }) pagesNamingAFormat++
+            withClue("${page.path}: names lake format(s) outside LakeTableFormat ${enumFormats.sorted()}") {
+                (hit - enumFormats).shouldBeEmpty()
+            }
+        }
+        withClue("no rendered page names a lake format at all — the arm would pass on a site that never names one") {
+            (pagesNamingAFormat > 0) shouldBe true
+        }
+    }
+
+    /**
+     * 160 — `admin` is not a key scope (auth.md §7.5: it left the key wire in RBAC round 1;
+     * requesting it is `auth.key_scope_unavailable`). No marketing page may render it as one,
+     * so the literal a scope table or a scope sentence renders — `<code>admin</code>` — is
+     * banned outright: every appearance of that literal on these pages has been a scope claim.
+     * The security page's three-scope wording is the exemplar this guard holds the site to.
+     */
+    @Test
+    fun `no page names admin as a key scope`() {
+        rendered.forEach { (page, html) ->
+            withClue("${page.path}: <code>admin</code> renders — admin is not a key scope (docs/auth.md §7.5)") {
+                html.contains("<code>admin</code>") shouldBe false
+            }
+        }
+        val security = rendered.getValue(SitePages.SECURITY)
+        listOf("<code>read</code>", "<code>execute</code>", "<code>author</code>").forEach { scope ->
+            withClue("the security page no longer names the three key scopes — the arm would pass on an empty page") {
+                security.contains(scope) shouldBe true
+            }
+        }
+    }
+
     @Test
     fun `the tools page lists every catalogue name and nothing else`() {
         val html = rendered.getValue(SitePages.MCP_TOOLS)
@@ -194,10 +245,16 @@ class SiteV2GuardsTest {
         val TAG = Regex("<[^>]+>")
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
 
-        /** Upcoming-month promises (also hyphenated) and explicit month/year release dates. */
+        /**
+         * Upcoming-month promises (also hyphenated) and explicit month/year release dates —
+         * and, since 160, the dated-roadmap phrasings those month patterns missed (#120):
+         * "next release", "with dates", "carries the date", "dates both", ", dated" and the
+         * time-bound "this year". The roadmap page's own rule is "no announced release date";
+         * every marketing page answers to the same rule.
+         */
         val DATED_PROMISE =
             Regex(
-                """\b(next[ -]month|""" +
+                """\b(next[ -](month|release)|with[ -]dates|carries the date|dates both|, dated|this year|""" +
                     """(January|February|March|April|May|June|July|August|September|October|November|December) 20\d\d)\b""",
                 RegexOption.IGNORE_CASE,
             )

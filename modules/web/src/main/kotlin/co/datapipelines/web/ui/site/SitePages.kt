@@ -119,7 +119,20 @@ data class EngineFacts(
     val demo: String?,
     /** Where [demo] is shown, or null when no seeded pipeline reads this engine. */
     val demoHref: String?,
-)
+) {
+    /**
+     * The indefinite article [displayName] takes in prose (160): "an Oracle connection",
+     * "an H2 datasource", "a MySQL connection". H2 is pronounced aitch, so it takes "an"
+     * despite the consonant letter; the rest follow their initial letter.
+     */
+    val article: String
+        get() =
+            when {
+                displayName == "H2" -> "an"
+                displayName.first().uppercase() in setOf("A", "E", "I", "O", "U") -> "an"
+                else -> "a"
+            }
+}
 
 /**
  * The site's page registry (073) — the single list of what is public, indexable and
@@ -206,7 +219,7 @@ object SitePages {
     val COMPARE_AIRFLOW =
         SitePage(
             path = "/compare/airflow",
-            title = "datapipelines.co vs Apache Airflow — when to use each",
+            title = "Apache Airflow alternative for SQL pipelines — when to use each",
             description =
                 "An honest comparison: Airflow orchestrates scheduled workflows across a whole platform. " +
                     "We run agent-authored SQL across several operational databases.",
@@ -217,7 +230,7 @@ object SitePages {
     val COMPARE_DBT =
         SitePage(
             path = "/compare/dbt",
-            title = "datapipelines.co vs dbt — when to use each",
+            title = "dbt alternative without a warehouse — when to use each",
             description =
                 "An honest comparison: dbt transforms inside one warehouse and owns the modelling layer. " +
                     "We join across operational databases without landing anything.",
@@ -228,7 +241,7 @@ object SitePages {
     val FEDERATED_QUERY =
         SitePage(
             path = "/federated-query",
-            title = "Federated query without a warehouse — cross-database joins",
+            title = "Federated query and data virtualization — cross-database joins",
             description =
                 "Join Postgres to MySQL to SQLite in one pipeline. Each source is read in place, " +
                     "the join runs in an in-memory staging database, and nothing is landed.",
@@ -300,7 +313,7 @@ object SitePages {
     val TABLEAU =
         SitePage(
             path = "/tableau",
-            title = "Using datapipelines with Tableau — today, and what V2 adds",
+            title = "Using datapipelines with Tableau — what ships today, what is planned",
             description =
                 "Feed Tableau a governed dataset from Postgres, MySQL, SQL Server and S3 without a warehouse, " +
                     "as an API or a table it reads. What ships now, what is next.",

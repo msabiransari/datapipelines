@@ -18,7 +18,7 @@
        history, and the warehouse itself. */-->
   <!-- claim: docs/staging.md §3 — the per-run scratch join, nothing landed -->
   <!-- claim: docs/rest-api.md §19 — the result served as a versioned endpoint -->
-  <!-- claim: docs/pipeline-contract.md §9 — write-back is a table, not a warehouse -->
+  <!-- claim: docs/pipeline-contract.md §8 — write-back is a table, not a warehouse -->
   <!-- claim: docs/datasources.md §7 — the server holds the credentials, not the agent -->
   <!-- claim: docs/versioning.md §3 — a person releases what the agent drafted -->
   <!-- claim: docs/ROADMAP.md §3 — scheduled extracts to your lake are later, not now -->
@@ -114,13 +114,13 @@
           if the source overwrites yesterday, yesterday is gone, and no query at the source will bring it back.
           History is the ELT tools' home ground; that is one of the reasons they exist.
         </p>
-        <!-- claim: docs/pipeline-contract.md §9 -->
+        <!-- claim: docs/pipeline-contract.md §8 -->
         <p>
           Second, the warehouse itself. Write-back here means a pipeline node can land its result in a table of a
           datasource you already run — useful for feeding a BI tool, and explicitly not a columnar warehouse with a
           modelling layer on top. Third, scheduling: pipelines run on demand, by an agent, a REST call or a person;
-          the scheduler is the planned roadmap item, and scheduled extracts to your own lake are later. A
-          roadmap page dates both. Fourth, transformation breadth: the work is SQL, plus JSONata and JavaScript
+          the scheduler is the planned roadmap item, and scheduled extracts to your own lake are later. The
+          roadmap page labels both as planned and later, undated. Fourth, transformation breadth: the work is SQL, plus JSONata and JavaScript
           transform nodes that are themselves a roadmap item — if the job is Python operators orchestrating a
           platform, the <a th:href="@{/compare/airflow}">Airflow comparison</a> says plainly that Airflow is the
           answer.
@@ -170,7 +170,7 @@
       <p class="kicker">What it looks like</p>
       <h2 id="fa-shot" class="ds-headline">The answer, where the copy would have been</h2>
       <figure class="shot">
-        <figcaption>The demo lake pipeline <code>nyc/mobility/taxi_vs_rideshare</code> mid-run — each source read in place, the join staged, the result in the results dock. No warehouse between them.</figcaption>
+        <figcaption>The demo pipeline <code>demo/top_company_by_borough</code> mid-run — the lake read in place, the join staged, the result in the results dock. No warehouse between them.</figcaption>
         <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
       <div class="prose">

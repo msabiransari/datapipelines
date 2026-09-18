@@ -18,7 +18,7 @@
   <!-- claim: docs/staging.md §3 — the cross-engine join in a per-run scratch database -->
   <!-- claim: docs/datasources.md §7 — credentials encrypted, the agent holds only a key -->
   <!-- claim: docs/datasources.md §3 — read-only where you say so -->
-  <!-- claim: docs/pipeline-contract.md §9 — write-back lands in Postgres if you like -->
+  <!-- claim: docs/pipeline-contract.md §8 — write-back lands in Postgres if you like -->
   <!-- claim: docs/versioning.md §3 — the release step, by a person -->
   <!-- claim: docs/rest-api.md §19 — the API partners ask for -->
 
@@ -111,7 +111,7 @@
           ever write. The agent's SQL runs against your real schema with a key you issued and can revoke; the
           database password itself never leaves the deployment.
         </p>
-        <!-- claim: docs/pipeline-contract.md §9 -->
+        <!-- claim: docs/pipeline-contract.md §8 -->
         <p>
           The scratch engine is per run, so there is nothing new to operate when the second source arrives — the
           join happens in an H2 workbench that exists for exactly that execution. And when the result of a pipeline
@@ -177,8 +177,8 @@
         <p>
           Then register your own Postgres beside the demo sources and ask the agent the question your team answered
           by hand last week. If the honest verdict is "Postgres alone still covers this", the page has done its
-          job: you have tested the boundary instead of assuming it, and the demo stack uninstalls with the same
-          one command it arrived by.
+          job: you have tested the boundary instead of assuming it, and the demo stack uninstalls with
+          <code>./app.sh --clean</code>.
         </p>
       </div>
     </div>
@@ -189,7 +189,7 @@
       <p class="kicker">Asked before</p>
       <!-- claim: docs/staging.md §3 — when is Postgres alone the right call -->
       <!-- claim: docs/datasources.md §7 — what arrives with the second source -->
-      <!-- claim: docs/pipeline-contract.md §9 — does datapipelines take Postgres away -->
+      <!-- claim: docs/pipeline-contract.md §8 — does datapipelines take Postgres away -->
       <!-- claim: docs/versioning.md §3 — who changes what runs -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Postgres-only questions, answered plainly')}"></div>
     </div>
