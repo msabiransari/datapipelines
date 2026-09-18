@@ -28,7 +28,7 @@ dependencies {
 //   ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
 //                       -PshotsEmail=you@example.com -PshotsPassword=… \
 //                       [-PshotsSet=app] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>] \
-//                       [-PshotsHeroOut=<dir>]
+//                       [-PshotsHeroOut=<dir>] [-PshotsPipeline=<name>] [-PshotsHeroPipeline=<name>] [-PshotsInspectNode=<id>]
 tasks.register<JavaExec>("siteShots") {
     group = "documentation"
     description = "Captures the marketing site's screenshots from a running demo deployment (070 §C)."
@@ -49,6 +49,11 @@ tasks.register<JavaExec>("siteShots") {
             "dp.shots.out" to "shotsOut",
             "dp.shots.set" to "shotsSet",
             "dp.shots.failingPipeline" to "shotsFailingPipeline",
+            // #166: photograph a richer pipeline than the seeded defaults (the graph/inspector
+            // shots and the hero respectively); absent = the defaults in SiteShotsMain.
+            "dp.shots.pipeline" to "shotsPipeline",
+            "dp.shots.heroPipeline" to "shotsHeroPipeline",
+            "dp.shots.inspectNode" to "shotsInspectNode",
             // 093 §B: where the hero's poster (2400 wide, device scale 2) and OG (1200x630)
             // copies land. Absent = they are not produced at all — they do not ship with the
             // app and must never be written into static/site/img.

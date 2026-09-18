@@ -73,8 +73,12 @@ object SiteShotsMain {
     private const val VIEWPORT_W = 1440
     private const val VIEWPORT_H = 900
 
-    /** The pipeline photographed for the graph, inspector and failure shots. */
-    private const val SHOWCASE = "nyc/mobility/weather_sensitivity_by_borough"
+    /**
+     * The pipeline photographed for the graph, inspector and failure shots — the DEFAULT; the
+     * run's `-PshotsPipeline=<name>` overrides it (#166), so a deployment carrying a richer
+     * pipeline than the seeded examples can be photographed without editing this file.
+     */
+    private const val DEFAULT_SHOWCASE = "nyc/mobility/weather_sensitivity_by_borough"
 
     /**
      * The HERO pipeline (093 §B). The four-engine 089 showcase is the product's thesis in one
@@ -85,7 +89,22 @@ object SiteShotsMain {
      * photographing a lesser pipeline in its place, because "several nodes, more than one
      * engine, a staging join" is what the shot is FOR.
      */
-    private const val HERO_PIPELINE = "nyc/mobility/taxi_vs_rideshare"
+    private const val DEFAULT_HERO_PIPELINE = "nyc/mobility/taxi_vs_rideshare"
+
+    /** [DEFAULT_SHOWCASE] unless the run names another pipeline (`-PshotsPipeline`). */
+    private val showcase: String by lazy { prop("shots.pipeline", DEFAULT_SHOWCASE) }
+
+    /** [DEFAULT_HERO_PIPELINE] unless the run names another (`-PshotsHeroPipeline`). */
+    private val heroPipeline: String by lazy { prop("shots.heroPipeline", DEFAULT_HERO_PIPELINE) }
+
+    /**
+     * The node the inspector shot opens (`-PshotsInspectNode=<node id>`); blank = the first
+     * node of the accessible list, which is the first card. Opened through the list (#166),
+     * not the card's hover button: on an 18-node graph the fit zooms the cards down until
+     * the 24 px expand affordance no longer lays out, and the list is the keyboard route the
+     * product guarantees regardless of zoom (a11y.js, 031).
+     */
+    private val inspectNode: String by lazy { prop("shots.inspectNode", "") }
 
     /** The hero's viewport: taller than the shot list's 1440x900, so the dock fits under the graph. */
     private const val HERO_W = 1440
@@ -232,6 +251,16 @@ object SiteShotsMain {
             .setDeviceScaleFactor(1.0)
             .setColorScheme(ColorScheme.LIGHT)
             .setReducedMotion(ReducedMotion.REDUCE)
+
+    /**
+     * The folders a name sits under, outermost first: `a/b/c.sql` → `a`, `a/b`. Each is one
+     * explorer expansion (067: every level is fetched on demand).
+     */
+    internal fun folderPrefixes(name: String): List<String> =
+        name
+            .split('/')
+            .dropLast(1)
+            .runningReduce { prefix, segment -> "$prefix/$segment" }
 
     private fun prop(
         key: String,
@@ -787,7 +816,7 @@ object SiteShotsMain {
             if (page.viewportSize().width == VIEWPORT_W && page.viewportSize().height == VIEWPORT_H) {
                 page.setViewportSize(HERO_W, HERO_H)
             }
-            openEditor(HERO_PIPELINE)
+            openEditor(heroPipeline)
             execute()
             // 080: the dock's four tabs are Details | Results | Errors | Events; a successful
             // run lands on Results, and the table is the signal the rows arrived.
@@ -809,14 +838,14 @@ object SiteShotsMain {
             setTheme("dark")
             page.navigate("$baseUrl/pipelines")
             waitFor("#pipeline-list-wrapper")
-            expandFolder("nyc", PIPELINES_PARTIAL)
-            expandFolder("nyc/mobility", PIPELINES_PARTIAL)
+            // The showcase's folders, so the dark shell shows the pipeline the other shots do.
+            folderPrefixes(showcase).forEach { expandFolder(it, PIPELINES_PARTIAL) }
             shoot("shell-dark.png")
             setTheme("light")
         }
 
         private fun editorRunAndGraph() {
-            openEditor(SHOWCASE)
+            openEditor(showcase)
             execute()
             // 065: the results live in the bottom dock (Results | Errors), never a closable panel.
             waitFor(".pe-dock")
@@ -829,7 +858,7 @@ object SiteShotsMain {
         }
 
         private fun nodeInspector() {
-            openEditor(SHOWCASE)
+            openEditor(showcase)
             // FIT FIRST. At the canvas's default zoom a five-node dagre layout is wider than a
             // 1440 viewport, and the right-hand cards' expand buttons land OUTSIDE it — measured
             // 2026-09-08 on `nyc/mobility/borough_od_matrix`: card 2's button sat at x=1656 and
@@ -839,7 +868,7 @@ object SiteShotsMain {
             // pannable and the fit control is right there; the driver just has to use it.
             fitGraph()
             if (!canvasPaintsSanely("node-inspector.png")) return
-            selectNodeOnCanvas(0)
+            openDetailsViaList(inspectNode)
             // The resolved SQL is fetched server-side; the spinner leaving is the release signal.
             page.locator("#pe-node-sql-spinner").waitFor(
                 com.microsoft.playwright.Locator
@@ -991,11 +1020,7 @@ object SiteShotsMain {
             // segment at a time (each expansion fetches ONE more level), then read the editor
             // URL off the LEAF itself: data-editor-url is the same URL the detail pane's Open
             // button uses, and reading it depends on no detail-pane markup.
-            name
-                .split('/')
-                .dropLast(1)
-                .runningReduce { prefix, segment -> "$prefix/$segment" }
-                .forEach { prefix -> expandFolder(prefix, PIPELINES_PARTIAL) }
+            folderPrefixes(name).forEach { prefix -> expandFolder(prefix, PIPELINES_PARTIAL) }
             val leaf = page.locator("button.tpl-leaf:has(.tpl-label[title='$name'])").first()
             leaf.waitFor()
             val editorUrl =
@@ -1029,19 +1054,6 @@ object SiteShotsMain {
          * flake that failed one run in three before this poll existed. Waits for a box with
          * real area instead of trusting visibility.
          */
-        private fun laidOutBox(
-            card: com.microsoft.playwright.Locator,
-            index: Int,
-        ): com.microsoft.playwright.options.BoundingBox {
-            val deadline = System.nanoTime() + LAYOUT_TIMEOUT_MS.toLong() * 1_000_000
-            while (System.nanoTime() < deadline) {
-                val box = card.boundingBox()
-                if (box != null && box.width > 0 && box.height > 0) return box
-                page.waitForTimeout(LAYOUT_POLL_MS)
-            }
-            error("node card $index still had no laid-out box after ${LAYOUT_TIMEOUT_MS.toInt()} ms")
-        }
-
         private fun fitGraph() {
             page.locator(".pe-graph-controls button[aria-label='Fit graph to view']").click()
             // Cytoscape tweens the fit on the canvas; the injected stylesheet zeroes CSS
@@ -1050,34 +1062,36 @@ object SiteShotsMain {
         }
 
         /**
-         * Selects a node by clicking the CANVAS under its card. The card overlay is
-         * `pointer-events: none` (pipeline-editor.md §5.3) so that Cytoscape keeps every
-         * interaction — which means a click on the card element itself reaches nothing. The
-         * card's own bounding box is the coordinate source, so this follows the layout instead
-         * of hard-coding a position dagre is free to change.
+         * Opens a node's Details through the accessible node list (`#pe-node-list`, 031): the
+         * row takes focus and Enter calls the same `openNodeDetails` the card's expand button
+         * does — selection on the canvas is a side effect of opening (065 §C), so the card
+         * highlights exactly as it would from a click. Layout-independent by construction.
          */
-        private fun selectNodeOnCanvas(index: Int) {
-            val card = page.locator(".pe-card").nth(index)
-            card.waitFor()
-            val box = laidOutBox(card, index)
-            // 080: a click on the card SELECTS and fills the dock's Details tab; the
-            // card's own expand button is the explicit route in (it sits in the
-            // card's top-right corner).
-            page.mouse().click(box.x + box.width / 2, box.y + box.height / 2)
-            val open = card.locator(".pe-card-open").first()
-            val openBox = open.boundingBox()
-            val viewport = page.viewportSize()
-            check(
-                openBox != null &&
-                    openBox.x >= 0 && openBox.y >= 0 &&
-                    openBox.x + openBox.width <= viewport.width &&
-                    openBox.y + openBox.height <= viewport.height,
-            ) {
-                "node card $index's expand button is outside the ${viewport.width}x${viewport.height} " +
-                    "viewport (${openBox?.x}, ${openBox?.y}) — fit the graph before selecting"
-            }
-            open.click()
-            page.locator("#pe-pane-details .pe-details").waitFor()
+        private fun openDetailsViaList(nodeId: String) {
+            val rows = page.locator("#pe-node-list li[data-node-id]")
+            rows.first().waitFor(
+                com.microsoft.playwright.Locator
+                    .WaitForOptions()
+                    .setState(WaitForSelectorState.ATTACHED),
+            )
+            val row = if (nodeId.isBlank()) rows.first() else page.locator("#pe-node-list li[data-node-id='$nodeId']")
+            check(row.count() == 1) { "node '$nodeId' is not in the editor's node list" }
+            row.evaluate("el => el.focus()")
+            row.press("Enter")
+            val wanted = if (nodeId.isBlank()) row.getAttribute("data-node-id").orEmpty() else nodeId
+            val details = page.locator("#pe-pane-details .pe-details")
+            details.waitFor()
+            val shown =
+                details
+                    .locator(".pe-details-id")
+                    .first()
+                    .innerText()
+                    .trim()
+            check(shown == wanted) { "the Details pane opened '$shown', not '$wanted'" }
+            // 140 renders the body's release checks ABOVE the node section of the Details tab,
+            // so on a pipeline with checks the node is below the dock's fold: bring it to the top.
+            details.evaluate("el => el.scrollIntoView({ block: 'start' })")
+            page.waitForTimeout(FIT_SETTLE_MS)
             page.evaluate("() => document.activeElement && document.activeElement.blur()")
         }
 
@@ -1200,8 +1214,6 @@ object SiteShotsMain {
     private val SECRET_SHAPED = Regex("""dpk_[A-Za-z0-9_.\-]+""")
 
     private const val FIT_SETTLE_MS = 400.0
-    private const val LAYOUT_TIMEOUT_MS = 15_000.0
-    private const val LAYOUT_POLL_MS = 50.0
 
     private const val WAIT_MS = 30_000.0
     private const val EXECUTION_TIMEOUT_MS = 180_000.0

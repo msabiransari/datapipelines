@@ -479,7 +479,7 @@ screenshot may be illustrated, composited or retouched.
 
 | Property | Value |
 |---|---|
-| Options | `-PshotsUrl` `-PshotsEmail` `-PshotsPassword` (required), `-PshotsFailingPipeline` (the failure shot), `-PshotsOut`, `-PshotsReview` |
+| Options | `-PshotsUrl` `-PshotsEmail` `-PshotsPassword` (required), `-PshotsFailingPipeline` (the failure shot), `-PshotsPipeline` / `-PshotsHeroPipeline` (photograph a richer pipeline than the seeded defaults — the graph/inspector shots and the hero), `-PshotsInspectNode` (which node the inspector shot opens), `-PshotsOut`, `-PshotsReview` |
 | Account | Must have signed in once (its personal workspace carries the seeded examples) and must not still owe a forced password change — the driver fails loudly rather than photographing the change-password form |
 | Output | Ten PNGs at 1440×900, plus two full-page review captures (1440 and 390) under `build/site-review/` |
 | Determinism | Fixed viewport at scale 1, `prefers-reduced-motion`, an injected stylesheet zeroing animations and carets, `document.fonts.ready` awaited, toasts removed, and clocks blanked — timestamps, relative ages, correlation ids and result TTLs |
