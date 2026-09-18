@@ -123,16 +123,11 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
     }
 
     /**
-     * DISABLED pending #143: the server aborts (204 → ABORTED, and the §10.3 replay
-     * log carries execution_aborted) but the LIVE stream does not deliver the
-     * terminal frame under multi-suite load, so the page can never show Stopped
-     * without a reload. The Stopped lifecycle is guarded at unit level
-     * (graph-boundaries.test.mjs dispatches execution_aborted and asserts End reads
-     * Stopped); re-enable this arm when the delivery gap is fixed.
+     * Re-enabled with the #143 fix: the abort unwind no longer waits out the statement
+     * abandonment grace before the terminal event, so the LIVE stream delivers
+     * `execution_aborted` inside the editor's own 5 s cancel fallback window and the page
+     * reaches Stopped without a reload.
      */
-    @org.junit.jupiter.api.Disabled(
-        "#143 — live stream never delivers execution_aborted under load; the page cannot reach the Stopped state",
-    )
     @Test
     fun `stopping a run marks End Stopped — the boundary is a word, not a button`() {
         startTrace()

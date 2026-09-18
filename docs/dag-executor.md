@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.12 (revised — see Change Log)
+**Status:** v1.14 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-09-16
+**Last updated:** 2026-09-17
 
 ---
 
@@ -547,7 +547,7 @@ All limits are configured in [Configuration §3.2](configuration.md#32-executor)
 | Max concurrent executions (per instance — 050/R2) | `datapipelines.executor.max-concurrent-executions-per-instance` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
 | JDBC query timeout (per node) | `datapipelines.executor.node-query-timeout-seconds` | `Statement.queryTimeout` on every node statement, resolved by `ExecutorConfig.queryTimeoutSecondsFor` (156, #2) in precedence order: the node's own `settings.query_timeout_seconds`, else the pipeline's `settings.query_timeout_seconds` ([pipeline-contract §4.11/§5.3](pipeline-contract.md)), else the datasource's own `query_timeout_seconds` ([Datasources §5](datasources.md#55-query-timeout-precedence)), else the operator's per-dialect default (`node-query-timeout-seconds-by-dialect.<dialect>`, [Configuration §3.2](configuration.md#32-executor)), else this flat default. |
 | Node wall-clock deadline (108) | `datapipelines.executor.node-timeout-seconds` | `withTimeout(...)` around the WHOLE node — RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE — in `runWithNodeDeadline`. A node may override it with `settings.timeout_seconds` ([pipeline-contract §4.11](pipeline-contract.md)), bounded at `node-timeout-max-seconds`. |
-| Grace before a cancelled statement is abandoned (108) | `datapipelines.executor.cancel-grace-seconds` | `withTimeoutOrNull(...)` on the node body after its statements were cancelled — see below. |
+| Grace before a cancelled statement is abandoned (108) | `datapipelines.executor.cancel-grace-seconds` | `withTimeoutOrNull(...)` on the node body after its statements were cancelled — see below. On a CANCELLED execution the wait is additionally bounded by the cancel machinery's own re-issue horizon (§8.3): past it nothing is provoking the driver, so the abort's `execution_aborted` is not held behind the abandonment grace. |
 | Execution overall timeout | `datapipelines.executor.execution-timeout-seconds` | `withTimeout(...)` wrapping the execution scope (§5.2). On expiry the executor also calls `Statement.cancel()` on every registered statement (§8.3.1) — see below. |
 | Disconnect grace before cancellation | `datapipelines.sse.disconnect-grace-seconds` | SSE layer's grace timer, which calls into the cancellation registry (§8.3) |
 
@@ -1453,6 +1453,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.14 | #143/#130 live-stream delivery | §15 grace row: on a CANCELLED execution the unwind's body wait is bounded by the cancel machinery's re-issue horizon (the window `Statement.cancel()` is still being re-issued, 086 A1) in addition to `cancel-grace-seconds` — a body the cancel cannot stop (e.g. a staging drain) no longer holds the `execution_aborted` frame behind the full abandonment grace. Timeout and ancestor paths keep the full grace; the abandon WARN and the statement abandonment itself are unchanged. Delivery guarantee stated in [REST API §10.4](rest-api.md#104-cancel-execution). |
 | 2026-09-17 | v1.13 | 156 query timeout settings (#2) | §5.3's "JDBC query timeout (per node)" row and "Three budgets" table: the statement bound is now node `settings.query_timeout_seconds` > pipeline `settings.query_timeout_seconds` > the datasource's `query_timeout_seconds` > the operator's per-dialect default (`node-query-timeout-seconds-by-dialect.<dialect>`, Configuration §3.2) > the flat application default, resolved by `ExecutorConfig.queryTimeoutSecondsFor`. `pipeline.node.query_timeout`'s detail gains `source` naming the resolved tier. New save-time exception to "documented, not enforced across keys": a node's own `query_timeout_seconds` may not exceed that SAME node's own effective `timeout_seconds` (`pipeline.validation.node_query_timeout_invalid`) — both fully known at save, under one author's control. |
 | 2026-09-17 | v1.12 | 149 correction / #125 review R149-4 | §10: a rollback after a failed `commit()` is not evidence — the write-back runner reports `rolled_back` only for failures before the commit attempt; a lost acknowledgement stays unknown. |
 | 2026-09-17 | v1.11 | 149 correction / #125 review | §10: `committed` is commit evidence decided by the tracker, independent of the node outcome (kept on failure after a confirmed commit, `false` only on a confirmed undo, absent when unobserved); staging reports a dropped partial table (`partialTableDropped`); the result store enters `fetching` before the lazy `hasNext()`. |
