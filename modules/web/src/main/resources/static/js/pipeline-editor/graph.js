@@ -43,6 +43,10 @@
 
   var MARKER_ICONS = { start: "play", end: "square" };
 
+  /* 159 addendum (#151): the least breathing room between two node boxes before a card
+   * grown mid-run is allowed to move its neighbours (measureCard / cardOverlaps). */
+  var CARD_GAP_MIN = 8;
+
   /* 159/#148: while the execution runs, the Start disc of a viewer who may execute is the
    * CANCEL control — the toolbar's own Cancel (its square glyph, its verb) on the canvas.
    * The word and the name change with it; the plain marker of a viewer who may not
@@ -933,6 +937,7 @@
   PipelineGraph.prototype.runLayout = function (onStop) {
     var self = this;
     if (isGone(self)) return;
+    self._layoutStale = false;
     var layout = self.cy.elements().layout(layoutOptions());
     layout.one("layoutstop", function () {
       self.applyEdgeCurves();
@@ -984,6 +989,98 @@
       afterPaint(function () { self.syncCardHeights(); });
     });
     return true;
+  };
+
+  /**
+   * 159 addendum (#151) — a card that GROWS after render is measured again, per node.
+   *
+   * syncCardHeights above runs after the initial render and after a theme change; 151's
+   * output-port block then added lines to cards DURING a run (`one statement`,
+   * `committed · N rows`, the run line) through data writes the html-label re-renders on
+   * (a `setTimeout(0)` of its own) — nothing re-measured, the node box kept its pre-run
+   * height, and the label, centred on the box, spilled past both edges (the owner's
+   * screenshot). Every height-changing write now queues ONE deferred measure for that
+   * node: re-armed on each write so it sits behind every re-render the writes queued and
+   * measures the final render, never a stale intermediate. The measure is the 082 rule —
+   * `offsetHeight`, the `cardH` data and the style BYPASS — and nothing else: no full
+   * relayout while the run is in flight (a mid-run relayout moves cards under the reader).
+   * The two exceptions are the ones worth moving cards for: a grown card whose box would
+   * overlap a neighbour re-lays out at once, and a layout left stale by mid-run growth is
+   * re-run once when the run completes (settleCardHeights, from End's terminal state).
+   * `_heightPasses` bounds only syncCardHeights' own recursion; this path is never
+   * swallowed by it, and the completion pass resets it.
+   */
+  PipelineGraph.prototype.queueCardMeasure = function (nodeId) {
+    var self = this;
+    if (typeof document === "undefined") return;
+    self._measureTimers = self._measureTimers || {};
+    if (self._measureTimers[nodeId]) clearTimeout(self._measureTimers[nodeId]);
+    self._measureTimers[nodeId] = setTimeout(function () {
+      delete self._measureTimers[nodeId];
+      self.measureCard(nodeId);
+    }, 0);
+  };
+
+  /** Measure ONE card and tell Cytoscape; returns whether the node's box changed. */
+  PipelineGraph.prototype.measureCard = function (nodeId) {
+    var self = this;
+    if (isGone(self) || typeof document === "undefined") return false;
+    var node = self.findNode(nodeId);
+    if (!node) return false;
+    var changed = false;
+    self.cardElement(nodeId, function (el) {
+      var h = Math.ceil(el.offsetHeight);
+      if (h > 0 && h !== node.data("cardH")) {
+        node.data("cardH", h);
+        node.style("height", h);
+        changed = true;
+      }
+    });
+    if (!changed) return false;
+    self.renderMinimap();
+    if (self.cardOverlaps(node)) {
+      self._heightPasses = 0;
+      self.runLayout();
+    } else {
+      self._layoutStale = true;
+    }
+    return true;
+  };
+
+  /**
+   * Whether a node's box (its measured height, its own width) intersects any other node's,
+   * leaving less than CARD_GAP_MIN between them — the mid-run reason to re-lay out.
+   */
+  PipelineGraph.prototype.cardOverlaps = function (node) {
+    var self = this;
+    var p = node.position();
+    var w = self.nodeWidth(node);
+    var h = node.data("cardH") || self.tokens.cardH;
+    var hit = false;
+    self.cy.nodes().forEach(function (m) {
+      if (hit || m.id() === node.id()) return;
+      var q = m.position();
+      var mw = self.nodeWidth(m);
+      var mh = m.data("cardH") || self.tokens.cardH;
+      if (Math.abs(p.x - q.x) < (w + mw) / 2 + CARD_GAP_MIN && Math.abs(p.y - q.y) < (h + mh) / 2 + CARD_GAP_MIN) hit = true;
+    });
+    return hit;
+  };
+
+  /**
+   * The run is over: cards grown mid-run kept their positions (measureCard); if any did,
+   * the layout is re-run once for the new geometry, then measured as after any layout.
+   */
+  PipelineGraph.prototype.settleCardHeights = function () {
+    var self = this;
+    if (typeof document === "undefined") return;
+    setTimeout(function () {
+      if (isGone(self) || !self._layoutStale) return;
+      self._heightPasses = 0;
+      self.runLayout(function () {
+        afterPaint(function () { self.syncCardHeights(); });
+      });
+    }, 0);
   };
 
   /** The live HTML card element for a node id (the html-label overlay's output). */
@@ -1708,6 +1805,7 @@
     // Mirror execution state to the a11y node list (a11y.js owns the DOM; the call
     // is guarded so the pure module stays loadable under node --test).
     if (typeof window !== "undefined" && window.a11yNodeState) window.a11yNodeState(nodeId, state);
+    this.queueCardMeasure(nodeId); // #151: the footer's state line can change the card's height
   };
 
   /**
@@ -1724,6 +1822,7 @@
     var node = this.findNode(nodeId);
     if (!node) return;
     node.data("run", formatRunLine(stats));
+    this.queueCardMeasure(nodeId); // #151: the run line is a line the card did not have
   };
 
   /**
@@ -1738,6 +1837,7 @@
     node.data("opState", view && view.state ? view.state : null);
     // 151: the output port reads the same view — one reducer, one measured truth.
     node.data("port", view && view.port ? view.port : null);
+    this.queueCardMeasure(nodeId); // #151: the port block's lines (`one statement`, the count) grow the card
   };
 
   /**
@@ -1789,6 +1889,8 @@
     self.cy.edges().forEach(function (edge) {
       EDGE_STATES.forEach(function (c) { edge.removeClass(c); });
     });
+    // #151: every card just lost its run lines — each box follows (shrinking never overlaps).
+    self.cy.nodes().forEach(function (node) { self.queueCardMeasure(node.id()); });
   };
 
   /**
@@ -1813,6 +1915,10 @@
     // 151/#144: End shows how long the run took, when the caller knows (the run clock).
     node.data("elapsed", extra && extra.elapsed ? String(extra.elapsed) : null);
     this.updateMinimapNode(id, state);
+    this.queueCardMeasure(id); // #151: the elapsed line under End is a line the marker did not have
+    // #151: End's terminal state IS the run's end — the moment a layout left stale by
+    // mid-run growth may move the cards again.
+    if (side === "end" && (state === "success" || state === "failed" || state === "aborted")) this.settleCardHeights();
   };
 
   /** The disc an event came from, or null: the only element wireMarkerActivation acts on. */

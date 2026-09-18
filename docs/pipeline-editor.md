@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.16 (revised — see Change Log)
+**Status:** v1.17 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-09-17
@@ -600,6 +600,15 @@ zoom back into the model. Because dagre's rank separation is tuned to the card b
 re-runs the layout (`runLayout`), bounded at two passes: the second measures the same content and
 finds nothing to change. The minimap reads the same per-node height. `card-height.test.mjs` owns the
 stylesheet function, the measurement, the no-op second call, the zero-height guard and the CSS floor.
+**A card that grows DURING a run is measured again, per node (159 addendum, #151):** every
+height-changing write (`setNodeState`, `setNodeStats`, `setNodeOperation` — the port block's lines —
+`setMarkerState`'s elapsed line, `resetAll`) queues one deferred, per-node `measureCard` that runs
+behind the html-label's own re-render and writes the same `cardH` + bypass, without a full
+`runLayout` while the run is in flight (a mid-run relayout moves cards under the reader); the layout
+is re-run only when the grown box would overlap a neighbour (`cardOverlaps`, `CARD_GAP_MIN`) or, once,
+when End takes its terminal state (`settleCardHeights`, the `_heightPasses` bound reset). Before it,
+the two CTAS cards' `one statement` / committed lines grew the label past a node box measured once at
+render. `graph-card-height.test.mjs` and `PipelineEditorStartMarkerBrowserTest`'s card-heights arm.
 
 **The minimap** (no Cytoscape equivalent — plain DOM, painted by `renderMinimap()` after layout): nodes as small bars carrying the state colour (updated on every `setNodeState`), the viewport rectangle in `--brand` re-read from `cy.extent()` on pan/zoom. It is `pointer-events: none` — orientation, not navigation.
 
@@ -1885,6 +1894,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-18 | v1.17 | 159 addendum / #151 cards re-measure when they grow mid-run | §5.3: `measureCard` per height-changing write (state, stats, the port lines, the markers' elapsed line, the reset), deferred behind the html-label's re-render, no relayout in flight except on overlap; `settleCardHeights` re-runs a stale layout once at End's terminal state; the oscillation bound never reaches this path. |
 | 2026-09-17 | v1.16 | 159 / #148 the Start disc runs on a human press and cancels while running | §5.3b: **the press guard** — the cause of "Start does nothing" on the live editor was Cytoscape's mousedown `activate()` on the marker node re-rendering the disc (cytoscape-node-html-label re-parses on every `style` event, `setTimeout(0)`) under a held button, so no click was ever dispatched; `wireMarkerActivation` now stops `mousedown`/`pointerdown`/`touchstart` for `.pe-marker-run` targets in the capture phase. **Cancel from the marker**: while `isExecuting` the disc is `.pe-marker-cancel` (`Cancel execution`, the word Cancel, the square glyph, the danger fill, never `aria-disabled`) and its activation calls the toolbar's own `cancelExecution()`; Start again on any terminal state; a viewer who may not execute keeps the plain marker. **Focus survives the re-render** (`keepMarkerFocus`). §6.3: `execution_started` / `execution_aborted` rows name the disc's two faces. |
 | 2026-09-17 | v1.15 | 151 addendum / #144 boundary redesign | **New §5.3b the execution boundaries**: Start a disc and End a rounded square in a transparent 72px box (`node.boundary`, `BOUNDARY_W`; connectors anchored to the marker's half width); **Start is the run trigger** when `canExecute` (the toolbar's own flag, stamped as `data-can-execute`, read by `init()`) — `role="button"`, Enter/Space via `wireMarkerActivation`, the same `executePipeline()`, `aria-disabled` + pulse while Running…; End's fill and word are the outcome, with the run clock's elapsed (`durationText`); minimap silhouettes; `#cy-canvas` `role="group"`. §6.3: End on the terminal rows. §10.7: the closing sentence that said the arrows were untouched and no marker existed is replaced — the reducer now feeds the port, and the markers read the run status. |
 | 2026-09-17 | v1.14 | 151 / #127 arrows vs. writes | §5.3 edges rewritten: a `depends_on` edge is an ORDERING (`kind: "dependency"`; `active` still / `satisfied` / `unmet`; `done`, `rows`/`rowLabel` and the rAF dash flow retired — no count rides an edge, nothing moves along one). **New §5.3a the output port**: one row per configured output (`outputPortFor` mirrors `NodeOperations.operationFor`), states from `describe().port` (waiting amber and still, writing the only flow, honest terminal words, CTAS `one statement`), stale on stream loss, `settlePolledOutcome` on the recovery poll; Details `Depends on` / `Required by`; arrow tap announces its meaning; legend `Depends on` / `Output write`. §6.2/§6.3 tables updated; `edgeLabelText`/`edgeLabelBg` retired from `readDesignTokens`. |

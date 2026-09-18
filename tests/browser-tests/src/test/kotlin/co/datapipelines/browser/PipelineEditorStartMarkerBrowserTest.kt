@@ -199,6 +199,77 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
         shoot(if (settledLive) "held-stopped" else "held-stopped-after-reload")
     }
 
+    /**
+     * 159 addendum (#151): a card that grows mid-run (the output port's `one statement` and
+     * committed-count lines, the run line) re-measures its node box, so no label ever spills
+     * past its node. Asserted per card, in the graph's own units: the label's `offsetHeight`
+     * (layout, before the pan/zoom transform) against the node's model `height()`. Red with
+     * `measureCard` removed — the two CTAS cards keep their pre-run box and overflow it.
+     */
+    @Test
+    fun `cards grow their node box when the port lines arrive - no label spills past its node`() {
+        startTrace()
+        val user = seedLocalUser(uniqueEmail("smc-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        val datasource = "smc-src-" + generatedPassword("d").take(6).lowercase()
+        EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource) shouldBe emptyList<String>()
+        val name = "test/smc_" + generatedPassword("p").take(8).lowercase()
+        val pipelineId = EditorRunFixtures.createStageChainPipeline(page, name, datasource, rows = 60_000)
+        ensureTheme("light")
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/pipelines/$pipelineId/editor")
+        page.locator(".pe-card[data-node-id='pairs_b']").waitFor()
+        val before = cardBoxes(page)
+        before.keys shouldBe setOf("stage_calendar", "pairs_a", "pairs_b")
+        spills(before) shouldBe emptyList<String>()
+
+        page.locator("[data-verb='pipeline-execute']").click()
+        page.locator("[data-verb='pipeline-execute']:not([disabled])").waitFor(Locator.WaitForOptions().setTimeout(EXECUTION_TIMEOUT_MS))
+        page.locator(".pe-status:has-text('Completed')").waitFor()
+        // Every card carries its run line now, and the two CTAS cards their port lines: the
+        // labels are taller than at load. The measure is deferred a tick behind the
+        // html-label's re-render and the completion pass may re-lay out once, so the
+        // invariant is awaited, then read once more after a settle and asserted strictly.
+        waitUntil("every node box is at least as tall as its label") { spills(cardBoxes(page)).isEmpty() }
+        page.waitForTimeout(600.0)
+        val after = cardBoxes(page)
+        spills(after) shouldBe emptyList<String>()
+        val grown = after.filter { (id, box) -> box.label > before.getValue(id).label }.keys
+        check(grown.containsAll(setOf("pairs_a", "pairs_b"))) { "the CTAS cards did not grow: before=$before after=$after" }
+        page.locator(".pe-card[data-node-id='pairs_a'] .pe-port-kind:has-text('one statement')").count() shouldBe 1
+        page.locator(".pe-card[data-node-id='pairs_b'] .pe-port-kind:has-text('one statement')").count() shouldBe 1
+        println("151-card-boxes before=$before after=$after")
+        shoot("card-heights-finished")
+        shootClose("card-heights-pairs-a-close", "pairs_a")
+    }
+
+    /** Per card: the label's layout height and the node's model height, both in graph units. */
+    @Suppress("UNCHECKED_CAST")
+    private fun cardBoxes(on: Page): Map<String, Box> =
+        (
+            on.evaluate(
+                """() => {
+                  const cy = document.getElementById('cy-canvas')._cyreg.cy;
+                  const out = {};
+                  document.querySelectorAll('.pe-card:not(.pe-card-boundary)').forEach((card) => {
+                    const id = card.getAttribute('data-node-id');
+                    const node = cy.getElementById(id);
+                    out[id] = { label: card.offsetHeight, node: node.length ? node.height() : -1 };
+                  });
+                  return out;
+                }""",
+            ) as Map<String, Map<String, Number>>
+        ).mapValues { (_, v) -> Box(v.getValue("label").toDouble(), v.getValue("node").toDouble()) }
+
+    private fun spills(boxes: Map<String, Box>): List<String> =
+        boxes.filter { (_, b) -> b.label > b.node }.map { (id, b) -> "$id label=${b.label} node=${b.node}" }
+
+    private data class Box(
+        val label: Double,
+        val node: Double,
+    )
+
     /** A fan-out run — 60k rows is a few seconds; [SLOW_ROWS] is long enough to cancel by hand — the graph shape 151 documents. */
     private fun seedPipeline(
         page: Page,
