@@ -90,4 +90,9 @@ tasks.named<Test>("test") {
     // ordinary dp.test.forks — DEVELOPMENT.md §9.5 has the RAM arithmetic.
     maxParallelForks =
         project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+    // The #143/#130 load harness (ExecutionStreamCancelLoadE2eTest) counts its cancel-under-load
+    // trials through this knob. Gradle properties, not -D: a -D stops at the build JVM and would
+    // silently never reach the test (the shared conventions' own warning). A Gradle property is a
+    // tracked input, so a changed trial count invalidates the task instead of riding a cached run.
+    providers.gradleProperty("sse157.trials").orNull?.let { systemProperty("sse157.trials", it) }
 }

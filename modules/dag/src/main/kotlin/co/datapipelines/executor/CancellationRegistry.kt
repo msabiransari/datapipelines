@@ -61,6 +61,20 @@ interface CancellationHandle {
     /** The reason this execution was cancelled, or null while it is still running. */
     val abortReason: AbortReason?
 
+    /**
+     * How long the cancel machinery itself keeps actively provoking the driver — the re-issue
+     * watcher's whole window (086 A1). Beyond it a raise is no longer expected: per the watcher's
+     * own contract, a driver whose `cancel()` never lands is the statement's `queryTimeout`
+     * problem, not ours.
+     *
+     * The abort unwind waits on a node body for exactly this long, never for the statement
+     * abandonment grace the same cancel started: past the horizon the wait cannot buy the F8
+     * driver record any more, and every millisecond of it sits between the cancel's `204` and
+     * the stream's `execution_aborted` — the delivery gap behind #143, where the client's own
+     * fallback window closed before the terminal frame was written.
+     */
+    val reissueHorizonMillis: Long
+
     /** Statements currently registered — the assertion surface for "a live statement was cancelled". */
     val registeredStatements: Int
 
@@ -209,6 +223,10 @@ class InMemoryCancellationRegistry : CancellationRegistry {
         private val reissuing = AtomicBoolean()
 
         override val abortReason: AbortReason? get() = reason.get()
+
+        /** The re-issue watcher's whole window — see [CancellationHandle.reissueHorizonMillis]. */
+        override val reissueHorizonMillis: Long
+            get() = REISSUE_ATTEMPTS * REISSUE_INTERVAL_MS
 
         override val registeredStatements: Int get() = statements.size
 

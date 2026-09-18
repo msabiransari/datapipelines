@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.17 (frozen contract — additive-only changes after this point)
+**Status:** v2.18 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-16
+**Last updated:** 2026-09-17
 
 ---
 
@@ -1478,7 +1478,7 @@ Accept: text/event-stream
 
 Re-emits the SSE event stream from the Redis event log, in original order with original timestamps — `node_progress` samples included, each with the `observed_at` it was taken at (§6.4.9). Useful for debugging pipelines after the fact.
 
-Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour.
+Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour. The replay is also the answer to "I was not attached (or left early) while it ran": the live stream's delivery guarantee runs only to a connected consumer (§10.4), and everything else is read back from here.
 
 ### 10.4 Cancel execution
 
@@ -1489,6 +1489,8 @@ DELETE /executions/{execution_id}
 Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative).
 
 Works from **any** instance: the request writes a Redis cancellation flag that the executing instance honors within ~one heartbeat interval ([DAG Executor §8.3.1](dag-executor.md#831-the-registry)). The `204` acknowledges the cancellation *request*; the `execution_aborted` event marks its completion.
+
+**Live delivery guarantee.** A consumer that stays connected receives every event on its live stream, terminal event included, and the stream is closed by the server after the terminal sequence (§6.5). The terminal frame may legitimately lag the `204`: up to the executor's cancel re-issue horizon (~2 s) on the executing instance — the courtesy the abort unwind allows a driver that is slow to raise — and about one heartbeat interval cross-instance (§8.3.1). A consumer that abandons the stream early (its own fallback timer, a proxy idle timeout, a reload) has no live-delivery claim for anything written after it left; that gap is exactly what §10.3's replay — and, past the replay's hour, §10.2's durable record — exist to close.
 
 Response: `204 No Content`. Cancelling an already-terminal execution returns `409 Conflict` with `pipeline.execution.not_running`.
 
@@ -1997,6 +1999,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v2.18 | #143/#130 live-stream delivery | §10.4 gains the **live delivery guarantee** paragraph (no new client behaviour): a connected consumer receives the terminal event and the server-closed stream; the frame may lag the `204` by up to the cancel re-issue horizon (~2 s) same-instance, ~one heartbeat interval cross-instance; a consumer that leaves early reads what it missed from §10.3's replay (then §10.2's record). §10.3 names itself that answer. No wire changes. |
 | 2026-09-17 | v2.17 | 149 correction / #125 review R149-4 | §6.4.9: a failure thrown by `commit()` itself is ambiguous (the transaction may be durable, the acknowledgement lost) — `rolled_back` is evidence only when the failure came BEFORE the commit attempt; a lost acknowledgement leaves `committed`/`rolled_back` absent. |
 | 2026-09-17 | v2.16 | 149 correction / #125 review R149-1 | §6.4.9 `committed` is commit EVIDENCE, independent of the node outcome: `true` survives a `failed`/`aborted` sample when the writer confirmed the commit before the node failed; `false` only with a confirmed rollback (`rolled_back`); **absent on a terminal sample when neither was observed** (unknown — never "not committed"); the abandoned-driver limit stated. |
 | 2026-09-16 | v2.15 | 149 / #125 node_progress | New **§6.4.9 `node_progress`** (additive): a measured sample of a node's operation — `operation` (stage/ctas/materialize/writeback/statement/child), the real `destination`, one lifecycle `state`, `started_at`/`observed_at`/`elapsed_ms`, per-state `timings_ms`, `rows_fetched`/`rows_written`/`batches_written` (absent when unobserved), `committed`/`rolled_back` on the terminal sample only, `child_execution_id`; never a percentage. §6.5: zero or more per node between `node_started` and the node's terminal event, the terminal sample first; §10.3 replays them with their original `observed_at`. Cadence: first entry per state, then `datapipelines.executor.progress-sample-interval-seconds`. |

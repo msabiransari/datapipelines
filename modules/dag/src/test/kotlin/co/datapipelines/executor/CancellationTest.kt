@@ -4,6 +4,7 @@ import co.datapipelines.events.ExecutionAborted
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.LogicalType
@@ -89,6 +90,74 @@ class CancellationTest {
                 // SLOW_SQL runs ~57s to completion. Returning far inside that is only possible if
                 // Statement.cancel() actually reached the driver.
                 (elapsed < INTERRUPT_BUDGET_MS).shouldBeTrue()
+            }
+        }
+
+    /**
+     * The terminal event is not held behind the statement-abandonment grace (#143).
+     *
+     * The driver here drops the cancel MID-EXECUTION — [BlockingDriver] with no prologue and a
+     * long runtime is the production shape the #143 hunt measured on a staging drain: the
+     * statement is registered, the cancel is issued and delivered, and the body keeps working
+     * because the driver never raises. With the abandonment grace sitting between the cancel's
+     * `204` and the stream's `execution_aborted` — the whole grace, every time, measured
+     * 4 980–5 023 ms over 20 trials against a client fallback of exactly 5 000 ms — the frame
+     * landed on a connection the page had already given up. The abort unwind now waits on the
+     * body only as long as the cancel machinery itself keeps provoking the driver
+     * ([CancellationHandle.reissueHorizonMillis]).
+     *
+     * The grace below is 30 s — far above every budget in this file — so the elapsed assertion
+     * can only pass through the horizon bound. Revert the abort bound in
+     * `PipelineExecutor.bodyOutcomeOr` and this goes red at ~30 s, the right way round.
+     */
+    @Test
+    fun `an abort's terminal event is not held behind the statement-abandonment grace`() =
+        runBlocking<Unit> {
+            val driver =
+                BlockingDriver(
+                    statement = DriverLikeStatement(deafToCancel = true),
+                    prologueMs = 0,
+                    runtimeMs = ABANDONED_DRIVER_RUNTIME_MS,
+                )
+            val source = h2Datasource("deaf_cancel", listOf("CREATE TABLE deaf_cancel (n INT)"))
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to "DELETE FROM deaf_cancel")),
+                registry = FakeDatasourceRegistry(mapOf("deaf_cancel" to source), blockingDriver = driver),
+                config =
+                    ExecutorConfig(
+                        // All far above the budget, so none of them can be what ends this node.
+                        nodeQueryTimeoutSeconds = NO_RESCUE_QUERY_TIMEOUT_SECONDS,
+                        nodeTimeoutSeconds = NO_RESCUE_NODE_TIMEOUT_SECONDS,
+                        cancelGraceSeconds = GRACE_SECONDS,
+                        executionTimeoutSeconds = NO_RESCUE_EXECUTION_TIMEOUT_SECONDS,
+                        cancelPollIntervalSeconds = NO_RESCUE_EXECUTION_TIMEOUT_SECONDS,
+                    ),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("slow", type = NodeType.DML, source = "deaf_cancel"))
+                val run =
+                    async {
+                        shouldThrow<ExecutionAbortedException> { h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))) }
+                    }
+
+                val executionId = awaitNodeStarted(h)
+                awaitRegisteredStatement(h, executionId)
+                val elapsed =
+                    kotlin.system.measureTimeMillis {
+                        h.cancellations.cancel(executionId, AbortReason.CANCELLED)
+                        while (h.emitter.allOf<ExecutionAborted>().isEmpty()) delay(POLL_MS)
+                    }
+
+                (elapsed < TERMINAL_BUDGET_MS).shouldBeTrue()
+                run.await()
+                // The cancel really reached the driver and was really dropped: what the bound
+                // replaces is a wait that could not buy the driver record any more.
+                (driver.statement.cancels.get() >= 1).shouldBeTrue()
+                driver.statement.interrupted
+                    .get()
+                    .shouldBeFalse()
+                h.emitter.count(SseEventType.EXECUTION_ABORTED) shouldBe 1
+                h.slots.inFlight shouldBe 0
+                h.cancellations.liveExecutions shouldBe 0
             }
         }
 
@@ -699,6 +768,20 @@ class CancellationTest {
 
         /** Generous, but far below SLOW_SQL's own ~57s runtime — the test still falsifies. */
         const val INTERRUPT_BUDGET_MS = 20_000L
+
+        /** A grace so far above the budget that only the horizon bound can explain a pass. */
+        const val GRACE_SECONDS = 30L
+
+        /** The horizon bound is ~2 s; 10 s leaves loaded-box slack and nothing else. */
+        const val TERMINAL_BUDGET_MS = 10_000L
+
+        /** The abandoned driver call keeps running after the unwind gave up on it. */
+        const val ABANDONED_DRIVER_RUNTIME_MS = 15_000L
+
+        /** All far above the budget, so none of them can be what ends the node. */
+        const val NO_RESCUE_QUERY_TIMEOUT_SECONDS = 300
+        const val NO_RESCUE_NODE_TIMEOUT_SECONDS = 300L
+        const val NO_RESCUE_EXECUTION_TIMEOUT_SECONDS = 300L
 
         fun slowDatasource() = h2Datasource(SLOW_DS, listOf("CREATE TABLE unused (n INT)"))
     }

@@ -48,6 +48,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import co.datapipelines.pipeline.StagingEngine as PipelineStagingEngine
 
@@ -340,7 +341,7 @@ class PipelineExecutor(
         } catch (e: TimeoutCancellationException) {
             throw deadlineOutcome(node, ctx, run, seconds, startedAt, body, e)
         } catch (e: CancellationException) {
-            throw bodyOutcomeOr(body, e)
+            throw bodyOutcomeOr(body, e, ctx.handle)
         } finally {
             // Every non-timeout exit too: a sibling's failure, a cancel, an ancestor's deadline.
             // The body is done on the success path, so this is a no-op there; on every other it is
@@ -378,7 +379,7 @@ class PipelineExecutor(
         cause: TimeoutCancellationException,
     ): Throwable =
         if (cancelledByAncestor()) {
-            bodyOutcomeOr(body, cause)
+            bodyOutcomeOr(body, cause, ctx.handle)
         } else {
             nodeDeadlineExpired(node, ctx, run, seconds, startedAt, body)
         }
@@ -399,14 +400,39 @@ class PipelineExecutor(
      * under `NonCancellable` because our scope is already cancelled and every suspension point on
      * a cancelled scope is skipped before it starts.
      *
+     * ## The abort bound (#143)
+     *
+     * When the cancellation carries an [ExecutionAbortedException] the execution's outcome is
+     * already decided — `ABORTED`, reason recorded, statements cancelled — and the only thing the
+     * wait can still buy is the F8 suppressed driver record. That record arrives, when it arrives
+     * at all, inside the cancel machinery's own active window: past
+     * [CancellationHandle.reissueHorizonMillis] nothing is provoking the driver any more, and a
+     * body still running is doing work the cancel cannot stop (measured on #143's witness: a
+     * staging drain in H2 batch inserts, all of it beyond `Statement.cancel()`'s reach). Waiting
+     * out the full abandonment grace there put the whole grace between the cancel's `204` and the
+     * stream's `execution_aborted` — 4 980–5 023 ms over 20 trials against a client fallback of
+     * exactly 5 000 ms — so an abort's wait is bounded by the horizon instead. The grace stays
+     * the bound on every other path (timeout, ancestor), where the body's outcome IS the
+     * decision.
+     *
      * @return the body's own throwable, or [cancellation] when the body produced none in time.
      */
     private suspend fun bodyOutcomeOr(
         body: Deferred<NodeResult>,
         cancellation: CancellationException,
+        handle: CancellationHandle,
     ): Throwable =
         withContext(NonCancellable) {
-            withTimeoutOrNull(config.cancelGraceSeconds.seconds) {
+            val boundMillis =
+                if (abortReasonOrNull(cancellation) != null) {
+                    minOf(
+                        config.cancelGraceSeconds.seconds.inWholeMilliseconds,
+                        handle.reissueHorizonMillis,
+                    )
+                } else {
+                    config.cancelGraceSeconds.seconds.inWholeMilliseconds
+                }
+            withTimeoutOrNull(boundMillis.milliseconds) {
                 runCatching { body.await() }.exceptionOrNull()
             } ?: cancellation
         }
@@ -792,12 +818,14 @@ class PipelineExecutor(
      * depth-bounded so a pathological cause cycle cannot spin.
      */
     private fun familyAbortReason(cancellation: CancellationException): AbortReason =
+        abortReasonOrNull(cancellation) ?: AbortReason.CANCELLED
+
+    private fun abortReasonOrNull(cancellation: CancellationException): AbortReason? =
         generateSequence(cancellation as Throwable) { it.cause }
             .take(MAX_CAUSE_DEPTH)
             .filterIsInstance<ExecutionAbortedException>()
             .firstOrNull()
             ?.reason
-            ?: AbortReason.CANCELLED
 
     private fun pipelineFailed(
         run: ExecutionRun,

@@ -651,13 +651,21 @@ class TimedStatement(
  * window in which a cancel is dropped — and only then becomes cancellable.
  */
 
-class DriverLikeStatement : Statement by NoopStatement() {
+class DriverLikeStatement(
+    /**
+     * Model a driver the cancel never reaches — `cancel()` is recorded and dropped even while a
+     * command is executing (#143's witness: a staging drain whose blocking calls the interrupt
+     * cannot touch). Default `false` keeps the original H2-faithful behaviour: a cancel arriving
+     * while a command is registered raises `57014` on the blocked thread.
+     */
+    val deafToCancel: Boolean = false,
+) : Statement by NoopStatement() {
     /** Every `cancel()` the executor issued, dropped or not — the re-issue assertion surface. */
     val cancels = AtomicInteger()
 
     val closes = AtomicInteger()
 
-    /** True once a `cancel()` arrived while a command was registered. */
+    /** True once a `cancel()` arrived while a command was registered and could land. */
     val interrupted = AtomicBoolean()
 
     /** Counts down as the driver call is entered, before the prologue — the race's start line. */
@@ -667,7 +675,7 @@ class DriverLikeStatement : Statement by NoopStatement() {
 
     override fun cancel() {
         cancels.incrementAndGet()
-        if (executing.get()) interrupted.set(true)
+        if (executing.get() && !deafToCancel) interrupted.set(true)
     }
 
     override fun close() {
