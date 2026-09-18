@@ -58,6 +58,11 @@ class UiConfig {
     @Bean
     fun lakeTableBrowseModel(): LakeTableBrowseModel = LakeTableBrowseModel()
 
+    /** 162 (#156): the Tables view's schemas→tables→columns tree model, every other dialect. */
+    @Bean
+    fun datasourceSchemaTreeBrowseModel(introspector: co.datapipelines.datasources.SchemaIntrospector): DatasourceSchemaTreeBrowseModel =
+        DatasourceSchemaTreeBrowseModel(introspector)
+
     /** 079 §A: the rail's Pipelines/Templates badges, behind a 60s TTL (see [NavCounts]). */
     @Bean
     fun navCounts(
