@@ -316,7 +316,7 @@
             <!-- claim: docs/ui-screens.md §4.18, docs/auth.md §7.4 -->
             <p>Mint it on the <strong>API</strong> section — <code>/api-console</code>, where the endpoints it may call and the MCP connection already live — or with <code>POST /api/v1/auth/api-keys</code>.</p>
             <!-- claim: docs/auth.md §7.1–7.6, §7.7 -->
-            <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, given an expiry, and carry hierarchical scopes (<code>read</code>, <code>execute</code>, <code>author</code>, <code>admin</code>). An agent's key and a program's key are the same kind of credential.</p>
+            <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, given an expiry, and carry hierarchical scopes (<code>read</code>, <code>execute</code>, <code>author</code> — admin is for people, never issued to a key). An agent's key and a program's key are the same kind of credential.</p>
           </li>
           <li>
             <h3>Point the agent at <code>/mcp</code></h3>
@@ -715,9 +715,9 @@
             <rect x="4" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <rect x="13" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
           </svg>
-          <!-- claim: docs/auth.md §5.6, docs/metadata-db.md §4.12 -->
+          <!-- claim: docs/auth.md §5.6, docs/auth.md §11A, docs/metadata-db.md §4.12 -->
           <h3>Workspaces &amp; team isolation</h3>
-          <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace; roles are owner and member.</p>
+          <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace; membership roles are additive flags — viewer, author, promoter, workspace admin and super admin.</p>
           <!-- claim: docs/ui-screens.md §4.13, docs/rest-api.md §17 -->
           <p>The management UI ships: create, switch, manage members, a navbar switcher and add-by-email.</p>
         </article>
