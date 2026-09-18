@@ -520,7 +520,7 @@
     },
     {
      "level": "H2",
-     "text": "A Oracle datasource, read-only, credentials encrypted"
+     "text": "An Oracle datasource, read-only, credentials encrypted"
     },
     {
      "level": "H3",
@@ -783,7 +783,7 @@
     },
     {
      "level": "H2",
-     "text": "A H2 datasource, read-only, credentials encrypted"
+     "text": "An H2 datasource, read-only, credentials encrypted"
     },
     {
      "level": "H3",
