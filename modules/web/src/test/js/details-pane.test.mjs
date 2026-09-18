@@ -184,3 +184,43 @@ test("a PIPELINE node with no timeout says the child's deadline bounds it, not a
   // here would name a budget that never applies to it.
   assert.equal(map.Timeout, "child execution's own deadline");
 });
+
+test("a DQL node with no query_timeout_seconds names the operator tiers generically (156, #2)", () => {
+  editor.parameters = {};
+  editor.paramKeys = [];
+  editor.pipeline = { settings: {} };
+  editor.nodeStates = {};
+  const map = Object.fromEntries(editor.detailsMeta(DQL));
+  assert.equal(map["Query Timeout"], "operator default (datasource, per-dialect, or datapipelines.executor.node-query-timeout-seconds)");
+});
+
+test("a node's own query_timeout_seconds shows on Details as this node's statement budget (156, #2)", () => {
+  editor.pipeline = { settings: {} };
+  const withOwn = { ...DQL, settings: { query_timeout_seconds: 120 } };
+  const map = Object.fromEntries(editor.detailsMeta(withOwn));
+  assert.equal(map["Query Timeout"], "120s (this node)");
+});
+
+test("the pipeline's query_timeout_seconds shows as the row's default when the node declares none (156, #2)", () => {
+  editor.pipeline = { settings: { query_timeout_seconds: 300 } };
+  const map = Object.fromEntries(editor.detailsMeta(DQL));
+  assert.equal(map["Query Timeout"], "300s (pipeline default)");
+});
+
+test("a node's own query_timeout_seconds wins over the pipeline's default (156, #2)", () => {
+  editor.pipeline = { settings: { query_timeout_seconds: 300 } };
+  const withOwn = { ...DQL, settings: { query_timeout_seconds: 45 } };
+  const map = Object.fromEntries(editor.detailsMeta(withOwn));
+  assert.equal(map["Query Timeout"], "45s (this node)");
+});
+
+test("PIPELINE and CALCULATOR nodes carry no Query Timeout row - neither runs a statement (156, #2)", () => {
+  editor.pipeline = { settings: {} };
+  editor.childExecutions = {};
+  editor.contextValues = {};
+  editor.nodeValues = {};
+  const pipelineMap = Object.fromEntries(editor.detailsMeta(CHILD));
+  const calcMap = Object.fromEntries(editor.detailsMeta(CALC));
+  assert.equal("Query Timeout" in pipelineMap, false);
+  assert.equal("Query Timeout" in calcMap, false);
+});
