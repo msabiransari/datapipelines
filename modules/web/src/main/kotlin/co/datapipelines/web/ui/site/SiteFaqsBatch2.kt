@@ -64,8 +64,8 @@ object SiteFaqsBatch2 {
                 "Does datapipelines take Postgres away?",
                 "No. Postgres becomes a datasource: it keeps serving your application, the agent reads it through " +
                     "the server with a scoped key, and a pipeline can write its result back into a Postgres table " +
-                    "if that is where the answer belongs. Write-back is docs/pipeline-contract.md §9.",
-                "docs/pipeline-contract.md §9",
+                    "if that is where the answer belongs. Write-back is docs/pipeline-contract.md §8.",
+                "docs/pipeline-contract.md §8",
             ),
             FaqEntry(
                 "Who is allowed to change what runs?",

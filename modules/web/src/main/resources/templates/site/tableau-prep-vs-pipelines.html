@@ -19,7 +19,7 @@
   <!-- claim: docs/versioning.md §3 — draft, review, immutable release -->
   <!-- claim: docs/rest-api.md §19 — publish the result as an endpoint -->
   <!-- claim: docs/dag-executor.md §5 — query timeout and the probe's plan per node -->
-  <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource -->
+  <!-- claim: docs/pipeline-contract.md §8 — write-back to a datasource -->
   <!-- claim: docs/mcp-server.md §6.2 — the agent authors the draft -->
   <!-- claim: docs/datasources.md §3 — register sources read-only -->
   <!-- claim: docs/staging.md §3 — the cross-source join in the per-run scratch database -->
@@ -103,7 +103,7 @@
           <p>Every statement carries a query timeout, and the SQL probe captures the plan before the query runs — so a slow node names itself, with a plan, instead of being a spinner in someone else's UI.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/pipeline-contract.md §9 -->
+          <!-- claim: docs/pipeline-contract.md §8 -->
           <h3>Write its result back</h3>
           <p>A node can land its result in a datasource — the Postgres table a BI tool live-connects to. The flow's output stays where the flow puts it.</p>
         </article>

@@ -19,7 +19,7 @@
   <!-- claim: docs/versioning.md §3 — a person releases -->
   <!-- claim: docs/rest-api.md §19 — publish and call the endpoint -->
   <!-- claim: docs/auth.md §7.7 — bind a key to the path -->
-  <!-- claim: docs/pipeline-contract.md §9 — write-back to a datasource -->
+  <!-- claim: docs/pipeline-contract.md §8 — write-back to a datasource -->
 
   <script type="application/ld+json">
   {
@@ -101,7 +101,7 @@
             <code>GET</code> runs it with the query string bound to its declared parameters and returns the rows as
             JSON; the response is versioned with the pipeline.
           </p>
-          <!-- claim: docs/pipeline-contract.md §9 -->
+          <!-- claim: docs/pipeline-contract.md §8 -->
           <p>
             <b>Table:</b> if Tableau already connects to one of your databases, add a write-back node so the pipeline's
             last step lands the result in a table there. Tableau live-connects to the table it already knows; each
