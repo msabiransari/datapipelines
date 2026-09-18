@@ -198,7 +198,7 @@ object SiteFaqsCluster {
             FaqEntry(
                 "Which sources can it read?",
                 "The operational databases applications write to — the dialect catalog covers seven JDBC engines " +
-                    "plus the lake's Parquet, CSV and Iceberg — each with its own adapter and type mapping, read " +
+                    "plus the lake's Parquet and Iceberg — each with its own adapter and type mapping, read " +
                     "where they live. The catalog is docs/datasources.md §4.1.",
                 "docs/datasources.md §4.1",
             ),

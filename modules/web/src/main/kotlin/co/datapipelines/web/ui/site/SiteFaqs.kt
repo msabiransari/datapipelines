@@ -33,7 +33,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases does it talk to?",
-                "${facts.engines} — dp-lake is Parquet, CSV and Iceberg on S3 read in place by an embedded " +
+                "${facts.engines} — dp-lake is Parquet and Iceberg on S3 read in place by an embedded " +
                     "DuckDB. One pipeline can mix all of them; each node runs where its data lives. " +
                     "The dialect matrix with driver and licence notes is docs/datasources.md §4.",
                 "docs/datasources.md §4",
@@ -277,7 +277,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases?",
-                "The ${facts.engineCountWord} engines are ${facts.engines} — dp-lake reads Parquet, CSV and " +
+                "The ${facts.engineCountWord} engines are ${facts.engines} — dp-lake reads Parquet and " +
                     "Iceberg on S3 in place — and one dataset can read several of them in the same run " +
                     "(docs/datasources.md §4).",
                 "docs/datasources.md §4",
