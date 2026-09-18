@@ -1106,10 +1106,13 @@
  * paints nothing: the shape is the whole marker. Start is the RUN TRIGGER when the viewer
  * may execute (`.pe-marker-run`, role=button): filled in the same accent as `.pe-run`, so
  * the toolbar button and the disc read as one action with two triggers; hover lifts it,
- * focus rings it, Running… pulses it. Without the right it is an outlined disc — no fill,
- * no affordance. End's fill is the authoritative outcome: success / danger / warning for
- * Finished / Failed / Stopped, a muted outline while idle. Tokens only, both themes,
- * reduced motion stops the pulse with every other animation. */
+ * focus rings it. While the run is active that button is the CANCEL control
+ * (159/#148, `.pe-marker-cancel`): the toolbar's danger fill under the same pulse, so the
+ * disc and the toolbar's Running… + Cancel read as one state. Without the right it is an
+ * outlined disc — no fill, no affordance, pulsing while the run is active. End's fill is
+ * the authoritative outcome: success / danger / warning for Finished / Failed / Stopped,
+ * a muted outline while idle. Tokens only, both themes, reduced motion stops the pulse
+ * with every other animation. */
 .pe-card-boundary {
   width: 72px;
   min-height: 0;
@@ -1163,7 +1166,7 @@
   box-shadow: var(--shadow-md, 0 4px 12px -4px rgb(15 23 42 / 0.18));
 }
 
-.pe-marker-run:hover:not([aria-disabled="true"]) {
+.pe-marker-run:hover {
   filter: brightness(1.08);
   transform: translateY(-1px);
 }
@@ -1173,15 +1176,28 @@
   outline-offset: var(--focus-ring-offset, 2px);
 }
 
-.pe-marker-run[aria-disabled="true"] {
-  cursor: default;
-}
-
 /* Running…: the disc pulses a brand-soft ring (the same keyframe as the status dot). */
 .pe-card-running .pe-marker-start {
   border-color: var(--brand, #2563eb);
   box-shadow: 0 0 0 4px var(--brand-soft, #dbeafe);
   animation: pe-pulse 1.2s ease-in-out infinite;
+}
+
+/* The Cancel face (159/#148): the toolbar's `.ds-button-danger` tokens on the disc, the
+   pulse kept — the run is live and this is how it stops. */
+.pe-marker-run.pe-marker-cancel {
+  background: var(--accent-danger, #dc2626);
+  border-color: var(--accent-danger, #dc2626);
+  color: var(--accent-danger-text, #fff);
+}
+
+.pe-marker-run.pe-marker-cancel:hover {
+  background: var(--accent-danger-hover, #b91c1c);
+  border-color: var(--accent-danger-hover, #b91c1c);
+}
+
+.pe-card-cancel .pe-marker-word {
+  color: var(--accent-danger, #dc2626);
 }
 
 /* End's outcome fills. */

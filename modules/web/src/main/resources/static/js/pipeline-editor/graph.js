@@ -43,6 +43,16 @@
 
   var MARKER_ICONS = { start: "play", end: "square" };
 
+  /* 159 addendum (#151): the least breathing room between two node boxes before a card
+   * grown mid-run is allowed to move its neighbours (measureCard / cardOverlaps). */
+  var CARD_GAP_MIN = 8;
+
+  /* 159/#148: while the execution runs, the Start disc of a viewer who may execute is the
+   * CANCEL control — the toolbar's own Cancel (its square glyph, its verb) on the canvas.
+   * The word and the name change with it; the plain marker of a viewer who may not
+   * execute keeps MARKER_LABELS' Running…. */
+  var MARKER_CANCEL = { word: "Cancel", aria: "Cancel execution", icon: "square" };
+
   /** Deterministic collision-safe synthetic id for a reserved base name. */
   function syntheticId(nodes, base) {
     var taken = {};
@@ -667,10 +677,15 @@
    * Start is the run trigger when the viewer MAY execute (`canExecute`, the same
    * server-rendered flag that renders the toolbar's Execute — read off `.pe-root`'s
    * `data-can-execute`, never re-derived in JS): `role="button"`, focusable, Enter/Space
-   * (wireMarkerActivation), `aria-disabled` while a run is active, the disc filled in the
-   * SAME accent as `.pe-run` so the two triggers read as one action. Without the right
-   * it is a plain marker (`role="img"`): an outlined disc, no fill, no affordance. End is
-   * never a trigger — its fill is the authoritative outcome (success/danger/warning).
+   * (wireMarkerActivation), the disc filled in the SAME accent as `.pe-run` so the two
+   * triggers read as one action. While the run is active that same button is the CANCEL
+   * control (159/#148, `.pe-marker-cancel`): the toolbar's square glyph, the word Cancel,
+   * the name "Cancel execution", never `aria-disabled` — one button, two verbs, exactly
+   * as the toolbar's Execute turns into Running… + Cancel. When the run ends (any
+   * terminal state) it is Start again. Without the right it is a plain marker
+   * (`role="img"`) in every state: an outlined disc, no fill, no affordance, Running…
+   * while the execution runs. End is never a trigger — its fill is the authoritative
+   * outcome (success/danger/warning).
    *
    * The `.pe-card` root class stays deliberate: syncCardHeights measures `.pe-card`s to
    * size the Cytoscape box; the marker box is BOUNDARY_W wide (stylesheet) and as tall
@@ -684,26 +699,30 @@
     var word = (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state;
     var running = state === "running";
     var trigger = side === "start" && data.canExecute === true;
+    var cancel = trigger && running;
+    if (cancel) word = MARKER_CANCEL.word;
     var elapsed = side === "end" && state !== "idle" && state !== "running" && data.elapsed ? String(data.elapsed) : null;
     var aria;
-    if (trigger) {
-      aria = "Start execution" + (running ? " — running" : "");
+    if (cancel) {
+      aria = MARKER_CANCEL.aria;
+    } else if (trigger) {
+      aria = "Start execution";
     } else if (side === "start") {
       aria = "Execution start" + (running ? " — running" : "");
     } else {
       aria = "Execution end" + (state === "idle" ? "" : " — " + (running ? "running" : word.toLowerCase())) + (elapsed ? " in " + elapsed : "");
     }
     var shape =
-      '<div class="pe-marker pe-marker-' + side + (trigger ? " pe-marker-run" : "") + '" role="' +
-      (trigger ? "button" : "img") + '"' +
+      '<div class="pe-marker pe-marker-' + side + (trigger ? " pe-marker-run" : "") + (cancel ? " pe-marker-cancel" : "") +
+      '" role="' + (trigger ? "button" : "img") + '"' +
       (trigger ? ' tabindex="0" data-marker-run="' + esc(data.id) + '"' : "") +
-      (trigger && running ? ' aria-disabled="true"' : "") +
       ' aria-label="' + esc(aria) + '">' +
-      iconSvg(MARKER_ICONS[side], "ds-icon-md") +
+      iconSvg(cancel ? MARKER_CANCEL.icon : MARKER_ICONS[side], "ds-icon-md") +
       "</div>";
     return (
       '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + " pe-card-" + esc(state) +
-      (data.stale ? " pe-card-stale" : "") + '" data-node-id="' + esc(data.id) + '" data-boundary="' + side + '">' +
+      (cancel ? " pe-card-cancel" : "") + (data.stale ? " pe-card-stale" : "") +
+      '" data-node-id="' + esc(data.id) + '" data-boundary="' + side + '">' +
       shape +
       '<span class="pe-marker-word">' + esc(word) + "</span>" +
       (elapsed ? '<span class="pe-marker-elapsed">' + esc(elapsed) + "</span>" : "") +
@@ -918,6 +937,7 @@
   PipelineGraph.prototype.runLayout = function (onStop) {
     var self = this;
     if (isGone(self)) return;
+    self._layoutStale = false;
     var layout = self.cy.elements().layout(layoutOptions());
     layout.one("layoutstop", function () {
       self.applyEdgeCurves();
@@ -969,6 +989,98 @@
       afterPaint(function () { self.syncCardHeights(); });
     });
     return true;
+  };
+
+  /**
+   * 159 addendum (#151) — a card that GROWS after render is measured again, per node.
+   *
+   * syncCardHeights above runs after the initial render and after a theme change; 151's
+   * output-port block then added lines to cards DURING a run (`one statement`,
+   * `committed · N rows`, the run line) through data writes the html-label re-renders on
+   * (a `setTimeout(0)` of its own) — nothing re-measured, the node box kept its pre-run
+   * height, and the label, centred on the box, spilled past both edges (the owner's
+   * screenshot). Every height-changing write now queues ONE deferred measure for that
+   * node: re-armed on each write so it sits behind every re-render the writes queued and
+   * measures the final render, never a stale intermediate. The measure is the 082 rule —
+   * `offsetHeight`, the `cardH` data and the style BYPASS — and nothing else: no full
+   * relayout while the run is in flight (a mid-run relayout moves cards under the reader).
+   * The two exceptions are the ones worth moving cards for: a grown card whose box would
+   * overlap a neighbour re-lays out at once, and a layout left stale by mid-run growth is
+   * re-run once when the run completes (settleCardHeights, from End's terminal state).
+   * `_heightPasses` bounds only syncCardHeights' own recursion; this path is never
+   * swallowed by it, and the completion pass resets it.
+   */
+  PipelineGraph.prototype.queueCardMeasure = function (nodeId) {
+    var self = this;
+    if (typeof document === "undefined") return;
+    self._measureTimers = self._measureTimers || {};
+    if (self._measureTimers[nodeId]) clearTimeout(self._measureTimers[nodeId]);
+    self._measureTimers[nodeId] = setTimeout(function () {
+      delete self._measureTimers[nodeId];
+      self.measureCard(nodeId);
+    }, 0);
+  };
+
+  /** Measure ONE card and tell Cytoscape; returns whether the node's box changed. */
+  PipelineGraph.prototype.measureCard = function (nodeId) {
+    var self = this;
+    if (isGone(self) || typeof document === "undefined") return false;
+    var node = self.findNode(nodeId);
+    if (!node) return false;
+    var changed = false;
+    self.cardElement(nodeId, function (el) {
+      var h = Math.ceil(el.offsetHeight);
+      if (h > 0 && h !== node.data("cardH")) {
+        node.data("cardH", h);
+        node.style("height", h);
+        changed = true;
+      }
+    });
+    if (!changed) return false;
+    self.renderMinimap();
+    if (self.cardOverlaps(node)) {
+      self._heightPasses = 0;
+      self.runLayout();
+    } else {
+      self._layoutStale = true;
+    }
+    return true;
+  };
+
+  /**
+   * Whether a node's box (its measured height, its own width) intersects any other node's,
+   * leaving less than CARD_GAP_MIN between them — the mid-run reason to re-lay out.
+   */
+  PipelineGraph.prototype.cardOverlaps = function (node) {
+    var self = this;
+    var p = node.position();
+    var w = self.nodeWidth(node);
+    var h = node.data("cardH") || self.tokens.cardH;
+    var hit = false;
+    self.cy.nodes().forEach(function (m) {
+      if (hit || m.id() === node.id()) return;
+      var q = m.position();
+      var mw = self.nodeWidth(m);
+      var mh = m.data("cardH") || self.tokens.cardH;
+      if (Math.abs(p.x - q.x) < (w + mw) / 2 + CARD_GAP_MIN && Math.abs(p.y - q.y) < (h + mh) / 2 + CARD_GAP_MIN) hit = true;
+    });
+    return hit;
+  };
+
+  /**
+   * The run is over: cards grown mid-run kept their positions (measureCard); if any did,
+   * the layout is re-run once for the new geometry, then measured as after any layout.
+   */
+  PipelineGraph.prototype.settleCardHeights = function () {
+    var self = this;
+    if (typeof document === "undefined") return;
+    setTimeout(function () {
+      if (isGone(self) || !self._layoutStale) return;
+      self._heightPasses = 0;
+      self.runLayout(function () {
+        afterPaint(function () { self.syncCardHeights(); });
+      });
+    }, 0);
   };
 
   /** The live HTML card element for a node id (the html-label overlay's output). */
@@ -1693,6 +1805,7 @@
     // Mirror execution state to the a11y node list (a11y.js owns the DOM; the call
     // is guarded so the pure module stays loadable under node --test).
     if (typeof window !== "undefined" && window.a11yNodeState) window.a11yNodeState(nodeId, state);
+    this.queueCardMeasure(nodeId); // #151: the footer's state line can change the card's height
   };
 
   /**
@@ -1709,6 +1822,7 @@
     var node = this.findNode(nodeId);
     if (!node) return;
     node.data("run", formatRunLine(stats));
+    this.queueCardMeasure(nodeId); // #151: the run line is a line the card did not have
   };
 
   /**
@@ -1723,6 +1837,7 @@
     node.data("opState", view && view.state ? view.state : null);
     // 151: the output port reads the same view — one reducer, one measured truth.
     node.data("port", view && view.port ? view.port : null);
+    this.queueCardMeasure(nodeId); // #151: the port block's lines (`one statement`, the count) grow the card
   };
 
   /**
@@ -1774,6 +1889,8 @@
     self.cy.edges().forEach(function (edge) {
       EDGE_STATES.forEach(function (c) { edge.removeClass(c); });
     });
+    // #151: every card just lost its run lines — each box follows (shrinking never overlaps).
+    self.cy.nodes().forEach(function (node) { self.queueCardMeasure(node.id()); });
   };
 
   /**
@@ -1798,7 +1915,16 @@
     // 151/#144: End shows how long the run took, when the caller knows (the run clock).
     node.data("elapsed", extra && extra.elapsed ? String(extra.elapsed) : null);
     this.updateMinimapNode(id, state);
+    this.queueCardMeasure(id); // #151: the elapsed line under End is a line the marker did not have
+    // #151: End's terminal state IS the run's end — the moment a layout left stale by
+    // mid-run growth may move the cards again.
+    if (side === "end" && (state === "success" || state === "failed" || state === "aborted")) this.settleCardHeights();
   };
+
+  /** The disc an event came from, or null: the only element wireMarkerActivation acts on. */
+  function markerRunOf(target) {
+    return target && typeof target.closest === "function" ? target.closest(".pe-marker-run") : null;
+  }
 
   /**
    * 151/#144 — the Start disc runs the pipeline. ONE delegated click + keydown pair on
@@ -1806,28 +1932,116 @@
    * per-element listener would leak), resolving the LIVE component exactly as the card's
    * open button does, and calling its `executePipeline()` — the same method the toolbar's
    * button calls, so parameters, the draft pin and the CSRF path are one code path.
-   * Guarded by `isExecuting` (Running… is not a trigger) and idempotent per container
-   * (a history-restored container keeps its listeners). A viewer's marker has no
-   * `.pe-marker-run` element at all, so nothing here can fire for them.
+   * 159/#148: while `isExecuting` the same activation calls `cancelExecution()` — the
+   * toolbar's Cancel, one code path again — and the disc is drawn as Cancel
+   * (buildMarkerHtml). Idempotent per container (a history-restored container keeps its
+   * listeners). A viewer's marker has no `.pe-marker-run` element at all, so nothing here
+   * can fire for them.
+   *
+   * THE PRESS GUARD (159/#148, the owner's "Start does nothing" on the live editor). The
+   * disc sits in the html-label layer INSIDE the Cytoscape container, so a pointer press on
+   * it also reached Cytoscape's own mousedown binding on that container, which
+   * `activate()`d the marker node; that emits `style`, and cytoscape-node-html-label
+   * answers every `style` by re-parsing the label a `setTimeout(0)` later — the disc under
+   * the pointer was REMOVED and a new one put in its place ~5–15 ms after mousedown.
+   * A human holds the button 50–150 ms, so mouseup landed on the new element and the
+   * browser, with no connected common ancestor for the pair, dispatched no click at all
+   * (measured 2026-09-17: mousedown, two mutations at +14 ms, mouseup, no click, no
+   * POST …/execute). Automation releases within ~2 ms and beat the timer, which is why
+   * the 151 browser arm stayed green. The guard stops the press at the container in the
+   * CAPTURE phase — before Cytoscape's bubble-phase binding — for `.pe-marker-run`
+   * targets only: the disc is a button, not a canvas gesture (a tap on a marker selects
+   * nothing anyway: selectOnly ignores synthetic ids). Nothing is prevented, so focus
+   * still lands on the disc. mousedown is the mouse path; pointerdown and touchstart are
+   * Cytoscape's touch paths and are stopped for the same reason.
    */
   PipelineGraph.prototype.wireMarkerActivation = function (container) {
     var self = this;
     if (!container || typeof container.addEventListener !== "function" || container.__peMarkerRunWired) return;
     container.__peMarkerRunWired = true;
+    var press = function (evt) {
+      if (markerRunOf(evt.target)) evt.stopPropagation();
+    };
+    ["mousedown", "pointerdown", "touchstart"].forEach(function (type) {
+      container.addEventListener(type, press, true);
+    });
     var activate = function (evt) {
-      var t = evt.target;
-      var disc = t && t.closest ? t.closest(".pe-marker-run") : null;
-      if (!disc) return;
+      if (!markerRunOf(evt.target)) return;
       evt.preventDefault();
       evt.stopPropagation();
       var ed = (typeof window !== "undefined" && window.__peInstance) || self.editor;
-      if (!ed || ed.isExecuting || typeof ed.executePipeline !== "function") return;
-      ed.executePipeline();
+      if (!ed) return;
+      if (ed.isExecuting) {
+        if (typeof ed.cancelExecution === "function") ed.cancelExecution();
+        return;
+      }
+      if (typeof ed.executePipeline === "function") ed.executePipeline();
     };
     container.addEventListener("click", activate);
     container.addEventListener("keydown", function (evt) {
       if (evt.key !== "Enter" && evt.key !== " ") return;
       activate(evt);
+    });
+    this.keepMarkerFocus(container);
+  };
+
+  /**
+   * 159/#148 — focus survives the disc's re-render. Every state change re-parses the
+   * label (see the press guard above), and the browser drops focus to <body> when the
+   * focused element is removed — 151 recorded exactly that: activate the disc from the
+   * keyboard and the focus is gone the moment the run starts. The keeper remembers which
+   * disc has focus (focusin), watches the canvas for the swap while it does, and hands
+   * focus to the replacement disc once it exists — only when focus fell to <body>, never
+   * when it moved somewhere on purpose. Chrome fires focusout for the removal too, with the
+   * old disc STILL connected during the event (measured 2026-09-17), so a focusout is
+   * classified one tick later: a disc that is gone by then was re-rendered (keep watching);
+   * one still connected was a real blur (Tab, a click elsewhere — stop). The restore itself
+   * is deferred one tick as well, and for an ordering reason: a mouse click on a card runs
+   * the mousedown listeners (Cytoscape activates that card, the html-label queues its
+   * re-render) BEFORE the focus change (the disc's focusout queues its classification), so
+   * the re-render's mutation reaches the observer with focus already on <body> and the
+   * classification still pending — a synchronous restore would pull focus back to the disc
+   * after every click on the canvas. Inert where there is no MutationObserver (node --test).
+   */
+  PipelineGraph.prototype.keepMarkerFocus = function (container) {
+    if (typeof MutationObserver !== "function" || typeof document === "undefined") return;
+    var focusedId = null;
+    var discOf = function (target) {
+      return target && typeof target.closest === "function" ? target.closest("[data-marker-run]") : null;
+    };
+    var restorePending = false;
+    var restore = function () {
+      restorePending = false;
+      if (!focusedId) return;
+      var active = document.activeElement;
+      if (active && active !== document.body) return;
+      var discs = container.querySelectorAll("[data-marker-run]");
+      for (var i = 0; i < discs.length; i++) {
+        if (discs[i].getAttribute("data-marker-run") === focusedId) {
+          discs[i].focus({ preventScroll: true });
+          return;
+        }
+      }
+    };
+    var observer = new MutationObserver(function () {
+      if (!focusedId || restorePending) return;
+      restorePending = true;
+      setTimeout(restore, 0);
+    });
+    container.addEventListener("focusin", function (evt) {
+      var disc = discOf(evt.target);
+      if (!disc) return;
+      focusedId = disc.getAttribute("data-marker-run");
+      observer.observe(container, { childList: true, subtree: true });
+    });
+    container.addEventListener("focusout", function (evt) {
+      var disc = discOf(evt.target);
+      if (!disc) return;
+      setTimeout(function () {
+        if (!disc.isConnected) return;
+        focusedId = null;
+        observer.disconnect();
+      }, 0);
     });
   };
 

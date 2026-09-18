@@ -97,6 +97,40 @@ internal object EditorRunFixtures {
     }
 
     /**
+     * 159 addendum (#151) — the owner's shape: THREE DQL cards, two of them tempdb → tempdb
+     * (a CTAS, so their output port carries `one statement` + the committed count — the lines
+     * that grow a card mid-run), one a staged fetch from the source:
+     *
+     * ```
+     *   stage_calendar ──▶ pairs_a
+     *                 ╲──▶ pairs_b
+     * ```
+     */
+    fun createStageChainPipeline(
+        page: Page,
+        name: String,
+        datasource: String,
+        rows: Int,
+    ): String {
+        val slug = name.split("/")[1]
+        createTemplate(page, "test/${slug}_cal.sql", "SELECT g AS day_id, g % 7 AS dow FROM generate_series(1, $rows) g")
+        createTemplate(page, "test/${slug}_pa.sql", "SELECT dow, COUNT(*) AS c FROM stage_calendar GROUP BY dow", dialect = "H2")
+        createTemplate(page, "test/${slug}_pb.sql", "SELECT day_id FROM stage_calendar WHERE dow = 3", dialect = "H2")
+        return postPipeline(
+            page,
+            name,
+            """[
+              { "id": "stage_calendar", "type": "DQL", "source": "$datasource", "template": { "id": "test/${slug}_cal.sql", "version": 1 },
+                "output": { "target": "tempdb", "table": "stage_calendar" }, "depends_on": [] },
+              { "id": "pairs_a", "type": "DQL", "source": "tempdb", "template": { "id": "test/${slug}_pa.sql", "version": 1 },
+                "output": { "target": "tempdb", "table": "pairs_a" }, "depends_on": ["stage_calendar"] },
+              { "id": "pairs_b", "type": "DQL", "source": "tempdb", "template": { "id": "test/${slug}_pb.sql", "version": 1 },
+                "output": { "target": "tempdb", "table": "pairs_b" }, "depends_on": ["stage_calendar"] }
+            ]""",
+        )
+    }
+
+    /**
      * ONE producer, TWO consumers, ONE ordering-only DDL:
      *
      * ```

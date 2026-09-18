@@ -63,9 +63,10 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
 
         page.locator("[data-verb='pipeline-execute']").click()
         // Start armed; End still neutral. The marker repaints when execution_started
-        // lands — wait for it rather than racing the stream.
-        waitUntil("Start arms on execution_started") { startAria() == "Start execution — running" }
-        startLabel() shouldBe "Running…"
+        // lands — wait for it rather than racing the stream. 159 (#148): while the run is
+        // live the disc of a viewer who may execute is the Cancel control.
+        waitUntil("Start arms on execution_started") { startAria() == "Cancel execution" }
+        startLabel() shouldBe "Cancel"
         endLabel() shouldBe "End"
 
         // 2. One completed branch while another runs — and End does NOT move.
