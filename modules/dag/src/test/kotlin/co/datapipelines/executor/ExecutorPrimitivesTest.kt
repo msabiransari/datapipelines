@@ -99,6 +99,43 @@ class ExecutorPrimitivesTest {
         }
     }
 
+    /**
+     * 156, #2 — the LAKE per-dialect default against a REAL embedded DuckDB engine (the engine a
+     * LAKE datasource actually runs on, datasources.md §4.1/§4.2A): resolves through
+     * [ExecutorConfig.queryTimeoutSecondsFor] exactly as [NodeRunner] would for a LAKE node, then
+     * applies the resolved value to a real `Statement.queryTimeout` and confirms the DRIVER
+     * enforces it — not a mock, not a stub. Uses the pinned slow-DuckDB-query fixture
+     * [StatementCancelDialectTest] already measured as genuinely slow and genuinely cancellable
+     * (086 A2), so this is not testing an instant query that happens to return before the clock
+     * fires. A full NodeRunner/LakeTableGate round trip is deliberately NOT exercised here — that
+     * machinery is orthogonal to the timeout precedence this class owns and is covered by the
+     * lake feature's own tests; this is the narrowest real-engine proof of the LAKE default alone.
+     */
+    @Test
+    fun `the LAKE per-dialect default is enforced by a real DuckDB statement, not merely resolved`() {
+        val config = ExecutorConfig(nodeQueryTimeoutSeconds = 600, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 1))
+        val resolved = config.queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.LAKE)
+        resolved shouldBe ResolvedQueryTimeout(1, QueryTimeoutSource.DIALECT)
+
+        java.sql.DriverManager.getConnection("jdbc:duckdb:").use { conn ->
+            conn.createStatement().use { statement ->
+                statement.queryTimeout = resolved.seconds
+                val elapsedMs =
+                    kotlin.system.measureTimeMillis {
+                        shouldThrow<java.sql.SQLException> {
+                            statement.executeQuery(
+                                "SELECT count(*) FROM range(1, 60000) a, range(1, 60000) b WHERE (a.range + b.range) % 7 = 0",
+                            )
+                        }
+                    }
+                // Generous relative to the 1s budget, tight relative to the query's natural
+                // multi-second runtime (086 A2 measured it in that range) — a query that merely
+                // finished fast on its own would not prove the timeout fired.
+                (elapsedMs < 10_000).shouldBeTrue()
+            }
+        }
+    }
+
     @Test
     fun `the result TTL is clamped, and an absent request uses the default`() {
         val result = ResultConfig(ttlDefaultSeconds = 300, ttlMinSeconds = 60, ttlMaxSeconds = 3600)

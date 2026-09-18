@@ -772,9 +772,12 @@ class ConfigValidator(
             }
         }
 
-        /** Reads the snapshot out of the live [Environment] (relaxed binding, per module keys). */
-        // A flat property-by-property mapping onto every §7-checked key, not complex logic — the
-        // same shape SecurityConfig.kt and PipelineExecutor.kt already suppress this rule for.
+        /**
+         * Reads the snapshot out of the live [Environment] (relaxed binding, per module keys).
+         *
+         * A flat property-by-property mapping onto every §7-checked key, not complex logic — the
+         * same shape `SecurityConfig.kt` and `PipelineExecutor.kt` already suppress `LongMethod` for.
+         */
         @Suppress("LongMethod")
         internal fun snapshotFrom(environment: Environment): ConfigSnapshot =
             ConfigSnapshot(
