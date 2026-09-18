@@ -274,6 +274,11 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain "test/only_here.sql"
         html shouldContain "test/also_mine.sql"
         html shouldContain "name=\"include_exclusive\""
+        // The offer is a control of the purge FORM: an htmx hx-post submits the form's own
+        // controls only, and a checkbox outside it never reaches the server (prod, 2026-09-18:
+        // the owner ticked it, the pipeline was purged, the three drafts stayed).
+        val form = html.substring(html.indexOf("<form"), html.indexOf("</form>"))
+        form shouldContain "name=\"include_exclusive\""
         html shouldContain "data-confirm-expect=\"nyc/mobility/probe\""
         html shouldContain ">Purge probe</button>"
         html shouldContain "disabled"

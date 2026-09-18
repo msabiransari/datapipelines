@@ -23,21 +23,24 @@
         are deleted permanently — this cannot be undone.
       </p>
 
-      <th:block th:if="${!#lists.isEmpty(dlg.exclusiveTemplates)}">
-        <label class="ds-form-label u-mt-md">
-          <input type="checkbox" name="include_exclusive" value="true">
-          Also purge these <span th:text="${#lists.size(dlg.exclusiveTemplates)}">2</span> template(s)
-          (they are pinned by nothing else)
-        </label>
-        <ul class="u-text-sm u-mb-md" data-exclusive-templates>
-          <li th:each="t : ${dlg.exclusiveTemplates}" class="u-mono" th:text="${t}">test/only_here.sql</li>
-        </ul>
-      </th:block>
 
       <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${dlg.id})},
                        hx-target=${from == 'editor'} ? null : '#pipeline-detail',
                        hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
         <input type="hidden" name="from" th:value="${from}">
+        <!-- 2026-09-18 (#165): the offer lives INSIDE the form — an htmx hx-post submits the form's own
+             controls only, and the checkbox that sat above the <form> never reached the server: the
+             owner ticked it, the pipeline was purged, the three drafts stayed. -->
+        <th:block th:if="${!#lists.isEmpty(dlg.exclusiveTemplates)}">
+          <label class="ds-form-label u-mt-md">
+            <input type="checkbox" name="include_exclusive" value="true">
+            Also purge these <span th:text="${#lists.size(dlg.exclusiveTemplates)}">2</span> template(s)
+            (they are pinned by nothing else)
+          </label>
+          <ul class="u-text-sm u-mb-md" data-exclusive-templates>
+            <li th:each="t : ${dlg.exclusiveTemplates}" class="u-mono" th:text="${t}">test/only_here.sql</li>
+          </ul>
+        </th:block>
         <label class="ds-form-label">
           Type the pipeline's name — <span class="u-mono" th:text="${dlg.expected}">test/my_pipeline</span> — to confirm
         </label>
