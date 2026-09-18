@@ -3,6 +3,11 @@
 
   var NODE_STATES = ["idle", "running", "success", "failed", "aborted"];
 
+  /* 151 (#127) — the states an edge can carry, all STATIC facts about its two nodes:
+   * `active` the target is running, `satisfied` the source completed, `unmet` the
+   * source failed or was aborted. resetAll strips exactly these. */
+  var EDGE_STATES = ["active", "satisfied", "unmet"];
+
   /* Type glyphs (059 §reference, retinted 080 §A): the glyph rides the card's icon
    * TILE — a rounded square washed in the node type's accent pair (--type-* /
    * --type-*-bg, app tokens 080) — not on the bare card. ONE glyph per card (059b):
@@ -32,7 +37,7 @@
   /* The End marker's word is the AUTHORITATIVE execution outcome; it never moves
    * on a node event (a finished branch is not a finished execution). */
   var MARKER_LABELS = {
-    start: { idle: "Start", running: "Start", success: "Start", failed: "Start", aborted: "Start" },
+    start: { idle: "Start", running: "Running…", success: "Start", failed: "Start", aborted: "Start" },
     end: { idle: "End", running: "End", success: "Finished", failed: "Failed", aborted: "Stopped" },
   };
 
@@ -91,6 +96,12 @@
    * the browser test asserts the same number the canvas paints. */
   var ARROW_SCALE = 2;
   var ARROW_BASE_PX = 4.35;
+
+  /* 151 / #144 — the boundary markers' Cytoscape box width in model px: the 56px
+   * shape plus room for the word under it ("Running…" at the card's small size).
+   * The stylesheet anchors the boundary connectors at ±BOUNDARY_W/2 and the edge
+   * router (applyEdgeCurves) and minimap read the same number through node.width(). */
+  var BOUNDARY_W = 72;
 
   function iconForType(type) {
     return TYPE_ICONS[String(type || "").toUpperCase()] || "db";
@@ -248,8 +259,6 @@
       nodeSuccess: colour("--accent-success", "#15803d"),
       nodeFailed: colour("--accent-danger", "#dc2626"),
       nodeAborted: colour("--accent-warning", "#a16207"),
-      edgeLabelText: colour("--text-muted", "#64748b"),
-      edgeLabelBg: colour("--surface-page", "#f8f9fb"),
       cardW: cardW,
       cardH: cardH,
       cardRadius: cardRadius,
@@ -368,11 +377,11 @@
         },
       },
       {
-        // Active (the target is running): --edge-active, dashed, and the `flow`
-        // animation — canvas has no keyframes, so graph.js steps line-dash-offset on
-        // a rAF loop while any edge is active (skipped under reduced motion). The
-        // mock's blurred glow path has no Cytoscape counterpart (no filters on
-        // canvas); the wider 2.5px stroke is the emphasis instead.
+        // 151 (#127): `active` — the TARGET is running. The mock's --edge-active dashed
+        // stroke, and NOTHING moves: the dash offset animation is retired, because
+        // motion along a dependency read as rows travelling along it. The only moving
+        // indicator on the canvas is the producer's output port while a write is
+        // MEASURED (buildCardHtml / pipeline-editor.css `.pe-port-writing`).
         selector: "edge.active",
         style: {
           "line-color": tokens.edgeActive,
@@ -383,28 +392,53 @@
         },
       },
       {
-        // Done (the target ran): --edge-done at rest, arrow included.
-        selector: "edge.done",
+        // `satisfied` — the SOURCE completed, so this ordering is met and the dependent
+        // may start. A fact about the source, in --edge-done, arrow included.
+        selector: "edge.satisfied",
         style: {
           "line-color": tokens.edgeDone,
           "target-arrow-color": tokens.edgeDone,
         },
       },
       {
-        // Row counts riding the edge (080 §A, owner-undecided, behind a class):
-        // JS adds `rows` and the `rowLabel` data when the SOURCE node completes —
-        // the wire carries rows_out only, so the label is the count flowing out of
-        // the source along this edge. Small mono, muted, page-coloured backing so
-        // the line does not show through the digits.
-        selector: "edge.rows",
+        // `unmet` — the SOURCE failed or was aborted: this ordering cannot be met in
+        // this run. Short dashes in the failed accent, dimmed — legible without colour
+        // by its pattern (active is [6 8], unmet is [2 6]).
+        selector: "edge.unmet",
         style: {
-          label: "data(rowLabel)",
-          "font-size": 11,
-          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
-          color: tokens.edgeLabelText,
-          "text-background-color": tokens.edgeLabelBg,
-          "text-background-opacity": 1,
-          "text-background-padding": 2,
+          "line-color": tokens.nodeFailed,
+          "target-arrow-color": tokens.nodeFailed,
+          "line-style": "dashed",
+          "line-dash-pattern": [2, 6],
+          opacity: 0.6,
+        },
+      },
+      {
+        // 151 / #144: the boundary markers are compact SHAPES (a 56px disc and a 56px
+        // square, built in HTML by buildMarkerHtml), so their Cytoscape box is narrow
+        // and its chrome transparent — the card-width rectangle 150 painted under the
+        // pill is what made a marker read as a node. Ordered after the state rules so
+        // a running/success/failed marker never gets a card border.
+        selector: "node.boundary",
+        style: {
+          width: BOUNDARY_W,
+          "background-opacity": 0,
+          "border-width": 0,
+          "underlay-opacity": 0,
+        },
+      },
+      {
+        // The boundary connectors leave the Start disc's right edge and enter the End
+        // shape's left edge — the marker's own half width, not the card's.
+        selector: "edge.boundary-start",
+        style: {
+          "source-endpoint": BOUNDARY_W / 2 + "px 0px",
+        },
+      },
+      {
+        selector: "edge.boundary-end",
+        style: {
+          "target-endpoint": -BOUNDARY_W / 2 + "px 0px",
         },
       },
       {
@@ -493,15 +527,18 @@
       var r = Number(stats.rows_out);
       if (isFinite(r) && r >= 0) out = countLabel(r, "row");
     }
-    var d = Number(stats.duration_ms);
-    if (isFinite(d) && d >= 0) {
-      var ms;
-      if (d < 1000) ms = Math.round(d) + " ms";
-      else if (d < 60000) ms = (d / 1000).toFixed(1) + " s";
-      else ms = Math.floor(d / 60000) + "m " + Math.round((d % 60000) / 1000) + "s";
-      out = out ? out + " · " + ms : ms;
-    }
+    var ms = durationText(stats.duration_ms);
+    if (ms !== null) out = out ? out + " · " + ms : ms;
     return out || null;
+  }
+
+  /** `842 ms` / `5.3 s` / `2m 14s` — the footer's vocabulary, shared with the End marker (151). */
+  function durationText(value) {
+    var d = Number(value);
+    if (!isFinite(d) || d < 0) return null;
+    if (d < 1000) return Math.round(d) + " ms";
+    if (d < 60000) return (d / 1000).toFixed(1) + " s";
+    return Math.floor(d / 60000) + "m " + Math.round((d % 60000) / 1000) + "s";
   }
 
   /* The footer state label (080 §A): Pending / Running… / Done / Failed / Aborted. */
@@ -527,8 +564,12 @@
     if (data.kind === "boundary") return buildMarkerHtml(data);
     var esc = escapeHtml;
     var state = data.state || "idle";
+    // 151: `stale` — the stream was lost mid-run (sse.js handleConnectionLoss →
+    // markStreamLost). The card keeps the last words it knew and stops every motion:
+    // the state is not rewritten, because nothing about the node was observed since.
+    var stale = data.stale ? " pe-card-stale" : "";
     var h =
-      '<div class="pe-card pe-card-' + esc(state) + '" data-node-id="' + esc(data.id) +
+      '<div class="pe-card pe-card-' + esc(state) + stale + '" data-node-id="' + esc(data.id) +
       '" style="--type:var(--type-' + esc(typeToken(data.type)) + ");--type-bg:var(--type-" +
       esc(typeToken(data.type)) + '-bg)">';
 
@@ -561,6 +602,8 @@
       h += "</div>";
     }
 
+    if (data.output) h += buildPortHtml(data);
+
     h += '<div class="pe-card-progress" aria-hidden="true"><i></i></div>';
 
     // 149: while the node RUNS, the footer's state word is the measured operation line
@@ -583,13 +626,55 @@
   }
 
   /**
-   * 150 — the boundary marker's pill. Distinct from a node card ON PURPOSE: one
-   * row (glyph, state dot, word), no ports, no open button, no facts, no progress
-   * line, no run numbers — a marker has nothing to open and nothing that ran. The
-   * `.pe-card` root class is deliberate: syncCardHeights measures `.pe-card`s to
-   * size the Cytoscape box, and the pill must be its own measured box. The state
-   * class (`pe-card-success` …) drives the same accent tokens as the cards; the
-   * `aria-label` names the boundary and its outcome for the accessible tree.
+   * 151 (#127) — the OUTPUT PORT row: a short connector stub leading into the
+   * destination, the operation's kind word once measured, and the state line on the
+   * right. One per node with a configured output; the ONLY thing on the canvas that
+   * moves for a write, and only while a `writing` sample is the latest word
+   * (`.pe-port-flow`, CSS-animated, stopped by prefers-reduced-motion and by `stale`).
+   * The states are 149's reducer through `describe().port` (node-ops.js) — idle before
+   * any sample, then pending / combined / waiting / writing / finalizing / done /
+   * failed / aborted; a lost stream appends "— stream lost" and freezes the row.
+   * `aria-label` is the port's whole meaning in words, usable without colour or motion.
+   */
+  function buildPortHtml(data) {
+    var esc = escapeHtml;
+    var out = data.output;
+    var port = data.port || null;
+    var pstate = port ? port.state : "idle";
+    var text = port ? port.text : "";
+    if (data.stale) text = (text ? text + " " : "") + "— stream lost";
+    var aria = port ? port.a11y : "Output to " + out.text;
+    if (data.stale) aria += " — stream lost";
+    var flow = pstate === "writing" && !data.stale ? '<i class="pe-port-flow" aria-hidden="true"></i>' : "";
+    var h =
+      '<div class="pe-port pe-port-' + esc(pstate) + (data.stale ? " pe-port-stale" : "") +
+      '" role="img" aria-label="' + esc(aria) + '" title="' + esc(aria) + '">' +
+      '<span class="pe-port-stub" aria-hidden="true">' + flow + "</span>" +
+      '<span class="pe-port-dest">' + esc(out.text) + "</span>";
+    if (port && port.kindLabel) h += '<span class="pe-port-kind">' + esc(port.kindLabel) + "</span>";
+    if (text) h += '<span class="pe-port-line">' + esc(text) + "</span>";
+    h += "</div>";
+    return h;
+  }
+
+  /**
+   * 150/151 (#126, #144) — the boundary markers: SHAPES, not cards. Start is a compact
+   * disc, End a rounded square — two silhouettes a peripheral glance tells apart from
+   * each other and from the rectangular cards (the 150 pill shared the cards' box and
+   * row grammar, which is what the owner rejected). The word sits BELOW the shape in
+   * the card's small type; End adds the elapsed time when the run clock knows it.
+   *
+   * Start is the run trigger when the viewer MAY execute (`canExecute`, the same
+   * server-rendered flag that renders the toolbar's Execute — read off `.pe-root`'s
+   * `data-can-execute`, never re-derived in JS): `role="button"`, focusable, Enter/Space
+   * (wireMarkerActivation), `aria-disabled` while a run is active, the disc filled in the
+   * SAME accent as `.pe-run` so the two triggers read as one action. Without the right
+   * it is a plain marker (`role="img"`): an outlined disc, no fill, no affordance. End is
+   * never a trigger — its fill is the authoritative outcome (success/danger/warning).
+   *
+   * The `.pe-card` root class stays deliberate: syncCardHeights measures `.pe-card`s to
+   * size the Cytoscape box; the marker box is BOUNDARY_W wide (stylesheet) and as tall
+   * as shape + word. No ports, no open button, no facts, no progress line, no port row.
    * Pure: driven from the element data like the card.
    */
   function buildMarkerHtml(data) {
@@ -597,32 +682,33 @@
     var state = data.state || "idle";
     var side = data.boundary === "end" ? "end" : "start";
     var word = (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state;
-    var aria =
-      side === "start"
-        ? "Execution start" + (state === "idle" ? "" : " — running")
-        : "Execution end" + (state === "idle" ? "" : " — " + word.toLowerCase());
+    var running = state === "running";
+    var trigger = side === "start" && data.canExecute === true;
+    var elapsed = side === "end" && state !== "idle" && state !== "running" && data.elapsed ? String(data.elapsed) : null;
+    var aria;
+    if (trigger) {
+      aria = "Start execution" + (running ? " — running" : "");
+    } else if (side === "start") {
+      aria = "Execution start" + (running ? " — running" : "");
+    } else {
+      aria = "Execution end" + (state === "idle" ? "" : " — " + (running ? "running" : word.toLowerCase())) + (elapsed ? " in " + elapsed : "");
+    }
+    var shape =
+      '<div class="pe-marker pe-marker-' + side + (trigger ? " pe-marker-run" : "") + '" role="' +
+      (trigger ? "button" : "img") + '"' +
+      (trigger ? ' tabindex="0" data-marker-run="' + esc(data.id) + '"' : "") +
+      (trigger && running ? ' aria-disabled="true"' : "") +
+      ' aria-label="' + esc(aria) + '">' +
+      iconSvg(MARKER_ICONS[side], "ds-icon-md") +
+      "</div>";
     return (
-      '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + ' pe-card-' + esc(state) +
-      '" data-node-id="' + esc(data.id) + '" role="img" aria-label="' + esc(aria) + '">' +
-      '<div class="pe-marker-row"><span class="pe-marker-icon">' + iconSvg(MARKER_ICONS[side], "ds-icon-xs") +
-      "</span>" +
-      '<span class="pe-card-state"><i></i><span class="pe-card-st">' + esc(word) + "</span></span></div>" +
+      '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + " pe-card-" + esc(state) +
+      (data.stale ? " pe-card-stale" : "") + '" data-node-id="' + esc(data.id) + '" data-boundary="' + side + '">' +
+      shape +
+      '<span class="pe-marker-word">' + esc(word) + "</span>" +
+      (elapsed ? '<span class="pe-marker-elapsed">' + esc(elapsed) + "</span>" : "") +
       "</div>"
     );
-  }
-
-  /**
-   * What flowed OUT of a completed node, for the edge label: a SQL node's rows
-   * (`0 rows` is a fact worth showing — the node ran and emitted nothing), a
-   * calculator's keys (its rows_out is 0 by construction and would have read
-   * "0 rows" on every calculator edge — T251), nothing when NOT_MEASURED.
-   */
-  function edgeLabelFor(stats) {
-    if (!stats) return null;
-    var keys = keysWritten(stats);
-    if (keys !== null) return countLabel(keys, "key");
-    var r = Number(stats.rows_out);
-    return isFinite(r) && r >= 0 ? countLabel(r, "row") : null;
   }
 
   function PipelineGraph(containerId, nodes, editor) {
@@ -631,7 +717,6 @@
     this.editor = editor;
     this.cy = null;
     this.tokens = readDesignTokens(containerId);
-    this._flowRunning = false;
     this._mm = null;
   }
 
@@ -716,6 +801,9 @@
         if (ed && ed.openNodeDetails) ed.openNodeDetails(id, btn);
       });
     }
+
+    // 151/#144: the Start disc's activation — same delegation, same live-component rule.
+    this.wireMarkerActivation(container);
 
     // The mock's hover lift (translateY(-2px) + --shadow-lg) and its hover-only
     // expand icon are CSS — but the label container is pointer-events:none, so CSS
@@ -1076,9 +1164,8 @@
   PipelineGraph.prototype.applyEdgeCurves = function () {
     if (!this.cy) return;
     var self = this;
-    var w = this.tokens.cardW;
     var boxOf = function (n) {
-      return { x: n.position().x, y: n.position().y, w: w, h: n.data("cardH") || self.tokens.cardH };
+      return { x: n.position().x, y: n.position().y, w: self.nodeWidth(n), h: n.data("cardH") || self.tokens.cardH };
     };
     var routed = [];
     var detoursPerTarget = {};
@@ -1236,6 +1323,20 @@
     if (this._fitted) this.fitToView();
   };
 
+  /**
+   * 151 / #144: a node's box width — the card's for a card, the marker's compact box
+   * for a boundary (the stylesheet's `node.boundary` width). Read from Cytoscape so
+   * the router and the minimap paint the same box the stylesheet declared; the token
+   * is the fallback for a fake without `width()`.
+   */
+  PipelineGraph.prototype.nodeWidth = function (n) {
+    if (n && typeof n.width === "function") {
+      var w = n.width();
+      if (isFinite(w) && w > 0) return w;
+    }
+    return this.tokens.cardW;
+  };
+
   /* ------------------------------------------------------------- the minimap */
 
   /**
@@ -1262,7 +1363,8 @@
     });
     if (!xs.length) return;
     // 082 addendum P1: each node carries its OWN height now, so the extent uses the
-    // tallest card rather than one assumed box.
+    // tallest card rather than one assumed box. 151: and its own WIDTH — a boundary's
+    // box is the compact marker's (nodeWidth), not the card's.
     var halfW = self.tokens.cardW / 2;
     var nodeH = function (n) { return n.data("cardH") || self.tokens.cardH; };
     var halfH = Math.max.apply(null, self.cy.nodes().map(function (n) { return nodeH(n) / 2; }));
@@ -1275,12 +1377,29 @@
 
     self.cy.nodes().forEach(function (n) {
       var bar = document.createElement("i");
-      bar.className = "pe-mm-node" + (n.data("state") && n.data("state") !== "idle" ? " pe-mm-" + n.data("state") : "");
+      var boundary = n.data("kind") === "boundary";
+      var state = n.data("state");
+      bar.className =
+        "pe-mm-node" +
+        (state && state !== "idle" ? " pe-mm-" + state : "") +
+        (boundary ? " pe-mm-boundary pe-mm-boundary-" + (n.data("boundary") === "end" ? "end" : "start") : "");
       bar.setAttribute("data-id", n.id());
-      bar.style.left = (self._mm.pad + (n.position().x - halfW - minX) * scale) + "px";
-      bar.style.top = (self._mm.pad + (n.position().y - nodeH(n) / 2 - minY) * scale) + "px";
-      bar.style.width = Math.max(8, self.tokens.cardW * scale) + "px";
-      bar.style.height = Math.max(5, nodeH(n) * scale) + "px";
+      var nw = self.nodeWidth(n);
+      var nh = nodeH(n);
+      // 151/#144: a marker keeps its silhouette — a square box the size of the shape,
+      // centred where the disc/square sits (the top of the marker's box, above its word).
+      if (boundary) {
+        var side = Math.max(6, Math.min(nw, nh) * scale);
+        bar.style.left = (self._mm.pad + (n.position().x - Math.min(nw, nh) / 2 - minX) * scale) + "px";
+        bar.style.top = (self._mm.pad + (n.position().y - nh / 2 - minY) * scale) + "px";
+        bar.style.width = side + "px";
+        bar.style.height = side + "px";
+      } else {
+        bar.style.left = (self._mm.pad + (n.position().x - nw / 2 - minX) * scale) + "px";
+        bar.style.top = (self._mm.pad + (n.position().y - nh / 2 - minY) * scale) + "px";
+        bar.style.width = Math.max(8, nw * scale) + "px";
+        bar.style.height = Math.max(5, nh * scale) + "px";
+      }
       el.appendChild(bar);
     });
 
@@ -1311,7 +1430,9 @@
     var bars = mm.el.querySelectorAll(".pe-mm-node");
     for (var i = 0; i < bars.length; i++) {
       if (bars[i].getAttribute("data-id") === nodeId) {
-        bars[i].className = "pe-mm-node" + (state && state !== "idle" ? " pe-mm-" + state : "");
+        // 151: a marker's silhouette classes survive its state changes.
+        var keep = (bars[i].className.match(/pe-mm-boundary(-start|-end)?/g) || []).join(" ");
+        bars[i].className = "pe-mm-node" + (state && state !== "idle" ? " pe-mm-" + state : "") + (keep ? " " + keep : "");
         return;
       }
     }
@@ -1342,17 +1463,35 @@
     return classes.join(" ");
   }
 
-  /* The card's output fact (080 §A line 3): short — `tempdb.trips`, `→ caller`,
-   * `ds.table`. The dock's Details pane carries the long form (init.js outputText). */
-  function outputFact(n) {
+  /**
+   * 151 (#127) — the node's ONE configured output, as the card's port: where its rows go
+   * (`tempdb.stg`, `warehouse.facts`, `caller`) and, once 149's samples arrive, whether
+   * they are going there right now. Mirrors the server's own node-shape → destination
+   * mapping (NodeOperations.operationFor) so the idle port and the measured
+   * `destination` name the same thing: a DQL's output block (omitted = caller, contract
+   * §4.7); a DML statement writes INTO its source and names no table (no SQL lineage);
+   * a PIPELINE node's port is the output it declared for the child's caller rows. DDL,
+   * an output-less PIPELINE and a CALCULATOR have NO port — nothing they do is a row
+   * write (a calculator's context keys are its fact line). The dock's Details pane
+   * carries the long form (init.js outputText); `null` means no port.
+   */
+  function outputPortFor(n) {
     var type = (n.type || "").toUpperCase();
-    if (type === "CALCULATOR") return null;
-    if (!n.output) return type === "DQL" ? "→ caller" : "side effect";
     var o = n.output;
-    if (o.target === "caller") return "→ caller";
-    if (o.target === "tempdb") return "tempdb." + (o.table || "—");
-    if (o.target === "datasource") return (o.datasource || "—") + "." + (o.table || "—");
-    return "side effect";
+    if (type === "DML") {
+      return n.source === "tempdb"
+        ? { kind: "tempdb", text: "tempdb" }
+        : { kind: "datasource", datasource: n.source || "—", text: n.source || "—" };
+    }
+    if (type === "DQL" && !o) return { kind: "caller", text: "caller" };
+    if (type !== "DQL" && type !== "PIPELINE") return null;
+    if (!o) return null;
+    if (o.target === "caller") return { kind: "caller", text: "caller" };
+    if (o.target === "tempdb") return { kind: "tempdb", table: o.table || "—", text: "tempdb." + (o.table || "—") };
+    if (o.target === "datasource") {
+      return { kind: "datasource", datasource: o.datasource || "—", table: o.table || "—", text: (o.datasource || "—") + "." + (o.table || "—") };
+    }
+    return null;
   }
 
   /**
@@ -1416,14 +1555,18 @@
         });
       }
     }
-    var out = outputFact(n);
-    if (out) data.facts.push({ kind: "output", icon: "table", text: out });
+    // 151: the output is the card's PORT row (buildCardHtml), not a fact line — the
+    // destination appears once, where its measured write shows.
+    data.output = outputPortFor(n);
     return data;
   }
 
-  function buildElements(nodes, settings) {
+  function buildElements(nodes, settings, options) {
     var elements = [];
     var i, j;
+    // 151/#144: whether the Start marker is a run trigger — the page's server-rendered
+    // right, handed in; the graph never decides permissions.
+    var canExecute = !!(options && options.canExecute === true);
 
     for (i = 0; i < nodes.length; i++) {
       var n = nodes[i];
@@ -1438,13 +1581,19 @@
       var deps = nodes[i].depends_on;
       if (deps && deps.length) {
         for (j = 0; j < deps.length; j++) {
+          // 151 (#127): a depends_on edge is an ORDERING — "the target waits for the
+          // source to finish" — and says so in its kind. It never carries a count and
+          // never moves: what a node writes, and where, is its output port (the card
+          // row buildCardHtml renders from `output`/`port`), not the arrow.
           elements.push({
             group: "edges",
             data: {
               id: deps[j] + "->" + nodes[i].id,
               source: deps[j],
               target: nodes[i].id,
+              kind: "dependency",
             },
+            classes: "dependency",
           });
         }
       }
@@ -1457,28 +1606,35 @@
     if (nodes.length) {
       var ids = boundaryIdsFor(nodes);
       var bounds = rootsAndLeaves(nodes);
+      // 151: unselectable — a tap on a marker must not paint the selection ring of a
+      // thing that has no Details (init.js's selectOnly already refuses synthetic ids).
       elements.push({
         group: "nodes",
-        data: { id: ids.start, kind: "boundary", boundary: "start", state: "idle" },
+        data: { id: ids.start, kind: "boundary", boundary: "start", state: "idle", canExecute: canExecute },
         classes: "idle boundary",
+        selectable: false,
       });
       elements.push({
         group: "nodes",
-        data: { id: ids.end, kind: "boundary", boundary: "end", state: "idle" },
+        data: { id: ids.end, kind: "boundary", boundary: "end", state: "idle", canExecute: canExecute, elapsed: null },
         classes: "idle boundary",
+        selectable: false,
       });
+      // 151: the connector names its SIDE so the stylesheet can anchor it to the
+      // marker's compact shape (edge.boundary-start / edge.boundary-end) instead of
+      // the card-width port every other edge uses.
       bounds.roots.forEach(function (rootId) {
         elements.push({
           group: "edges",
-          data: { id: ids.start + "->" + rootId, source: ids.start, target: rootId, kind: "boundary" },
-          classes: "boundary",
+          data: { id: ids.start + "->" + rootId, source: ids.start, target: rootId, kind: "boundary", side: "start" },
+          classes: "boundary boundary-start",
         });
       });
       bounds.leaves.forEach(function (leafId) {
         elements.push({
           group: "edges",
-          data: { id: leafId + "->" + ids.end, source: leafId, target: ids.end, kind: "boundary" },
-          classes: "boundary",
+          data: { id: leafId + "->" + ids.end, source: leafId, target: ids.end, kind: "boundary", side: "end" },
+          classes: "boundary boundary-end",
         });
       });
     }
@@ -1488,7 +1644,7 @@
 
   PipelineGraph.prototype.buildElements = function () {
     var settings = this.editor && this.editor.pipeline ? this.editor.pipeline.settings : null;
-    return buildElements(this.nodes, settings);
+    return buildElements(this.nodes, settings, { canExecute: !!(this.editor && this.editor.canExecute === true) });
   };
 
   PipelineGraph.prototype.findNode = function (id) {
@@ -1508,16 +1664,24 @@
     // The card reads state from DATA (the html-label template gets a data snapshot,
     // not classes) — writing it here is what re-renders the card's footer dot.
     node.data("state", state);
-    // Edge state follows the TARGET's state (080 §A): the curve into a running node
-    // flows, into a done node it rests in --edge-done. Failure clears the flow.
+    // 151 (#127): an edge is an ORDERING, and its classes are facts about the two
+    // nodes it joins — never a transfer, never in motion. INTO a running node the
+    // edge is `active` (the consumer is running; a static dashed brand stroke);
+    // OUT OF a completed node every dependency is `satisfied` (the dependents may
+    // start); out of a failed/aborted node it is `unmet` (it cannot be satisfied
+    // this run). The retired `done` (target ran) said nothing a reader needed, and
+    // the retired rAF dash flow said something false: rows do not travel along an
+    // arrow — a write shows on the producer's output port, from a measured sample.
     var incomers = node.incomers("edge");
+    var outgoers = node.outgoers("edge");
     if (state === "running") {
       incomers.forEach(function (e) { e.addClass("active"); });
-      this.ensureFlow();
     } else if (state === "success") {
-      incomers.forEach(function (e) { e.removeClass("active"); e.addClass("done"); });
+      incomers.forEach(function (e) { e.removeClass("active"); });
+      outgoers.forEach(function (e) { e.removeClass("unmet"); e.addClass("satisfied"); });
     } else if (state === "failed" || state === "aborted") {
       incomers.forEach(function (e) { e.removeClass("active"); });
+      outgoers.forEach(function (e) { e.removeClass("satisfied"); e.addClass("unmet"); });
     }
     // Keep the editor's nodeStates mirror complete. sse.js only writes entries for
     // nodes that START, and its execution_aborted sweep falls back to a classes-string
@@ -1534,25 +1698,17 @@
   /**
    * The run line (080 §A footer): `node_completed` carries FLAT `duration_ms` /
    * `rows_out` (SseEventProjection), plus `context_value` for a CALCULATOR — one data
-   * write the html-label template re-renders on. The same completion labels the
-   * OUTGOING edges with the count flowing out of this node (the class-gated,
-   * owner-undecided row labels).
+   * write the html-label template re-renders on. The count stays on the node that
+   * produced it: 151 (#127) retired the copy of `rows_out` onto every outgoing edge,
+   * which made one staged table read as one write PER CONSUMER (the owner's
+   * screenshot: "10,000 rows" on both arrows out of a node that wrote 10,000 rows
+   * once). The producer's footer and its output port carry the count, scoped to
+   * the operation that wrote it.
    */
   PipelineGraph.prototype.setNodeStats = function (nodeId, stats) {
     var node = this.findNode(nodeId);
     if (!node) return;
     node.data("run", formatRunLine(stats));
-    var label = edgeLabelFor(stats);
-    if (label !== null) {
-      node.outgoers("edge").forEach(function (e) {
-        // 150: a boundary connector is not a transfer — the rows flowing out of a
-        // leaf say nothing about what reached End, and a count on the leaf→End
-        // line is exactly the misread 151 exists to prevent.
-        if (e.data("kind") === "boundary") return;
-        e.data("rowLabel", label);
-        e.addClass("rows");
-      });
-    }
   };
 
   /**
@@ -1565,50 +1721,27 @@
     node.data("op", view && view.cardLine ? view.cardLine : null);
     node.data("opCounts", view && view.cardCounts ? view.cardCounts : null);
     node.data("opState", view && view.state ? view.state : null);
+    // 151: the output port reads the same view — one reducer, one measured truth.
+    node.data("port", view && view.port ? view.port : null);
+  };
+
+  /**
+   * 151: the stream is gone (sse.js handleConnectionLoss). Nothing about any node has
+   * been observed since, so nothing is REWRITTEN — every card and marker is marked
+   * `stale`, which freezes its motion and appends "— stream lost" to the port, and the
+   * consumer-running emphasis leaves every edge. The recovery poll may later set the
+   * End marker from the execution's polled status; node outcomes it cannot know.
+   */
+  PipelineGraph.prototype.markStreamLost = function () {
+    if (!this.cy) return;
+    this.cy.nodes().forEach(function (node) { node.data("stale", true); });
+    this.cy.edges().forEach(function (edge) { edge.removeClass("active"); });
   };
 
   /** Reduced motion cannot be read from CSS here — the graph is canvas, not DOM. */
   function pulseEnabled(mql) {
     return !(mql && mql.matches);
   }
-
-  /**
-   * The active-edge `flow` (080 §A): canvas has no keyframes, so while ANY edge is
-   * active a rAF loop steps every active edge's line-dash-offset. It stops itself
-   * the moment no edge is active; under prefers-reduced-motion the dashes stand
-   * still (the class's dash pattern still reads as "in flight").
-   */
-  PipelineGraph.prototype.ensureFlow = function () {
-    var self = this;
-    if (self._flowRunning || !self.cy) return;
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    if (!pulseEnabled(window.matchMedia("(prefers-reduced-motion: reduce)"))) return;
-    if (typeof requestAnimationFrame !== "function") return;
-    self._flowRunning = true;
-    var step = function () {
-      if (!self.cy) { self._flowRunning = false; return; }
-      var edges = self.cy.edges(".active");
-      if (!edges.length) { self._flowRunning = false; return; }
-      edges.forEach(function (e) {
-        var off = parseFloat(e.style("line-dash-offset")) || 0;
-        e.style("line-dash-offset", off - 1);
-      });
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  };
-
-  PipelineGraph.prototype.setEdgeActive = function (sourceId, targetId, active) {
-    if (!this.cy) return;
-    var edge = this.cy.edges("[source = '" + sourceId + "'][target = '" + targetId + "']");
-    if (!edge.length) return;
-    if (active) {
-      edge.addClass("active");
-      this.ensureFlow();
-    } else {
-      edge.removeClass("active");
-    }
-  };
 
   PipelineGraph.prototype.resetAll = function () {
     var self = this;
@@ -1621,11 +1754,14 @@
       node.data("op", null);
       node.data("opCounts", null);
       node.data("opState", null);
+      node.data("port", null);
+      node.data("stale", null);
       // 150: the markers reset with everything else — Start goes neutral until
       // execution_started re-arms it, End loses the previous run's outcome word.
       if (node.data("kind") === "boundary") {
         var side = node.data("boundary") === "end" ? "end" : "start";
         node.data("label", MARKER_LABELS[side].idle);
+        node.data("elapsed", null);
       }
       if (self.editor && self.editor.nodeStates && node.data("kind") !== "boundary") {
         self.editor.nodeStates[node.id()] = "idle";
@@ -1636,10 +1772,7 @@
       }
     });
     self.cy.edges().forEach(function (edge) {
-      edge.removeClass("active");
-      edge.removeClass("done");
-      edge.removeClass("rows");
-      edge.data("rowLabel", "");
+      EDGE_STATES.forEach(function (c) { edge.removeClass(c); });
     });
   };
 
@@ -1652,7 +1785,7 @@
    * a synthetic id. The minimap bar follows (it is keyed by node id), the a11y
    * node list stays authored-only.
    */
-  PipelineGraph.prototype.setMarkerState = function (side, state) {
+  PipelineGraph.prototype.setMarkerState = function (side, state, extra) {
     if (!this.cy || !this._boundaryIds) return;
     var id = this._boundaryIds[side];
     if (!id) return;
@@ -1662,39 +1795,40 @@
     node.addClass(state);
     node.data("state", state);
     node.data("label", (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state);
+    // 151/#144: End shows how long the run took, when the caller knows (the run clock).
+    node.data("elapsed", extra && extra.elapsed ? String(extra.elapsed) : null);
     this.updateMinimapNode(id, state);
   };
 
-  PipelineGraph.prototype.setEdgesToNodeActive = function (nodeId, active) {
-    if (!this.cy) return;
-    var node = this.cy.getElementById(nodeId);
-    if (!node.length) return;
-    var incomers = node.incomers("edge");
+  /**
+   * 151/#144 — the Start disc runs the pipeline. ONE delegated click + keydown pair on
+   * the graph container (the html-label re-renders the disc on every state change, so a
+   * per-element listener would leak), resolving the LIVE component exactly as the card's
+   * open button does, and calling its `executePipeline()` — the same method the toolbar's
+   * button calls, so parameters, the draft pin and the CSRF path are one code path.
+   * Guarded by `isExecuting` (Running… is not a trigger) and idempotent per container
+   * (a history-restored container keeps its listeners). A viewer's marker has no
+   * `.pe-marker-run` element at all, so nothing here can fire for them.
+   */
+  PipelineGraph.prototype.wireMarkerActivation = function (container) {
     var self = this;
-    incomers.forEach(function (edge) {
-      if (active) {
-        edge.addClass("active");
-      } else {
-        edge.removeClass("active");
-      }
+    if (!container || typeof container.addEventListener !== "function" || container.__peMarkerRunWired) return;
+    container.__peMarkerRunWired = true;
+    var activate = function (evt) {
+      var t = evt.target;
+      var disc = t && t.closest ? t.closest(".pe-marker-run") : null;
+      if (!disc) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+      var ed = (typeof window !== "undefined" && window.__peInstance) || self.editor;
+      if (!ed || ed.isExecuting || typeof ed.executePipeline !== "function") return;
+      ed.executePipeline();
+    };
+    container.addEventListener("click", activate);
+    container.addEventListener("keydown", function (evt) {
+      if (evt.key !== "Enter" && evt.key !== " ") return;
+      activate(evt);
     });
-    if (active) self.ensureFlow();
-  };
-
-  PipelineGraph.prototype.setEdgesFromNodeActive = function (nodeId, active) {
-    if (!this.cy) return;
-    var node = this.cy.getElementById(nodeId);
-    if (!node.length) return;
-    var outgoers = node.outgoers("edge");
-    var self = this;
-    outgoers.forEach(function (edge) {
-      if (active) {
-        edge.addClass("active");
-      } else {
-        edge.removeClass("active");
-      }
-    });
-    if (active) self.ensureFlow();
   };
 
   /**
@@ -1767,7 +1901,7 @@
     pulseEnabled: pulseEnabled,
     fitZoomFor: fitZoomFor,
     formatRunLine: formatRunLine,
-    edgeLabelFor: edgeLabelFor,
+    durationText: durationText,
     truncateLeft: truncateLeft,
     templateLine: templateLine,
     edgeControlPoints: edgeControlPoints,
@@ -1779,6 +1913,7 @@
     MARKER_LABELS: MARKER_LABELS,
     ARROW_SCALE: ARROW_SCALE,
     ARROW_BASE_PX: ARROW_BASE_PX,
+    BOUNDARY_W: BOUNDARY_W,
     EDGE_FORWARD_MIN_DX: EDGE_FORWARD_MIN_DX,
     EDGE_STUB: EDGE_STUB,
     EDGE_DETOUR_DEPTH: EDGE_DETOUR_DEPTH,

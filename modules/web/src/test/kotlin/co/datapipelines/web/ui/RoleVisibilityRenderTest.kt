@@ -60,6 +60,29 @@ class RoleVisibilityRenderTest {
         // is chrome and is not what "no toast" means here — nothing is PUSHED into it).
         viewer shouldNotContain "ds-toast-danger"
         viewer shouldNotContain "data-verb=\"pipeline-release\" disabled"
+        // 151/#144: the canvas's Start marker is a run trigger exactly when the toolbar's
+        // Execute renders — the SAME flag, stamped once on the root for the script to read.
+        viewer shouldContain "class=\"pe-root\" data-can-execute=\"true\""
+    }
+
+    /**
+     * 151/#144 — the one render in which the right is ABSENT: no Execute, and the root says
+     * so, so the Start marker is drawn as a plain shape (`role="img"`) rather than a button.
+     * In a browser session every workspace member may execute (D-R3), so this is the
+     * template contract for a principal without a workspace, not a reachable viewer walk.
+     */
+    @Test
+    fun `an editor rendered without the execute right stamps data-can-execute false and draws no Execute`() {
+        val noExecute =
+            render("pipelines/editor") {
+                editorModel()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = false))
+            }
+
+        noExecute shouldNotContain "data-verb=\"pipeline-execute\""
+        noExecute shouldContain "class=\"pe-root\" data-can-execute=\"false\""
+        // The canvas is a group, not an image: its buttons must stay in the accessible tree.
+        noExecute shouldContain "id=\"cy-canvas\" role=\"group\""
     }
 
     @Test

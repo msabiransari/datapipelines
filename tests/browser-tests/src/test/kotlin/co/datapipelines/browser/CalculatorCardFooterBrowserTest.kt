@@ -16,7 +16,8 @@ import org.junit.jupiter.api.Test
  *
  * Measured on a REAL run, not a fixture: a two-key `period_bounds` window node feeding a
  * `fiscal_quarter` node, executed through the editor's own button, then the footer text, the
- * footer's HEIGHT against the one-line footer beside it (the symptom), and the edge label.
+ * footer's HEIGHT against the one-line footer beside it (the symptom), and that the edge out of it
+ * carries no count at all (151: an arrow is an ordering).
  */
 class CalculatorCardFooterBrowserTest : BrowserSuite() {
     @Test
@@ -49,9 +50,15 @@ class CalculatorCardFooterBrowserTest : BrowserSuite() {
             (card.locator(".pe-card-foot").evaluate("el => el.getBoundingClientRect().height") as Number).toDouble()
         footerHeight(window) shouldBe footerHeight(fq)
 
-        // The edge out of the window node names what flowed: keys, not the calculator's
-        // zero rows_out.
-        page.evaluate("() => window.__peInstance.cy.edges()[0].data('rowLabel')") shouldBe "2 keys"
+        // 151 (#127): NO count rides any edge any more — the arrow out of the window node is
+        // an ordering. So the T251 defect ("0 rows" on a calculator's edge) cannot recur by
+        // construction: the dependency edge carries no label and no rowLabel data at all,
+        // and the count lives on the card (`2 keys · N ms`, asserted above).
+        page.evaluate(
+            "() => { const cy = window.__peInstance.cy; const e = cy.edges('.dependency')[0];" +
+                " return { rowLabel: e.data('rowLabel') === undefined ? 'absent' : e.data('rowLabel')," +
+                " label: String(e.style('label') || '') }; }",
+        ) shouldBe mapOf("rowLabel" to "absent", "label" to "")
     }
 
     /** `window` (period_bounds → window_start/window_end) feeding `fq` (fiscal_quarter), created in-page. */

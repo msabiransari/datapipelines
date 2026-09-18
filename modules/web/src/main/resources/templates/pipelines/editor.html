@@ -75,7 +75,10 @@
     </p>
   </div>
 
-  <div x-data="pipelineEditor()" x-init="init()" class="pe-root">
+  <!--/* 151/#144 — `data-can-execute` is the SAME `canExecute` that renders the toolbar's
+         Execute below, stamped once for the script: the canvas's Start marker is a run
+         trigger exactly when this is "true", and nothing in JS re-derives the right. */-->
+  <div x-data="pipelineEditor()" x-init="init()" class="pe-root" th:attr="data-can-execute=${canExecute == true}">
 
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
          bold), version chip, run status, Execute. -->
@@ -197,7 +200,11 @@
            legend, keyboard hint. -->
       <section class="pe-stage" aria-label="Pipeline graph">
         <div class="pe-hint">Drag to pan · Scroll to zoom · <kbd>F</kbd> fit</div>
-        <div id="cy-canvas" role="img" aria-label="Pipeline DAG visualization"></div>
+        <!-- 151/#144: `role="group"`, not `img` — an image role makes its children
+             presentational, which would hide the Start button and the cards' open buttons
+             from assistive tech. The accessible node list below remains the keyboard route
+             to every node; the group name says what the region is. -->
+        <div id="cy-canvas" role="group" aria-label="Pipeline DAG visualization"></div>
 
         <div class="pe-minimap" id="pe-minimap" aria-hidden="true"></div>
 
@@ -238,6 +245,13 @@
               <span class="pe-legend-chip"><i x-bind:style="'--type:var(' + chip.token + ')'"></i><span x-text="chip.label"></span></span>
             </template>
           </div>
+          <!-- 151 (#127) — how to read the links. An arrow is an ORDERING (the node it points
+               to waits for the node it leaves); a write is the PORT row on the producer's own
+               card. Not aria-hidden: these words are the graph's accessible key. -->
+          <ul class="pe-legend pe-legend-links" aria-label="How to read the graph">
+            <li class="pe-legend-chip"><i class="pe-legend-dep" aria-hidden="true"></i><span>Depends on</span></li>
+            <li class="pe-legend-chip"><i class="pe-legend-port" aria-hidden="true"></i><span>Output write</span></li>
+          </ul>
         </div>
         <div id="pe-live-region" class="sr-only" aria-live="polite" role="status"></div>
       </section>

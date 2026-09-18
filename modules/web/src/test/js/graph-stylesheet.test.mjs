@@ -146,7 +146,7 @@ test("states are accents, not full fills", () => {
   assert.equal(styleFor(sheet, "node.aborted").opacity, 0.5);   // §6.2 already required this
 });
 
-test("the edge's three states are the mock's: --edge at rest, --edge-active dashed while the target runs, --edge-done after", () => {
+test("the edge's states (151): --edge at rest, --edge-active dashed while the TARGET runs, --edge-done once the SOURCE completed, dimmed short dashes when it cannot be met", () => {
   const sheet = loadGraph().buildStylesheet(TOKENS);
   const idle = styleFor(sheet, "edge");
   assert.equal(idle["line-color"], TOKENS.edgeIdle);
@@ -155,19 +155,30 @@ test("the edge's three states are the mock's: --edge at rest, --edge-active dash
   const active = styleFor(sheet, "edge.active");
   assert.equal(active["line-color"], TOKENS.edgeActive);
   assert.equal(active["line-style"], "dashed");
-  assert.deepEqual(active["line-dash-pattern"], [6, 8], "the mock's dash — the flow animation steps the offset");
+  assert.deepEqual(active["line-dash-pattern"], [6, 8], "the mock's dash — STATIC since 151: nothing steps the offset");
 
-  const done = styleFor(sheet, "edge.done");
-  assert.equal(done["line-color"], TOKENS.edgeDone);
-  assert.equal(done["target-arrow-color"], TOKENS.edgeDone);
+  const satisfied = styleFor(sheet, "edge.satisfied");
+  assert.equal(satisfied["line-color"], TOKENS.edgeDone);
+  assert.equal(satisfied["target-arrow-color"], TOKENS.edgeDone);
+
+  const unmet = styleFor(sheet, "edge.unmet");
+  assert.equal(unmet["line-color"], TOKENS.nodeFailed);
+  assert.deepEqual(unmet["line-dash-pattern"], [2, 6], "a pattern a reader tells from `active` without colour");
+
+  assert.equal(sheet.find((r) => r.selector === "edge.done"), undefined, "`done` (target ran) is retired");
 });
 
-test("row counts ride the edge behind the `rows` class — small mono on a page-coloured backing", () => {
-  const style = styleFor(loadGraph().buildStylesheet(TOKENS), "edge.rows");
-  assert.equal(style.label, "data(rowLabel)");
-  assert.equal(style["font-size"], 11, "the mock's small mono label");
-  assert.equal(style.color, TOKENS.edgeLabelText);
-  assert.equal(style["text-background-color"], TOKENS.edgeLabelBg, "the line must not show through the digits");
+test("no count rides any edge (151): the sheet has no label rule, and the boundary connectors anchor to the marker shapes", () => {
+  const g = loadGraph();
+  const sheet = g.buildStylesheet(TOKENS);
+  assert.equal(sheet.find((r) => r.selector === "edge.rows"), undefined);
+  for (const rule of sheet) assert.equal(rule.style.label, undefined, rule.selector);
+  const marker = styleFor(sheet, "node.boundary");
+  assert.equal(marker.width, g.BOUNDARY_W, "a compact box, not the card's");
+  assert.equal(marker["background-opacity"], 0, "no card chrome under the shape");
+  assert.equal(marker["border-width"], 0);
+  assert.equal(styleFor(sheet, "edge.boundary-start")["source-endpoint"], g.BOUNDARY_W / 2 + "px 0px");
+  assert.equal(styleFor(sheet, "edge.boundary-end")["target-endpoint"], -g.BOUNDARY_W / 2 + "px 0px");
 });
 
 test("the pulse/flow gate honours the reduced-motion preference", () => {

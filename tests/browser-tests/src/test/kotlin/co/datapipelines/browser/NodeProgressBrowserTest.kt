@@ -56,9 +56,10 @@ class NodeProgressBrowserTest : BrowserSuite() {
         // at once, each by its own operation.
         check(polls.any { p -> p.all { WRITTEN.containsMatchIn(it) } }) { "never saw both written counts at once: ${polls.distinct()}" }
         check(polls.any { p -> p.any { it.startsWith("Writing") } }) { "no card ever showed its writing state: ${polls.distinct()}" }
-        // The destination is the card's own fact line, on both cards.
-        page.locator(".pe-card[data-node-id='src_a'] .pe-card-fact:has-text('tempdb.stg_a')").count() shouldBe 1
-        page.locator(".pe-card[data-node-id='src_b'] .pe-card-fact:has-text('tempdb.stg_b')").count() shouldBe 1
+        // The destination is the card's own OUTPUT PORT (151: the output fact line became the
+        // port row that carries the measured write), on both cards.
+        page.locator(".pe-card[data-node-id='src_a'] .pe-port .pe-port-dest:has-text('tempdb.stg_a')").count() shouldBe 1
+        page.locator(".pe-card[data-node-id='src_b'] .pe-port .pe-port-dest:has-text('tempdb.stg_b')").count() shouldBe 1
         // 2. The accessible description carried the same operation, without colour.
         check(
             a11ySeen.any { it.contains("Writing to tempdb.stg_a") || it.contains("Fetching") },

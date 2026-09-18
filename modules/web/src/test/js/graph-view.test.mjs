@@ -78,68 +78,54 @@ test("running: the curve INTO the node flows (active); the state mirrors to data
   assert.equal(g.editor.nodeStates.b, "running");
 });
 
-test("success: the flow stops and the edge rests in --edge-done", () => {
+test("success of the TARGET: consumer-running clears; the edge takes no `done` (151 retired it)", () => {
   const { g, edge } = graphWithEdge();
   g.setNodeState("b", "running");
   g.setNodeState("b", "success");
-  assert.ok(!edge.hasClass("active"), "the flow stops at completion");
-  assert.ok(edge.hasClass("done"), "the edge into a done target turns --edge-done");
+  assert.ok(!edge.hasClass("active"), "consumer-running clears at completion");
+  assert.ok(!edge.hasClass("done"), "`done` (target ran) is retired — the edge's states are facts about its SOURCE");
 });
 
-test("failed: the flow stops and no done marker survives", () => {
+test("success of the SOURCE: the outgoing dependency is satisfied", () => {
+  const { g, edge } = graphWithEdge();
+  g.setNodeState("a", "success");
+  assert.ok(edge.hasClass("satisfied"), "b may start: a is done");
+});
+
+test("failed: consumer-running clears and nothing else survives on the incoming edge", () => {
   const { g, edge } = graphWithEdge();
   g.setNodeState("b", "running");
   g.setNodeState("b", "failed");
   assert.ok(!edge.hasClass("active"));
-  assert.ok(!edge.hasClass("done"));
+  assert.ok(!edge.hasClass("done") && !edge.hasClass("satisfied"));
 });
 
-test("resetAll: every edge state and label clears for the next run", () => {
+test("resetAll: every edge state clears for the next run", () => {
   const { g, edge } = graphWithEdge();
+  g.setNodeState("a", "success");
   g.setNodeState("b", "running");
-  g.setNodeState("b", "success");
   g.setNodeStats("a", { duration_ms: 10, rows_out: 5 });
   g.resetAll();
-  assert.ok(!edge.hasClass("active") && !edge.hasClass("done") && !edge.hasClass("rows"));
-  assert.equal(edge.data("rowLabel"), "");
+  assert.deepEqual(edge.classes(), []);
   assert.equal(g.editor.nodeStates.b, "idle");
 });
 
-test("setNodeStats: the footer takes the run line and the OUTGOING edge takes the row label", () => {
+test("setNodeStats: the footer takes the run line; the OUTGOING edge takes nothing (151)", () => {
   const { g, edge, a } = graphWithEdge();
   g.setNodeStats("a", { duration_ms: 842, rows_out: 1203552 });
   assert.equal(a.data("run"), "1,203,552 rows · 842 ms");
-  assert.equal(edge.data("rowLabel"), "1,203,552 rows", "the count flowing OUT of the source rides the edge");
-  assert.ok(edge.hasClass("rows"), "…behind the class the stylesheet gates the label on");
-});
-
-test("setNodeStats with NOT_MEASURED rows labels no edge", () => {
-  const { g, edge } = graphWithEdge();
-  g.setNodeStats("a", { duration_ms: 12, rows_out: -1 });
+  assert.equal(edge.data("rowLabel"), undefined, "the count is what a WROTE once — it does not travel along the arrow");
   assert.ok(!edge.hasClass("rows"));
-  assert.equal(edge.data("rowLabel"), undefined);
 });
 
-test("the flow animation is gated on reduced motion — dashes stand still", () => {
-  const { g } = graphWithEdge();
-  globalThis.window = { matchMedia: () => ({ matches: true }) };
-  g.ensureFlow();
-  assert.equal(g._flowRunning, false, "reduced motion: the rAF loop never starts");
-  delete globalThis.window;
+test("setNodeStats with NOT_MEASURED rows: the footer shows the time alone", () => {
+  const { g, a } = graphWithEdge();
+  g.setNodeStats("a", { duration_ms: 12, rows_out: -1 });
+  assert.equal(a.data("run"), "12 ms");
 });
 
-test("the flow loop starts on motion-OK and stops itself when no edge is active", () => {
-  const { g, edge } = graphWithEdge();
-  let scheduled = null;
-  globalThis.window = { matchMedia: () => ({ matches: false }) };
-  globalThis.requestAnimationFrame = (cb) => { scheduled = cb; };
-  g.setNodeState("b", "running");
-  assert.equal(g._flowRunning, true, "an active edge keeps the loop alive");
-  edge.style = () => "0";
-  edge.removeClass("active");
-  const step = scheduled;
-  step(); // one tick: no active edges left — the loop must stop, not spin
-  assert.equal(g._flowRunning, false, "the loop stops itself when the last flow ends");
-  delete globalThis.window;
-  delete globalThis.requestAnimationFrame;
+test("the pulse gate honours reduced motion (the canvas has no moving edge any more)", () => {
+  const graph = loadGraph();
+  assert.equal(graph.pulseEnabled({ matches: true }), false);
+  assert.equal(typeof graph.PipelineGraph.prototype.ensureFlow, "undefined", "151: the rAF dash loop is retired");
 });

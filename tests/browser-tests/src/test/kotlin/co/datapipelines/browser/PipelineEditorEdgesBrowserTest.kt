@@ -117,11 +117,13 @@ class PipelineEditorEdgesBrowserTest : BrowserSuite() {
               cy.edges().forEach((e) => {
                 const s = e.source(), t = e.target();
                 const sp = s.position(), tp = t.position();
-                const halfW = s.width() / 2;
+                // 151: each node's OWN half width — a boundary marker's box is 72px, a card's 236px,
+                // and the connector must land on the port of the node it actually touches.
+                const sHalf = s.width() / 2, tHalf = t.width() / 2;
                 if (!(tp.x > sp.x)) out.push(e.id() + ': target not right of source');
                 const te = e.targetEndpoint(), se = e.sourceEndpoint();
-                if (Math.abs(te.x - (tp.x - halfW)) > 4) out.push(e.id() + ': target endpoint off the left port');
-                if (Math.abs(se.x - (sp.x + halfW)) > 4) out.push(e.id() + ': source endpoint off the right port');
+                if (Math.abs(te.x - (tp.x - tHalf)) > 4) out.push(e.id() + ': target endpoint off the left port');
+                if (Math.abs(se.x - (sp.x + sHalf)) > 4) out.push(e.id() + ': source endpoint off the right port');
               });
               return out;
             }""",

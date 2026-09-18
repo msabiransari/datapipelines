@@ -4,6 +4,8 @@ import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldMatch
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -14,7 +16,9 @@ import java.nio.file.Paths
  * user reads.
  *
  *  1. Multiple roots: Start and End render for an authored graph the moment the
- *     editor opens — before any run — as view-only pills with accessible names.
+ *     editor opens — before any run — as the 151 shapes (a disc that is the run
+ *     trigger for a member who may execute, a square that is never one) with
+ *     accessible names.
  *  2. One completed branch while another runs: the fast branch reads Done and the
  *     blocked join stays Pending while the slow branch is still live — and End
  *     still says End. A finished branch is not a finished execution.
@@ -51,15 +55,17 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
         page.locator(".pe-card-boundary-end").waitFor()
         startLabel() shouldBe "Start"
         endLabel() shouldBe "End"
-        startAria() shouldBe "Execution start"
+        startAria() shouldBe "Start execution"
         endAria() shouldBe "Execution end"
-        // View-only: nothing to open on a marker.
+        // Nothing to open on a marker; End is never a trigger.
         page.locator(".pe-card-boundary .pe-card-open").count() shouldBe 0
+        page.locator(".pe-card-boundary-end [role='button']").count() shouldBe 0
 
         page.locator("[data-verb='pipeline-execute']").click()
-        // Start armed; End still neutral. The pill repaints when execution_started
+        // Start armed; End still neutral. The marker repaints when execution_started
         // lands — wait for it rather than racing the stream.
-        waitUntil("Start arms on execution_started") { startAria() == "Execution start — running" }
+        waitUntil("Start arms on execution_started") { startAria() == "Start execution — running" }
+        startLabel() shouldBe "Running…"
         endLabel() shouldBe "End"
 
         // 2. One completed branch while another runs — and End does NOT move.
@@ -74,7 +80,8 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
         page.locator("[data-verb='pipeline-execute']:not([disabled])").waitFor(Locator.WaitForOptions().setTimeout(EXECUTION_TIMEOUT_MS))
         page.locator(".pe-status:has-text('Completed')").waitFor()
         endLabel() shouldBe "Finished"
-        endAria() shouldBe "Execution end — finished"
+        endAria() shouldStartWith "Execution end — finished in "
+        page.locator(".pe-card-boundary-end .pe-marker-elapsed").innerText().trim() shouldMatch Regex("\\d+(\\.\\d+)? ?(ms|s)|\\d+m \\d+s")
         startLabel() shouldBe "Start"
         shoot("finished")
     }
@@ -111,7 +118,7 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
         page.locator(".pe-card[data-node-id='slow'] .pe-card-st").innerText().trim() shouldBe "Aborted"
         // End speaks the AUTHORITATIVE outcome.
         endLabel() shouldBe "Failed"
-        endAria() shouldBe "Execution end — failed"
+        endAria() shouldStartWith "Execution end — failed"
         shoot("failed")
     }
 
@@ -151,7 +158,7 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
 
         page.locator(".pe-card[data-node-id='src_slow'] .pe-card-st").innerText().trim() shouldBe "Aborted"
         endLabel() shouldBe "Stopped"
-        endAria() shouldBe "Execution end — stopped"
+        endAria() shouldStartWith "Execution end — stopped"
         shoot("stopped")
     }
 
@@ -222,13 +229,16 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
 
     // --------------------------------------------------------- the reads
 
-    private fun startLabel(): String = page.locator(".pe-card-boundary-start .pe-card-st").innerText().trim()
+    // 151/#144: the word sits under the SHAPE (`.pe-marker-word`), and the shape carries
+    // the accessible name — a button's for Start when the user may execute (every workspace
+    // member may, D-R3), an image's for End.
+    private fun startLabel(): String = page.locator(".pe-card-boundary-start .pe-marker-word").innerText().trim()
 
-    private fun endLabel(): String = page.locator(".pe-card-boundary-end .pe-card-st").innerText().trim()
+    private fun endLabel(): String = page.locator(".pe-card-boundary-end .pe-marker-word").innerText().trim()
 
-    private fun startAria(): String = page.locator(".pe-card-boundary-start").getAttribute("aria-label") ?: ""
+    private fun startAria(): String = page.locator(".pe-card-boundary-start .pe-marker").getAttribute("aria-label") ?: ""
 
-    private fun endAria(): String = page.locator(".pe-card-boundary-end").getAttribute("aria-label") ?: ""
+    private fun endAria(): String = page.locator(".pe-card-boundary-end .pe-marker").getAttribute("aria-label") ?: ""
 
     private fun readExecuteEnabled(): Boolean = page.locator("[data-verb='pipeline-execute']").evaluate("el => !el.disabled") as Boolean
 

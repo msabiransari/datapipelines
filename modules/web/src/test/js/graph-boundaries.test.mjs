@@ -17,7 +17,8 @@
 //      eligible roots are NOT running roots (flow appears only on node_started);
 //      the 135 sweep skips the markers; a fresh run resets them.
 //   4. NOT A TRANSFER — a completing leaf never labels its leaf→End connector
-//      with its row count (151 will style these lines as boundaries).
+//      with its row count (151 styles these lines as boundaries and retired edge
+//      counts altogether — graph-dependency-edges.test.mjs).
 //
 // Same loader family as sse-abort-pulse.test.mjs: real sse.js + node-ops.js +
 // graph.js modules over hand-rolled cy fakes.
@@ -128,27 +129,29 @@ test("FALSIFY synthetic leak: buildElements never mutates the authored array", (
 
 /* ------------------------------------------------------- the marker pill */
 
-test("the marker renders a pill, not a card: no ports, no open button, no facts, an aria-label", () => {
+test("the marker renders a SHAPE, not a card: no ports, no open button, no facts, no port row, an aria-label (151 redesign)", () => {
   const { buildCardHtml } = loadAll().PEGraphUtil;
   const html = buildCardHtml({ id: "__execution_start__", kind: "boundary", boundary: "start", state: "running" });
   assert.match(html, /pe-card-boundary pe-card-boundary-start/);
   assert.match(html, /pe-card-running/);
+  assert.match(html, /class="pe-marker pe-marker-start"/, "the disc — graph-markers.test.mjs owns the button/img table");
   assert.match(html, /aria-label="Execution start — running"/);
   assert.ok(!html.includes("pe-card-open"), "nothing to open — a marker is not a node");
   assert.ok(!html.includes("pe-card-port"), "no ports");
+  assert.ok(!html.includes("pe-port "), "no output port row");
   assert.ok(!html.includes("pe-card-fact"), "no facts");
   assert.ok(!html.includes("pe-card-progress"), "no progress line");
   assert.ok(!html.includes("pe-card-rt"), "no run numbers");
 
   const endIdle = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "idle" });
-  assert.match(endIdle, /pe-card-st">End</);
+  assert.match(endIdle, /pe-marker-word">End</);
   const endDone = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "success" });
-  assert.match(endDone, /pe-card-st">Finished</);
+  assert.match(endDone, /pe-marker-word">Finished</);
   assert.match(endDone, /aria-label="Execution end — finished"/);
   const endStopped = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "aborted" });
-  assert.match(endStopped, /pe-card-st">Stopped</);
+  assert.match(endStopped, /pe-marker-word">Stopped</);
   const endFailed = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "failed" });
-  assert.match(endFailed, /pe-card-st">Failed</);
+  assert.match(endFailed, /pe-marker-word">Failed</);
 });
 
 /* -------------------------------------------------- the cy fake, again */
@@ -351,7 +354,9 @@ test("FALSIFY transfer-label leak: a completing leaf never labels its End connec
   g.setNodeStats("leaf", { duration_ms: 12, rows_out: 4242 });
   assert.ok(!world.edgeEndLeaf.hasClass("rows"), "the boundary connector carries no row class");
   assert.equal(world.edgeEndLeaf.data("rowLabel"), undefined, "and no row label — a leaf's rows_out is not a transfer into End");
-  // The authored edge between authored nodes keeps its real behaviour.
+  // 151: the authored edge is a dependency and carries no count either — the
+  // producer's footer and output port hold "7 rows", scoped to what it wrote.
   g.setNodeStats("root_a", { duration_ms: 5, rows_out: 7 });
-  assert.equal(world.edgeAB.data("rowLabel"), "7 rows");
+  assert.equal(world.edgeAB.data("rowLabel"), undefined);
+  assert.equal(world.rootA.data("run"), "7 rows · 5 ms");
 });

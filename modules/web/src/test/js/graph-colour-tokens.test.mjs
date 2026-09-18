@@ -144,8 +144,6 @@ test("every colour token is resolved, not just the mixed ones", () => {
     ["nodeSuccess", "--accent-success"],
     ["nodeFailed", "--accent-danger"],
     ["nodeAborted", "--accent-warning"],
-    ["edgeLabelText", "--text-muted"],
-    ["edgeLabelBg", "--surface-page"],
   ].forEach(([key, name]) => {
     assert.equal(tokens[key], RESOLVED[name], `${key} (${name}) was not resolved`);
   });

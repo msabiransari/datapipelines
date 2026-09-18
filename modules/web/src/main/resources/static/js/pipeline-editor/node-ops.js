@@ -5,8 +5,8 @@
    * 149 — the node-operation reducer: the ONE view model of what each node is doing,
    * built from the execution stream (rest-api §6.4.9 `node_progress`) and the node /
    * execution lifecycle events. The node cards, the Details pane, the Events tab and
-   * 151's output connector all read it; none of them estimates a phase from a node's
-   * status on its own.
+   * 151's output port (`describe().port`) all read it; none of them estimates a phase
+   * from a node's status on its own.
    *
    * PURE (no DOM, no clock): `node --test` owns it (node-ops.test.mjs).
    *
@@ -219,10 +219,93 @@
     if (op.committed === false) {
       return "Not committed" + (op.rolledBack ? " · rolled back" : "");
     }
-    // committed === null: no terminal sample was observed (a closing node event), or the
-    // destination has nothing to commit (DDL, a child with no output).
+    // committed === null: the destination has nothing to commit (DDL, a child with no
+    // output) — or the outcome is UNKNOWN: no terminal sample was observed (a closing
+    // node event), or the terminal sample carried no commit evidence (rest-api §6.4.9: a
+    // driver that never confirmed, a failure thrown by commit() itself). 151 aligned the
+    // second case with the wire's own instruction — "clients must show it as such
+    // ('commit not observed'), never as 'not committed'" — the pre-151 view stayed silent.
     if (op.destination && op.destination.kind === "none") return null;
-    return op.observed ? null : "Commit not observed";
+    return "Commit not observed";
+  }
+
+  /* ------------------------------------------------------------ the port (151) */
+
+  /* The operation kind in the reader's words. `ctas` keeps the combined label because the
+   * write IS the statement — there is no separate write phase to animate. */
+  var KIND_WORDS = { stage: "stage", ctas: "one statement", materialize: "result", writeback: "write-back", statement: "statement", child: "child result" };
+
+  /*
+   * The output port's state — a subset of the reducer's states, in the port's own terms:
+   * a port is about the DESTINATION, so a query or a fetch is `pending` (nothing has
+   * reached the destination yet, whatever the source is doing), a wait for the output
+   * connection is `waiting` (still — nothing moves), and only a measured `writing` sample
+   * earns the flow. CTAS is `combined`: the write is inside the statement.
+   */
+  function portState(op) {
+    if (op.terminal) return op.state === "completed" ? "done" : op.state;
+    switch (op.state) {
+      case "waiting_output": return "waiting";
+      case "writing": return "writing";
+      case "finalizing": return "finalizing";
+      case "executing": return op.kind === "ctas" ? "combined" : "pending";
+      default: return "pending";
+    }
+  }
+
+  function writtenText(op) {
+    return op.rowsWritten !== null ? count(op.rowsWritten) + " written" : null;
+  }
+
+  /* The terminal line: what is KNOWN about the write's durability, and only that. */
+  function portTerminalText(op, word) {
+    var parts = word ? [word] : [];
+    var w = writtenText(op);
+    if (op.committed === true) {
+      parts.push("committed" + (op.rowsWritten !== null ? " · " + count(op.rowsWritten) + " row" + (op.rowsWritten === 1 ? "" : "s") : ""));
+    } else if (op.committed === false) {
+      parts.push(op.rolledBack ? "rolled back" : "not committed");
+    } else {
+      if (w) parts.push(w);
+      parts.push("commit not observed");
+    }
+    return parts.join(" · ");
+  }
+
+  function portText(op) {
+    var w = writtenText(op);
+    switch (portState(op)) {
+      case "combined": return "one statement";
+      case "waiting": return "waiting for " + destinationNoun(op.destination) + " connection";
+      case "writing": return w ? "writing · " + w : "writing";
+      case "finalizing": return (op.kind === "writeback" ? "committing" : "finalizing") + (w ? " · " + w : "");
+      case "done": return portTerminalText(op, null);
+      case "failed": return portTerminalText(op, "failed");
+      case "aborted": return portTerminalText(op, "aborted");
+      default: return w || "";
+    }
+  }
+
+  /* The port's accessible name: destination first, then the state in words, no colour. */
+  function portA11y(op) {
+    var dest = destinationText(op.destination) || "output";
+    var state = portState(op);
+    var text;
+    switch (state) {
+      case "pending": text = writtenText(op) || "not writing yet"; break;
+      case "combined": text = "querying and materializing in one statement"; break;
+      default: text = portText(op).replace(/ · /g, ", ");
+    }
+    return "Output to " + dest + ": " + text;
+  }
+
+  function portView(op) {
+    return {
+      state: portState(op),
+      text: portText(op),
+      kindLabel: KIND_WORDS[op.kind] || op.kind || "",
+      a11y: portA11y(op),
+    };
   }
 
   /*
@@ -272,6 +355,8 @@
       a11yText: a11yText(op),
       terminal: op.terminal,
       state: op.state,
+      // 151: the output port's view — graph.js writes it onto the card's data.
+      port: portView(op),
     };
   }
 
