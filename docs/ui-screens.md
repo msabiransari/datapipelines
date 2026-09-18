@@ -180,6 +180,12 @@ styled transparent over the card), then the sections grouped **Build** / **Opera
 **Organisation** with Dashboard alone above them, then the collapse control at the foot. The
 nav packs to the top; the free space below it is deliberate.
 
+- **The brand mark (163, #157, "D1").** Three rings converging into an outlined tile with three
+  rising bars — the tile is a 4-unit `currentColor` stroke and the bars are `currentColor`
+  fills; nothing in the geometry depends on the theme, so there is no filled slab to go wrong
+  in dark mode. It exists once, as the `partials/brand-mark.html` fragment, and is included by
+  both `.app-brand-tile` copies in the rail (expanded and collapsed) and by the public site's
+  header and footer, which retired their separate line icon so the product carries one mark.
 - **Counts.** Pipelines and Templates carry a badge from `NavCounts`, one cheap `COUNT(*)`
   each behind a 60-second TTL keyed by workspace. There is no general metadata cache in this
   tree to reuse — `DatasourceMetadataCache` is keyed by datasource name and `AuthCache` lives

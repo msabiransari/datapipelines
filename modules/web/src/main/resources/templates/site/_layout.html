@@ -87,7 +87,7 @@
 <header class="site-header" th:fragment="siteHeader" xmlns:th="http://www.thymeleaf.org">
   <div class="container header-inner">
     <a class="brand" th:href="@{/}">
-      <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><circle cx="5" cy="5" r="2.5"/><circle cx="5" cy="14" r="2.5"/><circle cx="5" cy="23" r="2.5"/><path d="M8 5h4l5 9M8 14h8M8 23h4l5-9M18 14h7M22 9v10M26 6v16"/></svg>
+      <th:block th:replace="~{partials/brand-mark :: mark('')}"></th:block>
       <span>datapipelines.co</span>
     </a>
     <nav class="nav-wide" aria-label="Primary">
@@ -163,7 +163,7 @@
     <div class="footer-top">
       <div class="footer-brand">
         <a class="brand" th:href="@{/}">
-          <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><circle cx="5" cy="5" r="2.5"/><circle cx="5" cy="14" r="2.5"/><circle cx="5" cy="23" r="2.5"/><path d="M8 5h4l5 9M8 14h8M8 23h4l5-9M18 14h7M22 9v10M26 6v16"/></svg>
+          <th:block th:replace="~{partials/brand-mark :: mark('')}"></th:block>
           <span>datapipelines.co</span>
         </a>
         <p>Useful answers from the data you already have.<br>Open source. Self-hosted. Built for your team.</p>
