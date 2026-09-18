@@ -629,6 +629,16 @@
   background: var(--accent-warning, #a16207);
 }
 
+/* 151/#144: the boundaries keep their silhouettes in the minimap — a disc and a square,
+   sized by graph.js to the shape's own box, not the card's bar. */
+.pe-mm-node.pe-mm-boundary-start {
+  border-radius: var(--radius-full, 50%);
+}
+
+.pe-mm-node.pe-mm-boundary-end {
+  border-radius: 3px;
+}
+
 .pe-mm-view {
   position: absolute;
   border: 1.5px solid var(--brand, #2563eb);
@@ -1088,52 +1098,155 @@
   font-style: italic;
 }
 
-/* ---- Execution boundary markers (150) ----
- * View-only Start and End pills, derived from the graph — never authored, never
- * executable, nothing to open. Distinct from a card ON PURPOSE: opaque pill with
- * a dashed border (a boundary is not a thing), one row — glyph, state dot, word.
- * The state dot rides the same `.pe-card-state` accent tokens as the cards, so
- * End's word colours with the authoritative outcome (Finished/Failed/Stopped)
- * and reduced-motion stops the Start pulse with every other animation. */
+/* ---- Execution boundary markers (150, redesigned by 151 / #144) ----
+ * Two SHAPES, not pills: Start is a 56px disc, End a 56px rounded square, the word set
+ * under the shape in the card's small type. A silhouette a glance tells from the cards
+ * and from each other — the 150 pill shared the cards' box and row grammar, which is what
+ * the owner rejected. The `.pe-card` root keeps its measuring role (syncCardHeights) but
+ * paints nothing: the shape is the whole marker. Start is the RUN TRIGGER when the viewer
+ * may execute (`.pe-marker-run`, role=button): filled in the same accent as `.pe-run`, so
+ * the toolbar button and the disc read as one action with two triggers; hover lifts it,
+ * focus rings it, Running… pulses it. Without the right it is an outlined disc — no fill,
+ * no affordance. End's fill is the authoritative outcome: success / danger / warning for
+ * Finished / Failed / Stopped, a muted outline while idle. Tokens only, both themes,
+ * reduced motion stops the pulse with every other animation. */
 .pe-card-boundary {
+  width: 72px;
   min-height: 0;
-  box-sizing: border-box;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 9px 14px;
-  border-radius: var(--radius-pill, 999px);
-  background: var(--surface-raised, #fff);
-  border: 1px dashed var(--border-default, #8e94a1);
-  box-shadow: var(--shadow-sm, 0 1px 2px rgb(15 23 42 / 0.06));
+  gap: 6px;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.pe-marker-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.pe-marker-icon {
+.pe-marker {
+  width: 56px;
+  height: 56px;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
+  background: var(--surface-raised, #fff);
+  border: 2px solid var(--border-default, #8e94a1);
   color: var(--text-muted, #64748b);
+  transition:
+    transform var(--duration-fast, 100ms) var(--ease-out, ease-out),
+    box-shadow var(--duration-fast, 100ms) var(--ease-out, ease-out),
+    background-color var(--duration-fast, 100ms) var(--ease-out, ease-out);
 }
 
-.pe-card-boundary-start .pe-marker-icon {
+.pe-marker .ds-icon {
+  --icon-size: 22px;
+}
+
+.pe-marker-start {
+  border-radius: var(--radius-full, 50%);
   color: var(--brand, #2563eb);
 }
 
-.pe-card-boundary .pe-card-state {
-  font-size: var(--pe-card-fs-sm, 11.5px);
-  font-weight: var(--weight-semibold, 600);
-  color: var(--text-secondary, #334155);
+.pe-marker-end {
+  border-radius: var(--radius-lg, 12px);
 }
 
-.pe-card-boundary .pe-card-state i {
-  width: 6px;
-  height: 6px;
+/* The trigger: the run button's own fill and text, lifted, focusable. pointer-events
+   back on (the label container is pointer-events:none) so it can be clicked and hovered. */
+.pe-marker-run {
+  pointer-events: auto;
+  cursor: pointer;
+  background: var(--accent-primary, #0f172a);
+  border-color: var(--accent-primary, #0f172a);
+  color: var(--accent-primary-text, #fff);
+  box-shadow: var(--shadow-md, 0 4px 12px -4px rgb(15 23 42 / 0.18));
+}
+
+.pe-marker-run:hover:not([aria-disabled="true"]) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.pe-marker-run:focus-visible {
+  outline: 2px solid var(--focus-ring, #3b82f6);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+
+.pe-marker-run[aria-disabled="true"] {
+  cursor: default;
+}
+
+/* Running…: the disc pulses a brand-soft ring (the same keyframe as the status dot). */
+.pe-card-running .pe-marker-start {
+  border-color: var(--brand, #2563eb);
+  box-shadow: 0 0 0 4px var(--brand-soft, #dbeafe);
+  animation: pe-pulse 1.2s ease-in-out infinite;
+}
+
+/* End's outcome fills. */
+.pe-card-success .pe-marker-end {
+  background: var(--accent-success, #15803d);
+  border-color: var(--accent-success, #15803d);
+  color: var(--accent-primary-text, #fff);
+}
+
+.pe-card-failed .pe-marker-end {
+  background: var(--accent-danger, #dc2626);
+  border-color: var(--accent-danger, #dc2626);
+  color: var(--accent-danger-text, #fff);
+}
+
+.pe-card-aborted .pe-marker-end {
+  background: var(--accent-warning, #b45309);
+  border-color: var(--accent-warning, #b45309);
+  color: var(--node-aborted-text, #fff);
+}
+
+.pe-marker-word {
+  font-size: var(--pe-card-fs-sm, 11.5px);
+  font-weight: var(--weight-semibold, 600);
+  line-height: 1.2;
+  color: var(--text-secondary, #334155);
+  white-space: nowrap;
+}
+
+.pe-card-success .pe-marker-word {
+  color: var(--accent-success, #15803d);
+}
+
+.pe-card-failed .pe-marker-word {
+  color: var(--accent-danger, #dc2626);
+}
+
+.pe-card-aborted .pe-marker-word {
+  color: var(--accent-warning, #b45309);
+}
+
+.pe-marker-elapsed {
+  margin-top: -3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: var(--text-muted, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The wide stage steps the shapes up with the cards (082 §A's one threshold). */
+@container pe-stage (min-width: 1200px) {
+  .pe-marker {
+    width: 64px;
+    height: 64px;
+  }
+
+  .pe-marker .ds-icon {
+    --icon-size: 26px;
+  }
+}
+
+/* A frozen stream stops the Start pulse with the rest (graph.js markStreamLost). */
+.pe-card-stale .pe-marker {
+  animation: none !important;
 }
 
 /* The expand affordance: the route into the dock's Details tab, visible on hover
@@ -1209,8 +1322,14 @@
   .pe-card-progress i,
   .pe-port-flow,
   .pe-port-stub::after,
+  .pe-marker,
   .pe-status-dot {
     animation: none !important;
+  }
+  .pe-marker,
+  .pe-marker-run:hover {
+    transition: none;
+    transform: none;
   }
   .pe-card,
   .pe-card-open {

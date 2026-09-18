@@ -37,7 +37,7 @@
   /* The End marker's word is the AUTHORITATIVE execution outcome; it never moves
    * on a node event (a finished branch is not a finished execution). */
   var MARKER_LABELS = {
-    start: { idle: "Start", running: "Start", success: "Start", failed: "Start", aborted: "Start" },
+    start: { idle: "Start", running: "Running…", success: "Start", failed: "Start", aborted: "Start" },
     end: { idle: "End", running: "End", success: "Finished", failed: "Failed", aborted: "Stopped" },
   };
 
@@ -527,15 +527,18 @@
       var r = Number(stats.rows_out);
       if (isFinite(r) && r >= 0) out = countLabel(r, "row");
     }
-    var d = Number(stats.duration_ms);
-    if (isFinite(d) && d >= 0) {
-      var ms;
-      if (d < 1000) ms = Math.round(d) + " ms";
-      else if (d < 60000) ms = (d / 1000).toFixed(1) + " s";
-      else ms = Math.floor(d / 60000) + "m " + Math.round((d % 60000) / 1000) + "s";
-      out = out ? out + " · " + ms : ms;
-    }
+    var ms = durationText(stats.duration_ms);
+    if (ms !== null) out = out ? out + " · " + ms : ms;
     return out || null;
+  }
+
+  /** `842 ms` / `5.3 s` / `2m 14s` — the footer's vocabulary, shared with the End marker (151). */
+  function durationText(value) {
+    var d = Number(value);
+    if (!isFinite(d) || d < 0) return null;
+    if (d < 1000) return Math.round(d) + " ms";
+    if (d < 60000) return (d / 1000).toFixed(1) + " s";
+    return Math.floor(d / 60000) + "m " + Math.round((d % 60000) / 1000) + "s";
   }
 
   /* The footer state label (080 §A): Pending / Running… / Done / Failed / Aborted. */
@@ -655,13 +658,23 @@
   }
 
   /**
-   * 150 — the boundary marker's pill. Distinct from a node card ON PURPOSE: one
-   * row (glyph, state dot, word), no ports, no open button, no facts, no progress
-   * line, no run numbers — a marker has nothing to open and nothing that ran. The
-   * `.pe-card` root class is deliberate: syncCardHeights measures `.pe-card`s to
-   * size the Cytoscape box, and the pill must be its own measured box. The state
-   * class (`pe-card-success` …) drives the same accent tokens as the cards; the
-   * `aria-label` names the boundary and its outcome for the accessible tree.
+   * 150/151 (#126, #144) — the boundary markers: SHAPES, not cards. Start is a compact
+   * disc, End a rounded square — two silhouettes a peripheral glance tells apart from
+   * each other and from the rectangular cards (the 150 pill shared the cards' box and
+   * row grammar, which is what the owner rejected). The word sits BELOW the shape in
+   * the card's small type; End adds the elapsed time when the run clock knows it.
+   *
+   * Start is the run trigger when the viewer MAY execute (`canExecute`, the same
+   * server-rendered flag that renders the toolbar's Execute — read off `.pe-root`'s
+   * `data-can-execute`, never re-derived in JS): `role="button"`, focusable, Enter/Space
+   * (wireMarkerActivation), `aria-disabled` while a run is active, the disc filled in the
+   * SAME accent as `.pe-run` so the two triggers read as one action. Without the right
+   * it is a plain marker (`role="img"`): an outlined disc, no fill, no affordance. End is
+   * never a trigger — its fill is the authoritative outcome (success/danger/warning).
+   *
+   * The `.pe-card` root class stays deliberate: syncCardHeights measures `.pe-card`s to
+   * size the Cytoscape box; the marker box is BOUNDARY_W wide (stylesheet) and as tall
+   * as shape + word. No ports, no open button, no facts, no progress line, no port row.
    * Pure: driven from the element data like the card.
    */
   function buildMarkerHtml(data) {
@@ -669,16 +682,31 @@
     var state = data.state || "idle";
     var side = data.boundary === "end" ? "end" : "start";
     var word = (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state;
-    var aria =
-      side === "start"
-        ? "Execution start" + (state === "idle" ? "" : " — running")
-        : "Execution end" + (state === "idle" ? "" : " — " + word.toLowerCase());
+    var running = state === "running";
+    var trigger = side === "start" && data.canExecute === true;
+    var elapsed = side === "end" && state !== "idle" && state !== "running" && data.elapsed ? String(data.elapsed) : null;
+    var aria;
+    if (trigger) {
+      aria = "Start execution" + (running ? " — running" : "");
+    } else if (side === "start") {
+      aria = "Execution start" + (running ? " — running" : "");
+    } else {
+      aria = "Execution end" + (state === "idle" ? "" : " — " + (running ? "running" : word.toLowerCase())) + (elapsed ? " in " + elapsed : "");
+    }
+    var shape =
+      '<div class="pe-marker pe-marker-' + side + (trigger ? " pe-marker-run" : "") + '" role="' +
+      (trigger ? "button" : "img") + '"' +
+      (trigger ? ' tabindex="0" data-marker-run="' + esc(data.id) + '"' : "") +
+      (trigger && running ? ' aria-disabled="true"' : "") +
+      ' aria-label="' + esc(aria) + '">' +
+      iconSvg(MARKER_ICONS[side], "ds-icon-md") +
+      "</div>";
     return (
-      '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + ' pe-card-' + esc(state) +
-      '" data-node-id="' + esc(data.id) + '" role="img" aria-label="' + esc(aria) + '">' +
-      '<div class="pe-marker-row"><span class="pe-marker-icon">' + iconSvg(MARKER_ICONS[side], "ds-icon-xs") +
-      "</span>" +
-      '<span class="pe-card-state"><i></i><span class="pe-card-st">' + esc(word) + "</span></span></div>" +
+      '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + " pe-card-" + esc(state) +
+      (data.stale ? " pe-card-stale" : "") + '" data-node-id="' + esc(data.id) + '" data-boundary="' + side + '">' +
+      shape +
+      '<span class="pe-marker-word">' + esc(word) + "</span>" +
+      (elapsed ? '<span class="pe-marker-elapsed">' + esc(elapsed) + "</span>" : "") +
       "</div>"
     );
   }
@@ -773,6 +801,9 @@
         if (ed && ed.openNodeDetails) ed.openNodeDetails(id, btn);
       });
     }
+
+    // 151/#144: the Start disc's activation — same delegation, same live-component rule.
+    this.wireMarkerActivation(container);
 
     // The mock's hover lift (translateY(-2px) + --shadow-lg) and its hover-only
     // expand icon are CSS — but the label container is pointer-events:none, so CSS
@@ -1332,7 +1363,8 @@
     });
     if (!xs.length) return;
     // 082 addendum P1: each node carries its OWN height now, so the extent uses the
-    // tallest card rather than one assumed box.
+    // tallest card rather than one assumed box. 151: and its own WIDTH — a boundary's
+    // box is the compact marker's (nodeWidth), not the card's.
     var halfW = self.tokens.cardW / 2;
     var nodeH = function (n) { return n.data("cardH") || self.tokens.cardH; };
     var halfH = Math.max.apply(null, self.cy.nodes().map(function (n) { return nodeH(n) / 2; }));
@@ -1345,12 +1377,29 @@
 
     self.cy.nodes().forEach(function (n) {
       var bar = document.createElement("i");
-      bar.className = "pe-mm-node" + (n.data("state") && n.data("state") !== "idle" ? " pe-mm-" + n.data("state") : "");
+      var boundary = n.data("kind") === "boundary";
+      var state = n.data("state");
+      bar.className =
+        "pe-mm-node" +
+        (state && state !== "idle" ? " pe-mm-" + state : "") +
+        (boundary ? " pe-mm-boundary pe-mm-boundary-" + (n.data("boundary") === "end" ? "end" : "start") : "");
       bar.setAttribute("data-id", n.id());
-      bar.style.left = (self._mm.pad + (n.position().x - halfW - minX) * scale) + "px";
-      bar.style.top = (self._mm.pad + (n.position().y - nodeH(n) / 2 - minY) * scale) + "px";
-      bar.style.width = Math.max(8, self.tokens.cardW * scale) + "px";
-      bar.style.height = Math.max(5, nodeH(n) * scale) + "px";
+      var nw = self.nodeWidth(n);
+      var nh = nodeH(n);
+      // 151/#144: a marker keeps its silhouette — a square box the size of the shape,
+      // centred where the disc/square sits (the top of the marker's box, above its word).
+      if (boundary) {
+        var side = Math.max(6, Math.min(nw, nh) * scale);
+        bar.style.left = (self._mm.pad + (n.position().x - Math.min(nw, nh) / 2 - minX) * scale) + "px";
+        bar.style.top = (self._mm.pad + (n.position().y - nh / 2 - minY) * scale) + "px";
+        bar.style.width = side + "px";
+        bar.style.height = side + "px";
+      } else {
+        bar.style.left = (self._mm.pad + (n.position().x - nw / 2 - minX) * scale) + "px";
+        bar.style.top = (self._mm.pad + (n.position().y - nh / 2 - minY) * scale) + "px";
+        bar.style.width = Math.max(8, nw * scale) + "px";
+        bar.style.height = Math.max(5, nh * scale) + "px";
+      }
       el.appendChild(bar);
     });
 
@@ -1381,7 +1430,9 @@
     var bars = mm.el.querySelectorAll(".pe-mm-node");
     for (var i = 0; i < bars.length; i++) {
       if (bars[i].getAttribute("data-id") === nodeId) {
-        bars[i].className = "pe-mm-node" + (state && state !== "idle" ? " pe-mm-" + state : "");
+        // 151: a marker's silhouette classes survive its state changes.
+        var keep = (bars[i].className.match(/pe-mm-boundary(-start|-end)?/g) || []).join(" ");
+        bars[i].className = "pe-mm-node" + (state && state !== "idle" ? " pe-mm-" + state : "") + (keep ? " " + keep : "");
         return;
       }
     }
@@ -1510,9 +1561,12 @@
     return data;
   }
 
-  function buildElements(nodes, settings) {
+  function buildElements(nodes, settings, options) {
     var elements = [];
     var i, j;
+    // 151/#144: whether the Start marker is a run trigger — the page's server-rendered
+    // right, handed in; the graph never decides permissions.
+    var canExecute = !!(options && options.canExecute === true);
 
     for (i = 0; i < nodes.length; i++) {
       var n = nodes[i];
@@ -1556,13 +1610,13 @@
       // thing that has no Details (init.js's selectOnly already refuses synthetic ids).
       elements.push({
         group: "nodes",
-        data: { id: ids.start, kind: "boundary", boundary: "start", state: "idle" },
+        data: { id: ids.start, kind: "boundary", boundary: "start", state: "idle", canExecute: canExecute },
         classes: "idle boundary",
         selectable: false,
       });
       elements.push({
         group: "nodes",
-        data: { id: ids.end, kind: "boundary", boundary: "end", state: "idle" },
+        data: { id: ids.end, kind: "boundary", boundary: "end", state: "idle", canExecute: canExecute, elapsed: null },
         classes: "idle boundary",
         selectable: false,
       });
@@ -1590,7 +1644,7 @@
 
   PipelineGraph.prototype.buildElements = function () {
     var settings = this.editor && this.editor.pipeline ? this.editor.pipeline.settings : null;
-    return buildElements(this.nodes, settings);
+    return buildElements(this.nodes, settings, { canExecute: !!(this.editor && this.editor.canExecute === true) });
   };
 
   PipelineGraph.prototype.findNode = function (id) {
@@ -1707,6 +1761,7 @@
       if (node.data("kind") === "boundary") {
         var side = node.data("boundary") === "end" ? "end" : "start";
         node.data("label", MARKER_LABELS[side].idle);
+        node.data("elapsed", null);
       }
       if (self.editor && self.editor.nodeStates && node.data("kind") !== "boundary") {
         self.editor.nodeStates[node.id()] = "idle";
@@ -1730,7 +1785,7 @@
    * a synthetic id. The minimap bar follows (it is keyed by node id), the a11y
    * node list stays authored-only.
    */
-  PipelineGraph.prototype.setMarkerState = function (side, state) {
+  PipelineGraph.prototype.setMarkerState = function (side, state, extra) {
     if (!this.cy || !this._boundaryIds) return;
     var id = this._boundaryIds[side];
     if (!id) return;
@@ -1740,7 +1795,40 @@
     node.addClass(state);
     node.data("state", state);
     node.data("label", (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state);
+    // 151/#144: End shows how long the run took, when the caller knows (the run clock).
+    node.data("elapsed", extra && extra.elapsed ? String(extra.elapsed) : null);
     this.updateMinimapNode(id, state);
+  };
+
+  /**
+   * 151/#144 — the Start disc runs the pipeline. ONE delegated click + keydown pair on
+   * the graph container (the html-label re-renders the disc on every state change, so a
+   * per-element listener would leak), resolving the LIVE component exactly as the card's
+   * open button does, and calling its `executePipeline()` — the same method the toolbar's
+   * button calls, so parameters, the draft pin and the CSRF path are one code path.
+   * Guarded by `isExecuting` (Running… is not a trigger) and idempotent per container
+   * (a history-restored container keeps its listeners). A viewer's marker has no
+   * `.pe-marker-run` element at all, so nothing here can fire for them.
+   */
+  PipelineGraph.prototype.wireMarkerActivation = function (container) {
+    var self = this;
+    if (!container || typeof container.addEventListener !== "function" || container.__peMarkerRunWired) return;
+    container.__peMarkerRunWired = true;
+    var activate = function (evt) {
+      var t = evt.target;
+      var disc = t && t.closest ? t.closest(".pe-marker-run") : null;
+      if (!disc) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+      var ed = (typeof window !== "undefined" && window.__peInstance) || self.editor;
+      if (!ed || ed.isExecuting || typeof ed.executePipeline !== "function") return;
+      ed.executePipeline();
+    };
+    container.addEventListener("click", activate);
+    container.addEventListener("keydown", function (evt) {
+      if (evt.key !== "Enter" && evt.key !== " ") return;
+      activate(evt);
+    });
   };
 
   /**
@@ -1813,6 +1901,7 @@
     pulseEnabled: pulseEnabled,
     fitZoomFor: fitZoomFor,
     formatRunLine: formatRunLine,
+    durationText: durationText,
     truncateLeft: truncateLeft,
     templateLine: templateLine,
     edgeControlPoints: edgeControlPoints,

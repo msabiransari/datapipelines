@@ -129,27 +129,29 @@ test("FALSIFY synthetic leak: buildElements never mutates the authored array", (
 
 /* ------------------------------------------------------- the marker pill */
 
-test("the marker renders a pill, not a card: no ports, no open button, no facts, an aria-label", () => {
+test("the marker renders a SHAPE, not a card: no ports, no open button, no facts, no port row, an aria-label (151 redesign)", () => {
   const { buildCardHtml } = loadAll().PEGraphUtil;
   const html = buildCardHtml({ id: "__execution_start__", kind: "boundary", boundary: "start", state: "running" });
   assert.match(html, /pe-card-boundary pe-card-boundary-start/);
   assert.match(html, /pe-card-running/);
+  assert.match(html, /class="pe-marker pe-marker-start"/, "the disc — graph-markers.test.mjs owns the button/img table");
   assert.match(html, /aria-label="Execution start — running"/);
   assert.ok(!html.includes("pe-card-open"), "nothing to open — a marker is not a node");
   assert.ok(!html.includes("pe-card-port"), "no ports");
+  assert.ok(!html.includes("pe-port "), "no output port row");
   assert.ok(!html.includes("pe-card-fact"), "no facts");
   assert.ok(!html.includes("pe-card-progress"), "no progress line");
   assert.ok(!html.includes("pe-card-rt"), "no run numbers");
 
   const endIdle = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "idle" });
-  assert.match(endIdle, /pe-card-st">End</);
+  assert.match(endIdle, /pe-marker-word">End</);
   const endDone = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "success" });
-  assert.match(endDone, /pe-card-st">Finished</);
+  assert.match(endDone, /pe-marker-word">Finished</);
   assert.match(endDone, /aria-label="Execution end — finished"/);
   const endStopped = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "aborted" });
-  assert.match(endStopped, /pe-card-st">Stopped</);
+  assert.match(endStopped, /pe-marker-word">Stopped</);
   const endFailed = buildCardHtml({ id: "__execution_end__", kind: "boundary", boundary: "end", state: "failed" });
-  assert.match(endFailed, /pe-card-st">Failed</);
+  assert.match(endFailed, /pe-marker-word">Failed</);
 });
 
 /* -------------------------------------------------- the cy fake, again */

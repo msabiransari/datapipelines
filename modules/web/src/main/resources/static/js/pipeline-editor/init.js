@@ -118,6 +118,11 @@
       // node_progress event reduces into it (sse.js); the cards, the Details pane and
       // the a11y list read it; 151's output connector will too.
       nodeOps: window.PENodeOps ? window.PENodeOps.createNodeOps() : null,
+      // 151/#144: whether THIS viewer may execute — the same server-rendered `canExecute`
+      // that renders the toolbar's Execute button, stamped on `.pe-root` as
+      // `data-can-execute` and read by init(). The Start marker is a run trigger only when
+      // this is true; nothing in JS derives it from roles.
+      canExecute: false,
       isExecuting: false,
       executionId: null,
       /* 080 §D: the top bar's run status — dot + elapsed while running, the
@@ -173,6 +178,8 @@
           self.nodesById = byId;
           self.parameters = data.parameters || {};
           self.paramKeys = Object.keys(self.parameters);
+          // The data script sits in <head>, so the root is looked up, not walked up to.
+          self.canExecute = self.canExecuteFrom(typeof document.querySelector === "function" ? document.querySelector(".pe-root") : null);
 
           var overrides = {};
           self.paramKeys.forEach(function (k) {
@@ -500,6 +507,11 @@
         // "Commit not observed", never "Committed"; there is no percentage to show.
         self.operationRows(node.id).forEach(function (row) { rows.push(row); });
         return rows;
+      },
+
+      /** 151/#144: the root's `data-can-execute`, and only an explicit "true" grants the trigger. */
+      canExecuteFrom: function (root) {
+        return !!(root && typeof root.getAttribute === "function" && root.getAttribute("data-can-execute") === "true");
       },
 
       /**

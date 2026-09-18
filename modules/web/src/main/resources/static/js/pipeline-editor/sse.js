@@ -348,7 +348,8 @@
         if (editor.stopRunClock) editor.stopRunClock("aborted");
         self.abortUnfinishedNodes();
         // 150: the owner's cancel is Stopped at the boundary — the marker's word,
-        // not a control (the boundaries are never buttons).
+        // not a control (End is never a button; since 151/#144 Start is the run
+        // trigger, and Cancel stays the toolbar's).
         self.setMarker("start", "idle");
         self.setMarker("end", "aborted");
         var abortReason = payload && payload.reason ? String(payload.reason) : null;
@@ -395,8 +396,20 @@
   SseHandler.prototype.setMarker = function (side, state) {
     var editor = this.editor;
     if (editor.graph && typeof editor.graph.setMarkerState === "function") {
-      editor.graph.setMarkerState(side, state);
+      // 151/#144: a terminal End carries the run clock's elapsed time when the clock ran
+      // this session (init.js runStatus.startedAt); no clock, no claim.
+      var terminal = side === "end" && (state === "success" || state === "failed" || state === "aborted");
+      editor.graph.setMarkerState(side, state, terminal ? { elapsed: this.runElapsedText() } : null);
     }
+  };
+
+  /** `2m 14s` since the run clock started, or null when this session has no clock for the run. */
+  SseHandler.prototype.runElapsedText = function () {
+    var rs = this.editor.runStatus;
+    var startedAt = rs && Number(rs.startedAt);
+    if (!startedAt || !isFinite(startedAt) || startedAt <= 0) return null;
+    var fmt = window.PEGraphUtil && window.PEGraphUtil.durationText;
+    return fmt ? fmt(Date.now() - startedAt) : null;
   };
 
   /**

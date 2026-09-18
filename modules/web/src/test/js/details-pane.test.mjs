@@ -218,3 +218,16 @@ test("edgeDescription: what a tapped arrow means, in words", () => {
   assert.equal(editor.edgeDescription("stg_rides", "by_hour"), "by_hour depends on stg_rides — ordering only; stg_rides failed, so by_hour cannot start");
 });
 
+/* ------------------------------------------------- 151/#144: canExecute */
+
+// The Start disc is a run trigger only when the page says the viewer may execute. The
+// flag is the SAME Thymeleaf `canExecute` that renders the toolbar's Execute, stamped on
+// `.pe-root` as `data-can-execute` — read here, never re-derived from roles in JS.
+test("canExecuteFrom: the root's server-rendered flag, and only an explicit true counts", () => {
+  const root = (v) => ({ getAttribute: (name) => (name === "data-can-execute" ? v : null) });
+  assert.equal(editor.canExecuteFrom(root("true")), true);
+  assert.equal(editor.canExecuteFrom(root("false")), false);
+  assert.equal(editor.canExecuteFrom(root(null)), false, "an unstamped root is a viewer who may not run");
+  assert.equal(editor.canExecuteFrom(null), false);
+  assert.equal(editor.canExecute, false, "the component starts without the right until init reads it");
+});
