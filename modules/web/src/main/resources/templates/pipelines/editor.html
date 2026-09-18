@@ -238,6 +238,13 @@
               <span class="pe-legend-chip"><i x-bind:style="'--type:var(' + chip.token + ')'"></i><span x-text="chip.label"></span></span>
             </template>
           </div>
+          <!-- 151 (#127) — how to read the links. An arrow is an ORDERING (the node it points
+               to waits for the node it leaves); a write is the PORT row on the producer's own
+               card. Not aria-hidden: these words are the graph's accessible key. -->
+          <ul class="pe-legend pe-legend-links" aria-label="How to read the graph">
+            <li class="pe-legend-chip"><i class="pe-legend-dep" aria-hidden="true"></i><span>Depends on</span></li>
+            <li class="pe-legend-chip"><i class="pe-legend-port" aria-hidden="true"></i><span>Output write</span></li>
+          </ul>
         </div>
         <div id="pe-live-region" class="sr-only" aria-live="polite" role="status"></div>
       </section>

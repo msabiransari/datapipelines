@@ -184,3 +184,37 @@ test("a PIPELINE node with no timeout says the child's deadline bounds it, not a
   // here would name a budget that never applies to it.
   assert.equal(map.Timeout, "child execution's own deadline");
 });
+
+/* ------------------------------------------------------------ 151: links */
+
+// 151 (#127): the Details pane names a node's orderings in words — what it waits for,
+// with each dependency's state, and which nodes wait for it — so the arrows can be
+// read without the canvas. Orderings, never transfers: no count appears on either row.
+const PRODUCER = { id: "stg_rides", type: "DQL", source: "sample-trips", output: { target: "tempdb", table: "stg_rides" } };
+const DDL = { id: "mk_index", type: "DDL", source: "tempdb", depends_on: ["stg_rides"] };
+const C1 = { id: "by_zone", type: "DQL", source: "tempdb", depends_on: ["stg_rides", "mk_index"], output: { target: "tempdb", table: "by_zone" } };
+const C2 = { id: "by_hour", type: "DQL", source: "tempdb", depends_on: ["stg_rides"] };
+
+test("Details: Depends on names each ordering with its state; Required by lists the dependents — no counts", () => {
+  editor.nodes = [PRODUCER, DDL, C1, C2];
+  editor.nodesById = Object.fromEntries(editor.nodes.map((n) => [n.id, n]));
+  editor.nodeStates = { stg_rides: "success", mk_index: "running", by_zone: "idle", by_hour: "idle" };
+  const producer = Object.fromEntries(editor.detailsMeta(PRODUCER));
+  assert.equal(producer["Depends on"], undefined, "a root waits for nothing — no empty row");
+  assert.equal(producer["Required by"], "mk_index · by_zone · by_hour");
+  const c1 = Object.fromEntries(editor.detailsMeta(C1));
+  assert.equal(c1["Depends on"], "stg_rides (done) · mk_index (running)", "the DDL ordering is an ordering like any other");
+  assert.equal(c1["Required by"], undefined, "a leaf has no dependents — no empty row");
+  for (const v of Object.values(c1)) assert.ok(!/\d+ rows/.test(String(v)) || v === c1.Output, "no transfer count on a link row");
+});
+
+test("edgeDescription: what a tapped arrow means, in words", () => {
+  editor.nodes = [PRODUCER, DDL, C1, C2];
+  editor.nodesById = Object.fromEntries(editor.nodes.map((n) => [n.id, n]));
+  editor.nodeStates = { stg_rides: "success", mk_index: "idle" };
+  assert.equal(editor.edgeDescription("stg_rides", "by_zone"), "by_zone depends on stg_rides — ordering only; stg_rides is done");
+  assert.equal(editor.edgeDescription("mk_index", "by_zone"), "by_zone depends on mk_index — ordering only; mk_index is pending");
+  editor.nodeStates = { stg_rides: "failed" };
+  assert.equal(editor.edgeDescription("stg_rides", "by_hour"), "by_hour depends on stg_rides — ordering only; stg_rides failed, so by_hour cannot start");
+});
+

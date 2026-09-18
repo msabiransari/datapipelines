@@ -200,9 +200,11 @@ test("buildElements seeds the card facts: tempdb engine, PIPELINE child, dialect
   assert.equal(els[1].data.template, null);
   assert.equal(sourceFact(els[2].data), "sample-trips", "dialect lands later from the registry listing");
   assert.equal(els[2].data.sourceName, "sample-trips", "the registry lookup key survives for applyDialects");
-  // The output fact: caller default on an output-less DQL, tempdb.table otherwise.
-  const outFact = (data) => (data.facts.find((f) => f.kind === "output") || {}).text;
-  assert.equal(outFact(els[0].data), "→ caller");
+  // 151: the output is the card's PORT (`data.output`), not a fact line — caller default
+  // on an output-less DQL; an output-less PIPELINE has no port at all.
+  assert.equal(els[0].data.facts.find((f) => f.kind === "output"), undefined);
+  assert.deepEqual(els[0].data.output, { kind: "caller", text: "caller" });
+  assert.equal(els[1].data.output, null);
 });
 
 test("every card carries exactly one open-details button: sized icon, non-empty label, node id attached", () => {

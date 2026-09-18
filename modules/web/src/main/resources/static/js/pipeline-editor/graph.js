@@ -561,8 +561,12 @@
     if (data.kind === "boundary") return buildMarkerHtml(data);
     var esc = escapeHtml;
     var state = data.state || "idle";
+    // 151: `stale` — the stream was lost mid-run (sse.js handleConnectionLoss →
+    // markStreamLost). The card keeps the last words it knew and stops every motion:
+    // the state is not rewritten, because nothing about the node was observed since.
+    var stale = data.stale ? " pe-card-stale" : "";
     var h =
-      '<div class="pe-card pe-card-' + esc(state) + '" data-node-id="' + esc(data.id) +
+      '<div class="pe-card pe-card-' + esc(state) + stale + '" data-node-id="' + esc(data.id) +
       '" style="--type:var(--type-' + esc(typeToken(data.type)) + ");--type-bg:var(--type-" +
       esc(typeToken(data.type)) + '-bg)">';
 
@@ -595,6 +599,8 @@
       h += "</div>";
     }
 
+    if (data.output) h += buildPortHtml(data);
+
     h += '<div class="pe-card-progress" aria-hidden="true"><i></i></div>';
 
     // 149: while the node RUNS, the footer's state word is the measured operation line
@@ -612,6 +618,38 @@
       esc(live || STATE_LABELS[state] || state) + '</span></span><span class="pe-card-rt">' +
       esc(right) + "</span></div>";
 
+    h += "</div>";
+    return h;
+  }
+
+  /**
+   * 151 (#127) — the OUTPUT PORT row: a short connector stub leading into the
+   * destination, the operation's kind word once measured, and the state line on the
+   * right. One per node with a configured output; the ONLY thing on the canvas that
+   * moves for a write, and only while a `writing` sample is the latest word
+   * (`.pe-port-flow`, CSS-animated, stopped by prefers-reduced-motion and by `stale`).
+   * The states are 149's reducer through `describe().port` (node-ops.js) — idle before
+   * any sample, then pending / combined / waiting / writing / finalizing / done /
+   * failed / aborted; a lost stream appends "— stream lost" and freezes the row.
+   * `aria-label` is the port's whole meaning in words, usable without colour or motion.
+   */
+  function buildPortHtml(data) {
+    var esc = escapeHtml;
+    var out = data.output;
+    var port = data.port || null;
+    var pstate = port ? port.state : "idle";
+    var text = port ? port.text : "";
+    if (data.stale) text = (text ? text + " " : "") + "— stream lost";
+    var aria = port ? port.a11y : "Output to " + out.text;
+    if (data.stale) aria += " — stream lost";
+    var flow = pstate === "writing" && !data.stale ? '<i class="pe-port-flow" aria-hidden="true"></i>' : "";
+    var h =
+      '<div class="pe-port pe-port-' + esc(pstate) + (data.stale ? " pe-port-stale" : "") +
+      '" role="img" aria-label="' + esc(aria) + '" title="' + esc(aria) + '">' +
+      '<span class="pe-port-stub" aria-hidden="true">' + flow + "</span>" +
+      '<span class="pe-port-dest">' + esc(out.text) + "</span>";
+    if (port && port.kindLabel) h += '<span class="pe-port-kind">' + esc(port.kindLabel) + "</span>";
+    if (text) h += '<span class="pe-port-line">' + esc(text) + "</span>";
     h += "</div>";
     return h;
   }
@@ -1374,17 +1412,35 @@
     return classes.join(" ");
   }
 
-  /* The card's output fact (080 §A line 3): short — `tempdb.trips`, `→ caller`,
-   * `ds.table`. The dock's Details pane carries the long form (init.js outputText). */
-  function outputFact(n) {
+  /**
+   * 151 (#127) — the node's ONE configured output, as the card's port: where its rows go
+   * (`tempdb.stg`, `warehouse.facts`, `caller`) and, once 149's samples arrive, whether
+   * they are going there right now. Mirrors the server's own node-shape → destination
+   * mapping (NodeOperations.operationFor) so the idle port and the measured
+   * `destination` name the same thing: a DQL's output block (omitted = caller, contract
+   * §4.7); a DML statement writes INTO its source and names no table (no SQL lineage);
+   * a PIPELINE node's port is the output it declared for the child's caller rows. DDL,
+   * an output-less PIPELINE and a CALCULATOR have NO port — nothing they do is a row
+   * write (a calculator's context keys are its fact line). The dock's Details pane
+   * carries the long form (init.js outputText); `null` means no port.
+   */
+  function outputPortFor(n) {
     var type = (n.type || "").toUpperCase();
-    if (type === "CALCULATOR") return null;
-    if (!n.output) return type === "DQL" ? "→ caller" : "side effect";
     var o = n.output;
-    if (o.target === "caller") return "→ caller";
-    if (o.target === "tempdb") return "tempdb." + (o.table || "—");
-    if (o.target === "datasource") return (o.datasource || "—") + "." + (o.table || "—");
-    return "side effect";
+    if (type === "DML") {
+      return n.source === "tempdb"
+        ? { kind: "tempdb", text: "tempdb" }
+        : { kind: "datasource", datasource: n.source || "—", text: n.source || "—" };
+    }
+    if (type === "DQL" && !o) return { kind: "caller", text: "caller" };
+    if (type !== "DQL" && type !== "PIPELINE") return null;
+    if (!o) return null;
+    if (o.target === "caller") return { kind: "caller", text: "caller" };
+    if (o.target === "tempdb") return { kind: "tempdb", table: o.table || "—", text: "tempdb." + (o.table || "—") };
+    if (o.target === "datasource") {
+      return { kind: "datasource", datasource: o.datasource || "—", table: o.table || "—", text: (o.datasource || "—") + "." + (o.table || "—") };
+    }
+    return null;
   }
 
   /**
@@ -1448,8 +1504,9 @@
         });
       }
     }
-    var out = outputFact(n);
-    if (out) data.facts.push({ kind: "output", icon: "table", text: out });
+    // 151: the output is the card's PORT row (buildCardHtml), not a fact line — the
+    // destination appears once, where its measured write shows.
+    data.output = outputPortFor(n);
     return data;
   }
 
@@ -1610,6 +1667,21 @@
     node.data("op", view && view.cardLine ? view.cardLine : null);
     node.data("opCounts", view && view.cardCounts ? view.cardCounts : null);
     node.data("opState", view && view.state ? view.state : null);
+    // 151: the output port reads the same view — one reducer, one measured truth.
+    node.data("port", view && view.port ? view.port : null);
+  };
+
+  /**
+   * 151: the stream is gone (sse.js handleConnectionLoss). Nothing about any node has
+   * been observed since, so nothing is REWRITTEN — every card and marker is marked
+   * `stale`, which freezes its motion and appends "— stream lost" to the port, and the
+   * consumer-running emphasis leaves every edge. The recovery poll may later set the
+   * End marker from the execution's polled status; node outcomes it cannot know.
+   */
+  PipelineGraph.prototype.markStreamLost = function () {
+    if (!this.cy) return;
+    this.cy.nodes().forEach(function (node) { node.data("stale", true); });
+    this.cy.edges().forEach(function (edge) { edge.removeClass("active"); });
   };
 
   /** Reduced motion cannot be read from CSS here — the graph is canvas, not DOM. */
@@ -1628,6 +1700,8 @@
       node.data("op", null);
       node.data("opCounts", null);
       node.data("opState", null);
+      node.data("port", null);
+      node.data("stale", null);
       // 150: the markers reset with everything else — Start goes neutral until
       // execution_started re-arms it, End loses the previous run's outcome word.
       if (node.data("kind") === "boundary") {

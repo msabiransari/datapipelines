@@ -520,6 +520,76 @@
   background: var(--type, var(--border-subtle));
 }
 
+/* 151 (#127) — the LINK legend beside the type chips: what an arrow is (an ordering),
+   what the port is (the write), what the two shapes are (the boundaries). It is NOT
+   aria-hidden — these three words are the accessible explanation of the canvas — and
+   its swatches are drawn in CSS from the same tokens the canvas paints with, so a theme
+   swap re-skins the legend and the graph together. Sentence case, one noun phrase each. */
+.pe-legend-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pe-legend-links .pe-legend-chip {
+  gap: 7px;
+}
+
+.pe-legend-links .pe-legend-chip i {
+  position: relative;
+  width: 22px;
+  height: 8px;
+  border-radius: 0;
+  background: none;
+}
+
+/* Depends on: a line with an arrowhead, in the rest stroke. */
+.pe-legend-dep::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 5px;
+  top: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--edge, #8e94a1);
+}
+
+.pe-legend-dep::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent var(--edge, #8e94a1);
+}
+
+/* Output write: the port's stub and dot, in the write accent. */
+.pe-legend-port::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 8px;
+  top: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-success, #15803d);
+}
+
+.pe-legend-port::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  border-radius: var(--radius-full, 50%);
+  background: var(--surface-raised, #fff);
+  border: 2px solid var(--accent-success, #15803d);
+}
+
 /* The minimap (080 §A): nodes as small bars carrying the state colour, the viewport
    rectangle in --brand. Bars/viewport are painted by graph.js from model coords. */
 .pe-minimap {
@@ -836,6 +906,188 @@
   border-color: var(--edge-done, #15803d);
 }
 
+/* ---- The output PORT (151, #127) ----
+ * One row per node with a configured output — the destination its rows go to, the
+ * operation's kind once measured, and the write's state — sitting where the output fact
+ * line used to be. The arrows out of the card are orderings; THIS is the write. A short
+ * stub with the port dot leads into the destination; while a `writing` sample is the
+ * latest word the stub carries the ONLY moving indicator on the canvas (`.pe-port-flow`,
+ * a repeating gradient sliding right). A wait is amber and still, a commit is a one-shot
+ * settle ring so a half-second write still registers, a lost stream freezes everything.
+ * Every colour is a token; the state classes come from node-ops.js `describe().port`. */
+.pe-port {
+  display: flex;
+  /* The state line joins the destination's row while it fits and drops to its own row,
+     right-aligned, when it does not (`committed · 128,026 rows` beside `tempdb.stg` does
+     not fit a 236px card): the destination is never truncated to make room for a state,
+     and the card grows by one line — syncCardHeights measures the real height. */
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 7px;
+  margin: 2px 12px 0;
+  padding: 3px 0 3px 2px;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--pe-card-fs-fact, 12px);
+  line-height: 1.4;
+  color: var(--text-secondary, #334155);
+}
+
+.pe-port-stub {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--edge, #8e94a1);
+  overflow: visible;
+}
+
+/* The port dot at the stub's end — the same dot vocabulary as the card's edge anchors. */
+.pe-port-stub::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border-radius: var(--radius-full, 50%);
+  background: var(--surface-raised, #fff);
+  border: 2px solid var(--border-default, #8e94a1);
+}
+
+.pe-port-flow {
+  position: absolute;
+  inset: 0;
+  border-radius: 1px;
+  background: repeating-linear-gradient(90deg, var(--accent-success, #15803d) 0 6px, transparent 6px 12px);
+  background-size: 12px 2px;
+  animation: pe-port-flow 0.5s linear infinite;
+}
+
+@keyframes pe-port-flow {
+  to { background-position: 12px 0; }
+}
+
+.pe-port-dest {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--weight-medium, 500);
+  color: var(--text-primary, #0f172a);
+}
+
+.pe-port-kind {
+  flex: none;
+  font-family: inherit;
+  font-size: var(--pe-card-fs-sm, 11.5px);
+  color: var(--text-muted, #64748b);
+}
+
+.pe-port-line {
+  flex: 1 1 auto;
+  margin-left: auto;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--pe-card-fs-sm, 11.5px);
+  color: var(--text-muted, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+
+/* waiting — the destination's connection is not held yet: amber, still. */
+.pe-port-waiting .pe-port-stub {
+  background: var(--accent-warning, #b45309);
+}
+
+.pe-port-waiting .pe-port-stub::after {
+  border-color: var(--accent-warning, #b45309);
+  background: var(--accent-warning-bg, #fef3c7);
+}
+
+.pe-port-waiting .pe-port-line {
+  color: var(--accent-warning, #b45309);
+}
+
+/* writing — the measured write: the success accent, the flow on the stub, the dot filled. */
+.pe-port-writing .pe-port-stub {
+  background: var(--accent-success-bg, #dcfce7);
+}
+
+.pe-port-writing .pe-port-stub::after,
+.pe-port-finalizing .pe-port-stub::after,
+.pe-port-combined .pe-port-stub::after {
+  border-color: var(--accent-success, #15803d);
+  background: var(--accent-success, #15803d);
+}
+
+.pe-port-writing .pe-port-line,
+.pe-port-finalizing .pe-port-line {
+  color: var(--accent-success, #15803d);
+}
+
+/* finalizing / combined (CTAS — the write is inside the statement): a soft ring pulse on
+   the dot, no flow — nothing is streaming, something is being made durable. */
+.pe-port-finalizing .pe-port-stub::after,
+.pe-port-combined .pe-port-stub::after {
+  box-shadow: 0 0 0 3px var(--accent-success-bg, #dcfce7);
+  animation: pe-pulse 1.2s ease-in-out infinite;
+}
+
+/* done — the stub rests in the done stroke; ONE settle ring so a short write registers. */
+.pe-port-done .pe-port-stub {
+  background: var(--edge-done, #15803d);
+}
+
+.pe-port-done .pe-port-stub::after {
+  border-color: var(--accent-success, #15803d);
+  background: var(--accent-success, #15803d);
+  animation: pe-port-settle 0.7s ease-out 1;
+}
+
+@keyframes pe-port-settle {
+  0% { box-shadow: 0 0 0 0 var(--accent-success-bg, #dcfce7); }
+  60% { box-shadow: 0 0 0 7px var(--accent-success-bg, #dcfce7); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.pe-port-failed .pe-port-stub,
+.pe-port-failed .pe-port-stub::after {
+  background: var(--accent-danger, #dc2626);
+  border-color: var(--accent-danger, #dc2626);
+}
+
+.pe-port-failed .pe-port-line {
+  color: var(--accent-danger, #dc2626);
+}
+
+.pe-port-aborted {
+  opacity: 0.7;
+}
+
+.pe-port-aborted .pe-port-stub::after {
+  border-color: var(--accent-warning, #b45309);
+}
+
+/* stale — the stream is gone: the last words stand, nothing moves, the row dims. */
+.pe-port-stale .pe-port-stub::after,
+.pe-card-stale .pe-card-state i,
+.pe-card-stale .pe-card-progress i {
+  animation: none !important;
+  box-shadow: none;
+}
+
+.pe-port-stale .pe-port-line {
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+}
+
 /* ---- Execution boundary markers (150) ----
  * View-only Start and End pills, derived from the graph — never authored, never
  * executable, nothing to open. Distinct from a card ON PURPOSE: opaque pill with
@@ -955,6 +1207,8 @@
 @media (prefers-reduced-motion: reduce) {
   .pe-card-state i,
   .pe-card-progress i,
+  .pe-port-flow,
+  .pe-port-stub::after,
   .pe-status-dot {
     animation: none !important;
   }

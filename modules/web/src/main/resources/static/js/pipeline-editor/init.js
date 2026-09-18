@@ -246,6 +246,25 @@
             }
           });
 
+          // 151 (#127): a tap on an ARROW says what it means — in the live region, and
+          // by selecting the node that waits (its Details carry the Depends on row).
+          // Boundary connectors have no authored target to select; they announce alone.
+          self.cy.on("tap", "edge", function (evt) {
+            var e = evt.target;
+            var kind = e.data("kind");
+            if (kind === "boundary") {
+              var side = e.data("side") === "end" ? "end" : "start";
+              announceStatus(
+                side === "start"
+                  ? e.target().id() + " can start as soon as the execution starts — a boundary, not a transfer"
+                  : "the execution ends after " + e.source().id() + " — a boundary, not a transfer",
+              );
+              return;
+            }
+            announceStatus(self.edgeDescription(e.source().id(), e.target().id()));
+            self.selectNodeById(e.target().id(), false);
+          });
+
           // 076 §B: the boosted-swap teardown reaches the live component through
           // this handle (wireBoostLifecycle below).
           window.__peInstance = self;
@@ -467,6 +486,12 @@
         // "Default" names where the number comes from when the node declares none: an author
         // debugging a `pipeline.node.timeout` needs to know whether THIS node set the budget.
         rows.push(["Timeout", self.nodeTimeoutText(node)]);
+        // 151 (#127): the node's ORDERINGS in words — what it waits for (each with its
+        // state) and what waits for it. These are the arrows, read without the canvas;
+        // no count belongs on either row, because an arrow is never a transfer.
+        var waits = self.dependencyRows(node);
+        if (waits.dependsOn) rows.push(["Depends on", waits.dependsOn]);
+        if (waits.requiredBy) rows.push(["Required by", waits.requiredBy]);
         var state = self.nodeStates[node.id];
         if (state && state !== "idle") rows.push(["Last run", state]);
         // 149: the measured operation — what the node is doing (or did), where its output
@@ -475,6 +500,44 @@
         // "Commit not observed", never "Committed"; there is no percentage to show.
         self.operationRows(node.id).forEach(function (row) { rows.push(row); });
         return rows;
+      },
+
+      /**
+       * 151: the state word for a dependency's SOURCE, in the footer's vocabulary — an
+       * ordering is met when its source is done, and can never be met once it failed.
+       */
+      dependencyStateWord: function (nodeId) {
+        var WORDS = { idle: "pending", running: "running", success: "done", failed: "failed", aborted: "aborted" };
+        return WORDS[this.nodeStates[nodeId] || "idle"] || "pending";
+      },
+
+      /** The Details pane's link rows (151): `Depends on` with states, `Required by` plain. */
+      dependencyRows: function (node) {
+        var self = this;
+        var deps = node.depends_on || [];
+        var dependsOn = deps.length
+          ? deps.map(function (id) { return id + " (" + self.dependencyStateWord(id) + ")"; }).join(" · ")
+          : null;
+        var dependents = (self.nodes || []).filter(function (n) {
+          return (n.depends_on || []).indexOf(node.id) !== -1;
+        }).map(function (n) { return n.id; });
+        return { dependsOn: dependsOn, requiredBy: dependents.length ? dependents.join(" · ") : null };
+      },
+
+      /**
+       * 151: what a tapped arrow MEANS, for the live region — the same sentence whatever
+       * the source's type (a DDL ordering reads exactly like a staged-table one, because
+       * it is the same thing: the target waits for the source to finish).
+       */
+      edgeDescription: function (sourceId, targetId) {
+        var state = this.nodeStates[sourceId] || "idle";
+        var tail;
+        if (state === "failed" || state === "aborted") {
+          tail = sourceId + (state === "failed" ? " failed" : " was aborted") + ", so " + targetId + " cannot start";
+        } else {
+          tail = sourceId + " is " + this.dependencyStateWord(sourceId);
+        }
+        return targetId + " depends on " + sourceId + " — ordering only; " + tail;
       },
 
       /** The Details pane's operation rows for one node (149), from node-ops.js. */

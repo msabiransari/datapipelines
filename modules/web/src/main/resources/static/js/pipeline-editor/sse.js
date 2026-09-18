@@ -454,11 +454,35 @@
     var self = this;
     if (self.connectionLost) return;
     self.connectionLost = true;
+    // 151: nothing about the run is observed from here on — freeze every moving
+    // indicator (pulses, the port's write flow, consumer-running edges) without
+    // rewriting a single state; the recovery poll below may learn the OUTCOME.
+    if (self.editor.graph && typeof self.editor.graph.markStreamLost === "function") {
+      self.editor.graph.markStreamLost();
+    }
     self.editor.setBanner(
       "Connection lost — attempting to recover",
       "connection-lost"
     );
     self.pollExecution();
+  };
+
+  /**
+   * 151: the recovery poll learned how the execution ENDED. Settle the graph the way
+   * the live terminal event would have — the End marker takes the polled outcome, Start
+   * rests, every open operation closes UNOBSERVED through the reducer (149's rule: the
+   * client never saw it end, so its commit is "not observed", never "committed"), and a
+   * failed/aborted outcome sweeps the unfinished nodes exactly as the live
+   * pipeline_failed / execution_aborted do (135). A polled SUCCESS paints no node Done:
+   * no node_completed was observed, and a card is not repainted from an inference.
+   */
+  SseHandler.prototype.settlePolledOutcome = function (outcome) {
+    var self = this;
+    var kind = outcome === "success" ? "pipeline_completed" : outcome === "failed" ? "pipeline_failed" : "execution_aborted";
+    self.reduceOperation(kind, {});
+    if (outcome !== "success") self.abortUnfinishedNodes();
+    self.setMarker("start", "idle");
+    self.setMarker("end", outcome);
   };
 
   SseHandler.prototype.pollExecution = function () {
@@ -491,10 +515,12 @@
         if (status === "completed" || status === "success") {
           self.editor.isExecuting = false;
           if (self.editor.stopRunClock) self.editor.stopRunClock("done");
+          self.settlePolledOutcome("success");
           self.editor.setBanner("Pipeline completed", "success");
         } else if (status === "failed") {
           self.editor.isExecuting = false;
           if (self.editor.stopRunClock) self.editor.stopRunClock("failed");
+          self.settlePolledOutcome("failed");
           // 057: even the degraded recovery path names the CODE — a bare "Pipeline failed"
           // was the exact screen the owner reported (T85). The full record is a click away
           // on the execution page; this banner at least says what failed.
@@ -506,6 +532,7 @@
           // that raced a dropped stream fell through to "Connection lost".
           self.editor.isExecuting = false;
           if (self.editor.stopRunClock) self.editor.stopRunClock("aborted");
+          self.settlePolledOutcome("aborted");
           if (window.DpToast && window.DpToast.show) {
             window.DpToast.show("warning", "Execution aborted", "The execution was aborted");
           }
