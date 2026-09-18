@@ -2060,15 +2060,22 @@ code {
 }
 
 .walk-card {
-  grid-column: 2;
   padding: var(--space-6);
   background: var(--site-surface);
   border: var(--space-px) solid var(--site-hair);
   border-radius: var(--radius-xl);
 }
 
+/* The number-column placement belongs to the WALKTHROUGH grid, not to the card: an
+   unconditional `grid-column: 2` also hit the home knowledge section's `.grid-2`, where it
+   forced an implicit second column below 48rem and squeezed the text beside the card to
+   0px (160). Scoped to the walkthrough here; the card itself carries only its box styles. */
+.walkthrough .walk-card {
+  grid-column: 2;
+}
+
 @media (min-width: 64rem) {
-  .walk-card {
+  .walkthrough .walk-card {
     grid-column: auto;
   }
 }
