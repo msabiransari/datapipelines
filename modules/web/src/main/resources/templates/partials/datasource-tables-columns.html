@@ -1,0 +1,27 @@
+<!-- The TERMINAL level of a discovered-schema datasource's Tables view (162, #156): one table's
+     live columns — name, canonical type, nullability — through the same `SchemaIntrospector`
+     read the REST/MCP introspection surfaces call (datasources.md §7A). Static rows, not
+     buttons: a column has no action on this screen, exactly like a LAKE leaf
+     (`lake-table-tree-level.html`). Unpaged — a table's own column count is naturally bounded,
+     the same reasoning `datasources.md` §7A gives for not capping this read at all. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
+     th:id="${levelId}" class="tpl-level">
+
+  <div th:replace="~{partials/datasource-tables-error :: error}"></div>
+
+  <th:block th:if="${introspectionErrorCode} == null">
+    <div class="ds-empty" th:if="${#lists.isEmpty(columns)}">
+      <p class="ds-empty-title">No readable columns</p>
+    </div>
+
+    <ul class="tpl-tree" th:unless="${#lists.isEmpty(columns)}" role="group" th:attr="aria-label='Columns of ' + ${table}">
+      <li class="tpl-node" role="none" th:each="c : ${columns}">
+        <div class="tpl-leaf tpl-leaf-static">
+          <span class="tpl-label" th:text="${c.column.name}">id</span>
+          <span class="ds-badge ds-badge-default u-mono" th:text="${c.column.type.wire}">INTEGER</span>
+          <span class="ds-badge ds-badge-default" th:if="${c.column.nullable} == true">nullable</span>
+        </div>
+      </li>
+    </ul>
+  </th:block>
+</div>

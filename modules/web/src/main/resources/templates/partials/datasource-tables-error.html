@@ -1,0 +1,15 @@
+<!-- 162 (#156): the inline introspection-failure state every level of the discovered-schema
+     Tables tree includes — an unreachable datasource, or a driver that cannot report its
+     current schema, renders its catalogued §13 code and message HERE, in the pane the reader
+     is already looking at, never a toast (`UiExceptionHandler`'s toast is for actions; this is
+     a read) and never a blank pane or a stack trace (issue #156 fix-wanted §3). Mirrors
+     `execution-error.html`'s code-plus-message badge. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="error">
+  <div class="ds-empty" th:if="${introspectionErrorCode} != null">
+    <div class="app-row-baseline u-wrap u-mb-xs">
+      <span class="ds-badge ds-badge-danger u-mono u-text-xs u-break"
+            th:text="${introspectionErrorCode}">pipeline.execution.datasource_unreachable</span>
+    </div>
+    <p class="ds-empty-description" th:text="${introspectionErrorMessage}">message</p>
+  </div>
+</th:block>

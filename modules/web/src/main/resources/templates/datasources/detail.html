@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<!-- The LAKE datasource detail (089 §A): the dp-lake catalog as a READ-ONLY namespace tree
-     (metadata-db §4.15), on the 058/067 explorer pattern — one tree level per request, no
-     client-side tree assembly. Registration stays REST/MCP-only (R10): there is deliberately
-     no form, no selection and no detail pane here. The shared tpl-* classes are what make the
-     existing explorer CSS and template-explorer.js apply to this tree unchanged. -->
+<!-- The datasource detail — a read-only Tables view for every dialect (162, #156). LAKE shows
+     the dp-lake catalog as a namespace tree (089 §A, metadata-db §4.15); every other dialect
+     shows its live schemas → tables → columns (`partials/datasource-tables-schemas`). Both
+     follow the 058/067 explorer pattern — one tree level per request, no client-side tree
+     assembly — and neither offers a form: LAKE registration stays REST/MCP-only (R10), and
+     introspection has nothing to write. The shared tpl-* classes are what make the existing
+     explorer CSS and template-explorer.js apply to both trees unchanged. -->
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
@@ -28,11 +30,17 @@
     </div>
   </div>
 
-  <p class="u-secondary u-text-sm u-mb-md">
+  <p class="u-secondary u-text-sm u-mb-md" th:if="${datasource.dialect.wire == 'LAKE'}">
     The tables registered in this datasource's catalog, as a read-only tree — each leaf shows its
     format and partition column. Registration and import are agent-first:
     <code>POST /api/v1/datasources/<span th:text="${datasource.name}">name</span>/tables[/import]</code>
     or the <code>lake_tables_*</code> MCP tools.
+  </p>
+  <p class="u-secondary u-text-sm u-mb-md" th:unless="${datasource.dialect.wire == 'LAKE'}">
+    A read-only view of every schema, table and column this datasource can see, read live
+    through the same introspection an authoring agent uses:
+    <code>GET /api/v1/datasources/<span th:text="${datasource.name}">name</span>/schemas</code>.
+    Nothing here writes to the datasource.
   </p>
 
   <!-- 109 §B — the non-secret dialect configuration this row RUNS with (region, unsigned,
@@ -47,11 +55,21 @@
     </div>
   </dl>
 
+  <!-- 162 (#156): the section's own heading, so the reader never confuses the two Tables
+       views — the LAKE registry and a discovered-schema dialect's live introspection — even
+       without comparing the URL to the list's button label. -->
+  <h2 class="ds-title u-mb-sm" th:text="${datasource.dialect.wire == 'LAKE'} ? 'Lake tables' : 'Tables'">Tables</h2>
+
   <div class="tplx-body">
-    <div class="tplx-tree" id="lake-table-tree-pane" data-explorer-pane>
+    <div class="tplx-tree" th:if="${datasource.dialect.wire == 'LAKE'}" id="lake-table-tree-pane" data-explorer-pane>
       <!-- The fragment's own root carries id="lake-table-tree", so the swap target survives
            every refresh — this div is only a placeholder. -->
       <div th:replace="~{partials/lake-table-tree-level :: level}"></div>
+    </div>
+    <div class="tplx-tree" th:unless="${datasource.dialect.wire == 'LAKE'}" id="ds-tables-tree-pane" data-explorer-pane>
+      <!-- The fragment's own root carries id="ds-schemas-root" (or, on a schemaless dialect,
+           the tables level's own id) — this div is only a placeholder. -->
+      <div th:replace="~{partials/datasource-tables-schemas :: fragment}"></div>
     </div>
   </div>
 
