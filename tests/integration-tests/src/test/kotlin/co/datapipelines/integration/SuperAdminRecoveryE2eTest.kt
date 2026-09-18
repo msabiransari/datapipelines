@@ -410,6 +410,33 @@ class SuperAdminRecoveryE2eTest {
         @AfterAll
         fun tearDown() {
             oidc.close()
+            if (seeded) restoreDefaultWorkspace()
+        }
+
+        /**
+         * Leaves the instance the way the next suite expects it: `default` active again and the
+         * two workspaces this suite created deactivated. SharedE2e's Postgres is per JVM, not
+         * per suite, and test 4 ends with `default` deactivated on purpose. In CI's single fork
+         * (`dp.test.forks.e2e=1`, alphabetical class order) every later suite that pins an API
+         * key to `default` without calling E2eClean answered 404 `auth.key_workspace_inactive`
+         * on its first request: run 35287573035 on e6d99e58, TemplateAddressingE2eTest and
+         * TemplatesUpdateGoldenPathE2eTest, 12 failures. The dev-box gate's two forks split the
+         * classes across JVMs, which is why it never saw it (#139).
+         */
+        private fun restoreDefaultWorkspace() {
+            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(
+                        "UPDATE workspaces SET deactivated_at = NOW(), deactivated_by = NULL" +
+                            " WHERE name IN ('recovery-ws', 'browser-ws') AND deactivated_at IS NULL",
+                    )
+                    val restored =
+                        statement.executeUpdate(
+                            "UPDATE workspaces SET deactivated_at = NULL, deactivated_by = NULL WHERE id = '$WS_DEFAULT'",
+                        )
+                    check(restored == 1) { "could not restore the default workspace (rows=$restored)" }
+                }
+            }
         }
     }
 }
