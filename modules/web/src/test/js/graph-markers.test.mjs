@@ -357,18 +357,21 @@ test("focus survives the disc's re-render: the replacement disc is focused when 
     assert.equal(h.observers.observeCalls, 1, "watching the canvas for the re-render once a disc has focus");
     assert.deepEqual(h.observed().opts, { childList: true, subtree: true });
     // The re-render: focusout fires with the old disc STILL connected (measured on Chrome
-    // 2026-09-17), then the swap detaches it, focus falls to <body>, the observer fires.
+    // 2026-09-17), then the swap detaches it, focus falls to <body>, the observer fires —
+    // and its restore is DEFERRED behind the focusout's own classification (below).
     h.container.listeners.focusout({ target: old, relatedTarget: null });
     old.isConnected = false;
     h.doc.activeElement = h.doc.body;
     const fresh = h.disc("__execution_start__");
     h.mutate();
+    assert.equal(fresh.focused, 0, "nothing synchronous: the restore waits one tick for the focusout to be classified");
+    h.flushTimers();
     assert.equal(fresh.focused, 1, "the replacement disc took the focus back");
     assert.equal(h.doc.activeElement, fresh);
-    h.flushTimers();
     assert.equal(h.observers.disconnectCalls, 0, "the deferred focusout check saw a removed disc and kept watching");
     // A later re-render while focus is still on the disc: nothing to do.
     h.mutate();
+    h.flushTimers();
     assert.equal(fresh.focused, 1, "focus already on the disc — not re-focused");
   } finally {
     h.restore();
@@ -392,17 +395,36 @@ test("focus that moved on purpose is respected: a genuine blur stops the keeper,
     old.isConnected = false;
     const fresh = h.disc("__execution_start__");
     h.mutate();
+    h.flushTimers();
     assert.equal(fresh.focused, 0, "no focus theft after a deliberate move");
     assert.equal(h.doc.activeElement, elsewhere);
-    // And with focus on <body> after a click on the canvas (a genuine blur too): still nothing.
+    // A mouse click on a CARD while the disc has focus — the order the browser runs it in:
+    // the mousedown listeners first (Cytoscape activates the card, the html-label QUEUES that
+    // card's re-render), then the focus change (focus on <body>, the disc's focusout QUEUES
+    // its classification), then the re-render timer runs and its mutation reaches the
+    // observer — with the classification still pending. A synchronous restore here would
+    // pull focus back to the disc; the deferred one lands behind the classification.
     const again = h.disc("__execution_start__");
     again.focus();
-    h.container.listeners.focusout({ target: again, relatedTarget: null });
+    h.doc.activeElement = h.doc.body;
+    h.container.listeners.focusout({ target: again, relatedTarget: null }); // classification queued
+    h.mutate(); // the other card's re-render: the observer fires now, focus is on <body>
+    assert.equal(h.doc.activeElement, h.doc.body, "nothing synchronous in the observer");
+    h.flushTimers(); // the classification runs first (queued first), then the restore finds nothing to do
+    assert.equal(again.focused, 1, "no focus theft: the click on the canvas blurred a still-connected disc");
+    assert.equal(fresh.focused, 0);
+    assert.equal(h.doc.activeElement, h.doc.body);
+    assert.equal(h.observers.disconnectCalls, 2, "the keeper stopped");
+    // And the plain canvas-click case, classified before any re-render: still nothing.
+    const third = h.disc("__execution_start__");
+    third.focus();
+    h.container.listeners.focusout({ target: third, relatedTarget: null });
     h.doc.activeElement = h.doc.body;
     h.flushTimers();
-    again.isConnected = false;
+    third.isConnected = false;
     const newer = h.disc("__execution_start__");
     h.mutate();
+    h.flushTimers();
     assert.equal(newer.focused, 0, "the canvas click blurred the disc while it was still connected — no restore");
   } finally {
     h.restore();

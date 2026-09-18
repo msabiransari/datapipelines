@@ -1889,8 +1889,13 @@
    * when it moved somewhere on purpose. Chrome fires focusout for the removal too, with the
    * old disc STILL connected during the event (measured 2026-09-17), so a focusout is
    * classified one tick later: a disc that is gone by then was re-rendered (keep watching);
-   * one still connected was a real blur (Tab, a click elsewhere — stop). Inert where there
-   * is no MutationObserver (node --test).
+   * one still connected was a real blur (Tab, a click elsewhere — stop). The restore itself
+   * is deferred one tick as well, and for an ordering reason: a mouse click on a card runs
+   * the mousedown listeners (Cytoscape activates that card, the html-label queues its
+   * re-render) BEFORE the focus change (the disc's focusout queues its classification), so
+   * the re-render's mutation reaches the observer with focus already on <body> and the
+   * classification still pending — a synchronous restore would pull focus back to the disc
+   * after every click on the canvas. Inert where there is no MutationObserver (node --test).
    */
   PipelineGraph.prototype.keepMarkerFocus = function (container) {
     if (typeof MutationObserver !== "function" || typeof document === "undefined") return;
@@ -1898,7 +1903,9 @@
     var discOf = function (target) {
       return target && typeof target.closest === "function" ? target.closest("[data-marker-run]") : null;
     };
-    var observer = new MutationObserver(function () {
+    var restorePending = false;
+    var restore = function () {
+      restorePending = false;
       if (!focusedId) return;
       var active = document.activeElement;
       if (active && active !== document.body) return;
@@ -1909,6 +1916,11 @@
           return;
         }
       }
+    };
+    var observer = new MutationObserver(function () {
+      if (!focusedId || restorePending) return;
+      restorePending = true;
+      setTimeout(restore, 0);
     });
     container.addEventListener("focusin", function (evt) {
       var disc = discOf(evt.target);
