@@ -4,6 +4,7 @@ import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -27,6 +28,13 @@ import java.nio.file.Paths
  * is to make one happen. Screenshots join `build/reports/151-screenshots/`.
  */
 class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
+    /**
+     * #150: the guard samples the lease wait on a 30 ms poll and requires one poll to land inside
+     * the window where one port waits while the other writes. It failed on CI's 2-vCPU runner
+     * (run 35303693520 on 77f5a11e) and on a loaded dev box, and passes alone; disabled until it
+     * synchronises on the port-state events instead of time (issue #150 has the poll evidence).
+     */
+    @Disabled("#150: samples a 30 ms window; red on CI's runner and under load, green alone")
     @Test
     fun `with one staging connection two writers take turns and the waiting port says so`() {
         startTrace()
