@@ -186,7 +186,18 @@ if [[ $COMPOSE_PROJECT != dp && -z ${APP_HOST_PORT:-} ]]; then
 fi
 APP_HOST_PORT="${APP_HOST_PORT:-8080}"
 export APP_HOST_PORT
-APP_URL="http://localhost:${APP_HOST_PORT}"
+# APP_HOST_PORT is Compose's published-port form: a bare port (`8080`) or a bind
+# address with a port (`127.0.0.1:8080`, the edge deployment's loopback-only form —
+# caddy SETUP.md §3). The health probe needs a host and a port, not the raw string:
+# `http://localhost:127.0.0.1:8080` was never a URL, and every loopback-bound start
+# sat at "still booting" for the whole HEALTH_WAIT_SECONDS with a healthy app (#163).
+if [[ $APP_HOST_PORT == *:* ]]; then
+  APP_HOST="${APP_HOST_PORT%:*}"; APP_PORT="${APP_HOST_PORT##*:}"
+  [[ $APP_HOST == 0.0.0.0 || $APP_HOST == "[::]" || -z $APP_HOST ]] && APP_HOST=localhost
+else
+  APP_HOST=localhost; APP_PORT="$APP_HOST_PORT"
+fi
+APP_URL="http://${APP_HOST}:${APP_PORT}"
 HEALTH_URL="${APP_URL}/health"
 
 # The image tag follows the compose project (default "dp"): a hardcoded single tag
