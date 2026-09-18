@@ -748,6 +748,8 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 
 Content: table of the ACTIVE workspace's datasources (name + `readonly` badge, dialect badge, workspace column — `global` or the bound name, URL, username, **last test**). Per-row "Test" button (`author` scope) → connection result as a §5.1 Notifications toast; the table itself is never re-rendered mid-interaction. "Register Datasource" button → modal form with: name, display name, dialect dropdown, JDBC URL, username, password, description, and two checkboxes — `readonly` (always settable, [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)) and `global` (**admin-only; visible-disabled for everyone else**, workspaces D8: unchecked binds to the active workspace). The register action applies the SAME D8 rules as REST §9.1 (`DatasourceWorkspaceRules` — one component, two surfaces) and crosses the same registry save boundary. A register REFUSAL stays inline in the modal (the screen-local `htmx:responseError` path — the modal must not close over an error, so it deliberately carries no `HX-Retarget`).
 
+**The Tables column (162, #156).** Every row carries a link to the detail page — "Lake tables" for a LAKE datasource (its registered catalog, [§4.5c](#45c-datasource-detail--a-read-only-tables-view-162-156)), "Tables" for every other dialect (its live schemas → tables → columns, same section). It is `data-read`, not `data-verb` — a viewer's row renders it exactly like every other row, the same [Datasource learned facts](#45b-datasource-learned-facts-118) precedent.
+
 **The Last test column (061/T84).** Each row shows the outcome of the LAST connection test against that datasource ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)): a `ds-badge-success` **ok** or `ds-badge-danger` **failed** badge, the timestamp, and the driver's message in the cell's `title`. A datasource nobody has probed says **never tested** rather than rendering blank, because an empty cell on a health column reads as health. This column exists because LISTING a datasource does not connect to it: on 2026-09-02 this screen showed `sample-trips` as fine while every demo pipeline failed at CONNECT with `password authentication failed` — the screen could be silent but not wrong. Nothing on this screen polls; the column shows what the last test (the Test button, the REST probe, or the startup bootstrap check) found.
 
 The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-bound + global, repository-level); a datasource bound to another workspace is absent, and its by-name test behaves as not-found. Rename is not offered — a datasource name is immutable (delete + re-create, blocked while referenced — including by a HISTORICAL pipeline version, [Datasources §6.2](datasources.md#62-in-use-check-on-delete)). The search covers every column the table renders (the §5.1 Search rule): name and the `readonly` badge, the dialect wire value, the workspace column (the bound name or the literal `global`), the JDBC URL, the username, and the last-test state (`ok` / `failed` / `never tested`, so "show me the broken ones" is a search) — plus `description`, searchable though only the modal shows it.
@@ -804,7 +806,7 @@ Every grant and revoke is audited (`datasource.granted` / `datasource.revoked`),
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /partials/datasources/{name}/facts` (a dialog into `#ds-dialog`); the same table inline on the LAKE datasource detail page (`GET /datasources/{name}`, the 089 §A catalog tree — not separately catalogued here) |
+| URL | `GET /partials/datasources/{name}/facts` (a dialog into `#ds-dialog`); the same table inline on every datasource's detail page (`GET /datasources/{name}`, [§4.5c](#45c-datasource-detail--a-read-only-tables-view-162-156)) |
 | Auth required | Yes — any member (`READ_RESOURCES`): the facts are a READ, and which rows a workspace sees is the store's own predicate, not the screen's |
 | Purpose | Show what agents LEARNED about a datasource that its schema could not say — units, time zones, sampling, grain, what coded values mean, joins, caveats — with trust badges ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §7.3) |
 | Design primitives | `.u-backdrop`, `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-empty` |
@@ -813,6 +815,31 @@ Every grant and revoke is audited (`datasource.granted` / `datasource.revoked`),
 **Read-only in round 1.** One row per fact, oldest first: the OBJECT it is about (`schema.table.column`), the kind badge (plus a `workspace` badge on a WORKSPACE-scope fact — one organisation's meaning, D-S1), the fact text (plus a `conflict` badge when another live fact of the same kind sits on the same refs — D-S5: both shown, neither wins), the TRUST badge — `observed`/`verified` success, `needs_review` warning, `stale` danger, `asserted` default — with the drift message under it when the read-time check demoted it (§6: "column X no longer exists"), the evidence summary (or "none — asserted"), and the provenance: when, through what (`mcp`/`session`/`api_key`), a `via another workspace` badge when the active workspace did not record it, and the source pipeline as a link ONLY when this workspace can read it (D-S9). Recording, verifying and retiring from the UI are round 2; the empty state says so and names the verbs that exist today (the `semantics_*` MCP tools).
 
 **Rendered for.** The row's **Facts** button is every member's — it is `data-read`, not `data-verb`, because a viewer's datasources screen renders no verbs (§4.3e) and this button changes nothing, exactly like the LAKE row's **Tables** link. The dialog and the detail section render the same fragment (`partials/datasource-facts`) from the same model (`DatasourceFactsModel`), so the two cannot drift. An invisible datasource answers the inline refusal an unknown name gets (the §5.3 gate, before the service runs).
+
+### 4.5c Datasource detail — a read-only Tables view (162, #156)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /datasources/{name}` |
+| Auth required | Yes — any member (`READ_RESOURCES`): a viewer may read, the same floor as the list |
+| Purpose | Show every datasource's tables, and every discovered-schema dialect's columns, read-only |
+| Design primitives | `.tpl-tree`, `.tpl-level`, `.tpl-folder`, `.tpl-leaf`, `.ds-badge`, `.ds-empty` — the 058/067 explorer's shared classes |
+| JS | `template-explorer.js` (unchanged: the `<details>`/`<summary>` disclosure and keyboard nav it already drives) |
+| htmx | Yes — one level per request, `hx-trigger="click once"`, `hx-target="next .tpl-level"`, `outerHTML` — the same lazy-per-level contract as the LAKE tree below |
+
+Until this round the detail route served only LAKE; every other dialect's row had no Tables button and no detail page at all. Now every visible datasource has one, and the SAME page branches on dialect:
+
+**LAKE** keeps its round-089 registry tree exactly as before: the dp-lake catalog's registered tables as a read-only namespace tree, one level per request, format and partition-column badges on each leaf, no selection and no form (registration is REST/MCP-only, R10). The section heading and the list's button both read **"Lake tables"**.
+
+**Every other dialect** gets a NEW tree, live through [`SchemaIntrospector`](datasources.md#7a-schema-introspection) — the same read the REST `/api/v1/datasources/{name}/schemas|tables|columns` endpoints and the `datasources_get_schemas/get_tables/get_columns` MCP tools use, called directly rather than through those `author`-scoped surfaces (a viewer may read this screen). The section heading and the list's button both read **"Tables"**. Three levels, at most:
+
+1. **Schemas**, as namespace folders — omitted entirely on a schemaless dialect (SQLite): the root level IS the tables level, the introspector's own "an empty schemas list is not an error" answer.
+2. **Tables**, one schema's own (or, on a schemaless dialect, the whole datasource's), paged 25 at a time exactly like the list itself; each row shows its raw JDBC type (`TABLE`, `VIEW`, …) and expands into its own columns level. Unlike a LAKE namespace folder (which cannot be empty — it is derived from the child that produced it), a real schema can hold zero tables, and renders that as its own empty state.
+3. **Columns** of one table — name, canonical type, nullability — unpaged, static rows with no action (a column has no verb on this screen, exactly like a LAKE leaf).
+
+**A failed introspection** (an unreachable datasource, a driver that cannot report its current schema for an unqualified columns read) renders the catalogued §13 code and message INLINE, in the level that failed — never a blank pane, never a stack trace, and never a toast: a toast is for an ACTION that failed, and this is a read the person is already looking at.
+
+**Rendered for.** Read-only by construction on every dialect: no `data-verb` anywhere in the tree, the same role floor as the list itself (a viewer may open it). The list's **Tables**/**Lake tables** button is `data-read`, exactly like the Facts button above. An invisible or unknown datasource name redirects to the listing, on every route this section adds.
 
 ### 4.6 Template List (the template EXPLORER — tree left, selected template right)
 
