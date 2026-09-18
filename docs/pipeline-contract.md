@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.23 (revised — see Change Log)
+**Status:** v1.24 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-17
