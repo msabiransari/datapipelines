@@ -201,8 +201,13 @@ class ApiErrorCatalogSpecDriftTest {
          * 177 → 178 with 140 (release checks): the one `pipeline.check.*` row of the new
          * §13.17, landed in the SAME commit as its constant and its catalog row. Re-derived
          * from the document's own parse.
+         *
+         * 178 → 179 with 158 (#129, the all-refused lake registry): §13.8 gains
+         * `datasource.validation.lake_no_healthy_tables` (400 — the family default, so no
+         * catalog row), landed in the SAME commit as its `DatasourceErrorCodes` constant.
+         * Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 178
+        const val SECTION_13_ROW_COUNT = 179
 
         /**
          * §12's distinct validation codes.

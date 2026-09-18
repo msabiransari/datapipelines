@@ -4,6 +4,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -175,6 +176,73 @@ class LakeViewStatementsTest {
     }
 
     // ----------------------------------------------------------------- 089 §F: the iceberg loads
+
+    // -------------------------------------- 158 (#129): planForTables' search-path postlude
+
+    @Test
+    fun `an all-refused single-namespace registry emits no schema and no search path`() {
+        // #129: the old rule emitted `SET search_path = 'a.b.c'` although no CREATE SCHEMA
+        // could ever run for an unmappable namespace — every physical connection then failed
+        // the postlude and the pool build died. The postlude now names only a namespace whose
+        // schema the prelude actually created.
+        val plan =
+            LakeViewStatements.planForTables(
+                listOf(table(listOf("a", "b", "c"), "unmappable")),
+                lake,
+            )
+
+        assertAll(
+            { plan.prelude shouldBe emptyList() },
+            { plan.postlude shouldBe emptyList() },
+            { plan.views.single().sql shouldBe null },
+            {
+                plan.views
+                    .single()
+                    .emissionError
+                    .shouldNotBeNull() shouldContain "3-segment namespace"
+            },
+        )
+    }
+
+    @Test
+    fun `a healthy-plus-refused single namespace keeps its search path - unchanged`() {
+        val plan =
+            LakeViewStatements.planForTables(
+                listOf(
+                    table(listOf("nyc", "mobility"), "trips"),
+                    table(listOf("nyc", "mobility"), "bad", location = "https://evil.example/x"),
+                ),
+                lake,
+            )
+
+        assertAll(
+            { plan.postlude shouldContainExactly listOf("SET search_path = 'nyc.mobility'") },
+            { plan.prelude.any { it.startsWith("CREATE SCHEMA") } shouldBe true },
+        )
+    }
+
+    @Test
+    fun `two namespaces with one fully refused still emit no search path - bare names stay ambiguous`() {
+        // The count reads ALL registered namespaces: the refused one disappearing would
+        // silently make the healthy namespace the bare-name default.
+        val plan =
+            LakeViewStatements.planForTables(
+                listOf(
+                    table(listOf("nyc"), "trips"),
+                    table(listOf("a", "b", "c"), "unmappable"),
+                ),
+                lake,
+            )
+
+        plan.postlude shouldBe emptyList()
+    }
+
+    @Test
+    fun `a single healthy namespace keeps its search path`() {
+        val plan = LakeViewStatements.planForTables(listOf(table(listOf("nyc"), "trips")), lake)
+
+        plan.postlude shouldContainExactly listOf("SET search_path = 'nyc'")
+    }
 
     @Test
     fun `an iceberg table prepends INSTALL and LOAD iceberg when no extension directory is set`() {

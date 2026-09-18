@@ -236,20 +236,35 @@ class LakeInstanceLifecycleIntegrationTest {
 
     @Test
     fun `a pool whose first physical connection fails leaves no owner behind`() {
-        // Pre-existing edge (#129), used here as the deterministic trigger: a single-namespace registry
-        // whose ONLY table is emission-refused creates no schema but still emits the search-path
-        // postlude, so the session init of the first physical connection fails and Hikari's
-        // fail-fast construction throws — after the owner was opened. The build must close it.
-        val trips = parquet("trips.parquet", "SELECT 1 AS id")
-        val rows = listOf(table("unmappable", trips, namespace = listOf("a", "b", "c")))
+        // The deterministic trigger is a session init the engine refuses: a search path naming
+        // a schema that does not exist (the engine answers `No catalog + schema named …`).
+        // Pre-#129 `planForTables` itself produced such a postlude for an all-refused
+        // single-namespace registry; with that fixed the plan is hand-built — what this test
+        // pins is the owner-cleanup rule for a failed first connection, not the generator.
+        val plan =
+            LakeViewPlan(
+                prelude = emptyList(),
+                views = emptyList(),
+                postlude = listOf("SET search_path = 'missing.missing'"),
+            )
+        val manager =
+            ConnectionPoolManager(
+                poolFactory = { datasource ->
+                    ConnectionPoolManager.buildHikariPool(
+                        datasource,
+                        lakeViews =
+                            LakeViewInit(datasource.name, plan, LakeViewOutcomeRecorder.NONE),
+                    )
+                },
+            )
 
         val lifecycle =
             capturingLogs {
-                poolManager({ rows }).use { manager ->
+                manager.use {
                     val failure = shouldThrow<Exception> { manager.poolFor(lakeDatasource("lake_first_fails")) }
                     assertAll(
-                        // The postlude `SET search_path = 'a.b.c'` is what the engine refuses.
-                        { rootMessage(failure) shouldContain "Too many dots" },
+                        // The session init `SET search_path = 'missing.missing'` is what the engine refuses.
+                        { rootMessage(failure) shouldContain "No catalog + schema named" },
                         { manager.hasPool("lake_first_fails") shouldBe false },
                     )
                 }

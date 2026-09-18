@@ -7,6 +7,7 @@ import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.LakeViewInit
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
 import java.sql.SQLException
@@ -155,19 +156,76 @@ class DefaultDatasourceRegistry(
         if (datasource.dialect != Dialect.LAKE) return null
         val tables = lakeTables.registeredTables(datasource.name)
         if (tables.isEmpty()) return null
+        val plan =
+            LakeViewStatements.planForTables(
+                tables,
+                DialectAdapters.forDialect(datasource.dialect),
+                // 089 §F: a registered Iceberg table prepends the iceberg extension loads,
+                // honoring §D's bundled-directory mode — the adapter's catalog.kind-keyed
+                // list cannot see the registry; this seam can.
+                duckdbExtensionDirectory,
+            )
+        refuseAllRefusedRegistry(datasource.name, plan)
         return LakeViewInit(
             datasourceName = datasource.name,
-            plan =
-                LakeViewStatements.planForTables(
-                    tables,
-                    DialectAdapters.forDialect(datasource.dialect),
-                    // 089 §F: a registered Iceberg table prepends the iceberg extension loads,
-                    // honoring §D's bundled-directory mode — the adapter's catalog.kind-keyed
-                    // list cannot see the registry; this seam can.
-                    duckdbExtensionDirectory,
-                ),
+            plan = plan,
             recorder = { name, namespace, table, error -> lakeViewRecorder.record(name, namespace, table, error) },
         )
+    }
+
+    /**
+     * 158 (#129) — the refuse-at-the-entry-point half of the all-refused registry: when EVERY
+     * registered table was emission-refused, no view and no schema exists and the search-path
+     * postlude is empty ([LakeViewStatements.planForTables] emits it only for a healthy
+     * namespace), so a built pool would serve nothing and say why nowhere. Instead each refusal
+     * is recorded on its registry row (the operator's per-table answer, transition-guarded
+     * against the row the plan was built from) and the pool build is refused with the
+     * catalogued [DatasourceErrorCodes.LAKE_NO_HEALTHY_TABLES] naming every table and its
+     * reason — the same all-tables-down signal the dangling postlude used to deliver as a
+     * cryptic engine error on the first physical connection, now actionable and recorded.
+     * A PARTIAL refusal still builds: 109 §A's per-table isolation is exactly that case.
+     */
+    private fun refuseAllRefusedRegistry(
+        datasourceName: String,
+        plan: LakeViewPlan,
+    ) {
+        val refused = plan.views.filter { it.sql == null }
+        if (refused.size != plan.views.size) return
+        refused.forEach { view ->
+            if (view.table.lastError != view.emissionError) {
+                recordRefusal(datasourceName, view)
+            }
+        }
+        throw DatapipelinesException(
+            DatasourceErrorCodes.LAKE_NO_HEALTHY_TABLES,
+            "Lake datasource '$datasourceName' cannot build a pool: every registered table was refused " +
+                "at the SQL-emission boundary — " +
+                refused.joinToString("; ") { "${it.qualifiedName}: ${it.emissionError}" } +
+                ". Repair or unregister the named tables; the pool builds when at least one table's view can be emitted.",
+            mapOf(
+                "datasource" to datasourceName,
+                "refused_tables" to refused.map { it.qualifiedName },
+            ),
+        )
+    }
+
+    /** One refusal's bookkeeping write: the recorder is an injected seam — its fault must not mask the refusal itself. */
+    @Suppress("TooGenericExceptionCaught")
+    private fun recordRefusal(
+        datasourceName: String,
+        view: LakeViewPlan.View,
+    ) {
+        try {
+            lakeViewRecorder.record(datasourceName, view.table.namespace, view.table.name, view.emissionError)
+        } catch (e: RuntimeException) {
+            log.warn(
+                "event=lake.view_outcome_record_failed datasource={} table={} error=\"{}\" " +
+                    "message=\"the emission refusal could not be recorded; the pool build is refused regardless\"",
+                datasourceName,
+                view.qualifiedName,
+                e.message,
+            )
+        }
     }
 
     /**

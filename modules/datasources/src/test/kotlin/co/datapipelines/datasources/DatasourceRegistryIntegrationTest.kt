@@ -7,14 +7,17 @@ import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.api.assertAll
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 
@@ -59,6 +62,8 @@ class DatasourceRegistryIntegrationTest {
         references: DatasourceReferences = DatasourceReferences.NONE,
         auditSink: DatasourceAuditSink = DatasourceAuditSink.NONE,
         invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
+        lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
+        lakeViewRecorder: LakeViewOutcomeRecorder = LakeViewOutcomeRecorder.NONE,
     ): DefaultDatasourceRegistry =
         DefaultDatasourceRegistry(
             DatasourceRepository(jdbc),
@@ -66,6 +71,8 @@ class DatasourceRegistryIntegrationTest {
             references = references,
             auditSink = auditSink,
             invalidation = invalidation,
+            lakeTables = lakeTables,
+            lakeViewRecorder = lakeViewRecorder,
         )
 
     @Test
@@ -104,6 +111,104 @@ class DatasourceRegistryIntegrationTest {
                 }
             }
         }
+    }
+
+    // ------------------ 158 (#129): the all-refused LAKE registry refuses the pool build
+
+    @Test
+    fun `an all-refused lake registry refuses the pool build - catalogued, and recorded per table`() {
+        // #129: every registered table emission-refused means no schema, no view and (now) no
+        // search path — a built pool would serve nothing. The registry records each refusal on
+        // its row and refuses the build with the catalogued, actionable error instead.
+        val recorded = mutableListOf<Pair<String, String?>>()
+        val registry =
+            registry(
+                lakeTables =
+                    LakeTableCatalog {
+                        listOf(
+                            LakeRegisteredTable(listOf("a", "b", "c"), "unmappable", "parquet", "s3://b/t.parquet"),
+                            LakeRegisteredTable(listOf("nyc"), "badlocation", "parquet", "https://evil.example/x.parquet"),
+                        )
+                    },
+                lakeViewRecorder =
+                    LakeViewOutcomeRecorder { _, namespace, table, error ->
+                        recorded += (namespace + table).joinToString(".") to error
+                    },
+            )
+        registry.save(
+            Datasource(
+                name = "lake_all_refused",
+                displayName = "Lake",
+                dialect = Dialect.LAKE,
+                jdbcUrl = "jdbc:duckdb::memory:",
+                credentialKind = CredentialKind.NONE,
+            ),
+            owner,
+        )
+
+        val failure =
+            shouldThrow<DatapipelinesException> {
+                registry.poolFor(registry.get("lake_all_refused").shouldNotBeNull())
+            }
+
+        assertAll(
+            { failure.code shouldBe DatasourceErrorCodes.LAKE_NO_HEALTHY_TABLES },
+            { failure.message.shouldNotBeNull() shouldContain "a.b.c.unmappable" },
+            { failure.message.shouldNotBeNull() shouldContain "nyc.badlocation" },
+            { failure.message.shouldNotBeNull() shouldContain "3-segment namespace" },
+            // Both refusals were recorded on their rows before the refusal was raised.
+            { recorded.map { it.first } shouldContainExactlyInAnyOrder listOf("a.b.c.unmappable", "nyc.badlocation") },
+            { recorded.all { it.second != null } shouldBe true },
+        )
+    }
+
+    @Test
+    fun `a partially refused lake registry still builds - per-table isolation is exactly that case`() {
+        val recorded = mutableListOf<Pair<String, String?>>()
+        val trips =
+            java.io.File.createTempFile("trips", ".parquet").apply {
+                deleteOnExit()
+                java.sql.DriverManager.getConnection("jdbc:duckdb:").use { connection ->
+                    connection.createStatement().use {
+                        it.execute("COPY (SELECT 1 AS id) TO '$absolutePath' (FORMAT PARQUET)")
+                    }
+                }
+            }
+        val registry =
+            registry(
+                lakeTables =
+                    LakeTableCatalog {
+                        listOf(
+                            LakeRegisteredTable(listOf("nyc"), "trips", "parquet", "file://${trips.absolutePath}"),
+                            LakeRegisteredTable(listOf("a", "b", "c"), "unmappable", "parquet", "s3://b/t.parquet"),
+                        )
+                    },
+                lakeViewRecorder =
+                    LakeViewOutcomeRecorder { _, namespace, table, error ->
+                        recorded += (namespace + table).joinToString(".") to error
+                    },
+            )
+        registry.save(
+            Datasource(
+                name = "lake_partial",
+                displayName = "Lake",
+                dialect = Dialect.LAKE,
+                jdbcUrl = "jdbc:duckdb::memory:",
+                credentialKind = CredentialKind.NONE,
+            ),
+            owner,
+        )
+
+        // Two namespaces → no search path; the healthy table answers qualified.
+        registry.poolFor(registry.get("lake_partial").shouldNotBeNull()).leaseConnection().use { connection ->
+            connection.createStatement().use { st ->
+                st.executeQuery("SELECT count(*) FROM \"nyc\".\"trips\"").use { rs ->
+                    rs.next() shouldBe true
+                    rs.getInt(1) shouldBe 1
+                }
+            }
+        }
+        recorded.map { it.first } shouldContainExactlyInAnyOrder listOf("a.b.c.unmappable")
     }
 
     // ------------------ readonly flag (workspaces design §6; writable via the D8-gated save since the surfaces slice)
