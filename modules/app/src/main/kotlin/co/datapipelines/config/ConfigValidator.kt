@@ -773,6 +773,9 @@ class ConfigValidator(
         }
 
         /** Reads the snapshot out of the live [Environment] (relaxed binding, per module keys). */
+        // A flat property-by-property mapping onto every §7-checked key, not complex logic — the
+        // same shape SecurityConfig.kt and PipelineExecutor.kt already suppress this rule for.
+        @Suppress("LongMethod")
         internal fun snapshotFrom(environment: Environment): ConfigSnapshot =
             ConfigSnapshot(
                 datasourceUrl = environment.getProperty("spring.datasource.url"),
@@ -822,16 +825,8 @@ class ConfigValidator(
                 // 050/R2 §7 — the executor concurrency alias pair (raw values; presence is the signal).
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
-                // 156, #2 — read through the same Binder the map-typed rotation keys above use:
-                // a property lookup cannot enumerate a map's entries.
                 executorNodeQueryTimeoutMaxSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-max-seconds"),
-                executorNodeQueryTimeoutSecondsByDialect =
-                    Binder
-                        .get(environment)
-                        .bind(
-                            "datapipelines.executor.node-query-timeout-seconds-by-dialect",
-                            Bindable.mapOf(String::class.java, String::class.java),
-                        ).orElse(emptyMap()),
+                executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
                 stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
                 maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB,
                 // §3.19 promotion (055). The base-url is an ordinary value; both keys are
@@ -860,6 +855,18 @@ class ConfigValidator(
                     environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
                 mail = mailSnapshot(environment),
             )
+
+        /**
+         * §3.2 (156, #2) — the per-dialect map, read through the same Binder the map-typed
+         * rotation keys above use: a property lookup cannot enumerate a map's entries.
+         */
+        private fun executorNodeQueryTimeoutSecondsByDialect(environment: Environment): Map<String, String> =
+            Binder
+                .get(environment)
+                .bind(
+                    "datapipelines.executor.node-query-timeout-seconds-by-dialect",
+                    Bindable.mapOf(String::class.java, String::class.java),
+                ).orElse(emptyMap())
 
         /**
          * §3.27 (137) — the mail block. Raw strings so a bad port or a `starttls` typo becomes a

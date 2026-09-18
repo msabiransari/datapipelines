@@ -87,7 +87,7 @@ data class ExecutorConfig(
     val nodeTimeoutSeconds: Long = 300,
     val nodeTimeoutMaxSeconds: Int = 900,
     val nodeQueryTimeoutMaxSeconds: Int = 900,
-    val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = mapOf(Dialect.LAKE to 180),
+    val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = mapOf(Dialect.LAKE to DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS),
     val cancelGraceSeconds: Long = 5,
     val sourceFetchSize: Int = 1000,
     val progressWriteIntervalSeconds: Long = 5,
@@ -232,6 +232,9 @@ data class ExecutorConfig(
          * constant) so the per-execution budget can never exceed it.
          */
         const val ENGINE_OUTPUT_BACKSTOP_CHARS: Long = 64L * 1024 * 1024
+
+        /** configuration.md §3.2's shipped LAKE default (156, #2) — see the class's own property KDoc. */
+        const val DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS = 180
     }
 }
 
