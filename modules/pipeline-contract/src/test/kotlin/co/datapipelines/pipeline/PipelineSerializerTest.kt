@@ -213,6 +213,39 @@ class PipelineSerializerTest {
     }
 
     @Test
+    fun `a body with no query_timeout_seconds settings serialises without either key - existing bodies are byte-identical`() {
+        // 156's hash-neutrality proof: both settings default to null under NON_NULL inclusion, so
+        // a body written before #2 existed serializes exactly as it did — no stored version's
+        // body hash moves (versioning §9.2, §15.2 additive).
+        val pipeline = Fixtures.pipeline()
+
+        val written = serializer.write(pipeline)
+
+        written.contains("query_timeout_seconds") shouldBe false
+        val reread = PipelineDeserializer().readOrThrow(written)
+        reread shouldBe pipeline
+        serializer.write(reread) shouldBe written
+    }
+
+    @Test
+    fun `pipeline and node query_timeout_seconds round-trip intact`() {
+        val pipeline =
+            Fixtures.pipeline(
+                nodes = listOf(Fixtures.node(settings = NodeSettings(queryTimeoutSeconds = 45))),
+                settings = PipelineSettings(queryTimeoutSeconds = 300),
+            )
+
+        val written = serializer.write(pipeline)
+
+        val json = Fixtures.json(written)
+        json.path("settings").path("query_timeout_seconds").asInt() shouldBe 300
+        json.path("nodes").first().path("settings").path("query_timeout_seconds").asInt() shouldBe 45
+        val reread = PipelineDeserializer().readOrThrow(written)
+        reread shouldBe pipeline
+        serializer.write(reread) shouldBe written
+    }
+
+    @Test
     fun `an explicit empty checks array canonicalizes to the absent form`() {
         // The second hash-neutrality direction: `"checks":[]` on the wire means the same as no
         // key, so it serializes back to the same bytes — the two spellings hash identically.

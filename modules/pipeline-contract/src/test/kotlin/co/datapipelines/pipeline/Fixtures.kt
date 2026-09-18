@@ -35,6 +35,7 @@ internal object Fixtures {
         template: TemplateRef = TemplateRef("test/fetch_orders.sql", 1),
         output: NodeOutput? = NodeOutput.Caller,
         dependsOn: List<String> = emptyList(),
+        settings: NodeSettings? = null,
     ): Node =
         Node(
             id = id,
@@ -44,6 +45,7 @@ internal object Fixtures {
             template = template,
             output = if (type == NodeType.DQL) output else null,
             dependsOn = dependsOn,
+            settings = settings,
         )
 
     fun pipeline(
@@ -90,8 +92,22 @@ internal object Fixtures {
         pipelines: PipelineResolver = PipelineResolver { _, _, _ -> null },
         maxCompositionDepth: Int = 5,
         orgContext: OrgContext = OrgContext.DEFAULTS,
+        nodeTimeoutMaxSeconds: Int = PipelineValidator.DEFAULT_NODE_TIMEOUT_MAX_SECONDS,
+        nodeTimeoutSeconds: Int = PipelineValidator.DEFAULT_NODE_TIMEOUT_SECONDS,
+        nodeQueryTimeoutMaxSeconds: Int = PipelineValidator.DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS,
         kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
-    ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth, orgContext, calculatorKinds = kinds)
+    ): PipelineValidator =
+        PipelineValidator(
+            datasources,
+            templates,
+            pipelines,
+            maxCompositionDepth,
+            orgContext,
+            nodeTimeoutMaxSeconds,
+            nodeTimeoutSeconds,
+            nodeQueryTimeoutMaxSeconds,
+            calculatorKinds = kinds,
+        )
 
     /**
      * The throwaway multi-output fixture kind (121): two DATE outputs, `start` and `end` — the
@@ -146,6 +162,7 @@ internal object Fixtures {
         contextKey: String? = "run_fiscal_quarter",
         contextKeys: Map<String, String>? = null,
         dependsOn: List<String> = emptyList(),
+        settings: NodeSettings? = null,
     ): Node =
         Node(
             id = id,
@@ -159,6 +176,7 @@ internal object Fixtures {
             inputs = inputs,
             contextKey = contextKey,
             contextKeys = contextKeys,
+            settings = settings,
         )
 
     /** A Context reference, as §0.3 spells one: a leading `$` then the key. */

@@ -199,6 +199,21 @@ data class Node(
 data class NodeSettings(
     @field:JsonProperty("timeout_seconds") @get:JsonProperty("timeout_seconds") @param:JsonProperty("timeout_seconds")
     val timeoutSeconds: Int? = null,
+    /**
+     * This node's own SQL **statement** timeout (§4.11, 156, #2) — overrides the pipeline's
+     * `settings.query_timeout_seconds` (§5.3), the datasource's `query_timeout_seconds` and the
+     * operator's per-dialect/application default, for this node alone. Legal only on a node type
+     * that runs a statement (`DQL`, `DML`, `DDL`); `PipelineValidator` refuses it on `PIPELINE`/
+     * `CALCULATOR` (§12.8, `pipeline.validation.node_query_timeout_invalid`).
+     *
+     * Distinct from [timeoutSeconds]: that one is the node's WALL-CLOCK deadline (render through
+     * materialize, executor-enforced); this one bounds a single `execute*` call and is enforced
+     * by the JDBC driver. Bounded by the same operator ceiling as [timeoutSeconds]
+     * (`datapipelines.executor.node-query-timeout-max-seconds`) and additionally may not exceed
+     * this node's own effective [timeoutSeconds] — refused, not clamped, naming both numbers.
+     */
+    @field:JsonProperty("query_timeout_seconds") @get:JsonProperty("query_timeout_seconds") @param:JsonProperty("query_timeout_seconds")
+    val queryTimeoutSeconds: Int? = null,
 )
 
 /**
