@@ -111,7 +111,7 @@ object SiteFaqs {
                 "From data to an API in a day — is that real?",
                 "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes what fails, " +
                     "you review and release, and the endpoint exists — no deployment, no service to write, no gateway to " +
-                    "configure. Dashboards your agent creates and you embed in your own product are the next release; the " +
+                    "configure. Dashboards your agent creates and you embed in your own product are a planned roadmap item; the " +
                     "roadmap page says so. Publishing is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
@@ -133,7 +133,7 @@ object SiteFaqs {
                 "Is it a Tableau or dbt replacement?",
                 "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or as Parquet on " +
                     "your own bucket, and it replaces the warehouse-plus-dbt step for teams that never wanted one. " +
-                    "Dashboards, scheduling and alerts are on the roadmap page with dates. The comparison pages cite " +
+                    "Dashboards, scheduling and alerts are on the roadmap page, undated. The comparison pages cite " +
                     "docs/versioning.md §3 for what is versioned.",
                 "docs/versioning.md §3",
             ),
@@ -183,7 +183,7 @@ object SiteFaqs {
                 "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there — across " +
                     "Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an agent and " +
                     "released by a person. Embedded dashboards created by your agent are planned; the " +
-                    "roadmap page carries the date. What is versioned today is docs/versioning.md §3.",
+                    "roadmap page carries the status. What is versioned today is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
             FaqEntry(
