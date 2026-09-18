@@ -29,11 +29,74 @@ class ExecutorPrimitivesTest {
     fun `a datasource query timeout overrides the executor default, and null falls back`() {
         val config = ExecutorConfig(nodeQueryTimeoutSeconds = 60)
 
-        config.queryTimeoutSecondsFor(5) shouldBe 5
-        config.queryTimeoutSecondsFor(null) shouldBe 60
+        config.queryTimeoutSecondsFor(5, Dialect.POSTGRES) shouldBe ResolvedQueryTimeout(5, QueryTimeoutSource.DATASOURCE)
+        config.queryTimeoutSecondsFor(null, Dialect.POSTGRES) shouldBe ResolvedQueryTimeout(60, QueryTimeoutSource.APPLICATION)
         // 0 means "no timeout" in JDBC and is a legitimate datasource setting — it must not be
         // treated as absent and silently replaced by the executor default.
-        config.queryTimeoutSecondsFor(0) shouldBe 0
+        config.queryTimeoutSecondsFor(0, Dialect.POSTGRES) shouldBe ResolvedQueryTimeout(0, QueryTimeoutSource.DATASOURCE)
+    }
+
+    @Test
+    fun `the full statement-timeout precedence - node, then pipeline, then datasource, then dialect, then application`(): Unit =
+        assertAll(
+            {
+                // node wins over everything, including a datasource setting.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(
+                        datasourceQueryTimeoutSeconds = 30,
+                        dialect = Dialect.LAKE,
+                        nodeQueryTimeoutSecondsOverride = 10,
+                        pipelineQueryTimeoutSecondsOverride = 20,
+                    ) shouldBe ResolvedQueryTimeout(10, QueryTimeoutSource.NODE)
+            },
+            {
+                // pipeline wins over datasource and dialect when the node declares none.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(
+                        datasourceQueryTimeoutSeconds = 30,
+                        dialect = Dialect.LAKE,
+                        nodeQueryTimeoutSecondsOverride = null,
+                        pipelineQueryTimeoutSecondsOverride = 20,
+                    ) shouldBe ResolvedQueryTimeout(20, QueryTimeoutSource.PIPELINE)
+            },
+            {
+                // datasource wins over the dialect default when neither node nor pipeline sets one.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(
+                        datasourceQueryTimeoutSeconds = 30,
+                        dialect = Dialect.LAKE,
+                    ) shouldBe ResolvedQueryTimeout(30, QueryTimeoutSource.DATASOURCE)
+            },
+            {
+                // the dialect default applies when no author or datasource tier sets one.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.LAKE) shouldBe
+                    ResolvedQueryTimeout(180, QueryTimeoutSource.DIALECT)
+            },
+            {
+                // falsification of the dialect tier: remove the LAKE default and the same call
+                // falls all the way to the flat application default.
+                ExecutorConfig(nodeQueryTimeoutSeconds = 60, nodeQueryTimeoutSecondsByDialect = emptyMap())
+                    .queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.LAKE) shouldBe
+                    ResolvedQueryTimeout(60, QueryTimeoutSource.APPLICATION)
+            },
+            {
+                // an unconfigured dialect (every non-LAKE default) falls straight to application.
+                ExecutorConfig(nodeQueryTimeoutSeconds = 60, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.POSTGRES) shouldBe
+                    ResolvedQueryTimeout(60, QueryTimeoutSource.APPLICATION)
+            },
+        )
+
+    @Test
+    fun `nodeQueryTimeoutMaxSeconds and the per-dialect map are validated positive and within the ceiling`() {
+        shouldThrow<IllegalArgumentException> { ExecutorConfig(nodeQueryTimeoutMaxSeconds = 0) }
+        shouldThrow<IllegalArgumentException> {
+            ExecutorConfig(nodeQueryTimeoutMaxSeconds = 100, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 101))
+        }
+        shouldThrow<IllegalArgumentException> {
+            ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 0))
+        }
     }
 
     @Test

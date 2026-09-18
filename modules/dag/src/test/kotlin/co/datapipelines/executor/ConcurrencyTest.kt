@@ -4,6 +4,8 @@ import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineSettings
+import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -340,6 +342,103 @@ class ConcurrencyTest {
                         shouldThrow<PipelineExecutionFailed> {
                             h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
                         }.errorCode shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
+                    }
+
+                (elapsed < QUERY_TIMEOUT_BUDGET_MS).shouldBeTrue()
+            }
+        }
+
+    /**
+     * 156, #2 — a node's own `settings.query_timeout_seconds` is the TOP of the statement-timeout
+     * precedence: it must win even over a longer datasource setting. `details.source` says so.
+     */
+    @Test
+    fun `a node's own query_timeout_seconds overrides the datasource setting, and details name the node tier`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("qtn", listOf("CREATE TABLE qtn (n INT)"), queryTimeoutSeconds = 600)
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to Fixtures.SLOW_SQL)),
+                registry = FakeDatasourceRegistry(mapOf("qtn" to source)),
+                config = ExecutorConfig(nodeQueryTimeoutSeconds = 600, executionTimeoutSeconds = TIMEOUT_SECONDS),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("slow", source = "qtn", queryTimeoutSeconds = 1))
+
+                val elapsed =
+                    kotlin.system.measureTimeMillis {
+                        val failed =
+                            shouldThrow<PipelineExecutionFailed> {
+                                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                            }
+                        failed.errorCode shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
+                        failed.errorDetails["timeout_seconds"] shouldBe 1
+                        failed.errorDetails["source"] shouldBe "node"
+                    }
+
+                (elapsed < QUERY_TIMEOUT_BUDGET_MS).shouldBeTrue()
+            }
+        }
+
+    /**
+     * 156, #2 — the pipeline's `settings.query_timeout_seconds` overrides the datasource setting
+     * when the node declares none of its own.
+     */
+    @Test
+    fun `a pipeline's query_timeout_seconds overrides the datasource setting when the node declares none`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("qtp", listOf("CREATE TABLE qtp (n INT)"), queryTimeoutSeconds = 600)
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to Fixtures.SLOW_SQL)),
+                registry = FakeDatasourceRegistry(mapOf("qtp" to source)),
+                config = ExecutorConfig(nodeQueryTimeoutSeconds = 600, executionTimeoutSeconds = TIMEOUT_SECONDS),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("slow", source = "qtp"))
+                val pipeline = Fixtures.pipeline(nodes, settings = PipelineSettings(queryTimeoutSeconds = 1))
+
+                val elapsed =
+                    kotlin.system.measureTimeMillis {
+                        val failed =
+                            shouldThrow<PipelineExecutionFailed> {
+                                h.executor.execute(Fixtures.request(pipeline))
+                            }
+                        failed.errorCode shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
+                        failed.errorDetails["timeout_seconds"] shouldBe 1
+                        failed.errorDetails["source"] shouldBe "pipeline"
+                    }
+
+                (elapsed < QUERY_TIMEOUT_BUDGET_MS).shouldBeTrue()
+            }
+        }
+
+    /**
+     * 156, #2 — the operator's per-dialect default applies when neither the node, the pipeline
+     * nor the datasource declares a statement timeout — falsified by removing the dialect's entry
+     * from the map, which lets the same node run to the flat application default instead.
+     */
+    @Test
+    fun `the operator's per-dialect default applies when no author or datasource tier overrides it`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("qtd", listOf("CREATE TABLE qtd (n INT)"))
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to Fixtures.SLOW_SQL)),
+                registry = FakeDatasourceRegistry(mapOf("qtd" to source)),
+                config =
+                    ExecutorConfig(
+                        nodeQueryTimeoutSeconds = 600,
+                        executionTimeoutSeconds = TIMEOUT_SECONDS,
+                        nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.H2 to 1),
+                    ),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("slow", source = "qtd"))
+
+                val elapsed =
+                    kotlin.system.measureTimeMillis {
+                        val failed =
+                            shouldThrow<PipelineExecutionFailed> {
+                                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                            }
+                        failed.errorCode shouldBe PipelineErrorCodes.Node.QUERY_TIMEOUT
+                        failed.errorDetails["timeout_seconds"] shouldBe 1
+                        failed.errorDetails["source"] shouldBe "dialect"
                     }
 
                 (elapsed < QUERY_TIMEOUT_BUDGET_MS).shouldBeTrue()

@@ -94,17 +94,34 @@ class PipelineTimeoutException(
  * timeout it was armed with) and the clock around the driver call: a driver error that arrives
  * after the statement's own budget has elapsed is the timeout's *consequence*, however the
  * driver spells it. Carries the catalog code, so [ErrorCodeMapper] passes it through unchanged.
+ *
+ * [source] (156, #2) is null at the raise site — the cancellation handle knows only the
+ * statement's `queryTimeout`, never which tier resolved it — and is filled in by
+ * [withSource] at the node runner's dispatch site, which DOES know
+ * ([ExecutorConfig.queryTimeoutSecondsFor]'s [ResolvedQueryTimeout]). The 057 pattern: decorate
+ * only what is still null, exactly as [decorateWithDialect]/`MappedError.withNodeFacts` do.
  */
 class NodeQueryTimeoutException(
     val timeoutSeconds: Int,
     val elapsedMs: Long,
     cause: SQLException,
+    val source: QueryTimeoutSource? = null,
 ) : PipelineException(
         code = PipelineErrorCodes.Node.QUERY_TIMEOUT,
         message = "Query exceeded its timeout of ${timeoutSeconds}s and was cancelled after ${elapsedMs}ms",
-        details = mapOf("timeout_seconds" to timeoutSeconds, "elapsed_ms" to elapsedMs, "sql_state" to cause.sqlState),
+        details =
+            mapOf(
+                "timeout_seconds" to timeoutSeconds,
+                "elapsed_ms" to elapsedMs,
+                "sql_state" to cause.sqlState,
+                "source" to source?.wire,
+            ),
         cause = cause,
-    )
+    ) {
+    /** Rebuilds with [tier] attached, unless one is already present. */
+    fun withSource(tier: QueryTimeoutSource): NodeQueryTimeoutException =
+        if (source != null) this else NodeQueryTimeoutException(timeoutSeconds, elapsedMs, cause as SQLException, tier)
+}
 
 /**
  * The node outlived its WALL-CLOCK deadline and the executor stopped it (§5.3, 108) —
