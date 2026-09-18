@@ -60,7 +60,8 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
                 "() => { const word = document.querySelector('.pe-card-boundary-start .pe-marker-word');" +
                     " const d = document.querySelector('.pe-card-boundary-start .pe-marker');" +
                     " const btn = document.querySelector(\"[data-verb='pipeline-execute']\");" +
-                    " return !!(word && word.textContent.trim() === 'Running…' && d && d.getAttribute('aria-disabled') === 'true' && btn && btn.disabled); }",
+                    " return !!(word && word.textContent.trim() === 'Running…'" +
+                    " && d && d.getAttribute('aria-disabled') === 'true' && btn && btn.disabled); }",
             ) == true
         }
         shoot("start-running-light-wide")

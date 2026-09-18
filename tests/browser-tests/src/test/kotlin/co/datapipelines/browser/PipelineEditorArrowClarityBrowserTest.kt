@@ -47,9 +47,23 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/pipelines/$pipelineId/editor")
         page.locator(".pe-card[data-node-id='stg']").waitFor()
         // Only THIS class's shots are refreshed; the folder is shared with the other 151 suites.
-        shotDir().toFile().listFiles()?.filter { f -> OWN_SHOTS.any { own -> f.name.startsWith("151-$own") } }?.forEach { it.delete() }
+        shotDir()
+            .toFile()
+            .listFiles()
+            ?.filter { f -> OWN_SHOTS.any { own -> f.name.startsWith("151-$own") } }
+            ?.forEach { it.delete() }
 
-        // 1. Idle: kinds, no labels, one port on the producer, none on the DDL, the legend.
+        idlePicture()
+        page.locator("[data-verb='pipeline-execute']").click()
+        producerWriting()
+        producerDone()
+        consumersRunning()
+        completed()
+        detailsNameTheOrderings()
+    }
+
+    /** 1. Idle: kinds, no labels, one port on the producer, none on the DDL, the legend. */
+    private fun idlePicture() {
         val edges = edgeModel()
         edges.filter { it["kind"] == "dependency" }.map { it["id"] as String }.sorted() shouldBe
             listOf("mk_index->by_a", "mk_index->by_b", "stg->by_a", "stg->by_b", "stg->mk_index")
@@ -64,10 +78,10 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
         page.locator(".pe-legend-links").innerText() shouldContain "Output write"
         shoot("idle")
         shootClose("idle-producer", "stg")
+    }
 
-        page.locator("[data-verb='pipeline-execute']").click()
-
-        // 2. The producer writes: port writing with a count and the flow; no arrow active.
+    /** 2. The producer writes: port writing with a count and the flow; no arrow active. */
+    private fun producerWriting() {
         waitUntil("the producer's port reads writing") { portState("stg") == "writing" && WRITTEN.containsMatchIn(portLine("stg")) }
         page.locator(".pe-card[data-node-id='stg'] .pe-port .pe-port-flow").count() shouldBe 1
         val duringWrite = edgeModel()
@@ -78,8 +92,10 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
         duringWrite.all { (it["label"] as String).isEmpty() } shouldBe true
         shoot("producer-writing")
         shootClose("producer-writing-close", "stg")
+    }
 
-        // 3. The producer is done: committed count on the port, satisfied orderings, no labels.
+    /** 3. The producer is done: committed count on the port, satisfied orderings, no labels. */
+    private fun producerDone() {
         waitUntil("the producer's port reads committed") { portState("stg") == "done" }
         portLine("stg") shouldMatch Regex("committed · 900,000 rows.*")
         page.locator(".pe-card[data-node-id='stg'] .pe-port .pe-port-flow").count() shouldBe 0
@@ -88,18 +104,23 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
         afterProducer.first { it["id"] == "stg->by_b" }["satisfied"] shouldBe true
         afterProducer.first { it["id"] == "stg->mk_index" }["satisfied"] shouldBe true
         afterProducer.all { (it["label"] as String).isEmpty() } shouldBe true
+    }
 
-        // 4. Consumers run: incoming edges active and STILL; the producer's port unchanged.
+    /**
+     * 4. Consumers run: incoming edges active and STILL; the producer's port unchanged. (Two
+     * consumers writing at once is [PipelineEditorLeaseWaitBrowserTest]'s and
+     * [NodeProgressBrowserTest]'s proof: here both consumers also wait for the DDL.)
+     */
+    private fun consumersRunning() {
         val polls = observeConsumers()
         check(polls.any { it.activeInto.isNotEmpty() }) { "no consumer's incoming edge was ever active: ${polls.distinct()}" }
         check(polls.any { it.stgPort == "done" && it.stgFlow == 0 && it.activeInto.isNotEmpty() }) {
             "while a consumer ran the producer's port must stay done and unanimated: ${polls.distinct()}"
         }
-        // (Two consumers writing at once is [PipelineEditorLeaseWaitBrowserTest]'s and
-        // [NodeProgressBrowserTest]'s proof: here by_a also waits for the DDL, so the two
-        // consumers are not promised to overlap.)
+    }
 
-        // 5. Completed.
+    /** 5. Completed: End Finished, every dependency satisfied, nothing animating, no label anywhere. */
+    private fun completed() {
         page.locator("[data-verb='pipeline-execute']:not([disabled])").waitFor(Locator.WaitForOptions().setTimeout(EXECUTION_TIMEOUT_MS))
         page.locator(".pe-status:has-text('Completed')").waitFor()
         page.locator(".pe-card-boundary-end").innerText() shouldContain "Finished"
@@ -113,8 +134,10 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
         page.locator("#pe-node-list [data-node-id='stg']").getAttribute("data-operation") shouldContain "Committed"
         shoot("completed")
         shootClose("completed-close", "stg")
+    }
 
-        // The Details pane names the orderings in words.
+    /** The Details pane names the orderings in words. */
+    private fun detailsNameTheOrderings() {
         page.locator(".pe-card-open[data-node-open='by_a']").evaluate("el => el.click()")
         page.locator("#pe-pane-details .pe-kv").waitFor()
         val details = page.locator("#pe-pane-details .pe-kv").innerText()
@@ -180,7 +203,10 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
 
     private fun portState(nodeId: String): String =
         (page.locator(".pe-card[data-node-id='$nodeId'] .pe-port").getAttribute("class") ?: "")
-            .split(" ").firstOrNull { it.startsWith("pe-port-") && it != "pe-port-stale" }?.removePrefix("pe-port-") ?: ""
+            .split(" ")
+            .firstOrNull { it.startsWith("pe-port-") && it != "pe-port-stale" }
+            ?.removePrefix("pe-port-")
+            ?: ""
 
     private fun portLine(nodeId: String): String =
         page.locator(".pe-card[data-node-id='$nodeId'] .pe-port .pe-port-line").let { if (it.count() == 0) "" else it.innerText().trim() }

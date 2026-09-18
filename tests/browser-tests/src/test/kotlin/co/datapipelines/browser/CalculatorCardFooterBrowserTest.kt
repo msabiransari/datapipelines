@@ -56,7 +56,8 @@ class CalculatorCardFooterBrowserTest : BrowserSuite() {
         // and the count lives on the card (`2 keys · N ms`, asserted above).
         page.evaluate(
             "() => { const cy = window.__peInstance.cy; const e = cy.edges('.dependency')[0];" +
-                " return { rowLabel: e.data('rowLabel') === undefined ? 'absent' : e.data('rowLabel'), label: String(e.style('label') || '') }; }",
+                " return { rowLabel: e.data('rowLabel') === undefined ? 'absent' : e.data('rowLabel')," +
+                " label: String(e.style('label') || '') }; }",
         ) shouldBe mapOf("rowLabel" to "absent", "label" to "")
     }
 

@@ -120,7 +120,12 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
         val slug = name.split("/")[1]
         EditorRunFixtures.createTemplate(page, "test/${slug}_a.sql", "SELECT g AS n FROM generate_series(1, $rows) g")
         EditorRunFixtures.createTemplate(page, "test/${slug}_b.sql", "SELECT g AS m FROM generate_series(1, $rows) g")
-        EditorRunFixtures.createTemplate(page, "test/${slug}_join.sql", "SELECT (SELECT COUNT(*) FROM stg_a) + (SELECT COUNT(*) FROM stg_b) AS c", dialect = "H2")
+        EditorRunFixtures.createTemplate(
+            page,
+            "test/${slug}_join.sql",
+            "SELECT (SELECT COUNT(*) FROM stg_a) + (SELECT COUNT(*) FROM stg_b) AS c",
+            dialect = "H2",
+        )
         return EditorRunFixtures.postPipeline(
             page,
             name,
