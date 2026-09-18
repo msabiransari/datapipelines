@@ -93,6 +93,15 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
             polls.add(Poll("src_b", b[0] as String, b[1] as String, (b[2] as Number).toInt(), a[0] as String))
             if (!shot && (a[0] == "waiting" || b[0] == "waiting")) {
                 page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("151-lease-wait.png")).setFullPage(true))
+                // And the waiting card at its real size — the wait is fleeting, so the close-up
+                // is taken in the same poll that saw it, then the fit is restored.
+                val waiting = if (a[0] == "waiting") "src_a" else "src_b"
+                page.evaluate(
+                    "(id) => { const cy = document.getElementById('cy-canvas')._cyreg.cy; cy.zoom(1); cy.center(cy.getElementById(id)); }",
+                    waiting,
+                )
+                page.locator(".pe-stage").screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("151-lease-wait-close.png")))
+                page.evaluate("() => window.__peInstance && window.__peInstance.graph && window.__peInstance.graph.fitToView()")
                 shot = true
             }
             if (read["terminal"] == true) return polls
