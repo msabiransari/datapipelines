@@ -78,7 +78,7 @@
           identical trips). That is why the showcase comparisons are built as within-mode ratios, like the
           rain-lift question that compares each mode's rainy days against its own dry days, where the sampling
           rate cancels — not as raw city-wide counts. The rideshare family carries the same sampling over the same
-          window, and its full untampled table is published too.
+          window, and its full unsampled table is published too.
         </p>
       </div>
     </div>
@@ -379,7 +379,7 @@
           </ul>
           <p class="prose" th:if="${f.artifacts.size() > 0}">
             Combined size of the published files:
-            <span th:text="${#numbers.formatDecimal(f.artifactsBytes / 1048576.0, 1, 'COMMA', 0, 'POINT')}">118</span>
+            <span th:text="${#numbers.formatDecimal(f.artifactsBytes / 1000000.0, 1, 'COMMA', 0, 'POINT')}">118</span>
             MB across <span th:text="${f.artifacts.size()}">4</span> files.
           </p>
         </div>

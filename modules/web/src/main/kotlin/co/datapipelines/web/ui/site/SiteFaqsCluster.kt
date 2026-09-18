@@ -70,7 +70,7 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "Which database drivers ship in the image?",
-                "Postgres, SQL Server, SQLite and DuckDB drivers are bundled; the MySQL and Oracle drivers are " +
+                "Postgres, SQL Server, SQLite, DuckDB, H2 and dp-lake are bundled; the MySQL and Oracle drivers are " +
                     "user-supplied for license reasons, and registering a datasource whose driver is absent fails " +
                     "at save time. The driver matrix is docs/deployment.md §3.5.",
                 "docs/deployment.md §3.5",
@@ -197,8 +197,8 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "Which sources can it read?",
-                "The operational databases applications write to — the dialect catalog covers seven JDBC engines " +
-                    "plus the lake's Parquet and Iceberg — each with its own adapter and type mapping, read " +
+                "The operational databases applications write to — the dialect catalog covers eight dialects: " +
+                    "the seven remote JDBC engines plus the lake's Parquet and Iceberg — each with its own adapter and type mapping, read " +
                     "where they live. The catalog is docs/datasources.md §4.1.",
                 "docs/datasources.md §4.1",
             ),

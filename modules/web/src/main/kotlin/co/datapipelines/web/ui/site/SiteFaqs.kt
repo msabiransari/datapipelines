@@ -161,7 +161,7 @@ object SiteFaqs {
             FaqEntry(
                 "How do I register an Iceberg table in dp-lake?",
                 "By its current metadata file - s3://bucket/table/metadata/00042-<uuid>.metadata.json - not by the " +
-                    "table root: DuckDB 1.5.5 cannot resolve a pyiceberg table's root, so the registry row names the " +
+                    "table root: DuckDB 1.5.5.1 cannot resolve a pyiceberg table's root, so the registry row names the " +
                     "file, and you re-register when the table commits. See docs/datasources.md section 8C.7.",
                 "docs/datasources.md §8C.7",
             ),
@@ -363,7 +363,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Will there be a hosted version?",
-                "There is no paid tier today, and nothing hosted is planned this year; if a hosted version ever " +
+                "There is no paid tier today, and nothing hosted is planned; if a hosted version ever " +
                     "exists it will be announced on the roadmap page first — never launched quietly. What is " +
                     "deliberately not planned lives on the roadmap's later band. (Source: docs/ROADMAP.md §3.)",
                 "docs/ROADMAP.md §3",

@@ -119,7 +119,20 @@ data class EngineFacts(
     val demo: String?,
     /** Where [demo] is shown, or null when no seeded pipeline reads this engine. */
     val demoHref: String?,
-)
+) {
+    /**
+     * The indefinite article [displayName] takes in prose (160): "an Oracle connection",
+     * "an H2 datasource", "a MySQL connection". H2 is pronounced aitch, so it takes "an"
+     * despite the consonant letter; the rest follow their initial letter.
+     */
+    val article: String
+        get() =
+            when {
+                displayName == "H2" -> "an"
+                displayName.first().uppercase() in setOf("A", "E", "I", "O", "U") -> "an"
+                else -> "a"
+            }
+}
 
 /**
  * The site's page registry (073) — the single list of what is public, indexable and
@@ -300,7 +313,7 @@ object SitePages {
     val TABLEAU =
         SitePage(
             path = "/tableau",
-            title = "Using datapipelines with Tableau — today, and what V2 adds",
+            title = "Using datapipelines with Tableau — what ships today, what is planned",
             description =
                 "Feed Tableau a governed dataset from Postgres, MySQL, SQL Server and S3 without a warehouse, " +
                     "as an API or a table it reads. What ships now, what is next.",

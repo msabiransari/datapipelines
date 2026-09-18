@@ -630,7 +630,7 @@
           <h3>One API section</h3>
           <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/x/…</code>, the keys that may call them, and the MCP connection block — the tool count rendered live from the catalog, never a literal.</p>
           <!-- claim: docs/ui-screens.md §4.18 (the endpoints card) -->
-          <p>It is honest about what it cannot show: no "calls in the last 24 h" column, because nothing in this system counts endpoint serves — so the card states the absence instead of filling it from a sample.</p>
+          <p>It is honest about what it cannot show: no "calls in the last 24 h" column — every serve is audited, but nothing tallies them per endpoint — so the card states the absence instead of filling it from a sample.</p>
           <a class="card-link" th:href="@{/docs/ui-screens}">Read the spec &rarr;</a>
         </article>
 
