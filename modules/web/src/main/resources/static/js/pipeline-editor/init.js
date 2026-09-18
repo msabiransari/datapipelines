@@ -467,6 +467,11 @@
         // "Default" names where the number comes from when the node declares none: an author
         // debugging a `pipeline.node.timeout` needs to know whether THIS node set the budget.
         rows.push(["Timeout", self.nodeTimeoutText(node)]);
+        // 156, #2 — the SQL statement budget, distinct from the wall-clock deadline above:
+        // that one bounds the whole node (render → materialize); this one bounds one
+        // `execute*` call and is the DRIVER's, not the executor's.
+        var queryTimeout = self.nodeQueryTimeoutText(node);
+        if (queryTimeout) rows.push(["Query Timeout", queryTimeout]);
         var state = self.nodeStates[node.id];
         if (state && state !== "idle") rows.push(["Last run", state]);
         // 149: the measured operation — what the node is doing (or did), where its output
@@ -506,6 +511,35 @@
         if (own) return own + "s (this node)";
         if (String(node.type || "").toUpperCase() === "PIPELINE") return "child execution's own deadline";
         return "default (datapipelines.executor.node-timeout-seconds)";
+      },
+
+      /**
+       * The Query Timeout row's value (156, #2, pipeline-contract §4.11/§5.3): the SQL
+       * STATEMENT budget, in author-precedence order — this node's own
+       * `settings.query_timeout_seconds`, else the pipeline's, else "operator default" naming
+       * every remaining tier generically.
+       *
+       * Absent (returns null, no row) for PIPELINE and CALCULATOR nodes: neither runs a
+       * statement, so the setting cannot apply to them (pipeline-contract §12.8 refuses it
+       * there for the same reason).
+       *
+       * Deliberately does NOT resolve or display the datasource's own `query_timeout_seconds`,
+       * the operator's per-dialect default, or the flat application default AS A NUMBER: none
+       * of those are in the pipeline JSON this pane already has, and fetching them would need a
+       * new endpoint exposing live server config to the browser — filed as a follow-up rather
+       * than guessed at here. "Operator default" names the remaining tiers generically, the same
+       * pattern [nodeTimeoutText] already uses for the operator's flat default.
+       */
+      nodeQueryTimeoutText: function (node) {
+        if (!node) return null;
+        var type = String(node.type || "").toUpperCase();
+        if (type === "PIPELINE" || type === "CALCULATOR") return null;
+        var own = node.settings ? node.settings.query_timeout_seconds : null;
+        if (own) return own + "s (this node)";
+        var pipelineDefault =
+          this.pipeline && this.pipeline.settings ? this.pipeline.settings.query_timeout_seconds : null;
+        if (pipelineDefault) return pipelineDefault + "s (pipeline default)";
+        return "operator default (datasource, per-dialect, or datapipelines.executor.node-query-timeout-seconds)";
       },
 
       /** The sql-head's label: what the right-hand side of the pane is showing. */

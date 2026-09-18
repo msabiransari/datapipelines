@@ -998,6 +998,7 @@ class PipelineExecutor(
             renderBudgetChars = config.renderOutputBudgetChars(budgetMb),
             stagingMaxMemoryMb = budgetMb,
             tempdbDialect = request.pipeline.settings.tempdb.engine.dialect,
+            pipelineQueryTimeoutSeconds = request.pipeline.settings.queryTimeoutSeconds,
             userId = request.userId,
             // A null rootExecutionId on the request marks a ROOT execution — its own id is the
             // family's root, exactly as the repository persists it (metadata-db §4.6).

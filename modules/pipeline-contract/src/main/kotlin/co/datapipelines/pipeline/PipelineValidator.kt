@@ -57,6 +57,20 @@ class PipelineValidator(
      */
     private val nodeTimeoutMaxSeconds: Int = DEFAULT_NODE_TIMEOUT_MAX_SECONDS,
     /**
+     * `datapipelines.executor.node-timeout-seconds` (156, #2) — the operator's default node
+     * WALL-CLOCK deadline, read here only to resolve a node's EFFECTIVE `timeout_seconds` when
+     * the node declares none, for the `settings.query_timeout_seconds` invariant (§12.8): a
+     * node's own statement budget may not exceed its own effective node deadline. Defaulted to
+     * the documented out-of-the-box value, same reasoning as [nodeTimeoutMaxSeconds].
+     */
+    private val nodeTimeoutSeconds: Int = DEFAULT_NODE_TIMEOUT_SECONDS,
+    /**
+     * `datapipelines.executor.node-query-timeout-max-seconds` (156, #2) — the ceiling a
+     * pipeline's or a node's own `settings.query_timeout_seconds` may not exceed (§12.8).
+     * Defaulted to the documented out-of-the-box value, same reasoning as [nodeTimeoutMaxSeconds].
+     */
+    private val nodeQueryTimeoutMaxSeconds: Int = DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS,
+    /**
      * The calculator-catalog lookup (121) — the registry is a deployment constant, so production
      * constructs this class unchanged; a test injects a fixture kind through the seam, exactly as
      * [orgContext] above established. Threaded to the two rule groups that resolve kinds:
@@ -81,7 +95,7 @@ class PipelineValidator(
         ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector, calculatorKinds)
         ParameterRules.check(pipeline, collector)
         ChecksRules.check(pipeline, datasources, workspaceId, collector)
-        SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, collector)
+        SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, nodeTimeoutSeconds, nodeQueryTimeoutMaxSeconds, collector)
         CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
         CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
         return collector.toResult()
@@ -103,5 +117,19 @@ class PipelineValidator(
          * defined in configuration.md alone (D8) and `web` binds it.
          */
         const val DEFAULT_NODE_TIMEOUT_MAX_SECONDS = 900
+
+        /**
+         * The documented default of `datapipelines.executor.node-timeout-seconds`
+         * (configuration.md §3.2). Mirrored here only as the constructor default, same reasoning
+         * as [DEFAULT_NODE_TIMEOUT_MAX_SECONDS].
+         */
+        const val DEFAULT_NODE_TIMEOUT_SECONDS = 300
+
+        /**
+         * The documented default of `datapipelines.executor.node-query-timeout-max-seconds`
+         * (configuration.md §3.2, 156). Mirrored here only as the constructor default, same
+         * reasoning as [DEFAULT_NODE_TIMEOUT_MAX_SECONDS].
+         */
+        const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900
     }
 }

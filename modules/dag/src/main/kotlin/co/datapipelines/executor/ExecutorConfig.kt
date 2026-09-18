@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.pipeline.OrgContext
+import co.datapipelines.typesystem.Dialect
 
 /**
  * The executor's resolved runtime settings (dag-executor.md §5.3).
@@ -32,6 +33,16 @@ import co.datapipelines.pipeline.OrgContext
  * @property nodeTimeoutMaxSeconds `datapipelines.executor.node-timeout-max-seconds` (108) — the
  *   ceiling a node's own override may not exceed; save-time validation refuses past it
  *   (`pipeline.validation.node_timeout_invalid`).
+ * @property nodeQueryTimeoutMaxSeconds `datapipelines.executor.node-query-timeout-max-seconds`
+ *   (156, #2) — the ceiling a pipeline's or a node's own `settings.query_timeout_seconds` may
+ *   not exceed; save-time validation refuses past it (`pipeline.validation.*query_timeout_invalid`).
+ * @property nodeQueryTimeoutSecondsByDialect
+ *   `datapipelines.executor.node-query-timeout-seconds-by-dialect.<DIALECT>` (156, #2) — the
+ *   operator's per-dialect default statement timeout, consulted when neither the node, the
+ *   pipeline nor the datasource declares one ([queryTimeoutSecondsFor]). Ships with `LAKE: 180`
+ *   (configuration.md §3.2): a LAKE engine over object storage re-reads cold data the flat
+ *   60s application default was never sized for (#136/#141); every other dialect is unset and
+ *   falls through to [nodeQueryTimeoutSeconds].
  * @property sourceFetchSize `datapipelines.executor.source-fetch-size` (108) — the JDBC
  *   `fetchSize` set on every DQL source statement, and the reason the staging memory budget is
  *   not a fiction. pgjdbc buffers the WHOLE result set in the driver unless the connection is
@@ -75,6 +86,8 @@ data class ExecutorConfig(
     val executionTimeoutSeconds: Long = 600,
     val nodeTimeoutSeconds: Long = 300,
     val nodeTimeoutMaxSeconds: Int = 900,
+    val nodeQueryTimeoutMaxSeconds: Int = 900,
+    val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = mapOf(Dialect.LAKE to DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS),
     val cancelGraceSeconds: Long = 5,
     val sourceFetchSize: Int = 1000,
     val progressWriteIntervalSeconds: Long = 5,
@@ -114,6 +127,13 @@ data class ExecutorConfig(
         // prevent harmless ones is not a guard.
         require(nodeTimeoutSeconds > 0) { "nodeTimeoutSeconds must be positive, was $nodeTimeoutSeconds" }
         require(nodeTimeoutMaxSeconds > 0) { "nodeTimeoutMaxSeconds must be positive, was $nodeTimeoutMaxSeconds" }
+        require(nodeQueryTimeoutMaxSeconds > 0) { "nodeQueryTimeoutMaxSeconds must be positive, was $nodeQueryTimeoutMaxSeconds" }
+        nodeQueryTimeoutSecondsByDialect.forEach { (dialect, seconds) ->
+            require(seconds in 1..nodeQueryTimeoutMaxSeconds) {
+                "nodeQueryTimeoutSecondsByDialect[$dialect] must be a positive integer no greater than " +
+                    "nodeQueryTimeoutMaxSeconds ($nodeQueryTimeoutMaxSeconds), was $seconds"
+            }
+        }
         require(cancelGraceSeconds > 0) { "cancelGraceSeconds must be positive, was $cancelGraceSeconds" }
         // ZERO IS LEGAL AND MEANS "DO NOT STREAM" — the operator's escape hatch (108 §B). A DQL
         // node's author SQL may legitimately be multi-statement, and pgjdbc's server-side cursor
@@ -130,14 +150,51 @@ data class ExecutorConfig(
     }
 
     /**
-     * The per-statement timeout for one node, in the one order
-     * [datasources §5.5](../../../../../../../docs/datasources.md) defines: the datasource's own
-     * `query_timeout_seconds` when set, otherwise `node-query-timeout-seconds`.
+     * The per-statement timeout for one node (156, #2; pipeline-contract §4.11/§5.3;
+     * [datasources §5.5](../../../../../../../docs/datasources.md)), in precedence order:
+     *
+     * 1. the node's own `settings.query_timeout_seconds` ([nodeQueryTimeoutSecondsOverride])
+     * 2. the pipeline's `settings.query_timeout_seconds` ([pipelineQueryTimeoutSecondsOverride])
+     * 3. the datasource's own `query_timeout_seconds` ([datasourceQueryTimeoutSeconds]) — `0` is
+     *    a legitimate "no timeout" datasource setting and is distinct from absent
+     * 4. the operator's per-dialect default ([nodeQueryTimeoutSecondsByDialect])
+     * 5. the flat application default ([nodeQueryTimeoutSeconds])
      *
      * @param datasourceQueryTimeoutSeconds the node's datasource setting, or null for a `tempdb`
-     *   node (tempdb is not a datasource and has no per-datasource override).
+     *   node (tempdb is not a datasource and has no per-datasource override; tempdb nodes skip
+     *   tier 3 entirely and fall through tiers 1/2 straight to 4/5, per the caller passing null).
+     * @param dialect the node's execution dialect — the datasource's, or the tempdb engine's
+     *   ([co.datapipelines.pipeline.TempdbSettings.engine]'s dialect) for a tempdb node.
+     * @param nodeQueryTimeoutSecondsOverride `node.settings.query_timeout_seconds`, or null.
+     * @param pipelineQueryTimeoutSecondsOverride `pipeline.settings.query_timeout_seconds`, or null.
      */
-    fun queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds: Int?): Int = datasourceQueryTimeoutSeconds ?: nodeQueryTimeoutSeconds
+    fun queryTimeoutSecondsFor(
+        datasourceQueryTimeoutSeconds: Int?,
+        dialect: Dialect,
+        nodeQueryTimeoutSecondsOverride: Int? = null,
+        pipelineQueryTimeoutSecondsOverride: Int? = null,
+    ): ResolvedQueryTimeout =
+        when {
+            nodeQueryTimeoutSecondsOverride != null -> {
+                ResolvedQueryTimeout(nodeQueryTimeoutSecondsOverride, QueryTimeoutSource.NODE)
+            }
+
+            pipelineQueryTimeoutSecondsOverride != null -> {
+                ResolvedQueryTimeout(pipelineQueryTimeoutSecondsOverride, QueryTimeoutSource.PIPELINE)
+            }
+
+            datasourceQueryTimeoutSeconds != null -> {
+                ResolvedQueryTimeout(datasourceQueryTimeoutSeconds, QueryTimeoutSource.DATASOURCE)
+            }
+
+            nodeQueryTimeoutSecondsByDialect[dialect] != null -> {
+                ResolvedQueryTimeout(nodeQueryTimeoutSecondsByDialect.getValue(dialect), QueryTimeoutSource.DIALECT)
+            }
+
+            else -> {
+                ResolvedQueryTimeout(nodeQueryTimeoutSeconds, QueryTimeoutSource.APPLICATION)
+            }
+        }
 
     /**
      * The wall-clock deadline for one node (§5.3, 108): the node's own
@@ -181,8 +238,33 @@ data class ExecutorConfig(
          * constant) so the per-execution budget can never exceed it.
          */
         const val ENGINE_OUTPUT_BACKSTOP_CHARS: Long = 64L * 1024 * 1024
+
+        /** configuration.md §3.2's shipped LAKE default (156, #2) — see the class's own property KDoc. */
+        const val DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS = 180
     }
 }
+
+/**
+ * Which tier resolved a node's effective statement timeout (156, #2) — carried in
+ * `pipeline.node.query_timeout`'s failure detail (`source`) so an author can tell whether their
+ * own override took effect or an operator default did.
+ */
+enum class QueryTimeoutSource(
+    /** The wire spelling — `pipeline.node.query_timeout`'s `details.source`. */
+    val wire: String,
+) {
+    NODE("node"),
+    PIPELINE("pipeline"),
+    DATASOURCE("datasource"),
+    DIALECT("dialect"),
+    APPLICATION("application"),
+}
+
+/** The result of [ExecutorConfig.queryTimeoutSecondsFor]: the effective seconds and their tier. */
+data class ResolvedQueryTimeout(
+    val seconds: Int,
+    val source: QueryTimeoutSource,
+)
 
 /**
  * Result-delivery settings — `datapipelines.result.*`

@@ -29,11 +29,111 @@ class ExecutorPrimitivesTest {
     fun `a datasource query timeout overrides the executor default, and null falls back`() {
         val config = ExecutorConfig(nodeQueryTimeoutSeconds = 60)
 
-        config.queryTimeoutSecondsFor(5) shouldBe 5
-        config.queryTimeoutSecondsFor(null) shouldBe 60
+        config.queryTimeoutSecondsFor(5, Dialect.POSTGRES) shouldBe ResolvedQueryTimeout(5, QueryTimeoutSource.DATASOURCE)
+        config.queryTimeoutSecondsFor(null, Dialect.POSTGRES) shouldBe ResolvedQueryTimeout(60, QueryTimeoutSource.APPLICATION)
         // 0 means "no timeout" in JDBC and is a legitimate datasource setting — it must not be
         // treated as absent and silently replaced by the executor default.
-        config.queryTimeoutSecondsFor(0) shouldBe 0
+        config.queryTimeoutSecondsFor(0, Dialect.POSTGRES) shouldBe ResolvedQueryTimeout(0, QueryTimeoutSource.DATASOURCE)
+    }
+
+    @Test
+    fun `the full statement-timeout precedence - node, then pipeline, then datasource, then dialect, then application`(): Unit =
+        assertAll(
+            {
+                // node wins over everything, including a datasource setting.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(
+                        datasourceQueryTimeoutSeconds = 30,
+                        dialect = Dialect.LAKE,
+                        nodeQueryTimeoutSecondsOverride = 10,
+                        pipelineQueryTimeoutSecondsOverride = 20,
+                    ) shouldBe ResolvedQueryTimeout(10, QueryTimeoutSource.NODE)
+            },
+            {
+                // pipeline wins over datasource and dialect when the node declares none.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(
+                        datasourceQueryTimeoutSeconds = 30,
+                        dialect = Dialect.LAKE,
+                        nodeQueryTimeoutSecondsOverride = null,
+                        pipelineQueryTimeoutSecondsOverride = 20,
+                    ) shouldBe ResolvedQueryTimeout(20, QueryTimeoutSource.PIPELINE)
+            },
+            {
+                // datasource wins over the dialect default when neither node nor pipeline sets one.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(
+                        datasourceQueryTimeoutSeconds = 30,
+                        dialect = Dialect.LAKE,
+                    ) shouldBe ResolvedQueryTimeout(30, QueryTimeoutSource.DATASOURCE)
+            },
+            {
+                // the dialect default applies when no author or datasource tier sets one.
+                ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.LAKE) shouldBe
+                    ResolvedQueryTimeout(180, QueryTimeoutSource.DIALECT)
+            },
+            {
+                // falsification of the dialect tier: remove the LAKE default and the same call
+                // falls all the way to the flat application default.
+                ExecutorConfig(nodeQueryTimeoutSeconds = 60, nodeQueryTimeoutSecondsByDialect = emptyMap())
+                    .queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.LAKE) shouldBe
+                    ResolvedQueryTimeout(60, QueryTimeoutSource.APPLICATION)
+            },
+            {
+                // an unconfigured dialect (every non-LAKE default) falls straight to application.
+                ExecutorConfig(nodeQueryTimeoutSeconds = 60, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 180))
+                    .queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.POSTGRES) shouldBe
+                    ResolvedQueryTimeout(60, QueryTimeoutSource.APPLICATION)
+            },
+        )
+
+    @Test
+    fun `nodeQueryTimeoutMaxSeconds and the per-dialect map are validated positive and within the ceiling`() {
+        shouldThrow<IllegalArgumentException> { ExecutorConfig(nodeQueryTimeoutMaxSeconds = 0) }
+        shouldThrow<IllegalArgumentException> {
+            ExecutorConfig(nodeQueryTimeoutMaxSeconds = 100, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 101))
+        }
+        shouldThrow<IllegalArgumentException> {
+            ExecutorConfig(nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 0))
+        }
+    }
+
+    /**
+     * 156, #2 — the LAKE per-dialect default against a REAL embedded DuckDB engine (the engine a
+     * LAKE datasource actually runs on, datasources.md §4.1/§4.2A): resolves through
+     * [ExecutorConfig.queryTimeoutSecondsFor] exactly as [NodeRunner] would for a LAKE node, then
+     * applies the resolved value to a real `Statement.queryTimeout` and confirms the DRIVER
+     * enforces it — not a mock, not a stub. Uses the pinned slow-DuckDB-query fixture
+     * [StatementCancelDialectTest] already measured as genuinely slow and genuinely cancellable
+     * (086 A2), so this is not testing an instant query that happens to return before the clock
+     * fires. A full NodeRunner/LakeTableGate round trip is deliberately NOT exercised here — that
+     * machinery is orthogonal to the timeout precedence this class owns and is covered by the
+     * lake feature's own tests; this is the narrowest real-engine proof of the LAKE default alone.
+     */
+    @Test
+    fun `the LAKE per-dialect default is enforced by a real DuckDB statement, not merely resolved`() {
+        val config = ExecutorConfig(nodeQueryTimeoutSeconds = 600, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.LAKE to 1))
+        val resolved = config.queryTimeoutSecondsFor(datasourceQueryTimeoutSeconds = null, dialect = Dialect.LAKE)
+        resolved shouldBe ResolvedQueryTimeout(1, QueryTimeoutSource.DIALECT)
+
+        java.sql.DriverManager.getConnection("jdbc:duckdb:").use { conn ->
+            conn.createStatement().use { statement ->
+                statement.queryTimeout = resolved.seconds
+                val elapsedMs =
+                    kotlin.system.measureTimeMillis {
+                        shouldThrow<java.sql.SQLException> {
+                            statement.executeQuery(
+                                "SELECT count(*) FROM range(1, 60000) a, range(1, 60000) b WHERE (a.range + b.range) % 7 = 0",
+                            )
+                        }
+                    }
+                // Generous relative to the 1s budget, tight relative to the query's natural
+                // multi-second runtime (086 A2 measured it in that range) — a query that merely
+                // finished fast on its own would not prove the timeout fired.
+                (elapsedMs < 10_000).shouldBeTrue()
+            }
+        }
     }
 
     @Test

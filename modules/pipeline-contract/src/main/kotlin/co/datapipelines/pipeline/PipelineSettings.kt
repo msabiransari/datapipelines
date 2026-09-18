@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.JsonNode
 
@@ -10,14 +11,33 @@ import com.fasterxml.jackson.databind.JsonNode
  *
  * Settings travel with the pipeline across environments (§5.2): the staging *engine choice*
  * is a property of the pipeline, while the connections it reaches are per-environment
- * config. Everything under §5.3 (parallelism, timeouts, cache sizes, default output format)
+ * config. Everything under §5.4 (parallelism, timeouts, cache sizes, default output format)
  * is deliberately out of scope for v1 and is not modelled here — an unknown settings key is
  * ignored on read (`ignoreUnknown`) so a v1.1 addition is not a breaking change.
+ *
+ * `NON_NULL` inclusion (156): [queryTimeoutSeconds] is genuinely absent on most pipelines, and
+ * the mapper carries no mapper-wide null-omission default ([PipelineJson] KDoc) — without this
+ * annotation an absent setting would serialize as `"query_timeout_seconds": null`, moving every
+ * existing pipeline's body hash the moment this field existed. [tempdb] is unaffected: it is
+ * never null.
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PipelineSettings(
     @field:JsonProperty("tempdb") @get:JsonProperty("tempdb") @param:JsonProperty("tempdb")
     val tempdb: TempdbSettings = TempdbSettings(),
+    /**
+     * pipeline-contract §5.3 (156, #2) — the default SQL statement timeout, in seconds, for
+     * every DQL/DML/DDL node in this pipeline that declares no `node.settings.query_timeout_seconds`
+     * of its own. Overrides a datasource's `query_timeout_seconds` and the operator's per-dialect
+     * / application default; overridden itself by a node's own setting.
+     *
+     * Nullable with a null default: an absent pipeline falls all the way through to the
+     * datasource/dialect/application tiers, exactly as before this field existed — the same
+     * body-hash-neutral reasoning as [NodeSettings.timeoutSeconds]'s KDoc gives.
+     */
+    @field:JsonProperty("query_timeout_seconds") @get:JsonProperty("query_timeout_seconds") @param:JsonProperty("query_timeout_seconds")
+    val queryTimeoutSeconds: Int? = null,
 )
 
 /**

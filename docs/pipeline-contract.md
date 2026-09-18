@@ -395,7 +395,7 @@ At run time the node evaluates at its DAG position, writes its value (once, ever
 
 **Every key a calculator node writes is also an implicit optional execute input** (078, owner ruling 2026-09-05; extended to the named set 121). A caller may supply it in the execute request's `parameters` object, typed by the kind's output — an ANY-output kind (`coalesce`, `if_null`, `map`) accepts any JSON scalar. Supplied, the node is **skipped**: it does not evaluate, the supplied value is what downstream nodes bind, and the node's stats carry `provided_by: "caller"` so a run record shows where the value came from. Unsupplied (an explicit JSON `null` reads as unsupplied), the node runs and computes the value exactly as before. A supplied value that fails coercion is refused with `pipeline.execution.invalid_parameter_type` (§13.3), exactly like a declared parameter — to the caller there is no second kind of execute input. For a multi-output node the override is **all-or-nothing**: every key supplied and the node is skipped, none and it computes; a proper subset is refused before any node runs with `pipeline.execution.calculator_keys_partial` (§13.3).
 
-### 4.11 `settings.timeout_seconds` — the node's own deadline
+### 4.11 `settings.timeout_seconds` / `settings.query_timeout_seconds` — a node's own deadline and statement budget
 
 ```json
 {
@@ -405,13 +405,14 @@ At run time the node evaluates at its DAG position, writes its value (once, ever
   "template": { "id": "trips/scan", "version": 3 },
   "output": { "target": "tempdb", "table": "trips" },
   "depends_on": [],
-  "settings": { "timeout_seconds": 600 }
+  "settings": { "timeout_seconds": 600, "query_timeout_seconds": 300 }
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `timeout_seconds` | integer | no | This node's WALL-CLOCK deadline, in seconds, overriding `datapipelines.executor.node-timeout-seconds` (default 300) for this node alone. Must be a positive integer no greater than `datapipelines.executor.node-timeout-max-seconds` (default 900), or the save is refused with `pipeline.validation.node_timeout_invalid` (§12.8). |
+| `query_timeout_seconds` | integer | no | This node's own SQL **statement** timeout (156, #2), in seconds — overrides the pipeline's `settings.query_timeout_seconds` (§5.3), the datasource's `query_timeout_seconds` and the operator's per-dialect/application default, for this node alone. Legal only on a node type that runs a statement (`DQL`, `DML`, `DDL`); declared on `PIPELINE` or `CALCULATOR` it is refused. Must be a positive integer no greater than `datapipelines.executor.node-query-timeout-max-seconds` (default 900) **and** no greater than this node's own effective `timeout_seconds` (above) — refused, not clamped, with `pipeline.validation.node_query_timeout_invalid` (§12.8) naming both numbers. |
 
 **Three budgets, one precedence** (the same table appears in [configuration.md §3.2](configuration.md) and [dag-executor.md §5.3](dag-executor.md)):
 
@@ -419,9 +420,11 @@ At run time the node evaluates at its DAG position, writes its value (once, ever
 |---|---|---|---|
 | Execution | `datapipelines.executor.execution-timeout-seconds` (600) | the whole execution | the executor |
 | Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node: RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE | the executor |
-| Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
+| Statement | `node.settings.query_timeout_seconds` (156, §5.3), else pipeline `settings.query_timeout_seconds`, else the datasource's `query_timeout_seconds`, else the dialect's operator default ([configuration.md §3.2](configuration.md)), else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
 
-Read it downward: the execution deadline is the outermost, the statement timeout the innermost, and the node deadline is what closes the gap between them. The statement bound is the **driver's**, and drivers honour it unevenly — a node whose driver ignores it is stopped by the node deadline anyway, which is exactly why the middle row exists. A pipeline-level `settings.execution.timeout_seconds` is still §5.3 future work: the outermost bound is the operator's setting, not the pipeline's.
+Read it downward: the execution deadline is the outermost, the statement timeout the innermost, and the node deadline is what closes the gap between them. The statement bound is the **driver's**, and drivers honour it unevenly — a node whose driver ignores it is stopped by the node deadline anyway, which is exactly why the middle row exists. A pipeline-level `settings.execution.timeout_seconds` is still §5.4 future work: the outermost bound is the operator's setting, not the pipeline's.
+
+**Statement-timeout precedence in full (156, #2).** The statement row above compresses five tiers into one cell; read individually: a node may override the pipeline's statement timeout, which may override the datasource's, which may override the operator's per-dialect default, which falls back to the flat application default. `settings.query_timeout_seconds` — at node level or pipeline level (§5.3) — is bounded by the SAME operator ceiling as `node.settings.timeout_seconds`: `datapipelines.executor.node-query-timeout-max-seconds` (default 900), refused rather than clamped at save (`pipeline.validation.node_query_timeout_invalid` / `pipeline.validation.pipeline_query_timeout_invalid`, §12.8). A node's own `query_timeout_seconds` must also not exceed that SAME node's effective wall-clock deadline (the Node row above) — a statement budget longer than the node's own lifecycle could ever reach is refused at save, naming both numbers. `pipeline.node.query_timeout`'s failure detail (§13.4) names which tier resolved the effective value (`source: node | pipeline | datasource | dialect | application`), so an author can tell whether their own override took effect or an operator default did.
 
 A node that exceeds its deadline fails with `pipeline.node.timeout` (§13.4, HTTP 504), whose `details` carry `timeout_seconds`, `elapsed_ms` and the `phase` the budget went in.
 
@@ -459,7 +462,21 @@ If `settings.tempdb` is omitted entirely, defaults to H2 with default config.
 - Pipeline authors declare the resource need upfront; operators budget accordingly.
 - Settings travel with the pipeline across environments — same engine choice in dev and prod (the actual `pg-prod` connection differs, but the staging engine choice doesn't).
 
-### 5.3 Future settings (out of scope for v1)
+### 5.3 `settings.query_timeout_seconds` — the pipeline-wide SQL statement timeout
+
+```json
+"settings": {
+  "query_timeout_seconds": 300
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `query_timeout_seconds` | integer | no | The default SQL **statement** timeout, in seconds, for every `DQL`/`DML`/`DDL` node in this pipeline that does not declare its own `node.settings.query_timeout_seconds` (§4.11). Overrides the datasource's `query_timeout_seconds` and the operator's per-dialect/application default; overridden itself by a node's own setting. Must be a positive integer no greater than `datapipelines.executor.node-query-timeout-max-seconds` (default 900), or the save is refused with `pipeline.validation.pipeline_query_timeout_invalid` (§12.8). |
+
+Pipeline-level, not global, for the same reason §5.2 gives `settings.tempdb`: different pipelines scan different volumes against different engines, authors declare the resource need once for the whole pipeline instead of repeating it on every node, and the setting travels with the pipeline across environments. It does not raise or lower any node's own **wall-clock** deadline (`node.settings.timeout_seconds`) — the two settings are independent, and §12.8's invariant is checked per node against whichever statement timeout applies to it.
+
+### 5.4 Future settings (out of scope for v1)
 
 - `settings.execution.parallelism` — per-pipeline concurrency limit override (different from the global default).
 - `settings.execution.timeout_seconds` — per-pipeline overall timeout.
@@ -870,6 +887,8 @@ is the same hole as an interpolated one, one directive earlier.
 | `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is `H2` (v1) |
 | `pipeline.validation.tempdb_config_invalid` | `settings.tempdb.config` keys are valid for the chosen engine |
 | `pipeline.validation.node_timeout_invalid` | A node's `settings.timeout_seconds` is a positive integer no greater than `datapipelines.executor.node-timeout-max-seconds` (default 900). Refused rather than clamped: an author who writes 14 400 and silently runs at 900 debugs a timeout that says nothing about what they asked for. `details` carries the node id, the requested value and the ceiling (§4.11) |
+| `pipeline.validation.pipeline_query_timeout_invalid` | `settings.query_timeout_seconds` (the pipeline-wide SQL statement timeout) is a positive integer no greater than `datapipelines.executor.node-query-timeout-max-seconds` (default 900). `details` carries the requested value and the ceiling (§5.3) |
+| `pipeline.validation.node_query_timeout_invalid` | A node's `settings.query_timeout_seconds` (this node's own SQL statement timeout) is a positive integer no greater than `datapipelines.executor.node-query-timeout-max-seconds` (default 900); is not declared on a node type that runs no SQL statement (`PIPELINE`, `CALCULATOR`); and does not exceed that node's own effective wall-clock deadline (`settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds`) — a statement budget the node's own lifecycle could never reach is never what an author meant. `details` names which check failed, the node id, the requested value, and the number it was compared against (§4.11) |
 
 ### 12.9 Composition validations
 
@@ -972,7 +991,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.datasource_readonly` | 500 | Datasource resolved at write-time but its **live** registry entry is readonly at run-time: a write-shaped use (a `DML`/`DDL` node `source`, or any node's `output.target: "datasource"`) of a datasource flagged `is_readonly` after this pipeline version was saved — the workspaces D10 flip window. The executor re-checks the live registry entry (past the metadata cache) at node execution time, so the flip fails HERE instead of shipping the write; a PIPELINE node's child nodes pass the same backstop in their own execution |
 | `pipeline.node.datasource_connection_failed` | 502 | Could not acquire connection to datasource |
 | `pipeline.node.query_execution_failed` | 502 | SQL executed but failed (syntax, permission, etc.) |
-| `pipeline.node.query_timeout` | 504 | The node's statement outlived its JDBC query timeout (the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds`) and the driver cancelled it. The detail carries `timeout_seconds` and `elapsed_ms`. Sibling of `pipeline.execution.timeout`; distinct from `query_execution_failed` because "too slow for the budget" and "wrong SQL" want different fixes |
+| `pipeline.node.query_timeout` | 504 | The node's statement outlived its JDBC query timeout — resolved in precedence order: the node's own `settings.query_timeout_seconds`, else the pipeline's `settings.query_timeout_seconds`, else the datasource's `query_timeout_seconds`, else the dialect's operator default (156, §3.2), else `datapipelines.executor.node-query-timeout-seconds` — and the driver cancelled it. The detail carries `timeout_seconds`, `elapsed_ms` and `source` (`node` / `pipeline` / `datasource` / `dialect` / `application` — which tier resolved the effective value). Sibling of `pipeline.execution.timeout`; distinct from `query_execution_failed` because "too slow for the budget" and "wrong SQL" want different fixes |
 | `pipeline.node.timeout` | 504 | The node outlived its WALL-CLOCK deadline (`node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds`) and the executor stopped it — RENDER through MATERIALIZE, staging included. Distinct from `query_timeout`, which is ONE statement's budget enforced by the driver: this one is the executor's own and fires whatever the driver does, so a driver that honours neither `queryTimeout` nor `cancel()` still cannot hold a node past its budget. A statement that has not returned `datapipelines.executor.cancel-grace-seconds` after being cancelled is abandoned and logged once with the execution id; the node fails on schedule. The detail carries `timeout_seconds`, `elapsed_ms` and `phase` — the phase is what says whether to make the query cheaper or the staged result smaller |
 | `pipeline.node.staging_failed` | 500 | Could not stage ResultSet into tempdb |
 | `pipeline.node.writeback_failed` | 500 | Could not write ResultSet to external datasource (output.target: "datasource") |
@@ -1473,6 +1492,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.23 | 156 query timeout settings (#2) | Pipeline and node SQL statement timeout overrides. New **§4.11** field `node.settings.query_timeout_seconds` and new **§5.3** `settings.query_timeout_seconds` (Future settings renumbered §5.3 → §5.4); precedence node > pipeline > datasource > per-dialect operator default ([configuration.md §3.2](configuration.md)) > `node-query-timeout-seconds`, bounded by the same ceiling as `node.settings.timeout_seconds` (`datapipelines.executor.node-query-timeout-max-seconds`, default 900). New §12.8 codes `pipeline.validation.pipeline_query_timeout_invalid` and `pipeline.validation.node_query_timeout_invalid` (refused on a non-SQL node type or when the statement budget exceeds the node's own wall-clock deadline, both refused rather than clamped). §13.4's `pipeline.node.query_timeout` detail gains `source` naming the resolved tier. Body-hash neutral: both keys are absent on every stored pipeline/node and serialize back absent. Additive per §15.2. |
 | 2026-09-15 | v1.21 | 139 the entry-point checks | **§12.11 (new)** — two MCP-surface save-time gates: `pipeline.validation.table_not_learned` (a saved template names a listed table the calling key never `datasources_get_columns`'d; audit-row read, key-lifetime window, `${…}` and `tempdb` exempt) and `pipeline.validation.door_unacknowledged` (a RAW_DATE_PAIR body refused until `door_acknowledged: true`, the `confirm_new_root` shape). **§13.3** — `pipeline.execution.template_unrendered` (400): execute of a DRAFT whose pinned DRAFT template postdates the key's last successful render. All three MCP-only: they read the caller's own `mcp.tool.called` audit rows. REST and the UI unaffected. Additive per §15.2; both validation codes live in §12.11, and `PipelineErrorCodesSpecDriftTest` pins both sides. |
 | 2026-09-15 | v1.22 | 140 | Release checks: optional §3.3 `checks[]` — server-run read-only statements with an expected value, versioned with the body like `nodes`, body-hash neutral; the agent supplies the query and expectation, never an observed value. §3.2 gains the field row; new §12.12 (`pipeline.validation.check_invalid`, one code for every declaration defect) and new §13.17 (`pipeline.check.failed`, 409 — release refused on a failing check, overridable with a reason). Additive per §15.2. |
 | 2026-09-14 | v1.20 | 136 §B refs optional on a WORKSPACE rule | §13.15 `semantics.fact_invalid`: the empty-`refs` arm is now DATASOURCE-scope only — a WORKSPACE-scope `definition`/`exclusion`/`preference` may carry no refs (a rule that spans datasources is recorded once, against the datasource the question is mostly about; V26 relaxes `chk_learned_facts_refs` the same way). No new code. |

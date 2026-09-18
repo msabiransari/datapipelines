@@ -2,6 +2,7 @@ package co.datapipelines.web.config
 
 import co.datapipelines.executor.ErrorDetail
 import co.datapipelines.pipeline.OrgContext
+import co.datapipelines.typesystem.Dialect
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
@@ -144,6 +145,31 @@ data class ExecutorProperties(
     val nodeTimeoutSeconds: Long = 300,
     /** `node-timeout-max-seconds` (108) — the ceiling a node's own `settings.timeout_seconds` may not exceed. */
     val nodeTimeoutMaxSeconds: Int = 900,
+    /**
+     * `node-query-timeout-max-seconds` (156, #2) — the ceiling a pipeline's or a node's own
+     * `settings.query_timeout_seconds` may not exceed. `ConfigValidator` additionally checks it
+     * (and the map below) fail fast at boot; `PipelineValidator` enforces it at save.
+     */
+    val nodeQueryTimeoutMaxSeconds: Int = 900,
+    /**
+     * `node-query-timeout-seconds-by-dialect.<dialect>` (156, #2) — the operator's per-dialect
+     * default statement timeout, consulted when neither the node, the pipeline nor the
+     * datasource declares one. Ships with `LAKE: 180` (configuration.md §3.2): a LAKE engine
+     * over object storage with less memory keeps less of it cached and re-reads cold from S3,
+     * which the flat 60s application default was never sized for (#136/#141).
+     *
+     * The YAML-anchored dotted form binds cleanly (`ExecutorPropertiesDialectMapBindingTest`).
+     * A RAW environment variable with no `application.yml` key — the naive
+     * `DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS_BY_DIALECT_LAKE` an operator might
+     * expect to just work — does **not** bind (same test, measured): Spring's relaxed env-var
+     * mapper turns every underscore into a dot, so it cannot tell
+     * `node-query-timeout-seconds-by-dialect` (one dashed segment) from eight dotted ones, and an
+     * open-ended trailing map key makes that worse. Every dialect this deployment overrides
+     * therefore needs its own explicit `application.yml` line, env-substituted like every other
+     * key in this file (`lake: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS_BY_DIALECT_LAKE:180}`)
+     * — never a bare env var for a dialect the file does not already name.
+     */
+    val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = mapOf(Dialect.LAKE to DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS),
     /** `cancel-grace-seconds` (108) — how long a cancelled statement is waited on before it is abandoned. */
     val cancelGraceSeconds: Long = 5,
     /** `source-fetch-size` (108) — the JDBC `fetchSize` on every DQL source cursor; what makes it stream. */
@@ -176,12 +202,24 @@ data class ExecutorProperties(
         require(executionTimeoutSeconds > 0) { "datapipelines.executor.execution-timeout-seconds must be > 0" }
         require(nodeTimeoutSeconds > 0) { "datapipelines.executor.node-timeout-seconds must be > 0" }
         require(nodeTimeoutMaxSeconds > 0) { "datapipelines.executor.node-timeout-max-seconds must be > 0" }
+        require(nodeQueryTimeoutMaxSeconds > 0) { "datapipelines.executor.node-query-timeout-max-seconds must be > 0" }
+        nodeQueryTimeoutSecondsByDialect.forEach { (dialect, seconds) ->
+            require(seconds in 1..nodeQueryTimeoutMaxSeconds) {
+                "datapipelines.executor.node-query-timeout-seconds-by-dialect.${dialect.wire} must be a positive " +
+                    "integer no greater than node-query-timeout-max-seconds ($nodeQueryTimeoutMaxSeconds), was $seconds"
+            }
+        }
         require(cancelGraceSeconds > 0) { "datapipelines.executor.cancel-grace-seconds must be > 0" }
         // 0 is legal and means "do not stream" — see ExecutorConfig's init for why it exists.
         require(sourceFetchSize >= 0) { "datapipelines.executor.source-fetch-size must be >= 0" }
         require(progressWriteIntervalSeconds > 0) { "datapipelines.executor.progress-write-interval-seconds must be > 0" }
         require(progressSampleIntervalSeconds > 0) { "datapipelines.executor.progress-sample-interval-seconds must be > 0" }
         require(heartbeatSeconds > 0) { "datapipelines.executor.heartbeat-seconds must be > 0" }
+    }
+
+    companion object {
+        /** configuration.md §3.2's shipped LAKE default (156, #2) — see [nodeQueryTimeoutSecondsByDialect]'s KDoc. */
+        const val DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS = 180
     }
 }
 

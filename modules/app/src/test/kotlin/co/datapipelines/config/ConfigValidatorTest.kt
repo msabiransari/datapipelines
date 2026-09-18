@@ -631,6 +631,72 @@ class ConfigValidatorTest {
     }
 
     @Test
+    fun `an unset ceiling and dialect map is clean - the documented default applies`() {
+        ConfigValidator.validate(validSnapshot()).violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a non-positive node-query-timeout-max-seconds is refused, naming the key`() {
+        listOf("0", "-1", "not-a-number").forEach { bad ->
+            val report = ConfigValidator.validate(validSnapshot().copy(executorNodeQueryTimeoutMaxSeconds = bad))
+
+            report.violations.shouldHaveSize(1)
+            report.violations.single().shouldContain("node-query-timeout-max-seconds")
+        }
+    }
+
+    @Test
+    fun `a per-dialect default outside 1 point ceiling is refused, naming the dialect and the ceiling`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    executorNodeQueryTimeoutMaxSeconds = "300",
+                    executorNodeQueryTimeoutSecondsByDialect = mapOf("lake" to "301"),
+                ),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("node-query-timeout-seconds-by-dialect.lake")
+        report.violations.single().shouldContain("300")
+    }
+
+    @Test
+    fun `a per-dialect default checks against the documented 900 default when no ceiling is set`() {
+        ConfigValidator
+            .validate(validSnapshot().copy(executorNodeQueryTimeoutSecondsByDialect = mapOf("lake" to "180")))
+            .violations
+            .shouldBeEmpty()
+
+        val report = ConfigValidator.validate(validSnapshot().copy(executorNodeQueryTimeoutSecondsByDialect = mapOf("lake" to "901")))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("900")
+    }
+
+    @Test
+    fun `a non-numeric or zero per-dialect value is refused`() {
+        listOf("0", "-1", "abc").forEach { bad ->
+            val report = ConfigValidator.validate(validSnapshot().copy(executorNodeQueryTimeoutSecondsByDialect = mapOf("lake" to bad)))
+
+            report.violations.shouldHaveSize(1)
+            report.violations.single().shouldContain("node-query-timeout-seconds-by-dialect.lake")
+        }
+    }
+
+    @Test
+    fun `falsification - removing the ceiling clamp lets a dialect value above 900 through`() {
+        // Guards the guard (156 brief): asserts the effective ceiling really is what bounds the
+        // dialect check by proving BOTH sides of the boundary at once, at the exact default 900.
+        ConfigValidator
+            .validate(validSnapshot().copy(executorNodeQueryTimeoutSecondsByDialect = mapOf("lake" to "900")))
+            .violations
+            .shouldBeEmpty()
+        ConfigValidator
+            .validate(validSnapshot().copy(executorNodeQueryTimeoutSecondsByDialect = mapOf("lake" to "901")))
+            .violations
+            .shouldHaveSize(1)
+    }
+
+    @Test
     fun `a non-integer executor alias is left to the binder - the §7 check skips it`() {
         val report =
             ConfigValidator.validate(

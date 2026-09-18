@@ -51,6 +51,8 @@ object Fixtures {
         template: TemplateRef = TemplateRef(id, 1),
         /** `node.settings.timeout_seconds` (contract §4.11) — the node's own wall-clock deadline. */
         timeoutSeconds: Int? = null,
+        /** `node.settings.query_timeout_seconds` (contract §4.11, 156) — this node's own statement timeout. */
+        queryTimeoutSeconds: Int? = null,
     ): Node =
         Node(
             id = id,
@@ -60,7 +62,12 @@ object Fixtures {
             template = template,
             output = if (type == NodeType.DQL) output else null,
             dependsOn = dependsOn,
-            settings = timeoutSeconds?.let { NodeSettings(timeoutSeconds = it) },
+            settings =
+                if (timeoutSeconds == null && queryTimeoutSeconds == null) {
+                    null
+                } else {
+                    NodeSettings(timeoutSeconds = timeoutSeconds, queryTimeoutSeconds = queryTimeoutSeconds)
+                },
         )
 
     fun pipeline(

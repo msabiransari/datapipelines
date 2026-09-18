@@ -214,6 +214,31 @@ object PipelineErrorCodes {
          */
         const val NODE_TIMEOUT_INVALID = "pipeline.validation.node_timeout_invalid"
 
+        /**
+         * §12.8 (156, #2) — `settings.query_timeout_seconds` (the pipeline-wide SQL statement
+         * timeout) is not a positive integer, or it exceeds
+         * `datapipelines.executor.node-query-timeout-max-seconds` (default 900).
+         *
+         * Refused at SAVE time, same reasoning as [NODE_TIMEOUT_INVALID]: a silently clamped
+         * value debugs a timeout the author never asked for. `details` carries the requested
+         * value and the ceiling.
+         */
+        const val PIPELINE_QUERY_TIMEOUT_INVALID = "pipeline.validation.pipeline_query_timeout_invalid"
+
+        /**
+         * §12.8 (156, #2) — a node's `settings.query_timeout_seconds` (this node's own SQL
+         * statement timeout) is invalid: not a positive integer, greater than
+         * `datapipelines.executor.node-query-timeout-max-seconds` (default 900), declared on a
+         * node type that runs no SQL statement (`PIPELINE`, `CALCULATOR`), or greater than this
+         * node's own effective wall-clock deadline (`settings.timeout_seconds`, else
+         * `datapipelines.executor.node-timeout-seconds`) — a statement budget longer than the
+         * node's own lifecycle can never be reached and is never what an author meant.
+         *
+         * `details` names which check failed, the requested value, and the number it was
+         * compared against (the ceiling, or the node's own deadline).
+         */
+        const val NODE_QUERY_TIMEOUT_INVALID = "pipeline.validation.node_query_timeout_invalid"
+
         /** §12.9 — a PIPELINE node's `pipeline.name` exists in the pipeline registry. */
         const val PIPELINE_NOT_FOUND = "pipeline.validation.pipeline_not_found"
 

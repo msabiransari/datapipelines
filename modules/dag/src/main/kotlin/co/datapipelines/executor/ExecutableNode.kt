@@ -60,6 +60,12 @@ data class ExecutableNode(
      * [ExecutorConfig.nodeTimeoutSecondsFor], never read raw.
      */
     val timeoutSeconds: Int? = null,
+    /**
+     * `node.settings.query_timeout_seconds` (pipeline-contract §4.11, 156, #2) — this node's own
+     * SQL statement timeout, or null to fall through to the pipeline/datasource/dialect/
+     * application tiers. Resolved through [ExecutorConfig.queryTimeoutSecondsFor], never read raw.
+     */
+    val queryTimeoutSeconds: Int? = null,
 ) {
     /** True when this node's ResultSet is the pipeline's result (§4.1). */
     val isCallerNode: Boolean get() = output == NodeOutput.Caller
@@ -82,6 +88,7 @@ data class ExecutableNode(
                 contextKey = node.contextKey,
                 contextKeys = node.contextKeys,
                 timeoutSeconds = node.settings?.timeoutSeconds,
+                queryTimeoutSeconds = node.settings?.queryTimeoutSeconds,
             )
     }
 }

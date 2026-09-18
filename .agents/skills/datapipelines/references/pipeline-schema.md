@@ -31,6 +31,24 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
 }
 ```
 
+**Timeouts** — a pipeline may declare `settings.query_timeout_seconds` (the default SQL
+statement timeout for every DQL/DML/DDL node that sets none of its own), and any DQL/DML/DDL
+node may declare its own `settings.query_timeout_seconds`, overriding the pipeline's. Precedence:
+node > pipeline > the datasource's own `query_timeout_seconds` > the operator's per-dialect
+default > the flat application default. Distinct from `settings.timeout_seconds` (a node's own
+WALL-CLOCK deadline, render through materialize) — a node's `query_timeout_seconds` bounds one
+SQL statement and must not exceed that same node's own `timeout_seconds`, or the save is refused
+naming both numbers. Illegal on `PIPELINE`/`CALCULATOR` nodes, which run no statement:
+
+```json
+"settings": { "query_timeout_seconds": 300 },
+"nodes": [{
+  "id": "scan_trips",
+  "type": "DQL",
+  "settings": { "timeout_seconds": 600, "query_timeout_seconds": 300 }
+}]
+```
+
 **Checks** — optional top-level `checks[]`: server-run cross-checks that gate a human's
 release (pipeline-contract §3.3). You write the query and the expectation; only the server's
 own run produces `observed`. One check:

@@ -545,7 +545,7 @@ All limits are configured in [Configuration §3.2](configuration.md#32-executor)
 | Max parallel nodes per execution | `datapipelines.executor.max-parallel-nodes` | `nodePermits` semaphore inside `runExecution` (§5.2) |
 | Max concurrent executions per user | `datapipelines.executor.max-concurrent-executions-per-user` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
 | Max concurrent executions (per instance — 050/R2) | `datapipelines.executor.max-concurrent-executions-per-instance` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
-| JDBC query timeout (per node) | `datapipelines.executor.node-query-timeout-seconds` | `Statement.queryTimeout` on every node statement. A datasource's own `query_timeout_seconds`, when set, overrides it for nodes on that datasource ([Datasources §5](datasources.md#55-query-timeout-precedence)) — this is what `config.nodeQueryTimeoutSeconds(node.source)` resolves. |
+| JDBC query timeout (per node) | `datapipelines.executor.node-query-timeout-seconds` | `Statement.queryTimeout` on every node statement, resolved by `ExecutorConfig.queryTimeoutSecondsFor` (156, #2) in precedence order: the node's own `settings.query_timeout_seconds`, else the pipeline's `settings.query_timeout_seconds` ([pipeline-contract §4.11/§5.3](pipeline-contract.md)), else the datasource's own `query_timeout_seconds` ([Datasources §5](datasources.md#55-query-timeout-precedence)), else the operator's per-dialect default (`node-query-timeout-seconds-by-dialect.<dialect>`, [Configuration §3.2](configuration.md#32-executor)), else this flat default. |
 | Node wall-clock deadline (108) | `datapipelines.executor.node-timeout-seconds` | `withTimeout(...)` around the WHOLE node — RENDER → CONNECT → EXECUTE → STAGE → MATERIALIZE — in `runWithNodeDeadline`. A node may override it with `settings.timeout_seconds` ([pipeline-contract §4.11](pipeline-contract.md)), bounded at `node-timeout-max-seconds`. |
 | Grace before a cancelled statement is abandoned (108) | `datapipelines.executor.cancel-grace-seconds` | `withTimeoutOrNull(...)` on the node body after its statements were cancelled — see below. |
 | Execution overall timeout | `datapipelines.executor.execution-timeout-seconds` | `withTimeout(...)` wrapping the execution scope (§5.2). On expiry the executor also calls `Statement.cancel()` on every registered statement (§8.3.1) — see below. |
@@ -559,15 +559,17 @@ When limits are exceeded, the request is rejected with `pipeline.execution.concu
 
 #### Three budgets, one precedence (108)
 
-The same table appears in [Configuration §3.2](configuration.md#32-executor) and [pipeline-contract §4.11](pipeline-contract.md#411-settingstimeout_seconds--the-nodes-own-deadline).
+The same table appears in [Configuration §3.2](configuration.md#32-executor) and [pipeline-contract §4.11](pipeline-contract.md#411-settingstimeout_seconds--settingsquery_timeout_seconds--a-nodes-own-deadline-and-statement-budget).
 
 | Bound | Setting | Scope | Enforced by |
 |---|---|---|---|
 | Execution | `datapipelines.executor.execution-timeout-seconds` (600) | the whole execution | the executor |
 | Node | `node.settings.timeout_seconds`, else `datapipelines.executor.node-timeout-seconds` (300) | one node, wall clock, all five phases | the executor |
-| Statement | the datasource's `query_timeout_seconds`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
+| Statement | `node.settings.query_timeout_seconds` (156, §5.3), else pipeline `settings.query_timeout_seconds`, else the datasource's `query_timeout_seconds`, else `node-query-timeout-seconds-by-dialect.<dialect>`, else `datapipelines.executor.node-query-timeout-seconds` (60) | one `execute*` call | the JDBC driver |
 
-The precedence is documented, not enforced across keys. Every inversion is harmless — a node deadline above the execution's is never reached, one below the statement timeout is stronger — while a cross-key refusal would turn lowering `execution-timeout-seconds` into a startup crash.
+The precedence is documented, not enforced across keys. Every inversion is harmless — a node deadline above the execution's is never reached, one below the statement timeout is stronger — while a cross-key refusal would turn lowering `execution-timeout-seconds` into a startup crash. The one exception is the two AUTHOR-facing statement-timeout settings against the SAME node's own wall-clock deadline: `pipeline.validation.node_query_timeout_invalid` refuses a node's `query_timeout_seconds` that exceeds its own effective `timeout_seconds` at SAVE (pipeline-contract §12.8) — both numbers are fully known at save time and under the SAME author's control, unlike the operator settings this paragraph is about.
+
+`pipeline.node.query_timeout`'s failure `details` name which tier resolved the effective statement timeout (`source: node | pipeline | datasource | dialect | application`, 156) — `NodeRunner` attaches it to an escaping `NodeQueryTimeoutException` at the dispatch site, since the cancellation handle that raises it (§8.3.1) knows only the statement's `queryTimeout`, never which tier chose it.
 
 **Why a node bound had to exist.** The statement timeout is the DRIVER's, and drivers honour it unevenly. The measurement this round is built on (108 §1) found a Postgres node stopped cleanly at its statement budget while H2 tempdb nodes in the same pipeline ran 168, 191 and 330 seconds past the same budget. Nothing between the statement and the whole execution had a deadline, so a node whose driver did not cooperate had none at all. Now it does, and the node's promise is unconditional: **no node runs past its budget, whatever the driver, whatever the engine, whatever the phase.**
 
@@ -626,7 +628,7 @@ For `NodeSource.Tempdb`:
 
 ### 6.3 Behavior by node `type`
 
-The executor dispatches on `node.type` after acquiring the connection. In every case the statement is created inside `handle.withStatement(nodeId, stmt) { ... }` (§8.3) so that a cancellation can interrupt it, and its `queryTimeout` is set from `datapipelines.executor.node-query-timeout-seconds` (or the datasource override — §5.3).
+The executor dispatches on `node.type` after acquiring the connection. In every case the statement is created inside `handle.withStatement(nodeId, stmt) { ... }` (§8.3) so that a cancellation can interrupt it, and its `queryTimeout` is set from `ExecutorConfig.queryTimeoutSecondsFor`'s resolved value (the node/pipeline/datasource/dialect/application precedence — §5.3, 156).
 
 #### 6.3.1 `DQL` — `executeQuery`
 
@@ -1451,6 +1453,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.13 | 156 query timeout settings (#2) | §5.3's "JDBC query timeout (per node)" row and "Three budgets" table: the statement bound is now node `settings.query_timeout_seconds` > pipeline `settings.query_timeout_seconds` > the datasource's `query_timeout_seconds` > the operator's per-dialect default (`node-query-timeout-seconds-by-dialect.<dialect>`, Configuration §3.2) > the flat application default, resolved by `ExecutorConfig.queryTimeoutSecondsFor`. `pipeline.node.query_timeout`'s detail gains `source` naming the resolved tier. New save-time exception to "documented, not enforced across keys": a node's own `query_timeout_seconds` may not exceed that SAME node's own effective `timeout_seconds` (`pipeline.validation.node_query_timeout_invalid`) — both fully known at save, under one author's control. |
 | 2026-09-17 | v1.12 | 149 correction / #125 review R149-4 | §10: a rollback after a failed `commit()` is not evidence — the write-back runner reports `rolled_back` only for failures before the commit attempt; a lost acknowledgement stays unknown. |
 | 2026-09-17 | v1.11 | 149 correction / #125 review | §10: `committed` is commit evidence decided by the tracker, independent of the node outcome (kept on failure after a confirmed commit, `false` only on a confirmed undo, absent when unobserved); staging reports a dropped partial table (`partialTableDropped`); the result store enters `fetching` before the lazy `hasNext()`. |
 | 2026-09-16 | v1.10 | 149 / #125 measured node operations | §10: **`NodeProgress`** — one measured operation per node attempt (`NodeOperationTracker`, `NodeOperations`), the writers' observers (staging `StageObserver`, write-back, result store, the composition sink), the per-execution 250 ms pump, first-entry samples taken at the entry instant, the periodic cadence `progress-sample-interval-seconds`, the terminal flush before the node event under a per-tracker lock, the seal against abandoned driver bodies, what each interval measures, and the ordering rule. Wire contract in [REST API §6.4.9](rest-api.md#649-node_progress). |

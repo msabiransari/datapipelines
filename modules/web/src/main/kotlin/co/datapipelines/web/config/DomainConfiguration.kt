@@ -432,6 +432,15 @@ class DomainConfiguration {
             // stored at the next save — a ceiling only the executor knew would be a ceiling the
             // author is told about at 3am.
             executor.nodeTimeoutMaxSeconds,
+            // 156, #2: the operator's default node WALL-CLOCK deadline, so §12.8's
+            // query_timeout_seconds-vs-node-deadline invariant resolves a node's EFFECTIVE
+            // deadline the same way the executor does when the node declares none.
+            // `NodeSettings.timeoutSeconds` and PipelineValidator's ceiling are both Int
+            // (pipeline-contract §4.11); ExecutorConfig's own field is Long (a Duration-like
+            // executor-internal quantity) — the conversion happens here, at the one seam.
+            executor.nodeTimeoutSeconds.toInt(),
+            // 156, #2: the ceiling on `settings.query_timeout_seconds` (pipeline- and node-level).
+            executor.nodeQueryTimeoutMaxSeconds,
         )
 
     /**

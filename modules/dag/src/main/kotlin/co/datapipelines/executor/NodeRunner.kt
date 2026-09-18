@@ -65,6 +65,13 @@ data class NodeExecutionContext(
     /** The dialect of `source: "tempdb"` nodes, from `settings.tempdb.engine` (§12.6, D6). */
     val tempdbDialect: Dialect,
     /**
+     * `pipeline.settings.query_timeout_seconds` (156, #2) — the pipeline-wide default SQL
+     * statement timeout, or null when the pipeline declares none. Consulted by
+     * [ExecutorConfig.queryTimeoutSecondsFor] when a node declares no `query_timeout_seconds`
+     * of its own.
+     */
+    val pipelineQueryTimeoutSeconds: Int? = null,
+    /**
      * The principal this execution runs as ([ExecuteRequest.userId]). A PIPELINE node's child
      * inherits it (design D9): composition carries no new scopes, and authorization was checked
      * on the parent's execute call.
@@ -323,15 +330,22 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
     ): NodeResult {
-        // tempdb is not a datasource, so there is no per-datasource override to consider (§5.5).
-        val timeout = config.queryTimeoutSecondsFor(null)
+        // tempdb is not a datasource, so there is no per-datasource override to consider (§5.5);
+        // the node/pipeline author tiers and the tempdb dialect's own operator default still apply.
+        val resolved =
+            config.queryTimeoutSecondsFor(
+                datasourceQueryTimeoutSeconds = null,
+                dialect = ctx.tempdbDialect,
+                nodeQueryTimeoutSecondsOverride = node.queryTimeoutSeconds,
+                pipelineQueryTimeoutSecondsOverride = ctx.pipelineQueryTimeoutSeconds,
+            )
         return when (node.type) {
             NodeType.DQL -> {
-                tempdbQuery(node, bound, ctx, startedAt, timeout)
+                tempdbQuery(node, bound, ctx, startedAt, resolved)
             }
 
             NodeType.DML, NodeType.DDL -> {
-                tempdbWrite(node, bound, ctx, startedAt, timeout)
+                tempdbWrite(node, bound, ctx, startedAt, resolved)
             }
 
             NodeType.PIPELINE, NodeType.CALCULATOR -> {
@@ -345,22 +359,22 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
     ): NodeResult =
         when (val output = requireOutput(node)) {
             is NodeOutput.Tempdb -> {
-                tempdbCreateTableAs(node, output, bound, ctx, startedAt, timeout)
+                tempdbCreateTableAs(node, output, bound, ctx, startedAt, resolved)
             }
 
             is NodeOutput.Caller -> {
                 phase(ctx, NodePhase.MATERIALIZE, node.id) {
-                    tempdbCursor(node, bound, ctx, timeout) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
+                    tempdbCursor(node, bound, ctx, resolved) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
                 }
             }
 
             is NodeOutput.Datasource -> {
                 phase(ctx, NodePhase.WRITEBACK, node.id) {
-                    tempdbCursor(node, bound, ctx, timeout) { rs ->
+                    tempdbCursor(node, bound, ctx, resolved) { rs ->
                         val op = ctx.operations.observerFor(node.id)
                         val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
                         NodeResult.of(node.id, written, startedAt)
@@ -399,7 +413,7 @@ class NodeRunner(
         node: ExecutableNode,
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
         block: suspend (ResultSet) -> T,
     ): T {
         // 149: a tempdb READ lease is a source connection (connecting), then the query executes.
@@ -407,10 +421,12 @@ class NodeRunner(
         op.phase(OperationPhase.CONNECTING)
         return ctx.staging.withConnection { connection ->
             BoundStatements.statementFor(connection, bound).use { statement ->
-                statement.queryTimeout = timeout
+                statement.queryTimeout = resolved.seconds
                 ctx.handle.withStatement(node.id, statement) {
                     op.phase(OperationPhase.EXECUTING)
-                    ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }.use { rs -> block(rs) }
+                    withQueryTimeoutSource(resolved) {
+                        ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
+                    }.use { rs -> block(rs) }
                 }
             }
         }
@@ -444,7 +460,7 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
     ): NodeResult {
         // Phase code, not the save-time validation code (§8.2 coherence): this is the STAGE phase.
         val table =
@@ -466,18 +482,22 @@ class NodeRunner(
                 op.phase(OperationPhase.WAITING_OUTPUT)
                 ctx.staging.withConnection { connection ->
                     BoundStatements.statementFor(connection, fullBound).use { statement ->
-                        statement.queryTimeout = timeout
+                        statement.queryTimeout = resolved.seconds
                         ctx.handle.withStatement(node.id, statement) {
                             op.phase(OperationPhase.EXECUTING)
-                            ctx.handle.whileExecuting(node.id, statement) { BoundStatements.update(statement, fullBound) }
+                            withQueryTimeoutSource(resolved) {
+                                ctx.handle.whileExecuting(node.id, statement) { BoundStatements.update(statement, fullBound) }
+                            }
                             op.phase(OperationPhase.FINALIZING)
                             // The row count runs on its OWN statement: H2 (and other drivers)
                             // refuse Statement-level `executeQuery(String)` on a prepared
                             // statement, so the count cannot ride the one that executed the CTAS.
                             connection.createStatement().use { countStatement ->
-                                countStatement.queryTimeout = timeout
+                                countStatement.queryTimeout = resolved.seconds
                                 ctx.handle.withStatement(node.id, countStatement) {
-                                    ctx.handle.whileExecuting(node.id, countStatement) { countRows(countStatement, table) }
+                                    withQueryTimeoutSource(resolved) {
+                                        ctx.handle.whileExecuting(node.id, countStatement) { countRows(countStatement, table) }
+                                    }
                                 }
                             }
                         }
@@ -513,7 +533,7 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
     ): NodeResult {
         val op = ctx.operations.observerFor(node.id)
         op.phase(OperationPhase.WAITING_OUTPUT)
@@ -521,14 +541,16 @@ class NodeRunner(
             phase(ctx, NodePhase.EXECUTE, node.id) {
                 ctx.staging.withConnection { connection ->
                     BoundStatements.statementFor(connection, bound).use { statement ->
-                        statement.queryTimeout = timeout
+                        statement.queryTimeout = resolved.seconds
                         ctx.handle.withStatement(node.id, statement) {
                             op.phase(OperationPhase.EXECUTING)
-                            ctx.handle.whileExecuting(node.id, statement) {
-                                if (node.type == NodeType.DML) {
-                                    BoundStatements.update(statement, bound).toLong()
-                                } else {
-                                    BoundStatements.executeDdl(statement, bound)
+                            withQueryTimeoutSource(resolved) {
+                                ctx.handle.whileExecuting(node.id, statement) {
+                                    if (node.type == NodeType.DML) {
+                                        BoundStatements.update(statement, bound).toLong()
+                                    } else {
+                                        BoundStatements.executeDdl(statement, bound)
+                                    }
                                 }
                             }
                         }
@@ -642,7 +664,13 @@ class NodeRunner(
         (node.output as? NodeOutput.Datasource)?.takeIf { node.type == NodeType.DQL }?.let { target ->
             phase(ctx, NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
         }
-        val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
+        val resolved =
+            config.queryTimeoutSecondsFor(
+                datasourceQueryTimeoutSeconds = datasource.queryTimeoutSeconds,
+                dialect = datasource.dialect,
+                nodeQueryTimeoutSecondsOverride = node.queryTimeoutSeconds,
+                pipelineQueryTimeoutSecondsOverride = ctx.pipelineQueryTimeoutSeconds,
+            )
         ctx.operations.observerFor(node.id).phase(OperationPhase.CONNECTING)
         val connection =
             phase(ctx, NodePhase.CONNECT, node.id) {
@@ -660,15 +688,15 @@ class NodeRunner(
         return connection.use { conn ->
             when (node.type) {
                 NodeType.DQL -> {
-                    datasourceQuery(node, conn, bound, ctx, startedAt, timeout, datasource.dialect)
+                    datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect)
                 }
 
                 NodeType.DML -> {
-                    datasourceUpdate(node, conn, bound, ctx, startedAt, timeout)
+                    datasourceUpdate(node, conn, bound, ctx, startedAt, resolved)
                 }
 
                 NodeType.DDL -> {
-                    datasourceDdl(node, conn, bound, ctx, startedAt, timeout)
+                    datasourceDdl(node, conn, bound, ctx, startedAt, resolved)
                 }
 
                 NodeType.PIPELINE, NodeType.CALCULATOR -> {
@@ -700,6 +728,22 @@ class NodeRunner(
             }
         }
 
+    /**
+     * Stamps [resolved]'s tier onto an escaping [NodeQueryTimeoutException] (156, #2) — the
+     * cancellation handle that raises it knows only the statement's `queryTimeout`, never which
+     * precedence tier resolved it; this call site does. Same "decorate only what is still null"
+     * shape as [decorateWithDialect].
+     */
+    private suspend fun <T> withQueryTimeoutSource(
+        resolved: ResolvedQueryTimeout,
+        block: suspend () -> T,
+    ): T =
+        try {
+            block()
+        } catch (e: NodeQueryTimeoutException) {
+            throw e.withSource(resolved.source)
+        }
+
     /** The DML/DDL source leg of the layer-2a backstop — see [ReadonlyBackstop] for the semantics. */
     private fun enforceSourceReadonly(
         name: String,
@@ -727,12 +771,12 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
         dialect: Dialect,
     ): NodeResult {
         val tookOutOfAutocommit = SourceStreaming.enable(conn, dialect, config.sourceFetchSize)
         try {
-            return runDatasourceQuery(node, conn, bound, ctx, startedAt, timeout, dialect)
+            return runDatasourceQuery(node, conn, bound, ctx, startedAt, resolved, dialect)
         } finally {
             // Restore autocommit's NET effect, on every path including failure (108 §B).
             //
@@ -756,17 +800,19 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
         dialect: Dialect,
     ): NodeResult =
         BoundStatements.statementFor(conn, bound).use { statement ->
-            statement.queryTimeout = timeout
+            statement.queryTimeout = resolved.seconds
             SourceStreaming.fetchSizeFor(dialect, config.sourceFetchSize)?.let { statement.fetchSize = it }
             ctx.handle.withStatement(node.id, statement) {
                 ctx.operations.observerFor(node.id).phase(OperationPhase.EXECUTING)
                 val rs =
                     phase(ctx, NodePhase.EXECUTE, node.id) {
-                        ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
+                        withQueryTimeoutSource(resolved) {
+                            ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
+                        }
                     }
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
@@ -899,10 +945,10 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
     ): NodeResult =
         conn.prepareStatement(bound.sql).use { statement ->
-            statement.queryTimeout = timeout
+            statement.queryTimeout = resolved.seconds
             // This path always prepared even before the round, so the statement shape is
             // unchanged; binding is the one thing the parameter case adds (042 C1/C4).
             if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
@@ -911,7 +957,9 @@ class NodeRunner(
                 op.phase(OperationPhase.EXECUTING)
                 val affected =
                     phase(ctx, NodePhase.EXECUTE, node.id) {
-                        ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
+                        withQueryTimeoutSource(resolved) {
+                            ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
+                        }
                     }
                 recordStatement(op, node, affected)
                 NodeResult.of(node.id, affected, startedAt)
@@ -924,15 +972,17 @@ class NodeRunner(
         bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
-        timeout: Int,
+        resolved: ResolvedQueryTimeout,
     ): NodeResult =
         BoundStatements.statementFor(conn, bound).use { statement ->
-            statement.queryTimeout = timeout
+            statement.queryTimeout = resolved.seconds
             ctx.handle.withStatement(node.id, statement) {
                 val op = ctx.operations.observerFor(node.id)
                 op.phase(OperationPhase.EXECUTING)
                 phase(ctx, NodePhase.EXECUTE, node.id) {
-                    ctx.handle.whileExecuting(node.id, statement) { BoundStatements.executeDdl(statement, bound) }
+                    withQueryTimeoutSource(resolved) {
+                        ctx.handle.whileExecuting(node.id, statement) { BoundStatements.executeDdl(statement, bound) }
+                    }
                 }
                 recordStatement(op, node, affected = 0L)
                 NodeResult.of(node.id, 0L, startedAt)
