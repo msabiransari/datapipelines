@@ -106,8 +106,8 @@ internal object SettingsRules {
                 into.add(
                     Validation.NODE_QUERY_TIMEOUT_INVALID,
                     path,
-                    "'query_timeout_seconds' ($requested) exceeds node '${node.id}''s own effective wall-clock " +
-                        "deadline ($effectiveNodeDeadline seconds, from " +
+                    "'query_timeout_seconds' ($requested) exceeds the effective wall-clock deadline of node " +
+                        "'${node.id}' ($effectiveNodeDeadline seconds, from " +
                         "${if (settings.timeoutSeconds != null) "its settings.timeout_seconds" else "the operator default"}) " +
                         "— a statement budget the node could never reach.",
                     mapOf(

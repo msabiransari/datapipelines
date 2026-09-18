@@ -235,6 +235,9 @@ class ApiErrorCatalogSpecDriftTest {
          * one code for every `checks[]` declaration defect. A 400 like every other §12 code;
          * landed in the SAME commit as its constant.
          */
-        const val SECTION_12_CODE_COUNT = 67
+        // 156, #2: +2 for pipeline.validation.pipeline_query_timeout_invalid and
+        // pipeline.validation.node_query_timeout_invalid (§12.8) — both resolve through the
+        // pipeline.validation. family default (400), no ApiErrorCatalog entry needed.
+        const val SECTION_12_CODE_COUNT = 69
     }
 }

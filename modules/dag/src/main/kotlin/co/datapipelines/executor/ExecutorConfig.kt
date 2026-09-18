@@ -175,19 +175,25 @@ data class ExecutorConfig(
         pipelineQueryTimeoutSecondsOverride: Int? = null,
     ): ResolvedQueryTimeout =
         when {
-            nodeQueryTimeoutSecondsOverride != null ->
+            nodeQueryTimeoutSecondsOverride != null -> {
                 ResolvedQueryTimeout(nodeQueryTimeoutSecondsOverride, QueryTimeoutSource.NODE)
+            }
 
-            pipelineQueryTimeoutSecondsOverride != null ->
+            pipelineQueryTimeoutSecondsOverride != null -> {
                 ResolvedQueryTimeout(pipelineQueryTimeoutSecondsOverride, QueryTimeoutSource.PIPELINE)
+            }
 
-            datasourceQueryTimeoutSeconds != null ->
+            datasourceQueryTimeoutSeconds != null -> {
                 ResolvedQueryTimeout(datasourceQueryTimeoutSeconds, QueryTimeoutSource.DATASOURCE)
+            }
 
-            nodeQueryTimeoutSecondsByDialect[dialect] != null ->
+            nodeQueryTimeoutSecondsByDialect[dialect] != null -> {
                 ResolvedQueryTimeout(nodeQueryTimeoutSecondsByDialect.getValue(dialect), QueryTimeoutSource.DIALECT)
+            }
 
-            else -> ResolvedQueryTimeout(nodeQueryTimeoutSeconds, QueryTimeoutSource.APPLICATION)
+            else -> {
+                ResolvedQueryTimeout(nodeQueryTimeoutSeconds, QueryTimeoutSource.APPLICATION)
+            }
         }
 
     /**
