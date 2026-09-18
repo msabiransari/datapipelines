@@ -1,0 +1,96 @@
+<!-- 161 — the shell search palette's results (#155). The ONE fragment behind
+     layouts/default.html's ⌘K control: GET /partials/search?q=… swaps this into the
+     open palette's results container (innerHTML), which carries role="listbox" — the
+     combobox/listbox pair the input's aria-controls names (ui-screens.md §3.4).
+
+     Three groups in a fixed order, each capped at the model's GROUP_LIMIT (8) with a
+     "more…" row when the probe overflowed, and every row a LINK to the page whose
+     destination the session's role already governs: a pipeline opens its editor, a
+     template the template editor, an execution its detail page. The "more…" row is
+     itself role="option" — it is a selectable row of the list (VS Code's "Show more"
+     idiom), which also puts it in the arrow-key walk for free. `q` rides on every more
+     link, so the landing list page opens FILTERED (?q=, ?status=, ?pipeline_id=) — the
+     palette is a jump list, not a second browser.
+
+     Names are the folder paths (the machine name is the identifier a search matches);
+     a pipeline's display name, when it has one, rides as the row's meta line. The
+     executions rows show status (as the same chip vocabulary the history table uses,
+     data-status for the machine reader) and started-at.
+
+     An empty answer is ONE sentence (role="status", so it is announced); a blank query
+     renders nothing at all — the palette's hint lives in the layout and the endpoint
+     refuses to pretend an empty box matched nothing. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results">
+  <th:block th:if="${asked}">
+    <p class="app-search-empty" role="status" th:if="${empty}">
+      No pipelines, templates or executions match “<span th:text="${q}">q</span>”.
+    </p>
+
+    <th:block th:unless="${empty}">
+      <div class="app-search-group" role="group" aria-label="Pipelines"
+           th:unless="${#lists.isEmpty(pipelineHits)}">
+        <p class="app-search-group-label" aria-hidden="true">Pipelines</p>
+        <a role="option" aria-selected="false" class="app-search-option"
+           th:each="p : ${pipelineHits}"
+           th:href="@{/pipelines/{id}/editor(id=${p.id})}">
+          <span class="app-search-option-title" th:text="${p.name}" th:title="${p.name}">nyc/mobility/revenue</span>
+          <span class="app-search-option-meta" th:if="${!p.displayName.isEmpty()}" th:text="${p.displayName}">Revenue by borough</span>
+        </a>
+        <a role="option" aria-selected="false" class="app-search-option app-search-more"
+           th:if="${pipelinesMore}"
+           th:href="@{/pipelines(q=${q})}">All pipelines matching “<span th:text="${q}">q</span>”…</a>
+      </div>
+
+      <div class="app-search-group" role="group" aria-label="Templates"
+           th:unless="${#lists.isEmpty(templateHits)}">
+        <p class="app-search-group-label" aria-hidden="true">Templates</p>
+        <a role="option" aria-selected="false" class="app-search-option"
+           th:each="t : ${templateHits}"
+           th:href="@{/templates/editor(name=${t.id})}">
+          <span class="app-search-option-title" th:text="${t.id}" th:title="${t.id}">acme/finance/monthly_revenue</span>
+          <span class="app-search-option-meta">
+            <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
+            <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
+          </span>
+        </a>
+        <a role="option" aria-selected="false" class="app-search-option app-search-more"
+           th:if="${templatesMore}"
+           th:href="@{/templates(q=${q})}">All templates matching “<span th:text="${q}">q</span>”…</a>
+      </div>
+
+      <div class="app-search-group" role="group" aria-label="Executions"
+           th:unless="${#lists.isEmpty(executionHits)}">
+        <p class="app-search-group-label" aria-hidden="true">Executions</p>
+        <a role="option" aria-selected="false" class="app-search-option"
+           th:each="r : ${executionHits}"
+           th:href="@{/executions/{id}(id=${r.executionId})}">
+          <span class="app-search-option-title"
+                th:with="p=${executionNames[r.pipelineId]}"
+                th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : ${r.pipelineId.toString().substring(0, 8) + '...'}"
+                th:title="${p != null} ? ${p.name} : null">nyc/mobility/revenue</span>
+          <span class="app-search-option-meta">
+            <!-- The chip shows prose; the ENUM rides on data-status — the history table's
+                 own rule (a copy change must never be a machine reader's problem). -->
+            <span class="app-chip" th:attr="data-status=${r.status.name()}"
+                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
+            <span th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">2026-09-18 10:24</span>
+          </span>
+        </a>
+        <!-- The filtered "more" row: a status word names its whole status, a single
+             pipeline names its runs page (?pipeline_id=), and an overflow with neither
+             falls back to the plain history screen. A page that fits in the palette and
+             has no filter to carry renders no more row — the palette does not offer a
+             link that shows what it already shows. -->
+        <a role="option" aria-selected="false" class="app-search-option app-search-more"
+           th:if="${statusMatch != null}"
+           th:href="@{/executions(status=${statusMatch.name()})}">All <span th:text="${#strings.toLowerCase(statusMatch.name())}">failed</span> executions…</a>
+        <a role="option" aria-selected="false" class="app-search-option app-search-more"
+           th:if="${statusMatch == null and pipelineMatch != null}"
+           th:href="@{/executions(pipeline_id=${pipelineMatch.id})}">All executions of “<span th:text="${pipelineMatch.name}">nyc/mobility/revenue</span>”…</a>
+        <a role="option" aria-selected="false" class="app-search-option app-search-more"
+           th:if="${statusMatch == null and pipelineMatch == null and executionsMore}"
+           th:href="@{/executions}">All executions…</a>
+      </div>
+    </th:block>
+  </th:block>
+</div>

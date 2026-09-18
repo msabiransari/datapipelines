@@ -103,6 +103,18 @@ class UiConfig {
     @Bean
     fun adminUsersBrowseModel(users: co.datapipelines.auth.UserService): AdminUsersBrowseModel = AdminUsersBrowseModel(users)
 
+    /**
+     * 161: the shell search palette's one model (#155) — pipelines, templates and executions,
+     * each group read through the query the group's own screen already answers with.
+     */
+    @Bean
+    fun searchBrowseModel(
+        pipelines: co.datapipelines.pipeline.PipelineService,
+        templates: TemplateRepository,
+        executions: co.datapipelines.executor.ExecutionRepository,
+        pipelineNames: PipelineNames,
+    ): SearchBrowseModel = SearchBrowseModel(pipelines, templates, executions, pipelineNames)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources

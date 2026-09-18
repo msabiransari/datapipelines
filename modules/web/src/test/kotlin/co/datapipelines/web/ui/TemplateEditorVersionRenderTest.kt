@@ -112,7 +112,11 @@ class TemplateEditorVersionRenderTest {
         html shouldContain "id=\"template-source\""
         html shouldContain "hx-target=\"#template-source\""
         html shouldContain "hx-swap=\"outerHTML\""
-        Regex("hx-get=\"([^\"]*)\"").find(html)!!.groupValues[1] shouldContain "/partials/templates/editor/source"
+        // The editor's own fragment swap, pinned by its URL — not by "the page's FIRST
+        // hx-get": since 161 the layout's search control precedes this one in DOM order,
+        // and a position-sensitive first-match would pin the shell's route, not the
+        // editor's (that is exactly how this test went red on an unrelated surface).
+        Regex("hx-get=\"[^\"]*/partials/templates/editor/source").containsMatchIn(html) shouldBe true
         // The dead 041 handler is gone — the select no longer calls a function that
         // blanked the query string and reloaded the same version.
         html shouldNotContain "updateVersion"

@@ -130,15 +130,23 @@ class ShellRenderTest {
     }
 
     @Test
-    fun `the top bar renders the search placeholder, the mode toggle and the avatar menu`() {
+    fun `the top bar renders the search palette, the mode toggle and the avatar menu`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
 
         html shouldContain "class=\"app-topbar\""
         html shouldContain "app-crumb-page"
-        // §B: the search box is a div, NEVER an input — nobody types into a field that
-        // is wired to nothing this round.
-        html shouldContain "class=\"app-search\" aria-hidden=\"true\""
-        html shouldNotContain "class=\"app-search\"><input"
+        // 161 (#155): the search is a REAL control — an <input role="combobox"> wired to
+        // /partials/search, with the palette and its listbox it names via aria-controls.
+        // The 079 §B placeholder's shape is banned in BOTH copies: no aria-hidden search
+        // div may come back.
+        html shouldNotContain "class=\"app-search\" aria-hidden"
+        html shouldContain
+            "<input id=\"app-search-input\" type=\"search\" name=\"q\" class=\"app-search-field\" role=\"combobox\""
+        html shouldContain "aria-controls=\"app-search-palette\""
+        html shouldContain "hx-get=\"/partials/search\""
+        html shouldContain "hx-target=\"#app-search-results\""
+        html shouldContain "id=\"app-search-palette\""
+        html shouldContain "role=\"listbox\" aria-label=\"Search results\""
         html shouldContain "id=\"mode-toggle\""
         html shouldContain "hx-patch=\"/partials/profile/theme\""
         html shouldContain "id=\"app-avatar\""
@@ -146,6 +154,24 @@ class ShellRenderTest {
         html shouldContain "aria-expanded=\"false\""
         html shouldContain "id=\"app-user-menu\""
         html shouldContain "role=\"menu\""
+    }
+
+    /**
+     * 161 — the drawer's copy is the SAME control, never a decoration: a real input,
+     * its own ids (the combobox's aria-controls must name ITS palette), and no
+     * aria-hidden copy left anywhere in the layout. Falsified by reverting either
+     * block to the 079 §B `<div aria-hidden>` — the positive assertions go red.
+     */
+    @Test
+    fun `the drawer carries its own real search control and no inert copy survives`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+
+        html shouldContain
+            "<input id=\"app-search-drawer-input\" type=\"search\" name=\"q\" class=\"app-search-field\" role=\"combobox\""
+        html shouldContain "aria-controls=\"app-search-drawer-palette\""
+        html shouldContain "hx-target=\"#app-search-drawer-results\""
+        html shouldContain "id=\"app-search-drawer-palette\""
+        html shouldNotContain "app-search-text"
     }
 
     @Test

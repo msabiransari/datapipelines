@@ -345,6 +345,35 @@ class RoleVisibilityRenderTest {
             .forEach { verb -> (verb in distinct) shouldBe true }
     }
 
+    /**
+     * 161 (#155) — the shell search is a READ, so it renders for EVERY role, viewer
+     * included: a viewer may search, and every hit is a link to a page the destination's
+     * own guards govern read-only. Rendered at `RoleModel.NONE` + `canRead` — the arm is
+     * worthless against the fullest role, which is what every other fixture here uses.
+     * A viewer's palette carries no verb controls, so the `data-verb` sweep above
+     * already pins the other half.
+     */
+    @Test
+    fun `the header search renders for a viewer - it is a read, not a verb`() {
+        val viewer =
+            render("pipelines/list") {
+                chrome()
+                setVariable("currentPath", "/pipelines")
+                withRoles(RoleModel.NONE.copy(canRead = true))
+                setVariable("scopes", setOf<String>())
+                setVariable("dialects", emptyList<String>())
+                setVariable("pipelines", emptyList<Any>())
+                setVariable("drafts", emptyMap<Any, Any>())
+                setVariable("q", "")
+                setVariable("offset", 0)
+                setVariable("hasMore", false)
+                setVariable("total", 0)
+            }
+
+        viewer shouldContain "<input id=\"app-search-input\" type=\"search\" name=\"q\" class=\"app-search-field\" role=\"combobox\""
+        viewer shouldContain "data-role=\"viewer\""
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** A context with NO role attributes at all — the forgotten-stamp case. */

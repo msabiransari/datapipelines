@@ -1083,3 +1083,152 @@ test("syncCollapseButton states the VISUAL state and writes nothing", () => {
   assert.equal(button.attr("title"), "Expand sidebar");
   assert.equal(doc.rootHas(shell.COLLAPSED_CLASS), false);
 });
+
+// ---------------------------------------------------------------------------
+// 161 — the search palette (#155). The pure halves: open/close state, the
+// combobox's active row (reserved document-unique id; focus never leaves the
+// input), the visible-copy pick for the ⌘K chord, and the reset/close sweeps.
+// The fetch discipline (blank query never fires) lives in init()'s
+// htmx:configRequest listener — wiring, not state — so it is falsified at the
+// browser arm, not here.
+// ---------------------------------------------------------------------------
+
+/** An element double with just what the palette functions touch. */
+function mkRow() {
+  const classes = new Set();
+  const attrs = {};
+  return {
+    // `id` reads and writes the SAME storage removeAttribute clears — the one
+    // attribute-value split a real DOM does not have.
+    get id() {
+      return attrs.id ?? null;
+    },
+    set id(v) {
+      attrs.id = v;
+    },
+    classes,
+    attrs,
+    classList: {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      contains: (c) => classes.has(c),
+      toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
+    },
+    getAttribute: (k) => (k in attrs ? attrs[k] : null),
+    setAttribute: (k, v) => { attrs[k] = v; },
+    removeAttribute: (k) => { delete attrs[k]; },
+    attr: (k) => (k in attrs ? attrs[k] : null),
+  };
+}
+
+/** A search root: input + palette(+options) + results + hint, dispatched by selector. */
+function mkSearchRoot(visible = true, optionCount = 0) {
+  const bySel = {
+    "[data-search-input]": mkRow(),
+    "[data-search-palette]": mkRow(),
+    "[data-search-results]": mkRow(),
+    "[data-search-hint]": mkRow(),
+  };
+  const input = bySel["[data-search-input]"];
+  input.offsetParent = visible ? {} : null;
+  const palette = bySel["[data-search-palette]"];
+  palette.hidden = true;
+  palette.options = [];
+  for (let i = 0; i < optionCount; i++) palette.options.push(mkRow());
+  // Faithful to the real lookup: the active row is found BY its reserved id.
+  palette.querySelector = (sel) => palette.options.find((o) => "#" + o.id === sel) ?? null;
+  palette.querySelectorAll = (sel) => (sel === '[role="option"]' ? palette.options : []);
+  const results = bySel["[data-search-results]"];
+  results.textContent = "";
+  const hint = bySel["[data-search-hint]"];
+  hint.hidden = false;
+  const root = {
+    querySelector: (sel) => bySel[sel] ?? null,
+  };
+  return { root, input, palette, results, hint };
+}
+
+test("setSearchOpen toggles hidden, the class and aria-expanded, and closing clears the active row", () => {
+  const shell = loadShell();
+  const { root, input, palette } = mkSearchRoot(true, 2);
+
+  assert.equal(shell.setSearchOpen(root, true), true);
+  assert.equal(palette.hidden, false);
+  assert.equal(palette.classList.contains(shell.SEARCH_OPEN_CLASS), true);
+  assert.equal(input.attr("aria-expanded"), "true");
+
+  // An active row is the reserved id's owner; closing must release it, or a reopened
+  // palette would greet a new query with Enter aimed at a stale row.
+  shell.setSearchActive(root, palette.options[1]);
+  assert.equal(palette.options[1].id, shell.SEARCH_ACTIVE_ID);
+  assert.equal(input.attr("aria-activedescendant"), shell.SEARCH_ACTIVE_ID);
+
+  assert.equal(shell.setSearchOpen(root, false), true);
+  assert.equal(palette.hidden, true);
+  assert.equal(input.attr("aria-expanded"), "false");
+  assert.equal(palette.options[1].id, null);
+  assert.equal(input.attr("aria-activedescendant"), null);
+  assert.equal(shell.searchOpen(root), false);
+});
+
+test("moveSearchActive walks the rows with wrap and never leaves an id behind", () => {
+  const shell = loadShell();
+  const { root, palette } = mkSearchRoot(true, 3);
+  const rows = palette.options;
+
+  shell.moveSearchActive(root, 1);
+  assert.equal(rows[0].classList.contains("is-active"), true);
+  assert.equal(rows[0].attr("aria-selected"), "true");
+
+  shell.moveSearchActive(root, 1);
+  assert.equal(rows[0].classList.contains("is-active"), false);
+  assert.equal(rows[1].classList.contains("is-active"), true);
+
+  // Wrap forward: last → first. The reserved id moves with the active row.
+  shell.moveSearchActive(root, 1);
+  shell.moveSearchActive(root, 1);
+  assert.equal(rows[0].classList.contains("is-active"), true);
+  assert.equal(rows[2].id, null);
+  assert.equal(rows[0].id, shell.SEARCH_ACTIVE_ID);
+
+  // Wrap back: first → last.
+  shell.moveSearchActive(root, -1);
+  assert.equal(rows[0].classList.contains("is-active"), false);
+  assert.equal(rows[2].classList.contains("is-active"), true);
+});
+
+test("visibleSearchRoot picks the copy that is displayed, or none", () => {
+  const shell = loadShell();
+  const topbar = mkSearchRoot(true, 0);
+  const drawer = mkSearchRoot(false, 0);
+  const doc = { querySelectorAll: (sel) => (sel === "[data-search-root]" ? [topbar.root, drawer.root] : []) };
+
+  assert.equal(shell.visibleSearchRoot(doc), topbar.root);
+
+  const bothHidden = mkSearchRoot(false, 0);
+  const doc2 = { querySelectorAll: (sel) => (sel === "[data-search-root]" ? [bothHidden.root] : []) };
+  assert.equal(shell.visibleSearchRoot(doc2), null);
+});
+
+test("resetSearchResults empties the answer and restores the hint", () => {
+  const shell = loadShell();
+  const { root, results, hint } = mkSearchRoot(true, 0);
+  results.textContent = "stale rows";
+
+  shell.resetSearchResults(root);
+  assert.equal(results.textContent, "");
+  assert.equal(hint.hidden, false);
+});
+
+test("closeAllSearchPalettes closes every open copy at once", () => {
+  const shell = loadShell();
+  const a = mkSearchRoot(true, 0);
+  const b = mkSearchRoot(true, 0);
+  shell.setSearchOpen(a.root, true);
+  shell.setSearchOpen(b.root, true);
+  const doc = { querySelectorAll: (sel) => (sel === "[data-search-root]" ? [a.root, b.root] : []) };
+
+  shell.closeAllSearchPalettes(doc);
+  assert.equal(shell.searchOpen(a.root), false);
+  assert.equal(shell.searchOpen(b.root), false);
+});

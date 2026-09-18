@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.55
+**Status:** v1.56
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-17 (151)
+**Last updated:** 2026-09-18 (161)
 
 ---
 
@@ -245,15 +245,27 @@ nav packs to the top; the free space below it is deliberate.
   of the app renders — the inventory is [§4.3e](#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative).
 
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
-a search field **placeholder**, the light/dark toggle, and the avatar menu.
+the search field **palette** (161), the light/dark toggle, and the avatar menu.
 
 - **The breadcrumb** is server-rendered from `AppNav.crumbFor(currentPath)` and re-derived
   client-side after a boosted swap from the active rail link's own `data-nav-group` /
   `data-nav-label`. `ShellRenderTest` asserts the Kotlin table and the rendered markup agree
   for every link, so the highlighted section and the crumb cannot drift apart.
-- **The search field is wired to nothing this round.** It is a `<div>`, not an `<input>`, and
-  `aria-hidden` — deliberately, so nobody types into a box that cannot answer. The `⌘K` chip
-  is a promise about a later round, not a live shortcut.
+- **The search field is real (161, #155).** A `<input role="combobox">` in the top bar — and
+  the same control in the drawer's head below 768px — opens a palette on focus/click or
+  **⌘K / Ctrl+K** and fetches `GET /partials/search?q=…` over htmx (`input changed
+  delay:200ms`; a BLANK query fetches nothing — `shell.js` cancels the request, so an empty
+  box never claims to have matched nothing). The answer (`SearchController` /
+  `SearchBrowseModel`, workspace- and role-scoped like the screens it jumps to) groups up to
+  8 hits each under **Pipelines / Templates / Executions**, every hit a link (pipeline → its
+  editor, template → the template editor, execution → its detail; executions show status and
+  started-at), with a "more…" row per group opening the FILTERED list page (`?q=`, `?status=`,
+  `?pipeline_id=`). The keyboard is the combobox contract: ↑/↓ move the active row (focus
+  stays in the input; `aria-activedescendant`), Enter opens it, Esc or an outside click
+  closes, and any boosted navigation closes the palette. Both copies (top bar + drawer) share
+  the behaviour through `data-search-*` hooks; ⌘K drives whichever copy is displayed (between
+  768 and 1100px neither is, and the chord does nothing). The search is read-only for every
+  role — a viewer sees what a viewer may open.
 - **The avatar** renders the OIDC `picture` claim when there is one and initials otherwise.
   The claim IS stored: `users.profile_picture_url`, written by `OidcSuccessHandler` through
   `UserRepository` on every login, and rendered on Settings since 025.
@@ -669,6 +681,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Templates explorer/editor | Release | `canPromote` | `RELEASE_VERSION` |
 | Template editor (§4.7) | the editable textarea, **Preview** and the render-context rail (143) | `canAuthor` — everyone else reads the working version in the read-only pane | `MUTATE_PIPELINES_TEMPLATES` (the preview POST) |
 | Shell (§3.4) | the **Admin** item (143) | `navAdminUsers` (super admin → `/admin/users`) or `navAdminMembers` (workspace admin → `/workspaces#workspace-members`); absent otherwise | `USER_ADMINISTRATION` / `MANAGE_WORKSPACE_MEMBERS` |
+| Shell (§3.4) | the header search (161, #155) | every role — a READ over what the session's workspace already shows; each result is a link to a page the destination screen's own guards govern | `READ_RESOURCES` |
 | Datasources (§4.5) | Register, Edit, Delete, **Test** | `canAdminWorkspace` | `MUTATE_WORKSPACE_DATASOURCES` / `TEST_DATASOURCE` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `MANAGE_DATASOURCE_GRANTS` |
 | API keys (§4.18) | New key | `canAuthor` (O-2 — viewers never mint) | `MANAGE_OWN_API_KEYS` + the §7.4 issuance gate |
@@ -1596,3 +1609,5 @@ reachability gap this round left open and the one-line fix it needs.
 | 2026-09-09 | v1.28 | resizable panes (104) | **Panes the user can size, one mechanism for two of them** (`static/js/splitter.js`: a pure clamp/step core under `node --test` plus a `role="separator"` DOM adapter — pointer capture, touch, arrows ±16px / Shift ±64px / Home / End, double-click reset, `localStorage` per pane key). **§4.4** the editor dock's 232px fixed height becomes a drag on its top edge (floor 120px, ceiling = stage − 160px), remembered as `dp.pane.editor-dock`, restored before first paint, and the Cytoscape canvas follows it: graph.js's stage `ResizeObserver` now routes through `handleStageResize` — `cy.resize()` always, re-fit only if the view was still the fit, which also fixes the rail-collapse and window-resize cases that silently had the same defect. **New §4.3a** (shared by §4.3 and §4.6): the tree pane's native `resize` corner is replaced by a handle ON the divider, floor 260px, ceiling 40vw, one key for both explorers so the width follows the user. Sizes travel as ONE CSS custom property on `<html>` (`--pe-dock-pane-h`, `--tplx-tree-w`) with the shipped default as the `var()` fallback, so reset is "remove the property"; `InlineWidthAuditTest`'s KDoc names that shape as the allowed one. §5.1 unchanged; no agent-facing surface changes, so the Skill is untouched. |
 | 2026-09-08 | v1.25 | 094 datasource lifecycle | **§4.5** gains three things. A collapsed **"Connection pool — defaults"** section in the register modal AND in the new **edit dialog**: the eight tunable HikariCP keys ([Datasources §5](datasources.md#5-connection-pool-configuration)) with unit, meaning and a help line naming the LAYER each prefilled default came from; `readOnly` mirrored disabled (it is §5.6-refused, so a free field would reject every value); refused keys never rendered; a field left at its default not persisted; the dialect select re-fetches the section because the default is the dialect's to decide. An **Edit** row action — name and dialect disabled (immutable, and re-pointing a live datasource would take every pipeline with it), a blank secret keeps the stored credential, `global` admin-only with a hidden companion field so an UNCHECKED box is still a deliberate write. A **Delete** row action whose dialog asks the usage question FIRST and renders the referencing nodes with their versions; the in-use branch has no button at all, the unused branch's confirm names the datasource. Both dialogs are fetched as whole backdrops into one empty `#ds-dialog` (nothing opens them; closing empties the container) and close on a `data-ds-saved` marker a refusal never carries. |
 | 2026-09-09 | v1.32 | the shell fits a phone (110) | **New §3.6 (normative) — the shell at three widths**: ≥1100px as today; 768–1099px the rail STARTS collapsed by a pure-CSS default (`rail-expanded`, stamped pre-paint by the layout's one inline script, is a stored-"0" user's opt-out; the collapse toggle acts on the VISUAL state, so its first click there expands); <768px the SAME `<aside class="app-rail">` becomes an off-canvas drawer — `rail-open` on `<html>` set/cleared by `shell.js`, never persisted, opened by the topbar's `#rail-open` (the sprite's new `menu` glyph; hidden ≥768 by CSS), closed by `#rail-close`, Escape, the `.app-rail-backdrop` scrim, or any BOOSTED navigation (the same one-shot `applyBoostSwap` arms for the §3.5 entrance decides the close, so a background partial settling cannot slam it shut). Opening moves focus to the first nav link; closing returns it; body scroll locks via the same class. The search MOVES into the drawer's head (a second inert copy of the §3.4 placeholder — hidden is not moved). §B: crumbs truncate to the leaf with the full path on `title` below 1100; every `.ds-table` scrolls inside its own box at every width (`display:block` + `overflow-x:auto` — one rule, wrapper-less tables included, oob fragments untouched); `.app-main` gets `min-width: 0` (the bare-`1fr` track was letting any page's min-content widen the document); `.app-modal` collapses to one full-width rule below 768 with a sticky close; the toast stack sits at the BOTTOM below 768; touch targets are `--field-height-lg` in the drawer and topbar. §4.4/§4.7: the editors are desktop-first BY DECISION — below 768 a `.app-wide-screen-note` band names the entity, its lifecycle badge and the explorer link, editor untouched underneath. Guards: the §D walk now covers 390 and 768 (`AppShellBrowserTest`), and `MobileShellBrowserTest` drives the drawer's open/close/focus/motion contract end to end. |
+
+| 2026-09-18 | v1.56 | the header search becomes real (161) | **§3.4 amended — the placeholder is gone (#155)**. The shell's search is a real `<input role="combobox">` (and the same control in the drawer's head), opening a palette on focus/click or ⌘K / Ctrl+K and fetching `GET /partials/search?q=…` over htmx (`input changed delay:200ms`; a BLANK query never reaches the server — `shell.js` cancels it). `SearchController` / `SearchBrowseModel` answer Pipelines / Templates / Executions, ≤ 8 each, workspace- and role-scoped through the screens' own queries (`PipelineService.list`, `TemplateRepository.list`, the execution-history fork), every hit a link (editor / template editor / execution detail; executions show status + started-at) and a "more…" row per group to the FILTERED list page. Combobox keyboard: ↑/↓ move the active row (`aria-activedescendant`; focus stays in the input), Enter opens it, Esc / outside click / any boosted navigation close. §4.3e gains the search's read-only inventory row. Guards: `ShellRenderTest` (real input, no `aria-hidden` search), `SearchControllerTest` / `SearchPartialRenderTest`, the palette half of `shell.test.mjs`, `RoleVisibilityRenderTest`'s viewer arm, and `HeaderSearchBrowserTest` (⌘K → type → arrow → Enter → editor, screenshot). |
