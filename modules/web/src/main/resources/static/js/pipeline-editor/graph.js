@@ -3,6 +3,11 @@
 
   var NODE_STATES = ["idle", "running", "success", "failed", "aborted"];
 
+  /* 151 (#127) — the states an edge can carry, all STATIC facts about its two nodes:
+   * `active` the target is running, `satisfied` the source completed, `unmet` the
+   * source failed or was aborted. resetAll strips exactly these. */
+  var EDGE_STATES = ["active", "satisfied", "unmet"];
+
   /* Type glyphs (059 §reference, retinted 080 §A): the glyph rides the card's icon
    * TILE — a rounded square washed in the node type's accent pair (--type-* /
    * --type-*-bg, app tokens 080) — not on the bare card. ONE glyph per card (059b):
@@ -91,6 +96,12 @@
    * the browser test asserts the same number the canvas paints. */
   var ARROW_SCALE = 2;
   var ARROW_BASE_PX = 4.35;
+
+  /* 151 / #144 — the boundary markers' Cytoscape box width in model px: the 56px
+   * shape plus room for the word under it ("Running…" at the card's small size).
+   * The stylesheet anchors the boundary connectors at ±BOUNDARY_W/2 and the edge
+   * router (applyEdgeCurves) and minimap read the same number through node.width(). */
+  var BOUNDARY_W = 72;
 
   function iconForType(type) {
     return TYPE_ICONS[String(type || "").toUpperCase()] || "db";
@@ -248,8 +259,6 @@
       nodeSuccess: colour("--accent-success", "#15803d"),
       nodeFailed: colour("--accent-danger", "#dc2626"),
       nodeAborted: colour("--accent-warning", "#a16207"),
-      edgeLabelText: colour("--text-muted", "#64748b"),
-      edgeLabelBg: colour("--surface-page", "#f8f9fb"),
       cardW: cardW,
       cardH: cardH,
       cardRadius: cardRadius,
@@ -368,11 +377,11 @@
         },
       },
       {
-        // Active (the target is running): --edge-active, dashed, and the `flow`
-        // animation — canvas has no keyframes, so graph.js steps line-dash-offset on
-        // a rAF loop while any edge is active (skipped under reduced motion). The
-        // mock's blurred glow path has no Cytoscape counterpart (no filters on
-        // canvas); the wider 2.5px stroke is the emphasis instead.
+        // 151 (#127): `active` — the TARGET is running. The mock's --edge-active dashed
+        // stroke, and NOTHING moves: the dash offset animation is retired, because
+        // motion along a dependency read as rows travelling along it. The only moving
+        // indicator on the canvas is the producer's output port while a write is
+        // MEASURED (buildCardHtml / pipeline-editor.css `.pe-port-writing`).
         selector: "edge.active",
         style: {
           "line-color": tokens.edgeActive,
@@ -383,28 +392,53 @@
         },
       },
       {
-        // Done (the target ran): --edge-done at rest, arrow included.
-        selector: "edge.done",
+        // `satisfied` — the SOURCE completed, so this ordering is met and the dependent
+        // may start. A fact about the source, in --edge-done, arrow included.
+        selector: "edge.satisfied",
         style: {
           "line-color": tokens.edgeDone,
           "target-arrow-color": tokens.edgeDone,
         },
       },
       {
-        // Row counts riding the edge (080 §A, owner-undecided, behind a class):
-        // JS adds `rows` and the `rowLabel` data when the SOURCE node completes —
-        // the wire carries rows_out only, so the label is the count flowing out of
-        // the source along this edge. Small mono, muted, page-coloured backing so
-        // the line does not show through the digits.
-        selector: "edge.rows",
+        // `unmet` — the SOURCE failed or was aborted: this ordering cannot be met in
+        // this run. Short dashes in the failed accent, dimmed — legible without colour
+        // by its pattern (active is [6 8], unmet is [2 6]).
+        selector: "edge.unmet",
         style: {
-          label: "data(rowLabel)",
-          "font-size": 11,
-          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
-          color: tokens.edgeLabelText,
-          "text-background-color": tokens.edgeLabelBg,
-          "text-background-opacity": 1,
-          "text-background-padding": 2,
+          "line-color": tokens.nodeFailed,
+          "target-arrow-color": tokens.nodeFailed,
+          "line-style": "dashed",
+          "line-dash-pattern": [2, 6],
+          opacity: 0.6,
+        },
+      },
+      {
+        // 151 / #144: the boundary markers are compact SHAPES (a 56px disc and a 56px
+        // square, built in HTML by buildMarkerHtml), so their Cytoscape box is narrow
+        // and its chrome transparent — the card-width rectangle 150 painted under the
+        // pill is what made a marker read as a node. Ordered after the state rules so
+        // a running/success/failed marker never gets a card border.
+        selector: "node.boundary",
+        style: {
+          width: BOUNDARY_W,
+          "background-opacity": 0,
+          "border-width": 0,
+          "underlay-opacity": 0,
+        },
+      },
+      {
+        // The boundary connectors leave the Start disc's right edge and enter the End
+        // shape's left edge — the marker's own half width, not the card's.
+        selector: "edge.boundary-start",
+        style: {
+          "source-endpoint": BOUNDARY_W / 2 + "px 0px",
+        },
+      },
+      {
+        selector: "edge.boundary-end",
+        style: {
+          "target-endpoint": -BOUNDARY_W / 2 + "px 0px",
         },
       },
       {
@@ -611,27 +645,12 @@
     );
   }
 
-  /**
-   * What flowed OUT of a completed node, for the edge label: a SQL node's rows
-   * (`0 rows` is a fact worth showing — the node ran and emitted nothing), a
-   * calculator's keys (its rows_out is 0 by construction and would have read
-   * "0 rows" on every calculator edge — T251), nothing when NOT_MEASURED.
-   */
-  function edgeLabelFor(stats) {
-    if (!stats) return null;
-    var keys = keysWritten(stats);
-    if (keys !== null) return countLabel(keys, "key");
-    var r = Number(stats.rows_out);
-    return isFinite(r) && r >= 0 ? countLabel(r, "row") : null;
-  }
-
   function PipelineGraph(containerId, nodes, editor) {
     this.containerId = containerId;
     this.nodes = nodes;
     this.editor = editor;
     this.cy = null;
     this.tokens = readDesignTokens(containerId);
-    this._flowRunning = false;
     this._mm = null;
   }
 
@@ -1076,9 +1095,8 @@
   PipelineGraph.prototype.applyEdgeCurves = function () {
     if (!this.cy) return;
     var self = this;
-    var w = this.tokens.cardW;
     var boxOf = function (n) {
-      return { x: n.position().x, y: n.position().y, w: w, h: n.data("cardH") || self.tokens.cardH };
+      return { x: n.position().x, y: n.position().y, w: self.nodeWidth(n), h: n.data("cardH") || self.tokens.cardH };
     };
     var routed = [];
     var detoursPerTarget = {};
@@ -1234,6 +1252,20 @@
     this.cy.resize();
     this.refreshCardMetrics();
     if (this._fitted) this.fitToView();
+  };
+
+  /**
+   * 151 / #144: a node's box width — the card's for a card, the marker's compact box
+   * for a boundary (the stylesheet's `node.boundary` width). Read from Cytoscape so
+   * the router and the minimap paint the same box the stylesheet declared; the token
+   * is the fallback for a fake without `width()`.
+   */
+  PipelineGraph.prototype.nodeWidth = function (n) {
+    if (n && typeof n.width === "function") {
+      var w = n.width();
+      if (isFinite(w) && w > 0) return w;
+    }
+    return this.tokens.cardW;
   };
 
   /* ------------------------------------------------------------- the minimap */
@@ -1438,13 +1470,19 @@
       var deps = nodes[i].depends_on;
       if (deps && deps.length) {
         for (j = 0; j < deps.length; j++) {
+          // 151 (#127): a depends_on edge is an ORDERING — "the target waits for the
+          // source to finish" — and says so in its kind. It never carries a count and
+          // never moves: what a node writes, and where, is its output port (the card
+          // row buildCardHtml renders from `output`/`port`), not the arrow.
           elements.push({
             group: "edges",
             data: {
               id: deps[j] + "->" + nodes[i].id,
               source: deps[j],
               target: nodes[i].id,
+              kind: "dependency",
             },
+            classes: "dependency",
           });
         }
       }
@@ -1457,28 +1495,35 @@
     if (nodes.length) {
       var ids = boundaryIdsFor(nodes);
       var bounds = rootsAndLeaves(nodes);
+      // 151: unselectable — a tap on a marker must not paint the selection ring of a
+      // thing that has no Details (init.js's selectOnly already refuses synthetic ids).
       elements.push({
         group: "nodes",
         data: { id: ids.start, kind: "boundary", boundary: "start", state: "idle" },
         classes: "idle boundary",
+        selectable: false,
       });
       elements.push({
         group: "nodes",
         data: { id: ids.end, kind: "boundary", boundary: "end", state: "idle" },
         classes: "idle boundary",
+        selectable: false,
       });
+      // 151: the connector names its SIDE so the stylesheet can anchor it to the
+      // marker's compact shape (edge.boundary-start / edge.boundary-end) instead of
+      // the card-width port every other edge uses.
       bounds.roots.forEach(function (rootId) {
         elements.push({
           group: "edges",
-          data: { id: ids.start + "->" + rootId, source: ids.start, target: rootId, kind: "boundary" },
-          classes: "boundary",
+          data: { id: ids.start + "->" + rootId, source: ids.start, target: rootId, kind: "boundary", side: "start" },
+          classes: "boundary boundary-start",
         });
       });
       bounds.leaves.forEach(function (leafId) {
         elements.push({
           group: "edges",
-          data: { id: leafId + "->" + ids.end, source: leafId, target: ids.end, kind: "boundary" },
-          classes: "boundary",
+          data: { id: leafId + "->" + ids.end, source: leafId, target: ids.end, kind: "boundary", side: "end" },
+          classes: "boundary boundary-end",
         });
       });
     }
@@ -1508,16 +1553,24 @@
     // The card reads state from DATA (the html-label template gets a data snapshot,
     // not classes) — writing it here is what re-renders the card's footer dot.
     node.data("state", state);
-    // Edge state follows the TARGET's state (080 §A): the curve into a running node
-    // flows, into a done node it rests in --edge-done. Failure clears the flow.
+    // 151 (#127): an edge is an ORDERING, and its classes are facts about the two
+    // nodes it joins — never a transfer, never in motion. INTO a running node the
+    // edge is `active` (the consumer is running; a static dashed brand stroke);
+    // OUT OF a completed node every dependency is `satisfied` (the dependents may
+    // start); out of a failed/aborted node it is `unmet` (it cannot be satisfied
+    // this run). The retired `done` (target ran) said nothing a reader needed, and
+    // the retired rAF dash flow said something false: rows do not travel along an
+    // arrow — a write shows on the producer's output port, from a measured sample.
     var incomers = node.incomers("edge");
+    var outgoers = node.outgoers("edge");
     if (state === "running") {
       incomers.forEach(function (e) { e.addClass("active"); });
-      this.ensureFlow();
     } else if (state === "success") {
-      incomers.forEach(function (e) { e.removeClass("active"); e.addClass("done"); });
+      incomers.forEach(function (e) { e.removeClass("active"); });
+      outgoers.forEach(function (e) { e.removeClass("unmet"); e.addClass("satisfied"); });
     } else if (state === "failed" || state === "aborted") {
       incomers.forEach(function (e) { e.removeClass("active"); });
+      outgoers.forEach(function (e) { e.removeClass("satisfied"); e.addClass("unmet"); });
     }
     // Keep the editor's nodeStates mirror complete. sse.js only writes entries for
     // nodes that START, and its execution_aborted sweep falls back to a classes-string
@@ -1534,25 +1587,17 @@
   /**
    * The run line (080 §A footer): `node_completed` carries FLAT `duration_ms` /
    * `rows_out` (SseEventProjection), plus `context_value` for a CALCULATOR — one data
-   * write the html-label template re-renders on. The same completion labels the
-   * OUTGOING edges with the count flowing out of this node (the class-gated,
-   * owner-undecided row labels).
+   * write the html-label template re-renders on. The count stays on the node that
+   * produced it: 151 (#127) retired the copy of `rows_out` onto every outgoing edge,
+   * which made one staged table read as one write PER CONSUMER (the owner's
+   * screenshot: "10,000 rows" on both arrows out of a node that wrote 10,000 rows
+   * once). The producer's footer and its output port carry the count, scoped to
+   * the operation that wrote it.
    */
   PipelineGraph.prototype.setNodeStats = function (nodeId, stats) {
     var node = this.findNode(nodeId);
     if (!node) return;
     node.data("run", formatRunLine(stats));
-    var label = edgeLabelFor(stats);
-    if (label !== null) {
-      node.outgoers("edge").forEach(function (e) {
-        // 150: a boundary connector is not a transfer — the rows flowing out of a
-        // leaf say nothing about what reached End, and a count on the leaf→End
-        // line is exactly the misread 151 exists to prevent.
-        if (e.data("kind") === "boundary") return;
-        e.data("rowLabel", label);
-        e.addClass("rows");
-      });
-    }
   };
 
   /**
@@ -1571,44 +1616,6 @@
   function pulseEnabled(mql) {
     return !(mql && mql.matches);
   }
-
-  /**
-   * The active-edge `flow` (080 §A): canvas has no keyframes, so while ANY edge is
-   * active a rAF loop steps every active edge's line-dash-offset. It stops itself
-   * the moment no edge is active; under prefers-reduced-motion the dashes stand
-   * still (the class's dash pattern still reads as "in flight").
-   */
-  PipelineGraph.prototype.ensureFlow = function () {
-    var self = this;
-    if (self._flowRunning || !self.cy) return;
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    if (!pulseEnabled(window.matchMedia("(prefers-reduced-motion: reduce)"))) return;
-    if (typeof requestAnimationFrame !== "function") return;
-    self._flowRunning = true;
-    var step = function () {
-      if (!self.cy) { self._flowRunning = false; return; }
-      var edges = self.cy.edges(".active");
-      if (!edges.length) { self._flowRunning = false; return; }
-      edges.forEach(function (e) {
-        var off = parseFloat(e.style("line-dash-offset")) || 0;
-        e.style("line-dash-offset", off - 1);
-      });
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  };
-
-  PipelineGraph.prototype.setEdgeActive = function (sourceId, targetId, active) {
-    if (!this.cy) return;
-    var edge = this.cy.edges("[source = '" + sourceId + "'][target = '" + targetId + "']");
-    if (!edge.length) return;
-    if (active) {
-      edge.addClass("active");
-      this.ensureFlow();
-    } else {
-      edge.removeClass("active");
-    }
-  };
 
   PipelineGraph.prototype.resetAll = function () {
     var self = this;
@@ -1636,10 +1643,7 @@
       }
     });
     self.cy.edges().forEach(function (edge) {
-      edge.removeClass("active");
-      edge.removeClass("done");
-      edge.removeClass("rows");
-      edge.data("rowLabel", "");
+      EDGE_STATES.forEach(function (c) { edge.removeClass(c); });
     });
   };
 
@@ -1663,38 +1667,6 @@
     node.data("state", state);
     node.data("label", (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state);
     this.updateMinimapNode(id, state);
-  };
-
-  PipelineGraph.prototype.setEdgesToNodeActive = function (nodeId, active) {
-    if (!this.cy) return;
-    var node = this.cy.getElementById(nodeId);
-    if (!node.length) return;
-    var incomers = node.incomers("edge");
-    var self = this;
-    incomers.forEach(function (edge) {
-      if (active) {
-        edge.addClass("active");
-      } else {
-        edge.removeClass("active");
-      }
-    });
-    if (active) self.ensureFlow();
-  };
-
-  PipelineGraph.prototype.setEdgesFromNodeActive = function (nodeId, active) {
-    if (!this.cy) return;
-    var node = this.cy.getElementById(nodeId);
-    if (!node.length) return;
-    var outgoers = node.outgoers("edge");
-    var self = this;
-    outgoers.forEach(function (edge) {
-      if (active) {
-        edge.addClass("active");
-      } else {
-        edge.removeClass("active");
-      }
-    });
-    if (active) self.ensureFlow();
   };
 
   /**
@@ -1767,7 +1739,6 @@
     pulseEnabled: pulseEnabled,
     fitZoomFor: fitZoomFor,
     formatRunLine: formatRunLine,
-    edgeLabelFor: edgeLabelFor,
     truncateLeft: truncateLeft,
     templateLine: templateLine,
     edgeControlPoints: edgeControlPoints,
@@ -1779,6 +1750,7 @@
     MARKER_LABELS: MARKER_LABELS,
     ARROW_SCALE: ARROW_SCALE,
     ARROW_BASE_PX: ARROW_BASE_PX,
+    BOUNDARY_W: BOUNDARY_W,
     EDGE_FORWARD_MIN_DX: EDGE_FORWARD_MIN_DX,
     EDGE_STUB: EDGE_STUB,
     EDGE_DETOUR_DEPTH: EDGE_DETOUR_DEPTH,

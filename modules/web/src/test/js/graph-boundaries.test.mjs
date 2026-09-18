@@ -17,7 +17,8 @@
 //      eligible roots are NOT running roots (flow appears only on node_started);
 //      the 135 sweep skips the markers; a fresh run resets them.
 //   4. NOT A TRANSFER — a completing leaf never labels its leaf→End connector
-//      with its row count (151 will style these lines as boundaries).
+//      with its row count (151 styles these lines as boundaries and retired edge
+//      counts altogether — graph-dependency-edges.test.mjs).
 //
 // Same loader family as sse-abort-pulse.test.mjs: real sse.js + node-ops.js +
 // graph.js modules over hand-rolled cy fakes.
@@ -351,7 +352,9 @@ test("FALSIFY transfer-label leak: a completing leaf never labels its End connec
   g.setNodeStats("leaf", { duration_ms: 12, rows_out: 4242 });
   assert.ok(!world.edgeEndLeaf.hasClass("rows"), "the boundary connector carries no row class");
   assert.equal(world.edgeEndLeaf.data("rowLabel"), undefined, "and no row label — a leaf's rows_out is not a transfer into End");
-  // The authored edge between authored nodes keeps its real behaviour.
+  // 151: the authored edge is a dependency and carries no count either — the
+  // producer's footer and output port hold "7 rows", scoped to what it wrote.
   g.setNodeStats("root_a", { duration_ms: 5, rows_out: 7 });
-  assert.equal(world.edgeAB.data("rowLabel"), "7 rows");
+  assert.equal(world.edgeAB.data("rowLabel"), undefined);
+  assert.equal(world.rootA.data("run"), "7 rows · 5 ms");
 });

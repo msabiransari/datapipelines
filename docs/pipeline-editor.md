@@ -523,7 +523,7 @@ Every node is a 236px rectangular card — 272px on a wide stage (082 §A, below
 
 **Edges — the mock's bezier, its three states, and the backward-edge detour (105).** `unbundled-bezier` with per-edge control points computed after layout AND after every node drag (`applyEdgeCurves`, re-run on `dragfree`). Which curve an edge gets is `edgeRouteFor`'s ruling, a pure function of the two card boxes: a port-to-port dx ≥ 60 takes the mock's bezier — offset `max(60, dx/2)`, leaving the source port horizontally and entering the target port horizontally; a dx < 60, including EVERY backward edge, takes an orthogonal detour BELOW both cards — out right of the source port, down past the lower card's bottom edge, across at the detour depth (44px + 24px per additional backward edge into the same target, so parallel detours stagger), up, and in to the target port from its left. The detour exists because nodes are draggable and a user can put a dependent left of its source (the owner did, 2026-09-08): on a backward edge the forward formula loops the line over the cards and the arrowhead ends up behind one of them — and because the (weight, distance) control points are RELATIVE to the source→target vector, a drag without a recompute kept the old curve re-projected onto the reversed vector, which is the photographed arc. `graph-edges.test.mjs` owns the regimes; `PipelineEditorEdgesBrowserTest` owns the live guarantees (direction, endpoints ±4px, the detour under both cards, the arrow clear).
 
-`--edge` at rest (2px, round caps); `.active` while the TARGET runs — `--edge-active`, dashed `[6 8]`, with the `flow` animation stepped on a rAF loop over `line-dash-offset` (canvas has no keyframes; the loop starts when an edge activates, stops itself when none remain, and never starts under `prefers-reduced-motion`); `.done` after the target ran — `--edge-done`, arrow included. The transitions live in `setNodeState()`: the target's state drives its incoming edges. The mock's blurred glow path has no Cytoscape counterpart (no canvas filters); the wider 2.5px active stroke carries the emphasis instead. **Row counts may ride the edge** (owner-undecided, shipped behind a class): when a node completes, its OUTGOING edges take `edge.rows` + the count as `rowLabel` — small mono on a page-coloured backing.
+**An edge is an ORDERING, never a transfer (151, #127).** Every `depends_on` entry is one edge of `kind: "dependency"` (class `dependency`): "the target waits for the source to finish" — which is also what a dependency on a DDL node means, with no rows involved at all. Its states are STATIC facts about the two nodes it joins, set in `setNodeState()`: `--edge` at rest (2px, round caps); `.active` while the TARGET runs — `--edge-active`, dashed `[6 8]`, **still** (the consumer is running and reading its inputs; nothing travels along the line); `.satisfied` once the SOURCE completed — `--edge-done`, arrow included (the ordering is met; the dependent may start); `.unmet` once the SOURCE failed or was aborted — the failed accent, short dashes `[2 6]` at 0.6 opacity (it cannot be met this run; legible without colour by its pattern). Nothing on the canvas moves along an edge: the pre-151 rAF loop that stepped `line-dash-offset` on active edges, and the `.done` (target ran) state, are retired — motion along a dependency read as rows moving along it, and one staged table feeding two consumers looked like two writes. **No count ever rides an edge:** `setNodeStats` used to copy the producer's `rows_out` onto every outgoing edge (`edge.rows` / `rowLabel`), so a node that wrote 10,000 rows once showed "10,000 rows" on each arrow out of it. The count stays on the producer — its footer and its output port (§5.3a), scoped to the operation that wrote it — and a consumer's count stays unknown until the consumer itself reports one. The mock's blurred glow path has no Cytoscape counterpart (no canvas filters); the wider 2.5px active stroke carries the emphasis instead. `graph-dependency-edges.test.mjs` falsifies both retired readings (a completing producer with two dependents labels neither edge; a starting consumer schedules no animation frame and touches no writing state on its producer).
 
 **The arrowhead is ≥ 8px at zoom 1 (105).** Cytoscape's triangle scales at 4.35 model px per unit of `arrow-scale` (measured live on this stack's editor, 2026-09-09: 3.91px at 0.9, 8.70px at 2.0). The 080 value of 0.9 put the head at 3.9px — under the floor and near-invisible at a 0.27 fit zoom, which is the owner's "the line just disappears behind the node without giving any hint if it's connected to input (left) or output (right)". `arrow-scale: 2` (the exported `ARROW_SCALE`) clears the floor and keeps the mock's head-to-card proportion.
 
@@ -627,23 +627,28 @@ function buildStylesheet(t) {        // t = readDesignTokens() output
             'curve-style': 'unbundled-bezier',
             'source-endpoint': (cardW / 2) + 'px 0px', 'target-endpoint': -(cardW / 2) + 'px 0px',
         } },
-        { selector: 'edge.active', style: {                       // the target is running
+        { selector: 'edge.active', style: {                       // the TARGET is running — still
             'width': 2.5, 'line-color': t.edgeActive, 'target-arrow-color': t.edgeActive,
-            'line-style': 'dashed', 'line-dash-pattern': [6, 8],  // + JS-stepped dash offset
+            'line-style': 'dashed', 'line-dash-pattern': [6, 8],
         } },
-        { selector: 'edge.done', style: {                         // the target ran
+        { selector: 'edge.satisfied', style: {                    // the SOURCE completed
             'line-color': t.edgeDone, 'target-arrow-color': t.edgeDone,
         } },
-        { selector: 'edge.rows', style: {                         // row counts, behind a class
-            'label': 'data(rowLabel)', 'font-size': 11, 'color': t.edgeLabelText,
-            'text-background-color': t.edgeLabelBg, 'text-background-opacity': 1,
+        { selector: 'edge.unmet', style: {                        // the SOURCE failed / was aborted
+            'line-color': t.nodeFailed, 'target-arrow-color': t.nodeFailed,
+            'line-style': 'dashed', 'line-dash-pattern': [2, 6], 'opacity': 0.6,
         } },
+        // 151/#144 — the boundary markers: a compact transparent box (the shape is HTML),
+        // and connectors anchored at the marker's own half width, not the card's.
+        { selector: 'node.boundary', style: { 'width': BOUNDARY_W, 'background-opacity': 0, 'border-width': 0, 'underlay-opacity': 0 } },
+        { selector: 'edge.boundary-start', style: { 'source-endpoint': (BOUNDARY_W / 2) + 'px 0px' } },
+        { selector: 'edge.boundary-end',   style: { 'target-endpoint': -(BOUNDARY_W / 2) + 'px 0px' } },
         { selector: 'edge.secondary', style: { 'line-style': 'dashed' } },   // reserved, unused
     ];
 }
 ```
 
-`readDesignTokens()` returns exactly the keys referenced above — `brand`, `brandSoft`, `edgeIdle`, `edgeActive`, `edgeDone`, `nodeSurface`, `nodeBorder`, `nodeSuccess`, `nodeFailed`, `nodeAborted`, `edgeLabelText`, `edgeLabelBg`, `cardW`, `cardH`, `cardRadius` — each read from the custom property with a hard hex fallback (the mock's light values), so a stale theme file cannot blank the graph. The retired `--node-selected-ring`/`--edge-*-stroke` tokens in `app.css` remain for the banner and node-list accents; the canvas no longer reads them.
+`readDesignTokens()` returns exactly the keys referenced above — `brand`, `brandSoft`, `edgeIdle`, `edgeActive`, `edgeDone`, `nodeSurface`, `nodeBorder`, `nodeSuccess`, `nodeFailed`, `nodeAborted`, `cardW`, `cardH`, `cardRadius` (151 retired `edgeLabelText`/`edgeLabelBg` with the edge label) — each read from the custom property with a hard hex fallback (the mock's light values), so a stale theme file cannot blank the graph. The retired `--node-selected-ring`/`--edge-*-stroke` tokens in `app.css` remain for the banner and node-list accents; the canvas no longer reads them.
 
 ### 5.4 Event handlers
 
@@ -718,17 +723,16 @@ All colors derive from the 080 canvas tokens (`app.css`'s node-type accent block
 | State | CSS class | Accent token | Animation | Meaning |
 |---|---|---|---|---|
 | `idle` | `.idle` | — (neutral card: `--border-subtle`) | none | Initial state. Applied in `buildElements()` so all five statuses are symmetric classes. |
-| `running` | `.running` | `--brand` | state-dot pulse + indeterminate progress line (CSS on the card); incoming edges flow (JS-stepped dash offset) | Node is currently executing |
-| `success` | `.success` | `--accent-success` | none; the out-port turns `--edge-done` | Node completed successfully |
+| `running` | `.running` | `--brand` | state-dot pulse + indeterminate progress line (CSS on the card); incoming edges `.active` (static dashed brand) | Node is currently executing |
+| `success` | `.success` | `--accent-success` | none; the out-port turns `--edge-done` and every outgoing dependency is `.satisfied` | Node completed successfully |
 | `failed` | `.failed` | `--accent-danger` | none | Node failed; pipeline aborted |
 | `aborted` | `.aborted` | `--accent-warning`, 0.5 opacity | none | Node never ran (dependency failed), or was interrupted by cancellation |
 
-Every animation the card owns is CSS (pulse, progress slide, status-dot pulse), so one
-`prefers-reduced-motion: reduce` media query stops them all — the 059 JS border pulse is
-retired. The edge `flow` is the one canvas animation and is JS (a rAF loop stepping
-`line-dash-offset`; a Cytoscape stylesheet has no keyframes), gated on the same media
-query in JS because the graph is a `<canvas>` CSS cannot reach. Under reduced motion the
-dashes stand still and the accents carry the state alone.
+Every animation the canvas chrome owns is CSS (pulse, progress slide, status-dot pulse,
+the output port's write flow — §5.3a), so one `prefers-reduced-motion: reduce` media query
+stops them all — the 059 JS border pulse and the 080 JS edge `flow` (a rAF loop stepping
+`line-dash-offset`) are both retired. Nothing moves on the `<canvas>` itself; under reduced
+motion the accents carry every state alone.
 
 Colors automatically adapt to the active design system theme. No hardcoded hex values.
 
@@ -739,10 +743,10 @@ Event payloads are defined in [REST API §6.4](rest-api.md#64-event-types); the 
 | SSE event | Graph action |
 |---|---|
 | `execution_started` | Reset all nodes to `idle`, edges to rest. Events log resets; the top bar's clock starts. Disable Execute button. |
-| `node_started` | Node → `running`; incoming edges → `.active` (inside `setNodeState`). |
-| `node_progress` | Reduced into `nodeOps` (§10.7); the card's footer takes the state word and the live count (`setNodeOperation`), the node's a11y row takes the operation as its description, the Events tab formats the row. No edge changes — dependency arrows and their copied row labels are #127's. |
-| `node_completed` | Node → `success`; incoming edges → `.done`; the node's run line fills; outgoing edges take the flow label — `523 rows` for a SQL node (`0 rows` included: it ran and emitted nothing), `2 keys` for a CALCULATOR (its `rows_out` is 0 by construction and used to label every calculator edge `0 rows`, T251). A CALCULATOR's `context_value`/`context_values` reach the Details pane, the Events tab and the Context; the footer counts them. A PIPELINE node's `child_execution_id` reaches the Details pane. |
-| `node_failed` | Node → `failed`; incoming edges clear `.active`. The failure record joins the dock's Errors tab. All pending nodes → `aborted`. |
+| `node_started` | Node → `running`; incoming edges → `.active` (static; inside `setNodeState`). |
+| `node_progress` | Reduced into `nodeOps` (§10.7); the card's footer takes the state word and the live count (`setNodeOperation`), the output port takes its measured state (§5.3a), the node's a11y row takes the operation as its description, the Events tab formats the row. No edge changes: a sample is a fact about the node's own write, never about an arrow. |
+| `node_completed` | Node → `success`; incoming edges clear `.active`; outgoing edges → `.satisfied`; the node's run line fills (`523 rows · 634 ms`; `0 rows` included: it ran and emitted nothing; `2 keys` for a CALCULATOR). **No edge takes a count** (151): the footer and the output port hold what this node wrote. A CALCULATOR's `context_value`/`context_values` reach the Details pane, the Events tab and the Context; the footer counts them. A PIPELINE node's `child_execution_id` reaches the Details pane. |
+| `node_failed` | Node → `failed`; incoming edges clear `.active`; outgoing edges → `.unmet`. The failure record joins the dock's Errors tab. All pending nodes → `aborted` (their outgoing edges `.unmet` too). |
 | `pipeline_completed` | Terminal. Every node is `success` or `aborted`. The ONE success toast; the top bar's status takes its final text. |
 | `pipeline_failed` | Terminal. Show error modal (§9); the record joins the Errors tab. |
 | `data_ready` | Show the result in the dock's Results tab (§10) — emitted after `pipeline_completed` and **only when the pipeline has a caller node**. |

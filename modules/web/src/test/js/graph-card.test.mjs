@@ -120,14 +120,6 @@ test("formatRunLine: a calculator's footer counts its keys — the values are th
   assert.equal(g.formatRunLine({ context_values: { a: 1, b: 2, c: 3 } }), "3 keys");
 });
 
-test("edgeLabelFor: a calculator's edge says what flowed — keys, never '0 rows'", () => {
-  const g = loadGraph();
-  assert.equal(g.edgeLabelFor({ duration_ms: 634, rows_out: 523 }), "523 rows");
-  assert.equal(g.edgeLabelFor({ duration_ms: 2, rows_out: 0, context_values: { start: "a", end: "b" } }), "2 keys");
-  assert.equal(g.edgeLabelFor({ duration_ms: 1, rows_out: 0, context_value: "2026-Q3" }), "1 key");
-  assert.equal(g.edgeLabelFor({ duration_ms: 5, rows_out: 0 }), "0 rows", "a SQL node that emitted nothing still says so");
-  assert.equal(g.edgeLabelFor({ duration_ms: 5, rows_out: -1 }), null, "NOT_MEASURED labels nothing");
-});
 
 test("the card is the mock's anatomy: tile, id, eyebrow, facts, footer, ports, progress", () => {
   const g = loadGraph();

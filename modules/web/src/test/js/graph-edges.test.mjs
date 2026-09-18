@@ -58,8 +58,9 @@ test("buildElements: every edge runs dependency -> dependent, for every node kin
   const edges = buildElements(nodes).filter((e) => e.group === "edges" && e.data.kind !== "boundary");
   assert.equal(edges.length, 5, "one edge per depends_on entry");
   const byId = Object.fromEntries(edges.map((e) => [e.data.id, e.data]));
-  assert.deepEqual(byId["src_dql->answer"], { id: "src_dql->answer", source: "src_dql", target: "answer" });
-  assert.deepEqual(byId["src_dml->answer"], { id: "src_dml->answer", source: "src_dml", target: "answer" });
+  // 151: the kind is data — a depends_on edge says it is an ORDERING, never a transfer.
+  assert.deepEqual(byId["src_dql->answer"], { id: "src_dql->answer", source: "src_dql", target: "answer", kind: "dependency" });
+  assert.deepEqual(byId["src_dml->answer"], { id: "src_dml->answer", source: "src_dml", target: "answer", kind: "dependency" });
   // DQL caller (omitted output), DQL caller (explicit), PIPELINE caller:
   assert.equal(byId["src_ddl->answer2"].source, "src_ddl");
   assert.equal(byId["src_ddl->answer2"].target, "answer2");
