@@ -198,6 +198,32 @@ class LakeViewIsolationIntegrationTest {
     }
 
     @Test
+    fun `a single-namespace registry whose only table is emission-refused still builds - no dangling search path`() {
+        // #129's guard, over a real pool: pre-fix the plan's postlude was
+        // `SET search_path = 'a.b.c'` although no CREATE SCHEMA could run for the unmappable
+        // namespace, so the FIRST physical connection's session init failed ("Too many dots")
+        // and Hikari's fail-fast construction threw — the whole datasource down over a
+        // per-table refusal. Now the postlude names only a namespace whose schema exists:
+        // the pool builds, the refusal is recorded per table, and the bare name fails
+        // honestly with the engine's table-not-found instead of taking the connection down.
+        val tripsFile = parquet("trips.parquet", "SELECT 1 AS id")
+        val rows =
+            listOf(LakeRegisteredTable(listOf("a", "b", "c"), "unmappable", "parquet", "file://${tripsFile.absolutePath}"))
+        val outcomes = RecordingOutcomes()
+        val ds = lakeDatasource("lake_all_refused")
+
+        poolManager({ rows }, outcomes).use { manager ->
+            manager.poolFor(ds).leaseConnection().use { connection ->
+                assertAll(
+                    { countOf(connection, "SELECT 1") shouldBe 1 },
+                    { runsSql(connection, "SELECT count(*) FROM unmappable") shouldBe false },
+                )
+            }
+            outcomes.events.map { it.first } shouldContainExactly listOf("lake_all_refused/a.b.c.unmappable")
+        }
+    }
+
+    @Test
     fun `FALSIFICATION - the pre-109 strict composition fails the whole pool build on one bad view`() {
         val tripsFile = parquet("trips.parquet", "SELECT 1 AS id")
         val brokenFile = notParquet("broken.parquet")

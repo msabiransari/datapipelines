@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.22 (revised — see Change Log)
+**Status:** v1.23 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-17
 
 ---
 
@@ -1062,6 +1062,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.table_not_found` | 404 | A table-addressed read (columns / table stats / preview rows) named a table the namespace's catalog listing does not contain (123 §A, datasources.md §7A). Where the dialect's catalog is complete the table does not exist; where it is privilege-filtered the table may only be invisible to the datasource's credentials — the message says which, and names the nearest listed table when one is close |
 | `datasource.table_forbidden` | 403 | The table IS in the catalog listing but the read failed with a permission SQLSTATE — the datasource's credentials cannot read it (123 §A). A 403, not the 404 `grant_required` argues for: a table on a GRANTED datasource is not invisible (the listing already told the caller it exists), so saying so leaks nothing |
 | `datasource.validation.lake_table_unreadable` | 400 | A lake-table registration/import named a table the pre-flight could not read — the view did not create or a one-row scan through it failed (109 §A, datasources.md §8C.1). Refused before storing; the message carries the bounded engine error |
+| `datasource.validation.lake_no_healthy_tables` | 400 | A LAKE pool build whose EVERY registered table was refused at the SQL-emission boundary (158, #129, datasources.md §8C.2): nothing would be queryable, so the build is refused instead of serving an empty pool. The message names every refused table and its reason; each refusal is also recorded on its registry row. The fix is the registered content — repair or unregister the named tables |
 | `datasource.lake.table_unavailable` | 502 | A pipeline node referenced a registered lake table whose connect-time view creation is recorded as failed (`lake_tables.last_error`, V20) — the table's view is skipped on every connection (109 §A, datasources.md §8C.2). `details` carry `table` and the recorded `last_error` |
 | `pipeline.execution.datasource_unreachable` | 502 | Pre-execution reachability check failed for a referenced datasource |
 
@@ -1473,6 +1474,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.23 | 158 (#129) | §13.8 gains `datasource.validation.lake_no_healthy_tables` (400): a LAKE pool build whose EVERY registered table was refused at the SQL-emission boundary is refused outright — nothing would be queryable, and the pre-fix shape failed the same build cryptically (a `SET search_path` naming a schema that was never created) on the first physical connection. The message names every refused table and its reason; each refusal is recorded on its registry row. Additive per §15.2; landed in the same commit as its `DatasourceErrorCodes` constant. |
 | 2026-09-15 | v1.21 | 139 the entry-point checks | **§12.11 (new)** — two MCP-surface save-time gates: `pipeline.validation.table_not_learned` (a saved template names a listed table the calling key never `datasources_get_columns`'d; audit-row read, key-lifetime window, `${…}` and `tempdb` exempt) and `pipeline.validation.door_unacknowledged` (a RAW_DATE_PAIR body refused until `door_acknowledged: true`, the `confirm_new_root` shape). **§13.3** — `pipeline.execution.template_unrendered` (400): execute of a DRAFT whose pinned DRAFT template postdates the key's last successful render. All three MCP-only: they read the caller's own `mcp.tool.called` audit rows. REST and the UI unaffected. Additive per §15.2; both validation codes live in §12.11, and `PipelineErrorCodesSpecDriftTest` pins both sides. |
 | 2026-09-15 | v1.22 | 140 | Release checks: optional §3.3 `checks[]` — server-run read-only statements with an expected value, versioned with the body like `nodes`, body-hash neutral; the agent supplies the query and expectation, never an observed value. §3.2 gains the field row; new §12.12 (`pipeline.validation.check_invalid`, one code for every declaration defect) and new §13.17 (`pipeline.check.failed`, 409 — release refused on a failing check, overridable with a reason). Additive per §15.2. |
 | 2026-09-14 | v1.20 | 136 §B refs optional on a WORKSPACE rule | §13.15 `semantics.fact_invalid`: the empty-`refs` arm is now DATASOURCE-scope only — a WORKSPACE-scope `definition`/`exclusion`/`preference` may carry no refs (a rule that spans datasources is recorded once, against the datasource the question is mostly about; V26 relaxes `chk_learned_facts_refs` the same way). No new code. |

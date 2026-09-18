@@ -168,4 +168,15 @@ object DatasourceErrorCodes {
      * caller's (the location, the format, the file).
      */
     const val LAKE_TABLE_UNREADABLE = "datasource.validation.lake_table_unreadable"
+
+    /**
+     * 158 (#129) — a LAKE pool build whose registry's EVERY table was refused at the
+     * SQL-emission boundary (an unmappable namespace, an unutterable location, an unknown
+     * format): nothing would be queryable, so the build is refused instead of serving a pool
+     * whose search path and views are all absent. Raised by `DefaultDatasourceRegistry`'s pool
+     * factory after recording each refusal on its registry row; the message names every refused
+     * table and its reason. 400 like the validation family: the fix is the operator's
+     * registered content — repair or unregister the named tables and the next build succeeds.
+     */
+    const val LAKE_NO_HEALTHY_TABLES = "datasource.validation.lake_no_healthy_tables"
 }

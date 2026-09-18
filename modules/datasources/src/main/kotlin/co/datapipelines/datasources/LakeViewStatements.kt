@@ -47,7 +47,10 @@ import co.datapipelines.typesystem.DatapipelinesException
  * resolve bare table names on duckdb_jdbc 1.5.5.1; the bare-schema spelling resolves too, but
  * the catalog-qualified form cannot drift into a same-named schema elsewhere). With ZERO or
  * MULTIPLE distinct namespaces nothing is set: there is no defensible default, and fully
- * qualified names are required. This rule is the contract later docs (datasources.md §8C, the
+ * qualified names are required. [planForTables] adds one health condition to the rule (#129):
+ * the single namespace must contain at least one emission-healthy table — the prelude creates
+ * no schema for an all-refused namespace, and a search path naming it fails every connection
+ * of the pool. This rule is the contract later docs (datasources.md §8C, the
  * SKILL) pick up.
  *
  * ## The location boundary
@@ -118,10 +121,19 @@ object LakeViewStatements {
      * - Only an emission-healthy table shapes the prelude. A 3+-segment namespace's
      *   `CREATE SCHEMA` would be invalid SQL the engine refuses; keeping it in the shared
      *   statements would re-create the all-tables-down failure inside the strict half.
-     * - The search-path rule reads ALL registered namespaces, healthy or not — the documented
-     *   rule is a fact about the REGISTRY ("the tables span exactly one namespace"), and a
-     *   broken table's namespace disappearing from the derivation would silently change what
-     *   bare names mean.
+     * - The search-path rule still reads ALL registered namespaces when counting them — the
+     *   documented rule is a fact about the REGISTRY ("the tables span exactly one
+     *   namespace"), and a broken table's namespace disappearing from the count would
+     *   silently change what bare names mean. But the postlude is emitted only when that one
+     *   namespace is also emission-HEALTHY (#129): the prelude creates schemas only for
+     *   healthy namespaces, so a `SET search_path` naming an all-refused namespace points at
+     *   a schema that was never created and fails EVERY physical connection (`Too many dots`
+     *   for a 3+-segment namespace, `No catalog + schema named …` for a mappable one) — the
+     *   all-tables-down outcome this method exists to prevent, arriving through the session
+     *   init instead of the views. The production seam refuses such a registry outright
+     *   (`DefaultDatasourceRegistry` raises `datasource.validation.lake_no_healthy_tables`),
+     *   so the empty postlude here is the generator's own invariant — the postlude never
+     *   names a schema the prelude did not create — not a state a pool is meant to serve.
      *
      * The Iceberg extension decision likewise reads all tables: a broken Iceberg table stays
      * Iceberg, and the operator's fix needs the extension loaded to succeed.
@@ -156,7 +168,7 @@ object LakeViewStatements {
             }
         val namespaces = tables.map { it.namespace }.distinct()
         val postlude =
-            if (namespaces.size == 1) {
+            if (namespaces.size == 1 && namespaces.single() in healthyNamespaces) {
                 listOf("SET search_path = '${namespaces.single().joinToString(".")}'")
             } else {
                 emptyList()
@@ -315,7 +327,7 @@ data class LakeViewPlan(
     val prelude: List<String>,
     /** One entry per registered table, in registry order. */
     val views: List<View>,
-    /** The search-path `SET` when the registry spans exactly one namespace, else empty. */
+    /** The search-path `SET` when the registry spans exactly one namespace with at least one emission-healthy table, else empty. */
     val postlude: List<String>,
 ) {
     init {

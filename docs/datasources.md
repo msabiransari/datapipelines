@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.38 (frozen contract — additive-only changes after this point)
+**Status:** v2.40 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-09-17
@@ -1199,7 +1199,13 @@ registry row (`last_error` / `last_error_at`, bounded to 2000 characters) and **
 and the build succeeds with the surviving views. The same isolation covers the SQL-emission
 boundary's own refusals (an unmappable 3+-segment namespace, a location that fails the
 grammar, an unknown format): the refusal is captured per table and recorded, never thrown
-into the pool build. Recording is **transition-only** — the initializer compares against the
+into the pool build — with ONE exception (158, #129): when EVERY registered table is
+emission-refused there is nothing to isolate, no schema exists and no view would serve, so
+the pool factory records each refusal on its registry row and refuses the build with
+`datasource.validation.lake_no_healthy_tables` (400), the message naming every table and its
+reason. (Pre-158 that registry built a pool whose search-path postlude named a schema that
+was never created, so the first physical connection failed with the engine's parser/catalog
+error — the all-tables-down outcome, without the reason.) Recording is otherwise **transition-only** — the initializer compares against the
 state the pool was built with, so an unchanged outcome writes nothing; a success after a
 failure CLEARS the row's `last_error`. A recorder that itself fails (the registry write) is
 logged and never fails the build. Because the statements run once per generation, no
@@ -1247,7 +1253,11 @@ partitions it names.
 **The search-path rule — when bare table names resolve.** When ALL of the datasource's
 registered tables share EXACTLY ONE distinct namespace, the last statement is
 `SET search_path = '<catalog>.<schema>'` (verified to resolve bare table names on duckdb_jdbc
-1.5.5.1; the catalog-qualified spelling cannot drift into a same-named schema elsewhere).
+1.5.5.1; the catalog-qualified spelling cannot drift into a same-named schema elsewhere) —
+provided at least one table in that namespace is emission-healthy (158, #129): the prelude
+creates no schema for an all-refused namespace, so a search path naming one would fail every
+physical connection, and the count of namespaces still reads ALL registered rows, so a broken
+table's namespace never silently changes what bare names mean.
 **This is the documented choice, and the demo uses it**: the `sample-lake` datasource's four
 tables all live in `[nyc, mobility]`, so templates read `FROM hvfhv_zone_day` bare. With ZERO
 or MULTIPLE distinct namespaces nothing is set — there is no defensible default — and queries
@@ -1601,6 +1611,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v2.40 | 158 (#129) | **§8C.2 — the all-refused registry is refused at the pool build**: the search-path postlude is now emitted only when the single registered namespace has at least one emission-healthy table (the prelude creates no schema for an all-refused namespace; the postlude naming it failed every physical connection — `Too many dots` / `No catalog + schema named …` — the all-tables-down outcome 109 §A removed, arriving through the session init). A registry whose EVERY table is emission-refused no longer builds a pool: each refusal is recorded on its registry row and the build fails with the catalogued `datasource.validation.lake_no_healthy_tables` (400, pipeline-contract §13.8) naming every table and its reason. Partial refusals are unchanged — per-table isolation is exactly that case. |
 | 2026-09-17 | v2.39 | 123 §7D probe timeout code (#123) | **§7D's clamps paragraph corrected**: a probe statement timeout is the catalogued `pipeline.node.query_timeout` (since T202 — `SqlProbeTool.probing`, MCP §6.2.34 already agreed), not `pipeline.node.query_execution_failed` with `reason: "timeout"`; the other-driver-refusal sentence keeps `query_execution_failed`. Docs-only; the codes agree across datasources.md, mcp-server.md and the contract. |
 | 2026-09-17 | v2.38 | Writable LAKE spill default (#133) | §8C.4: isolated anonymous-engine spill paths under the JVM temporary directory, retained through physical replacement and removed by normal engine shutdown; named/file settings preserved. §5.2 clarifies the existing concurrent-close no-attempt case and its reported residual. |
 | 2026-09-17 | v2.37 | 152 R152-8: the retained owner's close contained (#128) | **§5.2**: the retained owner connection's close takes the duplicates' nonfatal-exception policy — one attempt, `SQLException` or `RuntimeException` reported and contained (v2.36 caught only the former, and the escape reached the shared manager's loop and skipped the next retired pool); a refused physical close is reported, never called a closure. |
