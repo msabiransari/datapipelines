@@ -90,6 +90,8 @@ class EngineConfiguration {
             // 108: the middle of the three budgets — one node, wall clock, executor-enforced.
             nodeTimeoutSeconds = executor.nodeTimeoutSeconds,
             nodeTimeoutMaxSeconds = executor.nodeTimeoutMaxSeconds,
+            nodeQueryTimeoutMaxSeconds = executor.nodeQueryTimeoutMaxSeconds,
+            nodeQueryTimeoutSecondsByDialect = executor.nodeQueryTimeoutSecondsByDialect,
             cancelGraceSeconds = executor.cancelGraceSeconds,
             sourceFetchSize = executor.sourceFetchSize,
             progressWriteIntervalSeconds = executor.progressWriteIntervalSeconds,

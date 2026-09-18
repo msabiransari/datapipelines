@@ -71,6 +71,11 @@ class WebPropertiesSpecDriftTest {
         props.maxConcurrentExecutionsGlobal shouldBe null
         documented.getValue("datapipelines.executor.node-query-timeout-seconds") shouldBe props.nodeQueryTimeoutSeconds.toString()
         documented.getValue("datapipelines.executor.execution-timeout-seconds") shouldBe props.executionTimeoutSeconds.toString()
+        // 156, #2: the ceiling on `settings.query_timeout_seconds`. The per-dialect map's own
+        // default (`LAKE: 180`) is not a single scalar cell ROW_REGEX can parse — it is pinned
+        // directly against ExecutorProperties in ExecutorPropertiesDialectMapBindingTest instead.
+        documented.getValue("datapipelines.executor.node-query-timeout-max-seconds") shouldBe props.nodeQueryTimeoutMaxSeconds.toString()
+        props.nodeQueryTimeoutSecondsByDialect shouldBe mapOf(co.datapipelines.typesystem.Dialect.LAKE to 180)
         documented.getValue("datapipelines.executor.progress-write-interval-seconds") shouldBe props.progressWriteIntervalSeconds.toString()
         // 149: the node_progress periodic cadence — bound, documented and mirrored in the env files.
         documented.getValue("datapipelines.executor.progress-sample-interval-seconds") shouldBe
