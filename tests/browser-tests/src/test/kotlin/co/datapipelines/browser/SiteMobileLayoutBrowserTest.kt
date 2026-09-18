@@ -58,7 +58,8 @@ class SiteMobileLayoutBrowserTest : BrowserSuite() {
 
         val phone =
             newBrowserContext(
-                Browser.NewContextOptions()
+                Browser
+                    .NewContextOptions()
                     .setViewportSize(VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
                     .setIsMobile(true)
                     .setHasTouch(true),
@@ -72,8 +73,10 @@ class SiteMobileLayoutBrowserTest : BrowserSuite() {
                 phonePage.waitForLoadState(LoadState.NETWORKIDLE)
                 @Suppress("UNCHECKED_CAST")
                 val shape = phonePage.evaluate(SWEEP_JS) as Map<String, Any>
+
                 @Suppress("UNCHECKED_CAST")
                 val squeezed = shape["squeezed"] as List<String>
+
                 @Suppress("UNCHECKED_CAST")
                 val wide = shape["wide"] as List<String>
                 val docOver = (shape["docOver"] as Number).toLong()
