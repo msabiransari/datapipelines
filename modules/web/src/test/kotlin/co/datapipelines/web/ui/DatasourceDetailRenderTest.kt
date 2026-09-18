@@ -77,6 +77,33 @@ class DatasourceDetailRenderTest {
             ),
         )
 
+    /**
+     * 162 (#156): LAKE renders its registry tree exactly as before; every other dialect renders
+     * the schema tree's ROOT — hand-set here, like [tables] above, rather than through the real
+     * [DatasourceSchemaTreeBrowseModel] (which opens a live connection): a `flat` root with an
+     * empty tables page is enough to prove the WRAPPER renders, and the tree's own content is
+     * [DatasourceSchemaTreeRenderTest]'s job.
+     */
+    private fun fillTree(
+        model: ExtendedModelMap,
+        dialect: Dialect,
+    ) {
+        if (dialect == Dialect.LAKE) {
+            LakeTableBrowseModel().fillLevel(model, tables, prefix = null, offset = 0)
+        } else {
+            model.addAttribute("flat", true)
+            model.addAttribute("introspectionErrorCode", null)
+            model.addAttribute("introspectionErrorMessage", null)
+            model.addAttribute("levelId", "ds-tables-flat")
+            model.addAttribute("namespace", "")
+            model.addAttribute("tables", emptyList<Any>())
+            model.addAttribute("tablesTruncated", false)
+            model.addAttribute("offset", 0)
+            model.addAttribute("hasMore", false)
+            model.addAttribute("total", 0)
+        }
+    }
+
     private fun render(dialect: Dialect): String {
         val model = ExtendedModelMap()
         model.addAttribute("datasource", datasource(dialect))
@@ -87,7 +114,7 @@ class DatasourceDetailRenderTest {
         model.addAttribute("workspaceHeaderFragment", "")
         model.addAttribute("workspaceOptions", emptyList<Any>())
         model.addAttribute("activeWorkspace", "acme")
-        LakeTableBrowseModel().fillLevel(model, tables, prefix = null, offset = 0)
+        fillTree(model, dialect)
         // 118 — the learned-facts section reads `facts`; the header assertions need none.
         DatasourceFactsModel.fill(model, datasource(dialect), emptyList())
 
@@ -175,7 +202,7 @@ class DatasourceDetailRenderTest {
         model.addAttribute("workspaceHeaderFragment", "")
         model.addAttribute("workspaceOptions", emptyList<Any>())
         model.addAttribute("activeWorkspace", "acme")
-        LakeTableBrowseModel().fillLevel(model, tables, prefix = null, offset = 0)
+        fillTree(model, datasource.dialect)
 
         val context =
             WebContext(
@@ -232,5 +259,38 @@ class DatasourceDetailRenderTest {
         val html = render(datasource(Dialect.LAKE))
 
         html shouldNotContain ">region</dt>"
+    }
+
+    // ------------------------------- 162 (#156): LAKE registry vs discovered-schema tree
+
+    /**
+     * The two Tables views never mix on one screen: LAKE keeps its registry heading, prose and
+     * tree id; every other dialect gets the schema-tree heading, prose and id, and neither
+     * dialect renders the other's markup.
+     */
+    @Test
+    fun `LAKE renders the registry heading, prose and tree id, and nothing of the schema tree`() {
+        val html = render(Dialect.LAKE)
+
+        html shouldContain ">Lake tables</h2>"
+        html shouldContain "Registration and import are agent-first"
+        html shouldContain "id=\"lake-table-tree-pane\""
+        html shouldNotContain "id=\"ds-tables-tree-pane\""
+        html shouldNotContain "Nothing here writes to the datasource"
+    }
+
+    @Test
+    fun `every non-LAKE dialect renders the Tables heading, the introspection prose and the schema tree id`() {
+        Dialect.entries.filter { it != Dialect.LAKE }.forEach { dialect ->
+            val html = render(dialect)
+
+            withClue(dialect) {
+                html shouldContain ">Tables</h2>"
+                html shouldContain "Nothing here writes to the datasource"
+                html shouldContain "id=\"ds-tables-tree-pane\""
+                html shouldNotContain "id=\"lake-table-tree-pane\""
+                html shouldNotContain "Registration and import are agent-first"
+            }
+        }
     }
 }

@@ -1,0 +1,55 @@
+<!-- ONE level of a discovered-schema datasource's Tables view (162, #156): the tables and views
+     inside one schema — or, on a schemaless dialect, the whole datasource (`namespace` empty,
+     `DatasourceSchemaTreeBrowseModel.fillRoot`'s `flat` branch, rendered inline at the root by
+     `datasource-tables-schemas.html`).
+
+     A table row is NOT a static leaf like the LAKE registry's (089 §A,
+     `lake-table-tree-level.html`): it expands into its own COLUMNS level on click, the same
+     once-only lazy fetch the schema folder above it uses — the tree here is one tier deeper
+     than the LAKE one.
+
+     Paged like the datasources list itself (§4.5): the pager targets THIS level's own root by
+     id, so paging one schema's tables never disturbs a sibling schema's already-expanded tree
+     (the `lake-table-tree-level.html` rule, same reason). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
+     th:id="${levelId}" class="tpl-level">
+
+  <div th:replace="~{partials/datasource-tables-error :: error}"></div>
+
+  <th:block th:if="${introspectionErrorCode} == null">
+    <div class="ds-empty" th:if="${#lists.isEmpty(tables)}">
+      <p class="ds-empty-title">No tables found</p>
+    </div>
+
+    <ul class="tpl-tree" th:unless="${#lists.isEmpty(tables)}"
+        th:attr="role=${#strings.isEmpty(namespace)} ? 'tree' : 'group', aria-label=${#strings.isEmpty(namespace)} ? 'Tables' : null">
+      <li class="tpl-node" role="none" th:each="t : ${tables}">
+        <details class="tpl-folder">
+          <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                   th:attr="hx-get=@{/partials/datasources/{name}/tables/{table}/columns(name=${datasource.name}, table=${t.name}, schema=${namespace})}"
+                   hx-trigger="click once"
+                   hx-target="next .tpl-level" hx-swap="outerHTML">
+            <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+            <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#table"></use></svg>
+            <span class="tpl-label" th:text="${t.name}">orders</span>
+            <span class="ds-badge ds-badge-default" th:text="${t.type}">TABLE</span>
+          </summary>
+          <!-- Replaced whole by the table's columns level, which carries this same derived id. -->
+          <div class="tpl-level tpl-level-pending" th:id="${t.levelId}">
+            <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+          </div>
+        </details>
+      </li>
+    </ul>
+
+    <p class="tpl-overflow" th:if="${tablesTruncated}">
+      Only the first 2000 tables of this schema are shown.
+    </p>
+
+    <th:block th:if="${!#lists.isEmpty(tables) and (offset > 0 or hasMore)}"
+              th:with="prevUrl=@{/partials/datasources/{name}/tables(name=${datasource.name}, schema=${namespace}, offset=${offset - 25})},
+                       nextUrl=@{/partials/datasources/{name}/tables(name=${datasource.name}, schema=${namespace}, offset=${offset + 25})}">
+      <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${tables.size()}, ${total})}"></div>
+    </th:block>
+  </th:block>
+</div>

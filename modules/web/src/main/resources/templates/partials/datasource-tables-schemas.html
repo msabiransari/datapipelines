@@ -1,0 +1,54 @@
+<!-- The ROOT level of a discovered-schema datasource's Tables view (162, #156): schemas as
+     namespace folders, the 058/067 explorer pattern narrowed to a fixed depth. A schemaless
+     dialect (SQLite) reports no schemas — `DatasourceSchemaTreeBrowseModel.fillRoot`'s valid,
+     non-error answer — so this level renders the TABLES level directly instead of an
+     always-empty folder wrapper (`flat`).
+
+     Unlike the LAKE namespace tree (virtual folders, derived per request from the registered
+     rows beneath them), a schema can genuinely hold zero tables, so the empty state below
+     belongs to EVERY schema level, not only the root.
+
+     This level is rendered once, inline, at page load — it has no pager of its own (schemas are
+     capped, not paged, the same honesty-over-silent-cut choice as the LAKE tree's sub-folders)
+     and is never re-fetched independently. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
+     id="ds-schemas-root" class="tpl-level">
+
+  <div th:replace="~{partials/datasource-tables-error :: error}"></div>
+
+  <th:block th:if="${introspectionErrorCode} == null">
+    <th:block th:if="${flat}">
+      <div th:replace="~{partials/datasource-tables-tree :: fragment}"></div>
+    </th:block>
+
+    <th:block th:unless="${flat}">
+      <div class="ds-empty" th:if="${#lists.isEmpty(schemas)}">
+        <p class="ds-empty-title">No schemas found</p>
+      </div>
+
+      <ul class="tpl-tree" th:unless="${#lists.isEmpty(schemas)}" role="tree" aria-label="Schemas">
+        <li class="tpl-node" role="none" th:each="s : ${schemas}">
+          <details class="tpl-folder">
+            <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                     th:attr="hx-get=@{/partials/datasources/{name}/tables(name=${datasource.name}, schema=${s.path})}"
+                     hx-trigger="click once"
+                     hx-target="next .tpl-level" hx-swap="outerHTML">
+              <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+              <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+              <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
+              <span class="tpl-label" th:text="${s.label}">public</span>
+            </summary>
+            <!-- Replaced whole by the schema's tables level, which carries this same derived id. -->
+            <div class="tpl-level tpl-level-pending" th:id="${s.levelId}">
+              <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+            </div>
+          </details>
+        </li>
+      </ul>
+
+      <p class="tpl-overflow" th:if="${schemasTruncated}">
+        Only the first 2000 schemas are shown.
+      </p>
+    </th:block>
+  </th:block>
+</div>

@@ -267,6 +267,17 @@ class RoleVisibilityRenderTest {
             val html = engine().process(view, bare().apply { templateDetailModel() })
             html shouldNotContain "data-verb="
         }
+        // 162 (#156): the discovered-schema Tables tree is read-only by construction — same
+        // role floor as the datasources list itself (a viewer may read) — and carries no verb
+        // on any of its three levels, with no role attribute required to make that true.
+        listOf(
+            DatasourceSchemaTreeBrowseModel.SCHEMAS_VIEW,
+            DatasourceSchemaTreeBrowseModel.TABLES_VIEW,
+            DatasourceSchemaTreeBrowseModel.COLUMNS_VIEW,
+        ).forEach { view ->
+            val html = engine().process(view, bare().apply { datasourceTablesModel() })
+            html shouldNotContain "data-verb="
+        }
     }
 
     // ------------------------------------------------------------------ the inventory
@@ -370,6 +381,53 @@ class RoleVisibilityRenderTest {
         setVariable("canDiscardCurrent", true)
         setVariable("canPurgeDraftInHeader", true)
         setVariable("versions", emptyList<Any>())
+    }
+
+    /**
+     * One populated level of each kind — a schema, a table, a column — so the scan below is
+     * not vacuously true over three empty panes.
+     */
+    private fun WebContext.datasourceTablesModel() {
+        setVariable(
+            "datasource",
+            co.datapipelines.datasources.Datasource(
+                name = "pg-demo",
+                displayName = "pg-demo",
+                description = null,
+                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                jdbcUrl = "jdbc:postgresql://db/app",
+            ),
+        )
+        setVariable("introspectionErrorCode", null)
+        setVariable("introspectionErrorMessage", null)
+        setVariable("flat", false)
+        setVariable("schemas", listOf(SchemaFolderView(co.datapipelines.datasources.SchemaEntry(listOf("public"), "public"))))
+        setVariable("schemasTruncated", false)
+        setVariable("levelId", DatasourceSchemaTreeBrowseModel.tablesLevelId(listOf("public")))
+        setVariable("namespace", "public")
+        setVariable(
+            "tables",
+            listOf(TableRowView(listOf("public"), co.datapipelines.datasources.TableInfo(listOf("public"), "orders", "TABLE"))),
+        )
+        setVariable("tablesTruncated", false)
+        setVariable("offset", 0)
+        setVariable("hasMore", false)
+        setVariable("total", 1)
+        setVariable("table", "orders")
+        setVariable(
+            "columns",
+            listOf(
+                co.datapipelines.datasources.ColumnInfo(
+                    co.datapipelines.typesystem.ColumnSchema(
+                        name = "id",
+                        type = co.datapipelines.typesystem.LogicalType.INTEGER,
+                        nullable = false,
+                    ),
+                    sourceTypeName = "int4",
+                    warnings = emptyList(),
+                ),
+            ),
+        )
     }
 
     private fun WebContext.chrome() {

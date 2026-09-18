@@ -96,11 +96,12 @@
               </th:block>
             </td>
             <td class="num u-nowrap">
-              <!-- 089 §A: a LAKE datasource has a catalog to show — its registered tables live
-                   on the read-only detail page. Discovered-schema dialects have nothing there. -->
-              <a th:if="${ds.dialect.wire == 'LAKE'}"
-                 class="ds-button ds-button-secondary ds-button-sm"
-                 th:href="@{/datasources/{name}(name=${ds.name})}">Tables</a>
+              <!-- 162 (#156): every dialect now has a read-only Tables view on the detail page
+                   — schemas → tables → columns for discovered-schema dialects, the registered
+                   catalog for LAKE (089 §A). Only the label distinguishes the two. -->
+              <a data-read="datasource-tables" class="ds-button ds-button-secondary ds-button-sm"
+                 th:href="@{/datasources/{name}(name=${ds.name})}"
+                 th:text="${ds.dialect.wire == 'LAKE'} ? 'Lake tables' : 'Tables'">Tables</a>
               <!-- 114 §B — `canAdminWorkspace`, NOT `canAuthor`. auth.md §7.6 puts
                    `MUTATE_WORKSPACE_DATASOURCES` (register/edit/delete) and `TEST_DATASOURCE`
                    on the `ws_admin` role: Test is not a read — it opens a live connection with
