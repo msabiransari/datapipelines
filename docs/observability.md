@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.11 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.12 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-16
+**Last updated:** 2026-09-17
 
 ---
 
@@ -122,6 +122,7 @@ The notices of [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-
 | INFO | `mail.accepted` | The transport accepted a notice (the `mail.sent` audit row's log twin) | `kind`, `domain`, `message_id` |
 | DEBUG | `mail.already_claimed` | A second attempt for one message identity found the claim row and stopped — the "never twice" rule working | `kind`, `user`, `act` |
 | **WARN** | **`mail.send_failed`** | **The transport refused or failed a notice; the same error is on the `mail_sends` row and in the `mail.failed` audit row** | `kind`, `user`, `error` |
+| WARN | `mail.send_retry` | A connect failure (nothing delivered) is being retried in place (158, #121 — bounded: 3 attempts); the row is marked from the FINAL outcome | `kind`, `attempt`, `error` |
 | WARN | `mail.dispatch_failed` | The pool task itself threw (a claim-row update failed, not the transport) | `kind`, `user`, `error` |
 
 **`send_failed` is the one to alert on** — a welcome mail that failed is a user who cannot log in until an admin resets. The admin screen shows the failure too; this line is for the operator who watches logs rather than screens.
@@ -394,6 +395,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-17 | v1.12 | 158 (#121) mail connect retry | §3.4B gains `mail.send_retry` (WARN, `kind` + `attempt` + `error`): a connect-failed notice is retried in place (bounded, 3 attempts) before the claim row is marked — the retry line is per attempt, `mail.send_failed` remains the terminal one. |
 | 2026-09-17 | v1.11 | 152 R152-8 retained-owner containment (#128) | `lake.instance_owner_close_failed` now covers a nonfatal `RuntimeException` too (v1.10's catch was `SQLException`-only, and the escape crossed into the shared manager's pool loop); `lake.instance_closed` gains `retained_owner_closed` so a refused physical close is never reported as a closure. |
 | 2026-09-17 | v1.10 | 152 R152-5/6/7 ownership protocol (#128) | §3.4C gains `lake.instance_handle_exhausted` (WARN — the counted residual: every permitted close refused, no actor left) and `lake.instance_refused_duplicate_close_failed` (DEBUG — a duplicate refused at registration whose creator's close failed; still owned). `lake.instance_handles_closed`'s `in_flight` is now true by construction (the hand-off is decided in the closer's own failure transition). |
 | 2026-09-17 | v1.9 | 152 R152-3/4 confirmed closure (#128) | `lake.instance_handles_closed` now reports `closed` / `already_closed` / `in_flight` / `close_failures` separately — a handle leaves the generation's registry only when the driver has CONFIRMED its close, so the counts say what actually closed, never what was merely attempted. |

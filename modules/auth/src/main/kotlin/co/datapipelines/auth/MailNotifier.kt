@@ -78,7 +78,10 @@ interface MailNotices {
  *    proves both.
  * 4. **Send, then record**: the claim row gets `sent_at` + the Message-ID or the error, and
  *    an audit row (`mail.sent` / `mail.failed`) carries kind, recipients, act and the id or
- *    the error class — never the body. A row still `PENDING` long after its claim is a send
+ *    the error class — never the body. A connect failure (the connection never opened, so
+ *    nothing could have been delivered) is retried in place, bounded (158, #121: 3 attempts,
+ *    250 ms / 1 s backoff); the row and the audit reflect the FINAL outcome. A row still
+ *    `PENDING` long after its claim is a send
  *    the process never got to (it died between commit and send): visible on the admin
  *    screen, and the admin's answer is a reset, never a silent retry of a password mail.
  *
@@ -195,9 +198,81 @@ class MailNotifier(
         message: MailMessage,
     ) {
         try {
-            record(claim, userId, actId, message, sender.send(message))
+            record(claim, userId, actId, message, sendWithRetry(message))
         } catch (e: Exception) {
             log.warn("event=mail.dispatch_failed kind={} user={} error={}", message.kind.wire, userId, e.toString())
+        }
+    }
+
+    /**
+     * 158 (#121) — a bounded in-place retry for the ONE failure class that cannot have
+     * delivered: the connection never opened (a `ConnectException` or a connect-time
+     * `SocketTimeoutException` anywhere in the cause chain — refused, reset before the
+     * greeting, connect timed out on a loaded box). Anything past connect — a read timeout
+     * after DATA, a 5xx refusal, an authentication failure — is ambiguous or permanent and is
+     * recorded at once: a password mail never risks a SECOND copy, and §5A.8's never-twice
+     * rule is about the message, which only an accepted session can produce. Each retry is
+     * logged; the claim row is marked only from the FINAL outcome, so a recovered send reads
+     * `sent` and an exhausted one `failed` with the last error — one row, one audit event,
+     * either way.
+     */
+    private fun sendWithRetry(message: MailMessage): SendOutcome {
+        var outcome = sender.send(message)
+        var attempt = 1
+        while (outcome is SendOutcome.Failed && isConnectFailure(outcome.error) && attempt < MAX_SEND_ATTEMPTS) {
+            log.warn(
+                "event=mail.send_retry kind={} attempt={} error={}",
+                message.kind.wire,
+                attempt,
+                outcome.error.toString(),
+            )
+            Thread.sleep(RETRY_BACKOFF_MS[attempt - 1])
+            outcome = sender.send(message)
+            attempt++
+        }
+        return outcome
+    }
+
+    companion object {
+        /** Postmark's stream selector; the only vendor-shaped header the product knows. */
+        const val STREAM_HEADER = "X-PM-Message-Stream"
+
+        /** #121: initial attempt plus this many connect-failure retries, at these backoffs. */
+        private val RETRY_BACKOFF_MS = longArrayOf(250L, 1000L)
+
+        private val MAX_SEND_ATTEMPTS = 1 + RETRY_BACKOFF_MS.size
+
+        /** Bound on the cause-chain walk — a driver bug must not loop us (ConnectionLease's precedent). */
+        private const val CHAIN_WALK_LIMIT = 16
+
+        /**
+         * #121 — true only when the failure PROVES the connection never opened: a
+         * [java.net.ConnectException] (refused, reset before the greeting) or a connect-phase
+         * [java.net.SocketTimeoutException] (`connect timed out` — a read timeout says "Read
+         * timed out" and is deliberately NOT this class: the server may have accepted the
+         * message before the read died, and a password mail never risks a second copy).
+         * The wrappers (Spring's `MailException`, Jakarta's `MessagingException`) keep the
+         * IOException as a cause, so the walk — not the wrapper's type — decides.
+         */
+        private fun isConnectFailure(error: Throwable): Boolean {
+            var current: Throwable? = error
+            var depth = 0
+            while (current != null && depth < CHAIN_WALK_LIMIT) {
+                when {
+                    current is java.net.ConnectException -> {
+                        return true
+                    }
+
+                    current is java.net.SocketTimeoutException -> {
+                        if (current.message?.lowercase()?.contains("connect") == true) return true
+                    }
+                }
+                val next = current.cause
+                if (next === current) break
+                current = next
+                depth++
+            }
+            return false
         }
     }
 
@@ -245,9 +320,4 @@ class MailNotifier(
     private fun loginUrl(): String = "${baseUrl()}/login"
 
     private fun replyTo(): String = properties.effectiveReplyTo().orEmpty()
-
-    companion object {
-        /** Postmark's stream selector; the only vendor-shaped header the product knows. */
-        const val STREAM_HEADER = "X-PM-Message-Stream"
-    }
 }

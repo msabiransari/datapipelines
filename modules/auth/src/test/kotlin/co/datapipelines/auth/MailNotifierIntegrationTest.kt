@@ -13,6 +13,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import jakarta.mail.MessagingException
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -127,6 +128,61 @@ class MailNotifierIntegrationTest {
         event.details.toString() shouldNotContain ONE_TIME
     }
 
+    // ------------------ 158 (#121): the bounded connect-failure retry
+
+    @Test
+    fun `a connect failure is retried in place - one claim, the row ends sent, the attempts bounded`() {
+        // #121's fix, falsifiable: a connect failure (the one class that cannot have delivered)
+        // retries in place; the claim row is marked from the FINAL outcome only. On the pre-fix
+        // code the first failure ended the row FAILED — this test is red there.
+        val flaky =
+            RecordingMailSender(
+                failures =
+                    mutableListOf(
+                        MessagingException("Could not connect to SMTP host", java.net.ConnectException("Connection refused")),
+                        MessagingException("Could not connect to SMTP host", java.net.SocketTimeoutException("connect timed out")),
+                    ),
+            )
+
+        val lines = capturingLogs(MailNotifier::class.java) { notifier(mailSender = flaky).welcome(user, ONE_TIME) }
+
+        flaky.attempts shouldBe 3
+        val row = sends.find(user.id, MailKind.WELCOME, user.id).shouldNotBeNull()
+        row.status shouldBe MailSend.Status.SENT
+        row.messageId shouldBe "<recorded-1@dp>"
+        audit.rows.single().event shouldBe MailAuditEvents.SENT
+        lines.count { it.contains("event=mail.send_retry") } shouldBe 2
+    }
+
+    @Test
+    fun `a connect failure that never recovers ends failed after the bounded attempts - one claim, one audit row`() {
+        val down = RecordingMailSender(fail = MessagingException("Could not connect", java.net.ConnectException("Connection refused")))
+
+        notifier(mailSender = down).welcome(user, ONE_TIME)
+
+        down.attempts shouldBe 3
+        val row = sends.find(user.id, MailKind.WELCOME, user.id).shouldNotBeNull()
+        row.status shouldBe MailSend.Status.FAILED
+        // The recorded error is the final attempt's wrapper text (class + message), as documented.
+        row.error.shouldNotBeNull() shouldContain "MessagingException: Could not connect"
+        audit.rows.single().event shouldBe MailAuditEvents.FAILED
+    }
+
+    @Test
+    fun `a read timeout after connect is NOT retried - a password mail never risks a second copy`() {
+        // The ambiguous class: the server may have accepted the message before the read died.
+        // Recorded failed at once, one attempt — the admin's answer stays a reset (auth.md §5A.8).
+        val ambiguous =
+            RecordingMailSender(
+                fail = MessagingException("Exception reading response", java.net.SocketTimeoutException("Read timed out")),
+            )
+
+        notifier(mailSender = ambiguous).welcome(user, ONE_TIME)
+
+        ambiguous.attempts shouldBe 1
+        sends.find(user.id, MailKind.WELCOME, user.id).shouldNotBeNull().status shouldBe MailSend.Status.FAILED
+    }
+
     @Test
     fun `the new-user notice goes to every ops-to address, names the creator and the workspace, and carries no password`() {
         notifier(ON.copy(opsTo = "ops@company.com, sec@company.com")).newUser(user, createdBy = "admin@company.com", workspace = "acme")
@@ -230,10 +286,15 @@ class MailNotifierIntegrationTest {
     /** A REAL in-memory sender: records what it was handed, answers a fixed Message-ID, or fails on request. */
     private class RecordingMailSender(
         private val fail: Exception? = null,
+        private val failures: MutableList<Exception> = mutableListOf(),
     ) : MailSender {
         val sent = mutableListOf<MailMessage>()
+        var attempts = 0
 
         override fun send(message: MailMessage): SendOutcome {
+            attempts++
+            // The scripted transient failures are consumed first; [fail] fails every call.
+            if (failures.isNotEmpty()) return SendOutcome.Failed(failures.removeAt(0))
             fail?.let { return SendOutcome.Failed(it) }
             sent += message
             return SendOutcome.Sent(messageId = "<recorded-${sent.size}@dp>")

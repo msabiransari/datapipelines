@@ -390,8 +390,11 @@ class MailNoticesE2eTest {
         while (System.nanoTime() < deadline) {
             observed =
                 sqlRows(
+                    // A failed row reports its recorded transport error, not just "failed" —
+                    // #121: the next under-load sighting names the SMTP error instead of
+                    // leaving it in the row for someone to query by hand.
                     "SELECT m.kind, CASE WHEN m.sent_at IS NOT NULL THEN 'sent' " +
-                        "WHEN m.error IS NOT NULL THEN 'failed' ELSE 'pending' END " +
+                        "WHEN m.error IS NOT NULL THEN 'failed: ' || m.error ELSE 'pending' END " +
                         "FROM mail_sends m JOIN users u ON u.id = m.user_id WHERE u.email = '$email'",
                 )
             if (observed == expected) return
