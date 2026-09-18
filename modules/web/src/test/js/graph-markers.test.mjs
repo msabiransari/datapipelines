@@ -4,12 +4,21 @@
 // Pinned here, the truth table the addendum asks for — start/end × idle/running/
 // finished/failed/stopped × canExecute true/false:
 //   1. START is a disc. When the viewer MAY execute it is a real button (`role="button"`,
-//      focusable, `aria-label="Start execution"`), `aria-disabled` while a run is active;
-//      when they may not, a plain marker (`role="img"`) with no affordance.
+//      focusable, `aria-label="Start execution"`); while a run is active it is the CANCEL
+//      control (159/#148: `aria-label="Cancel execution"`, the word Cancel, the square
+//      glyph, never `aria-disabled`); when they may not, a plain marker (`role="img"`)
+//      with no affordance in every state.
 //   2. END is the terminal shape: the outcome word (Finished / Failed / Stopped), the
 //      elapsed time when known, never a button.
 //   3. ACTIVATION calls the live component's `executePipeline` exactly once — click, Enter
-//      or Space — and never while a run is active. With the wiring removed this file is red.
+//      or Space — while idle, and its `cancelExecution` exactly once while a run is active
+//      (the SAME methods the toolbar calls). With the wiring removed this file is red.
+//   3b. THE PRESS GUARD (159/#148): a pointer press on the disc is stopped at the canvas in
+//      the CAPTURE phase so Cytoscape never `activate()`s the marker node — that
+//      activation emitted `style`, the html-label re-rendered the disc a few ms later,
+//      and a human's mouseup landed on a NEW element, so no click was ever dispatched.
+//   3c. FOCUS survives the disc's re-render: the replacement disc is re-focused when the
+//      focused one was removed, and never when focus moved elsewhere on purpose.
 //   4. The markers keep their 150 contract: `kind: "boundary"`, no ports, nothing to open.
 
 import test from "node:test";
@@ -49,13 +58,34 @@ test("Start, may execute, idle: a real button — role, focus, label, no disable
   assert.ok(!html.includes("pe-card-port") && !html.includes("pe-card-open") && !html.includes("pe-port "), "a marker is not a node");
 });
 
-test("Start, may execute, running: still a button in the tree, aria-disabled, reads Running…", () => {
+test("Start, may execute, running: the Cancel control — a button, never aria-disabled, reads Cancel", () => {
   const html = marker("start", "running", { canExecute: true });
+  assert.match(html, /class="pe-marker pe-marker-start pe-marker-run pe-marker-cancel"/);
   assert.equal(attr(html, "role"), "button");
-  assert.equal(attr(html, "aria-disabled"), "true");
-  assert.equal(attr(html, "aria-label"), "Start execution — running");
-  assert.match(html, /pe-marker-word">Running…</);
+  assert.equal(attr(html, "tabindex"), "0");
+  assert.ok(!html.includes("aria-disabled"), "Cancel is live, not disabled");
+  assert.equal(attr(html, "aria-label"), "Cancel execution");
+  assert.match(html, /pe-marker-word">Cancel</);
+  assert.match(html, /lucide-sprite\.svg#square/, "the toolbar's Cancel glyph, not the play triangle");
+  assert.ok(!html.includes("lucide-sprite.svg#play"));
   assert.match(html, /pe-card-running/);
+  assert.match(html, /class="pe-card pe-card-boundary pe-card-boundary-start pe-card-running pe-card-cancel"/, "the card root carries the cancel state for the stylesheet");
+});
+
+test("idle → running → idle: the disc goes Start → Cancel → Start, and only the running state carries the cancel class", () => {
+  const idle = marker("start", "idle", { canExecute: true });
+  const running = marker("start", "running", { canExecute: true });
+  assert.match(idle, /pe-marker-word">Start</);
+  assert.ok(!idle.includes("pe-marker-cancel"));
+  assert.equal(attr(idle, "aria-label"), "Start execution");
+  assert.match(running, /pe-marker-word">Cancel</);
+  for (const terminal of ["success", "failed", "aborted"]) {
+    const back = marker("start", terminal, { canExecute: true });
+    assert.match(back, /pe-marker-word">Start</, terminal);
+    assert.ok(!back.includes("pe-marker-cancel") && !back.includes("pe-card-cancel"), terminal + ": the cancel classes are gone");
+    assert.equal(attr(back, "aria-label"), "Start execution", terminal);
+    assert.match(back, /lucide-sprite\.svg#play/, terminal);
+  }
 });
 
 for (const state of ["success", "failed", "aborted"]) {
@@ -76,7 +106,9 @@ test("Start, may NOT execute: a plain marker — role img, no tabindex, no run c
     assert.equal(attr(html, "aria-label"), state === "running" ? "Execution start — running" : "Execution start", state);
     assert.match(html, /pe-marker-word">(Start|Running…)</);
   }
-  assert.match(marker("start", "running", { canExecute: false }), /pe-marker-word">Running…</);
+  const running = marker("start", "running", { canExecute: false });
+  assert.match(running, /pe-marker-word">Running…</);
+  assert.ok(!running.includes("pe-marker-cancel") && !running.includes("pe-card-cancel") && !running.includes("Cancel"), "no cancel affordance for a viewer who may not execute");
 });
 
 /* ------------------------------------------------------------------- end */
@@ -113,12 +145,14 @@ test("MARKER_LABELS: Start says Running… while the execution runs", () => {
 
 /* ------------------------------------------------------------ activation */
 
-/** A container fake that records its delegated listeners. */
+/** A container fake that records its delegated listeners — bubble ones by type, capture ones apart. */
 function fakeContainer() {
   const listeners = {};
+  const capture = {};
   return {
     listeners,
-    addEventListener(type, fn) { listeners[type] = fn; },
+    capture,
+    addEventListener(type, fn, useCapture) { (useCapture === true ? capture : listeners)[type] = fn; },
   };
 }
 
@@ -153,18 +187,76 @@ test("click on the Start disc calls the live component's executePipeline exactly
   }
 });
 
-test("activation while a run is active is a no-op; a second wiring is not installed twice", () => {
+test("activation while a run is active calls the live component's cancelExecution exactly once — never executePipeline", () => {
   const g = Object.create(loadGraph().PipelineGraph.prototype);
   const container = fakeContainer();
-  let calls = 0;
-  globalThis.window = { __peInstance: { isExecuting: true, executePipeline() { calls++; } } };
+  let runs = 0;
+  let cancels = 0;
+  globalThis.window = { __peInstance: { isExecuting: true, executePipeline() { runs++; }, cancelExecution() { cancels++; } } };
   try {
     g.wireMarkerActivation(container);
-    container.listeners.click(fakeEvent("click", true));
-    assert.equal(calls, 0, "Running… is not a trigger");
+    const evt = fakeEvent("click", true);
+    container.listeners.click(evt);
+    assert.equal(cancels, 1, "one activation, one cancel — the same cancelExecution the toolbar's Cancel calls");
+    assert.equal(runs, 0, "a running pipeline is never started again from the disc");
+    assert.ok(evt.defaultPrevented && evt.stopped);
+    container.listeners.keydown(fakeEvent("keydown", true, { key: "Enter" }));
+    container.listeners.keydown(fakeEvent("keydown", true, { key: " " }));
+    assert.equal(cancels, 3, "Enter and Space cancel too");
     const before = container.listeners.click;
     g.wireMarkerActivation(container);
     assert.equal(container.listeners.click, before, "wiring is idempotent (history-restored containers keep one listener)");
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test("the activation guard's exits: no disc under the event, no live component, no executePipeline while idle, no cancelExecution while running", () => {
+  const g = Object.create(loadGraph().PipelineGraph.prototype);
+  const container = fakeContainer();
+  g.editor = null;
+  // 1. The event did not come from a disc: nothing is resolved, nothing is called.
+  let touched = 0;
+  globalThis.window = { get __peInstance() { touched++; return { isExecuting: false, executePipeline() { touched += 100; } }; } };
+  try {
+    g.wireMarkerActivation(container);
+    container.listeners.click(fakeEvent("click", false));
+    assert.equal(touched, 0, "a click elsewhere never even resolves the component");
+    // 2. No live component and no graph editor: a silent no-op, not a throw.
+    globalThis.window = {};
+    assert.doesNotThrow(() => container.listeners.click(fakeEvent("click", true)));
+    // 3. Idle, but the component has no executePipeline: nothing is called, nothing throws.
+    let cancels = 0;
+    globalThis.window = { __peInstance: { isExecuting: false, cancelExecution() { cancels++; } } };
+    assert.doesNotThrow(() => container.listeners.click(fakeEvent("click", true)));
+    assert.equal(cancels, 0, "idle never routes to cancel");
+    // 4. Running, but the component has no cancelExecution: nothing is called, never executePipeline.
+    let runs = 0;
+    globalThis.window = { __peInstance: { isExecuting: true, executePipeline() { runs++; } } };
+    assert.doesNotThrow(() => container.listeners.click(fakeEvent("click", true)));
+    assert.equal(runs, 0, "running never routes to execute");
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test("the press guard: mousedown, pointerdown and touchstart on the disc are stopped in the CAPTURE phase before Cytoscape sees them — and only on the disc", () => {
+  const g = Object.create(loadGraph().PipelineGraph.prototype);
+  const container = fakeContainer();
+  globalThis.window = { __peInstance: { isExecuting: false, executePipeline() {} } };
+  try {
+    g.wireMarkerActivation(container);
+    for (const type of ["mousedown", "pointerdown", "touchstart"]) {
+      assert.equal(typeof container.capture[type], "function", type + ": a capture-phase listener is installed");
+      assert.equal(container.listeners[type], undefined, type + ": not a bubble listener — Cytoscape's own binding on the same element would run first");
+      const onDisc = fakeEvent(type, true);
+      container.capture[type](onDisc);
+      assert.ok(onDisc.stopped, type + " on the disc is stopped");
+      assert.ok(!onDisc.defaultPrevented, type + ": the default (focus lands on the disc) is kept");
+      const elsewhere = fakeEvent(type, false);
+      container.capture[type](elsewhere);
+      assert.ok(!elsewhere.stopped, type + " elsewhere reaches Cytoscape — pan, drag and tap are untouched");
+    }
   } finally {
     delete globalThis.window;
   }
@@ -203,6 +295,127 @@ test("without a live component the graph's own editor is the fallback — and a 
   // A viewer's marker has no `.pe-marker-run` element at all (the role/img table above),
   // so `closest` never matches and the listener has nothing to activate.
   assert.ok(!marker("start", "idle", { canExecute: false }).includes("pe-marker-run"));
+});
+
+/* ------------------------------------------------------------- focus */
+
+/**
+ * A DOM small enough to script the keeper's three moments: the disc gains focus, the
+ * html-label REPLACES it (focusout with the old disc still connected, then the swap,
+ * then the observer's callback), or focus moves elsewhere on purpose.
+ */
+function focusHarness() {
+  const listeners = {};
+  const capture = {};
+  const container = {
+    listeners,
+    capture,
+    addEventListener(type, fn, useCapture) { (useCapture === true ? capture : listeners)[type] = fn; },
+    discs: [],
+    querySelectorAll(sel) { return sel === "[data-marker-run]" ? container.discs.filter((d) => d.isConnected) : []; },
+  };
+  const doc = { body: { tag: "body" }, activeElement: null };
+  doc.activeElement = doc.body;
+  const disc = (id) => {
+    const d = {
+      isConnected: true,
+      focused: 0,
+      getAttribute: (n) => (n === "data-marker-run" ? id : null),
+      closest: (sel) => (sel === "[data-marker-run]" ? d : null),
+      focus() { d.focused++; doc.activeElement = d; listeners.focusin && listeners.focusin({ target: d }); },
+    };
+    container.discs.push(d);
+    return d;
+  };
+  let observed = null;
+  let callback = null;
+  const observers = { observeCalls: 0, disconnectCalls: 0 };
+  globalThis.MutationObserver = class {
+    constructor(fn) { callback = fn; }
+    observe(target, opts) { observers.observeCalls++; observed = { target, opts }; }
+    disconnect() { observers.disconnectCalls++; observed = null; }
+  };
+  globalThis.document = doc;
+  const timers = [];
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn) => { timers.push(fn); return timers.length; };
+  const flushTimers = () => { while (timers.length) timers.shift()(); };
+  const mutate = () => callback && callback([]);
+  const restore = () => { delete globalThis.MutationObserver; delete globalThis.document; globalThis.setTimeout = realSetTimeout; };
+  return { container, doc, disc, observers, observed: () => observed, flushTimers, mutate, restore };
+}
+
+test("focus survives the disc's re-render: the replacement disc is focused when the focused one was removed by the html-label", () => {
+  const h = focusHarness();
+  try {
+    const g = Object.create(loadGraph().PipelineGraph.prototype);
+    g.wireMarkerActivation(h.container);
+    assert.equal(typeof h.container.listeners.focusin, "function", "the keeper listens for focus entering a disc");
+    assert.equal(typeof h.container.listeners.focusout, "function", "and for focus leaving it");
+    const old = h.disc("__execution_start__");
+    old.focus();
+    assert.equal(h.observers.observeCalls, 1, "watching the canvas for the re-render once a disc has focus");
+    assert.deepEqual(h.observed().opts, { childList: true, subtree: true });
+    // The re-render: focusout fires with the old disc STILL connected (measured on Chrome
+    // 2026-09-17), then the swap detaches it, focus falls to <body>, the observer fires.
+    h.container.listeners.focusout({ target: old, relatedTarget: null });
+    old.isConnected = false;
+    h.doc.activeElement = h.doc.body;
+    const fresh = h.disc("__execution_start__");
+    h.mutate();
+    assert.equal(fresh.focused, 1, "the replacement disc took the focus back");
+    assert.equal(h.doc.activeElement, fresh);
+    h.flushTimers();
+    assert.equal(h.observers.disconnectCalls, 0, "the deferred focusout check saw a removed disc and kept watching");
+    // A later re-render while focus is still on the disc: nothing to do.
+    h.mutate();
+    assert.equal(fresh.focused, 1, "focus already on the disc — not re-focused");
+  } finally {
+    h.restore();
+  }
+});
+
+test("focus that moved on purpose is respected: a genuine blur stops the keeper, a later re-render steals nothing", () => {
+  const h = focusHarness();
+  try {
+    const g = Object.create(loadGraph().PipelineGraph.prototype);
+    g.wireMarkerActivation(h.container);
+    const old = h.disc("__execution_start__");
+    old.focus();
+    // Tab away: focusout, the disc stays connected, focus is on another element.
+    const elsewhere = { tag: "button" };
+    h.container.listeners.focusout({ target: old, relatedTarget: elsewhere });
+    h.doc.activeElement = elsewhere;
+    h.flushTimers();
+    assert.equal(h.observers.disconnectCalls, 1, "a connected disc that lost focus is a real blur — the keeper stops");
+    // Then the run ends and the disc is re-rendered: focus must stay where the user put it.
+    old.isConnected = false;
+    const fresh = h.disc("__execution_start__");
+    h.mutate();
+    assert.equal(fresh.focused, 0, "no focus theft after a deliberate move");
+    assert.equal(h.doc.activeElement, elsewhere);
+    // And with focus on <body> after a click on the canvas (a genuine blur too): still nothing.
+    const again = h.disc("__execution_start__");
+    again.focus();
+    h.container.listeners.focusout({ target: again, relatedTarget: null });
+    h.doc.activeElement = h.doc.body;
+    h.flushTimers();
+    again.isConnected = false;
+    const newer = h.disc("__execution_start__");
+    h.mutate();
+    assert.equal(newer.focused, 0, "the canvas click blurred the disc while it was still connected — no restore");
+  } finally {
+    h.restore();
+  }
+});
+
+test("without a MutationObserver (node --test, an old browser) the keeper is inert and the activation wiring still installs", () => {
+  const g = Object.create(loadGraph().PipelineGraph.prototype);
+  const container = fakeContainer();
+  assert.equal(typeof globalThis.MutationObserver, "undefined");
+  assert.doesNotThrow(() => g.wireMarkerActivation(container));
+  assert.equal(typeof container.listeners.click, "function");
+  assert.equal(container.listeners.focusin, undefined, "no keeper without an observer");
 });
 
 /* ------------------------------------------------------- data plumbing */

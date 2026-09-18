@@ -43,6 +43,12 @@
 
   var MARKER_ICONS = { start: "play", end: "square" };
 
+  /* 159/#148: while the execution runs, the Start disc of a viewer who may execute is the
+   * CANCEL control — the toolbar's own Cancel (its square glyph, its verb) on the canvas.
+   * The word and the name change with it; the plain marker of a viewer who may not
+   * execute keeps MARKER_LABELS' Running…. */
+  var MARKER_CANCEL = { word: "Cancel", aria: "Cancel execution", icon: "square" };
+
   /** Deterministic collision-safe synthetic id for a reserved base name. */
   function syntheticId(nodes, base) {
     var taken = {};
@@ -667,10 +673,15 @@
    * Start is the run trigger when the viewer MAY execute (`canExecute`, the same
    * server-rendered flag that renders the toolbar's Execute — read off `.pe-root`'s
    * `data-can-execute`, never re-derived in JS): `role="button"`, focusable, Enter/Space
-   * (wireMarkerActivation), `aria-disabled` while a run is active, the disc filled in the
-   * SAME accent as `.pe-run` so the two triggers read as one action. Without the right
-   * it is a plain marker (`role="img"`): an outlined disc, no fill, no affordance. End is
-   * never a trigger — its fill is the authoritative outcome (success/danger/warning).
+   * (wireMarkerActivation), the disc filled in the SAME accent as `.pe-run` so the two
+   * triggers read as one action. While the run is active that same button is the CANCEL
+   * control (159/#148, `.pe-marker-cancel`): the toolbar's square glyph, the word Cancel,
+   * the name "Cancel execution", never `aria-disabled` — one button, two verbs, exactly
+   * as the toolbar's Execute turns into Running… + Cancel. When the run ends (any
+   * terminal state) it is Start again. Without the right it is a plain marker
+   * (`role="img"`) in every state: an outlined disc, no fill, no affordance, Running…
+   * while the execution runs. End is never a trigger — its fill is the authoritative
+   * outcome (success/danger/warning).
    *
    * The `.pe-card` root class stays deliberate: syncCardHeights measures `.pe-card`s to
    * size the Cytoscape box; the marker box is BOUNDARY_W wide (stylesheet) and as tall
@@ -684,26 +695,30 @@
     var word = (MARKER_LABELS[side] && MARKER_LABELS[side][state]) || state;
     var running = state === "running";
     var trigger = side === "start" && data.canExecute === true;
+    var cancel = trigger && running;
+    if (cancel) word = MARKER_CANCEL.word;
     var elapsed = side === "end" && state !== "idle" && state !== "running" && data.elapsed ? String(data.elapsed) : null;
     var aria;
-    if (trigger) {
-      aria = "Start execution" + (running ? " — running" : "");
+    if (cancel) {
+      aria = MARKER_CANCEL.aria;
+    } else if (trigger) {
+      aria = "Start execution";
     } else if (side === "start") {
       aria = "Execution start" + (running ? " — running" : "");
     } else {
       aria = "Execution end" + (state === "idle" ? "" : " — " + (running ? "running" : word.toLowerCase())) + (elapsed ? " in " + elapsed : "");
     }
     var shape =
-      '<div class="pe-marker pe-marker-' + side + (trigger ? " pe-marker-run" : "") + '" role="' +
-      (trigger ? "button" : "img") + '"' +
+      '<div class="pe-marker pe-marker-' + side + (trigger ? " pe-marker-run" : "") + (cancel ? " pe-marker-cancel" : "") +
+      '" role="' + (trigger ? "button" : "img") + '"' +
       (trigger ? ' tabindex="0" data-marker-run="' + esc(data.id) + '"' : "") +
-      (trigger && running ? ' aria-disabled="true"' : "") +
       ' aria-label="' + esc(aria) + '">' +
-      iconSvg(MARKER_ICONS[side], "ds-icon-md") +
+      iconSvg(cancel ? MARKER_CANCEL.icon : MARKER_ICONS[side], "ds-icon-md") +
       "</div>";
     return (
       '<div class="pe-card pe-card-boundary pe-card-boundary-' + side + " pe-card-" + esc(state) +
-      (data.stale ? " pe-card-stale" : "") + '" data-node-id="' + esc(data.id) + '" data-boundary="' + side + '">' +
+      (cancel ? " pe-card-cancel" : "") + (data.stale ? " pe-card-stale" : "") +
+      '" data-node-id="' + esc(data.id) + '" data-boundary="' + side + '">' +
       shape +
       '<span class="pe-marker-word">' + esc(word) + "</span>" +
       (elapsed ? '<span class="pe-marker-elapsed">' + esc(elapsed) + "</span>" : "") +
@@ -1800,34 +1815,115 @@
     this.updateMinimapNode(id, state);
   };
 
+  /** The disc an event came from, or null: the only element wireMarkerActivation acts on. */
+  function markerRunOf(target) {
+    return target && typeof target.closest === "function" ? target.closest(".pe-marker-run") : null;
+  }
+
   /**
    * 151/#144 — the Start disc runs the pipeline. ONE delegated click + keydown pair on
    * the graph container (the html-label re-renders the disc on every state change, so a
    * per-element listener would leak), resolving the LIVE component exactly as the card's
    * open button does, and calling its `executePipeline()` — the same method the toolbar's
    * button calls, so parameters, the draft pin and the CSRF path are one code path.
-   * Guarded by `isExecuting` (Running… is not a trigger) and idempotent per container
-   * (a history-restored container keeps its listeners). A viewer's marker has no
-   * `.pe-marker-run` element at all, so nothing here can fire for them.
+   * 159/#148: while `isExecuting` the same activation calls `cancelExecution()` — the
+   * toolbar's Cancel, one code path again — and the disc is drawn as Cancel
+   * (buildMarkerHtml). Idempotent per container (a history-restored container keeps its
+   * listeners). A viewer's marker has no `.pe-marker-run` element at all, so nothing here
+   * can fire for them.
+   *
+   * THE PRESS GUARD (159/#148, the owner's "Start does nothing" on the live editor). The
+   * disc sits in the html-label layer INSIDE the Cytoscape container, so a pointer press on
+   * it also reached Cytoscape's own mousedown binding on that container, which
+   * `activate()`d the marker node; that emits `style`, and cytoscape-node-html-label
+   * answers every `style` by re-parsing the label a `setTimeout(0)` later — the disc under
+   * the pointer was REMOVED and a new one put in its place ~5–15 ms after mousedown.
+   * A human holds the button 50–150 ms, so mouseup landed on the new element and the
+   * browser, with no connected common ancestor for the pair, dispatched no click at all
+   * (measured 2026-09-17: mousedown, two mutations at +14 ms, mouseup, no click, no
+   * POST …/execute). Automation releases within ~2 ms and beat the timer, which is why
+   * the 151 browser arm stayed green. The guard stops the press at the container in the
+   * CAPTURE phase — before Cytoscape's bubble-phase binding — for `.pe-marker-run`
+   * targets only: the disc is a button, not a canvas gesture (a tap on a marker selects
+   * nothing anyway: selectOnly ignores synthetic ids). Nothing is prevented, so focus
+   * still lands on the disc. mousedown is the mouse path; pointerdown and touchstart are
+   * Cytoscape's touch paths and are stopped for the same reason.
    */
   PipelineGraph.prototype.wireMarkerActivation = function (container) {
     var self = this;
     if (!container || typeof container.addEventListener !== "function" || container.__peMarkerRunWired) return;
     container.__peMarkerRunWired = true;
+    var press = function (evt) {
+      if (markerRunOf(evt.target)) evt.stopPropagation();
+    };
+    ["mousedown", "pointerdown", "touchstart"].forEach(function (type) {
+      container.addEventListener(type, press, true);
+    });
     var activate = function (evt) {
-      var t = evt.target;
-      var disc = t && t.closest ? t.closest(".pe-marker-run") : null;
-      if (!disc) return;
+      if (!markerRunOf(evt.target)) return;
       evt.preventDefault();
       evt.stopPropagation();
       var ed = (typeof window !== "undefined" && window.__peInstance) || self.editor;
-      if (!ed || ed.isExecuting || typeof ed.executePipeline !== "function") return;
-      ed.executePipeline();
+      if (!ed) return;
+      if (ed.isExecuting) {
+        if (typeof ed.cancelExecution === "function") ed.cancelExecution();
+        return;
+      }
+      if (typeof ed.executePipeline === "function") ed.executePipeline();
     };
     container.addEventListener("click", activate);
     container.addEventListener("keydown", function (evt) {
       if (evt.key !== "Enter" && evt.key !== " ") return;
       activate(evt);
+    });
+    this.keepMarkerFocus(container);
+  };
+
+  /**
+   * 159/#148 — focus survives the disc's re-render. Every state change re-parses the
+   * label (see the press guard above), and the browser drops focus to <body> when the
+   * focused element is removed — 151 recorded exactly that: activate the disc from the
+   * keyboard and the focus is gone the moment the run starts. The keeper remembers which
+   * disc has focus (focusin), watches the canvas for the swap while it does, and hands
+   * focus to the replacement disc once it exists — only when focus fell to <body>, never
+   * when it moved somewhere on purpose. Chrome fires focusout for the removal too, with the
+   * old disc STILL connected during the event (measured 2026-09-17), so a focusout is
+   * classified one tick later: a disc that is gone by then was re-rendered (keep watching);
+   * one still connected was a real blur (Tab, a click elsewhere — stop). Inert where there
+   * is no MutationObserver (node --test).
+   */
+  PipelineGraph.prototype.keepMarkerFocus = function (container) {
+    if (typeof MutationObserver !== "function" || typeof document === "undefined") return;
+    var focusedId = null;
+    var discOf = function (target) {
+      return target && typeof target.closest === "function" ? target.closest("[data-marker-run]") : null;
+    };
+    var observer = new MutationObserver(function () {
+      if (!focusedId) return;
+      var active = document.activeElement;
+      if (active && active !== document.body) return;
+      var discs = container.querySelectorAll("[data-marker-run]");
+      for (var i = 0; i < discs.length; i++) {
+        if (discs[i].getAttribute("data-marker-run") === focusedId) {
+          discs[i].focus({ preventScroll: true });
+          return;
+        }
+      }
+    });
+    container.addEventListener("focusin", function (evt) {
+      var disc = discOf(evt.target);
+      if (!disc) return;
+      focusedId = disc.getAttribute("data-marker-run");
+      observer.observe(container, { childList: true, subtree: true });
+    });
+    container.addEventListener("focusout", function (evt) {
+      var disc = discOf(evt.target);
+      if (!disc) return;
+      setTimeout(function () {
+        if (!disc.isConnected) return;
+        focusedId = null;
+        observer.disconnect();
+      }, 0);
     });
   };
 
