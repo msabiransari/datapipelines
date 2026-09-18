@@ -423,12 +423,19 @@ Any failure in steps 2–4 rejects the save with `datasource.validation.properti
 
 ### 5.5 Query timeout precedence
 
-Per-node JDBC statement timeouts resolve in exactly one order:
+Per-node JDBC statement timeouts resolve in one order (156, #2 — the full five-tier precedence,
+including the pipeline- and node-authored overrides above this datasource tier and the
+operator's per-dialect default below it, is stated once in
+[Configuration §3.2](configuration.md#32-executor) and [pipeline-contract §4.11/§5.3](pipeline-contract.md); this datasource's own place in that order is):
 
-1. The datasource's `query_timeout_seconds`, **when set** — it wins for every node executing against this datasource.
-2. Otherwise `datapipelines.executor.node-query-timeout-seconds` (default 60), defined in [Configuration §3.2](configuration.md#32-executor).
+1. The datasource's `query_timeout_seconds`, **when set** — it overrides the pipeline's own
+   setting and every operator default for every node executing against this datasource, but is
+   itself overridden by that node's or its pipeline's own `settings.query_timeout_seconds`.
+2. Otherwise the operator's per-dialect default (`node-query-timeout-seconds-by-dialect.<dialect>`),
+   else `datapipelines.executor.node-query-timeout-seconds` (default 60), both defined in
+   [Configuration §3.2](configuration.md#32-executor).
 
-The executor applies the resolved value with `Statement.setQueryTimeout` per node. This is the only place the precedence is stated; other docs reference it. Note this is a *per-statement* timeout and is independent of `datapipelines.executor.execution-timeout-seconds`, which bounds the whole execution.
+The executor applies the resolved value with `Statement.setQueryTimeout` per node. Note this is a *per-statement* timeout and is independent of `datapipelines.executor.execution-timeout-seconds`, which bounds the whole execution.
 
 ### 5.6 Refused property keys (normative security exception to passthrough)
 
