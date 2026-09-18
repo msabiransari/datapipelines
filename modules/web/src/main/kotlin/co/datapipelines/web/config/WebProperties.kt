@@ -169,7 +169,7 @@ data class ExecutorProperties(
      * key in this file (`lake: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS_BY_DIALECT_LAKE:180}`)
      * — never a bare env var for a dialect the file does not already name.
      */
-    val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = mapOf(Dialect.LAKE to 180),
+    val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = mapOf(Dialect.LAKE to DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS),
     /** `cancel-grace-seconds` (108) — how long a cancelled statement is waited on before it is abandoned. */
     val cancelGraceSeconds: Long = 5,
     /** `source-fetch-size` (108) — the JDBC `fetchSize` on every DQL source cursor; what makes it stream. */
@@ -215,6 +215,11 @@ data class ExecutorProperties(
         require(progressWriteIntervalSeconds > 0) { "datapipelines.executor.progress-write-interval-seconds must be > 0" }
         require(progressSampleIntervalSeconds > 0) { "datapipelines.executor.progress-sample-interval-seconds must be > 0" }
         require(heartbeatSeconds > 0) { "datapipelines.executor.heartbeat-seconds must be > 0" }
+    }
+
+    companion object {
+        /** configuration.md §3.2's shipped LAKE default (156, #2) — see [nodeQueryTimeoutSecondsByDialect]'s KDoc. */
+        const val DEFAULT_LAKE_QUERY_TIMEOUT_SECONDS = 180
     }
 }
 

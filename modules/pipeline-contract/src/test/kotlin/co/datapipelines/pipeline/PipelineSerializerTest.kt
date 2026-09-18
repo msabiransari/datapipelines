@@ -239,7 +239,12 @@ class PipelineSerializerTest {
 
         val json = Fixtures.json(written)
         json.path("settings").path("query_timeout_seconds").asInt() shouldBe 300
-        json.path("nodes").first().path("settings").path("query_timeout_seconds").asInt() shouldBe 45
+        json
+            .path("nodes")
+            .first()
+            .path("settings")
+            .path("query_timeout_seconds")
+            .asInt() shouldBe 45
         val reread = PipelineDeserializer().readOrThrow(written)
         reread shouldBe pipeline
         serializer.write(reread) shouldBe written
