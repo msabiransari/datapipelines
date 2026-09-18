@@ -219,7 +219,7 @@ object SitePages {
     val COMPARE_AIRFLOW =
         SitePage(
             path = "/compare/airflow",
-            title = "datapipelines.co vs Apache Airflow — when to use each",
+            title = "Apache Airflow alternative for SQL pipelines — when to use each",
             description =
                 "An honest comparison: Airflow orchestrates scheduled workflows across a whole platform. " +
                     "We run agent-authored SQL across several operational databases.",
@@ -230,7 +230,7 @@ object SitePages {
     val COMPARE_DBT =
         SitePage(
             path = "/compare/dbt",
-            title = "datapipelines.co vs dbt — when to use each",
+            title = "dbt alternative without a warehouse — when to use each",
             description =
                 "An honest comparison: dbt transforms inside one warehouse and owns the modelling layer. " +
                     "We join across operational databases without landing anything.",
@@ -241,7 +241,7 @@ object SitePages {
     val FEDERATED_QUERY =
         SitePage(
             path = "/federated-query",
-            title = "Federated query without a warehouse — cross-database joins",
+            title = "Federated query and data virtualization — cross-database joins",
             description =
                 "Join Postgres to MySQL to SQLite in one pipeline. Each source is read in place, " +
                     "the join runs in an in-memory staging database, and nothing is landed.",
