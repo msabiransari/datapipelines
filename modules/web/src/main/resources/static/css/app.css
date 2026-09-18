@@ -946,9 +946,12 @@ button.app-busy::after {
   text-overflow: ellipsis;
 }
 
-/* Visual only this round — a <div>, never an <input>, so nobody types into a
-   box that cannot answer (ui-screens.md §3.4). */
+/* 161 — the search is a real control now (#155): the container keeps the look the
+   placeholder had, the field inside it is a transparent <input>, and the palette
+   hangs below the container as a sibling-panel (the .app-menu popover treatment).
+   `position: relative` is what the palette's absolute box anchors to. */
 .app-search {
+  position: relative;
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -960,13 +963,126 @@ button.app-busy::after {
   color: var(--text-muted);
   font-size: var(--text-sm);
   width: 17.5rem;
-  user-select: none;
 }
 
-.app-search-text {
+.app-search-field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  /* The container carries the border and the ring (below); an outline inside a
+     bordered box reads as two boxes. */
+  outline: none;
+}
+
+.app-search-field::placeholder {
+  color: var(--text-muted);
+}
+
+.app-search:focus-within {
+  border-color: var(--border-default);
+}
+
+/* The palette: the avatar menu's panel treatment, anchored under the field's
+   container. Wide enough to hold a folder path, tall enough for three groups of 8,
+   scrolling past that. In the drawer's copy it spans the container instead of the
+   viewport-relative width — the drawer is 232px at most. */
+.app-search-palette {
+  position: absolute;
+  top: calc(100% + var(--gap-xs));
+  right: 0;
+  width: min(26rem, calc(100vw - 2rem));
+  max-height: min(24rem, 60vh);
+  overflow-y: auto;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--gap-xs);
+  z-index: var(--z-popover);
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.app-search-palette[hidden] {
+  display: none;
+}
+
+.app-rail-search .app-search-palette {
+  right: auto;
+  left: 0;
+  width: auto;
+  min-width: 100%;
+}
+
+.app-search-hint,
+.app-search-empty {
+  margin: 0;
+  padding: var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.app-search-group {
+  margin-bottom: var(--gap-xs);
+}
+
+.app-search-group:last-child {
+  margin-bottom: 0;
+}
+
+.app-search-group-label {
+  margin: 0;
+  padding: var(--gap-xs) var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.app-search-option {
+  display: block;
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.app-search-option:hover,
+.app-search-option.is-active {
+  background: var(--surface-inset);
+}
+
+.app-search-option-title {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.app-search-option-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.app-search-option-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-search-more {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
 .app-kbd {

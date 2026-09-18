@@ -148,6 +148,17 @@
  *     travels the same dp-rail key (`rail-expanded` = a stored "0", stamped
  *     pre-paint by the layout's inline script).
  *
+ * 161 added the SEARCH PALETTE (#155 — 079 §B's placeholder made real):
+ *
+ * 13. THE PALETTE. The layout's input fetches /partials/search itself (its own
+ *     hx-get, blank queries cancelled here); this file owns open/close (focus,
+ *     click, ⌘K/Ctrl+K, Escape, outside click, any boosted navigation), the
+ *     combobox keyboard (↑/↓ move the ACTIVE row — focus stays in the input;
+ *     Enter clicks it; Esc returns), and the two-copies rule: topbar + drawer
+ *     roots are told apart by data-search-* hooks, the active row's id is
+ *     reserved and document-unique, and ⌘K drives whichever copy is displayed
+ *     (between 768 and 1100px neither is, and the chord does nothing).
+ *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
  * every listener on document.body (plus one keydown on document, for the menu),
@@ -749,6 +760,141 @@
     return theme;
   }
 
+  /* ---- 161: the header search palette (#155) ---- */
+
+  /* The palette is the client half of the ⌘K control the layout renders: the input
+     fetches /partials/search through htmx as you type (its own hx-get/hx-trigger),
+     and everything OPEN/CLOSE/KEYBOARD about the panel lives here, beside the drawer
+     and the avatar menu — the other two pieces of shell chrome the boosted swap never
+     re-renders.
+
+     The layout renders TWO copies (topbar + phone drawer) distinguished by
+     data-search-* hooks, never by id, and this file is written so every function
+     below is pure over a root element or a `doc`, for shell.test.mjs.
+
+     Keyboard contract (combobox/listbox pattern, ARIA 1.2): focus STAYS in the input;
+     ↑/↓ move an ACTIVE row marked with .is-active + aria-selected, whose id is also
+     the input's aria-activedescendant. The active row's id is a RESERVED id assigned
+     at activation and removed at deactivation — only one row in the document carries
+     it at a time, so the two palette copies never collide and the fragment needs no
+     per-row ids. Enter activates the row (a real anchor click, so the navigation is
+     the app's own boosted one); Esc closes and returns focus to the input.
+
+     A BLANK query never reaches the server: the htmx:configRequest guard below
+     preventDefaults the request, because an empty box must not claim to have matched
+     nothing — the palette's hint is the empty state. */
+
+  var SEARCH_ACTIVE_ID = "app-search-active";
+  var SEARCH_OPEN_CLASS = "is-open";
+
+  function searchRoots(doc) {
+    return doc.querySelectorAll("[data-search-root]");
+  }
+
+  function searchPart(root, part) {
+    return root ? root.querySelector("[data-search-" + part + "]") : null;
+  }
+
+  /* The control a global shortcut should drive: the copy that is actually displayed.
+     offsetParent is null exactly when the element (or an ancestor) is display:none —
+     the topbar copy below 1100px, the drawer copy above 768px, and — the gap between
+     those breakpoints — neither, where the shell renders no search control at all and
+     ⌘K does nothing. */
+  function visibleSearchRoot(doc) {
+    var roots = searchRoots(doc);
+    for (var i = 0; i < roots.length; i++) {
+      var input = searchPart(roots[i], "input");
+      if (input && input.offsetParent !== null) return roots[i];
+    }
+    return null;
+  }
+
+  function searchOpen(root) {
+    var palette = searchPart(root, "palette");
+    return !!(palette && !palette.hidden);
+  }
+
+  function openSearchRoot(doc) {
+    var roots = searchRoots(doc);
+    for (var i = 0; i < roots.length; i++) {
+      if (searchOpen(roots[i])) return roots[i];
+    }
+    return null;
+  }
+
+  function setSearchOpen(root, open) {
+    var palette = searchPart(root, "palette");
+    var input = searchPart(root, "input");
+    if (!palette || !input) return false;
+    var changed = palette.hidden === !!open; // hidden true & opening, or false & closing
+    palette.hidden = !open;
+    palette.classList.toggle(SEARCH_OPEN_CLASS, open);
+    input.setAttribute("aria-expanded", String(open));
+    if (!open) setSearchActive(root, null);
+    return changed;
+  }
+
+  function searchOptions(root) {
+    var palette = searchPart(root, "palette");
+    return palette ? palette.querySelectorAll('[role="option"]') : [];
+  }
+
+  function activeSearchOption(root) {
+    var palette = searchPart(root, "palette");
+    return palette && palette.querySelector ? palette.querySelector("#" + SEARCH_ACTIVE_ID) : null;
+  }
+
+  function setSearchActive(root, option) {
+    var palette = searchPart(root, "palette");
+    var input = searchPart(root, "input");
+    if (!palette || !input) return null;
+    var current = activeSearchOption(root);
+    if (current) {
+      current.removeAttribute("id");
+      current.classList.remove("is-active");
+      current.setAttribute("aria-selected", "false");
+    }
+    if (!option) {
+      input.removeAttribute("aria-activedescendant");
+      return null;
+    }
+    option.id = SEARCH_ACTIVE_ID;
+    option.classList.add("is-active");
+    option.setAttribute("aria-selected", "true");
+    input.setAttribute("aria-activedescendant", SEARCH_ACTIVE_ID);
+    if (option.scrollIntoView) option.scrollIntoView({ block: "nearest" });
+    return option;
+  }
+
+  /* ↑/↓ with wrap at both ends — the avatar menu's move, minus real focus (focus
+     stays in the input so typing continues mid-walk). */
+  function moveSearchActive(root, delta) {
+    var options = searchOptions(root);
+    if (!options.length) return null;
+    var current = -1;
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].classList.contains("is-active")) current = i;
+    }
+    var next = (current + delta + options.length) % options.length;
+    return setSearchActive(root, options[next]);
+  }
+
+  /* A fresh answer replaces the last one; a cleared box restores the hint and the
+     empty results container, so reopening never shows a stale group under an empty
+     input. Pure over the parts, for the tests. */
+  function resetSearchResults(root) {
+    var results = searchPart(root, "results");
+    var hint = searchPart(root, "hint");
+    if (results && results.textContent !== undefined) results.textContent = "";
+    if (hint) hint.hidden = false;
+    setSearchActive(root, null);
+  }
+
+  function closeAllSearchPalettes(doc) {
+    var roots = searchRoots(doc);
+    for (var i = 0; i < roots.length; i++) setSearchOpen(roots[i], false);
+  }
+
   /* ---- the avatar menu ---- */
 
   function menuItems(menu) {
@@ -823,6 +969,10 @@
       if (!entranceDue) return;
       entranceDue = false;
       markEntrance(window, doc.getElementById(MAIN_ID));
+      /* 161: a BOOSTED navigation closes the search palette too — Enter on a row (or
+         any click on one) navigates through the rail's boost, and the palette the row
+         lives in must not hang over the screen it just opened. */
+      closeAllSearchPalettes(doc);
       /* 110 §A: a BOOSTED navigation closes the drawer — the same one-shot that
          decides the entrance decides the close, so a background partial settling
          while the drawer is open cannot slam it shut. setRailOpen's no-change
@@ -938,6 +1088,55 @@
       }
     });
 
+    /* 161 — the search palette's fetch discipline: a blank query never reaches the
+       server. The palette's hint is the empty state; an empty box must not be allowed
+       to claim it matched nothing. */
+    doc.body.addEventListener("htmx:configRequest", function (evt) {
+      var elt = evt.detail && evt.detail.elt;
+      if (elt && elt.getAttribute && elt.getAttribute("data-search-input") !== null) {
+        if (!elt.value || !elt.value.trim()) evt.preventDefault();
+      }
+    });
+
+    /* Typing opens the palette and retires the hint; clearing restores both and wipes
+       the last answer, so reopening an emptied box shows the hint, not stale rows. */
+    doc.body.addEventListener("input", function (evt) {
+      var input = evt.target;
+      if (!input.getAttribute || input.getAttribute("data-search-input") === null) return;
+      var root = input.closest && input.closest("[data-search-root]");
+      if (!root) return;
+      if (input.value && input.value.trim()) {
+        var hint = searchPart(root, "hint");
+        if (hint) hint.hidden = true;
+        setSearchOpen(root, true);
+      } else {
+        resetSearchResults(root);
+        setSearchOpen(root, false);
+      }
+    });
+
+    /* Open on click or focus; close on an outside click — the avatar menu's contract.
+       A click INSIDE the root (the input, a result row) never closes it: rows are the
+       point, and their click navigates (the boosted settle below closes the palette). */
+    doc.body.addEventListener("focusin", function (evt) {
+      var input = evt.target;
+      if (!input.getAttribute || input.getAttribute("data-search-input") === null) return;
+      var root = input.closest && input.closest("[data-search-root]");
+      if (root) setSearchOpen(root, true);
+    });
+    doc.body.addEventListener("click", function (evt) {
+      var input = evt.target.closest && evt.target.closest("[data-search-input]");
+      if (input) {
+        var root = input.closest("[data-search-root]");
+        if (root) setSearchOpen(root, true);
+        return;
+      }
+      var roots = searchRoots(doc);
+      for (var i = 0; i < roots.length; i++) {
+        if (searchOpen(roots[i]) && !roots[i].contains(evt.target)) setSearchOpen(roots[i], false);
+      }
+    });
+
     /* 079 §B — the avatar menu. Opening is a click on the avatar; closing is
        Escape, a click anywhere outside, or choosing an item. Arrow keys move
        within it without activating anything.
@@ -971,6 +1170,54 @@
       }
     });
     doc.addEventListener("keydown", function (evt) {
+      /* 161: ⌘K / Ctrl+K toggles the palette of the copy that is displayed — focus
+         plus open, or close when it is already the open one. preventDefault keeps the
+         browser's own shortcut (history search, focused-addressbar search) out of the
+         way: the field's placeholder has promised this chord since 079. */
+      if ((evt.metaKey || evt.ctrlKey) && (evt.key === "k" || evt.key === "K")) {
+        var shortcutRoot = visibleSearchRoot(doc);
+        if (!shortcutRoot) return;
+        evt.preventDefault();
+        var shortcutInput = searchPart(shortcutRoot, "input");
+        if (searchOpen(shortcutRoot)) {
+          setSearchOpen(shortcutRoot, false);
+        } else {
+          if (shortcutInput && shortcutInput.focus) shortcutInput.focus();
+          setSearchOpen(shortcutRoot, true);
+        }
+        return;
+      }
+      /* 161: the palette is the top layer when open — Escape closes it before the
+         drawer (110 §A) and the avatar menu get their turns, and focus returns to the
+         input (the WAI-ARIA combobox contract). */
+      if (evt.key === "Escape") {
+        var paletteRoot = openSearchRoot(doc);
+        if (paletteRoot) {
+          setSearchOpen(paletteRoot, false);
+          var paletteInput = searchPart(paletteRoot, "input");
+          if (paletteInput && paletteInput.focus) paletteInput.focus();
+          return;
+        }
+      }
+      /* 161: ↑/↓ walk the rows and Enter opens the active one — only while focus is
+         inside a search root, so the rest of the app's typing never meets these keys.
+         The walk moves the ACTIVE row, not focus (focus stays in the input); Enter
+         clicks the row's anchor, which is the app's own boosted navigation. */
+      var searchRoot = evt.target && evt.target.closest ? evt.target.closest("[data-search-root]") : null;
+      if (searchRoot && searchOpen(searchRoot)) {
+        if (evt.key === "ArrowDown" || evt.key === "ArrowUp") {
+          evt.preventDefault();
+          moveSearchActive(searchRoot, evt.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
+        if (evt.key === "Enter") {
+          var active = activeSearchOption(searchRoot);
+          if (active) {
+            evt.preventDefault();
+            active.click();
+          }
+        }
+      }
       /* 110 §A: Escape closes the drawer first — it is the top layer when open. */
       if (evt.key === "Escape" && railOpen(doc)) {
         setRailOpen(doc, false);
@@ -1071,6 +1318,20 @@
     railVisuallyCollapsed: railVisuallyCollapsed,
     syncCollapseButton: syncCollapseButton,
     DEFAULT_COLLAPSED_QUERY: DEFAULT_COLLAPSED_QUERY,
+    searchRoots: searchRoots,
+    searchPart: searchPart,
+    visibleSearchRoot: visibleSearchRoot,
+    searchOpen: searchOpen,
+    openSearchRoot: openSearchRoot,
+    setSearchOpen: setSearchOpen,
+    searchOptions: searchOptions,
+    activeSearchOption: activeSearchOption,
+    setSearchActive: setSearchActive,
+    moveSearchActive: moveSearchActive,
+    resetSearchResults: resetSearchResults,
+    closeAllSearchPalettes: closeAllSearchPalettes,
+    SEARCH_ACTIVE_ID: SEARCH_ACTIVE_ID,
+    SEARCH_OPEN_CLASS: SEARCH_OPEN_CLASS,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window !== "undefined") {
