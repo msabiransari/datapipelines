@@ -1900,10 +1900,13 @@ one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is glob
 
 The pipeline must exist in the endpoint's workspace and have a **released** version, and it must
 be **side-effect-free**: every node of the current released version is `DQL` with `output.target`
-in {`tempdb`, `caller`}, or a `PIPELINE` node whose pinned child satisfies the same rule
-transitively. A `DML`/`DDL` node — or a DQL node writing back to a datasource, which is a write
-wearing a read's type — refuses publication with `409 endpoint.pipeline_not_readonly` naming the
-node.
+in {`tempdb`, `caller`}, a `DML`/`DDL` node whose `source` is `tempdb`, or a `PIPELINE` node whose
+pinned child satisfies the same rule transitively. `tempdb` is the execution's own in-memory H2,
+created for the run and discarded with it — a statement against it cannot outlive the request, so
+it has no effect a `GET` needs to be safe from (#171). A `DML`/`DDL` node whose `source` is a
+registered datasource — or a DQL node writing back to a datasource, which is a write wearing a
+read's type — refuses publication with `409 endpoint.pipeline_not_readonly` naming the node and
+the datasource.
 
 That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
 preloaded by browsers and followed by crawlers. It is **re-checked on every serve**, because an
@@ -1999,6 +2002,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-18 | v2.19 | 171 (#171) | §19.2: a published endpoint's `DML`/`DDL` node is allowed when its `source` is `tempdb` (the execution's own in-memory H2, discarded with the run) and refused, naming the datasource, for any registered datasource — previously every `DML`/`DDL` node was refused regardless of source. Re-checked at serve (§5.1/§19.4) through the same rule; no wire or status-code changes. |
 | 2026-09-17 | v2.18 | #143/#130 live-stream delivery | §10.4 gains the **live delivery guarantee** paragraph (no new client behaviour): a connected consumer receives the terminal event and the server-closed stream; the frame may lag the `204` by up to the cancel re-issue horizon (~2 s) same-instance, ~one heartbeat interval cross-instance; a consumer that leaves early reads what it missed from §10.3's replay (then §10.2's record). §10.3 names itself that answer. No wire changes. |
 | 2026-09-17 | v2.17 | 149 correction / #125 review R149-4 | §6.4.9: a failure thrown by `commit()` itself is ambiguous (the transaction may be durable, the acknowledgement lost) — `rolled_back` is evidence only when the failure came BEFORE the commit attempt; a lost acknowledgement leaves `committed`/`rolled_back` absent. |
 | 2026-09-17 | v2.16 | 149 correction / #125 review R149-1 | §6.4.9 `committed` is commit EVIDENCE, independent of the node outcome: `true` survives a `failed`/`aborted` sample when the writer confirmed the commit before the node failed; `false` only with a confirmed rollback (`rolled_back`); **absent on a terminal sample when neither was observed** (unknown — never "not committed"); the abandoned-driver limit stated. |
