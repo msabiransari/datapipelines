@@ -28,7 +28,8 @@ dependencies {
 //   ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
 //                       -PshotsEmail=you@example.com -PshotsPassword=… \
 //                       [-PshotsSet=app] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>] \
-//                       [-PshotsHeroOut=<dir>] [-PshotsPipeline=<name>] [-PshotsHeroPipeline=<name>] [-PshotsInspectNode=<id>]
+//                       [-PshotsHeroOut=<dir>] [-PshotsPipeline=<name>] [-PshotsHeroPipeline=<name>] [-PshotsInspectNode=<id>] \
+//                       [-PshotsOnly=<name[,name…]>]
 tasks.register<JavaExec>("siteShots") {
     group = "documentation"
     description = "Captures the marketing site's screenshots from a running demo deployment (070 §C)."
@@ -58,6 +59,9 @@ tasks.register<JavaExec>("siteShots") {
             // copies land. Absent = they are not produced at all — they do not ship with the
             // app and must never be written into static/site/img.
             "dp.shots.heroOut" to "shotsHeroOut",
+            // 169: run only the named captures of the `site` set (see the driver's KDoc) —
+            // a two-shot round must not overwrite the other PNGs from a different deployment.
+            "dp.shots.only" to "shotsOnly",
         ).forEach { (systemProperty, projectProperty) ->
             (project.findProperty(projectProperty) as String?)?.let { systemProperty(systemProperty, it) }
         }

@@ -39,7 +39,14 @@ import java.nio.file.StandardCopyOption
  * ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
  *                     -PshotsEmail=you@example.com -PshotsPassword=... \
  *                     -PshotsHeroOut=../datapipelines-orchestration/handbacks/093-shots
+ *
+ * ./gradlew siteShots … -PshotsOnly=workspaces,release-step   # only these captures
  * ```
+ *
+ * `-PshotsOnly` (169) runs a SUBSET of the `site` list — a round that re-took two shots
+ * against a fresh throwaway stack should not overwrite the other PNGs with pixels from a
+ * different deployment than the one the page already shows. Names are the capture methods'
+ * file stems, comma-separated; blank or absent means every capture.
  *
  * The `lake` family is not optional for the `site` set since 093: the hero photographs the
  * four-engine showcase pipeline, whose rideshare node reads Parquet on S3 through the `LAKE`
@@ -106,6 +113,20 @@ object SiteShotsMain {
      */
     private val inspectNode: String by lazy { prop("shots.inspectNode", "") }
 
+    /**
+     * `-PshotsOnly=<name[,name…]>` (169): when set, [Shots.captureAll] runs only the named
+     * captures. The shot list photographs a whole deployment; a round that re-took two
+     * shots on its own throwaway stack must not quietly replace the other PNGs, which
+     * picture a DIFFERENT deployment (different workspace, different run times).
+     */
+    private val shotFilter: Set<String> by lazy {
+        prop("shots.only", "")
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
     /** The hero's viewport: taller than the shot list's 1440x900, so the dock fits under the graph. */
     private const val HERO_W = 1440
     private const val HERO_H = 1000
@@ -139,6 +160,20 @@ object SiteShotsMain {
 
     /** Created by the driver if absent, so the switcher shot has something to switch between. */
     private const val SECOND_WORKSPACE = "analytics-team"
+
+    /**
+     * The release-step shot's own draft (169): a small pipeline the driver seeds so the
+     * release dialog photographs with a configured check on it. No seeded demo pipeline
+     * carries `checks[]`, and the release workflow's caption is about a checked draft —
+     * a dialog reading "No checks on this version." would photograph the absence.
+     */
+    private const val RELEASE_PIPELINE = "nyc/review/release_gate"
+
+    /** The draft template [RELEASE_PIPELINE]'s node pins — created by the driver if absent. */
+    private const val RELEASE_TEMPLATE = "nyc/review/release_gate.sql"
+
+    /** The nyc demo datasource the fixture's node and check both read (bootstrap-datasources-nyc.yml). */
+    private const val RELEASE_CHECK_DATASOURCE = "sample-trips"
 
     /** The two shot sets `-PshotsSet` selects between; `site` is the default. */
     private const val SET_SITE = "site"
@@ -439,27 +474,31 @@ object SiteShotsMain {
         private val written = mutableListOf<String>()
 
         fun captureAll(): List<String> {
-            datasources()
-            datasourceLake()
-            templateExplorer()
-            templateUsedBy()
+            if (wanted("datasources")) datasources()
+            if (wanted("datasource-lake")) datasourceLake()
+            if (wanted("template-explorer")) templateExplorer()
+            if (wanted("template-used-by")) templateUsedBy()
             // 093: publish the demo endpoint FIRST — the keys shot needs a node to bind an
             // `endpoint`-kind key to, and the API-section shot needs the inventory to have a row.
-            publishDemoEndpoint()
-            keys()
-            apiConsole()
-            workspaces()
-            editorHero()
-            editorRunAndGraph()
-            nodeInspector()
-            failureDetail()
-            executions()
-            executionResult()
-            promotion()
-            shellDark()
+            if (wanted("keys", "api-console")) publishDemoEndpoint()
+            if (wanted("keys")) keys()
+            if (wanted("api-console")) apiConsole()
+            if (wanted("workspaces")) workspaces()
+            if (wanted("editor-hero")) editorHero()
+            if (wanted("graph-cards")) editorRunAndGraph()
+            if (wanted("node-inspector")) nodeInspector()
+            if (wanted("failure-detail")) failureDetail()
+            if (wanted("executions")) executions()
+            if (wanted("execution-result")) executionResult()
+            if (wanted("promotion")) promotion()
+            if (wanted("release-step")) releaseStep()
+            if (wanted("shell-dark")) shellDark()
             sitePageReview()
             return written
         }
+
+        /** True when [shotFilter] is empty (every capture runs) or names one of [names]. */
+        private fun wanted(vararg names: String): Boolean = shotFilter.isEmpty() || names.any { it in shotFilter }
 
         /**
          * The `app` set (076 §E): every top-level screen at BOTH review widths in BOTH
@@ -977,6 +1016,83 @@ object SiteShotsMain {
         }
 
         /**
+         * The release step (169): the editor's "Release v<n>…" dialog on a draft that carries
+         * a configured release check — the dialog runs the check AS IT OPENS (140) and the
+         * verdict rows are what the shot exists to show: the draft, the configured check and
+         * the version a person would lock. No seeded pipeline carries `checks[]`, so the
+         * driver seeds its own small draft through the same REST surface the UI calls, with
+         * the browser's own session and CSRF (the EditorRunFixtures pattern — nothing here
+         * bypasses auth).
+         *
+         * The dialog is photographed, never submitted: release is an explicit human verb
+         * (versioning D4), and the dialog's close button is the end of the flow.
+         */
+        private fun releaseStep() {
+            seedReleaseFixture()
+            openEditor(RELEASE_PIPELINE)
+            val release = page.locator("#pe-release-draft")
+            if (release.count() == 0) {
+                println("  SKIP release-step.png — $RELEASE_PIPELINE offers no Release button (no draft: already released?)")
+                println("         (re-point -PshotsPipeline-style seeding at a draft, or drop the pipeline's release back)")
+                return
+            }
+            page.waitForResponse({ it.url().contains("/lifecycle/release") }) { release.click() }
+            waitFor("[data-lifecycle-dialog='pipeline-release']")
+            // The check runs as the dialog opens (hx-trigger="load"); the pass chip is the
+            // run's own answer and the submit button enabling is the footer splice landing —
+            // shooting before either photographs the dialog mid-swap.
+            page
+                .locator("#plc-dialog-checks .app-chip-ok")
+                .first()
+                .waitFor(
+                    com.microsoft.playwright.Locator
+                        .WaitForOptions()
+                        .setTimeout(WAIT_MS),
+                )
+            page
+                .locator("#plc-release-footer button:not([disabled])")
+                .first()
+                .waitFor(
+                    com.microsoft.playwright.Locator
+                        .WaitForOptions()
+                        .setTimeout(WAIT_MS),
+                )
+            shoot("release-step.png")
+            page
+                .locator("[data-lifecycle-close]")
+                .first()
+                .click()
+            page
+                .locator("[data-lifecycle-dialog='pipeline-release']")
+                .waitFor(
+                    com.microsoft.playwright.Locator
+                        .WaitForOptions()
+                        .setState(WaitForSelectorState.DETACHED),
+                )
+        }
+
+        /**
+         * Seeds [RELEASE_PIPELINE] idempotently: a draft template, then a draft pipeline
+         * pinning it (a draft may pin a draft — versioning D58) and declaring one release
+         * check whose observed value is a constant, so the dialog's verdict is stable
+         * between runs. 201 = created; 409 / `duplicate_name` = the fixture is already
+         * there, which is the state the shot wants. Anything else is a loud failure — a
+         * silently missing fixture would only surface as a confusing editor error later.
+         */
+        private fun seedReleaseFixture() {
+            page.navigate("$baseUrl/dashboard")
+            waitFor("body")
+            @Suppress("UNCHECKED_CAST")
+            val seeded =
+                page.evaluate(
+                    SEED_RELEASE_FIXTURE,
+                    listOf(RELEASE_TEMPLATE, RELEASE_PIPELINE, RELEASE_CHECK_DATASOURCE),
+                ) as Map<String, Any?>
+            val failed = seeded.filterValues { it != null }
+            check(failed.isEmpty()) { "seeding the release fixture failed: $failed" }
+        }
+
+        /**
          * Two FULL-PAGE captures of the marketing page itself — desktop and phone — for the
          * reviewer who has to decide whether the page still lays out. They are review
          * artefacts, not shipped assets, so they land under `build/` and are never referenced
@@ -1245,6 +1361,51 @@ object SiteShotsMain {
         """.trimIndent()
 
     /**
+     * Seeds the release-step fixture from INSIDE the page (session cookie + CSRF token, the
+     * credentials the shell already holds). Returns a map of step → error string, null when
+     * the step landed (created, or already there).
+     */
+    private val SEED_RELEASE_FIXTURE =
+        """
+        async ([template, pipeline, datasource]) => {
+          const token = document.body.getAttribute('hx-headers');
+          const csrf = token ? JSON.parse(token)['DP-CSRF-Token'] : '';
+          const headers = {'Content-Type': 'application/json', 'DP-CSRF-Token': csrf};
+          const out = {template: null, pipeline: null};
+          let r = await fetch('/api/v1/templates', {
+            method: 'POST', credentials: 'same-origin', headers,
+            body: JSON.stringify({
+              id: template, dialect: 'POSTGRES', display_name: 'Release gate probe',
+              description: 'One read-only probe the release-gate screenshot reads.', imports: [],
+              body: 'SELECT 1 AS probe',
+            }),
+          });
+          if (!(r.status === 201 || r.status === 409)) out.template = r.status + ' ' + (await r.text()).slice(0, 200);
+          r = await fetch('/api/v1/pipelines', {
+            method: 'POST', credentials: 'same-origin', headers,
+            body: JSON.stringify({
+              name: pipeline, display_name: 'Release gate review',
+              nodes: [{
+                id: 'probe', type: 'DQL', source: datasource,
+                template: { id: template, version: 1 },
+                output: { target: 'tempdb', table: 'release_probe' }, depends_on: [],
+              }],
+              checks: [{
+                id: 'datasource_ready', name: 'The trips datasource answers before this release.',
+                datasource: datasource, sql: 'SELECT 1',
+                expected: { kind: 'value', value: 1, tolerance: 0 },
+              }],
+            }),
+          });
+          if (!(r.status === 201)) {
+            const text = await r.text();
+            if (!(r.status === 409 || text.includes('duplicate_name'))) out.pipeline = r.status + ' ' + text.slice(0, 200);
+          }
+          return out;
+        }
+        """.trimIndent()
+
+    /**
      * What the graph ACTUALLY painted with, read off the live Cytoscape instance, beside what
      * the tokens say it should be. Two reads of one reused probe span are included because they
      * are the evidence: the second is supposed to be the surface colour and comes back as the
@@ -1345,6 +1506,10 @@ object SiteShotsMain {
           const patterns = [
             [/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/g, '2026-01-01 00:00:00'],
             [/\b\d+\s*(seconds?|minutes?|hours?|days?)\s+ago\b/gi, 'moments ago'],
+            // 169: the release dialog's "Last written …" reads `just now` inside the first
+            // minute and `N minutes ago` after — the same clock on both sides of a boundary,
+            // so both blank to the same placeholder.
+            [/\bjust now\b/gi, 'moments ago'],
             // A result's remaining TTL counts down in real time and is pure noise.
             [/Expires in [^<\n]*/g, 'Expires in 60 minutes'],
             [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
