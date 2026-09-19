@@ -22,6 +22,9 @@
         <span th:text="|${engine.article} ${engine.displayName}|">an Oracle</span> connection it cannot abuse: read-only by default,
         one scoped key per agent, every call audited, and the database password never leaves your deployment.
       </p>
+      <!--/* 173 §A: the searcher's other name for this engine ("PostgreSQL", "MSSQL"), one sentence
+           from the row's searchAliases; a row with none renders no paragraph. */-->
+      <p class="section-lede" th:if="${engine.searchAliasSentence != ''}" th:text="${engine.searchAliasSentence}">alias</p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Client setup, step by step</a>
         <a class="btn btn-secondary" th:href="@{/mcp-server-for-sql-databases}">All engines</a>

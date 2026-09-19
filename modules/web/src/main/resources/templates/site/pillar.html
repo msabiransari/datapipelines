@@ -27,7 +27,7 @@
   <section class="section" aria-labelledby="pain-title">
     <div class="container">
       <h2 id="pain-title" class="ds-headline">Don't point an agent at production with write credentials</h2>
-      <p class="section-lede">The fast way to give a coding agent database access is to paste a connection string into a config file. It works on the first afternoon and creates four problems you keep.</p>
+      <p class="section-lede">The fast way to give a coding agent database access is to paste a connection string into a config file. It works on the first afternoon and creates four problems you keep. An MCP database server — one endpoint the agent talks to instead of the database — is the shape that avoids all four, and the rest of this page is what that server has to do to be safe.</p>
       <ul class="fact-list fact-list-plain">
         <li><strong>The credential can write.</strong> Most database logins that can read a table can also drop it. An agent that misreads a schema does not need bad intent to do damage.</li>
         <li><strong>Database passwords sprawl across laptops.</strong> Every developer's MCP config is another copy, in plain text, outside any inventory.</li>

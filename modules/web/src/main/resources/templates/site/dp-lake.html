@@ -37,12 +37,12 @@
   <section class="section" aria-labelledby="ships-title">
     <div class="container">
       <p class="kicker">What ships</p>
-      <h2 id="ships-title" class="ds-headline">Exactly this, and nothing more</h2>
+      <h2 id="ships-title" class="ds-headline">The DuckDB–S3 read path: exactly this, and nothing more</h2>
       <ol class="steps">
         <li>
           <h3>Parquet and Iceberg, on S3 or S3-compatible</h3>
           <!-- claim: docs/datasources.md §8C.1 -->
-          <p>Tables in <code>parquet</code> or <code>iceberg</code> format, addressed by <code>s3://</code> (or <code>file://</code> for an on-prem volume). S3-compatible stores — MinIO included — work through the datasource's endpoint and URL-style settings.</p>
+          <p>Tables in <code>parquet</code> or <code>iceberg</code> format, addressed by <code>s3://</code> (or <code>file://</code> for an on-prem volume). S3-compatible stores — MinIO included — work through the datasource's endpoint and URL-style settings. This is SQL on S3 in the plain sense, and Iceberg SQL without a Spark cluster: the table's own metadata says which files to read.</p>
         </li>
         <li>
           <h3>Read in place — no warehouse, no loader</h3>

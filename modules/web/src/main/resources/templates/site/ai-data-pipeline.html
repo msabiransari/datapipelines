@@ -133,6 +133,25 @@
     </div>
   </section>
 
+  <section class="section" aria-labelledby="tools-title">
+    <div class="container">
+      <p class="kicker">The category, honestly</p>
+      <h2 id="tools-title" class="ds-headline">Where this sits among data pipeline tools</h2>
+      <!-- claim: docs/dag-executor.md §5 — on-demand execution, no scheduler; docs/staging.md §1 — the per-run join; docs/mcp-server.md §6.1 — the agent's authoring surface -->
+      <p class="section-lede">
+        Most data pipeline tools were built for a person at a keyboard and gained an AI feature later. This one is
+        agent-native: the authoring surface is the MCP tool set, the person's job is review and release, and the
+        artefact is designed to be read by both. Call it an AI-native data platform if the phrase helps, with two
+        honest limits — it runs SQL and nothing else, and it runs on demand, so an orchestrator still owns the
+        schedule. Beside an orchestrator (<a th:href="@{/compare/airflow}">Airflow</a>,
+        <a th:href="@{/compare/dagster-vs-airflow}">Dagster or Prefect</a>) it is the governed SQL step they call;
+        beside a modelling tool (<a th:href="@{/compare/dbt}">dbt</a>) it is the no-warehouse case; beside an ELT
+        tool (<a th:href="@{/compare/fivetran-airbyte}">Fivetran or Airbyte</a>) it is the query at the source
+        instead of the copy.
+      </p>
+    </div>
+  </section>
+
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>

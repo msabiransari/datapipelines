@@ -43,12 +43,12 @@
   <section class="section" aria-labelledby="po-enough">
     <div class="container">
       <p class="kicker">Said plainly</p>
-      <h2 id="po-enough" class="ds-headline">When Postgres alone is enough</h2>
+      <h2 id="po-enough" class="ds-headline">Postgres as data warehouse: when Postgres alone is enough</h2>
       <div class="prose">
         <p>
           One database, one team, questions the database itself can answer: that is Postgres doing its job, and it
-          does it superbly. Materialized views, read replicas and a good schema cover most of what a first dashboard
-          needs. A warehouse earns its keep when data is spread across systems that cannot see each other, or when
+          does it superbly. Postgres for analytics is a sound default, and Postgres analytics on a read replica
+          with materialized views and a good schema covers most of what a first dashboard needs. A warehouse earns its keep when data is spread across systems that cannot see each other, or when
           the volume forces a columnar engine — and a team that is not there yet should not pretend otherwise.
           Buying the warehouse early buys a second deployment, a second security perimeter and a sync to keep
           honest, in exchange for nothing the database had not already answered.

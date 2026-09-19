@@ -7,7 +7,7 @@
     <ol>
       <li><a th:href="@{/}">Home</a></li>
       <li><a th:href="@{/mcp-server-for-sql-databases}">SQL MCP server</a></li>
-      <li aria-current="page">Add to Claude Code</li>
+      <li aria-current="page">Add MCP server to Claude Code</li>
     </ol>
   </nav>
 
@@ -86,14 +86,14 @@
         rejected on <code>/mcp</code>, deliberately.
       </p>
 
-      <h3>Claude Code</h3>
+      <h2 id="claude-code-config" class="ds-subheadline">The Claude Code MCP server config</h2>
       <div class="code-block">
         <pre><code>claude mcp add --transport http datapipelines https://your-host/mcp \
   --header "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
 
-      <h3>Cursor — <code>~/.cursor/mcp.json</code></h3>
+      <h2 id="cursor-config" class="ds-subheadline">The Cursor MCP server config — <code>~/.cursor/mcp.json</code></h2>
       <div class="code-block">
         <pre><code>{
   "mcpServers": {
@@ -106,7 +106,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
 
-      <h3>GitHub Copilot in VS Code — <code>.vscode/mcp.json</code></h3>
+      <h2 id="copilot-config" class="ds-subheadline">The GitHub Copilot MCP server config — <code>.vscode/mcp.json</code></h2>
       <div class="code-block">
         <pre><code>{
   "servers": {
@@ -120,7 +120,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
 
-      <h3>Claude Desktop and other JSON-configured clients</h3>
+      <h2 id="other-clients-config" class="ds-subheadline">Claude Desktop and other JSON-configured clients</h2>
       <div class="code-block">
         <pre><code>{
   "mcpServers": {

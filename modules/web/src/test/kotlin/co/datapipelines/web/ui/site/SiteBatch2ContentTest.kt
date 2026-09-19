@@ -154,7 +154,8 @@ class SiteBatch2ContentTest {
                 SitePages.TABLEAU_ROADMAP.path to "embedded dashboards",
                 SitePages.FOR_AGENCIES.path to "client reporting api",
                 SitePages.FOR_SAAS_TEAMS.path to "embedded analytics",
-                SitePages.FOR_ANALYSTS.path to "ai sql assistant with governance",
+                // 173: retargeted to the measured phrase (ai data analyst, 720/mo; owner ruling 2026-09-18).
+                SitePages.FOR_ANALYSTS.path to "ai data analyst with governance",
                 SitePages.HOW_IT_WORKS.path to "how it works",
                 SitePages.DEMO_DATA.path to "demo data",
                 SitePages.SEMANTIC_LAYER.path to "semantic layer",
