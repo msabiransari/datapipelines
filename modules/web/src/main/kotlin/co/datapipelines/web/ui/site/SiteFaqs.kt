@@ -102,7 +102,8 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "What does “published endpoint” mean?",
-                "A released pipeline gets a URL under /api/x/…; a GET runs it with the query string bound to its declared " +
+                "A released pipeline gets a URL of its own — /api/<your-namespace>/<version>/<path>; a GET runs it " +
+                    "with the query string bound to its declared " +
                     "parameters and returns the rows as JSON. Keys are bound to a path prefix, so a partner can be given one " +
                     "endpoint and nothing else. The serving contract is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",

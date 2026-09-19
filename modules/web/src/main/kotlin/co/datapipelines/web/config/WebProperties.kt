@@ -78,7 +78,7 @@ data class ResultProperties(
 
 /**
  * The `datapipelines.endpoints.*` keys (Configuration §3.22) — published endpoints, the
- * `GET /api/x/{path}` surface (rest-api §19).
+ * `GET /api/{category}/{version}/{path}` surface (rest-api §19, R-EP5).
  *
  * Only the timeout bounds live here. The design's fourth value, "page-rows-max", is
  * deliberately NOT a key of its own: ruling R-EP4 makes `DP-Result-Page-Rows` **one

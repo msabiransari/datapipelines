@@ -145,25 +145,28 @@ class EndpointKeyService(
     }
 
     /**
-     * A binding path as it is stored: a leading `/`, no trailing slash, and — apart from the root
-     * — a legal §4.1 path.
+     * A binding path as it is stored: a leading `/`, no trailing slash, the one `/api` prefix
+     * stripped, and — apart from the root — legal §4.1 segments.
      *
      * The root `/` is a legal binding and deliberately not a legal endpoint: binding at `/`
      * authorises the whole tree, which is a real operator intent, while publishing AT `/` is not
-     * an endpoint anyone can name.
+     * an endpoint anyone can name. The endpoint SHAPE rules (three segments, a literal category
+     * and version — R-EP5) do not apply here either: a binding names a tree NODE, and `/nyc`
+     * authorising everything beneath it is the common case.
      */
     private fun normalizeBinding(raw: String): String {
         val trimmed = raw.trim()
         if (trimmed == "/" || trimmed.isEmpty()) return "/"
         val candidate = "/" + trimmed.trim('/')
-        EndpointPath.parse(candidate).getOrElse {
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Endpoint.PATH_INVALID,
-                message = "Binding path '$raw' is not a legal endpoint path: ${it.message}",
-                details = mapOf("path_prefix" to raw),
-            )
-        }
-        return candidate
+        return EndpointPath
+            .parseTreeNode(candidate)
+            .getOrElse {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Endpoint.PATH_INVALID,
+                    message = "Binding path '$raw' is not a legal endpoint path: ${it.message}",
+                    details = mapOf("path_prefix" to raw),
+                )
+            }.pattern
     }
 
     /** What decides a kind's authority, for a refusal that tells the caller what to do instead. */

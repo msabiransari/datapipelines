@@ -13,7 +13,7 @@ import java.util.UUID
 /**
  * The per-instance registry cache (§4.1).
  *
- * The cache exists so a request under `/api/x` can be resolved without a metadata-DB round trip —
+ * The cache exists so a published-endpoint request can be resolved without a metadata-DB round trip —
  * including the `404`s, which are the cheapest thing a hostile caller can ask for. What these
  * tests pin is the pair of behaviours that makes it safe: it really does cache (so a write is not
  * visible until invalidation), and invalidation really does fan out (so peers are not left
@@ -24,10 +24,10 @@ class EndpointRegistryTest {
 
     @Test
     fun `the first match loads the registry, and later ones do not re-read it`() {
-        every { repository.findAllEnabled() } returns listOf(endpoint("/nyc/revenue"))
+        every { repository.findAllEnabled() } returns listOf(endpoint("/nyc/v1/revenue"))
         val registry = EndpointRegistry(repository)
 
-        repeat(3) { registry.matcher().match("/nyc/revenue").shouldNotBeNull() }
+        repeat(3) { registry.matcher().match("/nyc/v1/revenue").shouldNotBeNull() }
 
         verify(exactly = 1) { repository.findAllEnabled() }
     }
@@ -39,18 +39,18 @@ class EndpointRegistryTest {
         // pointless and this test would fail.
         every { repository.findAllEnabled() } returns emptyList()
         val registry = EndpointRegistry(repository)
-        registry.matcher().match("/nyc") shouldBe null
+        registry.matcher().match("/nyc/v1/summary") shouldBe null
 
-        every { repository.findAllEnabled() } returns listOf(endpoint("/nyc"))
+        every { repository.findAllEnabled() } returns listOf(endpoint("/nyc/v1/summary"))
 
         assertAll(
-            { registry.matcher().match("/nyc") shouldBe null },
+            { registry.matcher().match("/nyc/v1/summary") shouldBe null },
             {
                 registry
                     .let {
                         it.invalidateLocally()
                         it.matcher()
-                    }.match("/nyc")
+                    }.match("/nyc/v1/summary")
                     .shouldNotBeNull()
             },
         )
@@ -87,14 +87,14 @@ class EndpointRegistryTest {
 
     @Test
     fun `a row whose stored pattern cannot be compiled is dropped, and the rest still serve`() {
-        val good = endpoint("/nyc/revenue")
-        every { repository.findAllEnabled() } returns listOf(good, good.copy(pathPattern = "/nyc/{"))
+        val good = endpoint("/nyc/v1/revenue")
+        every { repository.findAllEnabled() } returns listOf(good, good.copy(pathPattern = "/nyc/v1/{"))
 
         val matcher = EndpointRegistry(repository).reload()
 
         assertAll(
             { matcher.size shouldBe 1 },
-            { matcher.match("/nyc/revenue").shouldNotBeNull() },
+            { matcher.match("/nyc/v1/revenue").shouldNotBeNull() },
         )
     }
 

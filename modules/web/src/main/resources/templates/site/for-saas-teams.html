@@ -62,7 +62,7 @@
         <p>
           datapipelines collapses the first two. The dataset is a versioned pipeline across your databases, drafted
           by an agent that reads your real schemas and released by a person. The API is one step after the release:
-          a published endpoint under <code>/api/x</code>, parameters bound from the request, keys scoped to the
+          a published endpoint under your own <code>/api</code> namespace, parameters bound from the request, keys scoped to the
           path. What remains is the embedding — the dashboard your agent creates is a planned roadmap item.
           It would consume the same published endpoint contract instead of needing a hand-built API.
         </p>
@@ -110,7 +110,7 @@
       <p class="kicker">The whole integration</p>
       <h2 id="st-call" class="ds-headline">What the call from your app looks like</h2>
       <div class="code-block">
-        <pre><code>GET /api/x/usage/summary?customer_id=8841&amp;month=2026-08
+        <pre><code>GET /api/usage/v1/summary?customer_id=8841&amp;month=2026-08
 DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
 
 200 OK

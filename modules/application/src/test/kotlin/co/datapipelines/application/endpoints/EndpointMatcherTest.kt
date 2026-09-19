@@ -28,38 +28,38 @@ import kotlin.random.Random
 class EndpointMatcherTest {
     @Test
     fun `a literal path matches its endpoint and binds no variables`() {
-        val match = matcher("/nyc/revenue").match("/nyc/revenue")
+        val match = matcher("/nyc/v1/revenue").match("/nyc/v1/revenue")
         assertAll(
-            { match?.endpoint?.pathPattern shouldBe "/nyc/revenue" },
+            { match?.endpoint?.pathPattern shouldBe "/nyc/v1/revenue" },
             { match?.pathVariables shouldBe emptyMap() },
         )
     }
 
     @Test
     fun `a variable segment is extracted by name`() {
-        val match = matcher("/nyc/revenue/{borough}").match("/nyc/revenue/Manhattan")
+        val match = matcher("/nyc/v1/revenue/{borough}").match("/nyc/v1/revenue/Manhattan")
         assertAll(
-            { match?.endpoint?.pathPattern shouldBe "/nyc/revenue/{borough}" },
+            { match?.endpoint?.pathPattern shouldBe "/nyc/v1/revenue/{borough}" },
             { match?.pathVariables shouldBe mapOf("borough" to "Manhattan") },
         )
     }
 
     @Test
     fun `several variables bind in one path`() {
-        matcher("/{a}/x/{b}").match("/one/x/two")?.pathVariables shouldBe mapOf("a" to "one", "b" to "two")
+        matcher("/nyc/v1/{a}/x/{b}").match("/nyc/v1/one/x/two")?.pathVariables shouldBe mapOf("a" to "one", "b" to "two")
     }
 
     @Test
     fun `a variable binds exactly one segment — it never spans a slash`() {
         assertAll(
-            { matcher("/nyc/{borough}").match("/nyc/a/b") shouldBe null },
-            { matcher("/nyc/{borough}").match("/nyc") shouldBe null },
+            { matcher("/nyc/v1/{borough}").match("/nyc/v1/a/b") shouldBe null },
+            { matcher("/nyc/v1/{borough}").match("/nyc/v1") shouldBe null },
         )
     }
 
     @Test
     fun `an unmatched path is null, not an exception`() {
-        matcher("/nyc/revenue").match("/nope") shouldBe null
+        matcher("/nyc/v1/revenue").match("/nope") shouldBe null
     }
 
     @Test
@@ -108,12 +108,27 @@ class EndpointMatcherTest {
     fun `a row whose stored pattern the parser rejects is dropped, not fatal`() {
         // Only reachable if a row was written around EndpointPath (§4.1 is strictly narrower than
         // what PathPatternParser accepts). The other endpoints must keep serving.
-        val good = endpoint("/nyc/revenue")
-        val bad = good.copy(pathPattern = "/nyc/{", parsed = good.parsed)
+        val good = endpoint("/nyc/v1/revenue")
+        val bad = good.copy(pathPattern = "/nyc/v1/{", parsed = good.parsed)
         val matcher = EndpointMatcher(listOf(good, bad))
         assertAll(
             { matcher.size shouldBe 1 },
-            { matcher.match("/nyc/revenue")?.endpoint?.pathPattern shouldBe "/nyc/revenue" },
+            { matcher.match("/nyc/v1/revenue")?.endpoint?.pathPattern shouldBe "/nyc/v1/revenue" },
+        )
+    }
+
+    @Test
+    fun `a row whose category is reserved is dropped, not served — the publish rule re-checked at serve`() {
+        // R-EP5's serve-time half: publish refuses a v<n> or 'api' category, and a row that
+        // somehow bypassed that refusal (a direct write) is never served either. The row LOADS —
+        // the grammar is legal — so every other endpoint keeps working.
+        val bypassed = endpoint("/v1/v1/revenue")
+        val good = endpoint("/nyc/v1/revenue")
+        val matcher = EndpointMatcher(listOf(bypassed, good))
+        assertAll(
+            { matcher.size shouldBe 1 },
+            { matcher.match("/v1/v1/revenue") shouldBe null },
+            { matcher.match("/nyc/v1/revenue")?.endpoint?.pathPattern shouldBe "/nyc/v1/revenue" },
         )
     }
 
@@ -134,10 +149,18 @@ class EndpointMatcherTest {
         )
 
     /**
-     * A request path drawn from the same vocabulary the fixture uses, so a meaningful share of
-     * them hit. Depth 1–4; each segment either a fixture word or a value a variable would bind.
+     * A request path drawn so a meaningful share of them hit: half the draws instantiate a
+     * fixture pattern (its variables filled from the vocabulary), half are free draws over the
+     * same words. A purely random draw over 13 words almost never assembles a 4-segment
+     * published path — the non-vacuity floor below exists because that generator proved it.
      */
-    private fun randomPath(random: Random): String = "/" + (1..random.nextInt(1, 5)).joinToString("/") { WORDS[random.nextInt(WORDS.size)] }
+    private fun randomPath(random: Random): String {
+        if (random.nextBoolean()) {
+            val pattern = CONFLICT_FREE[random.nextInt(CONFLICT_FREE.size)]
+            return VARIABLE_IN_PATTERN.replace(pattern) { WORDS[random.nextInt(WORDS.size)] }
+        }
+        return "/" + (1..random.nextInt(1, 6)).joinToString("/") { WORDS[random.nextInt(WORDS.size)] }
+    }
 
     private companion object {
         val WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
@@ -149,25 +172,41 @@ class EndpointMatcherTest {
 
         /**
          * Conflict-free by construction and deliberately adversarial: a literal and a variable at
-         * the same depth but in DIFFERENT positions, nested prefixes, and a three-deep pair that
-         * differs only in its last literal.
+         * the same depth but in DIFFERENT positions, nested prefixes, and a pair that differs only
+         * in its last literal. Every pattern carries the R-EP5 shape — a literal category, a
+         * free-form literal version, then the path.
          */
         val CONFLICT_FREE =
             listOf(
-                "/nyc",
-                "/nyc/revenue",
-                "/nyc/revenue/{borough}",
-                "/nyc/ridership/{borough}",
-                "/lending/{product}/home",
-                // NOT "/lending/summary/home" — that overlaps the line above (both match
-                // '/lending/summary/home'), which the premise assertion caught when this fixture
-                // first claimed to be conflict-free. Two segments instead of three is the fix.
-                "/lending/summary",
-                "/trade/{partner}/{flow}",
-                "/health/live/deep/{probe}",
+                "/nyc/v1/revenue",
+                "/nyc/v1/revenue/{borough}",
+                "/nyc/v1/ridership/{borough}",
+                "/lending/v1/{product}/home",
+                // NOT "/lending/v1/summary/home" — that overlaps the line above (both match
+                // '/lending/v1/summary/home'), which the premise assertion caught when this fixture
+                // first claimed to be conflict-free. One segment fewer is the fix.
+                "/lending/v1/summary",
+                "/trade/v1/{partner}/{flow}",
+                "/health/v1/live/deep/{probe}",
             )
 
         val WORDS =
-            listOf("nyc", "revenue", "ridership", "lending", "summary", "home", "trade", "health", "live", "deep", "manhattan", "queens")
+            listOf(
+                "nyc",
+                "v1",
+                "revenue",
+                "ridership",
+                "lending",
+                "summary",
+                "home",
+                "trade",
+                "health",
+                "live",
+                "deep",
+                "manhattan",
+                "queens",
+            )
+
+        val VARIABLE_IN_PATTERN = Regex("\\{[a-z_][a-z0-9_]*}")
     }
 }

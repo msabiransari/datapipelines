@@ -156,7 +156,7 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "Can a client's key reach only that client's numbers?",
-                "Yes — endpoint keys are bound to a path prefix under /api/x, so the key you hand a client calls " +
+                "Yes — endpoint keys are bound to a path prefix of the published tree, so the key you hand a client calls " +
                     "its endpoints and nothing else, and you revoke it without touching anyone else's access. Key " +
                     "kinds and bindings are docs/auth.md §7.7.",
                 "docs/auth.md §7.7",
@@ -197,7 +197,7 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "What can a customer-facing key reach?",
-                "One path subtree and nothing else: endpoint keys are bound to a path prefix under /api/x, cannot " +
+                "One path subtree and nothing else: endpoint keys are bound to a path prefix of the published tree, cannot " +
                     "call your product's own API or another tenant's endpoints, and are revoked in about a minute. " +
                     "Key kinds and bindings are docs/auth.md §7.7.",
                 "docs/auth.md §7.7",

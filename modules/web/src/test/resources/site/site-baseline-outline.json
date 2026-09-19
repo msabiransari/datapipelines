@@ -1914,7 +1914,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Turn a SQL query into an API — versioned, parameterised, scoped by key"
+     "text": "Turn a SQL query into a data API — versioned, parameterised, scoped by key"
     },
     {
      "level": "H2",

@@ -264,7 +264,7 @@
         <!-- 079 §C / T139: the API section. The owner's "I don't see any API menu"
              was literally true — published endpoints, keys and the MCP connection
              had no screen at all. /api-console, not /api/**: that prefix is the
-             REST surface (/api/v1 and the published /api/x). -->
+             REST surface (/api/v1 and the published /api/<category> tree). -->
         <a th:href="@{/api-console}" class="app-nav-link" data-nav-section="/api-console"
            data-nav-group="Operate" data-nav-label="API"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'active' : null"

@@ -32,7 +32,7 @@
       { "@type": "HowToStep", "name": "Register the sources, read-only", "text": "Register each database and the S3 bucket as a datasource, marking the ones Tableau's dataset must never write to as read-only. Credentials stay on the server, encrypted." },
       { "@type": "HowToStep", "name": "Ask the agent for the dataset", "text": "In Claude Code or Cursor, with the MCP server added, describe the dataset in business terms. The agent reads schemas and catalogue statistics, drafts the pipeline, runs it and fixes what fails." },
       { "@type": "HowToStep", "name": "Review the draft and release it", "text": "Open the draft in the editor, run it, read the result, and release it. The release is immutable; agents cannot release." },
-      { "@type": "HowToStep", "name": "Publish the endpoint, or write the table", "text": "Publish the released pipeline as a GET endpoint under /api/x, or add a write-back node so the result lands in a table Tableau already connects to." },
+      { "@type": "HowToStep", "name": "Publish the endpoint, or write the table", "text": "Publish the released pipeline as a GET endpoint under your own /api namespace, or add a write-back node so the result lands in a table Tableau already connects to." },
       { "@type": "HowToStep", "name": "Scope a key to the path", "text": "Issue an API key and bind it to the endpoint's path prefix; it can call that endpoint and nothing else." },
       { "@type": "HowToStep", "name": "Connect Tableau", "text": "Point a web data connector at the endpoint's JSON, or live-connect Tableau to the table the pipeline writes. Refresh the pipeline; the dataset refreshes." }
     ]
@@ -97,7 +97,7 @@
           <h3>Publish the endpoint — or write the table</h3>
           <!-- claim: docs/rest-api.md §19 -->
           <p>
-            <b>Endpoint:</b> publish the released pipeline under a path such as <code>/api/x/nyc/rain-share</code>. A
+            <b>Endpoint:</b> publish the released pipeline under a path such as <code>/api/nyc/v1/rain-share</code>. A
             <code>GET</code> runs it with the query string bound to its declared parameters and returns the rows as
             JSON; the response is versioned with the pipeline.
           </p>
@@ -112,12 +112,12 @@
           <h3>Scope a key to the path</h3>
           <!-- claim: docs/auth.md §7.7 -->
           <p>
-            Issue an API key and bind it to the endpoint's path prefix. That key can call <code>/api/x/nyc/…</code>
+            Issue an API key and bind it to the endpoint's path prefix. That key can call <code>/api/nyc/v1/…</code>
             and nothing else — not the product's own API, not another team's endpoints. Give it to the workbook, the
             partner, or the service that needs the dataset.
           </p>
           <div class="code-block">
-            <pre><code>curl -s "https://your-host/api/x/nyc/rain-share?quarter=2024-Q3" \
+            <pre><code>curl -s "https://your-host/api/nyc/v1/rain-share?quarter=2024-Q3" \
   -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
             <button type="button" class="copy-btn" hidden>Copy</button>
           </div>

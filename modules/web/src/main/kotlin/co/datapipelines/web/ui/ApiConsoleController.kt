@@ -26,11 +26,12 @@ import java.time.Instant
  * ## The route
  *
  * `/api-console`, NOT anything under `/api`. That prefix is the programmatic surface and is
- * split in two — the `/api/v1` REST envelope and the `/api/x` published endpoints this page
- * lists — and `ui-screens.md §2.1`'s three-URL-space rule says a page never lives in the JSON
- * space. (A glob in a KDoc opens a nested block comment: Kotlin nests them, so the prefixes
- * are written without their wildcards here.) `/api-console` cannot collide with either: Spring matches whole path
- * segments, and `api-console` is a different first segment from `api`. It needs no
+ * split in two — the `/api/v1` REST envelope and the published endpoints (every other category
+ * of `/api`, R-EP5) this page lists — and `ui-screens.md §2.1`'s three-URL-space rule says a
+ * page never lives in the JSON space. (A glob in a KDoc opens a nested block comment: Kotlin
+ * nests them, so the prefixes are written without their wildcards here.) `/api-console` cannot
+ * collide with either: Spring matches whole path segments, and `api-console` is a different
+ * first segment from `api`. It needs no
  * `SecurityConfig` entry — that chain's `permitAll` list is explicit and everything else is
  * `.anyRequest().authenticated()`.
  *
@@ -198,7 +199,7 @@ class ApiConsoleController(
 
     private companion object {
         /** `PublishedEndpointController.ROOT`, restated as the display prefix. */
-        const val PUBLISHED_PREFIX = "/api/x"
+        const val PUBLISHED_PREFIX = "/api"
 
         /** What `site/add-mcp-server.html` already shows when the origin is not configured. */
         const val HOST_PLACEHOLDER = "{host}"

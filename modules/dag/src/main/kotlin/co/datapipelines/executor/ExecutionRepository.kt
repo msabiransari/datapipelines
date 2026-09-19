@@ -17,7 +17,7 @@ enum class ExecutionTrigger {
     PIPELINE,
 
     /**
-     * A published endpoint served a `GET /api/x/…` request (074). The execution runs in-process
+     * A published endpoint served a `GET` request (074). The execution runs in-process
      * as the endpoint's workspace; `triggered_by` is the key's owner, and the serve's audit row
      * carries the key id — which is what lets an endpoint key read its own result and no other.
      */

@@ -1,6 +1,7 @@
 # Design: Published Endpoints — a pipeline as a GET API, under `/api/x/**`
 
 **Status:** RATIFIED 2026-09-05 (owner rulings R-EP1–R-EP4 below); implementation prompt 074.
+**Amended 2026-09-19:** ruling **R-EP5** (below, 172 / #172) supersedes R-EP1.
 **Not packaged into the product** (`docs/superpowers/` is excluded from the jar). The normative
 text lands in `rest-api.md` (new §18), `auth.md` (key kinds), `pipeline-contract.md §13`
 (codes), `metadata-db.md`, `mcp-server.md`, `ui-screens.md` — in the same commit as the code
@@ -37,9 +38,11 @@ the dashboards will consume next.
 
 ## 3. Rulings (owner, 2026-09-05)
 
-- **R-EP1 — root `/api/x/**`.** Engineers own everything beneath; `/api/v1/**` stays the
-  product's (its routes and the security allowlist live there). One catch-all handler, never
-  runtime route registration.
+- **R-EP1 — root `/api/x/**` — SUPERSEDED by R-EP5 (2026-09-18).** Engineers own everything
+  beneath; `/api/v1/**` stays the product's (its routes and the security allowlist live there).
+  One catch-all handler, never runtime route registration. (The catch-all and the no-runtime-
+  registration halves survive; the letter `x` does not — the owner read it as a version
+  placeholder, and a placeholder that answers real traffic is a lie in the URL.)
 - **R-EP2 — auth is the key, applied hierarchically.** A key bound at a tree node authorises
   every endpoint beneath it; a binding at a deeper node overrides (replaces) the inherited one
   for that subtree. Keys gain a **kind**.
@@ -47,6 +50,20 @@ the dashboards will consume next.
   client fetches when ready.
 - **R-EP4 — `DP-Result-Page-Rows`** request header (clamped to `page-max-rows`) on BOTH the
   endpoint and `POST /pipelines/{id}/execute` — one contract.
+- **R-EP5 (2026-09-18, 172 / #172) — the served shape is `/api/<category>/<version>/<path…>`,
+  supersedes R-EP1's root.** At least three segments after `/api`. The **category** is the
+  engineer's namespace (business domain, team, product line); **reserved**, refused at publish
+  with `endpoint.path_reserved` naming the segment and re-checked when the serve registry is
+  built: anything matching `v[0-9]+` (the product's API namespace, today `v1`, any `v<n>`
+  tomorrow — collisions impossible by construction, not by a route-table check) and the literal
+  `api`. The **version** is one free-form segment, no pattern enforced (`v1` by convention);
+  variables are allowed only after it. **Normalisation, not refusal**: a pattern beginning with
+  `/api/` has that ONE prefix stripped; the stored form is always the part after `/api`, and
+  create/read responses echo the full served URL — so `/api/api/…` is refused as category `api`.
+  Serving is one catch-all handler for `/api/{category}/**` whose pattern constrains the
+  category itself, and the auth layer recognises a published-endpoint request by the same
+  first-segment rule, never by a literal prefix. Key bindings stay on the full stored pattern.
+  Prod held zero published endpoints at the ruling, so nothing migrates.
 - **Validation is explicit** — a dedicated request validator built from the pipeline's declared
   parameters; strict REST semantics and status codes (§6).
 

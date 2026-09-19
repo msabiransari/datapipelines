@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.56
+**Status:** v1.57
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-18 (161)
@@ -1313,8 +1313,8 @@ Each row shows the pipeline's version here and on the target (`absent` when the 
 | htmx | Yes for KEYS (`hx-post="/partials/api-keys"` into `#keyCreated`; `hx-delete="/partials/api-keys/{id}"` into `#keys-table-body`, each with a §5.1 Shape A out-of-band piece). The endpoints and MCP cards stay read-only |
 
 **Why the route is `/api-console` and not something under `/api`.** That prefix is the
-programmatic surface, split in two — the `/api/v1` REST envelope and the `/api/x` published
-endpoints this page lists — and §2.1's three-URL-space rule says a page never lives in the
+programmatic surface, split in two — the `/api/v1` REST envelope and the published
+endpoints (`/api/<category>/…`, R-EP5) this page lists — and §2.1's three-URL-space rule says a page never lives in the
 JSON space. `api-console` is a different first path segment from `api`, so Spring's
 segment-wise matching cannot let either shadow the other. It needs no `SecurityConfig` entry:
 that chain's `permitAll` list is explicit and everything else is `.anyRequest().authenticated()`.
@@ -1559,6 +1559,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v1.57 | 172 (#172) | The `/api-console` route rationale reworded for the re-rooted published-endpoint tree (R-EP5); no screen, route or verb changed. |
 | 2026-09-17 | v1.55 | 159 / #148 Start runs on a human press; Cancel from the marker | §4.4: the Start disc now starts a run from a HAND's click — the live "Start does nothing" was Cytoscape's mousedown re-rendering the disc under a held button (no click ever dispatched); the press is stopped before Cytoscape. While the run is active the disc is the **Cancel** control (`Cancel execution`, the word Cancel, square glyph, danger fill, never `aria-disabled`, the toolbar's own `cancelExecution()`), Start again on any terminal state; a viewer who may not execute keeps the plain marker; focus survives the disc's re-render. ([Pipeline Editor §5.3b](pipeline-editor.md); `PipelineEditorStartMarkerBrowserTest` presses the disc the way a hand does.) |
 | 2026-09-17 | v1.54 | 151 addendum / #144 boundary redesign | §4.4: Start and End are **shapes** (a disc and a rounded square, the word under them), not pills; **Start runs the pipeline** for a viewer who may execute (`role="button"`, Enter/Space, the toolbar's own `canExecute` stamped as `data-can-execute`, the same `executePipeline()`), `aria-disabled` + pulse while Running…; End's fill is the outcome, with the run clock's elapsed; `#cy-canvas` is `role="group"`. Corrects v1.51's "never executable" reading: the markers are still not executable NODES, but Start is a run TRIGGER. In a browser session viewers may execute (D-R3), so they get the button too. |
 | 2026-09-17 | v1.53 | 151 / #127 arrows vs. writes | §4.4: a `depends_on` edge is an ORDERING (`dependency` kind; `active` still / `satisfied` / `unmet`), never a transfer — no copied row count on any edge, no motion along one (the rAF flow retired); the write is the producer's **output port** row (destination, kind word, measured state from the 149 reducer: waiting amber and still, writing the only flow, committed/not observed/rolled back honest words, CTAS `one statement`); stream loss freezes without inventing; the recovery poll settles End and closes open operations unobserved; legend `Depends on` / `Output write`; Details `Depends on` / `Required by`; arrow tap announces its meaning. |

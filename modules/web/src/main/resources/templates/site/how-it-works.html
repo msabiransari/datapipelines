@@ -119,7 +119,7 @@
         <div class="walk-card">
           <span class="subtle-label">Example API path</span>
           <!-- claim: docs/rest-api.md §19.1 (the path grammar), §19.3 (query parameters) — the demo endpoint from SiteFacts' demo block -->
-          <pre class="code"><span>GET </span><span th:text="${facts.demo.endpoint}">/api/x/…</span></pre>
+          <pre class="code"><span>GET </span><span th:text="${facts.demo.endpoint}">/api/demo/v1/…</span></pre>
           <p class="caption">The demo workspace's published endpoint. Your deployed host, released pipeline and scoped key determine access.</p>
         </div>
       </div>
@@ -682,7 +682,7 @@
           </svg>
           <!-- claim: docs/ui-screens.md §4.18 -->
           <h3>One API section</h3>
-          <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/x/…</code>, the keys that may call them, and the MCP connection block — the tool count rendered live from the catalog, never a literal.</p>
+          <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/…</code>, the keys that may call them, and the MCP connection block — the tool count rendered live from the catalog, never a literal.</p>
           <!-- claim: docs/ui-screens.md §4.18 (the endpoints card) -->
           <p>It is honest about what it cannot show: no "calls in the last 24 h" column — every serve is audited, but nothing tallies them per endpoint — so the card states the absence instead of filling it from a sample.</p>
           <a class="card-link" th:href="@{/docs/ui-screens}">Read the spec &rarr;</a>

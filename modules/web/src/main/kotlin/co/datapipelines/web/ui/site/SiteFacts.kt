@@ -190,7 +190,7 @@ val DEMO_SHOWCASE =
                 DemoShowcase.DemoRow("Bronx", "Uber", "6,078,750", "7,572,899", "80.27%"),
                 DemoShowcase.DemoRow("Staten Island", "Uber", "715,593", "918,360", "77.92%"),
             ),
-        endpoint = "/api/x/demo/top-company-by-borough?anchor_date=2025-01-01",
+        endpoint = "/api/demo/v1/top-company-by-borough?anchor_date=2025-01-01",
         sources =
             listOf(
                 DemoShowcase.DemoNode("sample-lake · Parquet on S3", "hvfhv_zone_day · 377k rows"),
@@ -203,7 +203,7 @@ val DEMO_SHOWCASE =
                 DemoShowcase.DemoNode("stage_zones", "263 rows · 204 ms"),
             ),
         answer = DemoShowcase.DemoNode("answer", "6 rows · caller"),
-        releaseLine = "demo/top_company_by_borough · v1 · awaiting a human release · then GET /api/x/demo/…",
+        releaseLine = "demo/top_company_by_borough · v1 · awaiting a human release · then GET /api/demo/v1/…",
         pipelinePath = "demo/top_company_by_borough",
         version = "v1",
         keyReach = "/demo/**",

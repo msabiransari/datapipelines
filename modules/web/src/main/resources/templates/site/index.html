@@ -90,7 +90,7 @@
             <p class="panel-label">API response</p>
             <p class="chart-title">The released pipeline’s endpoint, and its first row as JSON</p>
             <!-- claim: docs/rest-api.md §19.1 (the path grammar), §19.3 (declared parameters from the query string) -->
-            <pre class="code"><span>GET </span><span th:text="${facts.demo.endpoint}">/api/x/…</span>
+            <pre class="code"><span>GET </span><span th:text="${facts.demo.endpoint}">/api/demo/v1/…</span>
 
 {
   "borough": "<span th:text="${facts.demo.rows[0].borough}">Manhattan</span>",

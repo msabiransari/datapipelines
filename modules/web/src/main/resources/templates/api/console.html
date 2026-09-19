@@ -148,7 +148,7 @@
                  `Allow: GET`, so the tag is a fact about the surface, not a column that
                  could vary. -->
             <span class="app-method">GET</span>
-            <span class="ds-mono" th:text="${e.url}">/api/x/nyc/mobility/briefing</span>
+            <span class="ds-mono" th:text="${e.url}">/api/nyc/v1/mobility/briefing</span>
             <span class="app-chip app-chip-warn" th:unless="${e.enabled}"><i class="ds-status"></i>Disabled</span>
           </td>
           <td>
@@ -174,7 +174,7 @@
       <div class="app-card-b" th:if="${#lists.isEmpty(endpoints)}">
         <div class="app-empty">
           <b>No published endpoints</b>
-          A published endpoint turns one pipeline into a GET URL under <span class="ds-mono">/api/x</span>.
+          A published endpoint turns one pipeline into a GET URL under <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>.
           Publish one with the <span class="ds-mono">endpoints_create</span> MCP tool or
           <span class="ds-mono">POST /api/v1/endpoints</span>.
         </div>

@@ -206,8 +206,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `datasource.validation.lake_no_healthy_tables` (400 — the family default, so no
          * catalog row), landed in the SAME commit as its `DatasourceErrorCodes` constant.
          * Re-derived from the document's own parse.
+         *
+         * 179 → 180 with 172 (#172, the endpoint URL shape): §13.14 gains
+         * `endpoint.path_reserved` (400 — the `endpoint.` family default, so no catalog row),
+         * landed in the SAME commit as its `PipelineErrorCodes.Endpoint` constant. Re-derived
+         * from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 179
+        const val SECTION_13_ROW_COUNT = 180
 
         /**
          * §12's distinct validation codes.

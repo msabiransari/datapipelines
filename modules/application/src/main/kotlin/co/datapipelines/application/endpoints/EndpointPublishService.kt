@@ -77,6 +77,18 @@ class EndpointPublishService(
                     details = mapOf("path_pattern" to pathPattern),
                 )
             }
+        // R-EP5 — the category is the engineer's namespace; the product's (`v<n>`, and the
+        // literal `api`) is reserved. Refused here and re-checked when the serve registry is
+        // built, so a row written around this check is never served either.
+        EndpointPath.reservedCategory(parsed)?.let { segment ->
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Endpoint.PATH_RESERVED,
+                message =
+                    "The category '$segment' is reserved: v<number> is the product's own API namespace and 'api' " +
+                        "re-opens the stripped prefix. Pick your own namespace — a business domain, a team, a product line.",
+                details = mapOf("path_pattern" to parsed.pattern, "segment" to segment),
+            )
+        }
 
         val record = pipelineRepository.findByName(workspaceId, pipelineName) ?: throw pipelineNotFound(pipelineName)
         val version = releasedVersion(workspaceId, record) ?: throw notReleased(pipelineName)
@@ -123,20 +135,23 @@ class EndpointPublishService(
         pathPattern: String,
     ): Boolean {
         val workspaceId = principal.requireWorkspace().id
-        val existing = endpoints.findByPath(pathPattern) ?: return false
+        // Normalised like a publish (R-EP5): the stored form never carries the `/api` prefix,
+        // so an addressed `/api/trade/v1/x` names the row published as `/trade/v1/x`.
+        val stored = EndpointPath.normalize(pathPattern)
+        val existing = endpoints.findByPath(stored) ?: return false
         // A URL is global, but managing one is not: an endpoint belongs to the workspace that
         // published it, and another workspace's endpoint is invisible rather than forbidden —
         // the same not-found discipline every workspace-scoped read follows.
         if (existing.workspaceId != workspaceId && !principal.isSuperAdmin) return false
 
-        val removed = endpoints.deleteByPath(pathPattern)
+        val removed = endpoints.deleteByPath(stored)
         if (removed) {
             registry.invalidate()
             audit.log(
                 event = AUDIT_UNPUBLISHED,
                 userId = principal.userId,
                 keyId = principal.keyId,
-                details = mapOf("endpoint_id" to existing.id.toString(), "path_pattern" to pathPattern),
+                details = mapOf("endpoint_id" to existing.id.toString(), "path_pattern" to stored),
             )
         }
         return removed
@@ -150,7 +165,7 @@ class EndpointPublishService(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
     ): PublishedEndpoint? =
-        endpoints.findByPath(pathPattern)?.takeIf {
+        endpoints.findByPath(EndpointPath.normalize(pathPattern))?.takeIf {
             it.workspaceId == principal.requireWorkspace().id || principal.isSuperAdmin
         }
 

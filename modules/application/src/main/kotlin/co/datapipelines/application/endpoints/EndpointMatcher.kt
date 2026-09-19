@@ -11,11 +11,12 @@ import org.springframework.web.util.pattern.PatternParseException
  * ## Spring's parser as a LIBRARY, never as request mapping
  *
  * The paths users publish never reach Spring's `RequestMappingHandlerMapping`: the whole
- * `/api/x/{path}` subtree is served by ONE catch-all handler (ruling R-EP1), and this class parses
- * and matches the patterns itself with [PathPatternParser]. That is what keeps publishing a
- * database write instead of a mutation of the servlet container's routing table — no
- * re-registration, no restart, no per-instance divergence, and no way for a published path to
- * shadow a product route.
+ * published subtree is served by ONE catch-all handler whose mapping constrains the category
+ * segment itself (ruling R-EP5 — `/api/{category}/…` with the product's `v[0-9]+` and `api`
+ * excluded in the pattern), and this class parses and matches the patterns itself with
+ * [PathPatternParser]. That is what keeps publishing a database write instead of a mutation of
+ * the servlet container's routing table — no re-registration, no restart, no per-instance
+ * divergence, and no way for a published path to shadow a product route.
  *
  * ## Longest-literal precedence is NOT implemented, on purpose
  *
@@ -37,18 +38,26 @@ class EndpointMatcher(
     /**
      * The compiled patterns, paired with their rows.
      *
-     * A pattern that Spring's parser rejects is dropped rather than thrown on: the grammar
-     * (§4.1) is strictly narrower than what `PathPatternParser` accepts, so a parse failure here
-     * means the row was written by something that bypassed [EndpointPath], and refusing the whole
-     * registry would take every OTHER endpoint down with it. The drop is logged by the caller
-     * that built this matcher.
+     * Two kinds of row are dropped rather than thrown on, because refusing the whole registry
+     * would take every OTHER endpoint down with the bad one:
+     *
+     * - a pattern Spring's parser rejects — the grammar (§4.1) is strictly narrower than what
+     *   `PathPatternParser` accepts, so a parse failure here means the row was written by
+     *   something that bypassed [EndpointPath];
+     * - a row whose CATEGORY is reserved (R-EP5) — the publish-time `endpoint.path_reserved`
+     *   refusal re-checked at serve time, the same posture as the read-only rule: a row that
+     *   somehow bypassed the publish check is never served.
+     *
+     * Either drop is logged by the caller that built this matcher.
      */
     private val compiled: List<Pair<PathPattern, PublishedEndpoint>> =
-        endpoints.mapNotNull { endpoint ->
-            runCatching { PARSER.parse(endpoint.pathPattern) }
-                .getOrElse { if (it is PatternParseException) null else throw it }
-                ?.let { it to endpoint }
-        }
+        endpoints
+            .filter { EndpointPath.reservedCategory(it.parsed) == null }
+            .mapNotNull { endpoint ->
+                runCatching { PARSER.parse(endpoint.pathPattern) }
+                    .getOrElse { if (it is PatternParseException) null else throw it }
+                    ?.let { it to endpoint }
+            }
 
     /** How many patterns this matcher holds — the non-vacuity handle a fuzz test needs. */
     val size: Int get() = compiled.size
@@ -57,7 +66,7 @@ class EndpointMatcher(
      * The endpoint this request path resolves to, with its extracted path variables — or null
      * when nothing matches (§5.6's `404`).
      *
-     * [path] is the part AFTER `/api/x`, with its leading `/` (`/nyc/revenue/Manhattan`).
+     * [path] is the part AFTER `/api`, with its leading `/` (`/nyc/v1/revenue/Manhattan`).
      */
     fun match(path: String): Match? {
         val parsed = PathContainer.parsePath(path)

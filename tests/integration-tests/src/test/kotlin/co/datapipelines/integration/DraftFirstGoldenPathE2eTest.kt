@@ -180,7 +180,7 @@ class DraftFirstGoldenPathE2eTest {
                 .port(port)
                 .contentType(ContentType.JSON)
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-                .body("""{"path": "/draftfirst/rows", "pipeline": "$PIPELINE_NAME"}""")
+                .body("""{"path": "/draftfirst/v1/rows", "pipeline": "$PIPELINE_NAME"}""")
                 .`when`()
                 .post("/api/v1/endpoints")
                 .thenReturn()

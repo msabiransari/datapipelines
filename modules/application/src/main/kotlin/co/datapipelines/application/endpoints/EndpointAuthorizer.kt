@@ -51,7 +51,7 @@ class EndpointAuthorizer {
     /**
      * Applies §5.2 to one request.
      *
-     * @param requestPath the path under `/api/x`, with its leading `/`.
+     * @param requestPath the published path — the part after `/api`, with its leading `/`.
      * @param endpointWorkspaceId the workspace of the endpoint being called — the one a `user`
      *   key must be pinned to on an unbound path.
      * @param bindings every binding on any ancestor of [requestPath]; extra rows are harmless,

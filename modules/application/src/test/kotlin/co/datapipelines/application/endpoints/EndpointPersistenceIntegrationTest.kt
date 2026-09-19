@@ -114,19 +114,19 @@ class EndpointPersistenceIntegrationTest {
 
     @Test
     fun `an endpoint round-trips through every read the registry and the screens use`() {
-        publish("/lending/{borough}/home")
+        publish("/lending/v1/{borough}/home")
 
-        val byPath = endpoints.findByPath("/lending/{borough}/home")
+        val byPath = endpoints.findByPath("/lending/v1/{borough}/home")
         byPath.shouldNotBeNull()
         byPath.pipelineId shouldBe pipelineId
         byPath.isEnabled shouldBe true
         // The parse travels with the row, so the matcher and the screens share ONE parse.
         byPath.pathVariables shouldContainExactly listOf("borough")
 
-        endpoints.findAll().map { it.pathPattern } shouldContainExactly listOf("/lending/{borough}/home")
-        endpoints.findAllEnabled().map { it.pathPattern } shouldContainExactly listOf("/lending/{borough}/home")
-        endpoints.findByWorkspace(workspaceId).map { it.pathPattern } shouldContainExactly listOf("/lending/{borough}/home")
-        endpoints.findByPipeline(pipelineId).map { it.pathPattern } shouldContainExactly listOf("/lending/{borough}/home")
+        endpoints.findAll().map { it.pathPattern } shouldContainExactly listOf("/lending/v1/{borough}/home")
+        endpoints.findAllEnabled().map { it.pathPattern } shouldContainExactly listOf("/lending/v1/{borough}/home")
+        endpoints.findByWorkspace(workspaceId).map { it.pathPattern } shouldContainExactly listOf("/lending/v1/{borough}/home")
+        endpoints.findByPipeline(pipelineId).map { it.pathPattern } shouldContainExactly listOf("/lending/v1/{borough}/home")
 
         // The negative reads matter as much: a pipeline delete asks this question and must not
         // be blocked by an endpoint that does not exist.
@@ -137,9 +137,9 @@ class EndpointPersistenceIntegrationTest {
 
     @Test
     fun `a disabled endpoint leaves findAllEnabled but stays in findAll`() {
-        publish("/lending/home")
+        publish("/lending/v1/home")
 
-        endpoints.setEnabled("/lending/home", enabled = false) shouldBe true
+        endpoints.setEnabled("/lending/v1/home", enabled = false) shouldBe true
 
         // §5.6: a disabled endpoint answers 404 exactly like an unknown path, so the registry
         // cache must not see it — while the tree screen still shows it, flagged.
@@ -151,37 +151,37 @@ class EndpointPersistenceIntegrationTest {
 
     @Test
     fun `deleteByPath reports whether a row actually went`() {
-        publish("/lending/home")
+        publish("/lending/v1/home")
 
-        endpoints.deleteByPath("/lending/home") shouldBe true
-        endpoints.deleteByPath("/lending/home") shouldBe false
+        endpoints.deleteByPath("/lending/v1/home") shouldBe true
+        endpoints.deleteByPath("/lending/v1/home") shouldBe false
         endpoints.findAll().shouldBeEmpty()
     }
 
     @Test
     fun `an overlapping pattern is refused with endpoint path_conflict naming the other path`() {
-        publish("/lending/{borough}")
+        publish("/lending/v1/{borough}")
 
-        // §4.1: "/lending/home" and "/lending/{borough}" could match the same URL. The database
+        // §4.1: "/lending/v1/home" and "/lending/v1/{borough}" could match the same URL. The database
         // cannot express that — UNIQUE(path_pattern) catches only exact duplicates — so the
         // refusal is a read-then-write under the advisory lock, which is why this assertion
         // needs a real transaction and a real Postgres.
-        val refused = shouldThrow<DatapipelinesException> { publish("/lending/home") }
+        val refused = shouldThrow<DatapipelinesException> { publish("/lending/v1/home") }
         refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_CONFLICT
-        refused.details["conflicting_path"] shouldBe "/lending/{borough}"
-        refused.message.shouldNotBeNull() shouldContain "/lending/home"
+        refused.details["conflicting_path"] shouldBe "/lending/v1/{borough}"
+        refused.message.shouldNotBeNull() shouldContain "/lending/v1/home"
 
-        endpoints.findAll().map { it.pathPattern } shouldContainExactly listOf("/lending/{borough}")
+        endpoints.findAll().map { it.pathPattern } shouldContainExactly listOf("/lending/v1/{borough}")
     }
 
     @Test
     fun `an exact duplicate is refused with the same code, whichever line catches it`() {
-        publish("/lending/home")
+        publish("/lending/v1/home")
 
         // Reached through the overlap check with the lock held, and through the UNIQUE
         // constraint without it. A client must not be able to tell the two paths apart, so the
         // code is the same either way — this asserts the pair, not the route.
-        val refused = shouldThrow<DatapipelinesException> { publish("/lending/home") }
+        val refused = shouldThrow<DatapipelinesException> { publish("/lending/v1/home") }
         refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_CONFLICT
     }
 

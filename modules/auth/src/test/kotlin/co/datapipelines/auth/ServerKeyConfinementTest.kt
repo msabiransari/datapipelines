@@ -118,9 +118,17 @@ class ServerKeyConfinementTest {
             { ScopeInterceptor.reachableBy(ApiKeyKind.SERVER, "/api/v1/promotion/push") shouldBe true },
             // Not a prefix match on the SEGMENT: `/api/v1/promotions` is a different route.
             { ScopeInterceptor.reachableBy(ApiKeyKind.SERVER, "/api/v1/promotions") shouldBe false },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.SERVER, "/api/x/nyc/revenue") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.SERVER, "/api/nyc/v1/revenue") shouldBe false },
             { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1/promotion/push") shouldBe false },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/x/nyc/revenue") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/nyc/v1/revenue") shouldBe true },
+            // R-EP5 — the rule is the first segment, never a literal prefix: the reserved
+            // categories (the product's own v<n> namespace, and 'api') open nothing.
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1/revenue") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v10/revenue") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/api/v1/revenue") shouldBe false },
+            // A category that merely STARTS with a reserved word is an engineer's namespace.
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1a/revenue") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/apis/v1/revenue") shouldBe true },
             { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/api/v1/promotion/push") shouldBe true },
         )
     }
@@ -194,7 +202,7 @@ class ServerKeyConfinementTest {
                 "/api/v1/workspaces",
                 "/api/v1/endpoints",
                 "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001/result",
-                "/api/x/nyc/revenue/Manhattan",
+                "/api/nyc/v1/revenue/Manhattan",
                 "/partials/api-keys",
                 "/mcp",
                 // Unannotated, outside the governed prefixes — see the class KDoc.

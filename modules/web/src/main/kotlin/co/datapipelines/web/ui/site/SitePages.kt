@@ -295,9 +295,10 @@ object SitePages {
     val PUBLISHED_API =
         SitePage(
             path = "/published-api",
-            title = "Turn a SQL query into an API — published endpoints | datapipelines.co",
+            // "data api" is the measured head term (SEO addendum 4) — it leads the title and the H1.
+            title = "A data API from a SQL query — published endpoints | datapipelines.co",
             description =
-                "A released pipeline becomes a versioned GET endpoint under /api/x with bound parameters and " +
+                "A released pipeline becomes a versioned GET endpoint with bound parameters and " +
                     "path-scoped keys. Data to API in a day, nothing to deploy.",
             view = "site/published-api",
         )

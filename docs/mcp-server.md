@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.41 (frozen contract — additive-only changes after this point)
+**Status:** v1.43 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-16
@@ -928,12 +928,12 @@ An agent that needs a datasource it cannot find should **ask the person** to add
 
 #### 6.2.23 `endpoints_create`
 
-Publish a released pipeline as a `GET` endpoint under `/api/x` ([REST API §19](rest-api.md#19-published-endpoints)). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
+Publish a released pipeline as a `GET` endpoint at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
 
 ```json
 {
   "name": "endpoints_create",
-  "description": "Publish a released pipeline as a GET endpoint under /api/x. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 1-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.",
+  "description": "Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -944,7 +944,7 @@ Publish a released pipeline as a `GET` endpoint under `/api/x` ([REST API §19](
     "properties": {
       "path": {
         "type": "string",
-        "description": "e.g. /finance/revenue/{region} — no /api/x prefix, no trailing slash."
+        "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."
       },
       "pipeline": {
         "type": "string",
@@ -989,7 +989,7 @@ One published endpoint, by its path PATTERN.
 ```json
 {
   "name": "endpoints_get",
-  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/revenue/{region}').",
+  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}').",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -999,7 +999,7 @@ One published endpoint, by its path PATTERN.
     "properties": {
       "path": {
         "type": "string",
-        "description": "The published path PATTERN, e.g. /finance/revenue/{region}."
+        "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
       }
     }
   }
@@ -1025,7 +1025,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
     "properties": {
       "path": {
         "type": "string",
-        "description": "The published path PATTERN, e.g. /finance/revenue/{region}."
+        "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
       }
     }
   }
@@ -2139,6 +2139,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v1.43 | 172 (#172) | §6.2.23 `endpoints_create` description and `path` schema text: published endpoints serve at `/api/<category>/<version>/<path…>` (R-EP5) — the category is the caller's namespace with `v[0-9]+` and `api` reserved (`endpoint.path_reserved`), the version free-form, one leading `/api` prefix normalised away; `endpoints_*` responses' `url` carries the full served URL. No tool added, removed or renamed; no scope change. |
 | 2026-09-18 | v1.42 | 171 (#171) | No new tools, no schema change (`inputSchema` unaffected). **§6.2.23 `endpoints_create`** description text updated: a `DML`/`DDL` node whose `source` is `tempdb` is now side-effect-free and publishable — previously every `DML`/`DDL` node was refused regardless of source. Same rule, same code (`endpoint.pipeline_not_readonly`), same service both REST and this tool call ([REST API §19.2](rest-api.md#192-what-may-be-published)). |
 | 2026-09-16 | v1.41 | 147 incomplete tempdb validation (#119) | No new tools, no argument change. **§6.2.34 `sql_probe`, `name: "tempdb"`**: a missing staged table is an INCOMPLETE validation, not a pass — the payload gains **`validation_status`** (`"incomplete"` \| `"executed"`) and `parsed` becomes `null` on the incomplete branch (present, not omitted; `true` only when the statement executed); the note says what was NOT checked and names the two ways to finish (a self-contained `VALUES` restatement, or a run with the real staged inputs). Measured on H2 2.3.232: a missing table stops preparation before a later syntax error, so the pre-#119 "parsed, every self-defined name resolved" claim was false (an acceptance run matched a passing probe's SQL hash to its failing execution). Tool and `name` descriptions updated (drift-pinned); guards `SqlProbeH2Test` (real engine, with the tables-present counterexample) and `SqlProbeTempdbWireTest` (real dispatcher, real JSON). Errors, binds, limits, cleanup, scope and the hash-only audit unchanged. |
 | 2026-09-15 | v1.39 | 139 the entry-point checks | No new tools, one new input property. **§6.2.4/§6.2.5 `pipelines_create`/`pipelines_update`**: a body whose template names a table the key never `datasources_get_columns`'d is refused `pipeline.validation.table_not_learned` (§12.11; details.tables + the clearing calls); a raw-date door (two DATE parameters, no INTEGER period parameter, no window calculator) is refused `pipeline.validation.door_unacknowledged` unless the call carries the new **`door_acknowledged`** boolean — the `confirm_new_root` shape (094). **§6.2.3 `pipelines_execute` / §6.2.20 `pipelines_execute_node`**: a DRAFT version whose pinned DRAFT template was written after this key's last successful `templates_render` is refused `pipeline.execution.template_unrendered` (§13.3; details.templates). **§14**: the schema tools' rows gain `table` (+ `namespace`), `templates_render` rows gain `template` — the identifiers the checks learn from; pre-139 rows carry neither and do not count. All three checks are MCP-only (they read the caller's own audit rows); REST and the UI unaffected. |
@@ -2178,7 +2179,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 | 2026-09-01 | v1.15 | agent data visibility (037) | Tool surface 18 → **20**: new §6.2.19 `datasources_preview_rows` (≤50 wire-encoded rows of one table, `order_by` as `{column, direction}` objects, service-built + dialect-quoted statements, readonly datasources valid) and §6.2.20 `pipelines_execute_node` (ONE node's rendered SQL on its own datasource — a debug query, not an execution: no history/SSE/idempotency, DML/DDL for real, tempdb-source and PIPELINE nodes refused with `pipeline.node.standalone_execution_refused`, unknown node `pipeline.node.not_found`, E5 draft-if-exists version default with status always stated). §6.1, §5.1, §8 admission-rule counts updated. Both `author`: the first tools returning arbitrary customer row data (037 F). |
 | 2026-09-02 | v1.16 | MCP audit (052) | New **§14 Audit** (normative, ruling R4): `mcp.tool.called` (every call, since the original build) registered + `mcp.tool.write` (NEW — exactly one per catalog-declared mutating call, node runs included, after the tool returns on success and failure; scope refusals excluded because the tool never ran). Emitted at the dispatcher, not per-tool. Mutating is a declared catalog-entry property guarded by `McpToolCatalogBindingTest`. Never SQL/row data/parameter values. §13 gains the mutating-call checklist line. Both events registered in Enums §15 the same commit (docs-audit check C). No tool surface change. |
 | 2026-09-05 | v1.18 | pipeline folders (067) | Additive arguments only — **no new tool names**, the surface stays 21. `pipelines_list` and `templates_list` each gain **`prefix`**: absent = the flat listing (unchanged); present (`""` = the root) = ONE level of the folder tree, returning `{prefix, folders[{path, segment, *_count}], pipelines|templates[], total, has_more}`. `q`/`owner`/`datasource` are ignored while browsing; an illegal prefix answers an empty level, not an error. This closes a real gap for templates, which have had path ids since 043 and no way to browse a folder over MCP (verified 2026-09-04). `pipelines_create`/`pipelines_update` `name` patterns widen to the path grammar — rendered from `PipelineNameGrammar.pattern` itself, so the schema and the server rule cannot drift — with a description telling the agent to list the roots first and ask before minting one. §6.2.1 and §6.2.6 document browse-vs-search. |
-| 2026-09-05 | v1.19 | published endpoints (074) | Tool surface 24 → **28**: `endpoints_create` / `endpoints_list` / `endpoints_get` / `endpoints_delete` (§6.2) — publish a released, side-effect-free pipeline as `GET /api/x/…` and bind endpoint-kind keys to it. `create`/`delete` are `author`, the reads `read` (auth.md §7.6). **An endpoint-kind key cannot reach `/mcp` at all** (refused at `McpAuthFilter`; `/mcp` is a servlet outside `ScopeInterceptor`'s reach — security pass). No `api_keys_create` tool: a credential must not transit an agent's transcript. |
+| 2026-09-05 | v1.19 | published endpoints (074) | Tool surface 24 → **28**: `endpoints_create` / `endpoints_list` / `endpoints_get` / `endpoints_delete` (§6.2) — publish a released, side-effect-free pipeline as a `GET` endpoint and bind endpoint-kind keys to it. `create`/`delete` are `author`, the reads `read` (auth.md §7.6). **An endpoint-kind key cannot reach `/mcp` at all** (refused at `McpAuthFilter`; `/mcp` is a servlet outside `ScopeInterceptor`'s reach — security pass). No `api_keys_create` tool: a credential must not transit an agent's transcript. |
 | 2026-09-05 | v1.20 | mandatory folders (077) | No new tools; two `pattern`s and two descriptions. §6.2.4/§6.2.5 `pipelines_create`/`pipelines_update` `name` narrows to the 2–10-segment grammar ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) — rendered from `PipelineNameGrammar.pattern` itself, so it moved with the rule. §6.2.8 `templates_create` `id` **gains a `pattern` for the first time** and it is `TemplateNameGrammar.pattern`: the schema had been advertising the pre-043 flat `[a-z0-9_.-]+` in prose, three grammar changes stale (audit T129, 2026-09-05). Both descriptions now state that a folder is required, that `details.reason='folder_required'` is how the refusal is recognised, and that experiments go under `test/`. An omitted `templates_create` id is generated under `test/`. |
 | 2026-09-07 | v1.21 | 087 connector seams | No new tools. §6.2.22 `datasources_create` gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) and drops `username`/`password` from `required` — either shape is accepted, both together are refused; the dialect enum gains `LAKE`; the result carries `credential.kind` and a derived `password_set`. §6.2.16 `datasources_get_schemas` returns `entries: [{namespace, label}]` beside the legacy `schemas` array — two catalogs' same-named schemas are two entries, which a list of bare labels could not express. §6.2.17/§6.2.18 gain a `namespace` array argument beside `schema` (which now also accepts the dotted form), and every table row carries `namespace` beside `schema`. |
 | 2026-09-07 | v1.20 | dp-lake registry (089 §A) | Tool surface 28 → **31**: `lake_tables_register` / `lake_tables_import` / `lake_tables_unregister` (§6.2.29–31) — the dp-lake catalog (metadata-db §4.15): register one table, bulk-import a manifest.json `tables[]` block (inline or fetched server-side from the datasource's OWN endpoint/bucket only — the SSRF boundary), unregister. All three are `author` (auth.md §7.6) and declared `mutating`. |

@@ -142,8 +142,8 @@ class EndpointKeyConfinementTest {
     private companion object {
         val REACHABLE =
             listOf(
-                "/api/x/nyc/revenue/Manhattan",
-                "/api/x/lending",
+                "/api/nyc/v1/revenue/Manhattan",
+                "/api/lending",
                 "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001",
                 "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001/result",
             )
@@ -159,6 +159,10 @@ class EndpointKeyConfinementTest {
                 "/api/v1/workspaces",
                 "/api/v1/endpoints",
                 "/api/v1/executions",
+                // R-EP5 — a reserved first segment is the product's tree, whatever follows it.
+                "/api/v1/revenue/Manhattan",
+                "/api/v2/anything",
+                "/api/api/v1/x",
                 "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001/cancel",
                 "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001/events",
                 "/partials/api-keys",

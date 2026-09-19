@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.14 (living document — updated as enums evolve)
+**Status:** v1.15 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -513,7 +513,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `REST` | Direct REST API call (programmatic client) |
 | `MCP` | MCP tool invocation (agent) |
 | `PIPELINE` | Spawned by a parent execution's PIPELINE node (pipeline composition; metadata-db §4.6 lineage columns link the family) |
-| `ENDPOINT` | A published endpoint served a `GET /api/x/…` request (074). The execution runs in-process as the endpoint's workspace, `triggered_by` is the key's owner, and the serve's audit row carries the key id |
+| `ENDPOINT` | A published endpoint served a `GET` request on the published tree (074; re-rooted to `/api/<category>/<version>/<path…>` by 172). The execution runs in-process as the endpoint's workspace, `triggered_by` is the key's owner, and the serve's audit row carries the key id |
 | `SCHEDULED` | (Future) Cron-triggered execution |
 | `WEBHOOK` | (Future) External webhook trigger |
 
@@ -626,6 +626,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v1.15 | 172 (#172) | §18's `ENDPOINT` row reworded for the re-rooted published-endpoint URL shape (R-EP5); the enum and its wire value are unchanged. |
 | 2026-09-16 | v1.14 | 149 / #125 node_progress | §11 gains **`node_progress`** — the measured per-node operation sample ([REST API §6.4.9](rest-api.md#649-node_progress)); zero or more between a node's `node_started` and its terminal event, never terminal. |
 | 2026-09-15 | v1.12 | 142 release cascade | §15's `pipeline.version.released` row gains `templates_released`; `template.version.released` gains the cascade source (`cascade_from_pipeline_id`, `cascade_from_version`) when the pipeline release made it. |
 | 2026-09-14 | v1.11 | 140 release checks | New **§20 `CheckRunVerdict`** (`pass` \| `fail` \| `error`) and **§21 `CheckRunVia`** (`mcp` \| `rest` \| `ui` \| `release`) — the wire values of `pipeline_check_runs` (metadata-db §4.20, V28), authored in pipeline-contract `ReleaseCheckGate.kt`. §15's `pipeline.version.released` row gains the override record (`checks_overridden`, `override_reason`); §16 registers the `pipeline.check.*` domain (pipeline-contract §13.17). |

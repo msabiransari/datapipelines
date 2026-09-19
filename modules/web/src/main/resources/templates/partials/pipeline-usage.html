@@ -17,7 +17,7 @@
   <th:block th:if="${!#lists.isEmpty(usage.endpoints)}">
     <h4 class="tplx-usage-h">Published endpoints</h4>
     <div class="tplx-vrow" th:each="e : ${usage.endpoints}">
-      <span class="u-mono" th:text="${'/api/x' + e.path}">/api/x/rideshare</span>
+      <span class="u-mono" th:text="${'/api' + e.path}">/api/rideshare/v1/daily</span>
       <span class="ds-badge" th:classappend="${e.enabled} ? 'ds-badge-success' : 'ds-badge-default'"
             th:text="${e.enabled} ? 'enabled' : 'disabled'">enabled</span>
       <span class="tplx-vmeta" th:text="${e.description}">Serves the borough report.</span>

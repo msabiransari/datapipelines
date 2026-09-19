@@ -45,7 +45,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  *
  * ## Why this is needed at all
  *
- * [EndpointRegistry] holds the whole enabled registry per JVM so a request under `/api/x` can be
+ * [EndpointRegistry] holds the whole enabled registry per JVM so a request under `/api` can be
  * resolved without a metadata-DB round trip. With N replicas, a publish on instance A leaves B
  * and C serving `404` for a URL that exists. A TTL would fix that eventually, with a window
  * nobody can predict and a different answer per instance; a broadcast fixes it at the write.

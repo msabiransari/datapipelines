@@ -1009,7 +1009,7 @@ object PipelineErrorCodes {
 
     /**
      * §13.14 — published endpoints (published-endpoints design, round 074): a released pipeline
-     * served as `GET /api/x/{path}`.
+     * served as `GET /api/{category}/{version}/{path}` (R-EP5, 172 — the old fixed-letter root is retired).
      *
      * Two families in one object because they are one surface:
      *  - the bare `endpoint.*` codes are **publish-time and resolution-time** refusals — the path
@@ -1023,10 +1023,21 @@ object PipelineErrorCodes {
      */
     object Endpoint {
         /**
-         * §4.1 — a `path_pattern` that is not a legal path: wrong segment alphabet, more than 10
-         * segments, over 200 characters, a trailing slash, a `**`, or a malformed `{variable}`.
+         * §4.1 — a `path_pattern` that is not a legal path: wrong segment alphabet, fewer than
+         * three or more than 10 segments, over 200 characters, a trailing slash, a `**`, a
+         * malformed `{variable}`, or a variable in the category or version segment (R-EP5).
          */
         const val PATH_INVALID = "endpoint.path_invalid"
+
+        /**
+         * §4.1 / R-EP5 (172) — the pattern's CATEGORY segment is reserved: it matches `v[0-9]+`
+         * (the product's own API namespace — `/api/v1/…` today, any `v<n>` tomorrow, so a
+         * published path can never shadow a product route by construction) or it is the literal
+         * `api` (a normalised `/api/api/…` pattern). `details.segment` names it. Checked at
+         * publish and re-checked when the serve registry is built, so a row written around the
+         * publish path is never served.
+         */
+        const val PATH_RESERVED = "endpoint.path_reserved"
 
         /**
          * §4.1 — the pattern could match the same URL as one already published (`/a/{x}` against
@@ -1059,7 +1070,7 @@ object PipelineErrorCodes {
          */
         const val NOT_FOUND = "endpoint.not_found"
 
-        /** §5.6 — any method but `GET` on `/api/x/{path}`; the response carries `Allow: GET`. */
+        /** §5.6 — any method but `GET` on the published path; the response carries `Allow: GET`. */
         const val METHOD_NOT_ALLOWED = "endpoint.method_not_allowed"
 
         /** §5.3 — an `Accept` this surface cannot satisfy (v1 serves `application/json` only). */
