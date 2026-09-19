@@ -129,6 +129,7 @@ object SitePageRenderer {
             put(SitePages.TABLEAU_GOVERNED_DATASET.path, pagesController::tableauGovernedDataset)
             put(SitePages.COMPARE_FIVETRAN.path, batch2Controller::compareFivetranAirbyte)
             put(SitePages.COMPARE_POSTGRES_ONLY.path, batch2Controller::comparePostgresOnly)
+            put(SitePages.COMPARE_DAGSTER_AIRFLOW.path, batch2Controller::compareDagsterAirflow)
             put(SitePages.TABLEAU_PREP.path, batch2Controller::tableauPrep)
             put(SitePages.TABLEAU_ROADMAP.path, batch2Controller::tableauRoadmap)
             put(SitePages.FOR_AGENCIES.path, batch2Controller::forAgencies)

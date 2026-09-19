@@ -94,6 +94,8 @@ class PublicRouteWalkerTest {
                 "SitePagesController#textToSqlAgent",
                 // Site v2 batch 2 (111): the seven intent pages got their own controller
                 // (detekt TooManyFunctions), same shape and same reasoning.
+                // 173: the Dagster vs Airflow comparison, under the /compare glob.
+                "SiteV2Batch2Controller#compareDagsterAirflow",
                 "SiteV2Batch2Controller#compareFivetranAirbyte",
                 "SiteV2Batch2Controller#comparePostgresOnly",
                 "SiteV2Batch2Controller#forAgencies",
@@ -113,6 +115,11 @@ class PublicRouteWalkerTest {
                 // Markdown, no principal, no workspace, no datastore.
                 "DocsController#doc",
                 "DocsController#index",
+                // 173: the raw-Markdown twin of every doc, and the llms.txt pair — the same
+                // jar-packaged text, generated from the same registries as the sitemap.
+                "DocsController#markdown",
+                "LlmsTxtController#full",
+                "LlmsTxtController#index",
                 "SkillController#reference",
                 "SkillController#skill",
             ).sorted()

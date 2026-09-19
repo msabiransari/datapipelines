@@ -20,7 +20,8 @@
         The short version: if your data is already in a warehouse and the job is to model it, use dbt. Its whole
         design — models as SELECT statements, lineage from references, tests and generated docs — assumes one
         warehouse that everything has already been loaded into. We assume the opposite: the data is still in the
-        operational databases it was written to, and the question crosses them.
+        operational databases it was written to, and the question crosses them. So this is an alternative to dbt
+        only for that case — not a replacement for it where a warehouse already exists.
       </p>
     </div>
   </section>
@@ -76,6 +77,7 @@
         <li><strong>Not a warehouse tool.</strong> Snowflake, BigQuery and Databricks are not among the dialects. If that is where your data lives, dbt is the answer and we are not in the running.</li>
       </ul>
       <p><a th:href="@{/compare/airflow}">The Airflow comparison &rarr;</a> &middot;
+         <a th:href="@{/compare/dagster-vs-airflow}">Dagster vs Airflow, and where Prefect sits &rarr;</a> &middot;
          <a th:href="@{/federated-query}">The cross-database join &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Supported dialects &rarr;</a></p>
     </div>

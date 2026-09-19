@@ -219,6 +219,49 @@ object SiteFaqsCluster {
             ),
         )
 
+    /**
+     * 173 §B — the Dagster vs Airflow page's four. The page is editorial about three products
+     * that are not ours, so its questions are the ones a reader has about US in that context:
+     * whether an orchestrator is required, whether any of the three can trigger a run, whether
+     * this is an alternative to either, and where the facts about them come from.
+     */
+    val COMPARE_DAGSTER_AIRFLOW: List<FaqEntry> =
+        listOf(
+            FaqEntry(
+                "Do I need Dagster or Airflow to run pipelines here?",
+                "No. Pipelines execute on demand — by an agent over MCP, by a REST call, or by a person in the " +
+                    "editor — and there is no scheduler inside this server: no cron triggers, no backfills, no " +
+                    "sensors. If the work needs those, that is the orchestrator's job, and the page says which " +
+                    "one fits which team. The execution lifecycle is docs/dag-executor.md §5.",
+                "docs/dag-executor.md §5",
+            ),
+            FaqEntry(
+                "Can Dagster, Airflow or Prefect trigger a pipeline here?",
+                "Yes, and that is the composition the page recommends: a task in any of the three POSTs to the " +
+                    "execution endpoint and follows the per-milestone SSE stream until the run reaches a terminal " +
+                    "state, so the orchestrator keeps the platform view while the SQL that spans your operational " +
+                    "databases stays here, versioned and governed. The endpoint is docs/rest-api.md §6.",
+                "docs/rest-api.md §6",
+            ),
+            FaqEntry(
+                "Is datapipelines a Dagster alternative or an Airflow alternative?",
+                "Not in the sense a searcher means. Those two orchestrate whole platforms of Python work; this " +
+                    "server runs SQL pipelines across several operational databases, authored by an agent and " +
+                    "executed under governed, read-only-by-default credentials — a narrower thing that composes " +
+                    "with either rather than replacing it. What it does run is docs/dag-executor.md §5; what an " +
+                    "agent can author is docs/mcp-server.md §6.1.",
+                "docs/dag-executor.md §5, docs/mcp-server.md §6.1",
+            ),
+            FaqEntry(
+                "Where do the facts about Dagster, Airflow and Prefect on this page come from?",
+                "From each project's own current documentation, cited by URL in the page source next to every " +
+                    "claim — nothing about them here is written from memory, and the version each site showed on " +
+                    "the day it was read is named in the citation. The claims about this server rest on its own " +
+                    "specs the same way: the execution model is docs/dag-executor.md §5.",
+                "docs/dag-executor.md §5",
+            ),
+        )
+
     /** The federated-query page's four: where the join runs, the copies, the demo, the engine's future. */
     val FEDERATED_QUERY: List<FaqEntry> =
         listOf(
