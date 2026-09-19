@@ -5,7 +5,8 @@ import java.util.UUID
 
 /**
  * One row of `published_endpoints` (published-endpoints design §4) — a released pipeline served
- * as `GET /api/x{pathPattern}`.
+ * as `GET /api{pathPattern}` (R-EP5: the stored pattern is the part after `/api`, and its first
+ * segment is the engineer's category).
  *
  * The row pins a **pipeline**, never a version: §5.1 resolves the latest RELEASED version at
  * request time, so re-releasing a pipeline changes what the endpoint serves without touching the

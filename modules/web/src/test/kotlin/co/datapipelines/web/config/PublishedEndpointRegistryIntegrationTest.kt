@@ -82,9 +82,9 @@ class PublishedEndpointRegistryIntegrationTest {
 
     @Test
     fun `a published endpoint round-trips, carrying its parsed path variables`() {
-        publish("/nyc/revenue/{borough}")
+        publish("/nyc/v1/revenue/{borough}")
 
-        val stored = repository.findByPath("/nyc/revenue/{borough}")
+        val stored = repository.findByPath("/nyc/v1/revenue/{borough}")
         assertAll(
             { stored?.pipelineId shouldBe PIPELINE_ID },
             { stored?.timeoutSeconds shouldBe 30 },
@@ -95,16 +95,16 @@ class PublishedEndpointRegistryIntegrationTest {
 
     @Test
     fun `a pattern that could match the same URL as an existing one is refused, naming the other`() {
-        publish("/a/b")
+        publish("/a/v1/b")
 
-        val refused = shouldThrow<DatapipelinesException> { publish("/a/{x}") }
+        val refused = shouldThrow<DatapipelinesException> { publish("/a/v1/{x}") }
 
         assertAll(
             { refused.code shouldBe "endpoint.path_conflict" },
-            { refused.details["conflicting_path"] shouldBe "/a/b" },
-            { refused.message.orEmpty() shouldContain "/a/b" },
+            { refused.details["conflicting_path"] shouldBe "/a/v1/b" },
+            { refused.message.orEmpty() shouldContain "/a/v1/b" },
             // Nothing was written: the refusal is BEFORE the insert, not a rollback of it.
-            { repository.findAll().map { it.pathPattern } shouldBe listOf("/a/b") },
+            { repository.findAll().map { it.pathPattern } shouldBe listOf("/a/v1/b") },
         )
     }
 
@@ -112,46 +112,46 @@ class PublishedEndpointRegistryIntegrationTest {
     fun `an exact duplicate is refused with the same code as an overlapping one`() {
         // A client must not be able to tell the UNIQUE constraint from the §4.1 rule: both mean
         // "one URL, two meanings", and both answer `endpoint.path_conflict`.
-        publish("/a/b")
-        shouldThrow<DatapipelinesException> { publish("/a/b") }.code shouldBe "endpoint.path_conflict"
+        publish("/a/v1/b")
+        shouldThrow<DatapipelinesException> { publish("/a/v1/b") }.code shouldBe "endpoint.path_conflict"
     }
 
     @Test
     fun `a non-overlapping pattern at the same depth publishes fine`() {
         // The negative control for the two refusals above: if the conflict check were simply
         // "same segment count", these would be refused too and the tests above would pass anyway.
-        publish("/a/b")
-        publish("/a/c")
-        publish("/{x}/{y}/z")
+        publish("/a/v1/b")
+        publish("/a/v1/c")
+        publish("/b/v1/{x}")
         repository.findAll().size shouldBe 3
     }
 
     @Test
     fun `a disabled endpoint stays in the registry but leaves the matcher`() {
-        publish("/nyc/revenue")
-        repository.setEnabled("/nyc/revenue", enabled = false) shouldBe true
+        publish("/nyc/v1/revenue")
+        repository.setEnabled("/nyc/v1/revenue", enabled = false) shouldBe true
 
         assertAll(
             { repository.findAll().size shouldBe 1 },
             { repository.findAllEnabled().shouldBeEmpty() },
             // §5.6: a disabled endpoint answers exactly like an unknown path, so it must not be
             // matchable — the 404 must not depend on a special case further down the serve path.
-            { EndpointRegistry(repository).reload().match("/nyc/revenue") shouldBe null },
+            { EndpointRegistry(repository).reload().match("/nyc/v1/revenue") shouldBe null },
         )
     }
 
     @Test
     fun `the registry serves its cached snapshot until it is invalidated`() {
         val registry = EndpointRegistry(repository)
-        registry.matcher().match("/nyc/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue") shouldBe null
 
-        publish("/nyc/revenue")
+        publish("/nyc/v1/revenue")
 
         // Still the old snapshot. This is the cache doing its job — and it is also exactly the
         // staleness the channel exists to end on OTHER instances.
-        registry.matcher().match("/nyc/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue") shouldBe null
         registry.invalidateLocally()
-        registry.matcher().match("/nyc/revenue").shouldNotBeNull()
+        registry.matcher().match("/nyc/v1/revenue").shouldNotBeNull()
     }
 
     @Test
@@ -161,26 +161,26 @@ class PublishedEndpointRegistryIntegrationTest {
         val registryA = EndpointRegistry(repository, publisherFor(INSTANCE_A))
 
         assertAll(
-            { registryA.matcher().match("/nyc/revenue") shouldBe null },
-            { registryB.matcher().match("/nyc/revenue") shouldBe null },
+            { registryA.matcher().match("/nyc/v1/revenue") shouldBe null },
+            { registryB.matcher().match("/nyc/v1/revenue") shouldBe null },
         )
 
-        publish("/nyc/revenue")
+        publish("/nyc/v1/revenue")
         registryA.invalidate()
 
         // Polling, not sleeping: the claim is "B converges", and a fixed sleep is either flaky or
         // slow. Exhausting the budget means the message never arrived — the M3-shaped defect.
-        val seenByB = await { registryB.matcher().match("/nyc/revenue") }
+        val seenByB = await { registryB.matcher().match("/nyc/v1/revenue") }
 
         assertAll(
             {
                 registryA
                     .matcher()
-                    .match("/nyc/revenue")
+                    .match("/nyc/v1/revenue")
                     ?.endpoint
-                    ?.pathPattern shouldBe "/nyc/revenue"
+                    ?.pathPattern shouldBe "/nyc/v1/revenue"
             },
-            { seenByB?.endpoint?.pathPattern shouldBe "/nyc/revenue" },
+            { seenByB?.endpoint?.pathPattern shouldBe "/nyc/v1/revenue" },
         )
     }
 
@@ -191,13 +191,13 @@ class PublishedEndpointRegistryIntegrationTest {
         // skip were removed, the endpoint below would be visible after the self-publish.
         val registry = EndpointRegistry(repository)
         subscribe(registry, instanceId = INSTANCE_A)
-        registry.matcher().match("/nyc/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue") shouldBe null
 
-        publish("/nyc/revenue")
+        publish("/nyc/v1/revenue")
         publisherFor(INSTANCE_A).publish()
         TimeUnit.MILLISECONDS.sleep(SELF_MESSAGE_SETTLE_MS)
 
-        registry.matcher().match("/nyc/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue") shouldBe null
     }
 
     @Test
@@ -208,15 +208,15 @@ class PublishedEndpointRegistryIntegrationTest {
         // matcher() call would load the endpoint from the table whether or not the channel ever
         // delivered anything, and the test would pass with the subscriber disabled. (It did,
         // until a falsification run showed only ONE test going red instead of two.)
-        registry.matcher().match("/nyc/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue") shouldBe null
 
         redis.convertAndSend(EndpointInvalidationChannel.NAME, "{not json")
         TimeUnit.MILLISECONDS.sleep(SELF_MESSAGE_SETTLE_MS)
 
         // The garbage did not kill the listener thread: a well-formed message still lands.
-        publish("/nyc/revenue")
+        publish("/nyc/v1/revenue")
         publisherFor(INSTANCE_A).publish()
-        await { registry.matcher().match("/nyc/revenue") }.shouldNotBeNull()
+        await { registry.matcher().match("/nyc/v1/revenue") }.shouldNotBeNull()
     }
 
     /** Publishes [pattern] inside a transaction — the repository's advisory lock needs one. */

@@ -6,15 +6,20 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 
 ## Publishing a pipeline as a GET endpoint
 
-A released, **read-only** pipeline can be served at a stable URL under `/api/x`, so an
-application fetches rows with one `GET` and no event handling. Three steps: publish, bind a key,
-call it.
+A released, **read-only** pipeline can be served at a stable URL — `/api/<category>/<version>/<path…>`
+— so an application fetches rows with one `GET` and no event handling. The category is YOUR
+namespace (a business domain, a team); `v<number>` and `api` are reserved to the product and
+refused with `endpoint.path_reserved`. The version is one free-form segment (`v1` by
+convention); path variables come after it. Three steps: publish, bind a key, call it.
 
 ```
-endpoints_create {"path": "/finance/revenue/{region}", "pipeline": "revenue_by_region",
+endpoints_create {"path": "/finance/v1/revenue/{region}", "pipeline": "revenue_by_region",
                   "timeout_seconds": 60}
-→ url: /api/x/finance/revenue/{region}
+→ url: /api/finance/v1/revenue/{region}
 ```
+
+The stored form is always the part after `/api`: write the path without the prefix (one prefix,
+if present, is stripped — never stored).
 
 Then mint a key for it and bind it (REST or the UI — there is no key-minting MCP tool, on
 purpose: a minted key is a live credential and a tool result travels through your context and
@@ -26,7 +31,7 @@ curl -s http://localhost:8080/api/v1/auth/api-keys -X POST \
   -d '{"name": "finance-serving", "kind": "endpoint", "bindings": ["/finance"]}'
 # the plaintext key is in this response ONCE
 
-curl -s http://localhost:8080/api/x/finance/revenue/EMEA -H "DP-API-Key: dpk_..."
+curl -s http://localhost:8080/api/finance/v1/revenue/EMEA -H "DP-API-Key: dpk_..."
 ```
 
 The `200` body is the `data_ready` payload you already know from `pipelines_execute`:

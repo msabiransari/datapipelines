@@ -70,7 +70,7 @@ class SiteHandTypedCountsGuardTest {
             "77.92%",
             "Staten Island",
             "rendered 3 templates, ran the draft",
-            "/api/x/demo/top-company-by-borough",
+            "/api/demo/v1/top-company-by-borough",
         ).forEach { fact -> home shouldContain fact }
         val engineering = SitePageRenderer.render(SitePages.HOW_IT_WORKS)
         listOf(

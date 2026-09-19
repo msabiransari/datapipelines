@@ -310,10 +310,21 @@ class ScopeInterceptor(
             PathPatternParser.defaultInstance.let { parser -> PublicPaths.PATTERNS.map(parser::parse) }
 
         /**
-         * The published-endpoint subtree (ruling R-EP1). Engineers own everything beneath it;
-         * the `/api/v1` tree stays the product's.
+         * The published-endpoint rule (ruling R-EP5): a request is on the published surface when
+         * it is under `/api/` and its FIRST segment — the category — is not reserved (`v[0-9]+`,
+         * the product's own namespace, or the literal `api`). Never a literal prefix: the handler
+         * mapping carries the same constraint in its pattern
+         * (`EndpointPath.CATEGORY_URL_PATTERN`), and the two are pinned to each other by
+         * `EndpointCategoryRuleTest` in `web` — the one module that sees both.
          */
-        const val PUBLISHED_ENDPOINT_PREFIX = "/api/x/"
+        fun isPublishedEndpointPath(uri: String): Boolean {
+            if (!uri.startsWith(API_PREFIX)) return false
+            val category = uri.removePrefix(API_PREFIX).substringBefore('/')
+            return category.isNotEmpty() && !RESERVED_ENDPOINT_CATEGORY.matches(category)
+        }
+
+        /** The reserved-category test, mirrored from `EndpointPath.RESERVED_CATEGORY` (see above). */
+        private val RESERVED_ENDPOINT_CATEGORY = Regex("^v[0-9]+$|^api$")
 
         /**
          * `GET /api/v1/executions/{id}` and `.../result` — the cursor of an execution an endpoint
@@ -342,7 +353,7 @@ class ScopeInterceptor(
         ): Boolean =
             when (kind) {
                 ApiKeyKind.USER -> true
-                ApiKeyKind.ENDPOINT -> uri.startsWith(PUBLISHED_ENDPOINT_PREFIX) || EXECUTION_READ.matches(uri)
+                ApiKeyKind.ENDPOINT -> isPublishedEndpointPath(uri) || EXECUTION_READ.matches(uri)
                 ApiKeyKind.SERVER -> uri.startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
             }
 

@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.21 (revised — see Change Log)
+**Status:** v2.22 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-17
@@ -659,7 +659,7 @@ is pinned at issue and immutable. There is no read-only session: the §7.6 matri
 "this principal is a browser" or "this principal is a key", so the four gates that need that
 distinction are written outside it, by hand — `requireSessionAdmin` on the credential-minting
 admin actions (§5A.7), `changeOwnPassword` refusing keys (§5A.4), `POST /workspace/switch`
-(§5.6), and `/api/x` refusing sessions (§7.7). Anything that must distinguish the two is a
+(§5.6), and the published-endpoint surface refusing sessions (§7.7). Anything that must distinguish the two is a
 fifth one, not a scope.
 
 ### 6.2 Why not use OIDC tokens directly?
@@ -833,7 +833,7 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | Create a workspace | `POST /api/v1/workspaces` — workspaces are created by super admins (D-R11); the provisioning modes were retired with round 1 | `admin` | `super_admin` |
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `DELETE /api/v1/workspaces/{name}` | `author` | `ws_admin` |
 | Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | `read` | `view` |
-| Serve a published endpoint | `GET /api/x/**` ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses both axes because it carries neither scopes nor a membership | `read` | `view` |
+| Serve a published endpoint | `GET` on the published tree (`/api/<category>/<version>/<path…>`, R-EP5) ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses both axes because it carries neither scopes nor a membership | `read` | `view` |
 | Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler | `author` | `author` |
 | Register / import / unregister lake tables of a datasource (the dp-lake catalog) | `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{ns}/{t}` | `author` | `author` |
 | Release a version | `POST /api/v1/pipelines/{id}/release`, `POST /api/v1/templates/release` — withheld from authors on purpose: the promoter exists so "can edit" and "can release" are two answers (D-R2) | `author` | `promote` |
@@ -871,7 +871,7 @@ Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind-
 | Kind | Authenticates where | Authority | Minted by |
 |---|---|---|---|
 | `user` | `DP-API-Key` on the REST API, and `DP-API-Key` / `Authorization: Bearer` on `/mcp` — **one kind, two surfaces**: an agent's key and a program's key are the same thing | Its `scopes`, against the §7.6 matrix, inside its pinned workspace | Any authenticated principal, for itself, at or below its own scope |
-| `endpoint` | `DP-API-Key` on `GET /api/x/**` (plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started) | Its rows in `endpoint_key_bindings` — no scopes are consulted | Any authenticated principal, for itself |
+| `endpoint` | `DP-API-Key` on the published tree — a `GET` under `/api/` whose first segment is not a reserved category (`v[0-9]+` or `api`, R-EP5) — plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started | Its rows in `endpoint_key_bindings` — no scopes are consulted | Any authenticated principal, for itself |
 | `server` | `DP-Promotion-Key` on `/api/v1/promotion/**`, presented by a SENDING deployment | The route family, and nothing else — no scopes, no bindings | `admin` only |
 
 A kind is not a scope and is deliberately not modelled as one: scopes answer "how much may this credential do?", a kind answers "what kind of credential is this?", and the two axes do not compose. A scopeless kind (`endpoint`, `server`) is issued with **no scopes**, and asking for some is refused rather than quietly dropped — a caller who writes `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to correct out loud.
@@ -1479,6 +1479,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v2.22 | 172 (#172) endpoint URL shape | §7.6/§7.7: the published-endpoint surface is `/api/<category>/<version>/<path…>` (R-EP5) — the `endpoint`-kind confinement follows the FIRST segment of the path (reserved: `v[0-9]+`, `api`), never a literal prefix. No scope, role or kind rule changed; the route family an endpoint key reaches is the same set of URLs under a new shape. |
 | 2026-09-17 | v2.21 | 158 (#121) mail connect retry | §5A.8 step 3: a **connect** failure (the connection never opened — the one class that cannot have delivered) is retried in place, bounded (3 attempts, 250 ms / 1 s backoff, `mail.send_retry` logged per retry); anything past connect stays terminal at once — the never-twice rule for password mails is unchanged. The claim row and audit reflect the final outcome only. |
 | 2026-09-17 | v2.20 | SSE response headers (#131) | §8.1: configure eager security headers before asynchronous response handoff; retain security defaults and explicit application caching. Guarded at the configured filter boundary and by real HTTP/OIDC tests. |
 | 2026-09-14 | v2.19 | 140 release checks over MCP | §7.6 MCP table: `pipelines_run_checks` joins the `execute`/`execute` row (40 → 41 tools) — the D-R3 verb, the same floor as the `EXECUTE_PIPELINE` REST twin (`POST …/checks/run`): a viewer runs what they can read, and a check run returns no row data beyond the one observed cell per check. Both `ScopeMatrixSpecDriftTest` counts moved 40 → 41 in the same commit. The status line had drifted a version behind the rows again (the v2.16 note's pattern); now current. |

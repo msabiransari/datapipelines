@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * ## Why a cache at all
  *
- * Every request under `/api/x/` has to answer "which endpoint is this?" before it can do anything
+ * Every request under `/api/` has to answer "which endpoint is this?" before it can do anything
  * else — including refusing an unauthenticated caller. Reading the table per request would put a
  * metadata-DB round trip in front of every 404, which is the cheapest thing a hostile caller can
  * ask for. The registry is small (tens of rows) and changes rarely (a human publishes), so it is
@@ -66,13 +66,13 @@ class EndpointRegistry(
         val endpoints = repository.findAllEnabled()
         val built = EndpointMatcher(endpoints)
         if (built.size != endpoints.size) {
-            // EndpointMatcher drops a row whose stored pattern Spring's parser rejects. That
-            // cannot happen through this application (§4.1 is strictly narrower than what
-            // PathPatternParser accepts), so it means a row was written around the grammar —
-            // worth an ERROR naming the count, and NOT worth taking every other endpoint down.
+            // EndpointMatcher drops a row whose stored pattern Spring's parser cannot compile or
+            // whose category is reserved (R-EP5). Neither can happen through this application
+            // (publish refuses both), so it means a row was written around the grammar — worth an
+            // ERROR naming the count, and NOT worth taking every other endpoint down.
             log.error(
                 "event=endpoint.registry_pattern_unparseable loaded={} matchable={} " +
-                    "reason=\"rows whose stored path_pattern the matcher could not compile are not served\"",
+                    "reason=\"rows whose stored path_pattern the matcher could not compile or whose category is reserved are not served\"",
                 endpoints.size,
                 built.size,
             )

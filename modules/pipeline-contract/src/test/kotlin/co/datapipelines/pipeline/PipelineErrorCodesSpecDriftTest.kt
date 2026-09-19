@@ -193,6 +193,7 @@ class PipelineErrorCodesSpecDriftTest {
                 // datasource and template ones above. The validator's `endpoint.request.*`
                 // family DOES have one and is three-segment, so it is deliberately absent here.
                 PipelineErrorCodes.Endpoint.PATH_INVALID,
+                PipelineErrorCodes.Endpoint.PATH_RESERVED,
                 PipelineErrorCodes.Endpoint.PATH_CONFLICT,
                 PipelineErrorCodes.Endpoint.PATH_VARIABLE_UNKNOWN,
                 PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY,

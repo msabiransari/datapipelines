@@ -140,7 +140,7 @@ class ApiConsoleRenderTest {
     )
 
     private fun endpoint(
-        url: String = "/api/x/nyc/mobility/briefing",
+        url: String = "/api/nyc/v1/mobility/briefing",
         displayName: String = "Mobility briefing",
         path: String? = "nyc/mobility/briefing",
         served: Int? = 3,
@@ -181,7 +181,7 @@ class ApiConsoleRenderTest {
         val html = render { setVariable("endpoints", listOf(endpoint())) }
 
         html shouldContain ">GET<"
-        html shouldContain "/api/x/nyc/mobility/briefing"
+        html shouldContain "/api/nyc/v1/mobility/briefing"
         html shouldContain "Mobility briefing"
         html shouldContain "v3"
         html shouldContain "2 bound"

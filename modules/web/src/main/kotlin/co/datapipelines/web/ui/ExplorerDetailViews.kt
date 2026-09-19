@@ -113,7 +113,7 @@ data class UsageView(
 ) {
     val total: Int get() = endpoints.size + parents.size
 
-    /** A published endpoint serving this pipeline (`GET /api/x{path}`). */
+    /** A published endpoint serving this pipeline (`GET /api{path}`). */
     data class EndpointUse(
         val path: String,
         val enabled: Boolean,

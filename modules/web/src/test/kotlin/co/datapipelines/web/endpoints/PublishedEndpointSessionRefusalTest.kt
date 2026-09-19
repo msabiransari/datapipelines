@@ -24,7 +24,8 @@ import org.junit.jupiter.api.assertAll
 import java.util.UUID
 
 /**
- * `/api/x` is a MACHINE surface (§5.2): a browser session is refused, whatever it holds.
+ * The published-endpoint subtree (§5.2) is a MACHINE surface: a browser session is refused,
+ * whatever it holds.
  *
  * This is a security claim, so it is tested rather than asserted in prose — and the live stack
  * could not prove it: its scaffolded bootstrap password did not match the seeded hash, so no
@@ -55,7 +56,7 @@ class PublishedEndpointSessionRefusalTest {
 
     @Test
     fun `an OIDC session is refused with 401, and the registry is never consulted`() {
-        val outcome = service.serve("/nyc/revenue/Manhattan", session(AuthMethod.OIDC), request())
+        val outcome = service.serve("/nyc/v1/revenue/Manhattan", session(AuthMethod.OIDC), request())
 
         val refused = outcome.shouldBeInstanceOf<PublishedEndpointServeService.Outcome.Refused>()
         assertAll(
@@ -70,7 +71,7 @@ class PublishedEndpointSessionRefusalTest {
     @Test
     fun `an admin session is refused too — the surface is about the CREDENTIAL, not the scopes`() {
         service
-            .serve("/nyc/revenue/Manhattan", session(AuthMethod.OIDC, Scope.ADMIN), request())
+            .serve("/nyc/v1/revenue/Manhattan", session(AuthMethod.OIDC, Scope.ADMIN), request())
             .shouldBeInstanceOf<PublishedEndpointServeService.Outcome.Refused>()
             .status shouldBe 401
     }
@@ -79,7 +80,7 @@ class PublishedEndpointSessionRefusalTest {
     fun `a promotion credential is refused as well`() {
         // It authenticates a deployment-to-deployment channel, not a caller of endpoints.
         service
-            .serve("/nyc/revenue/Manhattan", session(AuthMethod.PROMOTION), request())
+            .serve("/nyc/v1/revenue/Manhattan", session(AuthMethod.PROMOTION), request())
             .shouldBeInstanceOf<PublishedEndpointServeService.Outcome.Refused>()
             .status shouldBe 401
     }

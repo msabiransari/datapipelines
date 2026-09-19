@@ -181,7 +181,10 @@ class EndpointsController(
             mapOf("path" to path),
         )
 
-    /** The outbound shape. The pipeline travels by NAME, so a reader gets the portable identity. */
+    /**
+     * The outbound shape. The pipeline travels by NAME, so a reader gets the portable identity;
+     * `url` is the full served URL (R-EP5: the stored pattern plus the `/api` root).
+     */
     private fun PublishedEndpoint.toResponse(): Map<String, Any?> =
         mapOf(
             "path" to pathPattern,
@@ -190,6 +193,7 @@ class EndpointsController(
             "description" to description,
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
+            "url" to "/api$pathPattern",
             "bindings" to bindings.findAll().filter { it.pathPrefix == pathPattern }.map { it.apiKeyId },
             "created_at" to createdAt.toString(),
             "updated_at" to updatedAt.toString(),

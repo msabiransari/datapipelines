@@ -10,7 +10,7 @@ import java.util.UUID
  * node of the endpoint tree.
  *
  * The table is tiny (one row per key per bound node) and is read on the authorisation path of
- * every request under `/api/x`, so [findByPrefixes] fetches the whole ancestor chain in ONE
+ * every published-endpoint request, so [findByPrefixes] fetches the whole ancestor chain in ONE
  * query rather than walking it with a query per level: a five-segment path would otherwise be six
  * round trips before the request is even authorised, which is the cheapest thing a hostile caller
  * could ask the database to do.

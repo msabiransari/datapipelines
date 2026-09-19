@@ -20,11 +20,12 @@
   <section class="section page-hero" aria-labelledby="pa-title">
     <div class="container">
       <p class="kicker">Published endpoints</p>
-      <h1 id="pa-title" class="ds-display">Turn a SQL query into an API — versioned, parameterised, scoped by key</h1>
+      <h1 id="pa-title" class="ds-display">Turn a SQL query into a data API — versioned, parameterised, scoped by key</h1>
       <p class="section-lede">
         Building an API over a dataset is usually a second project: a service, a deployment, auth, pagination,
-        on-call. Here it is one step after a release. A released pipeline is published under a path, a <code>GET</code>
-        runs it with bound parameters and returns JSON, and a key scoped to that path is the whole access story.
+        on-call. Here the SQL API is one step after a release: a released pipeline is published under a path, a
+        <code>GET</code> runs it with bound parameters and returns JSON, and a key scoped to that path is the
+        whole access story.
         From data to an API in a day is the shipped half of the sentence; the dashboards you embed are
         <a th:href="@{/roadmap}">planned</a>.
       </p>
@@ -48,12 +49,12 @@
         <li>
           <h3>Publish it under a path</h3>
           <!-- claim: docs/rest-api.md §19 -->
-          <p>A path is one to ten segments, literal or <code>{variable}</code>: <code>/api/x/nyc/rain-share</code>, <code>/api/x/customers/{id}/orders</code>. Path variables bind to the pipeline's declared parameters by name; the query string supplies the rest. Ambiguous patterns are refused at publish time, not resolved at call time.</p>
+          <p>A path is your namespace, a version, and the resource: <code>/api/nyc/v1/rain-share</code>, <code>/api/customers/v1/{id}/orders</code>. Path variables bind to the pipeline's declared parameters by name; the query string supplies the rest. Ambiguous patterns are refused at publish time, not resolved at call time.</p>
         </li>
         <li>
           <h3>Bind a key to the path</h3>
           <!-- claim: docs/auth.md §7.7 -->
-          <p>An API key is bound to a path prefix. A caller holding it can reach that subtree of <code>/api/x</code> and nothing else — not the product's own API, not another workspace's endpoints. Give a partner one key per contract and the contract is enforced by the router.</p>
+          <p>An API key is bound to a path prefix. A caller holding it can reach that subtree of <code>/api</code> and nothing else — not the product's own API, not another workspace's endpoints. Give a partner one key per contract and the contract is enforced by the router.</p>
         </li>
         <li>
           <h3>Call it</h3>
@@ -62,7 +63,7 @@
         </li>
       </ol>
       <div class="code-block">
-        <pre><code>GET /api/x/nyc/rain-share?quarter=2024-Q3
+        <pre><code>GET /api/nyc/v1/rain-share?quarter=2024-Q3
 DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
 
 200 OK
@@ -146,8 +147,9 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
         <p>
           Teams that already have the data and already have the chart still spend a quarter getting the number into
           their own product, because “expose this dataset as an API” means a service, a schema, an auth story, a
-          deployment pipeline and someone to wake up when it fails. That quarter is what a published endpoint
-          removes. The agent authors the pipeline against your databases and iterates it until the numbers are right;
+          deployment pipeline and someone to wake up when it fails. What a published endpoint hands you is a
+          REST API from database tables you already have — the query you released, answered over GET. That quarter
+          is what it removes. The agent authors the pipeline against your databases and iterates it until the numbers are right;
           you review and release; the endpoint exists. No service was written. Nothing was deployed. The on-call is
           the server you were already running.
         </p>

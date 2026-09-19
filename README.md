@@ -58,7 +58,7 @@ Licensed **AGPL-3.0** ([LICENSE](LICENSE)); contributors sign the one-time
   execution streams, and a browser UI (pipeline editor with DAG
   visualization, execution history, template explorer, light and dark themes).
 - **One API section** — `/api-console` is everything a program uses to talk to
-  a workspace, in one place: the published `GET /api/x/**` endpoints, the MCP
+  a workspace, in one place: the published `GET /api/<category>/…` endpoints, the MCP
   connection block with the live tool count, and the keys page where keys are
   issued and revoked — Kind (`user` \| `endpoint` \| `server`) → Scope → Name →
   Expiry → Bindings, the secret shown exactly once

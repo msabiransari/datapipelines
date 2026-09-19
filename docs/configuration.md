@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.23 (single source of truth for every config key)
+**Status:** v1.24 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-17
 
@@ -319,7 +319,7 @@ Env vars follow §1's derivation rule: `DATAPIPELINES_ORG_CURRENCY_NAME`, `DATAP
 
 ### 3.22 Published endpoints
 
-The timeout bounds for a released pipeline published as a `GET` endpoint under `/api/x` (round 074). `timeout-default-seconds` is what a publish that names no timeout is stored with; the min/max pair clamps every stored `published_endpoints.timeout_seconds` at write time, so retuning the bounds later never makes an existing row unreadable — it only changes what the next publish may ask for.
+The timeout bounds for a released pipeline published as a `GET` endpoint at `/api/<category>/<version>/<path…>` (round 074, re-rooted by 172's R-EP5). `timeout-default-seconds` is what a publish that names no timeout is stored with; the min/max pair clamps every stored `published_endpoints.timeout_seconds` at write time, so retuning the bounds later never makes an existing row unreadable — it only changes what the next publish may ask for.
 
 | YAML path | Default | Description |
 |---|---|---|
@@ -783,6 +783,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v1.24 | 172 (#172) | §3.22: the published-endpoint surface re-rooted to `/api/<category>/<version>/<path…>` (R-EP5); the `datapipelines.endpoints.*` keys and their bounds are unchanged. |
 | 2026-09-17 | v1.23 | 155 / #122 staging memory guard scope | §3.3: `max-memory-mb` re-described truthfully — the threshold is per-execution (the pipeline override changes the number one execution compares, never what is measured), but the MEASUREMENT is the whole JVM's used heap, sampled, so the guard is a shared circuit breaker, not an isolated budget, a reservation, or an OOM guarantee (Staging §8.2 says the same; one cross-link, not two copies). Sizing guidance rewritten from the demand side: worst-case heap demand stays `max-memory-mb` × `max-concurrent-executions-per-instance` per instance and `-Xmx`/container memory must cover it. No behaviour change; the 108 §C startup warn line is unchanged. |
 | 2026-09-17 | v1.22 | 153 operator memory-limit config (#136) | New **§3.25 row**: `datapipelines.duckdb.memory-limit` (`DATAPIPELINES_DUCKDB_MEMORY_LIMIT`, default empty). Deployment-wide default `memory_limit` for every LAKE engine build when a datasource sets none, restart-to-change, validated at startup with `properties.dialect.memory_limit`'s own grammar. §3.24's `memory_limit` row gains the three-way precedence sentence (datasource property > this key > derived 25%). §3.25's title and intro widened to cover both operator keys. §5 template block appended after `extension-directory` (same block, not a new one). |
 | 2026-09-17 | v1.21 | Writable LAKE spill default (#133) | §3.24: unique engine-owned absolute path under `java.io.tmpdir`; writable disk requirement, explicit override and cleanup semantics. |

@@ -72,10 +72,60 @@ class EndpointPublishServiceTest {
     }
 
     @Test
+    fun `a reserved category is refused with endpoint path_reserved naming the segment`() {
+        // R-EP5: every v<number> is the product's own API namespace, today and tomorrow. The
+        // refusal comes BEFORE the pipeline lookup, like every other path rule. (The 'api'
+        // category is covered by the normalisation test — '/api/…' strips one prefix first.)
+        listOf("v1", "v2", "v10").forEach { category ->
+            val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/$category/v1/x", "any", null, "") }
+            assertAll(
+                { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_RESERVED },
+                { refused.details["segment"] shouldBe category },
+            )
+        }
+        verify(exactly = 0) { pipelineRepository.findByName(any(), any()) }
+    }
+
+    @Test
+    fun `one api prefix is normalised away, and the second one is the reserved category`() {
+        stubPipeline()
+        val stored = slot<PublishedEndpoint>()
+        every { endpoints.insert(capture(stored)) } answers { stored.captured }
+
+        // R-EP5: normalisation, not refusal — the stored form is always the part after /api.
+        service().publish(principal(), "/api/nyc/v1/{borough}", PIPELINE_NAME, null, "")
+        stored.captured.pathPattern shouldBe "/nyc/v1/{borough}"
+
+        // '/api/api/v1/x' strips ONE prefix, leaving category 'api' — reserved, refused.
+        shouldThrow<DatapipelinesException> { service().publish(principal(), "/api/api/v1/x", PIPELINE_NAME, null, "") }
+            .code shouldBe PipelineErrorCodes.Endpoint.PATH_RESERVED
+    }
+
+    @Test
+    fun `the shape rules — two segments, a variable category, a variable version — are path_invalid`() {
+        assertAll(
+            {
+                shouldThrow<DatapipelinesException> { service().publish(principal(), "/nyc/v1", "any", null, "") }
+                    .code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID
+            },
+            {
+                // A variable category is a SHAPE failure, not a reservation — the reserved rule
+                // only ever names a literal segment.
+                shouldThrow<DatapipelinesException> { service().publish(principal(), "/{ns}/v1/x", "any", null, "") }
+                    .code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID
+            },
+            {
+                shouldThrow<DatapipelinesException> { service().publish(principal(), "/nyc/{v}/x", "any", null, "") }
+                    .code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID
+            },
+        )
+    }
+
+    @Test
     fun `an unknown pipeline is refused as not found`() {
         every { pipelineRepository.findByName(WORKSPACE, "ghost") } returns null
 
-        shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/b", "ghost", null, "") }
+        shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", "ghost", null, "") }
             .code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
     }
 
@@ -86,7 +136,7 @@ class EndpointPublishServiceTest {
         // only ever answer 503.
         stubPipeline(status = PipelineVersionStatus.DRAFT)
 
-        shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/b", PIPELINE_NAME, null, "") }
+        shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
             .code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED
     }
 
@@ -108,7 +158,7 @@ class EndpointPublishServiceTest {
             )
         every { pipelines.findCurrentVersion(WORKSPACE, PIPELINE_ID) } returns null
 
-        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/b", PIPELINE_NAME, null, "") }
+        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED },
@@ -120,7 +170,7 @@ class EndpointPublishServiceTest {
     fun `a pipeline that writes is refused, naming the node`() {
         stubPipeline(writes = true)
 
-        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/b", PIPELINE_NAME, null, "") }
+        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY },
@@ -133,7 +183,7 @@ class EndpointPublishServiceTest {
     fun `a path variable the version does not declare is refused, listing what it does declare`() {
         stubPipeline()
 
-        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/{ghost}", PIPELINE_NAME, null, "") }
+        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/{ghost}", PIPELINE_NAME, null, "") }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_VARIABLE_UNKNOWN },
@@ -149,10 +199,10 @@ class EndpointPublishServiceTest {
         val stored = slot<PublishedEndpoint>()
         every { endpoints.insert(capture(stored)) } answers { stored.captured }
 
-        service().publish(principal(), "/nyc/{borough}", PIPELINE_NAME, null, "revenue")
+        service().publish(principal(), "/nyc/v1/{borough}", PIPELINE_NAME, null, "revenue")
 
         assertAll(
-            { stored.captured.pathPattern shouldBe "/nyc/{borough}" },
+            { stored.captured.pathPattern shouldBe "/nyc/v1/{borough}" },
             { stored.captured.pathVariables shouldBe listOf("borough") },
             { stored.captured.description shouldBe "revenue" },
         )
@@ -166,7 +216,7 @@ class EndpointPublishServiceTest {
 
         val timeouts =
             listOf(null to 30, 0 to 1, 5 to 5, 9_999 to 300).map { (requested, expected) ->
-                service().publish(principal(), "/nyc/{borough}", PIPELINE_NAME, requested, "")
+                service().publish(principal(), "/nyc/v1/{borough}", PIPELINE_NAME, requested, "")
                 stored.captured.timeoutSeconds to expected
             }
 
@@ -180,7 +230,7 @@ class EndpointPublishServiceTest {
         stubPipeline()
         every { endpoints.insert(any()) } answers { firstArg() }
 
-        service().publish(principal(), "/nyc/{borough}", PIPELINE_NAME, null, "")
+        service().publish(principal(), "/nyc/v1/{borough}", PIPELINE_NAME, null, "")
 
         verify(exactly = 1) { registry.invalidate() }
         verify(exactly = 1) { audit.log("endpoint.published", any(), any(), any(), any(), any()) }
@@ -190,22 +240,22 @@ class EndpointPublishServiceTest {
     fun `unpublishing another workspace's endpoint reports not-found rather than forbidden`() {
         // A URL is global, but managing one is not — and a refusal must not disclose that an
         // endpoint exists in a workspace the caller cannot see.
-        every { endpoints.findByPath("/theirs") } returns
+        every { endpoints.findByPath("/theirs/v1/x") } returns
             endpoint(workspaceId = UUID.fromString("defa0000-0000-0000-0000-0000000000ff"))
 
         assertAll(
-            { service().unpublish(principal(), "/theirs") shouldBe false },
+            { service().unpublish(principal(), "/theirs/v1/x") shouldBe false },
             { verify(exactly = 0) { endpoints.deleteByPath(any()) } },
         )
     }
 
     @Test
     fun `unpublishing an endpoint of the caller's workspace removes it and invalidates`() {
-        every { endpoints.findByPath("/mine") } returns endpoint()
-        every { endpoints.deleteByPath("/mine") } returns true
+        every { endpoints.findByPath("/mine/v1/x") } returns endpoint()
+        every { endpoints.deleteByPath("/mine/v1/x") } returns true
 
         assertAll(
-            { service().unpublish(principal(), "/mine") shouldBe true },
+            { service().unpublish(principal(), "/mine/v1/x") shouldBe true },
             { verify(exactly = 1) { registry.invalidate() } },
             { verify(exactly = 1) { audit.log("endpoint.unpublished", any(), any(), any(), any(), any()) } },
         )
@@ -281,7 +331,7 @@ class EndpointPublishServiceTest {
         PublishedEndpoint.of(
             id = UUID.randomUUID(),
             workspaceId = workspaceId,
-            pathPattern = "/mine",
+            pathPattern = "/mine/v1/x",
             pipelineId = PIPELINE_ID,
             timeoutSeconds = 30,
             description = "",

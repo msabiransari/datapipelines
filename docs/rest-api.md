@@ -1876,21 +1876,36 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 
 ## 19. Published Endpoints
 
-A released pipeline served as a **`GET` API** under `/api/x`, whose response is the `data_ready`
-payload — the first page plus the cursor — with no event handling on the client
-(this section is the contract). Ruling R-EP1: engineers own
-everything beneath `/api/x`; the product's own routes stay under `/api/v1`, and a published path
-can never shadow one. There is **one** handler for the whole subtree and no runtime route
-registration: a published endpoint is a row, not a mapping.
+A released pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
+response is the `data_ready` payload — the first page plus the cursor — with no event handling on
+the client (this section is the contract). Ruling R-EP5: the **category** is the engineer's
+namespace — a business domain, a team, a product line — and the product's own API is simply its
+reserved namespace: a category matching `v[0-9]+` (`/api/v1/…` today, any `v<n>` tomorrow) or the
+literal `api` can never be published, so a published path cannot shadow a product route *by
+construction*. There is **one** handler for the whole subtree — its mapping constrains the
+category segment itself — and no runtime route registration: a published endpoint is a row, not
+a mapping.
 
 ### 19.1 The path grammar
 
-`path_pattern` is 1–10 segments, each a literal `[a-z0-9][a-z0-9_.-]{0,63}` or a variable
-`{name}` matching the parameter grammar `[a-z_][a-z0-9_]*`; at most 200 characters; a leading
-`/`, no trailing slash, no wildcards. It is the same segment grammar hierarchical template names
+`path_pattern` is 3–10 segments — **category, version, path** — each a literal
+`[a-z0-9][a-z0-9_.-]{0,63}` or a variable `{name}` matching the parameter grammar
+`[a-z_][a-z0-9_]*`; at most 200 characters; a leading `/`, no trailing slash, no wildcards. The
+category and the version are always **literal**: variables are allowed only after the version.
+The version is one free-form segment — no pattern is enforced; `v1` is the convention. The stored
+form is always the part after `/api`: a pattern handed in *with* one `/api` prefix is normalised,
+not refused — which is why `/api/api/…` is refused (its category is `api`, a reserved segment).
+It is the same segment grammar hierarchical template names
 use ([Template hierarchy §4](template-hierarchy-design.md)) — one grammar to learn.
 
-**Ambiguity is refused, not resolved.** `/a/{x}` and `/a/b` both match `GET /api/x/a/b`, so
+**Reserved categories.** A category matching `v[0-9]+` or equal to `api` is refused at publish
+with `400 endpoint.path_reserved` naming the segment, and re-checked when the serve registry is
+built — a row written around the publish path is never served. The reservation is the routing
+contract: the catch-all handler's own pattern excludes those categories, so an unknown
+`/api/v1/…` path answers the product's 404, not the endpoint one.
+
+**Ambiguity is refused, not resolved.** `/nyc/v1/{x}` and `/nyc/v1/b` both match
+`GET /api/nyc/v1/b`, so
 publishing the second is `409 endpoint.path_conflict` naming the first. Literal-beats-variable
 precedence is deliberately NOT offered in v1: because ambiguity cannot be published, at most one
 pattern can match a request, and a reader of the registry can tell what a URL does by finding the
@@ -2002,6 +2017,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v2.20 | 172 (#172) | **§19 re-rooted (BREAKING for a surface with zero callers)**: published endpoints serve at `/api/<category>/<version>/<path…>` — at least three segments; the category is the engineer's namespace with `v[0-9]+` and `api` reserved (`400 endpoint.path_reserved`, re-checked when the serve registry is built); the version is one free-form literal segment; variables live after it. One `/api` prefix on a submitted pattern is normalised away, never stored. The catch-all mapping constrains the category, so `/api/v1/…` stays the product's — its unknown paths answer the product's 404, not `endpoint.not_found`. Create/read responses gain the full served `url`. Prod held zero published endpoints at the ruling, so nothing migrates. |
 | 2026-09-18 | v2.19 | 171 (#171) | §19.2: a published endpoint's `DML`/`DDL` node is allowed when its `source` is `tempdb` (the execution's own in-memory H2, discarded with the run) and refused, naming the datasource, for any registered datasource — previously every `DML`/`DDL` node was refused regardless of source. Re-checked at serve (§5.1/§19.4) through the same rule; no wire or status-code changes. |
 | 2026-09-17 | v2.18 | #143/#130 live-stream delivery | §10.4 gains the **live delivery guarantee** paragraph (no new client behaviour): a connected consumer receives the terminal event and the server-closed stream; the frame may lag the `204` by up to the cancel re-issue horizon (~2 s) same-instance, ~one heartbeat interval cross-instance; a consumer that leaves early reads what it missed from §10.3's replay (then §10.2's record). §10.3 names itself that answer. No wire changes. |
 | 2026-09-17 | v2.17 | 149 correction / #125 review R149-4 | §6.4.9: a failure thrown by `commit()` itself is ambiguous (the transaction may be durable, the acknowledgement lost) — `rolled_back` is evidence only when the failure came BEFORE the commit attempt; a lost acknowledgement leaves `committed`/`rolled_back` absent. |
@@ -2032,7 +2048,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 | 2026-09-02 | v2.1 | 046 typed templates | Additive: §8.1's create gains optional `type` (`sql` \| `html`, default `sql`, fixed at creation — an `html` template takes no `dialect`); every template response echoes it; §8.5's list gains the `type` filter. No route changes. Per Templates §11.2's amended clause, the `dialect` conditional-requirement relaxation is claimed here explicitly: no existing payload becomes invalid (every stored template backfills to `sql` with its dialect intact). |
 | 2026-09-02 | v2.0 | 043 template addressing | **BREAKING — one addressing form (template-hierarchy-design §9.6).** §8's eight `/{id}` path-addressed template routes are REMOVED and replaced by name-in-query/name-in-body forms (`GET /templates?name=`, `GET /templates/versions?name=&version=`, `PUT /templates` with `id` in the body, `POST /templates/release` + `POST /templates/draft/discard` with `name` in the body, `DELETE /templates?name=`, `POST /templates/render` with `name`+`version` in the body). Measured reason: on the pinned Tomcat an encoded `%2F` in the path is refused `400` below routing and below the security chain, so a hierarchical name (`acme/finance/report`, legal since this round's §4.1 grammar) cannot travel in a path segment at all. `GET /templates` now answers two shapes on one route (single-resource + `404 template.not_found` with `name`, paged list without). Sanctioned break of the v1.4 freeze: the owner confirmed zero callers outside this repo (2026-09-01), so the promise was protecting a population of zero. Datasources and pipelines keep path addressing — their names cannot contain `/`. |
 | 2026-09-05 | v2.2 | 067 pipeline folders | Additive and route-free: §5.1 records that a pipeline `name` is now a **folder path** (the template grammar, [Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)) — every pre-067 name is still valid as a one-segment path, so no request shape changes and no client breaks. §5.7 records that `q` matches across full paths, and that folder BROWSING deliberately stays off REST: it is served by `GET /partials/pipelines?prefix=…` and by MCP `pipelines_list {prefix}`. **No route changes**, because a pipeline is UUID-addressed — the `%2F` problem that forced v2.0 for templates cannot arise here. |
-| 2026-09-05 | v2.3 | 074 published endpoints | New **§19**: a released, side-effect-free pipeline served as `GET /api/x/…`, answering the `data_ready` payload verbatim. One catch-all handler over a registry — never runtime route registration (R-EP1). Ambiguous paths are refused at publish (`endpoint.path_conflict`) rather than resolved by precedence, so at request time at most one pattern matches. Validation reports every defect at once and is strict about unknown query parameters. `202` on timeout with the execution still running (R-EP3), never `504`. §3.6's registry gains `DP-Result-Page-Rows` (R-EP4 — one contract, honoured by §6's execute too) and the `DP-Execution-Id` response header. Management is `/api/v1/endpoints`, addressed by `?path=` for the same measured reason §8's templates are. |
+| 2026-09-05 | v2.3 | 074 published endpoints | New **§19**: a released, side-effect-free pipeline served as a `GET` endpoint, answering the `data_ready` payload verbatim. One catch-all handler over a registry — never runtime route registration (R-EP1). Ambiguous paths are refused at publish (`endpoint.path_conflict`) rather than resolved by precedence, so at request time at most one pattern matches. Validation reports every defect at once and is strict about unknown query parameters. `202` on timeout with the execution still running (R-EP3), never `504`. §3.6's registry gains `DP-Result-Page-Rows` (R-EP4 — one contract, honoured by §6's execute too) and the `DP-Execution-Id` response header. Management is `/api/v1/endpoints`, addressed by `?path=` for the same measured reason §8's templates are. |
 | 2026-09-05 | v2.4 | 077 mandatory folders | §5.1: a pipeline `name` needs a **folder** — 2–10 segments, not 1–10 ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)). `POST /api/v1/pipelines` and `POST /api/v1/templates` answer `400` with the existing codes (`pipeline.validation.name_invalid`, `template.validation.id_invalid`) for a flat name, and `details.reason` now separates `folder_required` from `grammar`. **A narrowing, not an addition** — the one kind of change §11 forbids after the freeze — taken pre-release on the owner ruling of 2026-09-05: with no rename (Template Hierarchy §4.5), a root-level name created after the tag is permanent, and the root would accrete scratch with no way to tidy it. No route changes. |
 | 2026-09-07 | v2.5 | 087 connector seams | §9.1 gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) — `{kind, username?, secret?}`; the legacy top-level `username`/`password` pair still works and means `kind: password`, and a body carrying both is `400 datasource.validation.properties_invalid`. §9.3's response gains `credential: {kind, username?}` and derives `password_set` from the kind (`false` for `none`); top-level `username` is now nullable. §9.4: `credential.kind` is part of the body — moving to `none` clears the stored credential. §9.7's `/tables` and `/tables/{table}/columns` accept `?namespace=` (repeated or dotted) beside `?schema=`, and every table row gains a `namespace` array beside `schema`; `/schemas` gains `entries: [{namespace, label}]` beside the legacy `schemas`. All additive. |
 | 2026-09-08 | v2.6 | 089 dp-lake registry (recorded with the §G corrections) | New **§9.8 Lake tables (the dp-lake catalog)** — `POST /datasources/{name}/tables`, `DELETE …/tables/{namespace}/{table}`, `POST …/tables/import` (inline `tables[]`, or a `manifest_url` fetched server-side and restricted to the datasource's own bucket/endpoint — the SSRF boundary), and `GET …/lake-tables` (`read`). The writes are `author`, with a GLOBAL datasource's registry admin-only as a workspaces D8 rule; every write evicts the pool and publishes the §5.7 invalidation. Two corrections landed with this row: the Iceberg `location` is the table's current metadata FILE, not its root (the measured rule, datasources.md §8C.7), and §9.7's introspection listing is registry-backed for LAKE as shipped (datasources.md §8C.3) — §9.8's "a later phase" sentence was written before 089 §C landed. All additive. |

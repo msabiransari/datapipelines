@@ -74,7 +74,7 @@
           <h3><span class="status status-shipped">Ships today</span> Beside Tableau</h3>
           <ul>
             <!-- claim: docs/rest-api.md §19 -->
-            <li><b>A governed dataset Tableau can read.</b> Release a pipeline, publish it as a <code>GET</code> endpoint under <code>/api/x</code>; the JSON it returns is what a Tableau web data connector reads — versioned, and released by a person.</li>
+            <li><b>A governed dataset Tableau can read.</b> Release a pipeline, publish it as a <code>GET</code> endpoint under your own <code>/api</code> namespace; the JSON it returns is what a Tableau web data connector reads — versioned, and released by a person.</li>
             <!-- claim: docs/pipeline-contract.md §8 -->
             <li><b>Or land it where Tableau already looks.</b> A pipeline node can write its result into a datasource — a Postgres table Tableau live-connects to — so the dataset refreshes when the pipeline runs and Tableau never learns a new connector.</li>
             <!-- claim: docs/staging.md §3 -->

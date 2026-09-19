@@ -21,7 +21,7 @@ import java.util.UUID
  *
  * Everything here is driven through the product's own surfaces — publish over
  * `POST /api/v1/endpoints`, mint-and-bind over `POST /api/v1/auth/api-keys`, call over
- * `GET /api/x/…` — because that is the only way to prove the pieces agree. The unit suites
+ * `GET /api/nyc/v1/…` — because that is the only way to prove the pieces agree. The unit suites
  * already prove each rule in isolation; what they cannot prove is that the matcher, the
  * authorizer, the validator, the executor and the result store are wired to each other.
  *
@@ -72,7 +72,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan")
+            .get("/api/nyc/v1/revenue/Manhattan")
             .then()
             .statusCode(200)
             .header("Cache-Control", equalTo("no-store"))
@@ -100,7 +100,7 @@ class PublishedEndpointE2eTest {
             .header(API_KEY_HEADER, endpointKey)
             .header("DP-Result-Page-Rows", "1")
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan")
+            .get("/api/nyc/v1/revenue/Manhattan")
             .then()
             .statusCode(200)
             .body("rows.size()", equalTo(1))
@@ -118,7 +118,7 @@ class PublishedEndpointE2eTest {
                 .port(port)
                 .header(API_KEY_HEADER, endpointKey)
                 .`when`()
-                .get("/api/x/nyc/revenue/Manhattan")
+                .get("/api/nyc/v1/revenue/Manhattan")
                 .then()
                 .statusCode(200)
                 .extract()
@@ -144,7 +144,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/x/nyc/tempdb-ddl")
+            .get("/api/nyc/v1/tempdb-ddl")
             .then()
             .statusCode(200)
             .body("rows.size()", equalTo(5))
@@ -165,7 +165,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan?start_date=bogus")
+            .get("/api/nyc/v1/revenue/Manhattan?start_date=bogus")
             .then()
             .statusCode(400)
             .body("error.code", equalTo("endpoint.request.invalid"))
@@ -183,7 +183,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan?nope=1")
+            .get("/api/nyc/v1/revenue/Manhattan?nope=1")
             .then()
             .statusCode(400)
             .body("error.details.errors[0].code", equalTo("endpoint.request.parameter_unknown"))
@@ -197,7 +197,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan?start_date=bogus&nope=1&also_nope=2")
+            .get("/api/nyc/v1/revenue/Manhattan?start_date=bogus&nope=1&also_nope=2")
             .then()
             .statusCode(400)
             .body("error.code", equalTo("endpoint.request.invalid"))
@@ -211,7 +211,7 @@ class PublishedEndpointE2eTest {
             .header(API_KEY_HEADER, endpointKey)
             .header("Accept", "text/csv")
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan")
+            .get("/api/nyc/v1/revenue/Manhattan")
             .then()
             .statusCode(406)
             .body("error.code", equalTo("endpoint.not_acceptable"))
@@ -227,20 +227,20 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, foreignKey)
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan")
+            .get("/api/nyc/v1/revenue/Manhattan")
             .then()
             .statusCode(403)
     }
 
     @Test
     fun `the endpoint key is refused on a published subtree it is not bound to`() {
-        // 403, not 404: /trade/summary IS published, so the refusal is the authorisation rule
+        // 403, not 404: /trade/v1/summary IS published, so the refusal is the authorisation rule
         // speaking. That is what separates "no binding decides here" from "nothing is here".
         given()
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/x/trade/summary")
+            .get("/api/trade/v1/summary")
             .then()
             .statusCode(403)
             .body("error.code", equalTo("endpoint.key_kind_refused"))
@@ -251,9 +251,38 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .`when`()
-            .get("/api/x/nyc/revenue/Manhattan")
+            .get("/api/nyc/v1/revenue/Manhattan")
             .then()
             .statusCode(401)
+    }
+
+    @Test
+    fun `an endpoint key is refused on the product's own API`() {
+        // R-EP5: the confinement follows the first segment, not a literal prefix — /api/v1 is
+        // the product's namespace by construction, and an endpoint key has no business there.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, endpointKey)
+            .`when`()
+            .get("/api/v1/pipelines")
+            .then()
+            .statusCode(403)
+            .body("error.code", equalTo("endpoint.key_kind_refused"))
+    }
+
+    @Test
+    fun `an unknown path in the product's namespace answers the product 404, not the endpoint one`() {
+        // The reservation works in both directions: no endpoint can ever live under /api/v1,
+        // so an unknown path there is the product's own no-handler 404 — and a caller probing
+        // the boundary cannot tell the endpoint surface answers at all.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/definitely-not-a-route")
+            .then()
+            .statusCode(404)
+            .body("error.code", equalTo("pipeline.execution.not_found"))
     }
 
     // -------------------------------------------------------------------------------------
@@ -268,7 +297,7 @@ class PublishedEndpointE2eTest {
             .contentType(ContentType.JSON)
             .body("{}")
             .`when`()
-            .post("/api/x/nyc/revenue/Manhattan")
+            .post("/api/nyc/v1/revenue/Manhattan")
             .then()
             .statusCode(405)
             .header("Allow", equalTo("GET"))
@@ -281,7 +310,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .`when`()
-            .get("/api/x/nothing/here")
+            .get("/api/nothing/v1/here")
             .then()
             .statusCode(404)
             .body("error.code", equalTo("endpoint.not_found"))
@@ -292,13 +321,48 @@ class PublishedEndpointE2eTest {
     // -------------------------------------------------------------------------------------
 
     @Test
+    fun `the create response echoes the full served URL, and one api prefix is normalised away`() {
+        // R-EP5: the stored form is always the part after /api; the response names the URL a
+        // client actually calls. Published WITH the prefix to prove the normalisation.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .body("""{"path": "/api/echo/v1/normalised", "pipeline": "test/trade_summary"}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(201)
+            .body("data.path", equalTo("/echo/v1/normalised"))
+            .body("data.url", equalTo("/api/echo/v1/normalised"))
+    }
+
+    @Test
+    fun `a reserved category is refused at publish, naming the segment`() {
+        // R-EP5: v<number> is the product's own namespace. An endpoint under it would be
+        // indistinguishable from a product route, so the refusal comes at publish, not at
+        // some future collision.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .body("""{"path": "/v1/revenue/today", "pipeline": "test/trade_summary"}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.path_reserved"))
+            .body("error.details.segment", equalTo("v1"))
+    }
+
+    @Test
     fun `a pipeline with a DML node cannot be published`() {
         // The rule that makes GET safe, met where an author meets it.
         given()
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"path": "/writes/things", "pipeline": "test/writes_things"}""")
+            .body("""{"path": "/writes/v1/things", "pipeline": "test/writes_things"}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -317,13 +381,13 @@ class PublishedEndpointE2eTest {
             // `/nyc/revenue/{anything}` would be refused as an undeclared path variable (400)
             // before it ever reached the conflict check. This one is a legal path that happens to
             // collide, which is exactly what `endpoint.path_conflict` is for.
-            .body("""{"path": "/nyc/revenue/manhattan", "pipeline": "test/revenue_by_borough"}""")
+            .body("""{"path": "/nyc/v1/revenue/manhattan", "pipeline": "test/revenue_by_borough"}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
             .statusCode(409)
             .body("error.code", equalTo("endpoint.path_conflict"))
-            .body("error.details.conflicting_path", equalTo("/nyc/revenue/{borough}"))
+            .body("error.details.conflicting_path", equalTo("/nyc/v1/revenue/{borough}"))
     }
 
     @Test
@@ -332,7 +396,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"path": "/nyc/by/{ghost}", "pipeline": "test/revenue_by_borough"}""")
+            .body("""{"path": "/nyc/v1/by/{ghost}", "pipeline": "test/revenue_by_borough"}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -354,7 +418,7 @@ class PublishedEndpointE2eTest {
                 .port(port)
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .`when`()
-                .get("/api/x/slow/thing")
+                .get("/api/slow/v1/thing")
                 .then()
                 .statusCode(202)
                 .header("DP-Execution-Id", org.hamcrest.Matchers.notNullValue())
@@ -416,12 +480,12 @@ class PublishedEndpointE2eTest {
             .getString("data.key")
 
     private fun publishEndpoints() {
-        publish("/nyc/revenue/{borough}", "test/revenue_by_borough")
-        publish("/trade/summary", "test/trade_summary")
+        publish("/nyc/v1/revenue/{borough}", "test/revenue_by_borough")
+        publish("/trade/v1/summary", "test/trade_summary")
         // timeout_seconds = 1 against a 3-second query: the 202 path, deterministically.
-        publishWithTimeout("/slow/thing", "test/slow_sleep", 1)
+        publishWithTimeout("/slow/v1/thing", "test/slow_sleep", 1)
         // #171 — under /nyc, so the existing endpoint key's binding covers it with no new key.
-        publish("/nyc/tempdb-ddl", "test/tempdb_ddl_endpoint")
+        publish("/nyc/v1/tempdb-ddl", "test/tempdb_ddl_endpoint")
     }
 
     private fun publish(

@@ -1,5 +1,6 @@
 package co.datapipelines.web.endpoints
 
+import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -17,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * The published-endpoint surface: ONE handler for the whole `/api/x` subtree (ruling R-EP1).
+ * The published-endpoint surface: ONE handler for the published subtree (ruling R-EP5).
  *
  * ## Why a catch-all and not registered routes
  *
@@ -26,8 +27,16 @@ import org.springframework.web.bind.annotation.RestController
  * transaction, lost on restart, and impossible to roll back together with the row that caused
  * it. So user paths never reach Spring's mapping: this handler owns the subtree and matches
  * against the registry itself (`EndpointMatcher`, which uses Spring's `PathPatternParser` as a
- * library). Engineers own everything beneath `/api/x`; the product's routes stay under
- * `/api/v1`, and nothing anyone publishes can shadow one.
+ * library).
+ *
+ * ## The mapping IS the reservation (R-EP5)
+ *
+ * The catch-all is `/api/{category}/…` with the category constrained IN THE PATTERN
+ * ([EndpointPath.CATEGORY_URL_PATTERN]): anything matching `v[0-9]+` — the product's own API
+ * namespace — and the literal `api` do not match this handler at all, so a published path can
+ * never shadow a product route by construction, and an unknown `/api/v1/…` path falls through
+ * to the product's own 404 rather than the endpoint one. Engineers own every other category
+ * beneath `/api`.
  *
  * ## Everything here is HTTP shape
  *
@@ -44,7 +53,7 @@ class PublishedEndpointController(
     private val serveService: PublishedEndpointServeService,
 ) {
     /** Every method on the subtree; `GET` serves, everything else is a `405` carrying `Allow: GET`. */
-    @RequestMapping("/**")
+    @RequestMapping(CATCH_ALL)
     @RequiredScope(ScopeMatrix.RestOperation.SERVE_PUBLISHED_ENDPOINT)
     fun serve(request: HttpServletRequest): ResponseEntity<Any> {
         if (request.method != HTTP_GET) {
@@ -88,7 +97,7 @@ class PublishedEndpointController(
     }
 
     /**
-     * The request path beneath `/api/x`, with its leading `/`.
+     * The request path beneath `/api`, with its leading `/`.
      *
      * Read from the servlet path rather than a `@PathVariable`: the mapping is a wildcard, and
      * the container hands the URI back already decoded and normalised — which is what the matcher
@@ -132,8 +141,18 @@ class PublishedEndpointController(
         }
 
     companion object {
-        /** Ruling R-EP1's root. Engineers own everything beneath it. */
-        const val ROOT = "/api/x"
+        /**
+         * R-EP5's root: the published subtree is `/api/<category>/<version>/<path…>`, and the
+         * product's own routes are the reserved `v<n>` categories of the same tree.
+         */
+        const val ROOT = "/api"
+
+        /**
+         * The catch-all, with the category constrained in the pattern itself
+         * ([EndpointPath.CATEGORY_URL_PATTERN]) — a reserved category does not match this handler
+         * at all, so `/api/v1/…` belongs to the product whether or not a route there exists.
+         */
+        const val CATCH_ALL = "/{category:" + EndpointPath.CATEGORY_URL_PATTERN + "}/**"
 
         private const val HTTP_GET = "GET"
     }

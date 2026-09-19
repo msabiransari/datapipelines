@@ -137,7 +137,7 @@ object ScopeMatrix {
         CHANGE_OWN_PASSWORD(Scope.READ, Capability.VIEW),
 
         /**
-         * "Serve a published endpoint" (§7.6/§7.7, 074): `GET /api/x/…`.
+         * "Serve a published endpoint" (§7.6/§7.7, 074): `GET` on the published subtree.
          *
          * `read` is the FLOOR, not the gate. The real authorisation is the path binding
          * (`EndpointAuthorizer`), and on an unbound endpoint a `user` key additionally needs

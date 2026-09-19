@@ -458,7 +458,7 @@ class PipelineExplorerRenderTest {
         val html = render("partials/pipeline-usage") { fillUsage() }
 
         html shouldContain "Published endpoints"
-        html shouldContain "/api/x/rideshare"
+        html shouldContain "/api/rideshare/v1/daily"
         html shouldContain "Pipelines invoking it"
         html shouldContain "nyc/rollup"
         html shouldContain "pins v1"
@@ -481,7 +481,7 @@ class PipelineExplorerRenderTest {
         setVariable(
             "usage",
             UsageView(
-                endpoints = listOf(UsageView.EndpointUse("/rideshare", enabled = true, description = "Serves it.")),
+                endpoints = listOf(UsageView.EndpointUse("/rideshare/v1/daily", enabled = true, description = "Serves it.")),
                 parents = listOf(UsageView.ParentUse(UUID.randomUUID(), "nyc/rollup", 2, "child", 1)),
             ),
         )

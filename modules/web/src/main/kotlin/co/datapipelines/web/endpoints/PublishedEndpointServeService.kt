@@ -34,7 +34,7 @@ import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Serving one `GET /api/x/…` request (published-endpoints design §5).
+ * Serving one `GET` on the published subtree (published-endpoints design §5, R-EP5).
  *
  * The order is the whole design, and it is deliberate: **resolve, authorise, validate, run**.
  * Nothing about the request's data is inspected before the caller has been authorised, so an
@@ -101,7 +101,7 @@ class PublishedEndpointServeService(
     }
 
     /**
-     * Resolves and serves [path] (the part after `/api/x`, with its leading `/`).
+     * Resolves and serves [path] (the part after `/api`, with its leading `/`).
      *
      * Blocking by design: a servlet thread calls this, and the `202` contract means the block is
      * bounded by the endpoint's own timeout.

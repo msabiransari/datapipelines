@@ -351,7 +351,7 @@ datapipelines:
     fiscal-start-date: ${DATAPIPELINES_ORG_FISCAL_START_DATE:01-01}
     week-start: ${DATAPIPELINES_ORG_WEEK_START:monday}
     timezone: ${DATAPIPELINES_ORG_TIMEZONE:UTC}
-  # Published endpoints (074) — a released pipeline served as GET /api/x/** (rest-api §19).
+  # Published endpoints (074, R-EP5) — a released pipeline served as GET /api/<category>/<version>/<path> (rest-api §19).
   # Appended after the whole datapipelines: tree on purpose: a block inserted between two
   # existing ones reparents its followers silently (MISTAKES.md, the YAML entry).
   # There is no page-rows-max here — the DP-Result-Page-Rows clamp is

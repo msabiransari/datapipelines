@@ -54,7 +54,7 @@
         </p>
         <!-- claim: docs/auth.md §7.7 -->
         <p>
-          The client-facing half is a second kind of key: bound to a path prefix under <code>/api/x</code>, it can
+          The client-facing half is a second kind of key: bound to a path prefix of the published tree under <code>/api</code>, it can
           call that client's endpoints and nothing else. Handing client A their key never touches client B's, and
           revoking one is a checkbox — no shared password to rotate across the roster.
         </p>
@@ -158,7 +158,7 @@
           <h3><span class="status status-shipped">Ships today</span> The endpoint in their portal</h3>
           <!-- claim: docs/rest-api.md §19 -->
           <ul>
-            <li>The client's white-label page calls <code>GET /api/x/…</code> with their key; the query string binds the report's parameters — month, region, account.</li>
+            <li>The client's white-label page calls <code>GET /api/…</code> with their key; the query string binds the report's parameters — month, region, account.</li>
             <li><code>Cache-Control: no-store</code>: every call is a fresh run of the released version, so the portal never shows a stale cached copy.</li>
             <li>The key reaches that path and nothing else; the contract is enforced by the router, not by a promise.</li>
           </ul>

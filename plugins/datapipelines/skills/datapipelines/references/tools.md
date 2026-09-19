@@ -382,11 +382,11 @@ One calculator kind's full definition: display name, description, typed inputs, 
 
 Scope `author` · **writes**
 
-Publish a released pipeline as a GET endpoint under /api/x. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 1-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.
+Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `path` | string | required | e.g. /finance/revenue/{region} — no /api/x prefix, no trailing slash. |
+| `path` | string | required | e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash. |
 | `pipeline` | string | required | The pipeline NAME. It must have a released version. |
 | `timeout_seconds` | integer | optional | Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running. |
 | `description` | string | optional |  |
@@ -403,11 +403,11 @@ No arguments.
 
 Scope `read` · read-only
 
-One published endpoint by its path (the pattern, not a request URL — '/finance/revenue/{region}').
+One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}').
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `path` | string | required | The published path PATTERN, e.g. /finance/revenue/{region}. |
+| `path` | string | required | The published path PATTERN, e.g. /finance/v1/revenue/{region}. |
 
 ### `endpoints_delete`
 
@@ -417,7 +417,7 @@ Unpublish an endpoint by its path. The pipeline is untouched — only the URL st
 
 | Argument | Type | | What it is |
 |---|---|---|---|
-| `path` | string | required | The published path PATTERN, e.g. /finance/revenue/{region}. |
+| `path` | string | required | The published path PATTERN, e.g. /finance/v1/revenue/{region}. |
 
 ## lake
 

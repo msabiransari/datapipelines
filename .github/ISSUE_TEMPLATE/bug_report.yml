@@ -38,7 +38,7 @@ body:
         - Browser UI
         - REST API
         - MCP tool
-        - Published endpoint (/api/x)
+        - Published endpoint (/api/<category>/<version>/…)
         - CLI / app.sh
     validations:
       required: true
