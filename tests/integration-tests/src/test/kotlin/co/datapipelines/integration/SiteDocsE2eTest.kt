@@ -6,6 +6,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import io.restassured.response.Response
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -206,42 +207,33 @@ class SiteDocsE2eTest {
     }
 
     /**
-     * 173 §C — the agent surface, at the wire and ANONYMOUS: the llms pair, every doc's
-     * Markdown twin, and the links inside the served text.
+     * 173 §C — the agent surface, at the wire and ANONYMOUS: the llms pair and every doc's
+     * Markdown twin the index links.
      */
     @Test
-    fun `llms-txt and every markdown doc answer anonymously, and every link in them resolves`() {
-        val llms =
-            given()
-                .port(port)
-                .`when`()
-                .get("/llms.txt")
+    fun `llms-txt and every markdown doc it links answer anonymously as markdown`() {
+        val llms = anonymous("/llms.txt")
         llms.statusCode shouldBe 200
         llms.contentType shouldContain "text/markdown"
         llms.header("Cache-Control") shouldContain "public"
         llms.asString() shouldContain "# datapipelines.co"
 
-        val full =
-            given()
-                .port(port)
-                .`when`()
-                .get("/llms-full.txt")
+        val full = anonymous("/llms-full.txt")
         full.statusCode shouldBe 200
         full.contentType shouldContain "text/markdown"
 
-        // Every doc the index links is served as Markdown at that address.
-        val docLinks = MD_LINK.findAll(llms.asString()).map { it.groupValues[1] }.toSet()
-        check(docLinks.size >= MIN_DOC_LINKS) { "llms.txt linked only ${docLinks.size} markdown docs" }
-        val served =
-            docLinks.associateWith { path ->
-                given()
-                    .port(port)
-                    .`when`()
-                    .get(path)
-            }
+        val served = markdownTwins()
         served.filterValues { it.statusCode != 200 || !it.contentType.contains("text/markdown") }.keys shouldBe emptySet()
+    }
 
-        // Every site-relative link in the served Markdown walks to a 200 — the rewrite's promise.
+    /**
+     * 173 §C.2 — the rewrite's promise at the wire: every site-relative link in the served
+     * Markdown walks to a 200, the HTML page names its twin, and Accept negotiation on the
+     * HTML route reaches the same bytes.
+     */
+    @Test
+    fun `every link in the served markdown resolves, and the html page negotiates its twin`() {
+        val served = markdownTwins()
         val walked = mutableSetOf<String>()
         val dangling =
             served.values.flatMap { response ->
@@ -249,20 +241,12 @@ class SiteDocsE2eTest {
                     .findAll(response.asString())
                     .map { it.groupValues[1].substringBefore('#') }
                     .filter { walked.add(it) }
-                    .filter { path ->
-                        given()
-                            .port(port)
-                            .redirects()
-                            .follow(false)
-                            .`when`()
-                            .get(path)
-                            .statusCode != 200
-                    }.toList()
+                    .filter { path -> anonymous(path).statusCode != 200 }
+                    .toList()
             }
         check(walked.size >= MIN_WALKED) { "the markdown walk followed only ${walked.size} links" }
         dangling shouldBe emptyList()
 
-        // The HTML page names its twin, and Accept negotiation reaches the same bytes.
         val page =
             given()
                 .port(port)
@@ -280,6 +264,22 @@ class SiteDocsE2eTest {
         negotiated.contentType shouldContain "text/markdown"
         negotiated.asString() shouldBe served.getValue("/docs/auth.md").asString()
     }
+
+    /** Every `.md` twin `/llms.txt` links, fetched anonymously — the non-vacuity floor is checked here. */
+    private fun markdownTwins(): Map<String, Response> {
+        val docLinks = MD_LINK.findAll(anonymous("/llms.txt").asString()).map { it.groupValues[1] }.toSet()
+        check(docLinks.size >= MIN_DOC_LINKS) { "llms.txt linked only ${docLinks.size} markdown docs" }
+        return docLinks.associateWith { anonymous(it) }
+    }
+
+    /** An anonymous GET with no Accept header, redirects not followed. */
+    private fun anonymous(path: String): Response =
+        given()
+            .port(port)
+            .redirects()
+            .follow(false)
+            .`when`()
+            .get(path)
 
     @Test
     fun `signed in, the dashboard and the operations manual render`() {
