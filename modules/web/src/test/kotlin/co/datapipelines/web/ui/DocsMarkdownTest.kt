@@ -110,7 +110,8 @@ class DocsMarkdownTest {
         html.modelAndView?.viewName shouldBe "docs/doc-public"
 
         // No Accept at all is */*: the page, not the source.
-        mvc.perform(get("/docs/auth")).andReturn().modelAndView?.viewName shouldBe "docs/doc-public"
+        val bare = mvc.perform(get("/docs/auth")).andReturn()
+        bare.modelAndView?.viewName shouldBe "docs/doc-public"
     }
 
     @Test

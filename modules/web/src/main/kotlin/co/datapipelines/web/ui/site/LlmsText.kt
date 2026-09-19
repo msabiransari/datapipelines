@@ -25,16 +25,15 @@ object LlmsText {
                 append("## ").append(group.name).append('\n')
                 append(group.blurb).append("\n\n")
                 group.links.forEach { link ->
-                    append("- [").append(link.title).append("](").append(SITE_ORIGIN).append(agentPath(link.path)).append(')')
-                    if (link.description.isNotBlank()) append(": ").append(link.description)
+                    append("- [${link.title}]($SITE_ORIGIN${agentPath(link.path)})")
+                    if (link.description.isNotBlank()) append(": ${link.description}")
                     append('\n')
                 }
                 append('\n')
             }
             // The directory itself is not in its own groups; it is in the sitemap, so it is here.
-            append("## ").append(DIRECTORY_HEADING).append('\n')
-            append("- [").append(SitePages.EXPLORE.title).append("](").append(SitePages.EXPLORE.canonical).append("): ")
-            append(SitePages.EXPLORE.description).append('\n')
+            append("## $DIRECTORY_HEADING\n")
+            append("- [${SitePages.EXPLORE.title}](${SitePages.EXPLORE.canonical}): ${SitePages.EXPLORE.description}\n")
         }
 
     /** The full text: the same header, then every packaged doc's rewritten Markdown under `# <title>`. */
@@ -44,8 +43,8 @@ object LlmsText {
             docs.index().forEach { group ->
                 group.docs.forEach { entry ->
                     val markdown = checkNotNull(docs.markdown(entry.slug)) { "no markdown for packaged doc ${entry.slug}" }
-                    append("\n---\n\n# ").append(entry.title).append('\n')
-                    append(SOURCE_LINE_PREFIX).append(SITE_ORIGIN).append(agentPath("/docs/${entry.slug}")).append("\n\n")
+                    append("\n---\n\n# ${entry.title}\n")
+                    append("$SOURCE_LINE_PREFIX$SITE_ORIGIN${agentPath("/docs/${entry.slug}")}\n\n")
                     append(withoutLeadingH1(markdown).trimEnd()).append('\n')
                 }
             }
@@ -62,8 +61,7 @@ object LlmsText {
      * The address an agent should fetch for a path: a doc's `.md` twin (raw Markdown), the
      * HTML page for everything else — the docs index has no Markdown form.
      */
-    private fun agentPath(path: String): String =
-        if (path.startsWith(DOCS_PREFIX)) path + MARKDOWN_SUFFIX else path
+    private fun agentPath(path: String): String = if (path.startsWith(DOCS_PREFIX)) path + MARKDOWN_SUFFIX else path
 
     /**
      * Every packaged doc opens with its own `# Title` line — the line [DocsCatalog] took the

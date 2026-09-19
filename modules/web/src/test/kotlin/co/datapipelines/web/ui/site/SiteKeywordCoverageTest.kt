@@ -166,8 +166,9 @@ class SiteKeywordCoverageTest {
         surface: Surface,
     ): String {
         val main = main(html)
+        val title = TITLE_TAG.find(html)?.groupValues?.get(1)
         return when (surface) {
-            TITLE -> norm(visible(TITLE_TAG.find(html)?.groupValues?.get(1).orEmpty()))
+            TITLE -> norm(visible(title.orEmpty()))
             H1 -> H1_TAG.findAll(main).joinToString(" | ") { norm(visible(it.groupValues[1])) }
             H2 -> H2_TAG.findAll(main).joinToString(" | ") { norm(visible(it.groupValues[1])) }
             BODY -> norm(visible(SCRIPT_OR_STYLE.replace(main, " ")))
