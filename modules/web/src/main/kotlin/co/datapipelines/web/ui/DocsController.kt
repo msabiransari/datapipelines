@@ -1,16 +1,21 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.ui.site.DocJsonLd
 import co.datapipelines.web.ui.site.PublicPage
 import co.datapipelines.web.ui.site.SITE_ORIGIN
+import co.datapipelines.web.ui.site.SiteExplore
 import co.datapipelines.web.ui.site.SitePages
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.CacheControl
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.servlet.ModelAndView
 import java.util.concurrent.TimeUnit
 
@@ -33,6 +38,14 @@ import java.util.concurrent.TimeUnit
  * [UiWorkspaceAdvice] fills for every `@Controller` — Spring runs its `@ModelAttribute`
  * methods before this handler, and reading it here keeps ONE definition of "is there a
  * principal" rather than a second `SecurityContextHolder` lookup that could disagree.
+ *
+ * **Raw Markdown since 173** (§C.2): `GET /docs/{slug}.md` — and `GET /docs/{slug}` with
+ * `Accept: text/markdown` — serve the packaged Markdown itself, with the same relative-link
+ * rewrite the HTML gets ([DocsCatalog.markdown]). One handler, two patterns: Spring's
+ * `produces` negotiation picks it over the HTML handler only when the caller asks for
+ * Markdown, so a browser on `/docs/auth` still gets the page. It is the surface an agent
+ * reads (`/llms.txt` links every doc's `.md`), the `<link rel="alternate">` on the HTML page
+ * names it, and it is public for the same reason the HTML is.
  */
 @Controller
 class DocsController(
@@ -74,14 +87,36 @@ class DocsController(
             rendered.html,
         )
         if (isAuthenticated(model)) return ModelAndView("docs/doc", model.asMap())
+        val path = "/docs/${rendered.entry.slug}"
         publicHead(
             model,
             response,
             title = docPageTitle(rendered.entry.title),
             description = rendered.entry.description,
-            path = "/docs/${rendered.entry.slug}",
+            path = path,
         )
+        // 173 §C.4: TechArticle + BreadcrumbList, written from Kotlin like the FAQ block.
+        model.addAttribute("docJsonLd", DocJsonLd.render(rendered.entry.title, rendered.entry.description, SITE_ORIGIN + path))
         return ModelAndView("docs/doc-public", model.asMap())
+    }
+
+    @GetMapping("/docs/{slug}.md", "/docs/{slug}", produces = [MARKDOWN])
+    @ResponseBody
+    fun markdown(
+        @PathVariable slug: String,
+        response: HttpServletResponse,
+    ): ResponseEntity<String> {
+        val body =
+            docs.markdown(slug.lowercase())
+                ?: return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .contentType(MediaType.parseMediaType(MARKDOWN))
+                    .body("# Not found\n\nNo packaged doc `$slug`. The index is /llms.txt.\n")
+        response.setHeader(
+            HttpHeaders.CACHE_CONTROL,
+            CacheControl.maxAge(PublicPage.PAGE_MAX_AGE_MINUTES, TimeUnit.MINUTES).cachePublic().headerValue,
+        )
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(MARKDOWN)).body(body)
     }
 
     /**
@@ -107,6 +142,8 @@ class DocsController(
         model.addAttribute("canonicalUrl", SITE_ORIGIN + path)
         model.addAttribute("ogImage", SITE_ORIGIN + PublicPage.DEFAULT_OG_IMAGE)
         model.addAttribute("extraCss", "/css/docs.css")
+        // 173: the Markdown twin of this page, for the layout's <link rel="alternate"> (docs pages only).
+        model.addAttribute("alternateMarkdown", if (path == "/docs") null else "$path$MARKDOWN_SUFFIX")
         // The public footer builds its engine column from the registry, on every public page.
         model.addAttribute("engines", SitePages.ENGINES)
         // 145: the header marks the current primary item; every docs route is "Docs".
@@ -118,6 +155,12 @@ class DocsController(
     companion object {
         /** What a search result shows before it truncates the title mid-word. */
         const val TITLE_MAX = 70
+
+        /** Markdown, charset-qualified like `/skill.md` — the specs are full of em dashes and arrows. */
+        const val MARKDOWN = "text/markdown;charset=UTF-8"
+
+        /** The raw route's suffix: `/docs/auth` renders HTML, `/docs/auth.md` is the source. */
+        const val MARKDOWN_SUFFIX = ".md"
 
         /** The brand suffix every doc page's title carries, so a result set reads as one site. */
         const val TITLE_SUFFIX = " — datapipelines.co docs"
@@ -141,8 +184,7 @@ class DocsController(
             return lead.take(budget).substringBeforeLast(' ').trimEnd() + TITLE_SUFFIX
         }
 
-        private const val INDEX_DESCRIPTION =
-            "The operations manual and contracts for datapipelines.co: deployment, auth, datasources, " +
-                "the pipeline contract, templates and the MCP server."
+        /** One string, shared with `/explore` and `/llms.txt` through [SiteExplore.DOCS_INDEX_DESCRIPTION]. */
+        private const val INDEX_DESCRIPTION = SiteExplore.DOCS_INDEX_DESCRIPTION
     }
 }

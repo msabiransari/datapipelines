@@ -52,6 +52,9 @@
   <link rel="stylesheet" th:href="@{/site/css/site-fonts-mono.css}" media="print" data-late-style>
   <!--/* One optional extra sheet, named by the controller — the public docs page's typography. */-->
   <link th:if="${extraCss}" rel="stylesheet" th:href="@{${extraCss}}">
+  <!--/* 173 §C.2: a doc page names its Markdown twin (/docs/{slug}.md) for agents and crawlers;
+       DocsController sets it on the public doc page only. rel=alternate is head-only in HTML. */-->
+  <link th:if="${alternateMarkdown}" rel="alternate" type="text/markdown" th:href="@{${alternateMarkdown}}">
 </head>
 <body id="top">
   <a class="skip-link" href="#main">Skip to content</a>

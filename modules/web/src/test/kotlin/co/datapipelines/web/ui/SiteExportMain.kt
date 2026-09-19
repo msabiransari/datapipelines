@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.ui.site.LlmsText
 import co.datapipelines.web.ui.site.SITE_ORIGIN
 import co.datapipelines.web.ui.site.SITE_ORIGIN_HOST
 import co.datapipelines.web.ui.site.SitePageRenderer
@@ -24,8 +25,12 @@ import java.io.File
  * bean the app has and this process does not, and an invented date is worse than an absent
  * optional field.
  *
+ * 173 added the agent surface: `llms.txt`, `llms-full.txt` and every doc's `docs/<slug>.md`
+ * twin — the same bytes the live routes serve, from the same functions, so the fallback's
+ * `<link rel="alternate">` and its llms index resolve exactly as the app's do.
+ *
  * Assets are copied by the Gradle task itself (a plain `Copy`); this writes only HTML and
- * the two text files.
+ * the text files.
  */
 fun main(args: Array<String>) {
     val outDir = File(args.firstOrNull() ?: "build/website-export")
@@ -46,7 +51,13 @@ fun main(args: Array<String>) {
     slugs.forEach { slug ->
         writePage(outDir, "/docs/$slug", SitePageRenderer.renderDoc(slug, SITE_ORIGIN_HOST))
         pages++
+        // 173 §C.2: the Markdown twin beside the page directory — static hosting serves it
+        // by extension, at the address the page's rel=alternate and llms.txt name.
+        File(outDir, "docs/$slug.md").writeText(checkNotNull(SitePageRenderer.docs.markdown(slug)) { "no markdown for $slug" })
     }
+    // 173 §C.1: the agent index and the full text, from the same registries as the sitemap.
+    File(outDir, "llms.txt").writeText(LlmsText.index(SitePageRenderer.docs))
+    File(outDir, "llms-full.txt").writeText(LlmsText.full(SitePageRenderer.docs))
 
     val robots =
         checkNotNull(SiteExportMarker::class.java.classLoader.getResourceAsStream("static/robots.txt")) {
@@ -66,7 +77,10 @@ fun main(args: Array<String>) {
             "unstyled pages: ${missing.sorted().joinToString()}"
     }
 
-    println("website-export: wrote $pages pages + robots.txt + sitemap.xml (${locations.size} urls) to ${outDir.absolutePath}")
+    println(
+        "website-export: wrote $pages pages + ${slugs.size} docs/*.md + llms.txt + llms-full.txt + robots.txt + " +
+            "sitemap.xml (${locations.size} urls) to ${outDir.absolutePath}",
+    )
 }
 
 /**

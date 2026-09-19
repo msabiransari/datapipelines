@@ -23,11 +23,27 @@ class SiteJsonLdTest {
             .toList()
 
     @Test
-    fun `the homepage publishes exactly the two blocks, both valid JSON`() {
-        // Parsing happened in the initializer: reaching here means both blocks parsed.
-        blocks.size shouldBe 2
-        blocks.map { it["@type"].asText() } shouldBe listOf("SoftwareApplication", "FAQPage")
+    fun `the homepage publishes exactly the three blocks, all valid JSON`() {
+        // Parsing happened in the initializer: reaching here means every block parsed.
+        // 173 added the Organization block beside the SoftwareApplication one.
+        blocks.size shouldBe 3
+        blocks.map { it["@type"].asText() } shouldBe listOf("SoftwareApplication", "Organization", "FAQPage")
         blocks.all { it["@context"].asText() == "https://schema.org" } shouldBe true
+    }
+
+    /**
+     * 173 §C.3 — the Organization block: entity resolution for the publisher. The url, the
+     * logo and the one `sameAs` are held to the constants the rest of the site renders from,
+     * and the logo must be a packaged brand asset, not a promise.
+     */
+    @Test
+    fun `the Organization block names the site, its logo and the repository`() {
+        val org = blocks.first { it["@type"].asText() == "Organization" }
+        org["name"].asText() shouldBe "datapipelines.co"
+        org["url"].asText() shouldBe "$SITE_ORIGIN/"
+        org["logo"].asText() shouldBe "$SITE_ORIGIN$LOGO"
+        org["sameAs"].map { it.asText() } shouldBe listOf(REPO_URL)
+        (javaClass.classLoader.getResource("static$LOGO") != null) shouldBe true
     }
 
     @Test
@@ -40,6 +56,9 @@ class SiteJsonLdTest {
         app["name"].asText() shouldBe "datapipelines.co"
         app["offers"]["price"].asText() shouldBe "0"
         app["license"].asText() shouldBe AGPL_URL
+        // 173: the description is the ONE summary /llms.txt also opens with — literal JSON
+        // here, a constant there, held equal so an agent and a crawler read the same sentence.
+        app["description"].asText() shouldBe SITE_SUMMARY
     }
 
     @Test
@@ -113,6 +132,7 @@ class SiteJsonLdTest {
         const val LAKE_FAQ_MAX = 4
         const val MIN_ANSWER_CHARS = 120
         const val AGPL_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
+        const val LOGO = "/site/brand/android-chrome-512.png"
 
         val MAPPER = ObjectMapper()
         val LD_JSON =

@@ -36,6 +36,22 @@
   }
   </script>
 
+  <!--/* 173 §C.3 — the Organization block: entity resolution for the publisher (logo, the
+       one sameAs that exists — the AGPL repository). No WebSite block: the site has no
+       search action to declare, and a WebSite block without one adds nothing a crawler
+       does not already derive from the canonical. Parsed by SiteJsonLdTest, which holds the
+       url, logo and sameAs to the constants the rest of the site renders from. */-->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "datapipelines.co",
+    "url": "https://datapipelines.co/",
+    "logo": "https://datapipelines.co/site/brand/android-chrome-512.png",
+    "sameAs": ["https://github.com/msabiransari/datapipelines"]
+  }
+  </script>
+
   <!-- ============================ HERO ============================ -->
   <section class="hero home-hero" id="hero" aria-labelledby="hero-title">
     <div class="container">

@@ -9,6 +9,11 @@
       th:replace="~{site/_layout :: page(~{::content})}">
 <th:block th:fragment="content">
 
+  <!--/* 173 §C.4 — structured data: a TechArticle and a BreadcrumbList (Docs → this page),
+       written by DocJsonLd through Jackson (the FaqJsonLd shape) and parsed back by
+       DocsJsonLdTest. Two script tags, one per block, like the homepage. */-->
+  <script type="application/ld+json" th:each="block : ${docJsonLd}" th:utext="${block}"></script>
+
   <nav class="breadcrumbs" aria-label="Breadcrumb">
     <ol>
       <li><a th:href="@{/}">Home</a></li>
