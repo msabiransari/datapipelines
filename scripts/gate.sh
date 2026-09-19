@@ -93,9 +93,18 @@ if [ "${foreign:-0}" -gt 0 ]; then
   echo
 fi
 
+# GATE_GRADLE_ARGS: extra Gradle arguments appended to every invocation — the
+# per-run knobs of DEVELOPMENT.md §9.5 (`-Pdp.test.forks=6 -Pdp.test.forks.e2e=4
+# --max-workers=12` is the single-gate profile for a box running ONE gate). Only
+# `-P` reaches the project properties: `-D` system properties and
+# ORG_GRADLE_PROJECT_* env vars lose to the repo's gradle.properties (measured
+# 2026-09-19). Word-split on purpose; quote nothing that needs a space.
+read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
+[ "${#GATE_EXTRA_ARGS[@]}" -gt 0 ] && echo " gradle args: ${GATE_EXTRA_ARGS[*]}"
+
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" > "$log" 2>&1
+  ./gradlew "$@" "${GATE_EXTRA_ARGS[@]}" > "$log" 2>&1
   echo $?
 }
 

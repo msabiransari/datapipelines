@@ -655,6 +655,20 @@ below 24 threads per gate. Past the RAM or Docker ceiling the build does not slo
 gracefully — it goes **red** on wall-clock assertions (see the 6381 s run in
 `gradle.properties`), so lower the knobs before you see that.
 
+**The single-gate profile.** The defaults leave a lone gate on the 96-thread box using about a
+quarter of it (measured 2026-09-18: 21 min for the three invocations, load under 8). When nothing
+else is building, run `scripts/gate.sh` with the knobs doubled through `GATE_GRADLE_ARGS`, which
+the script appends to every invocation:
+
+```bash
+GATE_GRADLE_ARGS="-Pdp.test.forks=6 -Pdp.test.forks.e2e=4 --max-workers=12" ./scripts/gate.sh 1
+```
+
+By the budget above that is roughly 45 GB at peak — one such gate, not two, on 64 GB. Only `-P`
+works for the fork knobs: a `-D` system property or an `ORG_GRADLE_PROJECT_*` variable loses to the
+repo's `gradle.properties` (measured 2026-09-19 with an init-script probe), so the profile is
+arguments, not environment.
+
 **Three more things worth a minute on a dedicated Linux box.**
 
 - **The CPU governor.** Ubuntu ships `powersave`; `sudo cpupower frequency-set -g performance`
