@@ -34,6 +34,11 @@ import org.springframework.web.util.HtmlUtils
  *     so a heading that legitimately moved down a level (the old /how-it-works H1 is the
  *     engineering depth's H2) is still found.
  *
+ * 173 added `additions` to the fixture — every registry route beyond the baseline with the
+ * reason it exists — and heading renames on eleven routes (ten newly rewritten): the ones the
+ * measured search phrases needed (`SiteKeywordCoverageTest` pins the new texts), each retired
+ * with its reason.
+ *
  * Falsified at birth: removing one engine's registry row named its route here; deleting
  * `id="free-costs"` from the pricing page named the anchor; renaming a comparison page's H2
  * named the heading. Non-vacuity is asserted on the fixture itself — a fixture that shrank
@@ -61,8 +66,17 @@ class SiteRouteFloorTest {
             .toSet()
     }
 
+    /**
+     * 173: the routes that exist BEYOND the baseline, each with the reason it was added —
+     * the two 145 hubs and the Dagster vs Airflow comparison. The registry must equal the
+     * baseline plus exactly these, so a page cannot appear without a recorded reason.
+     */
+    private val additions: Map<String, String> by lazy {
+        fixture["additions"].properties().associate { (path, reason) -> path to reason.asText() }
+    }
+
     @Test
-    fun `the fixture is the 59-route baseline and the registry carries it plus the two additions`() {
+    fun `the fixture is the 59-route baseline and the registry carries it plus the recorded additions`() {
         withClue("the fixture holds the whole baseline") { routes.size shouldBe BASELINE_ROUTES }
         val marketing = routes.filterValues { it["status"].asText() != "doc" }.keys
         val docs = routes.filterValues { it["status"].asText() == "doc" }.keys
@@ -78,9 +92,14 @@ class SiteRouteFloorTest {
         withClue("every baseline docs route is a packaged doc") {
             docs.filterNot { it == "/docs" || it.removePrefix("/docs/") in docSlugs }.shouldBeEmpty()
         }
-        withClue("the registry is the baseline plus exactly the two 145 additions") {
+        withClue("the registry is the baseline plus exactly the recorded additions") {
             registry.keys shouldContainAll marketing
-            (registry.keys - marketing) shouldBe setOf(SitePages.USE_CASES.path, SitePages.EXPLORE.path)
+            (registry.keys - marketing) shouldBe additions.keys
+            additions.keys shouldBe
+                setOf(SitePages.USE_CASES.path, SitePages.EXPLORE.path, SitePages.COMPARE_DAGSTER_AIRFLOW.path)
+        }
+        withClue("every addition names its reason") {
+            additions.filterValues { it.length < MIN_REASON_CHARS }.keys.shouldBeEmpty()
         }
     }
 
@@ -168,7 +187,11 @@ class SiteRouteFloorTest {
         const val BASELINE_ROUTES = 59
         const val BASELINE_MARKETING = 35
         const val BASELINE_DOCS = 24
-        const val REWRITTEN_ROUTES = 7
+
+        // 145 rewrote seven routes; 173 (SEO coverage) renamed headings on eleven routes for the
+        // measured phrases, ten of them not rewritten before (/for/agencies already was) —
+        // every retirement names its phrase and keeps its anchor.
+        const val REWRITTEN_ROUTES = 17
         const val MIN_PINNED_HEADINGS = 400
         const val MIN_ANCHORS = 150
         const val MIN_REASON_CHARS = 20

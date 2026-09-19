@@ -43,6 +43,7 @@ class SiteClaimCitationTest {
                 "add-mcp-server.html",
                 "ai-data-pipeline.html",
                 "compare-airflow.html",
+                "compare-dagster-vs-airflow.html",
                 "compare-dbt.html",
                 "compare-fivetran-airbyte.html",
                 "compare-postgres-only.html",

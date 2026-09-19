@@ -1,5 +1,5 @@
 {
- "_": "Lane 145 migration guard. Derived from the frozen 2026-09-16 source baseline (59 routes) by make-outline-fixture.py in the private design records; edit deliberately — SiteRouteFloorTest fails when a route, an anchor or a heading listed here stops rendering.",
+ "_": "Lane 145 migration guard. Derived from the frozen 2026-09-16 source baseline (59 routes) by make-outline-fixture.py in the private design records; edit deliberately — SiteRouteFloorTest fails when a route, an anchor or a heading listed here stops rendering. Since 173, `additions` names every registry route that is not in the baseline, with the reason it exists; SiteRouteFloorTest holds the registry equal to the baseline plus exactly those.",
  "capturedAt": "2026-09-16T14:22:04.065Z",
  "routes": {
   "/": {
@@ -923,7 +923,7 @@
    ]
   },
   "/add-mcp-server-to-claude-code": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "add-title",
     "step1-title",
@@ -949,18 +949,6 @@
     {
      "level": "H2",
      "text": "Paste one config block"
-    },
-    {
-     "level": "H3",
-     "text": "Claude Code"
-    },
-    {
-     "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
-    },
-    {
-     "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
     },
     {
      "level": "H3",
@@ -998,7 +986,15 @@
      "level": "H2",
      "text": "Do the whole loop on the demo"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Claude Code": "173 (SEO coverage before indexing): the per-client config block became an H2 named for the measured phrase — \"The Claude Code MCP server config\" (claude code mcp server, 880/mo); no anchor existed.",
+     "Cursor — ~/.cursor/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The Cursor MCP server config — ~/.cursor/mcp.json\" (cursor mcp server, 720/mo); no anchor existed.",
+     "GitHub Copilot in VS Code — .vscode/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The GitHub Copilot MCP server config — .vscode/mcp.json\", the same shape as its two siblings; no anchor existed."
+    }
+   }
   },
   "/ai-data-pipeline": {
    "status": "unchanged",
@@ -1088,7 +1084,7 @@
    ]
   },
   "/text-to-sql-agent": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "tts-title",
     "gap-title",
@@ -1102,10 +1098,6 @@
     {
      "level": "H1",
      "text": "The text-to-SQL agent: from a question to a pipeline your team can rerun"
-    },
-    {
-     "level": "H2",
-     "text": "The gap a text-to-SQL tool leaves"
     },
     {
      "level": "H2",
@@ -1167,7 +1159,13 @@
      "level": "H2",
      "text": "Ask the question that keeps coming back"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "The gap a text-to-SQL tool leaves": "173 (SEO coverage before indexing): renamed \"The gap a natural language to SQL tool leaves\" (natural language to sql, 140/mo, was body-only); anchor #gap-title unchanged."
+    }
+   }
   },
   "/compare/airflow": {
    "status": "unchanged",
@@ -1397,7 +1395,7 @@
    ]
   },
   "/dp-lake": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "lake-title",
     "ships-title",
@@ -1409,10 +1407,6 @@
     {
      "level": "H1",
      "text": "Your data is already in S3. Ask it a question."
-    },
-    {
-     "level": "H2",
-     "text": "Exactly this, and nothing more"
     },
     {
      "level": "H3",
@@ -1470,7 +1464,13 @@
      "level": "SUMMARY",
      "text": "How do I register an Iceberg table in dp-lake?"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Exactly this, and nothing more": "173 (SEO coverage before indexing): renamed \"The DuckDB–S3 read path: exactly this, and nothing more\" (duckdb s3, 110/mo); anchor #ships-title unchanged."
+    }
+   }
   },
   "/faq": {
    "status": "rewritten",
@@ -1803,7 +1803,7 @@
    ]
   },
   "/security": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "sec-title",
     "sec-model",
@@ -1817,10 +1817,6 @@
     {
      "level": "H1",
      "text": "Letting an AI agent near your databases, without handing it a password"
-    },
-    {
-     "level": "H2",
-     "text": "Five boundaries, each enforced by the server, not by a prompt"
     },
     {
      "level": "H3",
@@ -1898,7 +1894,13 @@
      "level": "SUMMARY",
      "text": "Can an agent release a pipeline to production?"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Five boundaries, each enforced by the server, not by a prompt": "173 (SEO coverage before indexing): renamed \"MCP server security: five boundaries, …\" (mcp server security, 170/mo); anchor #sec-model unchanged."
+    }
+   }
   },
   "/published-api": {
    "status": "unchanged",
@@ -2192,7 +2194,7 @@
    ]
   },
   "/compare/fivetran-airbyte": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "fa-title",
     "fa-jobs",
@@ -2207,10 +2209,6 @@
     {
      "level": "H1",
      "text": "The Fivetran alternative that skips the copy: a query at the source, not a warehouse"
-    },
-    {
-     "level": "H2",
-     "text": "Two products that share a vocabulary and not a job"
     },
     {
      "level": "H2",
@@ -2276,10 +2274,16 @@
      "level": "H2",
      "text": "Point it at your two databases this afternoon"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Two products that share a vocabulary and not a job": "173 (SEO coverage before indexing): renamed \"A Fivetran or Airbyte alternative? Two products that share a vocabulary and not a job\" (airbyte alternative, 90/mo); anchor #fa-jobs unchanged."
+    }
+   }
   },
   "/compare/postgres-only": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "po-title",
     "po-enough",
@@ -2294,10 +2298,6 @@
     {
      "level": "H1",
      "text": "Do I need a data warehouse? When Postgres alone is enough, and what comes next"
-    },
-    {
-     "level": "H2",
-     "text": "When Postgres alone is enough"
     },
     {
      "level": "H2",
@@ -2363,7 +2363,13 @@
      "level": "H2",
      "text": "Meet the arrivals on the demo, not in production"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "When Postgres alone is enough": "173 (SEO coverage before indexing): renamed \"Postgres as data warehouse: when Postgres alone is enough\" (postgres as data warehouse, 110/mo); anchor #po-enough unchanged."
+    }
+   }
   },
   "/tableau/prep-vs-pipelines-as-code": {
    "status": "unchanged",
@@ -2473,7 +2479,7 @@
    ]
   },
   "/tableau/extracts-alerts-dashboards": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "tr-title",
     "tr-dash",
@@ -2492,10 +2498,6 @@
     {
      "level": "H2",
      "text": "Dashboards you embed"
-    },
-    {
-     "level": "H2",
-     "text": "Scheduled extracts to your own bucket"
     },
     {
      "level": "H2",
@@ -2565,7 +2567,13 @@
      "level": "H2",
      "text": "Build on the shipped half while the dates move"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Scheduled extracts to your own bucket": "173 (SEO coverage before indexing): renamed \"Tableau extracts, scheduled to your own bucket\" (tableau extracts, 110/mo, was body-only); anchor #tr-extract unchanged."
+    }
+   }
   },
   "/for/agencies": {
    "status": "rewritten",
@@ -2622,10 +2630,6 @@
      "text": "A release per client, with a version you can name in the invoice itself"
     },
     {
-     "level": "H2",
-     "text": "What you embed in the client's portal: the API today, the dashboard planned"
-    },
-    {
      "level": "H3",
      "text": "Ships today The endpoint in their portal"
     },
@@ -2666,7 +2670,8 @@
     "anchors": {},
     "headings": {
      "What you embed in the client's portal: the API today, the dashboard next month": "#120: removed the release-date promise; replaced by \"What you embed in the client's portal: the API today, the dashboard planned\" without changing the section anchor.",
-     "Roadmap · October 2026 The dashboard beside it": "#120: removed the release-date promise; replaced by \"Planned The dashboard beside it\" without changing the section anchor."
+     "Roadmap · October 2026 The dashboard beside it": "#120: removed the release-date promise; replaced by \"Planned The dashboard beside it\" without changing the section anchor.",
+     "What you embed in the client's portal: the API today, the dashboard planned": "173 (SEO coverage before indexing): renamed \"White-label reporting in the client's portal: the API today, the dashboard planned\" (white label reporting, 320/mo); anchor #ag-embed unchanged."
     }
    }
   },
@@ -2769,7 +2774,7 @@
    }
   },
   "/for/analysts": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "an-title",
     "an-ask",
@@ -2781,10 +2786,6 @@
     "an-next"
    ],
    "headings": [
-    {
-     "level": "H1",
-     "text": "The AI SQL assistant with governance: ask in your words, get a pipeline you can read"
-    },
     {
      "level": "H2",
      "text": "Ask in your words, get a pipeline you can read"
@@ -2849,7 +2850,13 @@
      "level": "H2",
      "text": "Give the agent your Monday question"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "The AI SQL assistant with governance: ask in your words, get a pipeline you can read": "173 (SEO coverage before indexing): H1 retargeted to \"The AI data analyst with governance: …\" (ai data analyst, 720/mo, owner ruling 2026-09-18); \"AI SQL assistant\" stays in the lede; anchor #an-title unchanged."
+    }
+   }
   },
   "/how-it-works": {
    "status": "rewritten",
@@ -3073,7 +3080,7 @@
    }
   },
   "/demo-data": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "dd-title",
     "dd-ships",
@@ -3090,10 +3097,6 @@
     {
      "level": "H1",
      "text": "The demo data, table by table"
-    },
-    {
-     "level": "H2",
-     "text": "Published artifacts, not fixtures"
     },
     {
      "level": "H2",
@@ -3159,7 +3162,13 @@
      "level": "SUMMARY",
      "text": "Does the demo need internet access?"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Published artifacts, not fixtures": "173 (SEO coverage before indexing): renamed \"A sample SQL database you can load in one command — published artifacts, not fixtures\" (sample sql database, 320/mo); anchor #dd-ships unchanged."
+    }
+   }
   },
   "/pricing": {
    "status": "rewritten",
@@ -3235,7 +3244,7 @@
    }
   },
   "/semantic-layer": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "sl-title",
     "sl-what",
@@ -3258,14 +3267,6 @@
     {
      "level": "H2",
      "text": "What a semantic layer is, in the searcher's words"
-    },
-    {
-     "level": "H2",
-     "text": "Why written models rot"
-    },
-    {
-     "level": "H2",
-     "text": "A semantic model you do not write"
     },
     {
      "level": "H3",
@@ -3321,10 +3322,6 @@
     },
     {
      "level": "H2",
-     "text": "How this differs from the dbt semantic layer and Cube"
-    },
-    {
-     "level": "H2",
      "text": "For the engineer: the tools, the kinds, the rules"
     },
     {
@@ -3355,7 +3352,15 @@
      "level": "SUMMARY",
      "text": "Does it work on my own warehouse?"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Why written models rot": "173 (SEO coverage before indexing): renamed \"Why a written semantic model rots\" so \"semantic model\" keeps a heading after the next rename; anchor #sl-rot unchanged.",
+     "A semantic model you do not write": "173 (SEO coverage before indexing): renamed \"A semantic data model you do not write\" (semantic data model, part of 3,600/mo); anchor #sl-learned unchanged.",
+     "How this differs from the dbt semantic layer and Cube": "173 (SEO coverage before indexing): renamed \"… the dbt semantic layer and the Cube semantic layer\" (cube semantic layer, 390/mo); anchor #sl-compare unchanged."
+    }
+   }
   },
   "/docs": {
    "status": "doc"
@@ -3429,5 +3434,10 @@
   "/docs/readme": {
    "status": "doc"
   }
+ },
+ "additions": {
+  "/use-cases": "145 §2: the use-cases hub, added by the website transition after the 2026-09-16 baseline was frozen.",
+  "/explore": "145 §2: the generated directory, added by the website transition after the baseline was frozen.",
+  "/compare/dagster-vs-airflow": "173 §B: the Dagster vs Airflow editorial comparison (dagster vs airflow 390/mo, prefect vs airflow 210, airflow vs dagster 140, dagster alternative 70), added before indexing."
  }
 }

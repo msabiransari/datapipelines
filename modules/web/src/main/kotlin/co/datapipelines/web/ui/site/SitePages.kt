@@ -64,6 +64,18 @@ const val RELEASE_STAGE: String = "Public beta — self-hosted, AGPL, actively d
 /** The call to action that follows [RELEASE_STAGE], linking to the support section on `/faq`. */
 const val RELEASE_STAGE_CTA: String = "Report what breaks."
 
+/**
+ * The one-paragraph description of the product (173 §C.1) — the homepage's
+ * `SoftwareApplication.description` and the blockquote summary of `/llms.txt`. The JSON-LD
+ * block in `index.html` carries the same sentence as literal JSON (it is data, not a
+ * template expression); `SiteJsonLdTest` holds the two equal, so the summary an agent reads
+ * and the one a crawler reads cannot drift apart.
+ */
+const val SITE_SUMMARY: String =
+    "Open-source, self-hosted data pipelines for small and medium-sized organisations: an AI agent authors " +
+        "reusable SQL pipelines over your existing databases and S3 data, a person reviews and releases them, " +
+        "and the released version serves an API or a dataset for your BI tool."
+
 /** The host of [SITE_ORIGIN], without the scheme — what a request's server name is compared against. */
 val SITE_ORIGIN_HOST: String = SITE_ORIGIN.removePrefix("https://")
 
@@ -119,19 +131,51 @@ data class EngineFacts(
     val demo: String?,
     /** Where [demo] is shown, or null when no seeded pipeline reads this engine. */
     val demoHref: String?,
+    /**
+     * The other names a searcher types for this engine's MCP server (173 §A) — "PostgreSQL"
+     * for Postgres, "MSSQL" for SQL Server — rendered as ONE sentence in the page's opening,
+     * from the row. A row field rather than a template `if` because the engine page is one
+     * template over these rows; a name the measured study has no volume for stays empty.
+     * `SiteKeywordCoverageTest` pins each alias to its page.
+     */
+    val searchAliases: List<String> = emptyList(),
 ) {
     /**
      * The indefinite article [displayName] takes in prose (160): "an Oracle connection",
      * "an H2 datasource", "a MySQL connection". H2 is pronounced aitch, so it takes "an"
      * despite the consonant letter; the rest follow their initial letter.
      */
-    val article: String
+    val article: String get() = articleFor(displayName)
+
+    /**
+     * The one sentence the engine page's opening renders for [searchAliases] (173 §A) —
+     * "If you searched for a PostgreSQL MCP server, this is that page: the names differ,
+     * the server does not." — or the empty string for a row with no alias, which the
+     * template treats as "no paragraph".
+     */
+    val searchAliasSentence: String
         get() =
+            if (searchAliases.isEmpty()) {
+                ""
+            } else {
+                val names = searchAliases.joinToString(" or ") { "${articleFor(it)} $it MCP server" }
+                "If you searched for $names, this is that page: the names differ, the server does not."
+            }
+
+    private companion object {
+        /**
+         * The indefinite article a name takes in prose (160): "an Oracle connection", "an
+         * H2 datasource", "an MSSQL MCP server", "a MySQL connection". H2 and MSSQL are
+         * pronounced letter-first (aitch, em), so they take "an" despite the consonant
+         * letter; the rest follow their initial letter.
+         */
+        fun articleFor(name: String): String =
             when {
-                displayName == "H2" -> "an"
-                displayName.first().uppercase() in setOf("A", "E", "I", "O", "U") -> "an"
+                name == "H2" || name == "MSSQL" -> "an"
+                name.first().uppercase() in setOf("A", "E", "I", "O", "U") -> "an"
                 else -> "a"
             }
+    }
 }
 
 /**
@@ -235,6 +279,24 @@ object SitePages {
                 "An honest comparison: dbt transforms inside one warehouse and owns the modelling layer. " +
                     "We join across operational databases without landing anything.",
             view = "site/compare-dbt",
+        )
+
+    /**
+     * 173 §B — "dagster vs airflow" (390) + "prefect vs airflow" (210) + "airflow vs dagster"
+     * (140) + "dagster alternative" (70): an EDITORIAL comparison of the two orchestrators,
+     * with Prefect placed honestly, and datapipelines mentioned once as the thing that
+     * composes with either. Every fact about the three products is cited to their own
+     * documentation by URL in the template's claim comments — nothing about them from memory.
+     */
+    val COMPARE_DAGSTER_AIRFLOW =
+        SitePage(
+            path = "/compare/dagster-vs-airflow",
+            title = "Dagster vs Airflow — when to choose each, and where Prefect sits",
+            // ≤ 155 (SiteSeoMetaTest): the three one-line definitions and the promise.
+            description =
+                "Airflow schedules task graphs, Dagster models the data assets those tasks produce, " +
+                    "Prefect turns Python functions into flows. Which fits which team.",
+            view = "site/compare-dagster-vs-airflow",
         )
 
     /** "federated query" (170) + "data virtualization tool" (170, $48 CPC). */
@@ -401,11 +463,15 @@ object SitePages {
             view = "site/for-saas-teams",
         )
 
-    /** "one analyst five databases" + "join data across databases without etl" + "ai sql assistant with governance". */
+    /**
+     * "ai data analyst" (720/mo, $22.70 — the title and H1 since 173, owner ruling 2026-09-18)
+     * + "one analyst five databases" + "ai sql assistant with governance" (the body keeps
+     * "AI SQL assistant"; "sql assistant" 50/mo is pinned there).
+     */
     val FOR_ANALYSTS =
         SitePage(
             path = "/for/analysts",
-            title = "The AI SQL assistant with governance — one analyst, five databases",
+            title = "AI data analyst with governance — one analyst, five databases",
             description =
                 "Ask in your words, get a pipeline you can read: the agent drafts the SQL, the join crosses " +
                     "engines in a scratch database, a release makes it an API.",
@@ -540,6 +606,8 @@ object SitePages {
                 jdbcUrlExample = "jdbc:postgresql://db.internal:5432/analytics",
                 demo = "nyc/mobility/revenue_by_borough",
                 demoHref = "/federated-query",
+                // "postgresql mcp server" shares the 720/mo with "postgres mcp server" (173).
+                searchAliases = listOf("PostgreSQL"),
             ),
             EngineFacts(
                 slug = "sql-server",
@@ -552,6 +620,8 @@ object SitePages {
                 jdbcUrlExample = "jdbc:sqlserver://db.internal:1433;databaseName=analytics",
                 demo = null,
                 demoHref = null,
+                // "mssql mcp server" (210/mo); "sql server mcp server" (110) is the title itself (173).
+                searchAliases = listOf("MSSQL"),
             ),
             EngineFacts(
                 slug = "mysql",
@@ -651,6 +721,7 @@ object SitePages {
                 TEXT_TO_SQL_AGENT,
                 COMPARE_AIRFLOW,
                 COMPARE_DBT,
+                COMPARE_DAGSTER_AIRFLOW,
                 FEDERATED_QUERY,
                 DP_LAKE,
                 FAQ,

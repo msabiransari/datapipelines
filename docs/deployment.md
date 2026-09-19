@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.22
+**Status:** v1.23
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-19
 
 ---
 
@@ -403,7 +403,8 @@ Since v1.4 the app serves the marketing site and the documentation itself — th
 - **`GET /dashboard`** — the signed-in dashboard, moved off `/`. There is no auto-redirect: signed-in users hitting `/` get the marketing page.
 - **`GET /docs`, `GET /docs/{slug}`** — the packaged spec set (`docs/*.md` minus the contributor/research exclusions, packaged by `processResources` in `modules/web/build.gradle.kts`). **Public since 073**: the viewer renders Markdown out of the jar and reaches no principal, no workspace and no datastore, and the identical content is already public in the AGPL repository — so exposing it moves ~25 pages of documentation into this domain's search index instead of GitHub's. Anonymous readers get the public site chrome; signed-in readers keep the application chrome.
 - **`GET /mcp-server-for-sql-databases`, `/mcp-server/{engine}`, `/add-mcp-server-to-claude-code`, `/ai-data-pipeline`, `/text-to-sql-agent`, `/compare/{airflow,dbt}`, `/federated-query`** — the intent-cluster pages (073), same shape as `/`: GET-only, anonymous, constant content, no database. See [UI Screens §4.15](ui-screens.md#415-marketing-site-public).
-- **`GET /robots.txt`, `GET /sitemap.xml`** — crawler surfaces (073). `robots.txt` is a static file; `sitemap.xml` is generated from the page registry and the packaged doc slugs, with `lastmod` taken from `build-info.properties` when it is on the classpath.
+- **`GET /robots.txt`, `GET /sitemap.xml`** — crawler surfaces (073). `robots.txt` is a static file; `sitemap.xml` is generated from the page registry and the packaged doc slugs, with no `lastmod` (145 §7 — a build timestamp on every URL read as "every page changed" on every deploy).
+- **`GET /llms.txt`, `GET /llms-full.txt`, `GET /docs/{slug}.md`** — the agent surface (173): the llmstxt.org index and full text generated from the same two registries as the sitemap, and every packaged doc as raw Markdown with its links rewritten. Same shape as the sitemap — GET-only, anonymous, no database — and in the allowlist with their reasons ([Auth §8.3](auth.md#83-public-endpoints-no-auth-required)). See [UI Screens §4.15a](ui-screens.md#415a-crawler-surfaces-073).
 - **Public-surface defence is cache headers, not a rate limiter.** `/` is `Cache-Control: public, max-age=300`; `/site/**` is public with a 1-hour TTL plus `Last-Modified` revalidation. The login rate limiter is deliberately NOT applied here (033/D1): the content is constant between deploys, so a shared-cache TTL costs nothing per request — and the T46 remoteAddr-keying concern is closed regardless: the limiter now resolves the CLIENT address through `datapipelines.auth.trusted-proxies` (§6.2), so pointing it at `/` would no longer create an LB-address-wide bucket.
 - **Allowlist.** `/` and `/site/**` join the `permitAll` list in `SecurityConfig` with their reasons inline; 073 added the seven cluster-page matchers (enumerated, not globbed), `/docs` + `/docs/*`, `/robots.txt` and `/sitemap.xml`, each with its own comment. Nothing else was widened, and `anyRequest().authenticated()` still closes the list.
 
@@ -412,7 +413,7 @@ Since v1.4 the app serves the marketing site and the documentation itself — th
 Indexing is not automatic and is not a deploy step — it is a one-time verification plus an occasional check.
 
 1. **Verify the domain** in [Google Search Console](https://search.google.com/search-console) (and Bing Webmaster Tools, if you care about it). Use the **DNS TXT** method: it verifies the whole domain including subdomains, and it survives redeploys — an HTML-file method would need the file added to `static/`, which is a code change for a DNS problem. Do this **before** any launch announcement, so the first crawl after the first inbound links is already attributed.
-2. **Submit `https://<your-host>/sitemap.xml` once.** It regenerates on every request from the page registry and the packaged docs, so a page added in a later release is in it the moment that release is deployed — there is nothing to resubmit.
+2. **Submit `https://<your-host>/sitemap.xml` once.** It regenerates on every request from the page registry and the packaged docs, so a page added in a later release is in it the moment that release is deployed — there is nothing to resubmit. `/llms.txt` needs no submission anywhere: an agent or an AI crawler fetches it by convention at the root, and it is generated from the same registries, so it is current the moment the sitemap is.
 3. **`robots.txt` allows everything**, and deliberately lists no private paths: it is a public file, so naming internal routes in it advertises them. What keeps the private surface private is `SecurityConfig`'s `anyRequest().authenticated()`, not this file.
 4. **A self-hosted deployment emits `datapipelines.co` canonicals.** That is deliberate — `rel="canonical"` names the one address that should be indexed, and a private instance asking Google to index it is the failure mode the tag exists to prevent. If you WANT your own deployment indexed under your own domain, change `SITE_ORIGIN` in `modules/web/.../ui/site/SitePages.kt` and rebuild.
 5. **What to look at afterwards.** Coverage (are the doc pages indexed?), Performance filtered to `/mcp-server/` (are the engine pages taking their measured queries?), and any Core Web Vitals note. Nothing here needs a schedule; a look a month after launch and a look a quarter later is the whole practice.
@@ -958,6 +959,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v1.23 | 173 (#173) the agent surface before indexing | §6.7: `/llms.txt`, `/llms-full.txt` and `/docs/{slug}.md` listed beside the crawler surfaces; the Search Console note says llms.txt needs no submission; the sitemap bullet corrected — `lastmod` has been absent since 145, not read from `build-info.properties`. |
 | 2026-09-17 | v1.22 | Writable temporary storage (#133) | §6.4: disk-backed `/tmp` emptyDir with optional size limit while preserving the read-only root filesystem; LAKE disk sizing and cleanup requirements. |
 | 2026-09-14 | v1.21 | 137 mail notices | §5.1: the first-admin story no longer says "no SMTP" — with `DATAPIPELINES_MAIL_HOST` + `_FROM` set the one-time credential is emailed to the user and sys-ops (`DATAPIPELINES_MAIL_OPS_TO`) is told about every new user ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)); the variables are catalogued in [Configuration §3.27](configuration.md#327-mail) and named in `deploy/secrets.env.example`, per this doc's no-restated-keys rule. |
 | 2026-09-10 | v1.20 | 109 §E mobility v7 | **The nyc family pins `SAMPLE_VERSION=v7`** — a new immutable version directory carrying ONE change over v6: the `trips` table gains the composite index `(pu_location_id, pickup_date)` (`idx_trips_pu_location_pickup_date`, DDL beside the two singles), measured ~90× on the year-2024 airport shape (8.1 s sized seq scan → 0.09 s index-only). The other three artifacts are byte-identical v6 copies and every table content-checksum is unchanged — the v2 precedent's restore-and-redump shape. The v7 set (pg-trips.dump 117,733,060 bytes, sha256 `02627d0846…`, plus manifest) is handed to the owner in `handbacks/109-artifacts/mobility-v7/` for publishing; a fresh `--demo nyc` start needs v7 published to load. |

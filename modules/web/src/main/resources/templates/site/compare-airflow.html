@@ -20,7 +20,8 @@
         The short version: if what you need is a scheduler that orchestrates work across your whole platform, use
         Airflow. It is mature, it is the standard, and we are not trying to replace it. We are a narrower thing —
         SQL pipelines across several operational databases, authored by an agent and run under governed
-        credentials — and the two overlap less than the phrase "data pipeline" suggests.
+        credentials — and the two overlap less than the phrase "data pipeline" suggests. Read this as an
+        alternative to Airflow only for that narrow job, never for the platform.
       </p>
     </div>
   </section>
@@ -87,6 +88,7 @@
         view, and the SQL that spans your operational databases stays here, versioned and governed.
       </p>
       <p><a th:href="@{/compare/dbt}">The dbt comparison &rarr;</a> &middot;
+         <a th:href="@{/compare/dagster-vs-airflow}">Dagster vs Airflow, and where Prefect sits &rarr;</a> &middot;
          <a th:href="@{/federated-query}">The cross-database join &rarr;</a> &middot;
          <a th:href="@{/docs/rest-api}">REST API specification &rarr;</a></p>
     </div>

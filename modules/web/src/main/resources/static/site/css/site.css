@@ -236,9 +236,19 @@ h2,
   line-height: 1.2;
 }
 
-h3 {
+h3,
+.ds-subheadline {
   font-size: var(--site-text-h3);
   font-weight: var(--weight-bold);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--site-tracking-h3);
+}
+
+/* 173: an h2 that is a section's OUTLINE entry but sits inside another h2's block (the
+   per-client config blocks on the client how-to page) — the h3 scale, so four of them in
+   one section read as steps, not as four sections. */
+h2.ds-subheadline {
+  font-size: var(--site-text-h3);
   line-height: var(--leading-snug);
   letter-spacing: var(--site-tracking-h3);
 }

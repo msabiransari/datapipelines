@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.22 (revised — see Change Log)
+**Status:** v2.23 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-19
 
 ---
 
@@ -1072,11 +1072,13 @@ Two things are deliberately **not** rows in this table:
 | `/use-cases` | Site v3 hub page: GET-only constant content, no datastore and no principal on the request. | 145 |
 | `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | 145 |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
-| `/docs/*` | One packaged spec per slug, rendered from the jar; the same text is already public on GitHub. | 073 |
+| `/docs/*` | One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub. | 073 |
 | `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |
 | `/skill/*` | The skill's reference files, packaged in the jar and identical to the public AGPL repository's text. | 095 |
 | `/robots.txt` | Crawler infrastructure: a document that is meaningless unless it is readable without a login. | 073 |
 | `/sitemap.xml` | Generated from the page registry and packaged doc slugs; a sitemap behind auth indexes nothing. | 073 |
+| `/llms.txt` | The llms.txt index, generated from the page registry and the docs catalog; an agent index behind auth indexes nothing. | 173 |
+| `/llms-full.txt` | The full llms.txt: every packaged doc's Markdown, already public at its own .md route and on GitHub. | 173 |
 | `/health` | Liveness probe for orchestrators, which present no credential; flattened UP/DOWN plus version only. | P3d |
 | `/ready` | Readiness probe for orchestrators, which present no credential; flattened UP/DOWN plus version only. | P3d |
 | `/info` | Build info (version, build time, commit) — the deployment's own identity, no principal data. | P3d |
@@ -1479,6 +1481,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v2.23 | 173 (#173) the agent surface | §8.3: `/llms.txt` and `/llms-full.txt` join the allowlist (generated from the page registry and the docs catalog, no datastore, no principal — meaningless behind a login, like the sitemap); the `/docs/*` reason names the raw `.md` twin the same glob already covers. `PublicPathsTest` 41 → 43 rows. |
 | 2026-09-19 | v2.22 | 172 (#172) endpoint URL shape | §7.6/§7.7: the published-endpoint surface is `/api/<category>/<version>/<path…>` (R-EP5) — the `endpoint`-kind confinement follows the FIRST segment of the path (reserved: `v[0-9]+`, `api`), never a literal prefix. No scope, role or kind rule changed; the route family an endpoint key reaches is the same set of URLs under a new shape. |
 | 2026-09-17 | v2.21 | 158 (#121) mail connect retry | §5A.8 step 3: a **connect** failure (the connection never opened — the one class that cannot have delivered) is retried in place, bounded (3 attempts, 250 ms / 1 s backoff, `mail.send_retry` logged per retry); anything past connect stays terminal at once — the never-twice rule for password mails is unchanged. The claim row and audit reflect the final outcome only. |
 | 2026-09-17 | v2.20 | SSE response headers (#131) | §8.1: configure eager security headers before asynchronous response handoff; retain security defaults and explicit application caching. Guarded at the configured filter boundary and by real HTTP/OIDC tests. |

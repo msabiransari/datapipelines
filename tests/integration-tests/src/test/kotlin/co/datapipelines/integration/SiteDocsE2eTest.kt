@@ -6,6 +6,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import io.restassured.response.Response
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -30,7 +31,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - `/robots.txt` and `/sitemap.xml` answer anonymously, and EVERY `<loc>` in the sitemap
  *    answers 200 anonymously — the sweep that makes a generated sitemap trustworthy;
  *  - `/` and the `/site/` assets carry `Cache-Control: public` (033/D1: cache headers, NOT the
- *    login rate limiter — OPEN-ITEMS T46).
+ *    login rate limiter — OPEN-ITEMS T46);
+ *  - 173: `/llms.txt`, `/llms-full.txt` and every `/docs/{slug}.md` answer anonymously as
+ *    Markdown, and every site-relative link in the served Markdown walks to a 200 — the
+ *    sweep that makes the agent surface trustworthy the way the sitemap sweep does the HTML.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -202,6 +206,81 @@ class SiteDocsE2eTest {
         missing.jsonPath().getString("error.details.reason") shouldBe "skill_reference_not_found"
     }
 
+    /**
+     * 173 §C — the agent surface, at the wire and ANONYMOUS: the llms pair and every doc's
+     * Markdown twin the index links.
+     */
+    @Test
+    fun `llms-txt and every markdown doc it links answer anonymously as markdown`() {
+        val llms = anonymous("/llms.txt")
+        llms.statusCode shouldBe 200
+        llms.contentType shouldContain "text/markdown"
+        llms.header("Cache-Control") shouldContain "public"
+        llms.asString() shouldContain "# datapipelines.co"
+
+        val full = anonymous("/llms-full.txt")
+        full.statusCode shouldBe 200
+        full.contentType shouldContain "text/markdown"
+
+        val served = markdownTwins()
+        served.filterValues { it.statusCode != 200 || !it.contentType.contains("text/markdown") }.keys shouldBe emptySet()
+    }
+
+    /**
+     * 173 §C.2 — the rewrite's promise at the wire: every site-relative link in the served
+     * Markdown walks to a 200, the HTML page names its twin, and Accept negotiation on the
+     * HTML route reaches the same bytes.
+     */
+    @Test
+    fun `every link in the served markdown resolves, and the html page negotiates its twin`() {
+        val served = markdownTwins()
+        val walked = mutableSetOf<String>()
+        val dangling =
+            served.values.flatMap { response ->
+                RELATIVE_LINK
+                    .findAll(response.asString())
+                    .map { it.groupValues[1].substringBefore('#') }
+                    .filter { walked.add(it) }
+                    .filter { path -> anonymous(path).statusCode != 200 }
+                    .toList()
+            }
+        check(walked.size >= MIN_WALKED) { "the markdown walk followed only ${walked.size} links" }
+        dangling shouldBe emptyList()
+
+        val page =
+            given()
+                .port(port)
+                .accept("text/html")
+                .`when`()
+                .get("/docs/auth")
+        page.asString() shouldContain "rel=\"alternate\" type=\"text/markdown\" href=\"/docs/auth.md\""
+        val negotiated =
+            given()
+                .port(port)
+                .accept("text/markdown")
+                .`when`()
+                .get("/docs/auth")
+        negotiated.statusCode shouldBe 200
+        negotiated.contentType shouldContain "text/markdown"
+        negotiated.asString() shouldBe served.getValue("/docs/auth.md").asString()
+    }
+
+    /** Every `.md` twin `/llms.txt` links, fetched anonymously — the non-vacuity floor is checked here. */
+    private fun markdownTwins(): Map<String, Response> {
+        val docLinks = MD_LINK.findAll(anonymous("/llms.txt").asString()).map { it.groupValues[1] }.toSet()
+        check(docLinks.size >= MIN_DOC_LINKS) { "llms.txt linked only ${docLinks.size} markdown docs" }
+        return docLinks.associateWith { anonymous(it) }
+    }
+
+    /** An anonymous GET with no Accept header, redirects not followed. */
+    private fun anonymous(path: String): Response =
+        given()
+            .port(port)
+            .redirects()
+            .follow(false)
+            .`when`()
+            .get(path)
+
     @Test
     fun `signed in, the dashboard and the operations manual render`() {
         seedUser()
@@ -276,6 +355,16 @@ class SiteDocsE2eTest {
 
         /** Non-vacuity floor for the reference sweep: the split landed nine. */
         private const val MIN_SKILL_REFERENCES = 8
+
+        /** 173: a `.md` twin linked from llms.txt — `(https://datapipelines.co/docs/<slug>.md)`. */
+        private val MD_LINK = Regex("""\(https://datapipelines\.co(/docs/[a-z0-9-]+\.md)\)""")
+
+        /** 173: a site-relative Markdown link destination, fragment included. */
+        private val RELATIVE_LINK = Regex("""\]\((/[^)\s]+)\)""")
+
+        /** ~25 packaged docs; a walk over fewer than this is a broken regex, not a small site. */
+        private const val MIN_DOC_LINKS = 15
+        private const val MIN_WALKED = 15
 
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"

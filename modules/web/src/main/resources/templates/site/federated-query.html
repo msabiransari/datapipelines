@@ -131,7 +131,7 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
           <!-- claim: docs/ROADMAP.md §2 -->
           <strong>DuckDB as a staging engine is planned, not shipped.</strong> H2 is the staging engine today; the abstraction exists so a larger analytical engine can take its place.
         </li>
-        <li><strong>This is not data virtualization as a platform.</strong> There is no unified catalog, no semantic layer, no query planner spanning engines. There is a pipeline that reads several databases and joins their results — which is the part most teams actually needed.</li>
+        <li><strong>This is not data virtualization as a platform, and not a federated query engine.</strong> A federated query engine plans one SQL statement across engines; there is no such planner here, no unified catalog and no query optimiser spanning sources. A cross-database query here is a pipeline: one node per source, each running native SQL where the data lives, and one join node over their results in staging — which is the part most teams actually needed.</li>
         <li><strong>It is not an ETL tool.</strong> Nothing is copied anywhere on a schedule. If you want a result written back to a database, that is a node you add on purpose.</li>
       </ul>
       <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;

@@ -26,6 +26,17 @@ class SiteV2Batch2Controller {
         response: HttpServletResponse,
     ): String = PublicPage.render(model, response, SitePages.COMPARE_POSTGRES_ONLY, faq = SiteFaqsBatch2.COMPARE_POSTGRES_ONLY)
 
+    /**
+     * 173 §B — the Dagster vs Airflow editorial comparison, beside the other two comparison
+     * pages here rather than in [SitePagesController], which sits at detekt's function
+     * ceiling. Same shape: GET, anonymous, constant, under the `/compare/` allowlist glob.
+     */
+    @GetMapping("/compare/dagster-vs-airflow")
+    fun compareDagsterAirflow(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.COMPARE_DAGSTER_AIRFLOW, faq = SiteFaqsCluster.COMPARE_DAGSTER_AIRFLOW)
+
     @GetMapping("/tableau/prep-vs-pipelines-as-code")
     fun tableauPrep(
         model: Model,

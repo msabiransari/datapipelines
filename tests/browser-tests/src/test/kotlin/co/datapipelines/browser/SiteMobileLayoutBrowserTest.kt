@@ -105,9 +105,9 @@ class SiteMobileLayoutBrowserTest : BrowserSuite() {
         const val VIEWPORT_HEIGHT = 844
         const val SITE_ORIGIN = "https://datapipelines.co"
 
-        /** 35 baseline marketing routes + 24 docs routes + the two 145 additions. */
-        const val MIN_ROUTES = 61
-        const val MARKETING_ROUTES = 37
+        /** 35 baseline marketing routes + 24 docs routes + the two 145 additions + the 173 comparison page. */
+        const val MIN_ROUTES = 62
+        const val MARKETING_ROUTES = 38
 
         /** A squeezed text block carries at least this much text in a sliver this thin and tall. */
         const val MIN_TEXT_CHARS = 12

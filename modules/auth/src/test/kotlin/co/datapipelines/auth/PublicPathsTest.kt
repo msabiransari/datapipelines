@@ -61,6 +61,8 @@ class PublicPathsTest {
                 "/skill/*",
                 "/robots.txt",
                 "/sitemap.xml",
+                "/llms.txt",
+                "/llms-full.txt",
                 "/health",
                 "/ready",
                 "/info",
@@ -146,9 +148,10 @@ class PublicPathsTest {
          * `webjars` glob (28 -> 27) when htmx was vendored under `static/vendor`. Site v2 added
          * seven intent-page rows (27 -> 34); batch 2 (111) added the `for` glob (34 -> 35);
          * 115 added the engineering page (35 -> 36); 116 added the demo-data page (36 -> 37);
-         * 119 added the pricing page (37 -> 38) and the semantic-layer page (38 -> 39).
+         * 119 added the pricing page (37 -> 38) and the semantic-layer page (38 -> 39);
+         * 145 the two hub pages (39 -> 41); 173 the llms.txt pair (41 -> 43).
          * (Kotlin block comments nest, so the glob's spelling is written without its star.)
          */
-        const val DOCUMENTED_ROWS = 41
+        const val DOCUMENTED_ROWS = 43
     }
 }

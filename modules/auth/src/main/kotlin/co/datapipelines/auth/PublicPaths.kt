@@ -207,7 +207,7 @@ object PublicPaths {
             ),
             PublicPath(
                 "/docs/*",
-                "One packaged spec per slug, rendered from the jar; the same text is already public on GitHub.",
+                "One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub.",
                 "073",
             ),
             // 095: the agent skill, raw. `/skill.md` and `/skill/<reference>.md` serve the
@@ -239,6 +239,19 @@ object PublicPaths {
                 "/sitemap.xml",
                 "Generated from the page registry and packaged doc slugs; a sitemap behind auth indexes nothing.",
                 "073",
+            ),
+            // 173: the agent-facing index (llmstxt.org). Generated from the same two
+            // registries as the sitemap, by the same kind of controller — no datastore, no
+            // principal — and, like the sitemap, meaningless unless readable without a login.
+            PublicPath(
+                "/llms.txt",
+                "The llms.txt index, generated from the page registry and the docs catalog; an agent index behind auth indexes nothing.",
+                "173",
+            ),
+            PublicPath(
+                "/llms-full.txt",
+                "The full llms.txt: every packaged doc's Markdown, already public at its own .md route and on GitHub.",
+                "173",
             ),
             PublicPath(
                 "/health",

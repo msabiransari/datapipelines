@@ -56,11 +56,17 @@ class DocsCatalog(
         val docs: List<DocEntry>,
     )
 
-    /** A rendered doc: its index entry, the memoized HTML body, and the anchor ids it emits. */
+    /**
+     * A rendered doc: its index entry, the memoized HTML body, the anchor ids it emits, and
+     * (173 §C.2) the raw Markdown with the same §A link rewrite applied — every relative
+     * link resolves to `/docs/{slug}.md` or to GitHub, so the text served at
+     * `/docs/{slug}.md` and concatenated into `/llms-full.txt` carries no dangling href.
+     */
     data class RenderedDoc(
         val entry: DocEntry,
         val html: String,
         val anchors: Set<String>,
+        val markdown: String,
     )
 
     private val rendered: Map<String, RenderedDoc>
@@ -103,6 +109,9 @@ class DocsCatalog(
     /** The memoized render for `GET /docs/{slug}`, or null for an unknown slug. */
     fun render(slug: String): RenderedDoc? = rendered[slug]
 
+    /** The link-rewritten Markdown for `GET /docs/{slug}.md` (173), or null for an unknown slug. */
+    fun markdown(slug: String): String? = rendered[slug]?.markdown
+
     private fun renderDoc(
         slug: String,
         markdown: String,
@@ -136,7 +145,12 @@ class DocsCatalog(
                 }
             },
         )
-        return RenderedDoc(DocEntry(slug, title, groupOf(slug), metaDescription(document)), html, anchors)
+        return RenderedDoc(
+            DocEntry(slug, title, groupOf(slug), metaDescription(document)),
+            html,
+            anchors,
+            rewriteMarkdownLinks(markdown, packagedPaths),
+        )
     }
 
     /**
@@ -351,6 +365,44 @@ class DocsCatalog(
                 "$GITHUB_BLOB_BASE$resolved$fragment"
             }
         }
+
+        /**
+         * 173 §C.2 — the §A rewrite applied to the Markdown SOURCE rather than the parsed
+         * tree, for the raw-Markdown route: every inline link destination goes through
+         * [rewriteHref], and a destination that resolved to a packaged slug points at that
+         * slug's `.md` route (fragment kept), so a reader of the served text — or an agent
+         * following `/llms-full.txt` — lands on Markdown, not on the HTML page. Absolute
+         * URLs and in-page anchors pass through exactly as [rewriteHref] passes them. The
+         * packaged docs use inline links only (no reference-style definitions); the E2E walk
+         * over every served link is what keeps that premise honest.
+         */
+        internal fun rewriteMarkdownLinks(
+            markdown: String,
+            packagedPaths: Set<String>,
+        ): String =
+            INLINE_LINK.replace(markdown) { match ->
+                val destination = match.groupValues[1]
+                val title = match.groupValues[2]
+                "](" + markdownHref(destination, packagedPaths) + title + ")"
+            }
+
+        /** [rewriteHref], then the `.md` route for a packaged slug: `/docs/x#f` becomes `/docs/x.md#f`. */
+        internal fun markdownHref(
+            href: String,
+            packagedPaths: Set<String>,
+        ): String {
+            val rewritten = rewriteHref(href, packagedPaths)
+            if (!rewritten.startsWith(DOCS_ROUTE_PREFIX)) return rewritten
+            val path = rewritten.substringBefore('#')
+            val fragment = if ('#' in rewritten) "#${rewritten.substringAfter('#')}" else ""
+            return "$path$MARKDOWN_SUFFIX$fragment"
+        }
+
+        private const val DOCS_ROUTE_PREFIX = "/docs/"
+        private const val MARKDOWN_SUFFIX = ".md"
+
+        /** `](destination)` or `](destination "title")` — the inline link tail, destination in group 1. */
+        private val INLINE_LINK = Regex("""\]\(([^)\s]+)(\s+"[^"]*")?\)""")
 
         /** Absolute links (web, mail) pass the rewrite untouched. */
         private fun isAbsolute(href: String): Boolean {

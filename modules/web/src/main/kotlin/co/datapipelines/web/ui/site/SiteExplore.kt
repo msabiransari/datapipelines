@@ -17,10 +17,14 @@ import co.datapipelines.web.ui.DocsCatalog
  * pages stay reachable from the hub page (/use-cases) as well as here.
  */
 object SiteExplore {
-    /** One directory entry: the route and the title the searcher would have seen. */
+    /**
+     * One directory entry: the route, the title the searcher would have seen, and (173) the
+     * page's meta description — `/explore` renders the first two, `/llms.txt` all three.
+     */
     data class Link(
         val path: String,
         val title: String,
+        val description: String,
     )
 
     /** One group: a stable id (the section anchor), its heading, one line of purpose, and its links. */
@@ -38,26 +42,26 @@ object SiteExplore {
         val compare = pages.filter(::isComparePage)
         val product = pages.filterNot { isAgentPage(it) || isComparePage(it) }
         val docLinks =
-            listOf(Link("/docs", "Documentation")) +
-                docs.index().flatMap { group -> group.docs.map { Link("/docs/${it.slug}", it.title) } }
+            listOf(Link("/docs", "Documentation", DOCS_INDEX_DESCRIPTION)) +
+                docs.index().flatMap { group -> group.docs.map { Link("/docs/${it.slug}", it.title, it.description) } }
         return listOf(
             Group(
                 id = "product",
                 name = "Understand the product",
                 blurb = "Capabilities, worked examples, trust, pricing and the practical questions before you evaluate it.",
-                links = product.map { Link(it.path, it.title) },
+                links = product.map { Link(it.path, it.title, it.description) },
             ),
             Group(
                 id = "connect",
                 name = "Connect your agent and databases",
                 blurb = "The SQL MCP server, each supported engine's driver and setup, client configuration and the tool list.",
-                links = agent.map { Link(it.path, it.title) },
+                links = agent.map { Link(it.path, it.title, it.description) },
             ),
             Group(
                 id = "compare",
                 name = "Choose the right approach",
                 blurb = "Honest comparisons with the tools you may already run, and how the product works beside Tableau.",
-                links = compare.map { Link(it.path, it.title) },
+                links = compare.map { Link(it.path, it.title, it.description) },
             ),
             Group(
                 id = "docs",
@@ -75,4 +79,9 @@ object SiteExplore {
             page.path == SitePages.MCP_TOOLS.path
 
     private fun isComparePage(page: SitePage): Boolean = page.path.startsWith("/compare/") || page.path.startsWith("/tableau")
+
+    /** The docs index has no registry row; its one-line description is the one `DocsController` publishes. */
+    const val DOCS_INDEX_DESCRIPTION: String =
+        "The operations manual and contracts for datapipelines.co: deployment, auth, datasources, " +
+            "the pipeline contract, templates and the MCP server."
 }
