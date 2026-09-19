@@ -207,7 +207,7 @@ object PublicPaths {
             ),
             PublicPath(
                 "/docs/*",
-                "One packaged spec per slug, rendered from the jar or raw Markdown at its .md twin (173); the same text is already public on GitHub.",
+                "One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub.",
                 "073",
             ),
             // 095: the agent skill, raw. `/skill.md` and `/skill/<reference>.md` serve the

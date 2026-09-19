@@ -1072,7 +1072,7 @@ Two things are deliberately **not** rows in this table:
 | `/use-cases` | Site v3 hub page: GET-only constant content, no datastore and no principal on the request. | 145 |
 | `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | 145 |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
-| `/docs/*` | One packaged spec per slug, rendered from the jar or raw Markdown at its .md twin (173); the same text is already public on GitHub. | 073 |
+| `/docs/*` | One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub. | 073 |
 | `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |
 | `/skill/*` | The skill's reference files, packaged in the jar and identical to the public AGPL repository's text. | 095 |
 | `/robots.txt` | Crawler infrastructure: a document that is meaningless unless it is readable without a login. | 073 |
