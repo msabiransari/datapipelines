@@ -65,7 +65,12 @@ class ReadOnlyPipelineRuleTest {
 
         assertAll(
             { verdict.failures.single().details["node_id"] shouldBe "create" },
-            { verdict.failures.single().message.contains("datasource 'warehouse'") shouldBe true },
+            {
+                verdict.failures
+                    .single()
+                    .message
+                    .contains("datasource 'warehouse'") shouldBe true
+            },
         )
     }
 
@@ -75,7 +80,12 @@ class ReadOnlyPipelineRuleTest {
 
         assertAll(
             { verdict.failures.single().details["node_id"] shouldBe "load" },
-            { verdict.failures.single().message.contains("datasource 'warehouse'") shouldBe true },
+            {
+                verdict.failures
+                    .single()
+                    .message
+                    .contains("datasource 'warehouse'") shouldBe true
+            },
         )
     }
 
@@ -121,7 +131,12 @@ class ReadOnlyPipelineRuleTest {
 
         assertAll(
             { verdict.failures.single().details["node_id"] shouldBe "load" },
-            { verdict.failures.single().message.contains("datasource 'warehouse'") shouldBe true },
+            {
+                verdict.failures
+                    .single()
+                    .message
+                    .contains("datasource 'warehouse'") shouldBe true
+            },
         )
     }
 

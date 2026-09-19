@@ -143,7 +143,10 @@ class ReadOnlyPipelineRule(
         trail: List<String>,
     ): ValidationFailure? =
         when (val source = node.resolvedSource) {
-            is NodeSource.Tempdb -> null
+            is NodeSource.Tempdb -> {
+                null
+            }
+
             is NodeSource.Datasource -> {
                 offending(
                     node,
