@@ -60,12 +60,69 @@ class ReadOnlyPipelineRuleTest {
     }
 
     @Test
-    fun `a DDL node is refused`() {
+    fun `a DDL node against a datasource is refused, naming it`() {
+        val verdict = rule().check(pipeline(node("create", NodeType.DDL, source = "warehouse")), WORKSPACE)
+
+        assertAll(
+            { verdict.failures.single().details["node_id"] shouldBe "create" },
+            { verdict.failures.single().message.contains("datasource 'warehouse'") shouldBe true },
+        )
+    }
+
+    @Test
+    fun `a DML node against a datasource is refused, naming it`() {
+        val verdict = rule().check(pipeline(node("load", NodeType.DML, source = "warehouse")), WORKSPACE)
+
+        assertAll(
+            { verdict.failures.single().details["node_id"] shouldBe "load" },
+            { verdict.failures.single().message.contains("datasource 'warehouse'") shouldBe true },
+        )
+    }
+
+    @Test
+    fun `a DDL node against tempdb is read-only`() {
+        // #171 — CREATE INDEX on a staged table: tempdb is per-execution and discarded with the
+        // run, so the statement cannot outlive the request.
         rule()
-            .check(pipeline(node("create", NodeType.DDL)), WORKSPACE)
+            .check(pipeline(dql("stage", NodeOutput.Tempdb("stg")), node("index", NodeType.DDL, source = "tempdb")), WORKSPACE)
             .failures
-            .single()
-            .details["node_id"] shouldBe "create"
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `a DML node against tempdb is read-only`() {
+        rule()
+            .check(pipeline(dql("stage", NodeOutput.Tempdb("stg")), node("touch_up", NodeType.DML, source = "tempdb")), WORKSPACE)
+            .failures
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `a PIPELINE child carrying a tempdb DDL node is read-only`() {
+        // The transitive case the type-only check could not have distinguished either: the DDL
+        // node three levels down must be judged by ITS OWN source, not the parent's.
+        val resolver =
+            resolver(
+                "child" to pipeline(dql("stage", NodeOutput.Tempdb("stg")), node("index", NodeType.DDL, source = "tempdb")),
+            )
+        ReadOnlyPipelineRule(resolver, MAX_DEPTH)
+            .check(pipeline(pipelineNode("to_child", "child", 1)), WORKSPACE)
+            .failures
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `a PIPELINE child carrying a datasource DML node is refused, with the trail`() {
+        val resolver =
+            resolver(
+                "child" to pipeline(dql("stage", NodeOutput.Tempdb("stg")), node("load", NodeType.DML, source = "warehouse")),
+            )
+        val verdict = ReadOnlyPipelineRule(resolver, MAX_DEPTH).check(pipeline(pipelineNode("to_child", "child", 1)), WORKSPACE)
+
+        assertAll(
+            { verdict.failures.single().details["node_id"] shouldBe "load" },
+            { verdict.failures.single().message.contains("datasource 'warehouse'") shouldBe true },
+        )
     }
 
     @Test
@@ -213,11 +270,12 @@ class ReadOnlyPipelineRuleTest {
         id: String,
         type: NodeType,
         output: NodeOutput? = null,
+        source: String = "pg",
     ) = Node(
         id = id,
         description = "",
         type = type,
-        source = "pg",
+        source = source,
         template = TemplateRef("test/$id.sql", 1),
         output = output,
         dependsOn = emptyList(),

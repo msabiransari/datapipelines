@@ -68,10 +68,11 @@ object EndpointsTools {
                 name = "endpoints_create",
                 description =
                     "Publish a released pipeline as a GET endpoint under /api/x. The pipeline must have a RELEASED " +
-                        "version and must be side-effect-free: every node DQL into tempdb or the caller, transitively " +
-                        "through PIPELINE nodes. A DML/DDL node, or a DQL node writing back to a datasource, is refused " +
-                        "with endpoint.pipeline_not_readonly naming the node — that rule is what makes serving over GET " +
-                        "safe, since GET is retried, preloaded and crawled. " +
+                        "version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL " +
+                        "node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a " +
+                        "registered datasource, or a DQL node writing back to a datasource, is refused with " +
+                        "endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes " +
+                        "serving over GET safe, since GET is retried, preloaded and crawled. " +
                         "path is 1-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a " +
                         "declared parameter; remaining parameters come from the query string. A path that could match " +
                         "the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by " +

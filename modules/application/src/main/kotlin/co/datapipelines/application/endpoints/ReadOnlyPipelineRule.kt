@@ -1,6 +1,7 @@
 package co.datapipelines.application.endpoints
 
 import co.datapipelines.pipeline.Node
+import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.OutputTarget
 import co.datapipelines.pipeline.Pipeline
@@ -28,19 +29,26 @@ import java.util.UUID
  * Every node of the version must be:
  *  - a `DQL` node whose `output.target` is `tempdb` or `caller` — it reads, and it writes only
  *    into the execution's own scratch space or back to the caller; or
+ *  - a `DDL`/`DML` node whose `source` is `tempdb` — it writes, but only into the execution's
+ *    own in-memory H2, created for the run and discarded with it (staging.md §3), so the
+ *    statement cannot outlive the request and has no effect outside it (#171); or
  *  - a `PIPELINE` node whose pinned child satisfies the same rule, transitively; or
  *  - any other type in [READ_ONLY_NODE_TYPES] (see below).
  *
  * A `DQL` node with `output.target: datasource` is a WRITE — the write-back form of pipeline-
  * contract §4.3 — and is refused despite its type, which is exactly the case a type-only check
- * would wave through.
+ * would wave through. Symmetrically, a `DDL`/`DML` node whose `source` names a registered
+ * datasource is a real, durable write outside the run and stays refused — `tempdb` is the only
+ * exemption, named in the refusal message so an author can tell the two cases apart.
  *
- * ## One constant, so a new safe node type is one line
+ * ## One constant, so a new UNCONDITIONALLY safe node type is one line
  *
- * [READ_ONLY_NODE_TYPES] is the whole allowed set. `NodeType.CALCULATOR` (072) is in it: a pure
- * in-memory computation over the context, no datasource at all, so it has no side effect to be
- * safe from. It was admitted at the 074 merge (2026-09-05) — the one-line addition this design
- * anticipated while the two rounds were in flight together.
+ * [READ_ONLY_NODE_TYPES] is the set of types that are safe no matter what `source` they carry.
+ * `NodeType.CALCULATOR` (072) is in it: a pure in-memory computation over the context, no
+ * datasource at all, so it has no side effect to be safe from. It was admitted at the 074 merge
+ * (2026-09-05) — the one-line addition this design anticipated while the two rounds were in
+ * flight together. `DDL`/`DML` are deliberately absent from this set — they are safe only
+ * *conditionally*, by `source`, so [judge] checks them before consulting this constant at all.
  *
  * ## The walk
  *
@@ -101,6 +109,10 @@ class ReadOnlyPipelineRule(
         trail: List<String>,
     ): ValidationFailure? =
         when {
+            node.type == NodeType.DDL || node.type == NodeType.DML -> {
+                judgeStatementSource(node, trail)
+            }
+
             node.type !in READ_ONLY_NODE_TYPES -> {
                 offending(node, trail, "is a ${node.type.wire} node, which writes")
             }
@@ -115,6 +127,29 @@ class ReadOnlyPipelineRule(
 
             else -> {
                 null
+            }
+        }
+
+    /**
+     * The verdict on a `DDL`/`DML` node, by its `source` (#171).
+     *
+     * `tempdb` is the execution's own in-memory H2, created for the run and discarded with it
+     * (staging.md §3) — a statement against it cannot outlive the request, so it cannot make a
+     * `GET` unsafe. Any registered datasource is a real, durable write and stays refused, named
+     * in the message so the author can tell this case apart from an always-refused node type.
+     */
+    private fun judgeStatementSource(
+        node: Node,
+        trail: List<String>,
+    ): ValidationFailure? =
+        when (val source = node.resolvedSource) {
+            is NodeSource.Tempdb -> null
+            is NodeSource.Datasource -> {
+                offending(
+                    node,
+                    trail,
+                    "is a ${node.type.wire} node that writes to datasource '${source.name}', which is a write outside the run",
+                )
             }
         }
 
@@ -201,9 +236,11 @@ class ReadOnlyPipelineRule(
 
     companion object {
         /**
-         * The node types a published endpoint may contain. `PIPELINE` is here because it is a
-         * container, not because it is inherently safe — its child is walked and judged by this
-         * same rule.
+         * The node types a published endpoint may contain UNCONDITIONALLY — safe no matter what
+         * `source` they carry. `PIPELINE` is here because it is a container, not because it is
+         * inherently safe — its child is walked and judged by this same rule. `DDL`/`DML` are
+         * deliberately NOT here (#171): they are safe only when `source` is `tempdb`, which
+         * [judgeStatementSource] checks before this set is ever consulted.
          *
          * **Adding a type is one line.** `NodeType.CALCULATOR` (round 072) is here because it
          * computes over the execution context in memory and touches no datasource, so it cannot

@@ -34,12 +34,16 @@ The `200` body is the `data_ready` payload you already know from `pipelines_exec
 `expires_at`, `ttl_seconds`. `DP-Result-Page-Rows` sizes the inline page.
 
 **Only side-effect-free pipelines can be published.** Every node must be `DQL` into tempdb or
-the caller (or `CALCULATOR`), transitively through `PIPELINE` nodes. A `DML`/`DDL` node — or a
-DQL node writing back to a datasource, which is a write wearing a read's type — is refused with
-`endpoint.pipeline_not_readonly` naming the node. This is not a formality: `GET` is retried on
-timeout, preloaded by browsers and followed by crawlers, so a write behind one of these URLs
-would happen repeatedly and unbidden. The rule is re-checked on every serve, because an endpoint
-pins a pipeline and serves its latest RELEASED version — a later release can change the body.
+the caller (or `CALCULATOR`), a `DML`/`DDL` node whose `source` is `tempdb`, transitively through
+`PIPELINE` nodes. `tempdb` is the execution's own in-memory H2, created for the run and discarded
+with it — a `CREATE INDEX` or similar statement there cannot outlive the request, so it does not
+make `GET` unsafe. A `DML`/`DDL` node against a registered datasource — or a DQL node writing
+back to a datasource, which is a write wearing a read's type — is refused with
+`endpoint.pipeline_not_readonly` naming the node and the datasource. This is not a formality:
+`GET` is retried on timeout, preloaded by browsers and followed by crawlers, so a write behind
+one of these URLs would happen repeatedly and unbidden. The rule is re-checked on every serve,
+because an endpoint pins a pipeline and serves its latest RELEASED version — a later release can
+change the body.
 
 **An unknown query parameter is a `400`, on purpose.** `?start_dt=2024-01-01` on an endpoint
 declaring `start_date` is refused with `endpoint.request.parameter_unknown` rather than ignored.
