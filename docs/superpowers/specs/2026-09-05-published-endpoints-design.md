@@ -110,11 +110,13 @@ ALTER TABLE pipeline_executions ADD CONSTRAINT chk_triggered_via
 ### 4.2 Publish-time validation
 - Pipeline must exist in the endpoint's workspace and have a **released** version.
 - **GET is only for side-effect-free pipelines**: every node of the current released version
-  is `DQL` (with `output.target` in {tempdb, caller}) or `CALCULATOR` (072; admitted at the 074 merge), and every
-  `PIPELINE` node's child satisfies the same rule transitively. Any `DML`/`DDL` node, or a DQL
+  is `DQL` (with `output.target` in {tempdb, caller}) or `CALCULATOR` (072; admitted at the 074 merge), a
+  `DML`/`DDL` node whose `source` is `tempdb` (171 — the execution's own in-memory H2, discarded
+  with the run, so the statement cannot outlive the request), and every `PIPELINE` node's child
+  satisfies the same rule transitively. A `DML`/`DDL` node against a registered datasource, or a DQL
   node writing back to a datasource, refuses publication — `endpoint.pipeline_not_readonly`
-  (409) with the offending node id. Re-checked on every serve (§5.1), because a later release
-  can change the body.
+  (409) with the offending node id and the datasource. Re-checked on every serve (§5.1), because a
+  later release can change the body.
 - Every path variable must name a declared parameter of that version (`endpoint.path_variable_
   unknown`, 400); the pipeline may declare more (they come from the query string).
 - `timeout_seconds` clamped to `datapipelines.endpoints.timeout-min/max-seconds`.

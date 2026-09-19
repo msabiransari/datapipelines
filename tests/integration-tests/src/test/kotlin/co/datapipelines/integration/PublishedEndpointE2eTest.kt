@@ -135,6 +135,26 @@ class PublishedEndpointE2eTest {
             .body("data.rows.size()", equalTo(3))
     }
 
+    @Test
+    fun `a pipeline with a tempdb DDL node publishes and serves — the read-only rule's positive case`() {
+        // #171: `index_stg` is a real CREATE INDEX statement, against `tempdb` — the snow-days
+        // shape the rule used to refuse outright. publishEndpoints() already proved the 201; this
+        // proves the served rows are the indexed table's, read back correctly.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, endpointKey)
+            .`when`()
+            .get("/api/x/nyc/tempdb-ddl")
+            .then()
+            .statusCode(200)
+            .body("rows.size()", equalTo(5))
+            .body("row_count", equalTo(5))
+            .body("has_more", equalTo(false))
+            // Descending by revenue, exactly as the report template ordered the indexed table.
+            .body("rows[0][0]", equalTo("Manhattan"))
+            .body("rows[0][1]", equalTo(300))
+    }
+
     // -------------------------------------------------------------------------------------
     // Request validation (§19.3)
     // -------------------------------------------------------------------------------------
@@ -400,6 +420,8 @@ class PublishedEndpointE2eTest {
         publish("/trade/summary", "test/trade_summary")
         // timeout_seconds = 1 against a 3-second query: the 202 path, deterministically.
         publishWithTimeout("/slow/thing", "test/slow_sleep", 1)
+        // #171 — under /nyc, so the existing endpoint key's binding covers it with no new key.
+        publish("/nyc/tempdb-ddl", "test/tempdb_ddl_endpoint")
     }
 
     private fun publish(
@@ -459,11 +481,19 @@ class PublishedEndpointE2eTest {
         // The multi-instance harness's pg_sleep idea, shortened: long enough to outlive a
         // 1-second endpoint timeout, short enough that the cursor serves within this test.
         template("test/slow.sql", "SELECT pg_sleep(3) AS slept, 1 AS marker")
+        // #171 — the tempdb-DDL shape: stage from Postgres, CREATE INDEX on the staged table (a
+        // real DDL statement, against `tempdb`, exactly the snow-days pipeline's shape), then
+        // read the staged, indexed table back to the caller. Both the index and the report
+        // templates target the H2 tempdb, not Postgres.
+        template("test/tempdb_ddl_stage.sql", "SELECT borough, revenue FROM boroughs ORDER BY revenue DESC")
+        template("test/tempdb_ddl_index.sql", "CREATE INDEX idx_stg_ddl_boroughs_revenue ON stg_ddl_boroughs(revenue)", dialect = "H2")
+        template("test/tempdb_ddl_report.sql", "SELECT borough, revenue FROM stg_ddl_boroughs ORDER BY revenue DESC", dialect = "H2")
     }
 
     private fun template(
         id: String,
         body: String,
+        dialect: String = "POSTGRES",
     ) {
         given()
             .port(port)
@@ -471,7 +501,7 @@ class PublishedEndpointE2eTest {
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .body(
                 """
-                {"id": "$id", "dialect": "POSTGRES", "display_name": "$id",
+                {"id": "$id", "dialect": "$dialect", "display_name": "$id",
                  "description": "074 endpoint E2E fixture.", "imports": [], "body": "$body"}
                 """.trimIndent(),
             ).`when`()
@@ -545,6 +575,25 @@ class PublishedEndpointE2eTest {
              "nodes": [{"id": "insert_row", "description": "A write", "type": "DML",
                         "source": "ep-source", "template": {"id": "test/insert_row.sql", "version": 1},
                         "depends_on": []}]}
+            """.trimIndent(),
+        )
+        // #171 — a DDL node against tempdb is publishable: the snow-days shape (stage, CREATE
+        // INDEX on the staged table, read it back), the case the read-only rule used to over-refuse.
+        pipeline(
+            """
+            {"schema_version": 1, "name": "test/tempdb_ddl_endpoint", "display_name": "Tempdb DDL endpoint",
+             "description": "171 E2E — a DDL node against tempdb is side-effect-free.", "parameters": {},
+             "nodes": [
+               {"id": "stage", "description": "Stage boroughs into tempdb", "type": "DQL",
+                "source": "ep-source", "template": {"id": "test/tempdb_ddl_stage.sql", "version": 1},
+                "output": {"target": "tempdb", "table": "stg_ddl_boroughs"}, "depends_on": []},
+               {"id": "index_stg", "description": "CREATE INDEX on the staged table", "type": "DDL",
+                "source": "tempdb", "template": {"id": "test/tempdb_ddl_index.sql", "version": 1},
+                "depends_on": ["stage"]},
+               {"id": "report", "description": "Read the staged, indexed table back", "type": "DQL",
+                "source": "tempdb", "template": {"id": "test/tempdb_ddl_report.sql", "version": 1},
+                "output": {"target": "caller"}, "depends_on": ["stage", "index_stg"]}
+             ]}
             """.trimIndent(),
         )
     }
