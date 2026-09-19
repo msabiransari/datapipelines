@@ -35,8 +35,9 @@ import org.springframework.web.util.HtmlUtils
  *     engineering depth's H2) is still found.
  *
  * 173 added `additions` to the fixture — every registry route beyond the baseline with the
- * reason it exists — and ten more rewritten routes: the heading renames the measured search
- * phrases needed (`SiteKeywordCoverageTest` pins the new texts), each retired with its reason.
+ * reason it exists — and heading renames on eleven routes (ten newly rewritten): the ones the
+ * measured search phrases needed (`SiteKeywordCoverageTest` pins the new texts), each retired
+ * with its reason.
  *
  * Falsified at birth: removing one engine's registry row named its route here; deleting
  * `id="free-costs"` from the pricing page named the anchor; renaming a comparison page's H2
@@ -186,8 +187,9 @@ class SiteRouteFloorTest {
         const val BASELINE_ROUTES = 59
         const val BASELINE_MARKETING = 35
         const val BASELINE_DOCS = 24
-        // 145 rewrote seven routes; 173 (SEO coverage) renamed headings on ten more for the
-        // measured phrases — every retirement names its phrase and keeps its anchor.
+        // 145 rewrote seven routes; 173 (SEO coverage) renamed headings on eleven routes for the
+        // measured phrases, ten of them not rewritten before (/for/agencies already was) —
+        // every retirement names its phrase and keeps its anchor.
         const val REWRITTEN_ROUTES = 17
         const val MIN_PINNED_HEADINGS = 400
         const val MIN_ANCHORS = 150

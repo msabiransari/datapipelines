@@ -68,9 +68,9 @@ class SitePublicRoutesBrowserTest : BrowserSuite() {
         val LOC = Regex("""<loc>([^<]+)</loc>""")
         val VIEWPORTS = listOf(320 to 568, 390 to 844, 768 to 1024, 1440 to 900)
 
-        /** 35 baseline marketing routes + 24 docs routes + the two 145 additions. */
-        const val MIN_ROUTES = 61
-        const val MARKETING_ROUTES = 37
+        /** 35 baseline marketing routes + 24 docs routes + the two 145 additions + the 173 comparison page. */
+        const val MIN_ROUTES = 62
+        const val MARKETING_ROUTES = 38
 
         /** The page's shape: h1 count, document overflow, the landmarks, and the widest culprits. */
         const val SHAPE_JS =
