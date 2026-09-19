@@ -127,6 +127,46 @@
     </div>
   </section>
 
+  <!-- ============================ INSIDE THE PRODUCT ============================ -->
+  <!--/* 169: the real application captures as a home-page strip. Every picture is a driver
+       photograph of a running demo deployment (ui-screens §4.15 — the screenshots are a
+       command, not a folder); nothing a reader could mistake for a screenshot is
+       illustrated, composited or retouched. The gallery with every remaining capture is
+       /how-it-works#application. The first image loads eagerly (it sits just under the
+       fold on most screens); the rest are lazy. */-->
+  <section class="section" id="product-strip" aria-labelledby="strip-title">
+    <div class="container">
+      <div class="section-title">
+        <p class="eyebrow">Inside the product</p>
+        <h2 id="strip-title">Real screens from a running deployment.</h2>
+        <p>Photographed by the project's screenshot command — never drawn, composited or retouched.</p>
+      </div>
+      <div class="shot-gallery">
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/editor-hero.png" width="1440" height="1000" alt="The pipeline editor after a completed run: node cards and dependencies on the canvas, the results dock open below.">
+          <figcaption>The pipeline editor after a run — every node's state on the canvas, the returned rows docked below.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Execution detail</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/execution-result.png" width="1440" height="900" loading="lazy" alt="The execution detail page: a SUCCESS badge and a Node Stats table of per-node row counts and durations.">
+          <figcaption>The execution detail: the SUCCESS badge, per-node row counts and durations.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Node details</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/node-inspector.png" width="1440" height="900" loading="lazy" alt="A node's details pane with the rendered SQL behind the step, resolved from its pinned template.">
+          <figcaption>A node's details: the SQL behind the step, rendered from its pinned template.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/api-console.png" width="1440" height="900" loading="lazy" alt="The API screen: keys of each kind, the published endpoints and the MCP server connection card.">
+          <figcaption>The API section: keys by kind, the published endpoints and the MCP connection.</figcaption>
+        </figure>
+      </div>
+      <p class="strip-more"><a class="text-link" th:href="@{/how-it-works#application}">Every screen, on the how-it-works page <span aria-hidden="true">&rarr;</span></a></p>
+    </div>
+  </section>
+
   <!-- ============================ THE VIDEO SLOT ============================ -->
   <!--/* 145 §6: a compact slot reserved for the owner's real recording after testing —
        inputs, execution, returned rows. A labelled placeholder with no play control,

@@ -1681,6 +1681,45 @@ code {
   }
 }
 
+/* Real application captures inside a frame (169): the picture IS the canvas — full
+   width, its declared dimensions honoured for spacing (height:auto keeps the
+   intrinsic ratio while shrinking), never wider than its frame. */
+.media-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  background: var(--site-surface);
+}
+
+/* The capture strips: the home page's under-hero strip and the gallery under the
+   three application frames. Two columns from 64rem, one below — captions stay
+   under each picture at every width, and the frame chrome carries the label. */
+.shot-gallery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  margin-top: var(--space-8);
+}
+
+.shot-gallery .media-bar .tag {
+  margin-left: auto;
+}
+
+.strip-more {
+  margin: var(--space-5) 0 0;
+}
+
+@media (min-width: 64rem) {
+  .shot-gallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shot-gallery .media-bar .tag {
+    margin-left: 0;
+  }
+}
+
 /* The learned-context example: two illustrative facts, one asserted, one observed. */
 .knowledge .grid-2 {
   align-items: center;
