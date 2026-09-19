@@ -473,6 +473,13 @@ object SiteShotsMain {
     ) {
         private val written = mutableListOf<String>()
 
+        /**
+         * The `site` set in the order it photographs. One line per capture, in the order the
+         * state is produced; the publish-endpoint precondition runs before the two shots that
+         * read it. Flat by design — 169's `wanted` gate per line is what detekt's complexity
+         * ceiling counts, and the shot list is exactly the table it should stay.
+         */
+        @Suppress("CyclomaticComplexMethod")
         fun captureAll(): List<String> {
             if (wanted("datasources")) datasources()
             if (wanted("datasource-lake")) datasourceLake()
