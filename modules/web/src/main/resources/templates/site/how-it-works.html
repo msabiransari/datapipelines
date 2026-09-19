@@ -159,31 +159,85 @@
   </section>
 
   <!-- ============================ INSIDE THE APPLICATION ============================ -->
-  <!--/* 145 §6: three labelled placeholders reserved for real captures after the acceptance
-       testing — the pipeline canvas, the execution results, the draft/release workflow. No
-       fabricated screen; the recorded run itself is shown further down the page. */-->
+  <!--/* 169: the three reserved frames hold real captures now, and every remaining shot the
+       driver produces sits in the gallery below. The rule (ui-screens §4.15, the 145
+       handback): nothing a reader could mistake for a screenshot is illustrated, composited
+       or retouched — the captures come from `./gradlew siteShots`, which photographs a real
+       demo deployment and skips a screen that renders broken. */-->
   <section class="section border" id="application" aria-labelledby="application-title">
     <div class="container">
       <div class="section-title">
         <p class="eyebrow">Inside the application</p>
         <h2 id="application-title">See the work behind the result.</h2>
-        <p>These spaces will show the real pipeline canvas, execution results and release workflow after testing is complete.</p>
+        <p>Real screens, photographed from a running demo deployment — the pipeline as it is built, the result as it is checked, and the release a person approves.</p>
       </div>
       <div class="media-gallery">
         <figure class="media-frame" id="shot-pipeline">
-          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Inside the application</span><span class="tag">Screenshot placeholder</span></div>
-          <div class="media-canvas"><div class="media-symbol" aria-hidden="true">&#9639;</div><h3>Read the pipeline.</h3><p>Application capture coming after testing</p></div>
-          <figcaption>Pipeline canvas: source connections, dependencies and the SQL behind each step.</figcaption>
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/editor-hero.png" width="1440" height="1000" loading="lazy" alt="The pipeline editor after a completed run: node cards and dependencies on the canvas, the results dock open below.">
+          <figcaption>The pipeline canvas after a run: source connections, dependencies and the returned rows docked below.</figcaption>
         </figure>
         <figure class="media-frame" id="shot-results">
-          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Inside the application</span><span class="tag">Screenshot placeholder</span></div>
-          <div class="media-canvas"><div class="media-symbol" aria-hidden="true">&#9639;</div><h3>Inspect the result.</h3><p>Application capture coming after testing</p></div>
-          <figcaption>Execution results: returned rows, node timings and visible failure details.</figcaption>
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Execution detail</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/execution-result.png" width="1440" height="900" loading="lazy" alt="The execution detail page: a SUCCESS badge and a Node Stats table of per-node row counts and durations.">
+          <figcaption>The execution detail: the SUCCESS badge, per-node row counts and durations.</figcaption>
         </figure>
         <figure class="media-frame" id="shot-release">
-          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Inside the application</span><span class="tag">Screenshot placeholder</span></div>
-          <div class="media-canvas"><div class="media-symbol" aria-hidden="true">&#9639;</div><h3>Review before release.</h3><p>Application capture coming after testing</p></div>
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Release step</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/release-step.png" width="1440" height="900" loading="lazy" alt="The release dialog on a draft pipeline: its template pins, a configured check passing, and the version the release would lock.">
           <figcaption>Release workflow: the draft, configured checks and the version your team approves.</figcaption>
+        </figure>
+      </div>
+      <div class="shot-gallery">
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/graph-cards.png" width="1440" height="900" loading="lazy" alt="The same editor with the workspace rail open: the graph of node cards and the results dock beneath.">
+          <figcaption>The same run with the workspace rail open — cards, dependencies and the fit-to-view controls.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Datasources</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/datasources.png" width="1440" height="900" loading="lazy" alt="The datasource registry table listing registered databases with their dialects and their latest connection test outcomes.">
+          <figcaption>The datasource registry, with the result of each connection's latest test.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>dp-lake</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/datasource-lake.png" width="1440" height="900" loading="lazy" alt="A dp-lake datasource's registry page with the namespace tree expanded to its Parquet tables.">
+          <figcaption>A lake datasource's registry as a namespace tree, expanded to its tables.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Templates</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/template-explorer.png" width="1440" height="900" loading="lazy" alt="The template explorer: the folder tree on the left, the selected template's version list on the right.">
+          <figcaption>The template explorer — folders on the left, the selected template's versions on the right.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Templates</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/template-used-by.png" width="1440" height="900" loading="lazy" alt="A shared template's detail with its version list and the pipelines pinning each version.">
+          <figcaption>A shared template's version list, with the pipelines pinning each version.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The new-key modal open over the keys table: kind first, then scope, name and expiry.">
+          <figcaption>Minting a key — kind first, then scope, name and expiry.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Executions</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/executions.png" width="1440" height="900" loading="lazy" alt="The execution history table listing past runs with their status and duration, newest first.">
+          <figcaption>The execution history — every run, its status and duration, newest first.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Dark shell</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/shell-dark.png" width="1440" height="900" loading="lazy" alt="The pipelines list rendered in the dark theme.">
+          <figcaption>The same workspace in the dark theme, one setting away.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Workspaces</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/workspaces.png" width="1440" height="900" loading="lazy" alt="The workspaces page listing workspaces and each workspace's members with their roles.">
+          <figcaption>Workspaces and members — the boundaries around who sees what.</figcaption>
+        </figure>
+        <figure class="media-frame">
+          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Failure detail</span><span class="tag">Screenshot</span></div>
+          <img src="/site/img/failure-detail.png" width="1440" height="900" loading="lazy" alt="A deliberately failing pipeline in the editor: the failed node on the canvas and the full error chain in the Errors tab.">
+          <figcaption>A deliberately failing pipeline — the error chain on the record, not hidden.</figcaption>
         </figure>
       </div>
     </div>

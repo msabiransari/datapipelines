@@ -479,12 +479,13 @@ screenshot may be illustrated, composited or retouched.
 
 | Property | Value |
 |---|---|
-| Options | `-PshotsUrl` `-PshotsEmail` `-PshotsPassword` (required), `-PshotsFailingPipeline` (the failure shot), `-PshotsPipeline` / `-PshotsHeroPipeline` (photograph a richer pipeline than the seeded defaults — the graph/inspector shots and the hero), `-PshotsInspectNode` (which node the inspector shot opens), `-PshotsOut`, `-PshotsReview` |
+| Options | `-PshotsUrl` `-PshotsEmail` `-PshotsPassword` (required), `-PshotsFailingPipeline` (the failure shot), `-PshotsPipeline` / `-PshotsHeroPipeline` (photograph a richer pipeline than the seeded defaults — the graph/inspector shots and the hero), `-PshotsInspectNode` (which node the inspector shot opens), `-PshotsOnly=<name[,name…]>` (run only these captures of the `site` set — a two-shot round on its own stack must not overwrite the other PNGs with pixels from a different deployment), `-PshotsOut`, `-PshotsReview` |
 | Account | Must have signed in once (its personal workspace carries the seeded examples) and must not still owe a forced password change — the driver fails loudly rather than photographing the change-password form |
-| Output | Ten PNGs at 1440×900, plus two full-page review captures (1440 and 390) under `build/site-review/` |
-| Determinism | Fixed viewport at scale 1, `prefers-reduced-motion`, an injected stylesheet zeroing animations and carets, `document.fonts.ready` awaited, toasts removed, and clocks blanked — timestamps, relative ages, correlation ids and result TTLs |
+| Output | Fifteen PNGs at 1440×900 or taller (the hero is 1440×1000), plus two full-page review captures (1440 and 390) under `build/site-review/` |
+| Determinism | Fixed viewport at scale 1, `prefers-reduced-motion`, an injected stylesheet zeroing animations and carets, `document.fonts.ready` awaited, toasts removed, and clocks blanked — timestamps, relative ages (including the release dialog's "just now"), correlation ids and result TTLs |
 | Not blanked | **Node run times.** "Run time and rows on each card" is content the page asks for; a card reading `000 ms` would be a retouched screenshot of a product that never ran |
-| Reproducibility | 8 of the 10 are byte-identical across consecutive runs. `graph-cards.png` differs by its node run times, and `executions.png` by the rows the run itself just added — both are the capture photographing state it also creates |
+| Reproducibility | Byte-identical across consecutive runs except `graph-cards.png` (its node run times), `executions.png` (the rows the run itself just added), and the release-step dialog's verdict rows (the check's own run stamps them) |
+| Seeded state | The release-step capture seeds its own small draft (`nyc/review/release_gate` — one node, one release check) through the REST surface, because no seeded pipeline carries `checks[]`; the dialog is photographed, never submitted (release is a human's verb) |
 
 If a screen renders broken, it is **reported, not photographed** — and not edited afterwards.
 
