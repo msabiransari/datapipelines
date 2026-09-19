@@ -24,6 +24,8 @@ import org.springframework.ui.ExtendedModelMap
  * registry — while serving a page with an empty `<title>`.
  */
 class SiteRenderTest {
+    private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
+
     @Test
     fun `the marketing home renders anonymously with the recorded demo run and no unresolved expressions`() {
         val html = SitePageRenderer.render(SitePages.HOME)
@@ -80,11 +82,82 @@ class SiteRenderTest {
         html shouldContain "($count tools)"
         // 133 §B.3: the run is a rendered console and the endpoint a rendered panel.
         html shouldContain "class=\"console\""
-        // 145 §6: three screenshot slots, labelled, no fabricated screen.
+        // 169 §B: the three screenshot slots are filled with real captures — labelled frames,
+        // every picture a driver photograph (see the image guard below).
         listOf("shot-pipeline", "shot-results", "shot-release").forEach { html shouldContain "id=\"$it\"" }
-        html shouldNotContain "<img"
         html shouldNotContain " th:"
         html shouldNotContain ("\${")
+    }
+
+    /**
+     * 169 §E — every `<img>` on the two capture pages resolves to a PACKAGED file under
+     * `static/site/img/`, with its intrinsic size declared (no layout shift), a descriptive
+     * alt, and lazy loading except the home strip's first picture (the one image allowed to
+     * eager-load, as it sits just under the fold). A missing file, a third-party URL, an
+     * undeclared size or a marketing-claim alt is a red build — the page can no longer
+     * accumulate a silent broken picture.
+     */
+    @Test
+    fun `every screenshot on the capture pages is a packaged site image with its size declared`() {
+        val pages = listOf(SitePages.HOME, SitePages.HOW_IT_WORKS).associateWith { SitePageRenderer.render(it) }
+
+        val images =
+            pages.values.sumOf { html -> IMG.findAll(html).count() }
+        check(images >= MIN_IMAGES) { "the image sweep saw only $images images across the two pages" }
+
+        val offenders =
+            pages.flatMap { (page, html) ->
+                IMG.findAll(html).mapNotNull { match ->
+                    val tag = match.value
+                    imageOffender(page.path, tag)
+                }
+            }
+        offenders shouldBe emptyList()
+        // Positive control: the guard sees a real reference and a real absence, not nothing.
+        PACKAGE_PATH.matches("/site/img/editor-hero.png") shouldBe true
+        PACKAGE_PATH.matches("https://cdn.example.com/pic.png") shouldBe false
+    }
+
+    /** The reason [tag] on [path] breaks the capture rules, or null when it complies. */
+    private fun imageOffender(
+        path: String,
+        tag: String,
+    ): String? {
+        val src = ATTR.find(tag)?.groupValues?.get(1) ?: return "$path: an img without src"
+        return packagingOffender(path, src) ?: sizingOffender(path, src, tag)
+    }
+
+    /** The packaged-asset rules: a site capture is the page's ONLY allowed image source. */
+    private fun packagingOffender(
+        path: String,
+        src: String,
+    ): String? =
+        when {
+            !PACKAGE_PATH.matches(src) -> "$path: $src is not a packaged /site/img/ capture"
+            !resolver.getResource("classpath:static$src").exists() -> "$path: $src resolves to no packaged file"
+            else -> null
+        }
+
+    /** The layout and labelling rules: declared size, described, lazy unless the home strip's eager lead. */
+    private fun sizingOffender(
+        path: String,
+        src: String,
+        tag: String,
+    ): String? {
+        val eagerLead = path == SitePages.HOME.path && src == EAGER_ALLOWED
+        val altLength =
+            ALT
+                .find(tag)
+                ?.groupValues
+                ?.get(1)
+                ?.trim()
+                ?.length ?: 0
+        return when {
+            WIDTH_HEIGHT.find(tag) == null -> "$path: $src carries no explicit width and height"
+            altLength < MIN_ALT_CHARS -> "$path: $src carries no descriptive alt"
+            LAZY !in tag && !eagerLead -> "$path: $src is neither lazy nor the home strip's eager lead"
+            else -> null
+        }
     }
 
     @Test
@@ -195,5 +268,21 @@ class SiteRenderTest {
         val CLAIM_COMMENT = Regex("""<!--\s*claim:.*?-->""", RegexOption.DOT_MATCHES_ALL)
         val DOC_PATH = Regex("""docs/[A-Za-z0-9._/-]+\.md""")
         val HEADING = Regex("""<h3>(.*?)</h3>""", RegexOption.DOT_MATCHES_ALL)
+
+        /** 169: the two capture pages carry this many driver photographs between them. */
+        const val MIN_IMAGES = 17
+        const val MIN_ALT_CHARS = 20
+
+        /** A packaged capture reference: nothing but the site's own image directory. */
+        val PACKAGE_PATH = Regex("""/site/img/[a-z0-9-]+\.png""")
+
+        /** The one eager image: the home strip's lead capture, just under the fold. */
+        const val EAGER_ALLOWED = "/site/img/editor-hero.png"
+
+        val IMG = Regex("""<img\b[^>]*>""")
+        val ATTR = Regex("""\bsrc="([^"]*)"""")
+        val ALT = Regex("""\balt="([^"]*)"""")
+        val WIDTH_HEIGHT = Regex("""\bwidth="\d+"[^>]*\sheight="\d+"""")
+        const val LAZY = """loading="lazy""""
     }
 }
