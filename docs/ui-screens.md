@@ -186,6 +186,9 @@ nav packs to the top; the free space below it is deliberate.
   in dark mode. It exists once, as the `partials/brand-mark.html` fragment, and is included by
   both `.app-brand-tile` copies in the rail (expanded and collapsed) and by the public site's
   header and footer, which retired their separate line icon so the product carries one mark.
+  The ceremony screens carry the same fragment since 161 (#161) — the auth layout's brand link
+  and the login card's brand had kept the retired filled tile as inline copies, which is what
+  `BrandMarkParityRenderTest` now renders and what its source sweep of every template forbids.
 - **Counts.** Pipelines and Templates carry a badge from `NavCounts`, one cheap `COUNT(*)`
   each behind a 60-second TTL keyed by workspace. There is no general metadata cache in this
   tree to reuse — `DatasourceMetadataCache` is keyed by datasource name and `AuthCache` lives
@@ -1567,6 +1570,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-19 | v1.58 | 161 (#161) the login page renders the one brand mark | §3.4 brand mark: `login.html`'s card brand and `layouts/auth.html`'s brand link had kept the retired filled-tile SVG inline (163's sweep rendered the rail, the top bar and the site only); both now include `partials/brand-mark.html` exactly as `layouts/default.html` does — no CSS change, the tile and mark are sized by class. `BrandMarkParityRenderTest` renders the login page and the forced-password gate as two more surfaces (each divergence named) and sweeps every template source for the retired rect. |
 | 2026-09-19 | v1.57 | 172 (#172) | The `/api-console` route rationale reworded for the re-rooted published-endpoint tree (R-EP5); no screen, route or verb changed. |
 | 2026-09-17 | v1.55 | 159 / #148 Start runs on a human press; Cancel from the marker | §4.4: the Start disc now starts a run from a HAND's click — the live "Start does nothing" was Cytoscape's mousedown re-rendering the disc under a held button (no click ever dispatched); the press is stopped before Cytoscape. While the run is active the disc is the **Cancel** control (`Cancel execution`, the word Cancel, square glyph, danger fill, never `aria-disabled`, the toolbar's own `cancelExecution()`), Start again on any terminal state; a viewer who may not execute keeps the plain marker; focus survives the disc's re-render. ([Pipeline Editor §5.3b](pipeline-editor.md); `PipelineEditorStartMarkerBrowserTest` presses the disc the way a hand does.) |
 | 2026-09-17 | v1.54 | 151 addendum / #144 boundary redesign | §4.4: Start and End are **shapes** (a disc and a rounded square, the word under them), not pills; **Start runs the pipeline** for a viewer who may execute (`role="button"`, Enter/Space, the toolbar's own `canExecute` stamped as `data-can-execute`, the same `executePipeline()`), `aria-disabled` + pulse while Running…; End's fill is the outcome, with the run clock's elapsed; `#cy-canvas` is `role="group"`. Corrects v1.51's "never executable" reading: the markers are still not executable NODES, but Start is a run TRIGGER. In a browser session viewers may execute (D-R3), so they get the button too. |

@@ -20,12 +20,28 @@ import java.nio.file.Paths
  * with the rail's mark, not a dark rendering — the geometry comes from the same fragment
  * either way, which is exactly what `BrandMarkParityRenderTest` already proved at the source.
  *
- * Files land in `build/reports/163-screenshots/` as `163-<state>.png`.
+ * The login page (161, #161 — "the login dialog still has the old logo") is photographed the
+ * same way: anonymously, so in the deployment's default theme (`ThemeResolver` falls back to
+ * `ui.theme` when there is no signed-in preference to read), and BEFORE the sign-in below,
+ * because a signed-in visitor is redirected off `/login` (090 §C). Its card carries the card's
+ * own brand AND the auth layout's brand link; both are asserted, and the card is captured
+ * first so a regression leaves its picture behind.
+ *
+ * Files land in `build/reports/163-screenshots/` as `163-<state>.png` (`161-login-card.png`
+ * for the login leg).
  */
 class BrandMarkDarkModeShotsBrowserTest : BrowserSuite() {
     @Test
-    fun `the app rail shows the outlined mark in dark mode, and the site header shows the same mark`() {
+    fun `the login card, the app rail in dark mode and the site header all show the outlined mark`() {
         startTrace()
+        page.navigate("$baseUrl/login")
+        val card = page.locator(".app-auth-card").first()
+        card.waitFor()
+        page.waitForFunction("() => document.fonts.ready.then(() => document.fonts.status === 'loaded')")
+        card.screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("161-login-card.png")))
+        assertD1Geometry(page.locator(".app-auth-card-brand .app-brand-tile").first().innerHTML())
+        assertD1Geometry(page.locator(".app-auth-brand .app-brand-tile").first().innerHTML())
+
         val user =
             seedLocalUser(uniqueEmail("brandmark-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
         login(user.email, user.oneTimePassword)

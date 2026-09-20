@@ -69,7 +69,7 @@
          either completes the ceremony or leaves, and /dashboard is exactly the place they
          have not been let into yet. Same mark and tile as the rail's brand (079). */-->
     <a class="app-auth-brand" th:href="@{/}">
-      <span class="app-brand-tile" aria-hidden="true"><svg viewBox="0 0 64 64" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default)"/></svg></span><span>datapipelines</span>
+      <span class="app-brand-tile" aria-hidden="true"><th:block th:replace="~{partials/brand-mark :: mark('app-brand-mark')}"></th:block></span><span>datapipelines</span>
     </a>
 
     <!--/* A <main> WITHOUT the id: `#app-main` is the boosted swap target and nothing on a
