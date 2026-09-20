@@ -199,7 +199,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `author` | `execute`, `read` | Create / modify pipelines and templates | yes |
 | `admin` | `author`, `execute`, `read` | Manage datasources, users, system config | **no** — RBAC round 1 removed it from the key wire (O-2): it was the only scope that bought a key an INSTANCE verb, and instance verbs are human |
 
-**This is the CREDENTIAL axis, and since RBAC round 1 it is an API-key property only** — a session JWT carries no `scopes` claim. What a signed-in person may do is [`Capability`](#8b-capability--what-a-membership-may-do) in the active workspace. Both axes are enforced for a key: its scope AND its issuer's current role ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
+**This is the CREDENTIAL axis, and since RBAC round 1 it is an API-key property only** — a session JWT carries no `scopes` claim. What a signed-in person may do is [`Permission`](#8b-permission--an-action-a-role-may-perform-was-capability) in the active workspace. Both axes are enforced for a key: its scope AND its issuer's current role ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 
 ---
 

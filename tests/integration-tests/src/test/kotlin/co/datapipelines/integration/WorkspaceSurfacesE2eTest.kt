@@ -207,7 +207,7 @@ class WorkspaceSurfacesE2eTest {
             .statusCode(201)
             .body("data.name", Matchers.equalTo(FRESH_WS))
 
-        // `role` left the wire with the column (D-R2): the flags are what a membership is.
+        // `role` is back on the wire with the column (D1, 2026-09-20): the creator is the workspace admin.
         given()
             .port(port)
             .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
@@ -215,8 +215,7 @@ class WorkspaceSurfacesE2eTest {
             .get("/api/v1/workspaces")
             .then()
             .statusCode(200)
-            .body("data.find { it.name == '$FRESH_WS' }.admin", Matchers.equalTo(true))
-            .body("data.find { it.name == '$FRESH_WS' }.author", Matchers.equalTo(true))
+            .body("data.find { it.name == '$FRESH_WS' }.role", Matchers.equalTo("workspace_admin"))
     }
 
     @Test
@@ -370,11 +369,8 @@ class WorkspaceSurfacesE2eTest {
             .post("/api/v1/workspaces/acme/members")
             .then()
             .statusCode(200)
-            // Silence on a permission grant means the least a membership can be: a VIEWER
-            // (D-R11). `role` left the wire with the column — the flags are the membership.
-            .body("data.author", Matchers.equalTo(false))
-            .body("data.promoter", Matchers.equalTo(false))
-            .body("data.admin", Matchers.equalTo(false))
+            // Silence on the role means the least a membership can be: a VIEWER (D-R11).
+            .body("data.role", Matchers.equalTo("viewer"))
 
         given()
             .port(port)
@@ -414,7 +410,7 @@ class WorkspaceSurfacesE2eTest {
             .statusCode(202)
             .body("data.invited", Matchers.equalTo(true))
             .body("data.email", Matchers.equalTo("ghost@nowhere.test"))
-            .body("data.author", Matchers.equalTo(false))
+            .body("data.role", Matchers.equalTo("viewer"))
 
         // The ghost sits in ITS array, and in no member's array.
         given()

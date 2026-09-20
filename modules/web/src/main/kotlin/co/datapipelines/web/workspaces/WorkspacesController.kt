@@ -42,9 +42,13 @@ import java.util.UUID
 class WorkspacesController(
     private val workspaces: WorkspaceService,
 ) {
-    /** §17.1 — the caller's own memberships (design §9 "list-own"; admins list their own too — no merged view). */
+    /**
+     * §17.1 — the caller's own memberships (design §9 "list-own"; admins list their own too — no
+     * merged view). Every member's read: it is the list the switcher draws from, so it sits on
+     * the switcher's row (`WORKSPACE_SWITCH`), not on the page's (D13 narrowed the PAGE).
+     */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
+    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_SWITCH)
     fun list(): ApiResponse<List<Map<String, Any?>>> = ApiResponse.of(workspaces.listOwn(currentPrincipal()).map { it.toResponse() })
 
     /** §17.2 — one workspace. Members share one 403 for unknown and not-a-member; only an admin gets the 404. */

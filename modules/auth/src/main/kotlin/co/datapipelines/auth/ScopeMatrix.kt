@@ -126,10 +126,11 @@ object ScopeMatrix {
 
         /**
          * "The workspaces page and the workspace reads" (§7.6, D13 — 2026-09-20): the
-         * `/workspaces` screen, `GET /api/v1/workspaces`, one workspace, its members. Narrowed
-         * from every member to [Permission.WS_ADMIN]: the page administers members and roles,
-         * and a viewer has nothing to do on it. The one thing every member keeps is the
-         * SWITCHER, which is [WORKSPACE_SWITCH] — a different row on purpose.
+         * `/workspaces` screen, one workspace, its members. Narrowed from every member to
+         * [Permission.WS_ADMIN]: the page administers members and roles, and a viewer has
+         * nothing to do on it. What every member keeps is the SWITCHER and the list it draws
+         * from (`GET /api/v1/workspaces`, the caller's OWN memberships), which is
+         * [WORKSPACE_SWITCH] — a different row on purpose.
          *
          * One exception survives inside [allowed]: a SESSION with no reachable workspace may
          * still call this — "which workspaces do I belong to" is how a zero-membership person
@@ -139,11 +140,14 @@ object ScopeMatrix {
         WORKSPACES_READ(Scope.READ, Permission.WS_ADMIN),
 
         /**
-         * "Switch the active workspace" (D13, D14 — rule 10): `POST /workspace/switch`, the
-         * shell's switcher. Every member, no role gate — switching needs a MEMBERSHIP in the
-         * target, which `WorkspaceService.resolveSwitch` checks, and re-issues the session
-         * token. Its own operation because [WORKSPACES_READ] narrowed to admins and the
-         * switcher must not follow it.
+         * "Switch the active workspace, and list what can be switched to" (D13, D14 — rule
+         * 10): `POST /workspace/switch`, the shell's switcher, and `GET /api/v1/workspaces` —
+         * the caller's OWN memberships, the data the switcher draws. Every member, no role
+         * gate — switching needs a MEMBERSHIP in the target, which
+         * `WorkspaceService.resolveSwitch` checks, and re-issues the session token; a
+         * self-listing has nothing to protect from its own reader. Its own operation because
+         * [WORKSPACES_READ] narrowed to admins and neither the switcher nor its list must
+         * follow it (the record's row says "the page").
          */
         WORKSPACE_SWITCH(Scope.READ, Permission.VIEW),
 
@@ -426,6 +430,14 @@ object ScopeMatrix {
     fun requiredPermissionForTool(tool: String): Permission? = MCP_TOOL_MIN_PERMISSION[tool]
 
     /**
+     * The operations a SESSION may hold with no workspace context at all (see [allowed]): the
+     * workspaces page and the REST list-own — "which workspaces do I belong to" is a question
+     * whose answer may be none. Names, because [allowed] receives the operation as a string.
+     */
+    private val NO_CONTEXT_SESSION_OPERATIONS: Set<String> =
+        setOf(RestOperation.WORKSPACES_READ.name, RestOperation.WORKSPACE_SWITCH.name)
+
+    /**
      * The verdict of one authorization question (RBAC design §2). A sealed pair rather than a
      * boolean so the REFUSAL carries its catalogued code and its details to the boundary that
      * writes them — the interceptor and the MCP dispatcher render the same decision two ways,
@@ -467,8 +479,9 @@ object ScopeMatrix {
      * A null [context] means the principal resolved no workspace — zero memberships, or a
      * deactivated one. Every workspace-scoped operation is refused, with `workspace.not_found`:
      * D-R5's rule is that a workspace you cannot reach is a workspace that does not exist. Two
-     * session-only exceptions stand beside it: `WORKSPACES_READ` ("which workspaces do I belong
-     * to" is meaningful when the answer is none — how the no-workspace page is reached), and the
+     * session-only exceptions stand beside it: the two "which workspaces do I belong to" rows
+     * (`WORKSPACES_READ`, the page; `WORKSPACE_SWITCH`, the REST list-own — meaningful when the
+     * answer is none, and how the no-workspace page is reached), and the
      * super admin's INSTANCE verbs (the `SUPER_ADMIN`-permission operations — #113's
      * empty-instance recovery path; workspace-scoped operations stay refused even for them).
      */
@@ -537,11 +550,13 @@ object ScopeMatrix {
         // a key never arrives here, and on a key the 404 the rule promises stays.
         val sessionWithoutContext = context == null && principal.authMethod != AuthMethod.API_KEY
 
-        // ONE operation is meaningful with no workspace at all: listing the workspaces you
-        // belong to — which is also how a zero-membership person reaches the no-workspace page
-        // (ui-screens §4.13, 114 §C.3a) instead of a JSON 404 on the only screen that could
-        // explain their state.
-        if (sessionWithoutContext && operationName == RestOperation.WORKSPACES_READ.name) {
+        // Two operations are meaningful with no workspace at all: listing the workspaces you
+        // belong to — the page (WORKSPACES_READ) and the REST list-own on the switcher's row
+        // (WORKSPACE_SWITCH) — which is also how a zero-membership person reaches the
+        // no-workspace page (ui-screens §4.13, 114 §C.3a) instead of a JSON 404 on the only
+        // screen that could explain their state. A switch itself still needs a membership in
+        // the target, which the handler checks.
+        if (sessionWithoutContext && operationName in NO_CONTEXT_SESSION_OPERATIONS) {
             return Decision.Allowed
         }
 

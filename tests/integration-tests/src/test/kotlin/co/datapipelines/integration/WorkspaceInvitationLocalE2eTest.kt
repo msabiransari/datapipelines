@@ -30,7 +30,7 @@ import java.util.Base64
  *    `200` with a real membership row, the `invitations[]` array stays empty, and the
  *    `workspace.invitation_materialised` event never fires;
  *  - **carol**: row created and the membership written IN THE SAME ACT through the
- *    create-user form's optional workspace + flags (113 §B.3) — no invitation needed
+ *    create-user form's optional workspace + role (113 §B.3, D22) — no invitation needed
  *    because the row exists.
  *
  * The SSO twin of this suite (invite → FIRST login materialises a pending invitation)
@@ -73,13 +73,13 @@ class WorkspaceInvitationLocalE2eTest {
             .cookie("dp_csrf", adminLogin.csrfToken)
             .header("DP-CSRF-Token", adminLogin.csrfToken)
             .contentType(ContentType.JSON)
-            .body("""{"email":"$BOB_EMAIL","author":true}""")
+            .body("""{"email":"$BOB_EMAIL","role":"author"}""")
             .`when`()
             .post("/api/v1/workspaces/$WORKSPACE/members")
             .then()
             .statusCode(200)
             .body("data.email", Matchers.equalTo(BOB_EMAIL))
-            .body("data.author", Matchers.equalTo(true))
+            .body("data.role", Matchers.equalTo("author"))
             .body("data.invited", Matchers.nullValue())
 
         invitationRowCount() shouldBe 0
@@ -104,7 +104,7 @@ class WorkspaceInvitationLocalE2eTest {
             .statusCode(200)
             .body("data.name", Matchers.hasItem(WORKSPACE))
             .body("data.name", Matchers.not(Matchers.hasItem("demo")))
-            .body("data.author", Matchers.hasItem(true))
+            .body("data.role", Matchers.hasItem("author"))
 
         // The members listing separates the arrays: bob is a MEMBER of this workspace.
         given()
@@ -131,9 +131,9 @@ class WorkspaceInvitationLocalE2eTest {
         val adminLogin = postLogin(ADMIN_EMAIL, NEW_ADMIN_PASSWORD)
         val admin = adminLogin.sessionCookie()
 
-        // Carol is created WITH the optional workspace + flags (113 §B.3): the response
+        // Carol is created WITH the optional workspace + role (113 §B.3, D22): the response
         // carries the one-time password AND the membership note.
-        val carolOneTime = createLocalUser(admin, adminLogin.csrfToken, CAROL_EMAIL, workspace = WORKSPACE, author = true)
+        val carolOneTime = createLocalUser(admin, adminLogin.csrfToken, CAROL_EMAIL, workspace = WORKSPACE, role = "author")
 
         check(carolOneTime.isNotBlank()) { "expected a one-time password, got blank" }
         val carolLogin = postLogin(CAROL_EMAIL, carolOneTime)
@@ -184,7 +184,7 @@ class WorkspaceInvitationLocalE2eTest {
         csrf: String,
         email: String,
         workspace: String? = null,
-        author: Boolean = false,
+        role: String = "viewer",
     ): String {
         val spec =
             given()
@@ -196,7 +196,7 @@ class WorkspaceInvitationLocalE2eTest {
                 .formParam("email", email)
                 .formParam("displayName", email.substringBefore('@'))
         if (workspace != null) {
-            spec.formParam("workspace", workspace).formParam("author", author.toString())
+            spec.formParam("workspace", workspace).formParam("role", role)
         }
         val response =
             spec

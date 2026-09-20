@@ -16,8 +16,9 @@ import org.springframework.web.util.pattern.PathPatternParser
  * The rule is stated per RESOURCE FAMILY, keyed on the path the handler is mapped to, because
  * that is what a reader can see and what the record's §2 rows are about: the executions family
  * is the `READ_EXECUTIONS` / `RETRIEVE_RESULT` row (own unless admin, promoter none — NOT
- * `READ_RESOURCES`, whose row admits the promoter); the workspaces page and its REST reads are
- * `WORKSPACES_READ` (a workspace admin's, D13); the promotion page is `PROMOTION_READ` (rule
+ * `READ_RESOURCES`, whose row admits the promoter); the workspaces page and the reads OF a
+ * workspace are `WORKSPACES_READ` (a workspace admin's, D13) while the caller's own list is the
+ * switcher's `WORKSPACE_SWITCH`; the promotion page is `PROMOTION_READ` (rule
  * 13); user administration is `USER_ADMINISTRATION`; a dialog fetched by a verb's route floors at
  * that verb's operation; everything else a signed-in person may read is `READ_RESOURCES`.
  *
@@ -64,6 +65,7 @@ class ReadFloorTest {
         familyOf("/api/v1/executions/{id}/result") shouldBeFamily Family.EXECUTIONS
         familyOf("/partials/recent-executions") shouldBeFamily Family.EXECUTIONS
         familyOf("/workspaces") shouldBeFamily Family.WORKSPACES
+        familyOf("/api/v1/workspaces") shouldBeFamily Family.WORKSPACES_LIST_OWN
         familyOf("/api/v1/workspaces/{name}/members") shouldBeFamily Family.WORKSPACES
         familyOf("/promotion") shouldBeFamily Family.PROMOTION
         familyOf("/admin/users") shouldBeFamily Family.USER_ADMINISTRATION
@@ -96,11 +98,18 @@ class ReadFloorTest {
             matches = { path -> path.contains("executions") },
         ),
 
-        /** D13: the page and the workspace reads are a workspace admin's. */
+        /** The caller's own memberships — the list the switcher draws from, every member's (D13 narrowed the PAGE). */
+        WORKSPACES_LIST_OWN(
+            floor = 1,
+            operations = setOf(RestOperation.WORKSPACE_SWITCH),
+            matches = { path -> path == "/api/v1/workspaces" },
+        ),
+
+        /** D13: the page and the reads OF a workspace (one workspace, its members) are a workspace admin's. */
         WORKSPACES(
-            floor = 4,
+            floor = 3,
             operations = setOf(RestOperation.WORKSPACES_READ),
-            matches = { path -> path == "/workspaces" || path.startsWith("/api/v1/workspaces") },
+            matches = { path -> path == "/workspaces" || path.startsWith("/api/v1/workspaces/") },
         ),
 
         /** Owner rule 13: author, promoter, admins. */

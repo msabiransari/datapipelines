@@ -151,7 +151,7 @@ class RoleMatrixTest {
     fun `no reachable workspace is the 404, whatever the operation (D-R5) - except listing your workspaces`() {
         val session = session(WorkspaceRole.AUTHOR)
 
-        Op.entries.filter { it != Op.WORKSPACES_READ }.forEach { op ->
+        Op.entries.filter { it !in LIST_OWN_WORKSPACES }.forEach { op ->
             val decision = ScopeMatrix.allowed(session, op, context = null)
             (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
         }
@@ -167,10 +167,12 @@ class RoleMatrixTest {
     @Test
     fun `a session with no workspace may still list its workspaces - a key may not`() {
         val session = session(WorkspaceRole.VIEWER)
-        ScopeMatrix.allowed(session, Op.WORKSPACES_READ, context = null) shouldBe ScopeMatrix.Decision.Allowed
+        LIST_OWN_WORKSPACES.forEach { op ->
+            ScopeMatrix.allowed(session, op, context = null) shouldBe ScopeMatrix.Decision.Allowed
 
-        val decision = ScopeMatrix.allowed(key(setOf(Scope.READ), WorkspaceRole.VIEWER), Op.WORKSPACES_READ, context = null)
-        (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
+            val decision = ScopeMatrix.allowed(key(setOf(Scope.READ), WorkspaceRole.VIEWER), op, context = null)
+            (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
+        }
     }
 
     /**
@@ -189,7 +191,7 @@ class RoleMatrixTest {
         SUPER_ADMIN_ONLY.forEach { op ->
             ScopeMatrix.allowed(superAdminSession, op, context = null) shouldBe ScopeMatrix.Decision.Allowed
         }
-        (Op.entries.toSet() - SUPER_ADMIN_ONLY - Op.WORKSPACES_READ).forEach { op ->
+        (Op.entries.toSet() - SUPER_ADMIN_ONLY - LIST_OWN_WORKSPACES).forEach { op ->
             val decision = ScopeMatrix.allowed(superAdminSession, op, context = null)
             (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
         }
@@ -349,6 +351,9 @@ class RoleMatrixTest {
                 Op.MANAGE_WORKSPACE_MEMBERS,
                 Op.WORKSPACES_READ,
             )
+
+        /** The two rows a session may hold with NO workspace context: the page and the REST list-own. */
+        val LIST_OWN_WORKSPACES = setOf(Op.WORKSPACES_READ, Op.WORKSPACE_SWITCH)
 
         /** D7: the instance verbs. */
         val SUPER_ADMIN_ONLY =
