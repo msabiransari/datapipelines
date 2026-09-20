@@ -487,6 +487,19 @@ screenshot may be illustrated, composited or retouched.
 | Reproducibility | Byte-identical across consecutive runs except `graph-cards.png` (its node run times), `executions.png` (the rows the run itself just added), and the release-step dialog's verdict rows (the check's own run stamps them) |
 | Seeded state | The release-step capture seeds its own small draft (`nyc/review/release_gate` — one node, one release check) through the REST surface, because no seeded pipeline carries `checks[]`; the dialog is photographed, never submitted (release is a human's verb) |
 
+**The `home` set (175, #175).** `-PshotsSet=home` produces the home page's seven capability
+figures (`home-*.png`): the same 1440×900 viewport at `deviceScaleFactor = 2` (2880×1800 PNGs),
+with `-PshotsTheme=dark|light` (default `light`) driving the account's theme through the
+settings select — asserted before the first capture and restored to whatever the account had
+when the run started. The set is **read-only**: it never executes a pipeline, publishes an
+endpoint, mints a key, probes a datasource or creates a workspace, and it logs every non-GET
+request (`WRITE <method> <url>`) so a run against the live deployment can be audited. Six of
+the seven captures are the live deployment's own state; `review-release` keeps the release
+fixture's seeding and belongs on a throwaway lane instance
+(`-PshotsOnly=review-release -PshotsUrl=http://127.0.0.1:<lane port>`). A target missing the
+state a figure needs (two workspaces, a SUCCESS execution) fails loudly rather than
+photographing an empty screen.
+
 If a screen renders broken, it is **reported, not photographed** — and not edited afterwards.
 
 **Reproducing `failure-detail.png`.** No seeded pipeline fails — a demo whose examples break
