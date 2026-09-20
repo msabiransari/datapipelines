@@ -8,6 +8,7 @@ import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.options.AriaRole
 import com.microsoft.playwright.options.ColorScheme
 import com.microsoft.playwright.options.ReducedMotion
+import com.microsoft.playwright.options.ScreenshotScale
 import com.microsoft.playwright.options.WaitForSelectorState
 import java.nio.file.Files
 import java.nio.file.Path
@@ -75,6 +76,25 @@ import java.nio.file.StandardCopyOption
  * still holds. One Playwright video of a full boosted-navigation click-through is recorded
  * alongside (app/boost-navigation.webm), from its own context so the still-shot contexts
  * stay clean. Everything lands in an `app/` subfolder of the same output directory.
+ *
+ * ## The `home` set (175, #175)
+ *
+ * `-PshotsSet=home` photographs the home page's seven capability figures — `home-connect`,
+ * `home-agent-builds`, `home-no-warehouse`, `home-run-result`, `home-serve-api`,
+ * `home-workspaces` and `home-review-release` — as `home-*.png` in the SAME output directory,
+ * at the 1440x900 viewport with `deviceScaleFactor = 2` (2880x1800 PNGs, so the figures stay
+ * sharp at the full content width). `-PshotsTheme=dark|light` (default `light`, so the `site`
+ * list is unchanged) drives the account's theme through the settings select the way the `app`
+ * set does, asserts the resolved theme before the first capture, and puts the account back on
+ * the theme it had when the run started — the preference write and its restore are both
+ * printed. The set never executes a pipeline, publishes an endpoint, mints a key, probes a
+ * datasource or creates a workspace: six of the seven captures run against the LIVE
+ * deployment, which is read-only for this driver, and every non-GET request the page makes is
+ * logged (`WRITE <method> <url>`) so the run can be audited against that promise. The seventh,
+ * `home-review-release`, seeds its draft and is therefore aimed at a throwaway lane instance
+ * (`-PshotsOnly=review-release`), never at prod. `-PshotsPipeline` names the pipeline the two
+ * editor captures photograph and `-PshotsInspectNode` the cross-engine join node
+ * `home-no-warehouse` opens — both are read from the target's own explorer, never guessed.
  */
 object SiteShotsMain {
     private const val VIEWPORT_W = 1440
@@ -151,8 +171,10 @@ object SiteShotsMain {
      * The endpoint the driver publishes so the API section's inventory card has a row and the
      * `endpoint`-kind key has something to bind to. Both are demo state, produced by the
      * script — an empty card and an unbound key would photograph a surface nobody has used.
+     * Three segments since 172's path grammar (`/api/<category>/<version>/<path>`,
+     * rest-api.md §19.1): the pre-172 two-segment form is refused `400 endpoint.path_invalid`.
      */
-    private const val DEMO_ENDPOINT_PATH = "/nyc/revenue-by-borough"
+    private const val DEMO_ENDPOINT_PATH = "/nyc/v1/revenue-by-borough"
     private const val DEMO_ENDPOINT_PIPELINE = "nyc/mobility/revenue_by_borough"
 
     /** A library template lives here; this one is PINNED by four pipelines, which is what used-by shows. */
@@ -178,6 +200,24 @@ object SiteShotsMain {
     /** The two shot sets `-PshotsSet` selects between; `site` is the default. */
     private const val SET_SITE = "site"
     private const val SET_APP = "app"
+
+    /**
+     * 175: the home page's capability figures. Their own set because their contract differs
+     * from `site`'s in three ways: the captures are DPR-2 (a 1440x900 viewport at
+     * deviceScaleFactor 2 → 2880x1800 PNGs), the theme is the run's choice
+     * (`-PshotsTheme`, default light) rather than a fixed assertion, and the set is READ-ONLY
+     * — six of its seven captures run against the live deployment, so nothing the `site` set
+     * seeds (an endpoint, keys, a second workspace, a fresh execution) may happen here. The
+     * release-dialog capture keeps its seeding and is aimed at a throwaway lane instance.
+     */
+    private const val SET_HOME = "home"
+
+    /** The `home` set's device scale factor: 1440x900 CSS → 2880x1800 PNGs. */
+    private const val HOME_SCALE = 2.0
+
+    /** The two values `-PshotsTheme` accepts. */
+    private const val THEME_LIGHT = "light"
+    private const val THEME_DARK = "dark"
 
     /** The subfolder of the output dir the `app` set lands in. */
     private const val APP_DIR = "app"
@@ -238,6 +278,23 @@ object SiteShotsMain {
                     stills + recordBoostNavigation(email, password)
                 }
 
+                SET_HOME -> {
+                    val theme = prop("shots.theme", THEME_LIGHT)
+                    require(theme == THEME_LIGHT || theme == THEME_DARK) {
+                        "-PshotsTheme must be $THEME_LIGHT or $THEME_DARK, got '$theme'"
+                    }
+                    withBrowser(homeContextOptions()) { page ->
+                        // The set's read-only promise, made auditable: every non-GET request
+                        // the page makes is printed — against prod the only ones allowed are
+                        // the sign-in POST and the theme preference PATCH (both logged too).
+                        page.onRequest { request ->
+                            if (request.method() != "GET") println("  WRITE ${request.method()} ${request.url()}")
+                        }
+                        signIn(page, email, password)
+                        Shots(page, ScreenshotScale.DEVICE).captureHome(theme)
+                    }
+                }
+
                 else -> {
                     withSignedInPage(email, password) { page ->
                         assertLightTheme(page)
@@ -286,6 +343,14 @@ object SiteShotsMain {
             .setDeviceScaleFactor(1.0)
             .setColorScheme(ColorScheme.LIGHT)
             .setReducedMotion(ReducedMotion.REDUCE)
+
+    /**
+     * The `home` set's context: the same contract at [HOME_SCALE], so the figures stay sharp
+     * at the full content width (1440x900 CSS → 2880x1800 device px). The colour scheme stays
+     * LIGHT emulation even for a dark run — the theme is the APP's own, driven through the
+     * settings select the way a user drives it, never a browser emulation.
+     */
+    private fun homeContextOptions(): Browser.NewContextOptions = contextOptions().setDeviceScaleFactor(HOME_SCALE)
 
     /**
      * The folders a name sits under, outermost first: `a/b/c.sql` → `a`, `a/b`. Each is one
@@ -470,6 +535,12 @@ object SiteShotsMain {
     /** Every capture goes through here, so no shot can skip the determinism steps. */
     internal class Shots(
         private val page: Page,
+        /**
+         * The screenshot scale: CSS for the fixed-scale sets, DEVICE for the `home` set —
+         * whose context carries [HOME_SCALE], so DEVICE is what makes the PNG 2880x1800
+         * instead of a 1440x900 bitmap painted on a denser canvas.
+         */
+        private val shotScale: ScreenshotScale = ScreenshotScale.CSS,
     ) {
         private val written = mutableListOf<String>()
 
@@ -531,6 +602,108 @@ object SiteShotsMain {
                     page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
                     shoot("$APP_DIR/${route.substring(1).replace('/', '-')}-${width}x$height-$theme.png")
                 }
+            }
+        }
+
+        /**
+         * The `home` set (175, #175) — the seven capability figures of the home page. READ-ONLY
+         * by construction: nothing here executes a pipeline, publishes an endpoint, mints a key,
+         * probes a datasource or creates a workspace, so six of the seven run against the live
+         * deployment; `review-release` keeps [releaseStep]'s seeding and belongs on a throwaway
+         * lane instance. The theme is the run's choice ([theme]), driven through the settings
+         * select and asserted before the first capture; whatever the account had when the run
+         * started is restored in the `finally`, and both writes are printed for the audit log.
+         */
+        @Suppress("CyclomaticComplexMethod")
+        fun captureHome(theme: String): List<String> {
+            val previous = currentTheme()
+            if (previous != theme) {
+                println("  theme: the account was on $previous — setting $theme through the settings select")
+                setTheme(theme)
+            }
+            assertTheme(theme)
+            try {
+                if (wanted("connect")) homeConnect()
+                if (wanted("agent-builds")) homeAgentBuilds()
+                if (wanted("no-warehouse")) {
+                    require(inspectNode.isNotBlank()) {
+                        "home-no-warehouse needs -PshotsInspectNode=<the cross-engine join node> — read it from the target's explorer"
+                    }
+                    nodeInspector("home-no-warehouse.png")
+                }
+                if (wanted("run-result")) executionResult("home-run-result.png")
+                if (wanted("serve-api")) apiConsole("home-serve-api.png")
+                if (wanted("workspaces")) workspaces("home-workspaces.png", mayCreate = false)
+                if (wanted("review-release")) releaseStep("home-review-release.png")
+            } finally {
+                if (currentTheme() != previous) {
+                    setTheme(previous)
+                    println("  theme: the account is back on $previous")
+                }
+            }
+            return written
+        }
+
+        /** The account's current theme, read off the settings screen's resolved stylesheet. */
+        private fun currentTheme(): String {
+            page.navigate("$baseUrl/settings")
+            waitFor("#themeSelect")
+            val href = page.locator("#theme-link").getAttribute("href") ?: ""
+            return THEME_HREF.find(href)?.groupValues?.get(1)
+                ?: error("cannot read the account's theme from #theme-link href='$href'")
+        }
+
+        /** The resolved-theme assertion the `home` set makes before its first capture. */
+        private fun assertTheme(theme: String) {
+            page.navigate("$baseUrl/dashboard")
+            val href = page.locator("#theme-link").getAttribute("href") ?: ""
+            check(href.contains("/themes/$theme.css")) {
+                "the account's theme resolves to $href — this run was asked for $theme"
+            }
+        }
+
+        /**
+         * `home-connect` — the datasource registry as the deployment last measured it. The
+         * `site` set's Test-clicking is a WRITE probe per row and has no place in a read-only
+         * run; the last-test statuses on screen are the target's own.
+         */
+        private fun homeConnect() {
+            page.navigate("$baseUrl/datasources")
+            waitFor(".ds-table")
+            settle()
+            shoot("home-connect.png")
+        }
+
+        /**
+         * `home-agent-builds` — the editor canvas on the pipeline `-PshotsPipeline` names, rail
+         * collapsed for width, fitted so every node card reads. NOT executed: an execution is a
+         * write, and this set runs against prod. Cards a run never touched show their idle
+         * state; the per-node run numbers are `home-run-result`'s story.
+         *
+         * Room to read the names: the dock is collapsed to its tab bar and the settings
+         * sidebar parked at its floor — both through the user controls (the dock's toggle,
+         * the splitter's Home key), both restored before the run's other editor capture,
+         * which reads the dock. A fresh browser context means localStorage remembers none of
+         * it past the run.
+         */
+        private fun homeAgentBuilds() {
+            setRailCollapsed(true)
+            try {
+                openEditor(showcase)
+                page.locator(".pe-dock-toggle:visible").first().click()
+                page.locator(".pe-dock-collapsed").waitFor()
+                val splitter = page.locator(".pe-sidebar-splitter")
+                splitter.focus()
+                splitter.press("Home")
+                fitGraph()
+                if (canvasPaintsSanely("home-agent-builds.png")) shoot("home-agent-builds.png")
+            } finally {
+                if (page.locator(".pe-dock-collapsed").count() > 0) {
+                    page.locator(".pe-dock-toggle:visible").first().click()
+                    page.locator(".pe-dock:not(.pe-dock-collapsed)").waitFor()
+                }
+                page.locator(".pe-sidebar-splitter").dblclick()
+                setRailCollapsed(false)
             }
         }
 
@@ -688,13 +861,13 @@ object SiteShotsMain {
          * `McpToolCatalog.NAMES.size`, exactly as the marketing page does. One capture, because at
          * 1440x900 the whole section is one screen.
          */
-        private fun apiConsole() {
+        private fun apiConsole(file: String = "api-console.png") {
             page.navigate("$baseUrl/api-console")
             waitFor(".ds-table")
             page.locator("h2.ds-title:text-is('Published endpoints')").first().waitFor()
             page.locator("h2.ds-title:text-is('MCP server')").first().waitFor()
             refuseVisibleSecret()
-            shoot("api-console.png")
+            shoot(file)
         }
 
         /**
@@ -751,7 +924,16 @@ object SiteShotsMain {
             }
         }
 
-        private fun workspaces() {
+        /**
+         * [mayCreate] separates the two callers: the `site` set owns its throwaway stack and
+         * seeds a second workspace when the screen has only one; the `home` set is read-only
+         * and FAILS instead — a target whose workspaces screen shows one workspace cannot
+         * produce "each team has its own workspace", and creating one there is a write.
+         */
+        private fun workspaces(
+            file: String = "workspaces.png",
+            mayCreate: Boolean = true,
+        ) {
             page.navigate("$baseUrl/workspaces")
             waitFor("body")
             // The screen has TWO tables — "Your workspaces" and the members list — so a bare
@@ -759,6 +941,9 @@ object SiteShotsMain {
             // below is skipped forever. Count the WORKSPACES table (the first one).
             val workspaceRows = page.locator("table").first().locator("tbody tr")
             if (workspaceRows.count() < 2) {
+                check(mayCreate) {
+                    "the $file shot needs two workspaces; the screen shows one and this set may not create one"
+                }
                 page.fill("form[action*='/workspaces/create'] input[name=name]", SECOND_WORKSPACE)
                 page.click("form[action*='/workspaces/create'] button[type=submit]")
                 page.locator("td:has-text('$SECOND_WORKSPACE')").first().waitFor()
@@ -778,7 +963,7 @@ object SiteShotsMain {
                         .locator("tbody tr")
                         .count()
             }
-            shoot("workspaces.png")
+            shoot(file)
         }
 
         /**
@@ -903,7 +1088,7 @@ object SiteShotsMain {
             shoot("graph-cards.png")
         }
 
-        private fun nodeInspector() {
+        private fun nodeInspector(file: String = "node-inspector.png") {
             openEditor(showcase)
             // FIT FIRST. At the canvas's default zoom a five-node dagre layout is wider than a
             // 1440 viewport, and the right-hand cards' expand buttons land OUTSIDE it — measured
@@ -913,7 +1098,7 @@ object SiteShotsMain {
             // Cytoscape overlay is positioned, not scrolled. The product is fine — the canvas is
             // pannable and the fit control is right there; the driver just has to use it.
             fitGraph()
-            if (!canvasPaintsSanely("node-inspector.png")) return
+            if (!canvasPaintsSanely(file)) return
             openDetailsViaList(inspectNode)
             // The resolved SQL is fetched server-side; the spinner leaving is the release signal.
             page.locator("#pe-node-sql-spinner").waitFor(
@@ -922,7 +1107,7 @@ object SiteShotsMain {
                     .setState(WaitForSelectorState.HIDDEN),
             )
             waitFor("#pe-node-sql")
-            shoot("node-inspector.png")
+            shoot(file)
         }
 
         /**
@@ -975,7 +1160,7 @@ object SiteShotsMain {
          * time and the newest run is whatever this driver did last, which on the failure pass
          * is a FAILED one.
          */
-        private fun executionResult() {
+        private fun executionResult(file: String = "execution-result.png") {
             page.navigate("$baseUrl/executions")
             waitFor(".ds-table")
             // The row is a clickable TR, not a link (partials/executions.html sets an onclick),
@@ -988,7 +1173,7 @@ object SiteShotsMain {
             // `#result-content` self-loads (hx-trigger="load"); the ROWS are the signal, not the
             // page frame — a shot taken on the frame photographs the spinner.
             page.locator("#result-content table tbody tr").first().waitFor()
-            shoot("execution-result.png")
+            shoot(file)
         }
 
         private fun promotion() {
@@ -1034,12 +1219,12 @@ object SiteShotsMain {
          * The dialog is photographed, never submitted: release is an explicit human verb
          * (versioning D4), and the dialog's close button is the end of the flow.
          */
-        private fun releaseStep() {
+        private fun releaseStep(file: String = "release-step.png") {
             seedReleaseFixture()
             openEditor(RELEASE_PIPELINE)
             val release = page.locator("#pe-release-draft")
             if (release.count() == 0) {
-                println("  SKIP release-step.png — $RELEASE_PIPELINE offers no Release button (no draft: already released?)")
+                println("  SKIP $file — $RELEASE_PIPELINE offers no Release button (no draft: already released?)")
                 println("         (re-point -PshotsPipeline-style seeding at a draft, or drop the pipeline's release back)")
                 return
             }
@@ -1064,7 +1249,7 @@ object SiteShotsMain {
                         .WaitForOptions()
                         .setTimeout(WAIT_MS),
                 )
-            shoot("release-step.png")
+            shoot(file)
             page
                 .locator("[data-lifecycle-close]")
                 .first()
@@ -1319,6 +1504,8 @@ object SiteShotsMain {
             val target = outDir.resolve(file)
             // Clip to the CURRENT viewport, not a constant: the `app` set resizes the page
             // between passes, and a hard-coded 1440x900 clip would crop the 2560x1440 pass.
+            // The scale is the set's ([shotScale]) — DEVICE on a DPR-2 context is what makes
+            // the `home` set's PNGs 2880x1800 rather than a CSS-sized bitmap.
             val viewport = page.viewportSize()
             page.screenshot(
                 Page
@@ -1326,7 +1513,7 @@ object SiteShotsMain {
                     .setPath(target)
                     .setClip(0.0, 0.0, viewport.width.toDouble(), viewport.height.toDouble())
                     .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
-                    .setScale(com.microsoft.playwright.options.ScreenshotScale.CSS),
+                    .setScale(shotScale),
             )
             written += file
         }
@@ -1335,6 +1522,9 @@ object SiteShotsMain {
     /** `dpk_` + 12 characters is the listed prefix; the minted secret is several times that. */
     private const val KEY_PREFIX_MAX = 16
     private val SECRET_SHAPED = Regex("""dpk_[A-Za-z0-9_.\-]+""")
+
+    /** How the resolved theme reads off the `#theme-link` stylesheet href (`/themes/dark.css`). */
+    private val THEME_HREF = Regex("""/themes/([a-z]+)\.css""")
 
     private const val FIT_SETTLE_MS = 400.0
 
