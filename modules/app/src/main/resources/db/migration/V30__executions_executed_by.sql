@@ -27,7 +27,10 @@
 --
 -- DOWN PATH (manual): ALTER TABLE pipeline_executions DROP CONSTRAINT chk_executions_executed_by_key_kind,
 --   DROP COLUMN executed_by_key_kind; ALTER TABLE pipeline_executions RENAME COLUMN executed_by TO triggered_by;
--- Lossless: the rename is a rename and the new column carries nothing the row did not imply.
+-- The rename is lossless. The kind column is lossless for every row THIS migration backfilled
+-- (down then up re-derives 'endpoint' and 'user' from the trigger), but a `user` kind the
+-- application wrote at runtime on a REST run (a user key over REST) cannot be re-derived from
+-- `triggered_via = 'REST'` and comes back NULL — measured on the 177 lane's demo DB.
 -- =============================================================================
 
 ALTER TABLE pipeline_executions RENAME COLUMN triggered_by TO executed_by;
