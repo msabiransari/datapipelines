@@ -1,12 +1,12 @@
 package co.datapipelines.web.workspaces
 
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException

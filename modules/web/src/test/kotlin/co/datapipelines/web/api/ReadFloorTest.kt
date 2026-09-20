@@ -43,7 +43,8 @@ class ReadFloorTest {
             if (declared == null) {
                 wrong += "${handler.name} GET ${handler.path}: no operation at all"
             } else if (declared !in family.operations) {
-                wrong += "${handler.name} GET ${handler.path}: declares ${declared.name}, but the ${family.name} family is ${family.operations.map { it.name }}"
+                val admitted = family.operations.map { it.name }
+                wrong += "${handler.name} GET ${handler.path}: declares ${declared.name}, but the ${family.name} family is $admitted"
             }
         }
         wrong.joinToString("\n").also { withClue(it) { wrong.shouldBeEmpty() } }
@@ -75,8 +76,7 @@ class ReadFloorTest {
     }
 
     /** Every non-public GET handler on the classpath. */
-    private fun readers(): List<HandlerInventory.Handler> =
-        HandlerInventory.handlers().filter { it.verb == "GET" && !isPublic(it.path) }
+    private fun readers(): List<HandlerInventory.Handler> = HandlerInventory.handlers().filter { it.verb == "GET" && !isPublic(it.path) }
 
     private fun isPublic(path: String): Boolean = publicPatterns.any { it.matches(PathContainer.parsePath(path)) }
 
@@ -110,7 +110,10 @@ class ReadFloorTest {
         USER_ADMINISTRATION(
             floor = 2,
             operations = setOf(RestOperation.USER_ADMINISTRATION),
-            matches = { path -> path.startsWith("/admin/users") || path.startsWith("/api/v1/auth/users") || path.startsWith("/partials/admin/users") },
+            matches = { path ->
+                path.startsWith("/admin/users") || path.startsWith("/api/v1/auth/users") ||
+                    path.startsWith("/partials/admin/users")
+            },
         ),
 
         /** A super admin's dialog: which workspaces may see a datasource (D-R7). */
@@ -137,12 +140,21 @@ class ReadFloorTest {
         /** The lifecycle dialogs: a GET that returns the FORM of a verb floors at that verb's operation. */
         LIFECYCLE_DIALOGS(
             floor = 10,
-            operations = setOf(RestOperation.MUTATE_PIPELINES_TEMPLATES, RestOperation.RELEASE_VERSION, RestOperation.SWITCH_SERVED_VERSION),
+            operations =
+                setOf(
+                    RestOperation.MUTATE_PIPELINES_TEMPLATES,
+                    RestOperation.RELEASE_VERSION,
+                    RestOperation.SWITCH_SERVED_VERSION,
+                ),
             matches = { path -> path.contains("/lifecycle/") },
         ),
 
         /** 122: the pipeline editor floors at the operation the screen exists to perform for its lowest role. */
-        PIPELINE_EDITOR(floor = 1, operations = setOf(RestOperation.EXECUTE_PIPELINE), matches = { path -> path == "/pipelines/{id}/editor" }),
+        PIPELINE_EDITOR(
+            floor = 1,
+            operations = setOf(RestOperation.EXECUTE_PIPELINE),
+            matches = { path -> path == "/pipelines/{id}/editor" },
+        ),
 
         /** The self verbs' reads. */
         SELF(
@@ -152,7 +164,11 @@ class ReadFloorTest {
         ),
 
         /** The promotion RECEIVER's inventory read — the server-key route family (§7.7); its row is the second gate. */
-        PROMOTION_RECEIVER(floor = 1, operations = setOf(RestOperation.READ_RESOURCES), matches = { path -> path.startsWith("/api/v1/promotion/") }),
+        PROMOTION_RECEIVER(
+            floor = 1,
+            operations = setOf(RestOperation.READ_RESOURCES),
+            matches = { path -> path.startsWith("/api/v1/promotion/") },
+        ),
 
         /** The published-endpoint serve: `read` is the floor, the binding is the gate (§7.7). */
         PUBLISHED_ENDPOINT(

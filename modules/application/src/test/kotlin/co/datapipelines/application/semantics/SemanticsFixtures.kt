@@ -3,9 +3,9 @@ package co.datapipelines.application.semantics
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.semantics.FactRef
 import co.datapipelines.datasources.semantics.LearnedFact

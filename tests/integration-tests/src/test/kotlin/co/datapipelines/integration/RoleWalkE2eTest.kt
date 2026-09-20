@@ -1,6 +1,9 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
@@ -9,9 +12,6 @@ import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.specification.RequestSpecification
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.ObjectNode
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -86,30 +86,13 @@ class RoleWalkE2eTest {
     fun `every REST route answers each role exactly as auth-md §7-6 says`() {
         ensureSeeded()
         val routes = walkableRoutes()
-        val mismatches = mutableListOf<String>()
-        val counts = linkedMapOf<String, Pair<Int, Int>>()
+        val tallies = ROLES.associateWith { role -> walkRest(role, routes) }
+        val counts = tallies.mapValues { (_, tally) -> tally.allowed to tally.refused }
 
-        ROLES.forEach { role ->
-            var allowed = 0
-            var refused = 0
-            routes.forEach { route ->
-                val expectAllowed = restRows.getValue(route.operation).allows(role)
-                val answer = call(route, sessionFor(role))
-                val wasRefused = answer.roleRefused
-                if (wasRefused) refused++ else allowed++
-                if (wasRefused == expectAllowed) {
-                    mismatches +=
-                        "$role ${route.method} ${route.pattern} (${route.handler}, ${route.operation}) -> " +
-                        "${answer.status} ${answer.code ?: ""} but §7.6 says ${if (expectAllowed) "allowed" else "refused"}"
-                }
-            }
-            counts[role] = allowed to refused
-        }
-
-        println("event=rolewalk.inventory routes=${routes.size} " + counts.entries.joinToString(" ") { "${it.key}=allowed:${it.value.first}/refused:${it.value.second}" })
+        println("event=rolewalk.inventory routes=${routes.size} ${counts.summary()}")
         // Joined into ONE string: a collection assertion prints its first element and elides the
         // rest, and the point of a walk's failure is the LIST.
-        mismatches.joinToString("\n") shouldBe ""
+        tallies.values.flatMap { it.mismatches }.joinToString("\n") shouldBe ""
 
         // Non-vacuity floors, per role and both directions.
         routes.size shouldBeGreaterThanOrEqual MINIMUM_ROUTES
@@ -133,40 +116,12 @@ class RoleWalkE2eTest {
     fun `every MCP tool answers each role's key exactly as auth-md §7-6 says`() {
         ensureSeeded()
         val schemas = toolSchemas()
-        val mismatches = mutableListOf<String>()
-        val unknown = mutableListOf<String>()
-        val counts = linkedMapOf<String, Pair<Int, Int>>()
+        val tallies = ROLES.associateWith { role -> walkMcp(role, schemas) }
+        val counts = tallies.mapValues { (_, tally) -> tally.allowed to tally.refused }
 
-        ROLES.forEach { role ->
-            var allowed = 0
-            var refused = 0
-            mcpRows.forEach { (tool, cells) ->
-                val schema = schemas[tool]
-                if (schema == null) {
-                    unknown += "$tool -> not in tools/list"
-                    return@forEach
-                }
-                val body = callTool(tool, keyFor(role), synthesise(schema).toString())
-                if (body.contains("Unknown tool") || body.contains("tool_not_found") || body.contains("Tool not found")) {
-                    unknown += "$tool -> ${body.take(LEAK_EXCERPT)}"
-                    return@forEach
-                }
-                if (body.contains("input validation failed")) {
-                    unknown += "$tool -> the synthesised arguments did not satisfy the schema: ${body.take(LEAK_EXCERPT)}"
-                    return@forEach
-                }
-                val wasRefused = MCP_ROLE_REFUSALS.any { body.contains(it) }
-                if (wasRefused) refused++ else allowed++
-                if (wasRefused == cells.allows(role)) {
-                    mismatches += "$role $tool -> ${body.take(LEAK_EXCERPT)} but §7.6 says ${if (cells.allows(role)) "allowed" else "refused"}"
-                }
-            }
-            counts[role] = allowed to refused
-        }
-
-        println("event=rolewalk.mcp tools=${mcpRows.size} " + counts.entries.joinToString(" ") { "${it.key}=allowed:${it.value.first}/refused:${it.value.second}" })
-        unknown.joinToString("\n") shouldBe ""
-        mismatches.joinToString("\n") shouldBe ""
+        println("event=rolewalk.mcp tools=${mcpRows.size} ${counts.summary()}")
+        tallies.values.flatMap { it.unknown }.joinToString("\n") shouldBe ""
+        tallies.values.flatMap { it.mismatches }.joinToString("\n") shouldBe ""
 
         mcpRows.size shouldBeGreaterThanOrEqual MINIMUM_TOOLS
         counts.getValue("viewer").second shouldBeGreaterThanOrEqual MCP_VIEWER_REFUSED_FLOOR
@@ -174,6 +129,80 @@ class RoleWalkE2eTest {
         counts.getValue("super_admin").second shouldBe 0
         counts.getValue("workspace_admin").second shouldBe 0
     }
+
+    /** One role's walk: how many answers were allowed / refused, and every answer the doc did not predict. */
+    private class Tally {
+        var allowed = 0
+        var refused = 0
+        val mismatches = mutableListOf<String>()
+        val unknown = mutableListOf<String>()
+
+        fun record(wasRefused: Boolean) = if (wasRefused) refused++ else allowed++
+    }
+
+    private fun Map<String, Pair<Int, Int>>.summary(): String =
+        entries.joinToString(" ") { "${it.key}=allowed:${it.value.first}/refused:${it.value.second}" }
+
+    private fun walkRest(
+        role: String,
+        routes: List<Route>,
+    ): Tally {
+        val tally = Tally()
+        routes.forEach { route ->
+            val expectAllowed = restRows.getValue(route.operation).allows(role)
+            val answer = call(route, sessionFor(role))
+            tally.record(answer.roleRefused)
+            if (answer.roleRefused == expectAllowed) {
+                tally.mismatches +=
+                    "$role ${route.method} ${route.pattern} (${route.handler}, ${route.operation}) -> " +
+                    "${answer.status} ${answer.code ?: ""} but §7.6 says ${if (expectAllowed) "allowed" else "refused"}"
+            }
+        }
+        return tally
+    }
+
+    private fun walkMcp(
+        role: String,
+        schemas: Map<String, JsonNode>,
+    ): Tally {
+        val tally = Tally()
+        mcpRows.forEach { (tool, cells) ->
+            val schema = schemas[tool]
+            if (schema == null) {
+                tally.unknown += "$tool -> not in tools/list"
+                return@forEach
+            }
+            val body = callTool(tool, keyFor(role), synthesise(schema).toString())
+            val problem = unwalkable(body)
+            if (problem != null) {
+                tally.unknown += "$tool -> $problem"
+                return@forEach
+            }
+            val wasRefused = MCP_ROLE_REFUSALS.any { body.contains(it) }
+            tally.record(wasRefused)
+            if (wasRefused == cells.allows(role)) {
+                tally.mismatches +=
+                    "$role $tool -> ${body.take(LEAK_EXCERPT)} but §7.6 says ${if (cells.allows(role)) "allowed" else "refused"}"
+            }
+        }
+        return tally
+    }
+
+    /** An answer the walk cannot score: the tool does not exist, or the synthesised arguments never reached it. */
+    private fun unwalkable(body: String): String? =
+        when {
+            MCP_UNKNOWN_TOOL.any { body.contains(it) } -> {
+                body.take(LEAK_EXCERPT)
+            }
+
+            body.contains("input validation failed") -> {
+                "the synthesised arguments did not satisfy the schema: ${body.take(LEAK_EXCERPT)}"
+            }
+
+            else -> {
+                null
+            }
+        }
 
     /**
      * Gate 1 (runtime) and gate 3: the handlers the application registers, classified. An
@@ -229,7 +258,13 @@ class RoleWalkE2eTest {
             .filter { !it.public }
             .filterNot { it.pattern.startsWith(PROMOTION_RECEIVER_PREFIX) }
             .map { h ->
-                Route(h.method, h.pattern, substitute(h.pattern), h.handler, requireNotNull(h.operation) { "${h.handler} has no operation" })
+                Route(
+                    h.method,
+                    h.pattern,
+                    substitute(h.pattern),
+                    h.handler,
+                    requireNotNull(h.operation) { "${h.handler} has no operation" },
+                )
             }.distinct()
             .sortedWith(compareBy({ it.pattern }, { it.method }))
 
@@ -289,10 +324,12 @@ class RoleWalkE2eTest {
 
     /** Well-formed identifiers that exist NOWHERE — an admitted role reaches the handler and finds no row. */
     private fun substitute(pattern: String): String =
-        VARIABLE_PATTERN.replace(pattern) { match ->
-            val variable = match.groupValues[1].substringBefore(':')
-            ABSENT_VALUES[variable] ?: if (variable.lowercase().endsWith("id")) ABSENT_UUID else "nobody-owns-this"
-        }.replace("/**", "/x").replace("*", "x")
+        VARIABLE_PATTERN
+            .replace(pattern) { match ->
+                val variable = match.groupValues[1].substringBefore(':')
+                ABSENT_VALUES[variable] ?: if (variable.lowercase().endsWith("id")) ABSENT_UUID else "nobody-owns-this"
+            }.replace("/**", "/x")
+            .replace("*", "x")
 
     private fun call(
         route: Route,
@@ -383,18 +420,25 @@ class RoleWalkE2eTest {
             "array" -> MAPPER.createArrayNode()
             "integer", "number" -> MAPPER.nodeFactory.numberNode(1)
             "boolean" -> MAPPER.nodeFactory.booleanNode(false)
-            else ->
-                MAPPER.nodeFactory.textNode(
-                    when {
-                        // A name grammar (`templates_update`'s `id` is a template NAME, not a UUID).
-                        property.has("pattern") -> "nobody/owns_this.sql"
-                        property.path("format").asText() == "uuid" || name.endsWith("_id") || name == "id" -> ABSENT_UUID
-                        name in setOf("name", "datasource", "path", "id", "pipeline") -> "nobody/owns_this"
-                        else -> "nobody-owns-this"
-                    },
-                )
+            else -> MAPPER.nodeFactory.textNode(textFor(name, property))
         }
     }
+
+    /** A well-formed string that names nothing in the fixture: a UUID, a folder-path name, or a plain token. */
+    private fun textFor(
+        name: String,
+        property: JsonNode,
+    ): String =
+        when {
+            // A name grammar (`templates_update`'s `id` is a template NAME, not a UUID).
+            property.has("pattern") -> "nobody/owns_this.sql"
+
+            property.path("format").asText() == "uuid" || name.endsWith("_id") || name == "id" -> ABSENT_UUID
+
+            name in PATH_NAMED_ARGUMENTS -> "nobody/owns_this"
+
+            else -> "nobody-owns-this"
+        }
 
     private fun sessionFor(role: String): (RequestSpecification) -> RequestSpecification =
         { spec -> spec.cookie(SESSION_COOKIE, sessionJwt(USERS.getValue(role), "$role@rolewalk.test")) }
@@ -417,6 +461,8 @@ class RoleWalkE2eTest {
 
         /** A key's refusal on the role axis is the issuer-demotion code (D-R12); a session's is `auth.role_required`. */
         private val MCP_ROLE_REFUSALS = listOf("auth.key_issuer_role_lost", ROLE_REQUIRED)
+        private val MCP_UNKNOWN_TOOL = listOf("Unknown tool", "tool_not_found", "Tool not found")
+        private val PATH_NAMED_ARGUMENTS = setOf("name", "datasource", "path", "id", "pipeline")
 
         /**
          * Floors, not targets. The 2026-09-20 walk: 175 routes — viewer allowed 73 / refused 102,
@@ -460,7 +506,7 @@ class RoleWalkE2eTest {
 
         val ROLES = RoleMatrixDocE2e.ROLE_COLUMNS
 
-        private val WS_ID = "abc00000-0000-0000-0000-000000000177"
+        private const val WS_ID = "abc00000-0000-0000-0000-000000000177"
         private const val WS_NAME = "rolewalk"
         private val USERS: Map<String, String> =
             mapOf(

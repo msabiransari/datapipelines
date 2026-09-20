@@ -40,7 +40,10 @@ object ScopeMatrix {
         val minScope: Scope,
         val permission: Permission,
     ) {
-        /** Reads of pipelines, templates, datasource metadata, endpoints, the UI pages that show them. Every role (§2 row 1); the promoter's lens is R2's. */
+        /**
+         * Reads of pipelines, templates, datasource metadata, endpoints, the UI pages that show
+         * them. Every role (§2 row 1); the promoter's lens is R2's.
+         */
         READ_RESOURCES(Scope.READ, Permission.VIEW),
 
         /**

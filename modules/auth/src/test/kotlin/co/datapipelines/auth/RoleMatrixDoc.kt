@@ -86,7 +86,11 @@ object RoleMatrixDoc {
             .filterNot { it[0] == "Min scope" || it[0].startsWith("---") }
             .forEach { cells ->
                 val scope = Scope.fromWire(requireNotNull(TOKEN.find(cells[0])?.groupValues?.get(1)) { "no scope token in '${cells[0]}'" })
-                TOKEN.findAll(cells[1]).map { it.groupValues[1] }.filter(isKey).forEach { key -> result[key] = scope }
+                TOKEN
+                    .findAll(cells[1])
+                    .map { it.groupValues[1] }
+                    .filter(isKey)
+                    .forEach { key -> result[key] = scope }
             }
         return result
     }

@@ -53,6 +53,7 @@ enum class WorkspaceRole {
         fun fromWireOrNull(token: String?): WorkspaceRole? = token?.let { t -> entries.firstOrNull { it.wire == t.lowercase() } }
 
         /** Parses a wire token. Throws on an unknown token — a role that does not exist is a defect, never a default. */
-        fun fromWire(token: String): WorkspaceRole = fromWireOrNull(token) ?: throw IllegalArgumentException("Unknown workspace role: $token")
+        fun fromWire(token: String): WorkspaceRole =
+            fromWireOrNull(token) ?: throw IllegalArgumentException("Unknown workspace role: $token")
     }
 }

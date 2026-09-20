@@ -5,9 +5,9 @@ import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties

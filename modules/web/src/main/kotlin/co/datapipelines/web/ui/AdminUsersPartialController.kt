@@ -8,12 +8,12 @@ import co.datapipelines.auth.MailKind
 import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.web.api.currentPrincipal
 import org.slf4j.LoggerFactory

@@ -16,6 +16,7 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.security.SecureRandom
+import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
 import java.util.Base64
@@ -57,13 +58,23 @@ class ExecutionsVisibilityTest {
         ensureSeeded()
         listedFor(ALICE) shouldContainExactlyInAnyOrder listOf(RUN_ALICE)
 
-        session(ALICE).get("/api/v1/executions/$RUN_ALICE").then().statusCode(200).body("data.executed_by", Matchers.equalTo(ALICE))
+        session(ALICE)
+            .get("/api/v1/executions/$RUN_ALICE")
+            .then()
+            .statusCode(200)
+            .body("data.executed_by", Matchers.equalTo(ALICE))
         // The 404 rule: Vera's run and the endpoint's are NOT FOUND, never 403.
-        session(ALICE).get("/api/v1/executions/$RUN_VERA").then().statusCode(404).body("error.code", Matchers.equalTo("result.execution_not_found"))
+        session(
+            ALICE,
+        ).get("/api/v1/executions/$RUN_VERA").then().statusCode(404).body("error.code", Matchers.equalTo("result.execution_not_found"))
         session(ALICE).get("/api/v1/executions/$RUN_ENDPOINT").then().statusCode(404)
         // …and the result cursor and the screen's detail agree with the metadata read.
         session(ALICE).get("/api/v1/executions/$RUN_VERA/result").then().statusCode(404)
-        session(ALICE).accept("text/html").get("/executions/$RUN_VERA").then().statusCode(404)
+        session(ALICE)
+            .accept("text/html")
+            .get("/executions/$RUN_VERA")
+            .then()
+            .statusCode(404)
     }
 
     @Test
@@ -84,7 +95,11 @@ class ExecutionsVisibilityTest {
             .then()
             .statusCode(200)
             .body("data.executed_by_key_kind", Matchers.equalTo("endpoint"))
-        session(WANDA).accept("text/html").get("/executions").then().statusCode(200)
+        session(WANDA)
+            .accept("text/html")
+            .get("/executions")
+            .then()
+            .statusCode(200)
     }
 
     @Test
@@ -97,7 +112,14 @@ class ExecutionsVisibilityTest {
         refusedByRole(session(PAM).accept("text/html").get("/executions/$RUN_ALICE"))
         refusedByRole(session(PAM).header("HX-Request", "true").get("/partials/recent-executions"))
         // The dashboard itself renders for a promoter — without the runs panel.
-        val dashboard = session(PAM).accept("text/html").get("/dashboard").then().statusCode(200).extract().asString()
+        val dashboard =
+            session(PAM)
+                .accept("text/html")
+                .get("/dashboard")
+                .then()
+                .statusCode(200)
+                .extract()
+                .asString()
         dashboard shouldNotContain "/partials/recent-executions"
     }
 
@@ -111,7 +133,8 @@ class ExecutionsVisibilityTest {
         // executions_get: the 404 rule for another member's run; the admin reads it.
         tool("executions_get", ALICE_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""") shouldContain "execution_not_found"
         tool("executions_get", ALICE_KEY.plaintext, """{"execution_id":"$RUN_ENDPOINT"}""") shouldContain "execution_not_found"
-        unescape(tool("executions_get", WANDA_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""")) shouldContain "\"execution_id\":\"$RUN_VERA\""
+        unescape(tool("executions_get", WANDA_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""")) shouldContain
+            "\"execution_id\":\"$RUN_VERA\""
         tool("executions_get", PAM_KEY.plaintext, """{"execution_id":"$RUN_ALICE"}""") shouldContain "auth.key_issuer_role_lost"
         // executions_get_result: the same door, on the result.
         tool("executions_get_result", ALICE_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""") shouldContain "execution_not_found"
@@ -170,6 +193,7 @@ class ExecutionsVisibilityTest {
         private const val CSRF = "executions-visibility-csrf"
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SECRET_BYTES = 32
+        private const val TOKEN_TTL_SECONDS = 3600L
 
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000006"
         private const val ALICE = "aaa00000-0000-0000-0000-000000000006"
@@ -196,10 +220,11 @@ class ExecutionsVisibilityTest {
         ): String {
             val now = Instant.now()
             val header = b64("""{"alg":"HS256","typ":"JWT"}""")
+            val exp = now.plusSeconds(TOKEN_TTL_SECONDS).epochSecond
             val payload =
                 b64(
                     """{"sub":"$userId","email":"$email","name":"Test User","scopes":[],""" +
-                        """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond},"active_workspace":"acme"}""",
+                        """"iss":"datapipelines","iat":${now.epochSecond},"exp":$exp,"active_workspace":"acme"}""",
                 )
             val signature =
                 Mac.getInstance("HmacSHA256").run {
@@ -220,67 +245,68 @@ class ExecutionsVisibilityTest {
             seeded = true
             E2eClean.beforeSeeding()
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WS_ACME', 'acme', 'Acme')")
-                    statement.execute(
-                        """
-                        INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
-                            ('$ALICE', '$ALICE@acme.test', 'Alice', 'test', 'alice-sub', TRUE, FALSE),
-                            ('$VERA', '$VERA@acme.test', 'Vera', 'test', 'vera-sub', TRUE, FALSE),
-                            ('$WANDA', '$WANDA@acme.test', 'Wanda', 'test', 'wanda-sub', TRUE, FALSE),
-                            ('$PAM', '$PAM@acme.test', 'Pam', 'test', 'pam-sub', TRUE, FALSE)
-                        """.trimIndent(),
-                    )
-                    statement.execute(
-                        """
-                        INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
-                            ('$WS_ACME', '$ALICE', 'author'),
-                            ('$WS_ACME', '$VERA', 'viewer'),
-                            ('$WS_ACME', '$WANDA', 'workspace_admin'),
-                            ('$WS_ACME', '$PAM', 'promoter')
-                        """.trimIndent(),
-                    )
-                    statement.execute(
-                        """
-                        INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version) VALUES
-                            ('$PIPE_ID', 'acme/report', 'Acme Report', '', '$ALICE', '$WS_ACME', 1)
-                        """.trimIndent(),
-                    )
-                    statement.execute(
-                        """
-                        INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at) VALUES
-                            ('$PIPE_ID', 1, '{"schema_version":1,"name":"report","nodes":[]}'::jsonb, 'seed-hash', 'RELEASED', '$ALICE', '$ALICE', NOW())
-                        """.trimIndent(),
-                    )
-                    // Three finished runs: Alice's session run, Vera's session run, and a run a
-                    // PUBLISHED ENDPOINT started with Alice's key (executed_by = the key owner,
-                    // key kind = endpoint: nobody's own, an admin's to see).
-                    statement.execute(
-                        """
-                        INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, status, parameters_json,
-                                                         executed_by, executed_by_key_kind, triggered_via, root_execution_id,
-                                                         started_at, completed_at, duration_ms) VALUES
-                            ('$RUN_ALICE', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', NULL, 'UI', '$RUN_ALICE', NOW(), NOW(), 12),
-                            ('$RUN_VERA', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$VERA', NULL, 'UI', '$RUN_VERA', NOW(), NOW(), 12),
-                            ('$RUN_ENDPOINT', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', 'endpoint', 'ENDPOINT', '$RUN_ENDPOINT', NOW(), NOW(), 12)
-                        """.trimIndent(),
-                    )
-                }
-                connection
-                    .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                    .use { ps ->
-                        listOf(ALICE_KEY, WANDA_KEY, PAM_KEY).forEach { key ->
-                            ps.setString(1, key.id)
-                            ps.setObject(2, UUID.fromString(key.ownerId))
-                            ps.setString(3, key.name)
-                            ps.setString(4, key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                            ps.setObject(6, UUID.fromString(WS_ACME))
-                            ps.addBatch()
-                        }
-                        ps.executeBatch()
-                    }
+                connection.createStatement().use { statement -> seedRows().forEach { statement.execute(it) } }
+                insertKeys(connection)
             }
+        }
+
+        /** The fixture, in FK order: workspace, users, memberships, a released pipeline, and three finished runs. */
+        private fun seedRows(): List<String> =
+            listOf(
+                "INSERT INTO workspaces (id, name, display_name) VALUES ('$WS_ACME', 'acme', 'Acme')",
+                """
+                INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
+                    ('$ALICE', '$ALICE@acme.test', 'Alice', 'test', 'alice-sub', TRUE, FALSE),
+                    ('$VERA', '$VERA@acme.test', 'Vera', 'test', 'vera-sub', TRUE, FALSE),
+                    ('$WANDA', '$WANDA@acme.test', 'Wanda', 'test', 'wanda-sub', TRUE, FALSE),
+                    ('$PAM', '$PAM@acme.test', 'Pam', 'test', 'pam-sub', TRUE, FALSE)
+                """.trimIndent(),
+                """
+                INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+                    ('$WS_ACME', '$ALICE', 'author'),
+                    ('$WS_ACME', '$VERA', 'viewer'),
+                    ('$WS_ACME', '$WANDA', 'workspace_admin'),
+                    ('$WS_ACME', '$PAM', 'promoter')
+                """.trimIndent(),
+                """
+                INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version) VALUES
+                    ('$PIPE_ID', 'acme/report', 'Acme Report', '', '$ALICE', '$WS_ACME', 1)
+                """.trimIndent(),
+                """
+                INSERT INTO pipeline_versions
+                    (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at)
+                VALUES ('$PIPE_ID', 1, '{"schema_version":1,"name":"report","nodes":[]}'::jsonb, 'seed-hash',
+                        'RELEASED', '$ALICE', '$ALICE', NOW())
+                """.trimIndent(),
+                // Three finished runs: Alice's session run, Vera's session run, and a run a
+                // PUBLISHED ENDPOINT started with Alice's key (executed_by = the key owner,
+                // key kind = endpoint: nobody's own, an admin's to see).
+                """
+                INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, status, parameters_json,
+                                                 executed_by, executed_by_key_kind, triggered_via, root_execution_id,
+                                                 started_at, completed_at, duration_ms) VALUES
+                    ('$RUN_ALICE', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', NULL, 'UI', '$RUN_ALICE', NOW(), NOW(), 12),
+                    ('$RUN_VERA', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$VERA', NULL, 'UI', '$RUN_VERA', NOW(), NOW(), 12),
+                    ('$RUN_ENDPOINT', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', 'endpoint', 'ENDPOINT',
+                     '$RUN_ENDPOINT', NOW(), NOW(), 12)
+                """.trimIndent(),
+            )
+
+        private fun insertKeys(connection: Connection) {
+            connection
+                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
+                .use { ps ->
+                    listOf(ALICE_KEY, WANDA_KEY, PAM_KEY).forEach { key ->
+                        ps.setString(1, key.id)
+                        ps.setObject(2, UUID.fromString(key.ownerId))
+                        ps.setString(3, key.name)
+                        ps.setString(4, key.hash)
+                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.setObject(6, UUID.fromString(WS_ACME))
+                        ps.addBatch()
+                    }
+                    ps.executeBatch()
+                }
         }
 
         private val postgres get() = SharedE2e.postgres

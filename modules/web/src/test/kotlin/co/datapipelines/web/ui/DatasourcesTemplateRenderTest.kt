@@ -421,8 +421,13 @@ class DatasourcesTemplateRenderTest {
             engine().process(
                 "partials/datasources",
                 context()
-                    .withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
-                    .apply { fillListModel() },
+                    .withRoles(
+                        canExecute = false,
+                        canAuthor = false,
+                        canAdminWorkspace = false,
+                        isSuperAdmin = false,
+                        roleLabel = "promoter",
+                    ).apply { fillListModel() },
             )
         promoter shouldNotContain "data-verb=\"datasource-test\""
         promoter shouldContain "pg-prod"

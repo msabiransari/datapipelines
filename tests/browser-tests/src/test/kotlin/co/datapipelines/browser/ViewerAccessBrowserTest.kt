@@ -276,7 +276,10 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val tokenBefore = admin.sessionToken()
         admin.switchTo(other)
         admin.roleBadge() shouldBe "viewer"
-        admin.sessionToken().let { it shouldNotBe null; it shouldNotBe tokenBefore }
+        admin.sessionToken().let {
+            it shouldNotBe null
+            it shouldNotBe tokenBefore
+        }
         admin.adminAnchors() shouldBe emptyList()
         admin.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 0
         admin.page.locator("#workspace-switcher").count() shouldBe 1
@@ -563,12 +566,19 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             page.navigate("$baseUrl/dashboard")
             page.waitForSelector("#workspace-switcher")
             page.selectOption("#workspace-switcher", arrayOf(workspace), Page.SelectOptionOptions().setForce(true))
-            page.waitForFunction("() => document.querySelector('[data-role]') && document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'")
+            page.waitForFunction(
+                "() => document.querySelector('[data-role]') && document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'",
+            )
             page.waitForSelector("nav.app-nav")
         }
 
         /** The `dp_session` cookie's value — a switch re-issues the token (D14), so it must change. */
-        fun sessionToken(): String? = page.context().cookies().firstOrNull { it.name == "dp_session" }?.value
+        fun sessionToken(): String? =
+            page
+                .context()
+                .cookies()
+                .firstOrNull { it.name == "dp_session" }
+                ?.value
 
         fun close() = session.close()
     }

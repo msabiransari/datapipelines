@@ -3,11 +3,11 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceMembership
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceAuditEvents

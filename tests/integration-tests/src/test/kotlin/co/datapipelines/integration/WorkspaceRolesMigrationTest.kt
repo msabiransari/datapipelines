@@ -154,7 +154,9 @@ class WorkspaceRolesMigrationTest {
         flagsOf(bob) shouldBe "true|false|false"
         flagsOf(carol) shouldBe "false|true|false"
         flagsOf(dave) shouldBe "false|false|false"
-        query("SELECT email || '=' || author::text || '|' || promoter::text || '|' || admin::text FROM workspace_invitations ORDER BY email") {
+        query(
+            "SELECT email || '=' || author::text || '|' || promoter::text || '|' || admin::text FROM workspace_invitations ORDER BY email",
+        ) {
             it.getString(1)
         } shouldContainExactly
             listOf(

@@ -8,12 +8,12 @@ import co.datapipelines.auth.MailKind
 import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
-import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceMemberRow
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain

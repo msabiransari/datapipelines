@@ -39,13 +39,20 @@ object HandlerInventory {
     /** Every handler, as Spring would map it: class prefix joined to the method path, one row per verb and path. */
     fun handlers(): List<Handler> =
         controllers().flatMap { type ->
-            val classPrefix = type.getAnnotation(RequestMapping::class.java)?.value?.firstOrNull().orEmpty().removeSuffix("/")
+            val classPrefix =
+                type
+                    .getAnnotation(RequestMapping::class.java)
+                    ?.value
+                    ?.firstOrNull()
+                    .orEmpty()
+                    .removeSuffix("/")
             val classOperation = type.getAnnotation(RequiredScope::class.java)?.value
             type.declaredMethods.flatMap { method ->
                 val (verbs, paths) = mappingOf(method) ?: return@flatMap emptyList()
                 val operation = method.getAnnotation(RequiredScope::class.java)?.value ?: classOperation
                 paths.flatMap { path ->
-                    val full = (classPrefix + if (path.isEmpty() || path.startsWith("/")) path else "/$path").ifEmpty { "/" }
+                    val suffix = if (path.isEmpty() || path.startsWith("/")) path else "/$path"
+                    val full = (classPrefix + suffix).ifEmpty { "/" }
                     verbs.map { verb -> Handler(verb, full, "${type.simpleName}#${method.name}", operation) }
                 }
             }
@@ -65,19 +72,36 @@ object HandlerInventory {
             // Production coverage only: the test runtime classpath also holds @RestController
             // test probes (e.g. ApiExceptionHandlerTest.ProbeController), which live in the test
             // compile output and are exercised by their own tests.
-            .filter { it.protectionDomain.codeSource.location.path.contains("/main/") }
+            .filter { "/main/" in it.protectionDomain.codeSource.location.path }
             .sortedBy { it.name }
 
+    /** The verb-specific shortcut annotations, each read the same way: `value` + `path`, or the bare class prefix. */
+    private val shortcuts: List<Pair<String, (Method) -> Pair<Array<String>, Array<String>>?>> =
+        listOf(
+            "GET" to { m -> m.getAnnotation(GetMapping::class.java)?.let { it.value to it.path } },
+            "POST" to { m -> m.getAnnotation(PostMapping::class.java)?.let { it.value to it.path } },
+            "PUT" to { m -> m.getAnnotation(PutMapping::class.java)?.let { it.value to it.path } },
+            "PATCH" to { m -> m.getAnnotation(PatchMapping::class.java)?.let { it.value to it.path } },
+            "DELETE" to { m -> m.getAnnotation(DeleteMapping::class.java)?.let { it.value to it.path } },
+        )
+
     private fun mappingOf(method: Method): Pair<Set<String>, List<String>>? {
-        method.getAnnotation(GetMapping::class.java)?.let { return setOf("GET") to (it.value + it.path).toList().ifEmpty { listOf("") } }
-        method.getAnnotation(PostMapping::class.java)?.let { return setOf("POST") to (it.value + it.path).toList().ifEmpty { listOf("") } }
-        method.getAnnotation(PutMapping::class.java)?.let { return setOf("PUT") to (it.value + it.path).toList().ifEmpty { listOf("") } }
-        method.getAnnotation(PatchMapping::class.java)?.let { return setOf("PATCH") to (it.value + it.path).toList().ifEmpty { listOf("") } }
-        method.getAnnotation(DeleteMapping::class.java)?.let { return setOf("DELETE") to (it.value + it.path).toList().ifEmpty { listOf("") } }
-        method.getAnnotation(RequestMapping::class.java)?.let { mapping ->
-            val verbs = mapping.method.map { it.name }.toSet().ifEmpty { setOf("GET", "POST", "PUT", "PATCH", "DELETE") }
-            return verbs to (mapping.value + mapping.path).toList().ifEmpty { listOf("") }
+        for ((verb, read) in shortcuts) {
+            val (value, path) = read(method) ?: continue
+            return setOf(verb) to pathsOf(value, path)
         }
-        return null
+        val mapping = method.getAnnotation(RequestMapping::class.java) ?: return null
+        val verbs =
+            mapping.method
+                .map { it.name }
+                .toSet()
+                .ifEmpty { setOf("GET", "POST", "PUT", "PATCH", "DELETE") }
+        return verbs to pathsOf(mapping.value, mapping.path)
     }
+
+    /** A mapping with neither `value` nor `path` maps the class prefix itself — one empty path. */
+    private fun pathsOf(
+        value: Array<String>,
+        path: Array<String>,
+    ): List<String> = (value + path).toList().ifEmpty { listOf("") }
 }
