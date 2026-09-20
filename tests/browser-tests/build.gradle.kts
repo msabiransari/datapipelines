@@ -27,7 +27,7 @@ dependencies {
 //
 //   ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
 //                       -PshotsEmail=you@example.com -PshotsPassword=… \
-//                       [-PshotsSet=app] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>] \
+//                       [-PshotsSet=app|home] [-PshotsTheme=dark] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>] \
 //                       [-PshotsHeroOut=<dir>] [-PshotsPipeline=<name>] [-PshotsHeroPipeline=<name>] [-PshotsInspectNode=<id>] \
 //                       [-PshotsOnly=<name[,name…]>]
 tasks.register<JavaExec>("siteShots") {
@@ -62,6 +62,12 @@ tasks.register<JavaExec>("siteShots") {
             // 169: run only the named captures of the `site` set (see the driver's KDoc) —
             // a two-shot round must not overwrite the other PNGs from a different deployment.
             "dp.shots.only" to "shotsOnly",
+            // 175: the `home` set's theme — dark|light, default light. Driven through the
+            // settings select and restored afterwards; the `site` set is untouched by it.
+            "dp.shots.theme" to "shotsTheme",
+            // 175: the review captures' directory was documented (-PshotsReview) but never
+            // wired — the driver's prop("shots.review") always fell back to build/site-review.
+            "dp.shots.review" to "shotsReview",
         ).forEach { (systemProperty, projectProperty) ->
             (project.findProperty(projectProperty) as String?)?.let { systemProperty(systemProperty, it) }
         }

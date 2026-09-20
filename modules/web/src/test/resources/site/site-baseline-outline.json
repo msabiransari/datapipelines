@@ -7,9 +7,44 @@
    "anchors": [
     "hero-title",
     "faq",
-    "faq-title"
+    "faq-title",
+    "cap-connect",
+    "cap-agent",
+    "cap-no-warehouse",
+    "cap-run",
+    "cap-release",
+    "cap-api",
+    "cap-workspaces"
    ],
    "headings": [
+    {
+     "level": "H2",
+     "text": "Connect the databases you already have."
+    },
+    {
+     "level": "H2",
+     "text": "Ask a question; the agent builds the pipeline."
+    },
+    {
+     "level": "H2",
+     "text": "No warehouse. Joined where the data lives."
+    },
+    {
+     "level": "H2",
+     "text": "Run it and read the result."
+    },
+    {
+     "level": "H2",
+     "text": "Review, then release."
+    },
+    {
+     "level": "H2",
+     "text": "Serve it as an API."
+    },
+    {
+     "level": "H2",
+     "text": "Each team has its own workspace."
+    },
     {
      "level": "H2",
      "text": "Questions people ask before they run it"
