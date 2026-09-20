@@ -274,9 +274,13 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         admin.page.waitForSelector("$row select[data-member-role]")
         admin.page.selectOption("$row select[data-member-role]", "workspace_admin")
         admin.page.click("$row [data-verb='member-role']")
-        admin.page.waitForSelector(".ds-toast-success")
-        // …and the swapped-in row shows what the database now holds.
-        admin.page.waitForSelector("$row select[data-member-role] option[value=workspace_admin]:checked")
+        // The response's OWN toast (the `?ok=member_added` flash is already on the page, so a
+        // bare `.ds-toast-success` wait would be satisfied before the POST is answered).
+        admin.page.waitForSelector(".ds-toast-success:has-text('Role changed')")
+        // …and the swapped-in row shows what the database now holds: the SERVER marked the
+        // option selected in the re-rendered fragment (read as the select's value — an <option>
+        // in a closed select is never "visible", so a selector wait on it would never resolve).
+        admin.page.locator("$row select[data-member-role]").inputValue() shouldBe "workspace_admin"
 
         roleOf(workspace, member) shouldBe "workspace_admin"
         admin.close()
@@ -333,21 +337,17 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         fun roleBadge(): String = page.locator("[data-role]").first().getAttribute("data-role")
 
         /**
-         * Enters [workspace] through the screen's own Switch verb, then lands back on
-         * `/workspaces` with the switch APPLIED.
-         *
-         * Not `BrowserSuite.enterWorkspace`: that one waits for `**\/dashboard` after driving
-         * the rail's switcher, and a session already sitting on `/dashboard` satisfies that
-         * wait instantly — the assertion passes before the POST has been answered, and the
-         * next navigation races the re-minted cookie. Switching FROM `/workspaces` makes the
-         * redirect a real URL change, so the wait has something to wait for.
+         * Enters [workspace] through the chrome's switcher, then lands on `/workspaces` with the
+         * switch APPLIED — the wait is on the badge's workspace NAME changing, so the next
+         * navigation cannot race the re-minted cookie.
          */
         fun switchTo(workspace: String) {
-            page.navigate("$baseUrl/workspaces")
-            val form = "form[action*='/workspace/switch']:has(input[value='$workspace'])"
-            page.waitForSelector("$form [data-verb='workspace-switch']")
-            page.click("$form [data-verb='workspace-switch']")
-            page.waitForURL("**/dashboard")
+            // 177/D13: through the CHROME's switcher — the workspaces PAGE is a workspace
+            // admin's, and this person is a viewer of `default` until the switch lands.
+            page.navigate("$baseUrl/dashboard")
+            page.waitForSelector("#workspace-switcher")
+            page.selectOption("#workspace-switcher", arrayOf(workspace), Page.SelectOptionOptions().setForce(true))
+            page.waitForFunction("() => document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'")
             page.navigate("$baseUrl/workspaces")
         }
 

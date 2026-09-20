@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.18 (frozen contract — additive-only changes after this point)
+**Status:** v2.21 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-17
@@ -899,7 +899,7 @@ Every completed execution with a caller node has its full result **materialized 
 GET /executions/{execution_id}/result?offset=0&limit=10000&format=json
 ```
 
-Auth: `read` scope + ownership of the execution (`admin` may read any). The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
+Auth: `read` scope + the `RETRIEVE_RESULT` row (D11, 177): the caller's OWN execution — `executed_by = self`, not an endpoint-key run — or any execution for a workspace admin; a promoter is refused by role, and another member's execution is `404 result.execution_not_found`, never 403. The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 
 ### 7.3 Response (JSON format, default)
 
@@ -1420,16 +1420,16 @@ result is unexpired):
 | `error` | object \| null | The mapped failure (`code`, `message`) on `FAILED` |
 | `failed_node_id` | string \| null | The node the failure is attributed to |
 | `correlation_id` | uuid \| null | The caller-supplied correlation id |
-| `triggered_by` | uuid | The user (or owning execution's user context) that started it |
-| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` |
+| `executed_by` | uuid | The user the run belongs to (D11, 177): the session's user, or a key's OWNER. Was `triggered_by` until 2026-09-20 — renamed, not re-derived; every row kept its actor |
+| `executed_by_key_kind` | string \| null | Which KIND of credential started it when a key did — `user` \| `endpoint` \| `server` ([enums §18A](enums.md#18a-executedbykeykind--which-kind-of-credential-started-an-execution)); `null` for a signed-in session. An `endpoint` run is nobody's OWN: it lists for workspace admins only, and for the endpoint key itself (§19) |
+| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` |
 | `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
 | `result_size_bytes` | int \| null | Size of the materialized caller result |
 | `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
 | `parent_node_id` | string \| null | That node's id; null for a root |
 | `root_execution_id` | uuid | The family's top ancestor; equals `execution_id` for a root |
 
-Ownership: `admin` reads every execution in the workspace (optionally
-pipeline-narrowed); every other principal reads only executions they triggered.
+Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) `READ_EXECUTIONS`): a **workspace admin** (or super admin) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
 
 ### 10.2 Get execution metadata
 
@@ -1457,8 +1457,9 @@ Returns the execution record (without rows — use §7 for result data):
     "result_expires_at": "...",
     "result_row_count": 1204,       // null for a zero-caller pipeline, and for a `direct`-delivered child
     "result_size_bytes": 48213,
-    "triggered_by": "user-uuid",
-    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE",
+    "executed_by": "user-uuid",           // D11: the run's user — the session's, or the key's OWNER
+    "executed_by_key_kind": null,         // "user" | "endpoint" | "server" when a key started it; null for a session
+    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT",
 
     "parent_execution_id": "exec-uuid",   // the execution whose PIPELINE node spawned this one; null for a root
     "parent_node_id": "run_leaf",         // that node's id; null for a root
@@ -1692,14 +1693,14 @@ Workspaces are the unit of team isolation ([workspaces design](superpowers/specs
 ```
 GET /workspaces
 ```
-The caller's memberships (design §9 "list-own"): `{name, role, joined_at}` rows. A global admin gets exactly the same shape for their own memberships — no implicit merged view (the ratified 019 ruling; admins address other workspaces per-request via `DP-Workspace`).
+The caller's memberships (design §9 "list-own"): `{name, role, active, joined_at}` rows, `role` one of `viewer` \| `author` \| `promoter` \| `workspace_admin` ([enums §8C](enums.md#8c-workspacerole--the-one-role-a-membership-holds); D1, 2026-09-20 — the three booleans V23's flags had put on the wire are gone). **A workspace admin's or super admin's read** since D13 (`WORKSPACES_READ`; the switcher a member uses is `POST /workspace/switch`, its own row). A super admin gets every workspace on the instance, deactivated ones marked `active: false`.
 
 ### 17.2 Get workspace
 
 ```
 GET /workspaces/{name}
 ```
-`{name, display_name, is_personal, created_at}`. Members (or a global admin) only — everyone else gets the 403/404 split above.
+`{name, display_name, is_personal, created_at, active, deactivated_at}`. A workspace admin of that workspace, or a super admin (D13) — everyone else gets the 403/404 split above.
 
 ### 17.3 Create workspace
 
@@ -1731,21 +1732,21 @@ GET /workspaces/{name}/members
 ```
 TWO arrays, never mixed ([Auth §4.6](auth.md#46-invitations)) — a client that counts members must not count ghosts:
 
-- `members[]`: `{user_id, email, display_name, author, promoter, admin, joined_at}` rows, oldest membership first. Any member of the workspace, or a global admin.
-- `invitations[]`: `{email, author, promoter, admin, invited_by, invited_at}` rows — the pending, email-keyed invitations ([Auth §4.6](auth.md#46-invitations)) whose `users` row does not exist yet. No `user_id`: there is no user yet; the email IS the identity.
+- `members[]`: `{user_id, email, display_name, role, joined_at}` rows, oldest membership first — `role` is the member's ONE role (D1). A workspace admin of that workspace, or a super admin (D13).
+- `invitations[]`: `{email, role, invited_by, invited_at}` rows — the pending, email-keyed invitations ([Auth §4.6](auth.md#46-invitations)) whose `users` row does not exist yet, each carrying the one role it will materialise with (D20). No `user_id`: there is no user yet; the email IS the identity.
 
 ### 17.7 Add member
 
 ```
 POST /workspaces/{name}/members
-{"email": "bob@example.com", "author": true}
+{"email": "bob@example.com", "role": "author"}
 ```
-Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`; D-R11 retired the `open-join` self-service path). `author`/`promoter`/`admin` are optional booleans, absent = false — a body that says nothing asks for a VIEWER, the D-R11 default. The email is normalized lowercase before every lookup and store (the [Auth §4.2](auth.md#42-user-provisioning) rule). Adding an existing member is idempotent: the existing membership is returned unchanged — changing flags is §17.10.
+Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`; D-R11 retired the `open-join` self-service path). `role` is optional, one of `viewer` \| `author` \| `promoter` \| `workspace_admin`; absent = `viewer` — a body that says nothing asks for the least a membership can be. A value outside the four is the surface's bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "role"`, `details.allowed` the four) — never stored. The email is normalized lowercase before every lookup and store (the [Auth §4.2](auth.md#42-user-provisioning) rule). Adding an existing member is idempotent: the existing membership is returned unchanged — changing a role is §17.10.
 
 TWO outcomes, distinguishable by status AND body, so a client never mistakes a ghost for a member:
 
 - **`200`** with the membership row — the `users` row existed; the person is now (or already was) a member.
-- **`202`** with `{"invited": true, "email", "author", "promoter", "admin"}` — nobody by that email exists yet; an invitation ([Auth §4.6](auth.md#46-invitations)) was created, upserting over any earlier one (the latest admin decision wins, audited), and their first login materialises it.
+- **`202`** with `{"invited": true, "email", "role"}` — nobody by that email exists yet; an invitation ([Auth §4.6](auth.md#46-invitations)) was created, upserting over any earlier one (the latest admin decision wins, audited), and their first login materialises it.
 
 A missing or non-textual `email` is the surface's generic bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "email"`). An email the §4.3 domain allowlist would refuse at login is refused HERE with the SAME code the login would use — `auth.login.domain_not_allowed` at a 400 — because an invitation that could never be honoured is a trap. A deactivated workspace is `workspace.inactive` (404).
 
@@ -1754,7 +1755,7 @@ A missing or non-textual `email` is the surface's generic bad-parameter 400 (`pi
 ```
 DELETE /workspaces/{name}/members/{user_id}
 ```
-Workspace admin or super admin. Removing the LAST admin is refused with `409 workspace.last_admin` — a workspace with no admin is unmanageable, and the caller's next step is "give someone else the admin role first" (§13.12). A `user_id` that names no member of the workspace is the workspace's own 404 (`workspace.not_found`), so the member list cannot be probed one id at a time.
+Workspace admin or super admin. Removing the LAST workspace admin is refused with `409 workspace.last_admin` — a workspace with no admin is unmanageable, and the caller's next step is "give someone else the workspace admin role first" (§13.12). A `user_id` that names no member of the workspace is the workspace's own 404 (`workspace.not_found`), so the member list cannot be probed one id at a time.
 
 ### 17.9 Revoke an invitation
 
@@ -1763,13 +1764,13 @@ DELETE /workspaces/{name}/invitations/{email}
 ```
 Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`). Removes a pending invitation ([Auth §4.6](auth.md#46-invitations)) — `204` on success. An email with no invitation in this workspace is `404 workspace.invitation.not_found`: the workspace itself resolved, so the not-found thing is the invitation, and one answer for "revoked already", "never created" and "another workspace's" keeps an admin from probing which emails hold pending invitations. The email is normalized lowercase, so revoking `Bob@Company.com` finds the row the invite of `bob@company.com` created. A super admin may revoke inside a DEACTIVATED workspace (its pending invitations wait; cleanup before reactivation is the point).
 
-### 17.10 Set a member's flags
+### 17.10 Set a member's role
 
 ```
 PUT /workspaces/{name}/members/{user_id}
-{"author": true, "promoter": true}
+{"role": "promoter"}
 ```
-Workspace admin or super admin. REPLACES the three capability flags wholesale — a PUT, not a PATCH, because additive flags make a partial update ambiguous in precisely the way this surface must not be: a body that says nothing asks for a VIEWER. Demoting the LAST admin is `409 workspace.last_admin`.
+Workspace admin or super admin. REPLACES the membership's ONE role (D1, 2026-09-20; the three booleans of the flags era are gone from this body — see the change log). `role` is one of the four; absent = `viewer`, unknown = the §17.7 400. Demoting the LAST workspace admin is `409 workspace.last_admin`. Returns the §17.6 member row. The audit event is `workspace.member_role_changed` (`from`, `to`).
 
 ---
 
@@ -1965,9 +1966,10 @@ anyway. `Accept` must admit `application/json` (`*/*` and an absent header do), 
 second caller another caller's rows.
 
 The execution runs **in-process** through the same recording path an MCP execution uses — never
-HTTP-to-self, never SSE parsing — as the endpoint's workspace, with `triggered_via = ENDPOINT`
-and `triggered_by` = the key's owner. Every serve is audited with the key id, the endpoint, the
-execution id and the outcome.
+HTTP-to-self, never SSE parsing — as the endpoint's workspace, with `triggered_via = ENDPOINT`,
+`executed_by` = the key's owner and `executed_by_key_kind = endpoint` (D11: the run is the
+ENDPOINT's, not the owner's — it lists for workspace admins only, and for this key through the
+serve audit). Every serve is audited with the key id, the endpoint, the execution id and the outcome.
 
 **`202` on timeout (ruling R-EP3).** When the endpoint's `timeout_seconds` elapses the execution
 is **not** cancelled — it keeps running, and the response is `202` with
@@ -2017,6 +2019,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-20 | v2.21 | 177 (#177) roles R1 | **Two deliberate breaks under the ratified [roles design](superpowers/specs/2026-09-20-roles-permissions-design.md)**, both on surfaces whose only callers are the product's own UI and E2E suites: (1) §17 — the membership wire says **`role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`), replacing the `author`/`promoter`/`admin` booleans on §17.1, §17.6, §17.7 (request and both responses) and §17.10 (renamed *Set a member's role*; body `{"role"}`); an unknown role is a 400. §17.1/§17.2/§17.6 are a workspace admin's reads (D13). (2) §10 — `triggered_by` → **`executed_by`** on the list and read projections, plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| null); `triggered_via` documents `ENDPOINT`. Ownership rewritten to D11: own unless workspace admin, promoter refused by role, endpoint-key runs admin-only. `/promotion` (UI) is readable by authors too (rule 13). |
 | 2026-09-19 | v2.20 | 172 (#172) | **§19 re-rooted (BREAKING for a surface with zero callers)**: published endpoints serve at `/api/<category>/<version>/<path…>` — at least three segments; the category is the engineer's namespace with `v[0-9]+` and `api` reserved (`400 endpoint.path_reserved`, re-checked when the serve registry is built); the version is one free-form literal segment; variables live after it. One `/api` prefix on a submitted pattern is normalised away, never stored. The catch-all mapping constrains the category, so `/api/v1/…` stays the product's — its unknown paths answer the product's 404, not `endpoint.not_found`. Create/read responses gain the full served `url`. Prod held zero published endpoints at the ruling, so nothing migrates. |
 | 2026-09-18 | v2.19 | 171 (#171) | §19.2: a published endpoint's `DML`/`DDL` node is allowed when its `source` is `tempdb` (the execution's own in-memory H2, discarded with the run) and refused, naming the datasource, for any registered datasource — previously every `DML`/`DDL` node was refused regardless of source. Re-checked at serve (§5.1/§19.4) through the same rule; no wire or status-code changes. |
 | 2026-09-17 | v2.18 | #143/#130 live-stream delivery | §10.4 gains the **live delivery guarantee** paragraph (no new client behaviour): a connected consumer receives the terminal event and the server-closed stream; the frame may lag the `204` by up to the cancel re-issue horizon (~2 s) same-instance, ~one heartbeat interval cross-instance; a consumer that leaves early reads what it missed from §10.3's replay (then §10.2's record). §10.3 names itself that answer. No wire changes. |

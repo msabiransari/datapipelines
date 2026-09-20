@@ -433,11 +433,11 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 | Attribute | Value |
 |---|---|
 | URL | `GET /dashboard` |
-| Auth required | Yes (`read`) |
+| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `READ_EXECUTIONS` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own unless workspace admin) |
 | Purpose | Landing page — overview of recent activity |
 | Design primitives | `.ds-card`, `.ds-badge`, `.ds-table` |
 | JS | None |
-| htmx | Yes — refresh sections independently (`hx-get="/partials/recent-executions"`) |
+| htmx | Yes — refresh sections independently (`hx-get="/partials/recent-executions"`, rendered only for `canReadExecutions`) |
 
 Content:
 - **Recent executions** (last 10): pipeline **display name** (the machine folder-path name on hover; T114 — the truncated pipeline UUID is gone everywhere), status badge, duration, timestamp. Clickable → execution detail.
@@ -990,7 +990,7 @@ Content:
 | Attribute | Value |
 |---|---|
 | URL | `GET /executions` |
-| Auth required | Yes (`read`) |
+| Auth required | Yes — `READ_EXECUTIONS` (D11, 177): a viewer or author sees their OWN runs, a workspace admin every run of the workspace (endpoint-key runs included), a **promoter is refused by role** (`auth.role_required`) and the rail does not draw the Executions item for one ([§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
 | Purpose | Browse past executions, filter by pipeline/status/date |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
 | JS | None |
@@ -1003,7 +1003,7 @@ Content: table of executions (pipeline **display name** — machine path on hove
 | Attribute | Value |
 |---|---|
 | URL | `GET /executions/{execution_id}` |
-| Auth required | Yes (`read` + ownership of the execution; `admin` may view any. Cancelling a running execution requires `execute`) |
+| Auth required | Yes — `READ_EXECUTIONS` + ownership of the execution (D11: own unless workspace admin; another member's run is the 404, never 403; a promoter is refused by role). Cancelling a running execution is `CANCEL_EXECUTION` (`canExecute`) |
 | Purpose | View execution metadata, node stats, result, replay events |
 | Design primitives | `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-code-block` |
 | JS | Light — result preview pagination if large |
@@ -1110,7 +1110,7 @@ Content: table of all users (email, display_name, `is_active` and `is_admin` as 
 - Deactivation copy states the effect window: existing JWTs and API keys stop working within the liveness-cache TTL (~60s), not instantly and not at JWT expiry.
 - Scopes are derived, not assigned, in v1: `is_admin` → `admin`, every other active user → `author` ([Auth §7.5](auth.md#75-scopes)). So the "grant admin" toggle *is* the scope control — there is no per-user scope editor to build.
 
-### 4.13 Workspaces (workspaces design §9; members and deactivation rewritten by 114; the page and the members table by 177)
+### 4.13 Workspaces (workspaces design §9; members and deactivation rewritten by 114)
 
 | Attribute | Value |
 |---|---|

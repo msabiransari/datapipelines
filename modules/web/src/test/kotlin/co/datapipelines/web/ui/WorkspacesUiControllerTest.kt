@@ -267,6 +267,11 @@ class WorkspacesUiControllerTest {
 
         // Both tables (own workspaces, per-managed members) are on the design system (029).
         html shouldContain "<table class=\"ds-table\">"
+        // D22: the member row is the partial's fragment — the dropdown with the current role
+        // selected, the row hook the browser suite addresses, the partial's post target.
+        html shouldContain "data-member=\"bob@acme.test\""
+        html shouldContain "value=\"author\" selected"
+        html shouldContain "hx-post=\"/partials/workspaces/acme/members/"
         html shouldContain "ds-badge ds-badge-primary" // the active-workspace chip
         html shouldNotContain "border-collapse: collapse"
     }

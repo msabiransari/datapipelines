@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.17 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.22 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-11
@@ -43,7 +43,7 @@ users ──1:N── api_keys
 users ──1:N── pipelines (owner_id)
 users ──1:N── templates (created_by)
 users ──1:N── datasources (created_by)
-users ──1:N── pipeline_executions (triggered_by)
+users ──1:N── pipeline_executions (executed_by)
 users ──1:N── audit_log
 users ──1:N── pipeline_versions (created_by)
 users ──1:N── template_versions (created_by)
@@ -282,8 +282,9 @@ CREATE TABLE pipeline_executions (
     pipeline_version    INTEGER     NOT NULL,        -- snapshot of version at execution time
     status              TEXT        NOT NULL,        -- 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ABORTED'
     parameters_json     JSONB       NOT NULL DEFAULT '{}', -- the FULLY RESOLVED Context (see below)
-    triggered_by        UUID        NOT NULL REFERENCES users(id),
-    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE'
+    executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or a key's OWNER (was triggered_by; renamed by V30, D11)
+    executed_by_key_kind TEXT,                       -- 'user' | 'endpoint' | 'server' when a key started it; NULL = a signed-in session (V30)
+    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT'
     correlation_id      UUID,
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at        TIMESTAMPTZ,
@@ -298,7 +299,8 @@ CREATE TABLE pipeline_executions (
     root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
     heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V21 row (V21, §8.3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
-    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE')),  -- 'PIPELINE' added by V3
+    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11
+    CONSTRAINT chk_executions_executed_by_key_kind CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'endpoint', 'server')),  -- V30
     CONSTRAINT fk_executions_pipeline_version
         FOREIGN KEY (pipeline_id, pipeline_version)
         REFERENCES pipeline_versions (pipeline_id, version)
@@ -307,7 +309,7 @@ CREATE TABLE pipeline_executions (
 CREATE INDEX idx_executions_pipeline ON pipeline_executions(pipeline_id, started_at DESC);
 CREATE INDEX idx_executions_status_running ON pipeline_executions(started_at)
     WHERE status = 'RUNNING';
-CREATE INDEX idx_executions_user ON pipeline_executions(triggered_by, started_at DESC);
+CREATE INDEX idx_executions_user ON pipeline_executions(executed_by, started_at DESC);  -- the column was renamed under it (V30); the index kept its name
 CREATE INDEX idx_executions_correlation ON pipeline_executions(correlation_id)
     WHERE correlation_id IS NOT NULL;
 CREATE INDEX idx_executions_root ON pipeline_executions(root_execution_id);   -- family lookup / cancellation (V3)
@@ -541,29 +543,26 @@ CREATE INDEX idx_workspaces_active ON workspaces(name) WHERE is_deleted = FALSE 
 
 ### 4.12 `workspace_members`
 
-**Membership IS capability** (RBAC design D-R1/D-R2): a person's role is per workspace, carried as three additive flags. A row with all three false is a **viewer**. `users.is_admin` is the one global capability left and means **super admin** (§4.1).
+**Membership IS the role** (RBAC design D-R1; roles design D1, 2026-09-20): a person's role is per workspace, carried as ONE value. `users.is_admin` is the one global authority left and means **super admin** (§4.1).
 
 ```sql
 CREATE TABLE workspace_members (
     workspace_id UUID        NOT NULL REFERENCES workspaces(id),
     user_id      UUID        NOT NULL REFERENCES users(id),
-    author       BOOLEAN     NOT NULL DEFAULT FALSE,   -- create/edit/discard/restore/purge, publish endpoints, issue own keys (V23)
-    promoter     BOOLEAN     NOT NULL DEFAULT FALSE,   -- release and promote (V23)
-    admin        BOOLEAN     NOT NULL DEFAULT FALSE,   -- members, roles, workspace-bound datasources, the audit trail (V23)
+    role         TEXT        NOT NULL DEFAULT 'viewer',  -- 'viewer' | 'author' | 'promoter' | 'workspace_admin' (V29; enums §8C)
     joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (workspace_id, user_id),
-    CONSTRAINT chk_workspace_member_admin_authors CHECK (NOT admin OR author)
+    CONSTRAINT chk_workspace_member_role CHECK (role IN ('viewer', 'author', 'promoter', 'workspace_admin'))
 );
 
-CREATE INDEX idx_workspace_members_admins ON workspace_members(workspace_id) WHERE admin;
+CREATE INDEX idx_workspace_members_admins ON workspace_members(workspace_id) WHERE role = 'workspace_admin';
 ```
 
 **Notes:**
-- **Flags, not a role column, because the roles are additive (D-R2).** "An author who also releases" and "a DevOps person who ONLY releases" are both one row, and no single label can name both. The `role TEXT` column (`owner` | `member`) and its CHECK were dropped in V23.
-- **V23's backfill: `owner → admin + author`, `member → author`.** A `member` already had the whole authoring surface — session capability was `JwtService.scopesFor`, which gave every non-admin user `author` globally — so `member → author` preserves exactly what worked the day before rather than demoting anyone.
-- **`admin → author` is a CHECK, not a convention.** A workspace admin can author (RBAC design §1), and stating it once in the database is what lets every capability predicate read `author` off the row instead of re-spelling the implication at each site. The service normalises before writing so a caller who ticks only "admin" gets what they asked for rather than a constraint violation with no catalogued code.
-- **The last-admin rule is NOT a constraint.** "At least one admin per workspace" is a cross-row invariant no CHECK can express, and a trigger's refusal would carry no catalogued error code — so it is enforced in `WorkspaceService` and answered as `workspace.last_admin` (409). The partial index above is what makes the count cheap.
-- No `updated_at`: membership rows are inserted, updated and deleted, and `joined_at` carries the only timestamp the model needs. **The audit trail is where role changes live** — `workspace.member_flags_changed` records the before and after (auth.md §10.1).
+- **One role, back again (V29).** V1 had `role TEXT` (`owner` | `member`); V23 replaced it with three additive booleans (`author`, `promoter`, `admin`) so that "an author who also releases" could be one row; the 2026-09-20 rulings took release away from the promoter and made it an ops role that authors nothing, so the combination the booleans existed for no longer exists and V29 folded them back into one value. V29's precedence for the rows it found: `admin → workspace_admin, else promoter → promoter, else author → author, else viewer` — an author+promoter row became a PROMOTER. The down path is documented in the migration and proven by `WorkspaceRolesMigrationTest`.
+- **The value set is a CHECK, not a convention.** Four values; a fifth cannot be stored whatever a caller sends. The `admin → author` CHECK of V23 left with the flags it constrained.
+- **The last-admin rule is NOT a constraint.** "At least one workspace admin per workspace" is a cross-row invariant no CHECK can express, and a trigger's refusal would carry no catalogued error code — so it is enforced in `WorkspaceService` and answered as `workspace.last_admin` (409). The partial index above (same name as before V29, new predicate) is what makes the count cheap.
+- No `updated_at`: membership rows are inserted, updated and deleted, and `joined_at` carries the only timestamp the model needs. **The audit trail is where role changes live** — `workspace.member_role_changed` records the before and after (auth.md §10.1).
 
 ### 4.13 `published_endpoints`
 
@@ -684,13 +683,11 @@ CREATE INDEX idx_datasource_workspaces_workspace ON datasource_workspaces(worksp
 CREATE TABLE workspace_invitations (
     workspace_id UUID        NOT NULL REFERENCES workspaces(id),
     email        TEXT        NOT NULL,                       -- normalized lowercase, the §4.2 rule
-    author       BOOLEAN     NOT NULL DEFAULT FALSE,
-    promoter     BOOLEAN     NOT NULL DEFAULT FALSE,
-    admin        BOOLEAN     NOT NULL DEFAULT FALSE,
+    role         TEXT        NOT NULL DEFAULT 'viewer',      -- the ONE role the membership will carry (V29, D20)
     invited_by   UUID        NOT NULL REFERENCES users(id),
     invited_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (workspace_id, email),
-    CONSTRAINT chk_workspace_invitation_admin_authors CHECK (NOT admin OR author),
+    CONSTRAINT chk_workspace_invitation_role CHECK (role IN ('viewer', 'author', 'promoter', 'workspace_admin')),
     CONSTRAINT chk_workspace_invitation_email_lower  CHECK (email = lower(email))
 );
 
@@ -699,8 +696,8 @@ CREATE INDEX idx_workspace_invitations_email ON workspace_invitations(email);
 
 **Notes:**
 - **Separate from `workspace_members` on purpose.** The members table's `user_id` is `NOT NULL REFERENCES users(id)` and stays that way — nothing pretends a person exists before they do. An invitation references an email, never a user id.
-- **The flags are the membership's flags, carried forward.** The `admin → author` invariant is the same CHECK the members table states (§4.12), and the service normalises before writing for the same reason: a caller who ticks only "admin" gets the workspace admin they asked for.
-- **One invitation per (workspace, email); a re-invite REPLACES the flags.** The upsert is the latest admin decision winning, and it is audited every time (`workspace.member_invited`), so the row holds no history by design — the audit trail does (the §4.12 rule again).
+- **The role is the membership's role, carried forward** (D20). The value set is the same CHECK the members table states (§4.12), mirrored by V29 exactly as V24 mirrored the flags.
+- **One invitation per (workspace, email); a re-invite REPLACES the role.** The upsert is the latest admin decision winning, and it is audited every time (`workspace.member_invited`), so the row holds no history by design — the audit trail does (the §4.12 rule again).
 - **No expiry column in v1** (owner ruling): an invitation is revocable like any other membership, and it is a membership waiting for its user, not a message that can go stale. Invitations for a user who ALREADY exists are never created — the invite becomes the membership at once (auth.md §4.6 rule 1).
 - **Materialisation preserves `invited_at` as `joined_at`.** A user invited into two workspaces materialises both in one statement, and the membership ordering (`joined_at`, §4.12) then stamps `active_workspace` to the EARLIER invitation — the admin's first decision, not the alphabetical accident of two same-transaction timestamps.
 - **Pending invitations into a DEACTIVATED workspace do not materialise** (113 §B.5): the materialise predicate requires the workspace to be active, so the rows wait and reactivation makes them live again. The index on `email` is the materialise lookup's access path — the PK prefix serves only the per-workspace listing.
@@ -1200,6 +1197,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-20 | v1.22 | V29 + V30 (177, roles R1) | **§4.12 `workspace_members` and §4.17 `workspace_invitations` carry ONE `role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`, CHECK'd) — V23's three booleans folded back by V29 with the precedence admin → workspace_admin, else promoter, else author, else viewer; `idx_workspace_members_admins` keeps its name over the new predicate; the down path is in the migration and proven up-and-down by `WorkspaceRolesMigrationTest`. **§4.6 `pipeline_executions.triggered_by` → `executed_by`** (V30, D11 — the same NOT NULL FK, every actor kept) plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| NULL, CHECK'd; backfilled from `triggered_via`: ENDPOINT → endpoint, MCP → user); the ERD edge follows. §4.6 also records `ENDPOINT` in `chk_triggered_via`, which V11 had widened without this document noticing. |
 | 2026-09-19 | v1.21 | 172 (#172) | No schema change. §4.13 reworded for R-EP5: the stored `path_pattern` is the part after `/api` in the `/api/<category>/<version>/<path…>` shape — the column, the constraint and every index are exactly as V11 wrote them. |
 | 2026-09-14 | v1.20 | V28 migration (140 release checks) | New **§4.20 `pipeline_check_runs`** — the server-side record of every release check run ([Pipeline Contract §3.3/§12.12](pipeline-contract.md)): one append-only row per check per run, `via` CHECK'd over `mcp` \| `rest` \| `ui` \| `release`, `verdict` CHECK'd over `pass` \| `fail` \| `error` (error = no verdict could be formed, recorded — never silently a fail), `parameters_json` the BOUND context, `observed_json` one small object (`{"value": …}` or `{"rows": …}`, NULL when the run errored before a value was read). FK to `pipelines(id)` only, deliberately not the composite version FK — a purged draft's runs are history to keep. §5 gains `idx_pipeline_check_runs_latest`; §5A classifies it derived; the ERD gains `pipelines ──1:N── pipeline_check_runs`. Nineteen tables. |
 | 2026-09-14 | v1.19 | V27 migration (137 mail notices) | New **§4.19 `mail_sends`** — the claim row behind every notice ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)): one row per message identity `(user_id, kind, act_id)` (`uq_mail_sends_message`), `chk_mail_sends_kind` over the closed list, `claimed_at` / `sent_at` / `message_id` / `error`; a row proves an attempt, never a delivery, and is never cleaned up. §5 gains its two constraint-backed indexes; the ERD gains `users ──1:N── mail_sends`. Eighteen tables. |

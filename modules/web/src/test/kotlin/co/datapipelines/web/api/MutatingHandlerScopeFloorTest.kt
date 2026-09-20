@@ -233,7 +233,13 @@ class MutatingHandlerScopeFloorTest {
                     "mint and a session carries CSRF, so the read floor is moot for the credential that could abuse it",
             )
 
-        const val BASE_PACKAGE = "co.datapipelines.web"
+        /**
+         * 177 §D.1 — `co.datapipelines`, not `co.datapipelines.web`: every controller on this
+         * module's classpath, whichever module declares it (auth, application, mcp-server sit
+         * below web and are reached; `modules/app` sits above and is covered by
+         * `RoleWalkE2eTest`, which walks the running application's own handler mapping).
+         */
+        const val BASE_PACKAGE = "co.datapipelines"
 
         /**
          * The mutating HTTP verb a handler carries, or null for read verbs.

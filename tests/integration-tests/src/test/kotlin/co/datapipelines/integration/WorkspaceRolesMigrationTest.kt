@@ -202,6 +202,13 @@ class WorkspaceRolesMigrationTest {
             VALUES ('$pipeline', 'acme/probe', 'Probe', '', '$alice', '$ws', NULL)
             """.trimIndent(),
         )
+        // `fk_executions_pipeline_version` (V1): an execution names a stored version.
+        execute(
+            """
+            INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by)
+            VALUES ('$pipeline', 1, '{}'::jsonb, 'probe-hash', 'DRAFT', '$alice')
+            """.trimIndent(),
+        )
         // One execution per trigger the backfill distinguishes: UI and REST stay NULL, MCP →
         // user, ENDPOINT → endpoint. `root_execution_id` is NOT NULL since V3.
         listOf(uiRun to ("UI" to alice), restRun to ("REST" to bob), mcpRun to ("MCP" to bob), endpointRun to ("ENDPOINT" to alice))

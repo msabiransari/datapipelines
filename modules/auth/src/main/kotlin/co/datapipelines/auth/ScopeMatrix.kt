@@ -78,13 +78,20 @@ object ScopeMatrix {
         INTROSPECT_DATASOURCE(Scope.AUTHOR, Permission.VIEW),
 
         /**
-         * "Create / update / delete workspace-bound datasources" (§7.6, workspaces design
-         * D8): `author` is the scope floor; the D8 gates — the `member-datasources-enabled`
-         * config gate and the membership/binding checks — are enforced by the handler, not
-         * expressible in a scope. Global datasource CUD stays [MUTATE_DATASOURCES] (`admin`).
+         * "Create / update / delete datasources" (§7.6, workspaces design D8): the ONE route
+         * family both the workspace-bound and the INSTANCE (`global: true`) datasource writes
+         * travel. `author` is the scope floor and workspace admin the role; the D8 gates — the
+         * `member-datasources-enabled` config gate, the membership/binding checks, and the
+         * super-admin requirement for an instance datasource — are `DatasourceWorkspaceRules`'
+         * in-service decisions, not expressible in a scope or a role row.
+         *
+         * There used to be a second constant, `MUTATE_DATASOURCES` (`admin` / super admin), for
+         * the instance half. No handler ever declared it — the same `POST /api/v1/datasources`
+         * serves both halves and a handler declares one operation — so 177's reachability gate
+         * (`RoleWalkE2eTest`) found it as a doc row nothing implemented and it was removed. The
+         * rule it described is unchanged and enforced where it always was.
          */
         MUTATE_WORKSPACE_DATASOURCES(Scope.AUTHOR, Permission.WS_ADMIN),
-        MUTATE_DATASOURCES(Scope.ADMIN, Permission.SUPER_ADMIN),
 
         /**
          * "Manage own API keys — any authenticated" (§7.6). [Scope.READ] is the floor

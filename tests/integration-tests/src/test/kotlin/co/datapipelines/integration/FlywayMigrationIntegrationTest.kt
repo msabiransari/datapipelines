@@ -773,6 +773,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",
                 "chk_dialect",
+                // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
+                "chk_executions_executed_by_key_kind",
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
@@ -808,15 +810,15 @@ class FlywayMigrationIntegrationTest {
                 "chk_template_versions_via",
                 "chk_triggered_via",
                 "chk_type_dialect",
-                // V24 (113) — the invitation row carries the same invariant as the membership
-                // it becomes, and stores the email in the one canonical form §4.2 mandates.
+                // V24 (113) — the invitation row stores the email in the one canonical form §4.2
+                // mandates; V29 (177) gave it the same ONE-role CHECK the membership carries (D20).
                 // Sorted BEFORE the members' CHECK: pg_constraint's ORDER BY conname puts
                 // "workspace_invitation_*" ahead of "workspace_member_*".
-                "chk_workspace_invitation_admin_authors",
                 "chk_workspace_invitation_email_lower",
-                // V23 replaced the role CHECK with the invariant that outlived it: a workspace
-                // admin can author, stated once in the database (RBAC design §1).
-                "chk_workspace_member_admin_authors",
+                "chk_workspace_invitation_role",
+                // V29 (177, D1): one role per membership — viewer | author | promoter |
+                // workspace_admin; the V23 admin-implies-author CHECK left with the flags.
+                "chk_workspace_member_role",
             )
     }
 

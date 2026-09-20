@@ -31,7 +31,7 @@ class ScopeInterceptorTest {
         @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
         fun read() = Unit
 
-        @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+        @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
         fun adminOnly() = Unit
 
         fun unannotated() = Unit

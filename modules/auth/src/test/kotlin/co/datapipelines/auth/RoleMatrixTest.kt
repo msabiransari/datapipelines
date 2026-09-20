@@ -353,7 +353,6 @@ class RoleMatrixTest {
         /** D7: the instance verbs. */
         val SUPER_ADMIN_ONLY =
             setOf(
-                Op.MUTATE_DATASOURCES,
                 Op.USER_ADMINISTRATION,
                 Op.WORKSPACE_CREATE,
                 Op.MANAGE_INSTANCE_WORKSPACES,

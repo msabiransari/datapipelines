@@ -4,6 +4,7 @@ import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldEndWith
 import org.junit.jupiter.api.Test
@@ -138,25 +139,24 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         watch: Watch,
     ) {
         viewer.adminAnchors() shouldBe emptyList()
-        viewer.page.navigate("$baseUrl/promotion")
-        viewer.page.waitForSelector(".app-page-h")
-        viewer.page.locator("#app-main form[action*='/promotion/promote']").count() shouldBe 0
-        viewer.page.locator("#app-main input[type='checkbox']").count() shouldBe 0
-        viewer.verbs().shouldBeEmpty()
-        shot(viewer.page, "viewer-promotion", "light")
-        viewer.page.navigate("$baseUrl/workspaces")
-        viewer.page.waitForSelector(".app-page-h")
-        viewer.page.locator("#workspace-members").count() shouldBe 0
-        viewer.page.locator("[data-verb='member-add']").count() shouldBe 0
-        viewer.page.locator("form[action*='/workspaces/create']").count() shouldBe 0
-        // Switch is the reader's own verb and stays.
-        viewer.page.locator("[data-verb='workspace-switch']").count() shouldBe 1
-        shot(viewer.page, "viewer-workspaces", "light")
+        // 177: the promotion page is `PROMOTION_READ` (author, promoter, admins — rule 13) and
+        // the workspaces page is a workspace admin's (D13). A viewer is refused both by ROLE —
+        // the catalogued 403, not a screen with the verbs hidden — and the rail draws neither
+        // item, so there is no dead link to click. The switcher in the chrome stays.
+        viewer.page.locator("nav.app-nav a[data-nav-section='/promotion']").count() shouldBe 0
+        viewer.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 0
+        viewer.page.locator("#workspace-switcher").count() shouldBe 1
+        // Asked through the session's own request context (the cookies ride along) rather than
+        // by navigating: the response watcher above records every ≥400 the PAGE sees, and these
+        // two refusals are the point, not a defect.
+        listOf("/promotion", "/workspaces").forEach { path ->
+            val refused = viewer.page.request().get("$baseUrl$path")
+            refused.status() shouldBe 403
+            refused.text() shouldContain "auth.role_required"
+        }
+        shot(viewer.page, "viewer-dashboard", "light")
         ensureThemeOn(viewer.page, "dark")
-        shot(viewer.page, "viewer-workspaces", "dark")
-        viewer.page.navigate("$baseUrl/promotion")
-        viewer.page.waitForSelector(".app-page-h")
-        shot(viewer.page, "viewer-promotion", "dark")
+        shot(viewer.page, "viewer-dashboard", "dark")
         // Boosted navigation keeps the rail as painted: still no Admin after rail clicks.
         viewer.page.locator("nav.app-nav a[data-nav-section='/pipelines']").click()
         viewer.page.waitForURL("**/pipelines**")
@@ -271,13 +271,20 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         admin.page.waitForURL("**/executions**")
         admin.adminAnchors().single().getAttribute("data-nav-admin") shouldBe "members"
 
+        // D13/D14 (177): the switcher in the chrome stays every member's and re-issues the
+        // token; the workspaces PAGE is the admin's and refuses the viewer this person now is.
+        val tokenBefore = admin.sessionToken()
         admin.switchTo(other)
         admin.roleBadge() shouldBe "viewer"
+        admin.sessionToken().let { it shouldNotBe null; it shouldNotBe tokenBefore }
         admin.adminAnchors() shouldBe emptyList()
-        admin.page.locator("#workspace-members").count() shouldBe 0
-        admin.page.locator("[data-verb='member-add']").count() shouldBe 0
+        admin.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 0
+        admin.page.locator("#workspace-switcher").count() shouldBe 1
         shot(admin.page, "ws-admin-switched-to-viewer", "light")
         watch.bad shouldBe emptyList()
+        val refused = admin.page.request().get("$baseUrl/workspaces")
+        refused.status() shouldBe 403
+        refused.text() shouldContain "auth.role_required"
         admin.close()
     }
 
@@ -546,15 +553,22 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             return watch
         }
 
+        /**
+         * Switches through the CHROME's switcher (the `<select>` every member keeps, D13/D14),
+         * landing on the dashboard with the switch applied — not through the workspaces page,
+         * which since 177 is a workspace admin's and would refuse the viewer this session is
+         * about to become.
+         */
         fun switchTo(workspace: String) {
-            page.navigate("$baseUrl/workspaces")
-            val form = "form[action*='/workspace/switch']:has(input[value='$workspace'])"
-            page.waitForSelector("$form [data-verb='workspace-switch']")
-            page.click("$form [data-verb='workspace-switch']")
-            page.waitForURL("**/dashboard")
-            page.navigate("$baseUrl/workspaces")
+            page.navigate("$baseUrl/dashboard")
+            page.waitForSelector("#workspace-switcher")
+            page.selectOption("#workspace-switcher", arrayOf(workspace), Page.SelectOptionOptions().setForce(true))
+            page.waitForFunction("() => document.querySelector('[data-role]') && document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'")
             page.waitForSelector("nav.app-nav")
         }
+
+        /** The `dp_session` cookie's value — a switch re-issues the token (D14), so it must change. */
+        fun sessionToken(): String? = page.context().cookies().firstOrNull { it.name == "dp_session" }?.value
 
         fun close() = session.close()
     }
