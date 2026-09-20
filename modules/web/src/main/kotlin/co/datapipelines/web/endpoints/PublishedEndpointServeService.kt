@@ -13,6 +13,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionResult
+import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
@@ -198,6 +199,9 @@ class PublishedEndpointServeService(
                 parameters = validated.parameters,
                 resultTtlSeconds = validated.ttlSeconds,
                 triggeredVia = ExecutionTrigger.ENDPOINT,
+                // D11: an endpoint-key run is the ENDPOINT's, not the key owner's — the own-runs
+                // filter excludes it and workspace admins (and the key, via the serve audit) see it.
+                executedByKeyKind = ExecutedByKeyKind.ENDPOINT,
                 executionId = executionId,
                 // rootExecutionId stays null on purpose: a root request takes a concurrency slot,
                 // and an endpoint serve must be governed by the same limits every other run is.

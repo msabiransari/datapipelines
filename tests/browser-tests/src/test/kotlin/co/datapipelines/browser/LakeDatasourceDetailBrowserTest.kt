@@ -141,8 +141,8 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
                 // for a fixture that forgot to say who the person is.
                 connection
                     .prepareStatement(
-                        "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)" +
-                            " VALUES (?, ?, TRUE, FALSE, TRUE) ON CONFLICT (workspace_id, user_id) DO NOTHING",
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES (?, ?, 'workspace_admin') ON CONFLICT (workspace_id, user_id) DO NOTHING",
                     ).use { ps ->
                         ps.setObject(1, workspaceId)
                         ps.setObject(2, userId)

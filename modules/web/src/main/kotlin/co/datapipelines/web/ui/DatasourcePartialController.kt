@@ -339,6 +339,7 @@ class DatasourcePartialController(
         val usages = if (forbidden == null) references.referencesTo(name) else emptyList()
         model.addAttribute("usages", usages)
         model.addAttribute("usedByPipelines", usages.map { it.pipelineName }.distinct())
+        RoleModel.stamp(model, principal())
         return "partials/datasource-delete"
     }
 

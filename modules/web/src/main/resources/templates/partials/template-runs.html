@@ -22,7 +22,7 @@
     <span class="tplx-vmeta">
       <span th:text="${r.durationMs != null} ? ${r.durationMs} + ' ms' : '—'">3200 ms</span>
       <span> · </span><span th:text="${r.triggeredVia.name()}">MCP</span>
-      <span> · </span><span th:text="${runActors[r.triggeredBy]} ?: 'unknown'">Muhammad</span>
+      <span> · </span><span th:text="${runActors[r.executedBy]} ?: 'unknown'">Muhammad</span>
       <span> · </span><span th:text="${runAgo[r.executionId]}"
                             th:title="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">4 mins ago</span>
     </span>

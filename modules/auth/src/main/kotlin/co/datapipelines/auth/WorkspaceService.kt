@@ -59,7 +59,7 @@ fun interface WorkspaceLiveness {
  * ([AuthenticatedPrincipal.requireWorkspace]), where there is no name to protect.
  *
  * ## Super admins (D-R8)
- * They resolve ANY workspace, through the SAME path, with [MembershipFlags.implicit] set
+ * They resolve ANY workspace, through the SAME path, with [WorkspaceContext.implicit] set
  * when they hold no explicit membership — which is what the `acting_via=super_admin` audit
  * flag reads. Being a super admin does not make a DEACTIVATED workspace selectable; it makes
  * it visible.
@@ -88,7 +88,7 @@ class WorkspaceService(
 
     /**
      * Resolves a `DP-Workspace` switch (design §5.1) to the context the request runs in,
-     * flags included. Unknown, non-member and deactivated are one [WorkspaceNotFoundException]
+     * role included. Unknown, non-member and deactivated are one [WorkspaceNotFoundException]
      * (D-R5), so the header can probe nothing.
      */
     fun resolveSwitch(
@@ -118,7 +118,7 @@ class WorkspaceService(
         // deployment is the one principal who cannot act in it.
         if (principal.isSuperAdmin) {
             workspaceRepository.findAllActive().firstOrNull()?.let {
-                return WorkspaceContext(it.id, it.name, MembershipFlags.IMPLICIT_SUPER_ADMIN)
+                return WorkspaceContext.superAdminOver(it.id, it.name, explicitRole = null)
             }
         }
         return null
@@ -131,7 +131,7 @@ class WorkspaceService(
      * **The materialise step comes first (113, auth.md §4.6):** every invitation for this
      * email becomes a membership, in the same statement that deletes the invitations, BEFORE
      * the resolution below reads anything — so an invited user's first login lands them in
-     * the invited workspace with the invited flags, and the demo join never fires for them.
+     * the invited workspace with the invited role, and the demo join never fires for them.
      * This is the ONE place both credential paths converge (OIDC's success handler and the
      * local login controller both call it), which is why the hook lives here and not in
      * either login handler: the owner's rule is about LOGGING IN, not about which provider
@@ -170,7 +170,7 @@ class WorkspaceService(
                         mapOf(
                             "workspace" to row.workspaceName,
                             "email" to normalized,
-                            "flags" to wire(row.flags),
+                            "role" to row.role.wire,
                             "inviter" to row.invitedBy.toString(),
                         ),
                 )
@@ -223,7 +223,9 @@ class WorkspaceService(
                 WorkspaceMembership(
                     workspaceId = it.id,
                     workspaceName = it.name,
-                    flags = MembershipFlags.superAdminOver(flagsIn(it.id, principal.userId)),
+                    // The row's OWN role (viewer when implicit): the listing says what the
+                    // membership carries; the instance authority is the principal's, not the row's.
+                    role = roleIn(it.id, principal.userId) ?: WorkspaceRole.VIEWER,
                     joinedAt = it.createdAt,
                     workspaceActive = it.isActive,
                 )
@@ -254,7 +256,7 @@ class WorkspaceService(
         displayName: String,
     ): Workspace {
         val workspace = read(principal, name)
-        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
         val updated =
             workspaceRepository.updateDisplayName(workspace.id, displayName)
                 // The row vanished between read() and the write: the 404 rule answers the race
@@ -404,7 +406,7 @@ class WorkspaceService(
     ) {
         val normalized = email.trim().lowercase()
         val workspace = read(principal, name)
-        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
         if (!invitationRepository.delete(workspace.id, normalized)) {
             throw WorkspaceInvitationNotFoundException(name, normalized)
         }
@@ -417,13 +419,13 @@ class WorkspaceService(
     }
 
     /**
-     * Adds a member with [flags] (design §1; workspace admin or super admin). A member added
-     * with no flags is a VIEWER — the D-R11 default and the one the demo path uses.
+     * Adds a member with [role] (D6, D20; workspace admin or super admin). The default is
+     * VIEWER — the D-R11 default and the one the demo path uses.
      *
      * ## The invitation branch (113, auth.md §4.6)
      * When no `users` row holds [email], the request does not fail: it creates an INVITATION
      * keyed by the email — upsert on the same (workspace, email), so a second invite
-     * REPLACES the flags and the latest admin decision wins, audited every time — and
+     * REPLACES the role and the latest admin decision wins, audited every time — and
      * returns [AddMemberOutcome.Invited]. The login path materialises it into a real
      * membership when the row comes into existence. An invitation for a user who ALREADY
      * exists is never created: the existing-user branch makes them a member at once.
@@ -440,18 +442,18 @@ class WorkspaceService(
      * The email is resolved here so the unknown-user mapping and the membership write are one
      * transaction of intent. Idempotent by the repository's `ON CONFLICT DO NOTHING`:
      * re-adding an existing member returns them unchanged rather than silently resetting
-     * their flags to the request's — changing an existing member's role is [setMemberFlags],
+     * their role to the request's — changing an existing member's role is [setMemberRole],
      * which the last-admin rule guards.
      */
     fun addMember(
         principal: AuthenticatedPrincipal,
         name: String,
         email: String,
-        flags: MembershipFlags = MembershipFlags.VIEWER,
+        role: WorkspaceRole = WorkspaceRole.VIEWER,
     ): AddMemberOutcome {
         val normalized = email.trim().lowercase()
         val workspace = read(principal, name)
-        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
         // §B.5: a deactivated workspace refuses invites. A member never gets here (their 404
         // rule answered already); this is the super admin, who CAN see the greyed workspace,
         // being told the same thing the members-verbs would tell any other role.
@@ -459,14 +461,14 @@ class WorkspaceService(
         val user = userRepository.findByEmail(normalized)
         if (user != null) {
             val row =
-                workspaceRepository.addMember(workspace.id, user.id, normalize(flags))
+                workspaceRepository.addMember(workspace.id, user.id, role)
                     ?: error("membership for $normalized in $name vanished after insert")
             authCache.invalidateMemberships(user.id)
             audit(
                 principal,
                 "workspace.member_added",
                 name,
-                mapOf("workspace" to name, "member" to normalized, "flags" to wire(flags)),
+                mapOf("workspace" to name, "member" to normalized, "role" to role.wire),
             )
             return AddMemberOutcome.Added(row)
         }
@@ -476,15 +478,14 @@ class WorkspaceService(
         if (!authProperties.isDomainAllowed(normalized)) {
             throw InvitationDomainNotAllowedException(normalized)
         }
-        val normalizedFlags = normalize(flags)
-        invitationRepository.upsert(workspace.id, normalized, normalizedFlags, principal.userId)
+        invitationRepository.upsert(workspace.id, normalized, role, principal.userId)
         audit(
             principal,
             "workspace.member_invited",
             name,
-            mapOf("workspace" to name, "email" to normalized, "flags" to wire(normalizedFlags)),
+            mapOf("workspace" to name, "email" to normalized, "role" to role.wire),
         )
-        return AddMemberOutcome.Invited(email = normalized, flags = normalizedFlags)
+        return AddMemberOutcome.Invited(email = normalized, role = role)
     }
 
     /** What [addMember] did: a real membership now exists, or an invitation now does. */
@@ -495,44 +496,45 @@ class WorkspaceService(
         ) : AddMemberOutcome
 
         /**
-         * No user row existed; an invitation was created (or its flags replaced). The login
+         * No user row existed; an invitation was created (or its role replaced). The login
          * path materialises it when the person first exists. Distinguishable from [Added] by
          * the HTTP status (202 vs 200) AND the body, so a client never mistakes a ghost for
          * a member.
          */
         data class Invited(
             val email: String,
-            val flags: MembershipFlags,
+            val role: WorkspaceRole,
         ) : AddMemberOutcome
     }
 
     /**
-     * Replaces a member's capability flags (design §1). Refuses to demote the LAST admin with
+     * Replaces a member's role (D1, D20). Refuses to demote the LAST admin with
      * [WorkspaceLastAdminException] — a workspace with no admin is unmanageable, and the
      * refusal names the fix ("give someone else the admin role first") rather than the rule.
      */
-    fun setMemberFlags(
+    fun setMemberRole(
         principal: AuthenticatedPrincipal,
         name: String,
         userId: UUID,
-        flags: MembershipFlags,
+        role: WorkspaceRole,
     ): WorkspaceMemberRow {
         val workspace = read(principal, name)
-        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
-        val normalized = normalize(flags)
-        if (target.flags.admin && !normalized.admin) requireAnotherAdmin(workspace, userId)
-        workspaceRepository.setFlags(workspace.id, userId, normalized)
+        if (target.role == WorkspaceRole.WORKSPACE_ADMIN && role != WorkspaceRole.WORKSPACE_ADMIN) {
+            requireAnotherAdmin(workspace, userId)
+        }
+        workspaceRepository.setRole(workspace.id, userId, role)
         authCache.invalidateMemberships(userId)
         audit(
             principal,
-            "workspace.member_flags_changed",
+            "workspace.member_role_changed",
             name,
             mapOf(
                 "workspace" to name,
                 "member_user_id" to userId.toString(),
-                "from" to wire(target.flags),
-                "to" to wire(normalized),
+                "from" to target.role.wire,
+                "to" to role.wire,
             ),
         )
         return workspaceRepository.findMemberRow(workspace.id, userId)
@@ -541,7 +543,7 @@ class WorkspaceService(
 
     /**
      * Removes a membership. Workspace admin or super admin; refuses the LAST admin
-     * ([WorkspaceLastAdminException]) for the same reason [setMemberFlags] does.
+     * ([WorkspaceLastAdminException]) for the same reason [setMemberRole] does.
      *
      * A user id that names no member of this workspace answers with the workspace's own 404
      * (D-R5): "there is no such member here" and "there is no such workspace for you" must not
@@ -553,9 +555,9 @@ class WorkspaceService(
         userId: UUID,
     ) {
         val workspace = read(principal, name)
-        requireCapability(principal, workspace, Capability.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
-        if (target.flags.admin) requireAnotherAdmin(workspace, userId)
+        if (target.role == WorkspaceRole.WORKSPACE_ADMIN) requireAnotherAdmin(workspace, userId)
         workspaceRepository.removeMember(workspace.id, userId)
         authCache.invalidateMemberships(userId)
         audit(
@@ -579,7 +581,7 @@ class WorkspaceService(
     ) : IllegalStateException("No user with email '$email'.")
 
     /**
-     * The context [principal] would run in inside [name] — flags resolved — or null when the
+     * The context [principal] would run in inside [name] — role resolved — or null when the
      * workspace does not exist FOR THEM (D-R5: unknown, non-member, or deactivated).
      *
      * The one resolution path (D-R8: "super admins resolve any workspace THROUGH THE SAME
@@ -597,11 +599,11 @@ class WorkspaceService(
         val explicit = memberships(principal.userId).firstOrNull { it.workspaceId == workspace.id }
         return when {
             principal.isSuperAdmin -> {
-                WorkspaceContext(workspace.id, workspace.name, MembershipFlags.superAdminOver(explicit?.flags))
+                WorkspaceContext.superAdminOver(workspace.id, workspace.name, explicit?.role)
             }
 
             explicit != null -> {
-                WorkspaceContext(workspace.id, workspace.name, explicit.flags)
+                WorkspaceContext(workspace.id, workspace.name, explicit.role)
             }
 
             else -> {
@@ -617,32 +619,34 @@ class WorkspaceService(
      * [RoleRequiredException] for the viewer.
      */
     @Suppress("ThrowsCount") // three distinct refusals: unknown workspace, unreachable, wrong role
-    fun requireIssuanceCapability(
+    fun requireIssuancePermission(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
     ): WorkspaceContext {
         val workspace = workspaceRepository.findById(workspaceId) ?: throw WorkspaceNotFoundException(workspaceId.toString())
         val context = contextFor(principal, workspace.name) ?: throw WorkspaceNotFoundException(workspace.name)
-        if (!Capability.AUTHOR.satisfiedBy(context.flags)) {
-            throw RoleRequiredException(Capability.AUTHOR, context.flags.held(), workspace.name)
+        if (!context.permits(Permission.AUTHOR)) {
+            throw RoleRequiredException(Permission.AUTHOR, context.held(), workspace.name)
         }
         return context
     }
 
     /**
-     * The flags a KEY's issuer currently holds in the key's pinned workspace, or null when the
-     * workspace is unreachable for them now (D-R12: removed issuer, deactivated workspace).
+     * The context a KEY's issuer currently holds in the key's pinned workspace, or null when
+     * the workspace is unreachable for them now (D-R12: removed issuer, deactivated workspace).
      * Read per request through the cache, which is what bounds the demotion window at one TTL.
      */
-    fun issuerFlags(
+    fun issuerContext(
         issuerId: UUID,
         issuerIsSuperAdmin: Boolean,
         workspaceId: UUID,
-    ): MembershipFlags? {
+        workspaceName: String,
+    ): WorkspaceContext? {
         val explicit = memberships(issuerId).firstOrNull { it.workspaceId == workspaceId && it.workspaceActive }
         return when {
-            issuerIsSuperAdmin -> MembershipFlags.superAdminOver(explicit?.flags)
-            else -> explicit?.flags
+            issuerIsSuperAdmin -> WorkspaceContext.superAdminOver(workspaceId, workspaceName, explicit?.role)
+            explicit != null -> WorkspaceContext(workspaceId, workspaceName, explicit.role)
+            else -> null
         }
     }
 
@@ -695,40 +699,33 @@ class WorkspaceService(
         workspaceId: UUID,
     ): Boolean = memberships(userId).any { it.workspaceId == workspaceId }
 
-    private fun flagsIn(
+    private fun roleIn(
         workspaceId: UUID,
         userId: UUID,
-    ): MembershipFlags? = memberships(userId).firstOrNull { it.workspaceId == workspaceId }?.flags
+    ): WorkspaceRole? = memberships(userId).firstOrNull { it.workspaceId == workspaceId }?.role
 
     private fun context(membership: WorkspaceMembership): WorkspaceContext =
-        WorkspaceContext(membership.workspaceId, membership.workspaceName, membership.flags)
-
-    /**
-     * The `admin → author` invariant (design §1), applied before every write. The database's
-     * `chk_workspace_member_admin_authors` is the authority; normalising here means a caller
-     * that ticks "admin" alone gets the workspace admin it asked for rather than a constraint
-     * violation with no catalogued code.
-     */
-    private fun normalize(flags: MembershipFlags): MembershipFlags = if (flags.admin) flags.copy(author = true) else flags
+        WorkspaceContext(membership.workspaceId, membership.workspaceName, membership.role)
 
     private fun requireSuperAdmin(principal: AuthenticatedPrincipal) {
         if (!principal.isSuperAdmin) {
-            throw RoleRequiredException(Capability.SUPER_ADMIN, emptySet())
+            throw RoleRequiredException(Permission.SUPER_ADMIN, emptySet())
         }
     }
 
-    private fun requireCapability(
+    private fun requirePermission(
         principal: AuthenticatedPrincipal,
         workspace: Workspace,
-        capability: Capability,
+        permission: Permission,
     ) {
-        val flags =
+        val explicit = roleIn(workspace.id, principal.userId)
+        val context =
             if (principal.isSuperAdmin) {
-                MembershipFlags.superAdminOver(flagsIn(workspace.id, principal.userId))
+                WorkspaceContext.superAdminOver(workspace.id, workspace.name, explicit)
             } else {
-                flagsIn(workspace.id, principal.userId) ?: throw WorkspaceNotFoundException(workspace.name)
+                WorkspaceContext(workspace.id, workspace.name, explicit ?: throw WorkspaceNotFoundException(workspace.name))
             }
-        if (!capability.satisfiedBy(flags)) throw RoleRequiredException(capability, flags.held(), workspace.name)
+        if (!context.permits(permission)) throw RoleRequiredException(permission, context.held(), workspace.name)
     }
 
     /** The last-admin rule: [excluding] is the member about to lose admin (design §1). */
@@ -736,7 +733,10 @@ class WorkspaceService(
         workspace: Workspace,
         excluding: UUID,
     ) {
-        val remaining = workspaceRepository.findMembersOf(workspace.id).count { it.flags.admin && it.userId != excluding }
+        val remaining =
+            workspaceRepository
+                .findMembersOf(workspace.id)
+                .count { it.role == WorkspaceRole.WORKSPACE_ADMIN && it.userId != excluding }
         if (remaining == 0) throw WorkspaceLastAdminException(workspace.name)
     }
 
@@ -757,7 +757,7 @@ class WorkspaceService(
         details: Map<String, Any?>,
     ) {
         val actingVia =
-            if (principal.isSuperAdmin && flagsIn(workspaceIdOf(workspaceName), principal.userId) == null) {
+            if (principal.isSuperAdmin && roleIn(workspaceIdOf(workspaceName), principal.userId) == null) {
                 mapOf(AuditLogger.ACTING_VIA to AuditLogger.ACTING_VIA_SUPER_ADMIN)
             } else {
                 emptyMap<String, Any?>()
@@ -768,13 +768,6 @@ class WorkspaceService(
     /** The id behind an already-resolved name; a vanished row audits without the membership probe. */
     private fun workspaceIdOf(name: String): UUID =
         authCache.workspaceByName(name) { workspaceRepository.findByName(it) }?.id ?: NIL_WORKSPACE
-
-    private fun wire(flags: MembershipFlags): List<String> =
-        buildList {
-            if (flags.author) add("author")
-            if (flags.promoter) add("promoter")
-            if (flags.admin) add("admin")
-        }
 
     private companion object {
         /** metadata-db §4.11 — `[a-z0-9_-]+`, 1–63, immutable. */

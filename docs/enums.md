@@ -203,28 +203,44 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 ---
 
-## 8B. `Capability` — what a membership may do
+## 8B. `Permission` — an action a role may perform (was `Capability`)
 
-**Source:** [Auth §11A](auth.md#11a-roles) (the role table), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) (the per-operation minimums)
+**Source:** [Auth §11A](auth.md#11a-roles) (the roles), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) (the role-first matrix — the per-operation row)
 **Used by:** auth (`ScopeMatrix.allowed`), every REST handler and MCP tool.
 
-The ROLE axis. It travels with a **membership**, not with a credential (RBAC design D-R1): the same person is a viewer in one workspace and an author in another, which is why it cannot live on the user.
+The ROLE axis of the matrix. A permission is a ROW of §7.6 — the set of workspace roles admitted to an action — never a free string (roles design D21, 2026-09-20). It travels with a **membership**, not with a credential: the same person is a viewer in one workspace and an author in another. Renamed from `Capability` on 2026-09-20 with the vocabulary ruling (role = what a member holds, permission = what a role may do).
 
-**Deliberately NOT a hierarchy**, unlike [`Scope`](#8-scope--api-key-authorization-scope). An author may not `release` and a promoter may not author, so neither dominates the other — each value is a predicate over the membership row's three flags (`author`, `promoter`, `admin`; all false = viewer), never an ordinal comparison.
+**Deliberately NOT a hierarchy**, unlike [`Scope`](#8-scope--api-key-authorization-scope). The roles are not a chain — the promoter promotes but does not execute, the author releases but does not promote — so each value lists the roles it admits outright. A super admin (`users.is_admin`) holds every value in every workspace (D7).
 
-| Value | Held by | Description |
+| Value | Admits | Description |
 |---|---|---|
-| `view` | any member | Read everything in the workspace |
-| `execute` | any member | Execute pipelines, read results, cancel own runs, run capped read-only SQL probes (D-R3: "viewers execute") |
-| `author` | `author` | Create/edit drafts, discard, restore, purge, publish endpoints, register lake tables, issue own keys |
-| `switch` | `author` OR `promoter` | Switch the served version — the rollback lever (O-1). Its own value because it is the one verb both hold and neither implies |
-| `promote` | `promoter` OR `admin` | `release` and `promote` — the DevOps verbs |
-| `ws_admin` | `admin` | Members and roles, workspace-bound datasource registration, the workspace audit trail |
-| `super_admin` | `users.is_admin` | Instance verbs: create/deactivate workspaces, users, config, datasource grants. Implicitly a member of every workspace (D-R8), audited as `auth.super_admin_acting` |
+| `view` | viewer, author, promoter, workspace_admin | Read the workspace's objects, introspect a datasource's schema, the self verbs (own keys, own password, theme), the switcher |
+| `execute` | viewer, author, workspace_admin | Execute pipelines, cancel runs, read executions and results (own unless workspace admin — D11), test a datasource connection. The promoter has none of it (D5) |
+| `author` | author, workspace_admin | Create/edit drafts, discard, restore, purge, **release**, switch the served version, publish endpoints, register lake tables, record/retire learned facts (D4, D8, D9) |
+| `promotion_read` | author, promoter, workspace_admin | Read the promotion page (owner rule 13): the author who released sees what is promotable |
+| `promote` | promoter, workspace_admin | Promote to the higher environment (D5, D8) |
+| `ws_admin` | workspace_admin | Members, roles and invitations, workspace-bound datasources, the workspaces page, the workspace audit trail |
+| `super_admin` | — (super admin only) | Instance verbs: create/deactivate workspaces, users, global datasources and grants. Implicitly a member of every workspace, audited as `auth.super_admin_acting` |
 
-`admin → author` is a database CHECK (`chk_workspace_member_admin_authors`, [metadata-db §4.12](metadata-db.md#412-workspace_members)), so `author` reads straight off the row rather than re-spelling the implication at each predicate.
+**Where the two axes disagree, and neither is redundant:** `execute` is the second SCOPE but a viewer-level PERMISSION — a `read` key may not execute, a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but `view` permission (every role, the promoter included — "introspection is reading", ratified 2026-09-20).
 
-**Where the two axes disagree, and neither is redundant:** `execute` is the second SCOPE but the viewer-level CAPABILITY — a `read` key may not execute, a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but `view` capability (a viewer gets capped read-only SELECT by design).
+---
+
+## 8C. `WorkspaceRole` — the ONE role a membership holds
+
+**Source:** [Auth §11A](auth.md#11a-roles); [metadata-db §4.12](metadata-db.md#412-workspace_members) (`workspace_members.role`, V29) and §4.17 (`workspace_invitations.role`)
+**Used by:** auth (`WorkspaceRole`, `Permission.satisfiedBy(role, superAdmin)`), the REST `role` field of the workspace surface (rest-api §17), the members dropdown (ui-screens §4.13).
+
+Exactly one per membership (roles design D1, 2026-09-20). Super admin is NOT a value: it is `users.is_admin`, a property of the user, held in every workspace. The wire and database token is the lowercase name; the UI prints it with a space (`workspace admin`).
+
+| Value | Description |
+|---|---|
+| `viewer` | Reads the workspace and executes pipelines (D3). Nothing else |
+| `author` | Viewer + creates, edits, releases, switches, publishes, registers lake tables, records facts (D4, D8) |
+| `promoter` | The ops role (D5): reads datasources and (R2) released-and-newer objects; promotes. Executes nothing, reads no executions, authors nothing, releases nothing |
+| `workspace_admin` | Everything in the workspace, members and promotion included (D6) |
+
+V23's three additive booleans (`author` / `promoter` / `admin`) were folded back into this value by V29 with the precedence `admin → workspace_admin, else promoter → promoter, else author → author, else viewer`; the database CHECK (`chk_workspace_member_role`, `chk_workspace_invitation_role`) keeps the set closed.
 
 ---
 
@@ -373,12 +389,12 @@ The ROLE axis. It travels with a **membership**, not with a credential (RBAC des
 | `auth.workspace.stranded_content` | Content committed into a workspace concurrently with its deletion and is now invisible with its name held — the detector, not a refusal |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request |
 | `auth.super_admin_acting` | A super admin acted in a workspace they hold no explicit membership in (RBAC design D-R8). Emitted at the scope interceptor's one choke point on every governed handler, READS INCLUDED — the 404 rule's whole promise is that a workspace is invisible from outside, and the one principal exempt from it is the one whose reads most need to be on the record. `details` carry the operation, the workspace, the path and `acting_via: super_admin` |
-| `workspace.member_added` | A member was added, with their capability flags (`details.flags`). The first-login demo join carries `reason: first_login_demo_viewer` |
-| `workspace.member_invited` | An invitation was created — or an existing one's flags replaced by a re-invite (the latest admin decision wins, audited every time; [Auth §4.6](auth.md#46-invitations)). `details` carry workspace, email, flags |
+| `workspace.member_added` | A member was added, with their role (`details.role`). The first-login demo join carries `reason: first_login_demo_viewer` |
+| `workspace.member_invited` | An invitation was created — or an existing one's role replaced by a re-invite (the latest admin decision wins, audited every time; [Auth §4.6](auth.md#46-invitations)). `details` carry workspace, email, role |
 | `workspace.invitation_revoked` | A pending invitation was revoked ([Auth §4.6](auth.md#46-invitations)). `details` carry workspace and email |
-| `workspace.invitation_materialised` | A pending invitation became a real membership at login — the inviter's decision being executed by the invitee's first sign-in ([Auth §4.6](auth.md#46-invitations)). `details` carry workspace, email, flags and `inviter` |
+| `workspace.invitation_materialised` | A pending invitation became a real membership at login — the inviter's decision being executed by the invitee's first sign-in ([Auth §4.6](auth.md#46-invitations)). `details` carry workspace, email, role and `inviter` |
 | `workspace.member_removed` | A member was removed |
-| `workspace.member_flags_changed` | A member's capability flags were replaced — `details.from` and `details.to` carry both sets, because a membership row keeps no history of its own |
+| `workspace.member_role_changed` | A member's role was replaced (D1, 2026-09-20; was `workspace.member_flags_changed`) — `details.from` and `details.to` carry both roles, because a membership row keeps no history of its own |
 | `workspace.deactivated` | A workspace was deactivated (RBAC design D-R10). Nothing it owns is purged; the five effects follow from readers consulting its state |
 | `workspace.reactivated` | A deactivated workspace was restored |
 | `datasource.granted` | A datasource was granted to a workspace (D-R7) — the verb that decides who can see a live database credential's data. `details.already_granted` distinguishes a new grant from an idempotent re-grant |
@@ -513,13 +529,30 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `REST` | Direct REST API call (programmatic client) |
 | `MCP` | MCP tool invocation (agent) |
 | `PIPELINE` | Spawned by a parent execution's PIPELINE node (pipeline composition; metadata-db §4.6 lineage columns link the family) |
-| `ENDPOINT` | A published endpoint served a `GET` request on the published tree (074; re-rooted to `/api/<category>/<version>/<path…>` by 172). The execution runs in-process as the endpoint's workspace, `triggered_by` is the key's owner, and the serve's audit row carries the key id |
+| `ENDPOINT` | A published endpoint served a `GET` request on the published tree (074; re-rooted to `/api/<category>/<version>/<path…>` by 172). The execution runs in-process as the endpoint's workspace, `executed_by` is the key's owner with `executed_by_key_kind = endpoint` (§18A — the run lists for admins only, D11), and the serve's audit row carries the key id |
 | `SCHEDULED` | (Future) Cron-triggered execution |
 | `WEBHOOK` | (Future) External webhook trigger |
 
 > **Declaration reality (2026-08-10).** Declared in the `dag` module, for the same layering reason as `ExecutionStatus` (§10) and `SseEventType` (§11): the executor owns the execution repository that persists `pipeline_executions.trigger`, and it sits below `web`. This document, [rest-api](rest-api.md) and [metadata-db](metadata-db.md) remain the wire authorities.
 
 ---
+
+---
+
+## 18A. `ExecutedByKeyKind` — which kind of credential started an execution
+
+**Source:** [metadata-db §4.6](metadata-db.md#46-pipeline_executions) (`pipeline_executions.executed_by_key_kind`, V30), [REST API §10.2](rest-api.md#102-get-execution-metadata)
+**Used by:** dag (`ExecutedByKeyKind`, the own-runs predicate), rest-api, mcp-server.
+
+Roles design D11 (2026-09-20). `executed_by` names the user a run belongs to — the session's user, or a key's OWNER. This value says which KIND of credential started it when a key did; **null means a signed-in session**. The values mirror [`ApiKeyKind`](#8a-apikeykind--what-an-api-key-is)'s wire names, but the enum is `dag`'s own: the executor does not depend on auth and does not care what a key IS, only how the run is attributed.
+
+| Value | Description |
+|---|---|
+| `user` | A user API key (REST or MCP): the run is the key owner's, listed as their own |
+| `endpoint` | A published endpoint's key. `executed_by` still names the key's owner (the concurrency slot and the audit trail need a user), but the run is NOT that person's: the own-runs filter excludes it, so it lists for workspace admins only — and for the endpoint key itself through the serve audit row (auth.md §7.7) |
+| `server` | Reserved for the promotion peer's credential; nothing writes it today |
+
+The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V30 backfilled `ENDPOINT`-triggered rows to `endpoint` and `MCP` rows to `user`; REST and UI rows stayed NULL (a REST run may have been a key or a cookie, and NULL reads as "a person's run", which is what those rows meant).
 
 ---
 
@@ -592,7 +625,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
 | `Scope` | auth | every endpoint (API keys only since RBAC round 1) |
-| `Capability` | [auth.md §11A](auth.md#11a-roles) | auth, every endpoint and MCP tool |
+| `Permission` | [auth.md §11A](auth.md#11a-roles) / §7.6 | auth, every endpoint and MCP tool |
+| `WorkspaceRole` | [auth.md §11A](auth.md#11a-roles) | auth, metadata-db (the V29 CHECKs), rest-api §17, the members dropdown |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |
 | `ExecutionStatus` | rest-api | dag-executor, mcp-server, persistence |
 | `SseEventType` | rest-api | dag-executor, mcp-server |
@@ -600,6 +634,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `SslMode` | datasources | datasources |
 | `AuthAuditEvent` | auth (+ datasource/mcp event tables in §15) | observability |
 | `ExecutionTrigger` | rest-api | mcp-server, persistence |
+| `ExecutedByKeyKind` | metadata-db §4.6 (`dag` declares it; §18A here is the wire table) | rest-api, mcp-server, persistence |
 | `ApiKeyKind` | [auth.md §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) | metadata-db, rest-api, mcp-server |
 | `LearnedFactKind` | [learned-semantic-layer design §4](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) (§19 here is the wire table) | datasources, metadata-db (the V25 CHECK), mcp-server, rest-api |
 | `CheckRunVerdict` | pipeline-contract (`ReleaseCheckGate.kt`; §20 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
@@ -626,6 +661,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-20 | v1.16 | 177 (#177) roles R1 | §8B `Capability` → **`Permission`** (D21), redefined as the role SETS of the ratified matrix: `switch` gone (release and switch are the author's, D8), **`promotion_read`** new (owner rule 13), `execute` no longer admits the promoter (D5), `ws_admin` gains the workspaces page (D13). New **§8C `WorkspaceRole`** — the ONE role a membership holds (V29; `viewer` \| `author` \| `promoter` \| `workspace_admin`). New **§18A `ExecutedByKeyKind`** (`user` \| `endpoint` \| `server`, V30) beside the `executed_by` rename in §18. §15: `workspace.member_flags_changed` → `workspace.member_role_changed`; the member-added / invited / materialised rows carry `role`, not `flags`. |
 | 2026-09-19 | v1.15 | 172 (#172) | §18's `ENDPOINT` row reworded for the re-rooted published-endpoint URL shape (R-EP5); the enum and its wire value are unchanged. |
 | 2026-09-16 | v1.14 | 149 / #125 node_progress | §11 gains **`node_progress`** — the measured per-node operation sample ([REST API §6.4.9](rest-api.md#649-node_progress)); zero or more between a node's `node_started` and its terminal event, never terminal. |
 | 2026-09-15 | v1.12 | 142 release cascade | §15's `pipeline.version.released` row gains `templates_released`; `template.version.released` gains the cascade source (`cascade_from_pipeline_id`, `cascade_from_version`) when the pipeline release made it. |

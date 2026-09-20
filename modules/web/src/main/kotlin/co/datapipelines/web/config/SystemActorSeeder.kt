@@ -7,7 +7,7 @@ import org.springframework.beans.factory.SmartInitializingSingleton
 /**
  * Provisions the system service account at first boot (auth.md §4.5, ruling R7).
  *
- * `pipeline_versions.created_by` and `pipeline_executions.triggered_by` are
+ * `pipeline_versions.created_by` and `pipeline_executions.executed_by` are
  * `NOT NULL REFERENCES users(id)`, so every write the SYSTEM makes on nobody's behalf —
  * a promoted version, a retention sweep, a stale-execution reap — still needs a row to
  * point at. That row is provisioned here, ONCE, and read everywhere through

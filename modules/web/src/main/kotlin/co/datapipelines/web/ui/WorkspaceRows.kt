@@ -1,29 +1,30 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.auth.Capability
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
+import co.datapipelines.auth.WorkspaceRole
 import java.util.UUID
 
 /**
- * The row shapes `workspaces/index.html` renders (114 §C.1/§C.3).
+ * The row shapes `workspaces/index.html` and `partials/workspace-member-row.html` render
+ * (114 §C.1/§C.3; D22).
  *
- * Before this round the template derived a role label from the flags in an inline ternary,
- * twice — once per table — and the two spellings had already diverged from the one the shell
- * shows. The label is derived HERE, by [RoleModel.labelOf], so the members table, the
- * workspace list and the switcher's badge all say the same word about the same row.
+ * Before 114 the template derived a role label from the row in an inline ternary, twice — once
+ * per table — and the two spellings had already diverged from the one the shell shows. The label
+ * is derived HERE, by [RoleModel.labelOf], so the members table, the workspace list and the
+ * switcher's badge all say the same word about the same row.
  *
- * The three checkboxes render straight off [MembershipFlags]; the SERVER normalises them
- * (`admin` forces `author`) whatever the client sends, so the template's tick-author-with-admin
- * script is a convenience and never the rule.
+ * Since D22 (2026-09-20) a member row carries ONE [role], rendered as the selected option of the
+ * role dropdown; the SERVER decides the value set (`WorkspaceRole`, and the database CHECK
+ * behind it), so the template lists `WorkspaceRole.entries` and never spells a role name.
  */
 data class MemberRowView(
     val userId: UUID,
     val email: String,
     val displayName: String,
-    val flags: MembershipFlags,
+    val role: WorkspaceRole,
     val roleLabel: String,
 ) {
     companion object {
@@ -32,8 +33,8 @@ data class MemberRowView(
                 userId = row.userId,
                 email = row.email,
                 displayName = row.displayName,
-                flags = row.flags,
-                roleLabel = RoleModel.labelOf(row.flags),
+                role = row.role,
+                roleLabel = RoleModel.labelOf(row.role),
             )
     }
 }
@@ -60,10 +61,10 @@ data class WorkspaceRowView(
         ): WorkspaceRowView =
             WorkspaceRowView(
                 name = membership.workspaceName,
-                roleLabel = RoleModel.labelOf(membership.flags),
+                roleLabel = RoleModel.labelOf(membership.role),
                 active = membership.workspaceActive,
                 isCurrent = membership.workspaceName == activeWorkspace,
-                canAdmin = superAdmin || Capability.WS_ADMIN.satisfiedBy(membership.flags),
+                canAdmin = Permission.WS_ADMIN.satisfiedBy(membership.role, superAdmin),
             )
     }
 }
@@ -82,7 +83,7 @@ data class InvitationRowView(
         fun of(row: WorkspaceInvitation): InvitationRowView =
             InvitationRowView(
                 email = row.email,
-                roleLabel = RoleModel.labelOf(row.flags),
+                roleLabel = RoleModel.labelOf(row.role),
                 invitedAt = row.invitedAt,
             )
     }

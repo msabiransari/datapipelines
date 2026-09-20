@@ -92,7 +92,7 @@
       </div>
       <!-- 114 §A — a viewer's editor is READ-ONLY: it loads (canRead), the mutating verbs
            are absent, and the line below says so once, quietly. No toast: nothing failed. -->
-      <div th:if="${canAuthor != true and canPromote != true}" class="app-note" data-role-note="read-only">
+      <div th:if="${canAuthor != true}" class="app-note" data-role-note="read-only">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
         <span>Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.</span>
       </div>
@@ -103,7 +103,7 @@
              pre-102 text claiming an executed draft "is kept as history" was false). The POST
              answers HX-Redirect and the page reloads: the editor's draft state is
              document-wide. Agents never release (D4). -->
-        <button th:if="${hasDraft == true and canPromote == true}" data-verb="pipeline-release" class="ds-button ds-button-primary ds-button-sm"
+        <button th:if="${hasDraft == true and canAuthor == true}" data-verb="pipeline-release" class="ds-button ds-button-primary ds-button-sm"
                 id="pe-release-draft"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipelineId}, from='editor')},
                          hx-target='#pe-dialog', hx-swap='innerHTML'">

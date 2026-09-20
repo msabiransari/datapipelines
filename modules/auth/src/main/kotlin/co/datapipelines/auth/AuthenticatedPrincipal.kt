@@ -119,8 +119,8 @@ data class AuthenticatedPrincipal(
     val isSuperAdmin: Boolean get() = superAdmin
 
     /**
-     * True when this principal administers the ACTIVE workspace — its `admin` flag, or super
-     * admin (D-R8, who administers every workspace).
+     * True when this principal administers the ACTIVE workspace — the `workspace_admin` role,
+     * or super admin (D-R8, who administers every workspace).
      *
      * The successor to `Scope.satisfies(scopes, ADMIN)`, which a dozen surfaces used as "is
      * this an administrator" and which round 1 made permanently FALSE: a session carries no
@@ -133,7 +133,7 @@ data class AuthenticatedPrincipal(
      * should find one answer, not re-derive a tenth.
      */
     val isWorkspaceAdmin: Boolean
-        get() = superAdmin || Capability.WS_ADMIN.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER)
+        get() = superAdmin || holds(Permission.WS_ADMIN)
 
     /**
      * "May this principal AUTHOR here" — the same question [isWorkspaceAdmin] answers one rung
@@ -151,32 +151,42 @@ data class AuthenticatedPrincipal(
         get() =
             superAdmin ||
                 (
-                    Capability.AUTHOR.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER) &&
+                    holds(Permission.AUTHOR) &&
                         (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
                 )
 
     /**
-     * "May this principal RELEASE and PROMOTE here" — [Capability.PROMOTE], the third rung of
-     * the same question [isWorkspaceAdmin] and [isAuthor] answer, spelled here for the same
-     * reason: the screens ask it, and a screen that re-derives a capability predicate is one
-     * more place the matrix can drift away from (114 — the round that made the UI stop
-     * offering verbs the server refuses).
+     * "May this principal PROMOTE here" — [Permission.PROMOTE], the third rung of the same
+     * question [isWorkspaceAdmin] and [isAuthor] answer, spelled here for the same reason: the
+     * screens ask it, and a screen that re-derives a permission predicate is one more place the
+     * matrix can drift away from (114 — the round that made the UI stop offering verbs the
+     * server refuses).
      *
-     * Deliberately NOT implied by [isAuthor] and not implying it: an author may not release and
-     * a promoter may not author (D-R2 — "the DevOps guys who can only release"), which is the
-     * whole reason [Capability] is a set of predicates rather than a chain.
+     * Deliberately NOT implied by [isAuthor] and not implying it: since the 2026-09-20 rulings
+     * an author RELEASES and a promoter PROMOTES (D5, D8) — the two roles hold different rows,
+     * which is the whole reason [Permission] is a set of role sets rather than a chain.
      *
      * The API-key conjunct is [isAuthor]'s, and for the same reason: the credential axis has no
-     * promoter (design §1), so `author` is the scope the release/promote rows carry in §7.6 and
-     * a `read` key must not acquire an author's reach because its issuer holds the role.
+     * promoter, so `author` is the scope the promote row carries in §7.6 and a `read` key must
+     * not acquire that reach because its issuer holds the role.
      */
     val isPromoter: Boolean
         get() =
             superAdmin ||
                 (
-                    Capability.PROMOTE.satisfiedBy(workspace?.flags ?: MembershipFlags.VIEWER) &&
+                    holds(Permission.PROMOTE) &&
                         (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
                 )
+
+    /**
+     * The workspace role this principal holds in the ACTIVE workspace, or null with no
+     * reachable workspace. A super admin's is their EXPLICIT membership's role (viewer when
+     * implicit) — ask [isSuperAdmin] for the instance authority, never this.
+     */
+    val workspaceRole: WorkspaceRole? get() = workspace?.role
+
+    /** [Permission.satisfiedBy] over the active context; false with no context. The one spelling every predicate above shares. */
+    fun holds(permission: Permission): Boolean = workspace?.permits(permission) ?: false
 
     /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)

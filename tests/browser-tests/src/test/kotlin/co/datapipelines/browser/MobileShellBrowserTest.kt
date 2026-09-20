@@ -348,7 +348,7 @@ class MobileShellBrowserTest : BrowserSuite() {
                         """
                         INSERT INTO pipeline_executions (
                             execution_id, pipeline_id, pipeline_version, status, parameters_json,
-                            triggered_by, triggered_via, root_execution_id,
+                            executed_by, triggered_via, root_execution_id,
                             started_at, completed_at, duration_ms, node_stats_json
                         ) VALUES (?, ?, 1, 'SUCCESS', '{}',
                                   (SELECT id FROM users WHERE email = ?), 'REST', ?,

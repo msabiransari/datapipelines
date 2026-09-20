@@ -18,10 +18,43 @@ enum class ExecutionTrigger {
 
     /**
      * A published endpoint served a `GET` request (074). The execution runs in-process
-     * as the endpoint's workspace; `triggered_by` is the key's owner, and the serve's audit row
+     * as the endpoint's workspace; `executed_by` is the key's owner, and the serve's audit row
      * carries the key id — which is what lets an endpoint key read its own result and no other.
      */
     ENDPOINT,
+}
+
+/**
+ * Which KIND of credential started an execution, when a key did (D11, V30 —
+ * `pipeline_executions.executed_by_key_kind`; enums.md §18A). Null on the record means a
+ * signed-in session.
+ *
+ * Its own enum in `dag` rather than auth's `ApiKeyKind`, because this module does not depend
+ * on auth and the executor does not care what a key IS — only what the run should be
+ * attributed as. The values mirror `ApiKeyKind`'s wire names so the surfaces map one-to-one.
+ */
+enum class ExecutedByKeyKind {
+    /** A user API key (REST or MCP): the run is the key owner's, listed as their own. */
+    USER,
+
+    /**
+     * A published endpoint's key. `executed_by` still names the key's OWNER (the concurrency
+     * slot and the audit trail need a user), but the run is NOT that person's: the own-runs
+     * filter excludes it, so it lists for workspace admins only — and for the endpoint key
+     * itself through the serve audit row (auth.md §7.7).
+     */
+    ENDPOINT,
+
+    /** Reserved for the promotion peer's credential; nothing writes it today. */
+    SERVER,
+    ;
+
+    /** The database and wire token — the CHECK constraint's values. */
+    val wire: String get() = name.lowercase()
+
+    companion object {
+        fun fromWire(token: String?): ExecutedByKeyKind? = token?.let { t -> entries.firstOrNull { it.wire == t } }
+    }
 }
 
 /**
@@ -43,7 +76,8 @@ data class ExecutionRecord(
     val pipelineVersion: Int,
     val status: ExecutionStatus,
     val parametersJson: String,
-    val triggeredBy: UUID,
+    /** Who ran it (D11): the session's user, or a key's OWNER. The own-runs filter reads it. */
+    val executedBy: UUID,
     val triggeredVia: ExecutionTrigger,
     val correlationId: UUID? = null,
     val startedAt: Instant = Instant.now(),
@@ -57,7 +91,16 @@ data class ExecutionRecord(
     val parentExecutionId: UUID? = null,
     val parentNodeId: String? = null,
     val rootExecutionId: UUID? = null,
-)
+    /** The credential kind behind [executedBy] when a key started the run; null for a session (D11, V30). */
+    val executedByKeyKind: ExecutedByKeyKind? = null,
+) {
+    /**
+     * D11 — is this run [userId]'s OWN, as the own-runs filter defines it: they executed it,
+     * and not through an endpoint key (an endpoint-key run belongs to the endpoint, not to the
+     * person who happens to own the key). The SQL twin is [ExecutionRepository.OWN_RUN_PREDICATE].
+     */
+    fun isOwnRunOf(userId: UUID): Boolean = executedBy == userId && executedByKeyKind != ExecutedByKeyKind.ENDPOINT
+}
 
 /**
  * Persistence for `pipeline_executions` (metadata-db §4.6, module-structure §3.1).
@@ -86,11 +129,11 @@ class ExecutionRepository(
             """
             INSERT INTO pipeline_executions (
                 execution_id, pipeline_id, pipeline_version, status, parameters_json,
-                triggered_by, triggered_via, correlation_id, started_at,
+                executed_by, executed_by_key_kind, triggered_via, correlation_id, started_at,
                 parent_execution_id, parent_node_id, root_execution_id
             ) VALUES (
                 :executionId, :pipelineId, :pipelineVersion, :status, CAST(:parametersJson AS jsonb),
-                :triggeredBy, :triggeredVia, :correlationId, :startedAt,
+                :executedBy, :executedByKeyKind, :triggeredVia, :correlationId, :startedAt,
                 :parentExecutionId, :parentNodeId, :rootExecutionId
             )
             """.trimIndent(),
@@ -100,7 +143,8 @@ class ExecutionRepository(
                 "pipelineVersion" to record.pipelineVersion,
                 "status" to record.status.name,
                 "parametersJson" to record.parametersJson,
-                "triggeredBy" to record.triggeredBy,
+                "executedBy" to record.executedBy,
+                "executedByKeyKind" to record.executedByKeyKind?.wire,
                 "triggeredVia" to record.triggeredVia.name,
                 "correlationId" to record.correlationId,
                 "startedAt" to java.sql.Timestamp.from(record.startedAt),
@@ -312,7 +356,7 @@ class ExecutionRepository(
     ): List<ExecutionRecord> {
         val (where, params) =
             filteredQuery(
-                "triggered_by = :userId AND $WORKSPACE_PREDICATE",
+                "$OWN_RUN_PREDICATE AND $WORKSPACE_PREDICATE",
                 mapOf("userId" to userId, "workspaceId" to workspaceId),
                 pipelineId,
                 status,
@@ -470,13 +514,21 @@ class ExecutionRepository(
         const val WORKSPACE_PREDICATE =
             "EXISTS(SELECT 1 FROM pipelines p WHERE p.id = pipeline_executions.pipeline_id AND p.workspace_id = :workspaceId)"
 
+        /**
+         * D11 — "the caller's OWN runs": executed by them, and not through an endpoint key. The
+         * Kotlin twin is [ExecutionRecord.isOwnRunOf]; both must say the same thing, because the
+         * list filters in SQL and the single-record reads filter in memory.
+         */
+        const val OWN_RUN_PREDICATE =
+            "executed_by = :userId AND (executed_by_key_kind IS NULL OR executed_by_key_kind <> 'endpoint')"
+
         /** The one place the crash sweep's error envelope is written (F2). */
         val INSTANCE_LOST_JSON = """{"code":"${PipelineErrorCodes.Execution.INSTANCE_LOST}"}"""
 
         val SELECT_COLUMNS =
             """
             SELECT execution_id, pipeline_id, pipeline_version, status, parameters_json::TEXT AS parameters_json,
-                   triggered_by, triggered_via, correlation_id, started_at, completed_at, duration_ms,
+                   executed_by, executed_by_key_kind, triggered_via, correlation_id, started_at, completed_at, duration_ms,
                    failed_node_id, error_json::TEXT AS error_json, node_stats_json::TEXT AS node_stats_json,
                    result_row_count, result_size_bytes,
                    parent_execution_id, parent_node_id, root_execution_id
@@ -491,7 +543,8 @@ class ExecutionRepository(
                     pipelineVersion = rs.getInt("pipeline_version"),
                     status = ExecutionStatus.valueOf(rs.getString("status")),
                     parametersJson = rs.getString("parameters_json"),
-                    triggeredBy = rs.getObject("triggered_by", UUID::class.java),
+                    executedBy = rs.getObject("executed_by", UUID::class.java),
+                    executedByKeyKind = ExecutedByKeyKind.fromWire(rs.getString("executed_by_key_kind")),
                     triggeredVia = ExecutionTrigger.valueOf(rs.getString("triggered_via")),
                     correlationId = rs.getObject("correlation_id", UUID::class.java),
                     startedAt = rs.getTimestamp("started_at").toInstant(),

@@ -2,7 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.AbortReason
@@ -98,7 +98,7 @@ class ExecutionControllerTest {
                         workspaceId,
                         "acme",
                         // RBAC round 1: the capability axis answers "is this an administrator".
-                        if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                        if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
                     ),
             )
         SecurityContextHolder.getContext().authentication =
@@ -112,7 +112,7 @@ class ExecutionControllerTest {
             pipelineVersion = 1,
             status = status,
             parametersJson = "{}",
-            triggeredBy = owner,
+            executedBy = owner,
             triggeredVia = ExecutionTrigger.REST,
             startedAt = Instant.parse("2026-08-10T14:30:00Z"),
             durationMs = 1500,
@@ -196,7 +196,7 @@ class ExecutionControllerTest {
     @Test
     fun `detail shows 404 for non-owner`() {
         authenticate(UUID.randomUUID(), setOf(Scope.READ))
-        val otherRecord = record().copy(triggeredBy = owner)
+        val otherRecord = record().copy(executedBy = owner)
         every { executions.findById(any(), executionId) } returns otherRecord
 
         shouldThrow<ResponseStatusException> {

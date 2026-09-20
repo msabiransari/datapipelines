@@ -4,17 +4,20 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Capability
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LoginMethod
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceLastAdminException
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspaceSessionRequiredException
 import co.datapipelines.auth.sessionCookie
 import jakarta.servlet.http.HttpServletRequest
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -25,13 +28,17 @@ import org.springframework.web.bind.annotation.RequestParam
 import java.util.UUID
 
 /**
- * The workspace screens' actions (ui-screens.md §4.13): create, members and their three role
- * flags, display name, deactivate/reactivate, delete, and the shell switcher's re-stamp.
+ * The workspace screens' actions (ui-screens.md §4.13): create, members and their ONE role
+ * (D22), display name, deactivate/reactivate, delete, and the shell switcher's re-stamp.
  *
  * Every action delegates to [WorkspaceService] — the same methods the REST surface (§17) calls,
- * so the last-admin rule, the `admin -> author` normalisation and the membership checks are
- * enforced ONCE. The UI owns only binding and the redirect choreography; expected refusals
- * bounce back as `?error=<code suffix>`, which the layout renders into the §5.1 toast stack.
+ * so the last-admin rule and the membership checks are enforced ONCE. The UI owns only binding
+ * and the redirect choreography; expected refusals bounce back as `?error=<code suffix>`, which
+ * the layout renders into the §5.1 toast stack. The one htmx partial — the member's role
+ * dropdown's Save ([setMemberRole]) — swaps the row in place and toasts out-of-band instead.
+ *
+ * The page itself is a workspace admin's (D13, `WORKSPACES_READ` → `ws_admin`); the switcher
+ * in the chrome stays every member's and posts to [switch] under its own operation.
  *
  * The `open-join` handler is gone with the provisioning modes it served (D-R11): workspaces are
  * created by super admins, there is no joinable list, and the route had been unreachable from
@@ -55,6 +62,9 @@ class WorkspacesUiController(
         val activeWorkspace = principal.workspace?.name
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model, principal)
+        // D22: the role dropdown's options — the four workspace roles, in doc order. Listed by
+        // the server so the template never spells a role name.
+        model.addAttribute("workspaceRoles", WorkspaceRole.entries)
         val memberships = workspaceService.listOwn(principal)
         model.addAttribute(
             "own",
@@ -81,7 +91,7 @@ class WorkspacesUiController(
         // reactivate first (auth.md 11A.2).
         val administered =
             memberships.filter {
-                it.workspaceActive && (Capability.WS_ADMIN.satisfiedBy(it.flags) || principal.isSuperAdmin)
+                it.workspaceActive && Permission.WS_ADMIN.satisfiedBy(it.role, principal.isSuperAdmin)
             }
         val listings =
             administered
@@ -113,7 +123,7 @@ class WorkspacesUiController(
                     .filter {
                         it.workspaceActive &&
                             it.workspaceName != activeWorkspace &&
-                            Capability.WS_ADMIN.satisfiedBy(it.flags)
+                            Permission.WS_ADMIN.satisfiedBy(it.role, superAdmin = false)
                     }.map { it.workspaceName }
             },
         )
@@ -146,35 +156,35 @@ class WorkspacesUiController(
         }
 
     /**
-     * A workspace admin adds a member by email, WITH the three role flags.
+     * A workspace admin adds a member by email, WITH their one role (D22: the same dropdown the
+     * members table uses; an unknown value bounces as `?error=unknown_role`).
      *
-     * `MANAGE_WORKSPACE_MEMBERS`, not `MANAGE_WORKSPACE`: the two carry the same capability
-     * today ([Capability.WS_ADMIN]) but they are not the same OPERATION, and the annotation is
+     * `MANAGE_WORKSPACE_MEMBERS`, not `MANAGE_WORKSPACE`: the two carry the same permission
+     * today ([Permission.WS_ADMIN]) but they are not the same OPERATION, and the annotation is
      * how a handler says which section-7.6 row it implements. A display-name editor is not a
      * member manager, and the REST twin has declared the members operation since 112 — the
      * UI's coarser one was drift, not a decision.
      *
-     * The flags go through the SAME [WorkspaceService.addMember] the REST surface calls, so the
-     * `admin -> author` normalisation and the membership checks are enforced once; a client
-     * that posts `admin=true` with no `author` still gets a row satisfying the V23 constraint.
+     * The role goes through the SAME [WorkspaceService.addMember] the REST surface calls, so
+     * the membership checks are enforced once.
      */
     @PostMapping("/workspaces/{name}/members")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
     fun addMember(
         @PathVariable name: String,
         @RequestParam email: String,
-        @RequestParam(required = false) author: Boolean?,
-        @RequestParam(required = false) promoter: Boolean?,
-        @RequestParam(required = false) admin: Boolean?,
-    ): String =
-        outcome {
+        @RequestParam(required = false, defaultValue = "viewer") role: String,
+    ): String {
+        val workspaceRole = WorkspaceRole.fromWireOrNull(role) ?: return "redirect:/workspaces?error=unknown_role"
+        return outcome {
             // 113 — an email with no user row is an INVITATION, not a failure; the toast says
             // which one happened, because "added" for a person who cannot sign in yet is a lie.
-            when (workspaceService.addMember(requireSessionPrincipal(), name, email, flagsOf(author, promoter, admin))) {
+            when (workspaceService.addMember(requireSessionPrincipal(), name, email, workspaceRole)) {
                 is WorkspaceService.AddMemberOutcome.Added -> "member_added"
                 is WorkspaceService.AddMemberOutcome.Invited -> "member_invited"
             }
         }
+    }
 
     /**
      * Revokes a pending invitation (113) — the same [WorkspaceService.revokeInvitation] the REST
@@ -190,26 +200,49 @@ class WorkspacesUiController(
     ): String = action("invitation_revoked") { workspaceService.revokeInvitation(requireSessionPrincipal(), name, email) }
 
     /**
-     * Replaces a member's flags — the same [WorkspaceService.setMemberFlags] the REST
+     * D22 — the member row's role dropdown, saved: the ONE htmx partial on this screen.
+     * Replaces the member's role through the same [WorkspaceService.setMemberRole] the REST
      * `PUT .../members/{userId}` calls, so the last-admin rule (`workspace.last_admin`, 409)
-     * and the `admin -> author` normalisation live in ONE place. A second code path is exactly
-     * the drift this round exists to remove.
+     * lives in ONE place, then answers with the re-rendered row (swapped in place of the one
+     * that posted) and a toast out-of-band. A refusal is a toast alone, retargeted at the
+     * stack, and the row keeps its previous selection — the browser never shows a role the
+     * server refused.
      *
-     * A REPLACE, not a merge: an unticked box is a flag being taken away, and a form that posts
-     * only what is ticked cannot express that any other way.
+     * A partial rather than the redirect choreography the other verbs use because a role change
+     * is the verb an admin repeats down a table: a full-page reload per row loses the scroll
+     * position and re-fetches every section for one cell that changed.
      */
-    @PostMapping("/workspaces/{name}/members/{userId}/flags")
+    @PostMapping("/partials/workspaces/{name}/members/{userId}/role")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
-    fun setMemberFlags(
+    fun setMemberRole(
+        model: Model,
         @PathVariable name: String,
         @PathVariable userId: UUID,
-        @RequestParam(required = false) author: Boolean?,
-        @RequestParam(required = false) promoter: Boolean?,
-        @RequestParam(required = false) admin: Boolean?,
-    ): String =
-        action("member_flags") {
-            workspaceService.setMemberFlags(requireSessionPrincipal(), name, userId, flagsOf(author, promoter, admin))
+        @RequestParam role: String,
+    ): Any {
+        val workspaceRole =
+            WorkspaceRole.fromWireOrNull(role)
+                ?: return refusedToast(HttpStatus.BAD_REQUEST, "Role not changed", "Unknown workspace role '$role'.")
+        return try {
+            val row = workspaceService.setMemberRole(requireSessionPrincipal(), name, userId, workspaceRole)
+            RoleModel.stamp(model)
+            model.addAttribute("workspaceName", name)
+            model.addAttribute("workspaceRoles", WorkspaceRole.entries)
+            model.addAttribute("member", MemberRowView.of(row))
+            model.addAttribute("toastVariant", "success")
+            model.addAttribute("toastTitle", "Role changed")
+            model.addAttribute("toastMessage", "${row.email} is now ${row.role.label} in $name.")
+            "partials/workspace-member-row :: saved"
+        } catch (_: WorkspaceLastAdminException) {
+            refusedToast(
+                HttpStatus.CONFLICT,
+                "Role not changed",
+                "This is the last workspace admin. Give someone else the workspace admin role first.",
+            )
+        } catch (e: AuthException) {
+            refusedToast(HttpStatus.valueOf(e.status), "Role not changed", e.userMessage)
         }
+    }
 
     /** A workspace admin removes a member; the last admin is the `workspace.last_admin` refusal. */
     @PostMapping("/workspaces/{name}/members/{userId}/remove")
@@ -270,7 +303,7 @@ class WorkspacesUiController(
      * hx-headers). A refused switch falls back to the workspaces screen with the error.
      */
     @PostMapping("/workspace/switch")
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
+    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_SWITCH)
     fun switch(
         response: jakarta.servlet.http.HttpServletResponse,
         @RequestParam name: String,
@@ -292,19 +325,17 @@ class WorkspacesUiController(
         }
     }
 
-    /**
-     * The three checkboxes as a [MembershipFlags]. An absent box is `false` — an HTML checkbox
-     * sends nothing when unticked, which is exactly "this flag is off" for a REPLACE.
-     *
-     * `admin` is NOT expanded to `author` here: [WorkspaceService] normalises it and the
-     * database constrains it (`chk_workspace_member_admin_authors`), and a third copy of the
-     * invariant in a form binder is a third place for it to go wrong.
-     */
-    private fun flagsOf(
-        author: Boolean?,
-        promoter: Boolean?,
-        admin: Boolean?,
-    ): MembershipFlags = MembershipFlags(author = author == true, promoter = promoter == true, admin = admin == true)
+    /** A partial's refusal: the toast alone, retargeted at the stack; the row that posted is left as it was. */
+    private fun refusedToast(
+        status: HttpStatus,
+        title: String,
+        message: String,
+    ): ResponseEntity<String> =
+        ResponseEntity
+            .status(status)
+            .header("HX-Retarget", "#toast")
+            .header("HX-Reswap", "beforeend")
+            .body(ToastHtml.oob("danger", title, ToastHtml.esc(message)))
 
     /** One shared outcome wrapper: run the action, bounce back with ok/error, never a raw error page. */
     private fun action(

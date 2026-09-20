@@ -776,7 +776,7 @@ class VersionLifecycleModelTest {
         jdbc.update(
             """
             INSERT INTO pipeline_executions
-                (execution_id, pipeline_id, pipeline_version, status, parameters_json, triggered_by,
+                (execution_id, pipeline_id, pipeline_version, status, parameters_json, executed_by,
                  triggered_via, root_execution_id)
             VALUES (:execution, :id, :version, 'SUCCESS', '{}', :owner, 'REST', :execution)
             """.trimIndent(),

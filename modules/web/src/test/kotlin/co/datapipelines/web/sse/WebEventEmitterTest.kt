@@ -81,7 +81,7 @@ class WebEventEmitterTest {
 
             record.captured.executionId shouldBe executionId
             record.captured.status shouldBe ExecutionStatus.RUNNING
-            record.captured.triggeredBy shouldBe userId
+            record.captured.executedBy shouldBe userId
             record.captured.triggeredVia shouldBe ExecutionTrigger.REST
             record.captured.correlationId shouldBe correlationId
             record.captured.parametersJson shouldBe """{"start_date":"2026-01-01"}"""

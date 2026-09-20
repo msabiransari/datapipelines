@@ -42,7 +42,7 @@
       <p class="u-secondary u-text-sm u-mb-md">
         All <span th:text="${#lists.size(checks)}">2</span> checks pass.
       </p>
-      <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
+      <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
               class="ds-button ds-button-primary u-full"
               hx-disabled-elt="this" th:text="'Release v' + ${version}">Release v3</button>
     </th:block>
@@ -67,7 +67,7 @@
         <textarea name="overrideChecksReason" class="ds-textarea u-mt-md" rows="3" required minlength="10"
                   data-min-chars-input data-min-chars="10"
                   placeholder="Why this release is safe despite the failing checks (at least 10 characters)"></textarea>
-        <button th:if="${canPromote == true}" type="submit" data-verb="pipeline-release-override" data-min-chars-submit data-consent-submit disabled
+        <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-release-override" data-min-chars-submit data-consent-submit disabled
                 class="ds-button ds-button-danger u-full u-mt-md" hx-disabled-elt="this"
                 th:text="'Release v' + ${version} + ' anyway'">Release v3 anyway</button>
       </details>

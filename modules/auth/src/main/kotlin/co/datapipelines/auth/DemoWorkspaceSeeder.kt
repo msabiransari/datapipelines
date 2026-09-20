@@ -58,7 +58,7 @@ class DemoWorkspaceSeeder(
     fun joinDemoIfUnaffiliated(userId: UUID): WorkspaceContext? {
         val demo = workspaceRepository.findByName(DEMO_WORKSPACE)?.takeIf { it.isActive } ?: return null
         if (workspaceRepository.membershipsOf(userId).isNotEmpty()) return null
-        workspaceRepository.addMember(demo.id, userId, MembershipFlags.VIEWER)
+        workspaceRepository.addMember(demo.id, userId, WorkspaceRole.VIEWER)
         auditLogger.log(
             event = "workspace.member_added",
             userId = userId,
@@ -66,12 +66,12 @@ class DemoWorkspaceSeeder(
                 mapOf(
                     "workspace" to demo.name,
                     "member_user_id" to userId.toString(),
-                    "flags" to emptyList<String>(),
+                    "role" to WorkspaceRole.VIEWER.wire,
                     "reason" to "first_login_demo_viewer",
                 ),
         )
         log.info("First login with no membership: user_id={} joined '{}' as viewer", userId, demo.name)
-        return WorkspaceContext(demo.id, demo.name, MembershipFlags.VIEWER)
+        return WorkspaceContext(demo.id, demo.name, WorkspaceRole.VIEWER)
     }
 
     /**

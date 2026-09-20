@@ -130,8 +130,9 @@ class ViewerEditorRenderTest {
         promoter shouldNotContain "previewBtn"
     }
 
+    /** D5/D8 (2026-09-20): the promoter releases nothing — a read-only source, the read-only note, no verb. */
     @Test
-    fun `a promoter's editor is read-only and keeps Release when a draft is pending`() {
+    fun `a promoter's editor is read-only with no Release, even when a draft is pending`() {
         val html =
             render("templates/editor") {
                 page(readOnly = true, hasDraft = true)
@@ -140,9 +141,9 @@ class ViewerEditorRenderTest {
 
         html shouldContain "id=\"versionBody\""
         html shouldNotContain "<textarea"
-        html shouldContain "data-verb=\"template-release\""
+        html shouldNotContain "data-verb=\"template-release\""
         html shouldNotContain "data-verb=\"template-purge\""
-        html shouldNotContain "data-role-note=\"read-only\""
+        html shouldContain "data-role-note=\"read-only\""
         html shouldNotContain "previewBtn"
     }
 

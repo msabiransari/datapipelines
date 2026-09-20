@@ -369,8 +369,8 @@ class McpSaveWorkspaceDatasourceE2eTest {
                     )
                     // The foreign key's issuer must be able to act in its pinned workspace (D-R12).
                     statement.execute(
-                        "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)" +
-                            " VALUES ('$FOREIGN_WORKSPACE_ID', '$FOREIGN_USER_ID', TRUE, FALSE, TRUE)",
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$FOREIGN_WORKSPACE_ID', '$FOREIGN_USER_ID', 'workspace_admin')",
                     )
                 }
                 connection

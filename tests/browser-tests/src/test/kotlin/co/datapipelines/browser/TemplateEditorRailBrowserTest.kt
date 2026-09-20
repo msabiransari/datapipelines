@@ -28,12 +28,12 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     @Test
     fun `a viewer on an imports-less template gets NO rail - the source spans the body, in light and dark`() {
         startTrace()
-        val maker = seedAndLogin("railmk", author = true, promoter = false, admin = false)
+        val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_plain_" + suffix()
         seedTemplate(maker, name)
         maker.close()
 
-        val viewer = seedAndLogin("railvw", author = false, promoter = false, admin = false)
+        val viewer = seedAndLogin("railvw", role = "viewer")
         openEditor(viewer, name)
 
         assertCollapsed(probe(viewer.page), "on first paint")
@@ -47,12 +47,12 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     @Test
     fun `a pure promoter on an imports-less template gets NO rail either - the panel is author-only`() {
         startTrace()
-        val maker = seedAndLogin("railmk", author = true, promoter = false, admin = false)
+        val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_promo_" + suffix()
         seedTemplate(maker, name)
         maker.close()
 
-        val promoter = seedAndLogin("railpr", author = false, promoter = true, admin = false)
+        val promoter = seedAndLogin("railpr", role = "promoter")
         openEditor(promoter, name)
         assertCollapsed(probe(promoter.page), "promoter")
         promoter.close()
@@ -61,12 +61,12 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     @Test
     fun `the collapse holds narrow and wide - the phone band does not resurrect the rail`() {
         startTrace()
-        val maker = seedAndLogin("railmk", author = true, promoter = false, admin = false)
+        val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_np_" + suffix()
         seedTemplate(maker, name)
         maker.close()
 
-        val viewer = seedAndLogin("railvw", author = false, promoter = false, admin = false)
+        val viewer = seedAndLogin("railvw", role = "viewer")
         // 110 §C: at 390px the page shows the wide-screen note with the editor rendered
         // underneath — and the rail question has the same answer there.
         viewer.page.setViewportSize(390, 844)
@@ -82,9 +82,9 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     @Test
     fun `a viewer on a template WITH imports keeps the rail - the Imports table is the read it carries`() {
         startTrace()
-        // The maker holds BOTH editing and release: releasing the library v1 is a promoter's
-        // verb (RELEASE_VERSION), an author-only fixture dies on it with a 403.
-        val maker = seedAndLogin("railmk", author = true, promoter = true, admin = false)
+        // The maker edits AND releases: since 2026-09-20 release is the AUTHOR's verb (D8), so
+        // an author fixture holds both.
+        val maker = seedAndLogin("railmk", role = "author")
         val lib = "test/rail_lib_" + suffix()
         val libHash = seedTemplate(maker, lib, isLibrary = true, body = "<#macro one>1</#macro>")
         libHash.isNotBlank() shouldBe true
@@ -93,7 +93,7 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         seedTemplate(maker, name, imports = """[{"id":"$lib","version":1,"alias":"rl"}]""")
         maker.close()
 
-        val viewer = seedAndLogin("railvw", author = false, promoter = false, admin = false)
+        val viewer = seedAndLogin("railvw", role = "viewer")
         openEditor(viewer, name)
 
         val m = probe(viewer.page)
@@ -128,7 +128,7 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     @Test
     fun `an author's rail is untouched - Render Context stays and the remembered width still paints first`() {
         startTrace()
-        val author = seedAndLogin("railau", author = true, promoter = false, admin = false)
+        val author = seedAndLogin("railau", role = "author")
         val name = "test/rail_auth_" + suffix()
         seedTemplate(author, name)
 
@@ -174,12 +174,10 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ fixtures and drivers
 
-    /** A per-test user with the membership flags the case needs, signed in on its own session. */
+    /** A per-test user with the ONE workspace role the case needs, signed in on its own session. */
     private fun seedAndLogin(
         slug: String,
-        author: Boolean,
-        promoter: Boolean,
-        admin: Boolean,
+        role: String,
     ): Session {
         val user =
             seedLocalUser(
@@ -187,9 +185,7 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
                 generatedPassword("pw"),
                 mustChange = false,
                 isAdmin = false,
-                author = author,
-                promoter = promoter,
-                admin = admin,
+                role = role,
             )
         val session = newSession()
         session.page.navigate("$baseUrl/login")

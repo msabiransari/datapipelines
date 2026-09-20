@@ -20,7 +20,8 @@ class ExecutionToolsTest {
 
     @Test
     fun `list returns the caller's own executions`() {
-        every { executions.findByUser(any(), McpFixtures.USER, limit = 50, offset = 0) } returns listOf(McpFixtures.executionRecord())
+        every { executions.findByUser(any(), McpFixtures.USER, null, null, limit = 50, offset = 0) } returns
+            listOf(McpFixtures.executionRecord())
 
         val hits = ExecutionsListTool(executions).call(McpArguments(emptyMap()), ctx) as List<*>
 
@@ -29,11 +30,10 @@ class ExecutionToolsTest {
 
     @Test
     fun `list filters by status`() {
-        every { executions.findByUser(any(), McpFixtures.USER, limit = 50, offset = 0) } returns
-            listOf(
-                McpFixtures.executionRecord(status = ExecutionStatus.SUCCESS),
-                McpFixtures.executionRecord(executionId = UUID.randomUUID(), status = ExecutionStatus.FAILED),
-            )
+        // D11: the status filter is the repository's (SQL), like the REST listing's — the tool
+        // passes it through rather than filtering a page after the fact.
+        every { executions.findByUser(any(), McpFixtures.USER, null, ExecutionStatus.FAILED, limit = 50, offset = 0) } returns
+            listOf(McpFixtures.executionRecord(executionId = UUID.randomUUID(), status = ExecutionStatus.FAILED))
 
         val failed = ExecutionsListTool(executions).call(McpArguments(mapOf("status" to "FAILED")), ctx) as List<*>
 
@@ -42,11 +42,10 @@ class ExecutionToolsTest {
 
     @Test
     fun `list by pipeline hides other users' executions from a non-admin`() {
-        every { executions.findByPipeline(any(), McpFixtures.PIPELINE_ID, limit = 50, offset = 0) } returns
-            listOf(
-                McpFixtures.executionRecord(),
-                McpFixtures.executionRecord(executionId = UUID.randomUUID(), triggeredBy = McpFixtures.OTHER_USER),
-            )
+        // D11: a non-admin's listing is `findByUser` in SQL — the other user's run never
+        // arrives; the in-memory `visibleTo` is the second line, not the first.
+        every { executions.findByUser(any(), McpFixtures.USER, McpFixtures.PIPELINE_ID, null, limit = 50, offset = 0) } returns
+            listOf(McpFixtures.executionRecord())
 
         val mine =
             ExecutionsListTool(executions).call(
@@ -56,16 +55,16 @@ class ExecutionToolsTest {
 
         assertAll(
             { mine.size shouldBe 1 },
-            { (mine.first() as Map<*, *>)["triggered_by"] shouldBe McpFixtures.USER.toString() },
+            { (mine.first() as Map<*, *>)["executed_by"] shouldBe McpFixtures.USER.toString() },
         )
     }
 
     @Test
     fun `list by pipeline shows every user's executions to an admin`() {
-        every { executions.findByPipeline(any(), McpFixtures.PIPELINE_ID, limit = 50, offset = 0) } returns
+        every { executions.findAll(any(), McpFixtures.PIPELINE_ID, null, limit = 50, offset = 0) } returns
             listOf(
                 McpFixtures.executionRecord(),
-                McpFixtures.executionRecord(executionId = UUID.randomUUID(), triggeredBy = McpFixtures.OTHER_USER),
+                McpFixtures.executionRecord(executionId = UUID.randomUUID(), executedBy = McpFixtures.OTHER_USER),
             )
 
         val all =
@@ -145,7 +144,7 @@ class ExecutionToolsTest {
     @Test
     fun `another user's execution is invisible, reported as not found`() {
         every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
-            McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
+            McpFixtures.executionRecord(executedBy = McpFixtures.OTHER_USER)
 
         shouldThrow<DatapipelinesException> {
             ExecutionsGetTool(executions).call(McpArguments(mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString())), ctx)
@@ -155,7 +154,7 @@ class ExecutionToolsTest {
     @Test
     fun `an admin may read another user's execution`() {
         every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
-            McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
+            McpFixtures.executionRecord(executedBy = McpFixtures.OTHER_USER)
 
         @Suppress("UNCHECKED_CAST")
         val payload =
@@ -164,6 +163,6 @@ class ExecutionToolsTest {
                 McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
             ) as Map<String, Any?>
 
-        payload["triggered_by"] shouldBe McpFixtures.OTHER_USER.toString()
+        payload["executed_by"] shouldBe McpFixtures.OTHER_USER.toString()
     }
 }

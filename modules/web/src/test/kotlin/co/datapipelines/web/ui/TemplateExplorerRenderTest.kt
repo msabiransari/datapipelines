@@ -234,7 +234,7 @@ class TemplateExplorerRenderTest {
      * so there is no served pointer to move.
      */
     @Test
-    fun `114 - the template header renders Release only for a promoter and Purge only for an author`() {
+    fun `114 - the template header renders Release for an author and nothing for a promoter (D8, 2026-09-20)`() {
         val admin = render("partials/template-detail") { fillDetail() }
         admin shouldContain "data-verb=\"template-release\""
 
@@ -243,14 +243,14 @@ class TemplateExplorerRenderTest {
                 fillDetail()
                 withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
             }
-        author shouldNotContain "data-verb=\"template-release\""
+        author shouldContain "data-verb=\"template-release\""
 
         val promoter =
             render("partials/template-detail") {
                 fillDetail()
-                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
             }
-        promoter shouldContain "data-verb=\"template-release\""
+        promoter shouldNotContain "data-verb=\"template-release\""
         promoter shouldNotContain "data-verb=\"template-purge\""
         promoter shouldNotContain "data-verb=\"template-discard\""
 

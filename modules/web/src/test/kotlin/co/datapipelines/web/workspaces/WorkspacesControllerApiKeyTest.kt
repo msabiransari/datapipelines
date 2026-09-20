@@ -70,7 +70,7 @@ class WorkspacesControllerApiKeyTest {
                     co.datapipelines.auth.WorkspaceContext(
                         UUID.randomUUID(),
                         "acme",
-                        co.datapipelines.auth.MembershipFlags(author = true, promoter = true, admin = true),
+                        co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
                     ),
             )
         SecurityContextHolder.getContext().authentication =

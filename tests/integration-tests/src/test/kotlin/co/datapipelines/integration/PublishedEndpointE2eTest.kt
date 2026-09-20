@@ -112,7 +112,7 @@ class PublishedEndpointE2eTest {
     @Test
     fun `the cursor serves the rest of the result to the same endpoint key`() {
         // §7.7 — an endpoint key may read the cursor of an execution IT started, proved by the
-        // serve audit row rather than by triggered_by (which is the key's owner).
+        // serve audit row rather than by executed_by (which is the key's owner).
         val executionId =
             given()
                 .port(port)
@@ -735,8 +735,8 @@ class PublishedEndpointE2eTest {
                     )
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-                        VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', TRUE, FALSE, TRUE)
+                        INSERT INTO workspace_members (workspace_id, user_id, role)
+                        VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', 'workspace_admin')
                         """.trimIndent(),
                     )
                 }

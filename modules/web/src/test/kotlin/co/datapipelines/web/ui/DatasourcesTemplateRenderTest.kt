@@ -396,7 +396,7 @@ class DatasourcesTemplateRenderTest {
      * otherwise have been shown four buttons the interceptor refuses.
      */
     @Test
-    fun `114 - the row actions render for a workspace admin and not for an author`() {
+    fun `114 - the row mutations render for a workspace admin only, and Test follows execute (2026-09-20)`() {
         val admin = engine().process("partials/datasources", context().apply { fillListModel() })
         admin shouldContain "data-verb=\"datasource-test\""
         admin shouldContain "data-verb=\"datasource-edit\""
@@ -409,11 +409,23 @@ class DatasourcesTemplateRenderTest {
                     fillListModel()
                 },
             )
-        author shouldNotContain "data-verb=\"datasource-test\""
+        // TEST_DATASOURCE follows EXECUTE (ratified): every role that runs pipelines may test.
+        author shouldContain "data-verb=\"datasource-test\""
         author shouldNotContain "data-verb=\"datasource-edit\""
         author shouldNotContain "data-verb=\"datasource-delete\""
         // …and the row itself is still there: reading datasources is a viewer's right.
         author shouldContain "pg-prod"
+
+        // The promoter executes nothing (D5), so Test is not drawn for one either.
+        val promoter =
+            engine().process(
+                "partials/datasources",
+                context()
+                    .withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+                    .apply { fillListModel() },
+            )
+        promoter shouldNotContain "data-verb=\"datasource-test\""
+        promoter shouldContain "pg-prod"
     }
 
     /** §C.2 — Grants is a SUPER admin's verb (§7.6 `MANAGE_DATASOURCE_GRANTS`), one rung above. */

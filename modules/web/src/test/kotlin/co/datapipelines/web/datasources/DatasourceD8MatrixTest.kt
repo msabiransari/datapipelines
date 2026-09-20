@@ -4,7 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
@@ -91,7 +91,7 @@ class DatasourceD8MatrixTest {
                     // non-admin is a workspace admin, which is what the D8 gate reads.
                     emptySet(),
                     AuthMethod.OIDC,
-                    workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true, promoter = true, admin = true)),
+                    workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.WORKSPACE_ADMIN),
                     superAdmin = admin,
                 ),
                 null,

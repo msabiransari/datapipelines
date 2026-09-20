@@ -84,6 +84,13 @@ data class ExecuteRequest(
     val parentNodeId: String? = null,
     val rootExecutionId: UUID? = null,
     val compositionDepth: Int = 0,
+    /**
+     * D11 (V30): the KIND of credential behind [userId] when a key started the run — null for a
+     * signed-in session. Recorded on the execution row so the own-runs filter can tell a
+     * person's run from a published endpoint's run that merely shares the key owner. A child
+     * request (a PIPELINE node) inherits its parent's.
+     */
+    val executedByKeyKind: ExecutedByKeyKind? = null,
 )
 
 /**

@@ -88,8 +88,8 @@ class JwtAuthenticationFilter(
                     userId = userId,
                     email = claims["email"] as String,
                     displayName = claims["name"] as String,
-                    // D-R1 — a SESSION carries no scopes. Capability is the membership, resolved
-                    // per request by `WorkspaceResolutionFilter` into `workspace.flags`. The
+                    // D-R1 — a SESSION carries no scopes. Permission is the membership's role, resolved
+                    // per request by `WorkspaceResolutionFilter` into `workspace.role`. The
                     // `scopes` claim `JwtService` used to stamp derived a global `author` for
                     // every non-admin, which is precisely the global capability being removed;
                     // any token still carrying it is ignored rather than honoured.
@@ -98,7 +98,7 @@ class JwtAuthenticationFilter(
                     loginMethod = LoginMethod.fromAmr(claims[JwtService.AMR_CLAIM] as String?),
                     keyId = null,
                     // The stamped claim (design §5.1) — unresolved at this point; the
-                    // WorkspaceResolutionFilter resolves it into `workspace` with its flags.
+                    // WorkspaceResolutionFilter resolves it into `workspace` with its role.
                     workspaceName = claims["active_workspace"] as String?,
                     superAdmin = user.isAdmin,
                 )

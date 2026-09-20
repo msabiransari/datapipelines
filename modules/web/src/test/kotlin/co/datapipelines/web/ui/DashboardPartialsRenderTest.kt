@@ -76,7 +76,7 @@ class DashboardPartialsRenderTest {
                 pipelineVersion = 3,
                 status = co.datapipelines.executor.ExecutionStatus.SUCCESS,
                 parametersJson = "{}",
-                triggeredBy = java.util.UUID.randomUUID(),
+                executedBy = java.util.UUID.randomUUID(),
                 triggeredVia = co.datapipelines.executor.ExecutionTrigger.REST,
                 startedAt = java.time.Instant.parse("2026-09-01T10:00:00Z"),
                 durationMs = 900,
@@ -149,6 +149,8 @@ class DashboardPartialsRenderTest {
                 setVariable("workspaceOptions", emptyList<Any>())
                 setVariable("activeWorkspace", null)
                 setVariable("activeTheme", "saas")
+                // D11: the recent-executions panel renders for a role that holds READ_EXECUTIONS.
+                setVariable("canReadExecutions", true)
             }
 
         val html = engine.process("dashboard", context)

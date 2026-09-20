@@ -77,13 +77,13 @@ class ApiKeyService(
         // (a server key HAS no scopes, so the guard above is vacuous for it) but a floor on the
         // CREATOR, which is a different question and needs its own answer.
         if (kind == ApiKeyKind.SERVER && !issuer.isSuperAdmin) {
-            throw RoleRequiredException(Capability.SUPER_ADMIN, emptySet())
+            throw RoleRequiredException(Permission.SUPER_ADMIN, emptySet())
         }
-        // O-2: viewers never mint keys. The issuance gate is the ISSUER's capability in the
+        // O-2: viewers never mint keys. The issuance gate is the ISSUER's permission in the
         // pinned workspace — `author` — and the workspace must be one they can reach at all
         // (D-R5's 404 otherwise). Both answers come from ONE resolution, so "can they see it"
         // and "may they act in it" cannot disagree.
-        workspaceService.requireIssuanceCapability(issuer, workspaceId)
+        workspaceService.requireIssuancePermission(issuer, workspaceId)
 
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
         val secret = randomBase32(SECRET_LEN)
@@ -184,8 +184,8 @@ class ApiKeyService(
      * of the four per-request re-reads (key active, issuer active, issuer still holds the role,
      * workspace active), all inside the same `AuthCache` TTL.
      *
-     * A removed issuer resolves to no flags, which becomes VIEWER rather than a refusal: the
-     * key still authenticates and every capability above viewer then refuses with
+     * A removed issuer resolves to no role, which becomes VIEWER rather than a refusal: the
+     * key still authenticates and every permission above viewer then refuses with
      * `auth.key_issuer_role_lost`, which is the answer the caller can act on. Refusing the
      * credential outright would report "your key is invalid" for a key that is entirely valid.
      *
@@ -199,8 +199,8 @@ class ApiKeyService(
         if (!workspaceService.isActive(record.workspaceId)) {
             throw KeyWorkspaceInactiveException(record.workspaceName)
         }
-        val flags = workspaceService.issuerFlags(owner.id, owner.isAdmin, record.workspaceId) ?: MembershipFlags.VIEWER
-        return WorkspaceContext(record.workspaceId, record.workspaceName, flags)
+        return workspaceService.issuerContext(owner.id, owner.isAdmin, record.workspaceId, record.workspaceName)
+            ?: WorkspaceContext(record.workspaceId, record.workspaceName, WorkspaceRole.VIEWER)
     }
 
     /**

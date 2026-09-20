@@ -20,8 +20,10 @@ import org.thymeleaf.context.WebContext
 fun WebContext.withRoles(
     canRead: Boolean = true,
     canExecute: Boolean = true,
+    canReadExecutions: Boolean = canExecute,
     canAuthor: Boolean = true,
     canPromote: Boolean = true,
+    canReadPromotion: Boolean = canAuthor || canPromote,
     canAdminWorkspace: Boolean = true,
     isSuperAdmin: Boolean = true,
     roleLabel: String = "super admin",
@@ -30,17 +32,27 @@ fun WebContext.withRoles(
     // instance-users link; a test about the entry itself passes both explicitly.
     navAdminUsers: Boolean = isSuperAdmin,
     navAdminMembers: Boolean = canAdminWorkspace && !isSuperAdmin,
+    // 2026-09-20 — the three row-following rail items (RoleModel.Shell), derived the way the
+    // advice derives them from the booleans above.
+    navExecutions: Boolean = canReadExecutions,
+    navPromotion: Boolean = canReadPromotion,
+    navWorkspaces: Boolean = canAdminWorkspace || isSuperAdmin,
 ): WebContext =
     apply {
         setVariable("canRead", canRead)
         setVariable("canExecute", canExecute)
+        setVariable("canReadExecutions", canReadExecutions)
         setVariable("canAuthor", canAuthor)
+        setVariable("canReadPromotion", canReadPromotion)
         setVariable("canPromote", canPromote)
         setVariable("canAdminWorkspace", canAdminWorkspace)
         setVariable("isSuperAdmin", isSuperAdmin)
         setVariable("roleLabel", roleLabel)
         setVariable("navAdminUsers", navAdminUsers)
         setVariable("navAdminMembers", navAdminMembers)
+        setVariable("navExecutions", navExecutions)
+        setVariable("navPromotion", navPromotion)
+        setVariable("navWorkspaces", navWorkspaces)
     }
 
 /** The same set from [RoleModel.Roles], so a render test can stamp exactly what a controller would. */
@@ -48,7 +60,9 @@ fun WebContext.withRoles(roles: RoleModel.Roles): WebContext =
     withRoles(
         canRead = roles.canRead,
         canExecute = roles.canExecute,
+        canReadExecutions = roles.canReadExecutions,
         canAuthor = roles.canAuthor,
+        canReadPromotion = roles.canReadPromotion,
         canPromote = roles.canPromote,
         canAdminWorkspace = roles.canAdminWorkspace,
         isSuperAdmin = roles.isSuperAdmin,

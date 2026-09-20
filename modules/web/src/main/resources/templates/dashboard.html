@@ -24,7 +24,9 @@
     <div class="ds-skeleton ds-skeleton-card"></div>
   </div>
 
-  <div class="ds-card app-card-table">
+  <!-- D11 (2026-09-20): executions are a READ_EXECUTIONS read — own runs unless workspace
+       admin, and none for a promoter — so the panel renders by the role that holds the row. -->
+  <div th:if="${canReadExecutions == true}" class="ds-card app-card-table">
     <div class="app-card-h">
       <h2 class="ds-title">Recent executions</h2>
       <a class="u-text-sm" th:href="@{/executions}">View all <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>

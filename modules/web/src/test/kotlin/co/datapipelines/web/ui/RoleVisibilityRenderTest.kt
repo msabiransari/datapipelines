@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.web.pipelines.PromotionService
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -85,30 +86,36 @@ class RoleVisibilityRenderTest {
         noExecute shouldContain "id=\"cy-canvas\" role=\"group\""
     }
 
+    /** D8 (2026-09-20): release is the AUTHOR's — an author's editor carries Release AND Purge draft. */
     @Test
-    fun `an author's pipeline editor loses Release and keeps Purge draft, with no read-only line`() {
+    fun `an author's pipeline editor keeps Release and Purge draft, with no read-only line`() {
         val author =
             render("pipelines/editor") {
                 editorModel()
                 withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
             }
 
-        author shouldNotContain "data-verb=\"pipeline-release\""
+        author shouldContain "data-verb=\"pipeline-release\""
         author shouldContain "data-verb=\"pipeline-purge\""
         author shouldNotContain "data-role-note=\"read-only\""
     }
 
+    /**
+     * D5 (2026-09-20): the promoter authors nothing and releases nothing. The route itself
+     * refuses a promoter the pipeline editor (`EXECUTE_PIPELINE`); this pins the template
+     * contract for a principal with the promoter's booleans — read-only, no verb.
+     */
     @Test
-    fun `a promoter's pipeline editor keeps Release and loses Purge draft`() {
+    fun `a promoter's pipeline editor is read-only - no Release, no Purge draft`() {
         val promoter =
             render("pipelines/editor") {
                 editorModel()
-                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
             }
 
-        promoter shouldContain "data-verb=\"pipeline-release\""
+        promoter shouldNotContain "data-verb=\"pipeline-release\""
         promoter shouldNotContain "data-verb=\"pipeline-purge\""
-        promoter shouldNotContain "data-role-note=\"read-only\""
+        promoter shouldContain "data-role-note=\"read-only\""
     }
 
     // ------------------------------------------------------------------ promotion
@@ -125,7 +132,7 @@ class RoleVisibilityRenderTest {
      * absence, because a promotion screen with no promote button and no words reads as broken.
      */
     @Test
-    fun `promotion renders the plan for everyone and the Promote button only for a promoter`() {
+    fun `promotion renders the plan for every reader of the page and the Promote button only for a promoter`() {
         val promoter = render("promotion/index") { promotionModel() }
         promoter shouldContain "data-verb=\"promote\""
         promoter shouldNotContain "data-role-note=\"promote\""
@@ -174,14 +181,14 @@ class RoleVisibilityRenderTest {
             render("workspaces/index") {
                 workspacesModel()
                 setVariable("canCreate", false)
-                withRoles(isSuperAdmin = false, roleLabel = "admin")
+                withRoles(isSuperAdmin = false, roleLabel = "workspace admin")
             }
         workspaceAdmin shouldNotContain "data-verb=\"workspace-deactivate\""
         workspaceAdmin shouldNotContain "data-verb=\"workspace-reactivate\""
         workspaceAdmin shouldNotContain "data-verb=\"workspace-delete\""
         workspaceAdmin shouldNotContain "data-verb=\"workspace-create\""
         // …and still administers the members of the workspaces they administer.
-        workspaceAdmin shouldContain "data-verb=\"member-flags\""
+        workspaceAdmin shouldContain "data-verb=\"member-role\""
         workspaceAdmin shouldContain "data-verb=\"member-add\""
     }
 
@@ -199,14 +206,17 @@ class RoleVisibilityRenderTest {
         html shouldNotContain "data-verb=\"workspace-deactivate\""
     }
 
-    /** §C.1 — three checkboxes per member row, plus the add form's three, all named for the binder. */
+    /** §C.1 / D22 — ONE role dropdown per member row (current role selected), one on the add form, no checkbox anywhere. */
     @Test
-    fun `the members table renders the three role checkboxes and the 113 pending-invitation rows`() {
+    fun `the members table renders the role dropdown and the 113 pending-invitation rows`() {
         val html = render("workspaces/index") { workspacesModel() }
 
-        html shouldContain "name=\"author\" value=\"true\" data-flag=\"author\""
-        html shouldContain "name=\"promoter\" value=\"true\" data-flag=\"promoter\""
-        html shouldContain "name=\"admin\" value=\"true\" data-flag=\"admin\""
+        html shouldContain "select name=\"role\" class=\"ds-input app-input-inline\" data-member-role"
+        html shouldContain "value=\"workspace_admin\" selected"
+        html shouldContain "hx-post=\"/partials/workspaces/acme/members/11111111-1111-1111-1111-111111111111/role\""
+        html shouldContain "data-new-member-role"
+        html shouldNotContain "checkbox"
+        html shouldNotContain "data-flag"
         html shouldContain "/workspaces/acme/members/"
         // 113 merged with this round: the anchor became the ghost rows, revoke included.
         html shouldContain "data-invitation=\"pending@acme.test\""
@@ -297,7 +307,6 @@ class RoleVisibilityRenderTest {
         templates().forEach { file ->
             val text = Files.readString(file)
             if (!text.contains("data-verb=")) return@forEach
-            if (file.fileName.toString() in ROUTE_GUARDED) return@forEach
             val guardsInFile = ROLE_ATTRS.any { text.contains(it) }
             text.lines().forEachIndexed { index, line ->
                 if (!line.contains("data-verb=")) return@forEachIndexed
@@ -313,16 +322,18 @@ class RoleVisibilityRenderTest {
         unguarded.shouldBeEmpty()
     }
 
-    /** Non-vacuity for the exemptions: a stale entry exempts nothing and must fail here. */
+    /**
+     * 177 §D.8 — the route-guarded exemption list is EMPTY, for good. Every dialog fragment
+     * that used to be exempt (its route carried the `@RequiredScope`) now stamps the role model
+     * and guards its verb in the markup too, so the sweep above reads them like every other
+     * file. This arm refuses a non-empty list: an exemption is a verb the sweep cannot see,
+     * and the list grew to fourteen entries before anyone asked why the route alone was not
+     * enough (a render of the fragment outside its route — a test, a future reuse — showed the
+     * verb to everyone).
+     */
     @Test
-    fun `every route-guarded exemption is a real fragment that still carries a verb`() {
-        val carrying =
-            templates()
-                .filter { Files.readString(it).contains("data-verb=") }
-                .map { it.fileName.toString() }
-                .toSet()
-
-        (ROUTE_GUARDED.keys - carrying).shouldBeEmpty()
+    fun `the route-guarded exemption list is empty and stays empty`() {
+        ROUTE_GUARDED.shouldBeEmpty()
     }
 
     /**
@@ -341,7 +352,7 @@ class RoleVisibilityRenderTest {
         controls shouldBeGreaterThanOrEqual SHIPPED_CONTROLS
         distinct.size shouldBeGreaterThanOrEqual SHIPPED_VERBS
         // The six families the §B table names, each present by at least one control.
-        listOf("pipeline-release", "template-release", "datasource-register", "key-create", "member-flags", "promote")
+        listOf("pipeline-release", "template-release", "datasource-register", "key-create", "member-role", "promote")
             .forEach { verb -> (verb in distinct) shouldBe true }
     }
 
@@ -493,6 +504,7 @@ class RoleVisibilityRenderTest {
     private fun WebContext.workspacesModel(active: Boolean = true) {
         chrome()
         setVariable("canCreate", true)
+        setVariable("workspaceRoles", co.datapipelines.auth.WorkspaceRole.entries)
         setVariable(
             "own",
             listOf(
@@ -514,8 +526,8 @@ class RoleVisibilityRenderTest {
                             userId = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111"),
                             email = "alice@acme.test",
                             displayName = "Alice",
-                            flags = co.datapipelines.auth.MembershipFlags(author = true, admin = true),
-                            roleLabel = "admin",
+                            role = co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
+                            roleLabel = "workspace admin",
                         ),
                     ),
             ),
@@ -589,7 +601,9 @@ class RoleVisibilityRenderTest {
             listOf(
                 "canRead",
                 "canExecute",
+                "canReadExecutions",
                 "canAuthor",
+                "canReadPromotion",
                 "canPromote",
                 "canAdminWorkspace",
                 "isSuperAdmin",
@@ -598,33 +612,11 @@ class RoleVisibilityRenderTest {
             )
 
         /**
-         * The files whose guard is their ROUTE, not their markup: a dialog fragment is fetched
-         * by a URL whose handler carries the `@RequiredScope` for the very operation its button
-         * posts (`RELEASE_VERSION` for the release dialog, `MUTATE_DATASOURCES`… ). A role that
-         * may not perform the verb cannot obtain the markup at all, so a `th:if` inside it
-         * would be a second copy of a check that has already been made — and the launcher that
-         * opens the dialog is itself guarded, in a file this arm does check.
-         *
-         * Each entry must still exist and still carry a `data-verb`, or the exemption is
-         * certifying nothing (the non-vacuity rule the house's other allowlists carry).
+         * Files whose verb guard would be their ROUTE alone. EMPTY since 177 (§D.8): the fourteen
+         * dialog fragments that lived here stamp the role model and guard their verbs in the
+         * markup. Kept as a typed constant so the refusal above has something to be empty.
          */
-        val ROUTE_GUARDED: Map<String, String> =
-            mapOf(
-                "pipeline-lifecycle-release.html" to "fetched by GET /partials/pipelines/{id}/lifecycle/release — RELEASE_VERSION",
-                "pipeline-lifecycle-discard.html" to "GET .../lifecycle/discard — MUTATE_PIPELINES_TEMPLATES",
-                "pipeline-lifecycle-purge.html" to "GET .../lifecycle/purge — MUTATE_PIPELINES_TEMPLATES",
-                "pipeline-lifecycle-purge-entity.html" to "GET .../lifecycle/purge-entity — MUTATE_PIPELINES_TEMPLATES",
-                "pipeline-lifecycle-restore.html" to "GET .../lifecycle/restore — MUTATE_PIPELINES_TEMPLATES",
-                "pipeline-lifecycle-switch.html" to "GET .../lifecycle/switch — SWITCH_SERVED_VERSION",
-                "template-lifecycle-release.html" to "GET /partials/templates/lifecycle/release — RELEASE_VERSION",
-                "template-lifecycle-discard.html" to "GET .../lifecycle/discard — MUTATE_PIPELINES_TEMPLATES",
-                "template-lifecycle-purge.html" to "GET .../lifecycle/purge — MUTATE_PIPELINES_TEMPLATES",
-                "template-lifecycle-purge-entity.html" to "GET .../lifecycle/purge-entity — MUTATE_PIPELINES_TEMPLATES",
-                "template-lifecycle-restore.html" to "GET .../lifecycle/restore — MUTATE_PIPELINES_TEMPLATES",
-                "datasource-edit.html" to "GET /partials/datasources/{name}/edit — MUTATE_WORKSPACE_DATASOURCES",
-                "datasource-delete.html" to "GET /partials/datasources/{name}/delete — MUTATE_WORKSPACE_DATASOURCES",
-                "datasource-grants.html" to "GET /partials/datasources/{name}/grants — MANAGE_DATASOURCE_GRANTS (super admin)",
-            )
+        val ROUTE_GUARDED: Map<String, String> = emptyMap()
 
         /** The inventory as 114 shipped it: 63 controls over 50 distinct verbs. */
         const val SHIPPED_CONTROLS = 63

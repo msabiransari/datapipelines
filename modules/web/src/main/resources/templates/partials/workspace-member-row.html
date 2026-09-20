@@ -1,0 +1,44 @@
+<!-- One member of the ACTIVE workspace (ui-screens.md §4.13, D22): identity, the role
+     dropdown with the current role selected, Save, Remove. Rendered by the page for every
+     member AND by the role partial's response, so the row a Save swaps in IS the row the
+     page drew — never a second copy of the markup.
+
+     Model: `workspaceName`, `workspaceRoles` (WorkspaceRole.entries), `member` (MemberRowView). -->
+<th:block xmlns:th="http://www.thymeleaf.org">
+  <tr th:fragment="row" th:attr="data-member=${member.email}">
+    <td>
+      <span th:text="${member.displayName}">Alice</span>
+      <span class="u-secondary u-text-xs" th:text="' ' + ${member.email}">alice@example.com</span>
+    </td>
+    <!-- ONE role per membership (D1). The <select> lists the server's roles, the member's
+         current one selected; Save posts it through the one htmx partial on this screen and
+         the response swaps THIS row. `workspace.last_admin` (409) is the SERVER's refusal —
+         demote the last workspace admin and a toast names the rule while the row keeps the
+         selection the server still holds. -->
+    <td>
+      <form th:attr="hx-post=@{/partials/workspaces/{name}/members/{userId}/role(name=${workspaceName}, userId=${member.userId})}"
+            hx-target="closest tr" hx-swap="outerHTML" class="u-row-md u-wrap">
+        <select name="role" class="ds-input app-input-inline" data-member-role th:attr="aria-label='Role of ' + ${member.email}">
+          <option th:each="r : ${workspaceRoles}" th:value="${r.wire}" th:text="${r.label}" th:selected="${r == member.role}">viewer</option>
+        </select>
+        <!-- Both verbs sit inside the role guard like every other verb (§D.8): the page and the
+             partial's response render this row only for a workspace admin, and the markup says so. -->
+        <button th:if="${canAdminWorkspace == true}" type="submit" data-verb="member-role" class="ds-button ds-button-secondary ds-button-sm">Save</button>
+      </form>
+    </td>
+    <td class="num">
+      <!-- The last-admin rule is the SERVER's (workspace.last_admin, 409); hiding the
+           button for every admin would also hide it for the ones who can be removed. -->
+      <form th:action="@{/workspaces/{name}/members/{userId}/remove(name=${workspaceName}, userId=${member.userId})}" method="post">
+        <button th:if="${canAdminWorkspace == true}" type="submit" data-verb="member-remove" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
+      </form>
+    </td>
+  </tr>
+
+  <!-- The role partial's response: the refreshed row (swapped in place) and the toast,
+       out-of-band into the §5.1 stack. -->
+  <th:block th:fragment="saved">
+    <th:block th:replace="~{partials/workspace-member-row :: row}"></th:block>
+    <div th:replace="~{partials/toast-oob :: oob(${toastVariant}, ${toastTitle}, ${toastMessage})}"></div>
+  </th:block>
+</th:block>

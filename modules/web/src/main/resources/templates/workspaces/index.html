@@ -51,9 +51,8 @@
                  the screen that brings it back. To a MEMBER it does not exist at all. -->
             <span th:unless="${ws.active}" class="ds-badge ds-badge-warning">inactive</span>
           </td>
-          <!-- D-R2: roles are ADDITIVE flags, so no single label names a row. The word is
-               derived by RoleModel.labelOf — the same one the shell's badge and the members
-               table print, rather than a third inline ternary (114). -->
+          <!-- The word is derived by RoleModel.labelOf — the same one the shell's badge and the
+               members table print, rather than a third inline ternary (114). -->
           <td th:text="${ws.roleLabel}">author</td>
           <td class="num">
             <form th:action="@{/workspace/switch}" method="post" class="u-inline" th:if="${ws.active}">
@@ -124,44 +123,16 @@
         <tr>
           <th>Member</th>
           <th>Role</th>
-          <th>Flags</th>
           <th class="num">Actions</th>
         </tr>
       </thead>
       <tbody>
-        <tr th:each="member : ${entry.value}">
-          <td>
-            <span th:text="${member.displayName}">Alice</span>
-            <span class="u-secondary u-text-xs" th:text="' ' + ${member.email}">alice@example.com</span>
-          </td>
-          <td th:text="${member.roleLabel}">author</td>
-          <!-- The three flags as ONE form: a REPLACE, so an unticked box is a role being taken
-               away and Save posts all three every time. `workspace.last_admin` (409) is the
-               SERVER's refusal — untick admin on the last one and the redirect carries
-               `?error=last_admin`, which the layout renders as a toast naming the rule. -->
-          <td>
-            <form th:action="@{/workspaces/{name}/members/{userId}/flags(name=${entry.key}, userId=${member.userId})}"
-                  method="post" class="u-row-md u-wrap app-member-flags">
-              <label class="u-row u-gap-xs u-text-sm">
-                <input type="checkbox" name="author" value="true" data-flag="author" th:checked="${member.flags.author}"> author
-              </label>
-              <label class="u-row u-gap-xs u-text-sm">
-                <input type="checkbox" name="promoter" value="true" data-flag="promoter" th:checked="${member.flags.promoter}"> promoter
-              </label>
-              <label class="u-row u-gap-xs u-text-sm">
-                <input type="checkbox" name="admin" value="true" data-flag="admin" th:checked="${member.flags.admin}"> admin
-              </label>
-              <button type="submit" data-verb="member-flags" class="ds-button ds-button-secondary ds-button-sm">Save</button>
-            </form>
-          </td>
-          <td class="num">
-            <!-- The last-admin rule is the SERVER's (workspace.last_admin, 409); hiding the
-                 button for every admin would also hide it for the ones who can be removed. -->
-            <form th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
-              <button type="submit" data-verb="member-remove" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
-            </form>
-          </td>
-        </tr>
+        <!-- D22 — one row per member, drawn by the partial the role Save swaps back in, so the
+             page and the response render ONE markup. `workspaceName` is what the row's forms
+             post to. -->
+        <th:block th:each="member : ${entry.value}" th:with="workspaceName=${entry.key}">
+          <th:block th:replace="~{partials/workspace-member-row :: row}"></th:block>
+        </th:block>
         <!-- 113 — pending invitations: ghost rows, visibly not members. Revoke is the
              member manager's verb (MANAGE_WORKSPACE_MEMBERS), same guard as the row above. -->
         <tr th:each="inv : ${pending?.get(entry.key)}" class="app-row-pending" th:attr="data-invitation=${inv.email}">
@@ -169,8 +140,10 @@
             <span th:text="${inv.email}">bob@example.com</span>
             <span class="ds-badge u-ml-xs">invited</span>
           </td>
-          <td th:text="${inv.roleLabel}">viewer</td>
-          <td class="u-secondary u-text-xs">Becomes a member at first sign-in</td>
+          <td>
+            <span th:text="${inv.roleLabel}">viewer</span>
+            <span class="u-secondary u-text-xs"> · becomes a member at first sign-in</span>
+          </td>
           <td class="num">
             <form th:action="@{/workspaces/{name}/invitations/revoke(name=${entry.key})}" method="post">
               <input type="hidden" name="email" th:value="${inv.email}">
@@ -181,34 +154,16 @@
       </tbody>
     </table>
 
-    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" class="u-row-md u-wrap app-member-flags">
+    <!-- Add a member — or invite one (113): an email with no account yet becomes an
+         invitation carrying the same ONE role, materialised at first sign-in. -->
+    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" class="u-row-md u-wrap">
       <input type="email" name="email" class="ds-input app-input-raised app-input-fixed-lg" placeholder="member@example.com" required>
-      <label class="u-row u-gap-xs u-text-sm">
-        <input type="checkbox" name="author" value="true" data-flag="author"> author
-      </label>
-      <label class="u-row u-gap-xs u-text-sm">
-        <input type="checkbox" name="promoter" value="true" data-flag="promoter"> promoter
-      </label>
-      <label class="u-row u-gap-xs u-text-sm">
-        <input type="checkbox" name="admin" value="true" data-flag="admin"> admin
-      </label>
+      <select name="role" class="ds-input app-input-inline" data-new-member-role aria-label="Role of the new member">
+        <option th:each="r : ${workspaceRoles}" th:value="${r.wire}" th:text="${r.label}" th:selected="${r.wire == 'viewer'}">viewer</option>
+      </select>
       <button type="submit" data-verb="member-add" class="ds-button ds-button-secondary ds-button-sm">Add member</button>
     </form>
   </section>
 
-  <script>
-    /* admin implies author (design §1, and the database's own
-       chk_workspace_member_admin_authors). Ticking admin ticks author so the form SHOWS the
-       row it is about to write; the server normalises it regardless, so this is a courtesy
-       and never the rule — posting admin=true&author=false still stores an author. */
-    document.addEventListener('change', function (event) {
-      var box = event.target;
-      if (!box || box.getAttribute('data-flag') !== 'admin' || !box.checked) return;
-      var form = box.closest('form');
-      if (!form) return;
-      var author = form.querySelector('input[data-flag="author"]');
-      if (author) author.checked = true;
-    });
-  </script>
 </th:block>
 </html>

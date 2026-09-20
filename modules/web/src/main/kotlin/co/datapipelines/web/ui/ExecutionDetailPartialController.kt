@@ -1,7 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Capability
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -108,9 +108,9 @@ class ExecutionDetailPartialController(
         // RBAC (112 merge review): the interceptor's two-axis `allowed()` for CANCEL_EXECUTION is
         // the authority — the old inline `Scope.satisfies(principal.scopes, EXECUTE)` was always
         // FALSE for a session once sessions stopped carrying scopes (D-R1), so no signed-in human
-        // could cancel. Capability, not scope, is what a session holds.
-        val flags = principal.workspace?.flags ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "No active workspace")
-        if (!Capability.EXECUTE.satisfiedBy(flags)) {
+        // could cancel. Permission, not scope, is what a session holds.
+        val context = principal.workspace ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "No active workspace")
+        if (!context.permits(Permission.EXECUTE)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Execute capability required")
         }
         val record =

@@ -2,7 +2,7 @@ package co.datapipelines.web.workspaces
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
@@ -20,6 +20,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
@@ -115,34 +116,61 @@ class WorkspacesControllerTest {
         authenticate()
         every { service.addMember(any(), "acme", "alice@company.com", any()) } returns
             WorkspaceService.AddMemberOutcome.Added(
-                WorkspaceMemberRow(userId, "alice@company.com", "Alice", MembershipFlags(author = true, admin = true), Instant.EPOCH),
+                WorkspaceMemberRow(userId, "alice@company.com", "Alice", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH),
             )
 
-        val response = controller.addMember("acme", mapper.readTree("""{"email":"alice@company.com","admin":true}"""))
+        val response = controller.addMember("acme", mapper.readTree("""{"email":"alice@company.com","role":"workspace_admin"}"""))
 
         response.statusCode.value() shouldBe 200
         response.body!!.data["user_id"] shouldBe userId.toString()
-        response.body!!.data["admin"] shouldBe true
+        response.body!!.data["role"] shouldBe "workspace_admin"
         // A membership, never a ghost: the invited flag exists only on the 202 branch.
-        response.body!!.data.keys shouldBe setOf("user_id", "email", "display_name", "author", "promoter", "admin", "joined_at")
+        response.body!!.data.keys shouldBe setOf("user_id", "email", "display_name", "role", "joined_at")
+        verify { service.addMember(any(), "acme", "alice@company.com", WorkspaceRole.WORKSPACE_ADMIN) }
+    }
+
+    /** D1: the body's `role` is one of four tokens; anything else is the surface's bad-parameter 400, before the service. */
+    @Test
+    fun `addMember with an unknown role is a 400 and never reaches the service`() {
+        authenticate()
+
+        val refusal =
+            shouldThrow<ApiException> {
+                controller.addMember("acme", mapper.readTree("""{"email":"alice@company.com","role":"owner"}"""))
+            }
+
+        refusal.details["field"] shouldBe "role"
+        verify(exactly = 0) { service.addMember(any(), any(), any(), any()) }
+    }
+
+    /** An absent `role` is the least a membership can be — a viewer — the only safe reading of silence. */
+    @Test
+    fun `addMember without a role asks for a viewer`() {
+        authenticate()
+        every { service.addMember(any(), "acme", "alice@company.com", WorkspaceRole.VIEWER) } returns
+            WorkspaceService.AddMemberOutcome.Added(
+                WorkspaceMemberRow(userId, "alice@company.com", "Alice", WorkspaceRole.VIEWER, Instant.EPOCH),
+            )
+
+        controller.addMember("acme", mapper.readTree("""{"email":"alice@company.com"}""")).statusCode.value() shouldBe 200
+
+        verify { service.addMember(any(), "acme", "alice@company.com", WorkspaceRole.VIEWER) }
     }
 
     @Test
     fun `addMember answers 202 with the invitation echo when the email has no user row`() {
         authenticate()
         every { service.addMember(any(), "acme", "ghost@company.com", any()) } returns
-            WorkspaceService.AddMemberOutcome.Invited("ghost@company.com", MembershipFlags(author = true))
+            WorkspaceService.AddMemberOutcome.Invited("ghost@company.com", WorkspaceRole.AUTHOR)
 
-        val response = controller.addMember("acme", mapper.readTree("""{"email":"ghost@company.com","author":true}"""))
+        val response = controller.addMember("acme", mapper.readTree("""{"email":"ghost@company.com","role":"author"}"""))
 
         response.statusCode.value() shouldBe 202
         response.body!!.data shouldBe
             mapOf(
                 "invited" to true,
                 "email" to "ghost@company.com",
-                "author" to true,
-                "promoter" to false,
-                "admin" to false,
+                "role" to "author",
             )
     }
 
@@ -158,7 +186,7 @@ class WorkspacesControllerTest {
                             memberId,
                             "alice@company.com",
                             "Alice",
-                            MembershipFlags(author = true, admin = true),
+                            WorkspaceRole.WORKSPACE_ADMIN,
                             Instant.EPOCH,
                         ),
                     ),
@@ -167,7 +195,7 @@ class WorkspacesControllerTest {
                         WorkspaceInvitation(
                             ws.id,
                             "bob@company.com",
-                            MembershipFlags.VIEWER,
+                            WorkspaceRole.VIEWER,
                             invitedBy = memberId,
                             invitedAt = Instant.EPOCH,
                         ),
@@ -180,25 +208,22 @@ class WorkspacesControllerTest {
         data["members"]!!.single()["user_id"] shouldBe memberId.toString()
         // The invitation is in ITS array, with the email as identity and no user_id.
         val invitation = data["invitations"]!!.single()
-        invitation.keys shouldBe setOf("email", "author", "promoter", "admin", "invited_by", "invited_at")
+        invitation.keys shouldBe setOf("email", "role", "invited_by", "invited_at")
         invitation["email"] shouldBe "bob@company.com"
     }
 
     @Test
-    fun `list-own rows carry the caller's capability FLAGS, not a role label (D-R2)`() {
+    fun `list-own rows carry the caller's ONE role (D1, D21)`() {
         authenticate()
         every { service.listOwn(any()) } returns
-            listOf(co.datapipelines.auth.WorkspaceMembership(ws.id, "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH))
+            listOf(co.datapipelines.auth.WorkspaceMembership(ws.id, "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH))
 
         val row = controller.list().data.single()
 
-        // `role` left the wire with the column. It is NOT replaced by a computed "highest
-        // role" string: the flags are additive, so any single label would have to lie about
-        // one of them — "author who also releases" has no name.
-        row["role"] shouldBe null
-        row["author"] shouldBe true
-        row["promoter"] shouldBe false
-        row["admin"] shouldBe true
+        // `role` is BACK on the wire (2026-09-20): one of four tokens, replacing the three
+        // booleans V23's additive flags had put there.
+        row["role"] shouldBe "workspace_admin"
+        row.keys shouldBe setOf("name", "role", "active", "joined_at")
         row["active"] shouldBe true
     }
 }

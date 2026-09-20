@@ -87,7 +87,7 @@ class SearchPartialRenderTest {
             pipelineVersion = 3,
             status = ExecutionStatus.FAILED,
             parametersJson = "{}",
-            triggeredBy = UUID.randomUUID(),
+            executedBy = UUID.randomUUID(),
             triggeredVia = ExecutionTrigger.UI,
             startedAt = Instant.parse("2026-09-18T10:24:00Z"),
         )

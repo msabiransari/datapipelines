@@ -315,7 +315,7 @@ Run ONE read-only SELECT or WITH statement against a datasource and return up to
 
 Scope `read` · read-only
 
-List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status.
+List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status. Returns the runs YOU started (this key's user); a workspace admin's key returns every run of the workspace, including runs started by published endpoints. Other members' runs are not listed.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -327,7 +327,7 @@ List recent pipeline executions of the key's pinned workspace, optionally filter
 
 Scope `read` · read-only
 
-Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result.
+Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result. Visible for YOUR OWN runs (this key's user), or any run of the workspace when the key's user is a workspace admin; another member's execution is not found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -337,7 +337,7 @@ Get metadata for a specific execution: status, timing, node_stats, parameters us
 
 Scope `read` · read-only
 
-Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run.
+Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run. Readable for YOUR OWN runs (this key's user), or any run of the workspace when the key's user is a workspace admin; another member's execution is not found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

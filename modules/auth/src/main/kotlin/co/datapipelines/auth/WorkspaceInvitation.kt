@@ -11,13 +11,13 @@ import java.util.UUID
  *
  * The invitee is an EMAIL, never a user id — deliberately: `workspace_members.user_id`
  * stays `NOT NULL REFERENCES users(id)` and nothing here pretends a person exists
- * before they do. [flags] are the membership's flags, carried forward unchanged;
- * `admin` implies `author` by the database CHECK, exactly as on the membership row.
+ * before they do. [role] is the membership's ONE role (D1, D20), carried forward unchanged
+ * when the row materialises.
  */
 data class WorkspaceInvitation(
     val workspaceId: UUID,
     val email: String,
-    val flags: MembershipFlags,
+    val role: WorkspaceRole,
     val invitedBy: UUID,
     val invitedAt: Instant,
 )

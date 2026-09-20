@@ -3,7 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceContext
@@ -185,7 +185,7 @@ class DatasourceGrantsPartialControllerTest {
                 scopes = setOf(Scope.ADMIN),
                 authMethod = AuthMethod.OIDC,
                 workspaceName = "acme",
-                workspace = WorkspaceContext(acmeId, "acme", MembershipFlags.IMPLICIT_SUPER_ADMIN),
+                workspace = WorkspaceContext.superAdminOver(acmeId, "acme", explicitRole = null),
                 superAdmin = true,
             )
         SecurityContextHolder.getContext().authentication =
@@ -214,7 +214,7 @@ class DatasourceGrantsPartialControllerTest {
         name: String,
         id: UUID,
         active: Boolean = true,
-    ) = WorkspaceMembership(id, name, MembershipFlags.IMPLICIT_SUPER_ADMIN, Instant.EPOCH, active)
+    ) = WorkspaceMembership(id, name, WorkspaceRole.VIEWER, Instant.EPOCH, active)
 
     private fun workspace(
         name: String,

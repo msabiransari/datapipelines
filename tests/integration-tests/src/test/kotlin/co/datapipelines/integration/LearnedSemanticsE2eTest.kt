@@ -416,10 +416,10 @@ class LearnedSemanticsE2eTest {
             )
             st.execute(
                 """
-                INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
-                    ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
-                    ('$WS_GLOBEX', '$BOB', TRUE, FALSE, FALSE),
-                    ('$WS_GLOBEX', '$VERA', FALSE, FALSE, FALSE)
+                INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+                    ('$WS_ACME', '$ALICE', 'workspace_admin'),
+                    ('$WS_GLOBEX', '$BOB', 'author'),
+                    ('$WS_GLOBEX', '$VERA', 'viewer')
                 """.trimIndent(),
             )
             st.execute(

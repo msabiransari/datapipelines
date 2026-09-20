@@ -99,7 +99,7 @@ class EndpointsConfiguration {
 
     /**
      * The §7.7 proof that an execution belongs to the endpoint key asking for its result. Reads
-     * the serve audit row, because `triggered_by` is the key's OWNER and cannot tell two of one
+     * the serve audit row, because `executed_by` is the key's OWNER and cannot tell two of one
      * person's keys apart.
      */
     @Bean

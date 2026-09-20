@@ -2,7 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -59,7 +59,7 @@ class TemplateEditorControllerTest {
      * author's editor (the route floored at MUTATE, so nobody else could reach it); 143 opens
      * the page to every reader, and the tests below pass the membership they mean.
      */
-    private fun authenticate(flags: MembershipFlags = MembershipFlags(author = true)) {
+    private fun authenticate(role: WorkspaceRole = WorkspaceRole.AUTHOR) {
         val principal =
             AuthenticatedPrincipal(
                 userId,
@@ -67,7 +67,7 @@ class TemplateEditorControllerTest {
                 "A",
                 setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme", flags),
+                workspace = WorkspaceContext(workspaceId, "acme", role),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -225,7 +225,7 @@ class TemplateEditorControllerTest {
      */
     @Test
     fun `a non-author opens the working version read-only, on the page and on the partial`() {
-        authenticate(MembershipFlags.VIEWER)
+        authenticate(WorkspaceRole.VIEWER)
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.findWorking(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.listVersions(any(), "test/my_template.sql") } returns sampleVersions
@@ -246,7 +246,7 @@ class TemplateEditorControllerTest {
         partial["readOnly"] shouldBe true
 
         // A PROMOTER is a reader of the source as well: release is a header verb, not an edit.
-        authenticate(MembershipFlags(promoter = true))
+        authenticate(WorkspaceRole.PROMOTER)
         val promoter = ExtendedModelMap()
         controller.editor("test/my_template.sql", null, promoter, mockk(relaxed = true))
         promoter["readOnly"] shouldBe true

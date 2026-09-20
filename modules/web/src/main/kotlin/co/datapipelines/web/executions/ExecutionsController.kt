@@ -59,12 +59,13 @@ class ExecutionsController(
     /**
      * §10.1 — the listing. Filters are evaluated **in SQL** by the repository (gate C, B4): the
      * page is cut after filtering, so `has_more` and page fullness are honest. `total` remains the
-     * proven lower bound — the repository offers no count. Ownership: `admin` reads `findAll`
-     * (optionally pipeline-narrowed); everyone else reads `findByUser`, which is scoped by
-     * `triggered_by` in SQL — no other user's execution can reach the page.
+     * proven lower bound — the repository offers no count. Ownership (D11): a workspace admin
+     * reads `findAll` (optionally pipeline-narrowed); everyone else reads `findByUser`, which is
+     * scoped by `executed_by` in SQL and excludes endpoint-key runs — no other user's execution
+     * can reach the page. The promoter never reaches this handler (`READ_EXECUTIONS`).
      */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
     fun list(
         @RequestParam(name = "pipeline_id", required = false) pipelineId: UUID?,
         @RequestParam(required = false) status: String?,
@@ -104,7 +105,7 @@ class ExecutionsController(
 
     /** §10.2 — one execution's metadata; `result_url` only while the result is unexpired. */
     @GetMapping("/{id}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<Map<String, Any?>> {
@@ -151,7 +152,7 @@ class ExecutionsController(
         // only accepts text/event-stream — see PipelineExecuteController.
         produces = [MediaType.TEXT_EVENT_STREAM_VALUE, MediaType.APPLICATION_JSON_VALUE],
     )
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
     fun events(
         @PathVariable id: UUID,
     ): SseEmitter {
@@ -215,7 +216,10 @@ class ExecutionsController(
             put("error", errorJson?.let { ExecutorJson.mapper.readTree(it) })
             put("failed_node_id", failedNodeId)
             put("correlation_id", correlationId?.toString())
-            put("triggered_by", triggeredBy.toString())
+            // D11 (2026-09-20, rest-api §10.2): `executed_by` replaced `triggered_by`; the key kind
+            // says whether a key ran it and which kind (null = a signed-in session).
+            put("executed_by", executedBy.toString())
+            put("executed_by_key_kind", executedByKeyKind?.wire)
             put("triggered_via", triggeredVia.name)
             put("result_row_count", resultRowCount)
             put("result_size_bytes", resultSizeBytes)

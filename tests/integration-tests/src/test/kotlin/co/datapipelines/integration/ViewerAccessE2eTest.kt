@@ -246,9 +246,9 @@ class ViewerAccessE2eTest {
                     // Alice authors AND promotes (the positive control); Vera is a plain viewer.
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
-                            ('$WS_ACME', '$ALICE', TRUE, TRUE, FALSE),
-                            ('$WS_ACME', '$VERA', FALSE, FALSE, FALSE)
+                        INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+                            ('$WS_ACME', '$ALICE', 'promoter'),
+                            ('$WS_ACME', '$VERA', 'viewer')
                         """.trimIndent(),
                     )
                     statement.execute(

@@ -71,7 +71,7 @@ class ExecutionRepositoriesIntegrationTest {
         found.pipelineId shouldBe pipelineId
         found.pipelineVersion shouldBe 1
         found.status shouldBe ExecutionStatus.RUNNING
-        found.triggeredBy shouldBe userId
+        found.executedBy shouldBe userId
         found.triggeredVia shouldBe ExecutionTrigger.REST
         found.correlationId shouldBe record.correlationId
         found.completedAt.shouldBeNull()
@@ -274,7 +274,7 @@ class ExecutionRepositoriesIntegrationTest {
         Thread.sleep(SPACING_MS)
         val theirs =
             running()
-                .copy(executionId = UUID.randomUUID(), pipelineId = otherPipeline, triggeredBy = otherUser)
+                .copy(executionId = UUID.randomUUID(), pipelineId = otherPipeline, executedBy = otherUser)
                 .also(executions::create)
 
         val all = executions.findAll(WORKSPACE_ID)
@@ -467,7 +467,7 @@ class ExecutionRepositoriesIntegrationTest {
             pipelineVersion = 1,
             status = ExecutionStatus.RUNNING,
             parametersJson = PARAMETERS_JSON,
-            triggeredBy = userId,
+            executedBy = userId,
             triggeredVia = ExecutionTrigger.REST,
             correlationId = UUID.randomUUID(),
         )

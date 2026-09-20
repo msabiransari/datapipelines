@@ -8,7 +8,7 @@ import co.datapipelines.auth.MailKind
 import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -70,12 +70,11 @@ class AdminUsersPartialController(
      * self-registration). The one-time password is shown to the admin exactly
      * once, out-of-band into `#admin-notice`; the new row prepends to the table.
      *
-     * The optional workspace + flags (113 §B.3) put the new account into a workspace
+     * The optional workspace + role (113 §B.3, D22) put the new account into a workspace
      * IN THE SAME ACT: no invitation is needed because the row exists by the time the
      * membership is written — [WorkspaceService.addMember] resolves the freshly created
-     * row directly. The flags ride the workspace's own rules (a super admin caller
-     * passes the capability gate via D-R8; `admin` normalises to admin+author in the
-     * service). An unknown or unreachable workspace is the workspace surface's own
+     * row directly. The role rides the workspace's own rules (a super admin caller
+     * passes the permission gate via D-R8). An unknown or unreachable workspace is the workspace surface's own
      * catalogued refusal, rendered as a toast — the USER ROW still exists, and the
      * admin can add it to a workspace afterwards from the workspaces screen.
      */
@@ -86,15 +85,18 @@ class AdminUsersPartialController(
         @RequestParam email: String,
         @RequestParam(required = false, defaultValue = "") displayName: String = "",
         @RequestParam(required = false, defaultValue = "") workspace: String = "",
-        @RequestParam(required = false, defaultValue = "false") author: Boolean = false,
-        @RequestParam(required = false, defaultValue = "false") promoter: Boolean = false,
-        @RequestParam(required = false, defaultValue = "false") admin: Boolean = false,
+        @RequestParam(required = false, defaultValue = "viewer") role: String = "viewer",
     ): Any {
         requireSessionAdmin("create-local-user")
         if (email.isBlank() || !email.contains('@')) {
             return refusedToast(HttpStatus.BAD_REQUEST, "User not created", "A valid email address is required")
         }
         val requestedWorkspace = workspace.trim().ifEmpty { null }
+        // Refused BEFORE the account is created: a role outside the four is a form nobody
+        // rendered, and creating the user first would leave a row behind a 400.
+        val workspaceRole =
+            WorkspaceRole.fromWireOrNull(role)
+                ?: return refusedToast(HttpStatus.BAD_REQUEST, "User not created", "Unknown workspace role '$role'")
         val result = localPasswordService.createLocalUser(email, displayName, currentPrincipal().userId, requestedWorkspace)
         return when (result) {
             is LocalPasswordService.CreateResult.EmailTaken -> {
@@ -102,7 +104,7 @@ class AdminUsersPartialController(
             }
 
             is LocalPasswordService.CreateResult.Success -> {
-                val note = membershipNote(result.user.email, workspace.trim(), author, promoter, admin)
+                val note = membershipNote(result.user.email, workspace.trim(), workspaceRole)
                 if (mailProperties.enabled) {
                     // 137: the credential went to the user. The notice carries the send's outcome
                     // (the claim row exists already — it is written on the request thread).
@@ -207,9 +209,7 @@ class AdminUsersPartialController(
     private fun membershipNote(
         userEmail: String,
         workspace: String,
-        author: Boolean,
-        promoter: Boolean,
-        admin: Boolean,
+        role: WorkspaceRole,
     ): String? {
         if (workspace.isBlank()) return null
         return try {
@@ -219,7 +219,7 @@ class AdminUsersPartialController(
                         currentPrincipal(),
                         workspace,
                         userEmail,
-                        MembershipFlags(author = author, promoter = promoter, admin = admin),
+                        role,
                     )
             ) {
                 // The row was JUST created, so the invitation branch is unreachable here —

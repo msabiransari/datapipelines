@@ -37,7 +37,7 @@
       <div class="tplx-detail-actions">
         <span class="htmx-indicator ds-spinner" id="template-detail-spinner" aria-hidden="true"></span>
 
-        <!-- 114 §B — state AND role, as on the pipeline twin: Release is `canPromote`
+        <!-- 114 §B — state AND role, as on the pipeline twin: Release is `canAuthor` (D8, 2026-09-20)
              (D-R2 — an author who is not a promoter sees none), the three destructive verbs
              are `canAuthor` (D-R4), and a role that holds neither renders none of them. -->
         <!-- 102 §B.1 — the §4.3d template twins in #tx-dialog, ONE destructive per view:
@@ -59,7 +59,7 @@
                          hx-target='#tx-dialog', hx-swap='innerHTML'"
                 th:text="'Purge v' + ${draftVersion} + '…'">Purge v2…</button>
 
-        <button th:if="${releasableVersion != null and canPromote == true}" data-verb="template-release" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${releasableVersion != null and canAuthor == true}" data-verb="template-release" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{'/partials/templates/lifecycle/release'(name=${templateId})},
                          hx-target='#tx-dialog', hx-swap='innerHTML'"
                 th:text="'Release v' + ${releasableVersion} + '…'">Release v1…</button>

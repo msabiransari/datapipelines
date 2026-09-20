@@ -112,7 +112,7 @@ class AuthCacheTest {
     @Test
     fun `membership snapshots follow the same TTL and invalidation discipline`() {
         val workspaceId = UUID.randomUUID()
-        val membership = WorkspaceMembership(workspaceId, "acme", MembershipFlags(author = true, admin = true), Instant.now())
+        val membership = WorkspaceMembership(workspaceId, "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.now())
         val loads = AtomicInteger()
 
         repeat(3) {

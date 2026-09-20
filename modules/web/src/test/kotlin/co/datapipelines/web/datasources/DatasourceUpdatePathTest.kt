@@ -4,7 +4,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
@@ -111,7 +111,7 @@ class DatasourceUpdatePathTest {
                         WorkspaceContext(
                             workspaceId,
                             "acme",
-                            MembershipFlags(author = true, promoter = true, admin = true),
+                            WorkspaceRole.WORKSPACE_ADMIN,
                         ),
                     superAdmin = admin,
                 ),

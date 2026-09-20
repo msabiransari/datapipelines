@@ -107,8 +107,8 @@ class DemoWorkspaceSeedingTest {
         val context = seeder.joinDemoIfUnaffiliated(alice)
 
         context?.name shouldBe "demo"
-        context?.flags shouldBe MembershipFlags.VIEWER
-        verify { workspaces.addMember(demoId, alice, MembershipFlags.VIEWER) }
+        context?.role shouldBe WorkspaceRole.VIEWER
+        verify { workspaces.addMember(demoId, alice, WorkspaceRole.VIEWER) }
     }
 
     @Test
@@ -118,7 +118,7 @@ class DemoWorkspaceSeedingTest {
         // Bob holds a membership somewhere — the join fires only for a user with NONE, which
         // is what stops the login path from undoing a deliberate removal.
         every { workspaces.membershipsOf(bob) } returns
-            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true), Instant.EPOCH))
+            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.AUTHOR, Instant.EPOCH))
 
         seeder.joinDemoIfUnaffiliated(bob).shouldBeNull()
         verify(exactly = 0) { workspaces.addMember(any(), any(), any()) }

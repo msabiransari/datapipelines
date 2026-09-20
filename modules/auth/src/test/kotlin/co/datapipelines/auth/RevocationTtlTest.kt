@@ -25,7 +25,9 @@ class RevocationTtlTest {
             // A relaxed mock answers `isActive` false, which would refuse every key here for
             // the wrong reason. The default is the live workspace and an author issuer.
             every { isActive(any()) } returns true
-            every { issuerFlags(any(), any(), any()) } returns MembershipFlags(author = true)
+            every { issuerContext(any(), any(), any(), any()) } answers {
+                WorkspaceContext(thirdArg(), arg(3), WorkspaceRole.AUTHOR)
+            }
         }
     private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
 
@@ -43,7 +45,7 @@ class RevocationTtlTest {
             displayName = "Owner",
             scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
-            workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true)),
+            workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.AUTHOR),
         )
 
     private fun issueKey(): IssuedApiKey {

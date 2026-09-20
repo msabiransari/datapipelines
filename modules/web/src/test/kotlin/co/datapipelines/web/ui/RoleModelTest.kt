@@ -2,38 +2,40 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.springframework.ui.ExtendedModelMap
 import java.util.UUID
 
 /**
- * The ONE role helper (114 §A), pinned over EVERY flag combination.
+ * The ONE role helper (114 §A), pinned over EVERY role (D1: four workspace roles, plus super
+ * admin, plus "no workspace").
  *
- * This is the test the round rests on: sixteen screens read these seven attributes, and a
+ * This is the test the round rests on: sixteen screens read these attributes, and a
  * mis-derived boolean either hides a verb from someone who holds it (a product that looks
- * broken) or renders one the server will refuse (the defect this round removes). Enumerating
- * the eight membership rows rather than sampling them is deliberate — the capability axis is
- * NOT a chain (an author may not release, a promoter may not author), so no combination is
- * implied by another and a sampled test would miss exactly the pairs D-R2 exists for.
+ * broken) or renders one the server will refuse (the defect 114 removed). Every role is
+ * enumerated rather than sampled — the roles are NOT a chain (a promoter promotes but does not
+ * execute; an author releases but does not promote), so no row is implied by another.
  */
 class RoleModelTest {
     private val workspaceId = UUID.randomUUID()
 
-    // ---------------------------------------------------------------- session, every row
+    // ---------------------------------------------------------------- session, every role
 
     @Test
-    fun `a viewer holds read and execute and nothing else`() {
-        val roles = RoleModel.roles(session(MembershipFlags.VIEWER))
+    fun `a viewer holds read, execute and the executions screens, and nothing else`() {
+        val roles = RoleModel.roles(session(WorkspaceRole.VIEWER))
 
         roles.canRead shouldBe true
-        // D-R3, the owner's words: "executing them should be fine". This is the row where the
-        // two axes disagree — `execute` is the second SCOPE but the bottom CAPABILITY.
+        // D3, the owner's words: "executing them should be fine". This is the row where the
+        // two axes disagree — `execute` is the second SCOPE but a viewer-level PERMISSION.
         roles.canExecute shouldBe true
+        roles.canReadExecutions shouldBe true
         roles.canAuthor shouldBe false
+        roles.canReadPromotion shouldBe false
         roles.canPromote shouldBe false
         roles.canAdminWorkspace shouldBe false
         roles.isSuperAdmin shouldBe false
@@ -41,69 +43,62 @@ class RoleModelTest {
     }
 
     @Test
-    fun `an author authors and does not promote`() {
-        val roles = RoleModel.roles(session(MembershipFlags(author = true)))
+    fun `an author authors, sees the promotion page, and does not promote`() {
+        val roles = RoleModel.roles(session(WorkspaceRole.AUTHOR))
 
         roles.canAuthor shouldBe true
-        // The whole of D-R2: "can edit" and "can release" are two answers.
+        roles.canExecute shouldBe true
+        roles.canReadExecutions shouldBe true
+        // Owner rule 13: the PAGE is the author's too; the promote VERB is not.
+        roles.canReadPromotion shouldBe true
         roles.canPromote shouldBe false
         roles.canAdminWorkspace shouldBe false
         roles.roleLabel shouldBe "author"
     }
 
+    /** D5 (2026-09-20): the ops role — promotes, reads; executes nothing, reads no executions, authors nothing. */
     @Test
-    fun `a promoter promotes and does not author`() {
-        val roles = RoleModel.roles(session(MembershipFlags(promoter = true)))
+    fun `a promoter promotes and reads the promotion page, and neither executes nor authors`() {
+        val roles = RoleModel.roles(session(WorkspaceRole.PROMOTER))
 
+        roles.canRead shouldBe true
+        roles.canExecute shouldBe false
+        roles.canReadExecutions shouldBe false
         roles.canAuthor shouldBe false
+        roles.canReadPromotion shouldBe true
         roles.canPromote shouldBe true
         roles.canAdminWorkspace shouldBe false
         roles.roleLabel shouldBe "promoter"
     }
 
     @Test
-    fun `author plus promoter holds both, and the label names both`() {
-        val roles = RoleModel.roles(session(MembershipFlags(author = true, promoter = true)))
-
-        roles.canAuthor shouldBe true
-        roles.canPromote shouldBe true
-        roles.canAdminWorkspace shouldBe false
-        roles.roleLabel shouldBe "author · promoter"
-    }
-
-    @Test
     fun `a workspace admin holds every workspace verb - and is not a super admin`() {
-        // The V23 constraint `chk_workspace_member_admin_authors` makes `admin` imply `author`
-        // on the ROW, which is why every predicate can read `author` straight off it.
-        val roles = RoleModel.roles(session(MembershipFlags(author = true, admin = true)))
+        val roles = RoleModel.roles(session(WorkspaceRole.WORKSPACE_ADMIN))
 
+        roles.canExecute shouldBe true
+        roles.canReadExecutions shouldBe true
         roles.canAuthor shouldBe true
+        roles.canReadPromotion shouldBe true
         roles.canPromote shouldBe true
         roles.canAdminWorkspace shouldBe true
         roles.isSuperAdmin shouldBe false
-        roles.roleLabel shouldBe "admin"
-    }
-
-    @Test
-    fun `admin plus promoter still reads admin - the label names the highest workspace role`() {
-        val roles = RoleModel.roles(session(MembershipFlags(author = true, promoter = true, admin = true)))
-
-        roles.canAdminWorkspace shouldBe true
-        roles.roleLabel shouldBe "admin"
+        roles.roleLabel shouldBe "workspace admin"
     }
 
     /**
-     * A super admin acting in a workspace they hold NO explicit membership in (D-R8). The
+     * A super admin acting in a workspace they hold NO explicit membership in (D7). The
      * badge reads `super admin` there — that is the authority they are acting with, and the
      * audit trail records `acting_via=super_admin` for the same reason.
      */
     @Test
     fun `an implicit super admin holds everything and reads super admin`() {
-        val roles = RoleModel.roles(session(MembershipFlags.IMPLICIT_SUPER_ADMIN, superAdmin = true))
+        val roles = RoleModel.roles(superAdminSession(explicitRole = null))
 
         roles.canRead shouldBe true
         roles.canExecute shouldBe true
+        roles.canReadExecutions shouldBe true
         roles.canAuthor shouldBe true
+        roles.canReadPromotion shouldBe true
         roles.canPromote shouldBe true
         roles.canAdminWorkspace shouldBe true
         roles.isSuperAdmin shouldBe true
@@ -112,7 +107,7 @@ class RoleModelTest {
 
     @Test
     fun `a super admin with an explicit viewer membership still reads super admin`() {
-        val roles = RoleModel.roles(session(MembershipFlags.superAdminOver(MembershipFlags.VIEWER), superAdmin = true))
+        val roles = RoleModel.roles(superAdminSession(explicitRole = WorkspaceRole.VIEWER))
 
         roles.canAdminWorkspace shouldBe true
         roles.roleLabel shouldBe "super admin"
@@ -123,63 +118,37 @@ class RoleModelTest {
     /**
      * §7.6's other axis. A key's SCOPE is a ceiling on its issuer's role: a `read` key must not
      * be shown an author's affordances just because the person who minted it is an author, or
-     * the screen would offer verbs `ScopeInterceptor` refuses on the scope arm.
-     */
-    @Test
-    fun `a read-scoped key narrows an admin issuer to reading`() {
-        val roles = RoleModel.roles(key(MembershipFlags(author = true, admin = true), Scope.READ))
-
-        roles.canRead shouldBe true
-        // `execute` is the second scope; a `read` key does not reach it (the mirror of the
-        // viewer row above — each axis refuses something the other admits).
-        roles.canExecute shouldBe false
-        roles.canAuthor shouldBe false
-        roles.canPromote shouldBe false
-        roles.canAdminWorkspace shouldBe false
-        // The LABEL follows the effective booleans, never the raw row: printing `admin` here
-        // would contradict every button beside it.
-        roles.roleLabel shouldBe "viewer"
-    }
-
-    @Test
-    fun `an execute-scoped key reaches execution and stops there`() {
-        val roles = RoleModel.roles(key(MembershipFlags(author = true), Scope.EXECUTE))
-
-        roles.canExecute shouldBe true
-        roles.canAuthor shouldBe false
-        roles.roleLabel shouldBe "viewer"
-    }
-
-    @Test
-    fun `an author-scoped key carries its issuer's author and promoter rows`() {
-        // Release/promote are `author` SCOPE (the credential axis has no promoter, design §1),
-        // so an author-scoped key whose issuer is a promoter does reach them.
-        val roles = RoleModel.roles(key(MembershipFlags(author = true, promoter = true), Scope.AUTHOR))
-
-        roles.canAuthor shouldBe true
-        roles.canPromote shouldBe true
-        roles.roleLabel shouldBe "author · promoter"
-    }
-
-    /**
      * O-2: no key may hold `admin` scope at all, so an INSTANCE verb is session-only. The
      * screen says the same thing the matrix says on the scope arm, rather than rendering a
      * Create/Deactivate button the interceptor will refuse.
      */
     @Test
     fun `a key never renders the instance verbs, even for a super admin owner`() {
-        val roles = RoleModel.roles(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.AUTHOR, superAdmin = true))
+        val roles = RoleModel.roles(superAdminKey(Scope.AUTHOR))
 
         roles.isSuperAdmin shouldBe false
         roles.canAdminWorkspace shouldBe true
         roles.roleLabel shouldBe "super admin"
     }
 
+    @Test
+    fun `an author's read key renders as a viewer - badge included`() {
+        val roles = RoleModel.roles(key(WorkspaceRole.AUTHOR, Scope.READ))
+
+        roles.canRead shouldBe true
+        // READ_EXECUTIONS floors at `read`: the runs the issuer may see, the key sees.
+        roles.canReadExecutions shouldBe true
+        roles.canExecute shouldBe false
+        roles.canAuthor shouldBe false
+        roles.canReadPromotion shouldBe false
+        roles.roleLabel shouldBe "viewer"
+    }
+
     // ---------------------------------------------------------------- no workspace at all
 
     @Test
     fun `a principal with no resolved workspace renders nothing`() {
-        val roles = RoleModel.roles(session(flags = null))
+        val roles = RoleModel.roles(session(role = null))
 
         roles shouldBe RoleModel.NONE
         // The badge still has a word in it: an empty badge reads as a broken screen.
@@ -200,21 +169,22 @@ class RoleModelTest {
      */
     @Test
     fun `a super admin's read key renders as a reader on every rung`() {
-        val roles = RoleModel.roles(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.READ, superAdmin = true))
+        val roles = RoleModel.roles(superAdminKey(Scope.READ))
 
         roles.canRead shouldBe true
         roles.canExecute shouldBe false
         roles.canAuthor shouldBe false
         roles.canPromote shouldBe false
+        roles.canReadPromotion shouldBe false
         roles.canAdminWorkspace shouldBe false
         roles.isSuperAdmin shouldBe false
         // The badge stays the owner's authority (documented at the branch), not the key's reach.
         roles.roleLabel shouldBe "super admin"
-        RoleModel.shell(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.READ, superAdmin = true)) shouldBe
-            RoleModel.Shell(adminUsers = false, adminMembers = false)
+        RoleModel.shell(superAdminKey(Scope.READ)) shouldBe
+            shell(executions = true, workspaces = true)
     }
 
-    // ---------------------------------------------------------------- the shell (143)
+    // ---------------------------------------------------------------- the shell (143, D11, D13, rule 13)
 
     /**
      * 143 (T315) — the rail's Admin entry is decided here, from the same predicates the verb
@@ -222,60 +192,74 @@ class RoleModelTest {
      * instance user administration for a super admin (workspace-independent — the instance
      * authority is the USER's, so a super admin with no active workspace keeps the entry),
      * or the active workspace's member management for a workspace admin. Nobody else has one.
+     *
+     * 2026-09-20 — three more items follow a §7.6 row: Executions (`READ_EXECUTIONS`),
+     * Promotion (`PROMOTION_READ`), Workspaces (`WORKSPACES_READ`).
      */
     @Test
-    fun `viewer, author and promoter get no Admin entry at all`() {
-        listOf(MembershipFlags.VIEWER, MembershipFlags(author = true), MembershipFlags(promoter = true)).forEach { flags ->
-            RoleModel.shell(session(flags)) shouldBe RoleModel.Shell(adminUsers = false, adminMembers = false)
-        }
+    fun `viewer, author and promoter get no Admin entry, and the rail follows their rows`() {
+        RoleModel.shell(session(WorkspaceRole.VIEWER)) shouldBe shell(executions = true)
+        RoleModel.shell(session(WorkspaceRole.AUTHOR)) shouldBe shell(executions = true, promotion = true)
+        RoleModel.shell(session(WorkspaceRole.PROMOTER)) shouldBe shell(promotion = true)
     }
 
     @Test
     fun `a workspace admin's Admin entry is the active workspace's members, never the instance`() {
-        RoleModel.shell(session(MembershipFlags(author = true, admin = true))) shouldBe
-            RoleModel.Shell(adminUsers = false, adminMembers = true)
+        RoleModel.shell(session(WorkspaceRole.WORKSPACE_ADMIN)) shouldBe
+            shell(adminMembers = true, executions = true, promotion = true, workspaces = true)
     }
 
     @Test
     fun `a super admin's Admin entry is instance users, with or without a workspace`() {
-        RoleModel.shell(session(MembershipFlags.IMPLICIT_SUPER_ADMIN, superAdmin = true)) shouldBe
-            RoleModel.Shell(adminUsers = true, adminMembers = false)
-        // No active workspace: the workspace-bound Roles are NONE, the shell entry survives.
-        RoleModel.roles(session(flags = null, superAdmin = true)) shouldBe RoleModel.NONE
-        RoleModel.shell(session(flags = null, superAdmin = true)) shouldBe
-            RoleModel.Shell(adminUsers = true, adminMembers = false)
+        RoleModel.shell(superAdminSession(explicitRole = null)) shouldBe
+            shell(adminUsers = true, executions = true, promotion = true, workspaces = true)
+        // No active workspace: the workspace-bound Roles are NONE, the shell entry survives,
+        // and the Workspaces item stays (the no-workspace page is the one screen that explains).
+        RoleModel.roles(session(role = null, superAdmin = true)) shouldBe RoleModel.NONE
+        RoleModel.shell(session(role = null, superAdmin = true)) shouldBe shell(adminUsers = true, workspaces = true)
     }
 
     @Test
     fun `a key narrows the shell entry like every other boolean`() {
         // O-2: no key holds `admin`, so a super admin's key never shows instance users.
-        RoleModel.shell(key(MembershipFlags.IMPLICIT_SUPER_ADMIN, Scope.AUTHOR, superAdmin = true)) shouldBe
-            RoleModel.Shell(adminUsers = false, adminMembers = true)
-        // A read key of a workspace admin shows neither (the member verbs floor at `author`).
-        RoleModel.shell(key(MembershipFlags(author = true, admin = true), Scope.READ)) shouldBe
-            RoleModel.Shell(adminUsers = false, adminMembers = false)
+        RoleModel.shell(superAdminKey(Scope.AUTHOR)) shouldBe
+            shell(adminMembers = true, executions = true, promotion = true, workspaces = true)
+        // A read key of a workspace admin shows neither Admin item (the member verbs floor at
+        // `author`); Executions stays (it floors at `read`), and so does the Workspaces page
+        // link — WORKSPACES_READ floors at `read`, the issuer administers the workspace.
+        RoleModel.shell(key(WorkspaceRole.WORKSPACE_ADMIN, Scope.READ)) shouldBe shell(executions = true)
     }
 
     @Test
-    fun `no principal and no workspace render no Admin entry`() {
-        RoleModel.shell(null) shouldBe RoleModel.Shell(adminUsers = false, adminMembers = false)
-        RoleModel.shell(session(flags = null)) shouldBe RoleModel.Shell(adminUsers = false, adminMembers = false)
+    fun `no principal renders no rail item - a member with no workspace keeps only the Workspaces link`() {
+        RoleModel.shell(null) shouldBe shell()
+        RoleModel.shell(session(role = null)) shouldBe shell(workspaces = true)
     }
 
     // ---------------------------------------------------------------- the model contract
 
     /**
-     * The seven attribute NAMES are a contract with every template in the app; a rename here
+     * The attribute NAMES are a contract with every template in the app; a rename here
      * is a silent un-rendering there (`th:if` on an absent variable is false, not an error).
      */
     @Test
-    fun `stamp puts exactly the seven documented attributes into the model`() {
+    fun `stamp puts exactly the nine documented attributes into the model`() {
         val model = ExtendedModelMap()
 
-        RoleModel.stamp(model, session(MembershipFlags(author = true)))
+        RoleModel.stamp(model, session(WorkspaceRole.AUTHOR))
 
         model.keys shouldBe
-            setOf("canRead", "canExecute", "canAuthor", "canPromote", "canAdminWorkspace", "isSuperAdmin", "roleLabel")
+            setOf(
+                "canRead",
+                "canExecute",
+                "canReadExecutions",
+                "canAuthor",
+                "canReadPromotion",
+                "canPromote",
+                "canAdminWorkspace",
+                "isSuperAdmin",
+                "roleLabel",
+            )
         model["canAuthor"] shouldBe true
         model["canPromote"] shouldBe false
         model["roleLabel"] shouldBe "author"
@@ -283,21 +267,25 @@ class RoleModelTest {
 
     /** The row label, for somebody ELSE's membership — the members table and the workspace list. */
     @Test
-    fun `labelOf names a membership row without consulting any user-level flag`() {
-        RoleModel.labelOf(MembershipFlags.VIEWER) shouldBe "viewer"
-        RoleModel.labelOf(MembershipFlags(author = true)) shouldBe "author"
-        RoleModel.labelOf(MembershipFlags(promoter = true)) shouldBe "promoter"
-        RoleModel.labelOf(MembershipFlags(author = true, promoter = true)) shouldBe "author · promoter"
-        RoleModel.labelOf(MembershipFlags(author = true, admin = true)) shouldBe "admin"
-        // `superAdmin` is a property of the USER, not of the row: a row says what the
-        // MEMBERSHIP carries, and instance authority is not one of its columns.
-        RoleModel.labelOf(MembershipFlags(superAdmin = true)) shouldBe "viewer"
+    fun `labelOf names a membership row by its role`() {
+        RoleModel.labelOf(WorkspaceRole.VIEWER) shouldBe "viewer"
+        RoleModel.labelOf(WorkspaceRole.AUTHOR) shouldBe "author"
+        RoleModel.labelOf(WorkspaceRole.PROMOTER) shouldBe "promoter"
+        RoleModel.labelOf(WorkspaceRole.WORKSPACE_ADMIN) shouldBe "workspace admin"
     }
 
     // ---------------------------------------------------------------- fixtures
 
+    private fun shell(
+        adminUsers: Boolean = false,
+        adminMembers: Boolean = false,
+        executions: Boolean = false,
+        promotion: Boolean = false,
+        workspaces: Boolean = false,
+    ) = RoleModel.Shell(adminUsers, adminMembers, executions, promotion, workspaces)
+
     private fun session(
-        flags: MembershipFlags?,
+        role: WorkspaceRole?,
         superAdmin: Boolean = false,
     ): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
@@ -307,14 +295,25 @@ class RoleModelTest {
             scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspaceName = "acme",
-            workspace = flags?.let { WorkspaceContext(workspaceId, "acme", it) },
+            workspace = role?.let { WorkspaceContext(workspaceId, "acme", it) },
             superAdmin = superAdmin,
         )
 
+    private fun superAdminSession(explicitRole: WorkspaceRole?): AuthenticatedPrincipal =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "root@acme.test",
+            displayName = "Root",
+            scopes = emptySet(),
+            authMethod = AuthMethod.OIDC,
+            workspaceName = "acme",
+            workspace = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole),
+            superAdmin = true,
+        )
+
     private fun key(
-        flags: MembershipFlags,
+        role: WorkspaceRole,
         scope: Scope,
-        superAdmin: Boolean = false,
     ): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
             userId = UUID.randomUUID(),
@@ -324,7 +323,19 @@ class RoleModelTest {
             authMethod = AuthMethod.API_KEY,
             keyId = "dp_key",
             workspaceName = "acme",
-            workspace = WorkspaceContext(workspaceId, "acme", flags),
-            superAdmin = superAdmin,
+            workspace = WorkspaceContext(workspaceId, "acme", role),
+        )
+
+    private fun superAdminKey(scope: Scope): AuthenticatedPrincipal =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "root@acme.test",
+            displayName = "Root",
+            scopes = setOf(scope),
+            authMethod = AuthMethod.API_KEY,
+            keyId = "dp_key",
+            workspaceName = "acme",
+            workspace = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole = null),
+            superAdmin = true,
         )
 }

@@ -18,7 +18,7 @@ import java.util.UUID
  *
  * The resolved [WorkspaceContext] now carries the caller's capability FLAGS, so these tests
  * assert what the request will be authorized with, not merely which workspace it landed in —
- * a context with the right id and the wrong flags is the failure this suite exists to catch.
+ * a context with the right id and the wrong role is the failure this suite exists to catch.
  */
 class WorkspaceServiceTest {
     private val repository = mockk<WorkspaceRepository>()
@@ -64,9 +64,9 @@ class WorkspaceServiceTest {
 
     private fun membership(
         ws: Workspace,
-        flags: MembershipFlags = MembershipFlags(author = true, admin = true),
+        role: WorkspaceRole = WorkspaceRole.WORKSPACE_ADMIN,
         active: Boolean = true,
-    ): WorkspaceMembership = WorkspaceMembership(ws.id, ws.name, flags, Instant.now(), workspaceActive = active)
+    ): WorkspaceMembership = WorkspaceMembership(ws.id, ws.name, role, Instant.now(), workspaceActive = active)
 
     private fun principal(
         superAdmin: Boolean = false,
@@ -88,8 +88,8 @@ class WorkspaceServiceTest {
     // ------------------------------------------------------------ resolveSwitch
 
     @Test
-    fun `a switch to a member workspace resolves WITH that membership's flags`() {
-        val flags = MembershipFlags(promoter = true)
+    fun `a switch to a member workspace resolves WITH that membership's role`() {
+        val flags = WorkspaceRole.PROMOTER
         val principal = principal(memberships = listOf(membership(wsA, flags)))
         every { repository.findByName("alpha") } returns wsA
 
@@ -137,7 +137,7 @@ class WorkspaceServiceTest {
         val context = service().resolveSwitch(principal, "beta")
 
         context.id shouldBe wsB.id
-        context.flags.superAdmin shouldBe true
+        context.superAdmin shouldBe true
         // The audit flag: this action is outside their own memberships.
         context.actingViaSuperAdmin shouldBe true
     }
@@ -206,7 +206,7 @@ class WorkspaceServiceTest {
         val context = service().resolveForSession(principal, null)
 
         context?.id shouldBe wsA.id
-        context?.flags?.superAdmin shouldBe true
+        context?.superAdmin shouldBe true
     }
 
     // ------------------------------------------------------------ workspaceForLogin
@@ -231,7 +231,7 @@ class WorkspaceServiceTest {
     fun `a first login with NO membership joins demo as a viewer (D-R11)`() {
         every { lastUsed.lastUsed(userId) } returns null
         principal(memberships = emptyList())
-        val demo = WorkspaceContext(UUID.randomUUID(), "demo", MembershipFlags.VIEWER)
+        val demo = WorkspaceContext(UUID.randomUUID(), "demo", WorkspaceRole.VIEWER)
         every { demoSeeder.joinDemoIfUnaffiliated(userId) } returns demo
 
         service().workspaceForLogin(user(), "alice@company.com") shouldBe demo
@@ -257,38 +257,38 @@ class WorkspaceServiceTest {
 
     @Test
     fun `a pending invitation materialises at login and stamps the INVITED workspace, never demo (113)`() {
-        val invitedFlags = MembershipFlags(author = true)
+        val invitedRole = WorkspaceRole.AUTHOR
         every {
             invitationRepository.materialiseFor("alice@company.com", userId)
         } returns
             listOf(
-                WorkspaceInvitationRepository.MaterialisedInvitation("alpha", invitedFlags, inviterId, Instant.EPOCH),
+                WorkspaceInvitationRepository.MaterialisedInvitation("alpha", invitedRole, inviterId, Instant.EPOCH),
             )
         every { lastUsed.lastUsed(userId) } returns null
         // The materialise invalidated the cache, so the resolution below re-reads the
         // memberships — which now hold the invited workspace.
-        principal(memberships = listOf(membership(wsA, flags = invitedFlags)))
+        principal(memberships = listOf(membership(wsA, role = invitedRole)))
 
         val stamped =
             service().workspaceForLogin(user(), "alice@company.com")
                 ?: error("an invited user's first login must stamp the invited workspace")
 
         stamped.id shouldBe wsA.id
-        stamped.flags shouldBe invitedFlags
-        // The materialisation was audited with the inviter and the flags (auth.md §10), and
+        stamped.role shouldBe invitedRole
+        // The materialisation was audited with the inviter and the role (auth.md §10), and
         // the demo join never fired: the invited workspace REPLACES the default (D-R11).
         verify(exactly = 0) { demoSeeder.joinDemoIfUnaffiliated(any()) }
     }
 
     @Test
-    fun `the materialise audit names the workspace, the normalized email, the flags and the INVITER`() {
+    fun `the materialise audit names the workspace, the normalized email, the role and the INVITER`() {
         every {
             invitationRepository.materialiseFor("alice@company.com", userId)
         } returns
             listOf(
                 WorkspaceInvitationRepository.MaterialisedInvitation(
                     "alpha",
-                    MembershipFlags(promoter = true),
+                    WorkspaceRole.PROMOTER,
                     inviterId,
                     Instant.EPOCH,
                 ),
@@ -308,7 +308,7 @@ class WorkspaceServiceTest {
                 match {
                     it["workspace"] == "alpha" &&
                         it["email"] == "alice@company.com" &&
-                        it["flags"] == listOf("promoter") &&
+                        it["role"] == "promoter" &&
                         it["inviter"] == inviterId.toString()
                 },
             )
@@ -324,7 +324,7 @@ class WorkspaceServiceTest {
         val refusal = shouldThrow<RoleRequiredException> { service().create(principal, "acme", "Acme") }
 
         refusal.code shouldBe AuthErrorCodes.ROLE_REQUIRED
-        refusal.details["required"] shouldBe Capability.SUPER_ADMIN.wire
+        refusal.details["required"] shouldBe Permission.SUPER_ADMIN.wire
         verify(exactly = 0) { repository.create(any(), any(), any(), any()) }
     }
 
@@ -389,7 +389,7 @@ class WorkspaceServiceTest {
         // removed or reflagged (the visibility read above is read-only).
         verify(exactly = 0) { repository.removeMember(any(), any()) }
         verify(exactly = 0) { repository.addMember(any(), any(), any()) }
-        verify(exactly = 0) { repository.setFlags(any(), any(), any()) }
+        verify(exactly = 0) { repository.setRole(any(), any(), any()) }
     }
 
     @Test
@@ -415,7 +415,7 @@ class WorkspaceServiceTest {
                     principal(memberships = listOf(membership(wsA))),
                     "alpha",
                     "intruder@elsewhere.org",
-                    MembershipFlags(author = true),
+                    WorkspaceRole.AUTHOR,
                 )
             }
 
@@ -450,11 +450,11 @@ class WorkspaceServiceTest {
         every { repository.membershipsOf(userId) } returns listOf(membership(wsA))
         every { repository.findMembersOf(wsA.id) } returns
             listOf(
-                WorkspaceMemberRow(userId, "a@x.test", "A", MembershipFlags.VIEWER, Instant.EPOCH),
+                WorkspaceMemberRow(userId, "a@x.test", "A", WorkspaceRole.VIEWER, Instant.EPOCH),
             )
         every { invitationRepository.findByWorkspace(wsA.id) } returns
             listOf(
-                WorkspaceInvitation(wsA.id, "b@x.test", MembershipFlags.VIEWER, invitedBy = userId, invitedAt = Instant.EPOCH),
+                WorkspaceInvitation(wsA.id, "b@x.test", WorkspaceRole.VIEWER, invitedBy = userId, invitedAt = Instant.EPOCH),
             )
 
         val listing = service().membersWithInvitations(principal(memberships = listOf(membership(wsA))), "alpha")

@@ -129,7 +129,7 @@ class ExecutionResultToolTest {
     @Test
     fun `another user's result is invisible`() {
         every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
-            McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
+            McpFixtures.executionRecord(executedBy = McpFixtures.OTHER_USER)
 
         shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }.code shouldBe
             PipelineErrorCodes.Result.EXECUTION_NOT_FOUND

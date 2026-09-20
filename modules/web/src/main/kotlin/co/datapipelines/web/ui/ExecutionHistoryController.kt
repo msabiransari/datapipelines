@@ -26,7 +26,7 @@ class ExecutionHistoryController(
     private val browse: ExecutionHistoryBrowseModel,
 ) {
     @GetMapping("/executions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
     @Suppress("LongParameterList") // the filter bar's fields, one parameter each (the §5 idiom)
     fun list(
         model: Model,

@@ -161,7 +161,7 @@ class DomainConfiguration {
 
     /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it
-     * is a referential precondition of the schema — `created_by` / `triggered_by` are NOT NULL
+     * is a referential precondition of the schema — `created_by` / `executed_by` are NOT NULL
      * — not a feature an operator opts into, and its absence would surface as a foreign-key
      * violation inside a promotion or a scheduled job.
      */

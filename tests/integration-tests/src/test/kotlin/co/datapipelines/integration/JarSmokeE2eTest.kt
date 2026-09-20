@@ -338,8 +338,8 @@ class JarSmokeE2eTest {
                 )
                 s.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE', 'smoke', 'Smoke')")
                 s.execute(
-                    "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) " +
-                        "VALUES ('$WORKSPACE', '$USER', TRUE, FALSE, TRUE)",
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                        "VALUES ('$WORKSPACE', '$USER', 'workspace_admin')",
                 )
                 s.execute(
                     "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, " +
@@ -368,7 +368,7 @@ class JarSmokeE2eTest {
                 )
                 s.execute(
                     "INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, " +
-                        "status, parameters_json, triggered_by, triggered_via, root_execution_id) " +
+                        "status, parameters_json, executed_by, triggered_via, root_execution_id) " +
                         "VALUES ('$SEEDED_EXECUTION', '$PIPELINE', 1, 'SUCCESS', '{}'::jsonb, " +
                         "'$USER', 'REST', '$SEEDED_EXECUTION')",
                 )
