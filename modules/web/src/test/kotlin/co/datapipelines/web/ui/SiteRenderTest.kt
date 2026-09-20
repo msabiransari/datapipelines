@@ -92,10 +92,14 @@ class SiteRenderTest {
     /**
      * 169 §E — every `<img>` on the two capture pages resolves to a PACKAGED file under
      * `static/site/img/`, with its intrinsic size declared (no layout shift), a descriptive
-     * alt, and lazy loading except the home strip's first picture (the one image allowed to
-     * eager-load, as it sits just under the fold). A missing file, a third-party URL, an
-     * undeclared size or a marketing-claim alt is a red build — the page can no longer
+     * alt, and lazy loading except the home page's first capability figure (the one image
+     * allowed to eager-load, as it sits just under the fold). A missing file, a third-party
+     * URL, an undeclared size or a marketing-claim alt is a red build — the page can no longer
      * accumulate a silent broken picture.
+     *
+     * 175: the home strip became seven capability sections, each with ONE full-width
+     * `home-*.png` at 2880x1800 (the driver's `home` set, DPR 2, dark theme); the eager lead
+     * moved to `home-connect.png`.
      */
     @Test
     fun `every screenshot on the capture pages is a packaged site image with its size declared`() {
@@ -138,7 +142,7 @@ class SiteRenderTest {
             else -> null
         }
 
-    /** The layout and labelling rules: declared size, described, lazy unless the home strip's eager lead. */
+    /** The layout and labelling rules: declared size, described, lazy unless the home page's eager lead. */
     private fun sizingOffender(
         path: String,
         src: String,
@@ -155,7 +159,7 @@ class SiteRenderTest {
         return when {
             WIDTH_HEIGHT.find(tag) == null -> "$path: $src carries no explicit width and height"
             altLength < MIN_ALT_CHARS -> "$path: $src carries no descriptive alt"
-            LAZY !in tag && !eagerLead -> "$path: $src is neither lazy nor the home strip's eager lead"
+            LAZY !in tag && !eagerLead -> "$path: $src is neither lazy nor the home page's eager lead"
             else -> null
         }
     }
@@ -269,15 +273,15 @@ class SiteRenderTest {
         val DOC_PATH = Regex("""docs/[A-Za-z0-9._/-]+\.md""")
         val HEADING = Regex("""<h3>(.*?)</h3>""", RegexOption.DOT_MATCHES_ALL)
 
-        /** 169: the two capture pages carry this many driver photographs between them. */
-        const val MIN_IMAGES = 17
+        /** 169, updated 175: the two capture pages carry this many driver photographs between them. */
+        const val MIN_IMAGES = 20
         const val MIN_ALT_CHARS = 20
 
         /** A packaged capture reference: nothing but the site's own image directory. */
         val PACKAGE_PATH = Regex("""/site/img/[a-z0-9-]+\.png""")
 
-        /** The one eager image: the home strip's lead capture, just under the fold. */
-        const val EAGER_ALLOWED = "/site/img/editor-hero.png"
+        /** The one eager image: the home page's first capability figure, just under the fold. */
+        const val EAGER_ALLOWED = "/site/img/home-connect.png"
 
         val IMG = Regex("""<img\b[^>]*>""")
         val ATTR = Regex("""\bsrc="([^"]*)"""")
