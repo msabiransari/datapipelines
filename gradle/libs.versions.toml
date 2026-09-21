@@ -155,6 +155,14 @@ mcp-sdk = "2.0.0"
 # Ubuntu 26.04 ("Playwright does not support chromium on ubuntu26.04-x64");
 # 1.62.0 lists ubuntu26.04 as a supported host.
 playwright = "1.62.0"
+# jsoup — the HTML parser the script-block XSS render test (185) reads the rendered
+# editor page with: deciding "the injected <script> element exists" is a parse-level
+# question (a script element's content is raw text, so a regex cannot tell an injected
+# element from JSON string content). 1.23.2 = Maven Central's <release> (verified
+# against maven-metadata.xml, 2026-09-21 — the search-API latestVersion field is stale
+# and suggested 1.21.1, which the gate's vuln scan then refused: GHSA-pmhh-3w7g-xqp8,
+# fixed 1.23.1). Single jar, no transitive dependencies, TEST scope only.
+jsoup = "1.23.2"
 
 [libraries]
 # --- Spring Boot starters (version from the BOM) -----------------------------
@@ -289,6 +297,7 @@ kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.
 # Architecture-as-tests (module-structure.md §7.8). TEST dependency only, in
 # modules/web (web rules) and tests/integration-tests (cross-module rules).
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 testcontainers = { module = "org.testcontainers:testcontainers" }           # testcontainers-bom 1.21.4
 testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
 # The MinIO suites' S3 client (089 §F) — see the `awssdk` version note above.

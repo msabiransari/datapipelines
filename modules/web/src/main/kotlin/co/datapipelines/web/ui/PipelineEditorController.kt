@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.PipelineResponses
+import co.datapipelines.web.ui.site.ScriptSafeJson
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
@@ -71,7 +72,10 @@ class PipelineEditorController(
         // this controller made before 056, now through the service.
         val versionDetail = draft ?: pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id)
         val fullTree = PipelineResponses.full(record, body, versionDetail, draft)
-        val pipelineJson = mapper.writeValueAsString(fullTree)
+        // Both blobs are inserted with `th:utext` into <script> blocks; the free text they
+        // carry (display name, description, node labels, template names) has no charset
+        // rule, so a `</script>` inside a value must not be able to close the block (185).
+        val pipelineJson = ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(fullTree))
 
         model.addAttribute("pipelineJson", pipelineJson)
         model.addAttribute("pipelineId", id)
@@ -84,13 +88,15 @@ class PipelineEditorController(
         model.addAttribute("releasedVersion", record.currentVersion)
         model.addAttribute(
             "lifecycleJson",
-            mapper.writeValueAsString(
-                buildMap<String, Any?> {
-                    put("hasDraft", draft != null)
-                    put("draftVersion", draft?.version)
-                    put("draftHash", draft?.bodyHash)
-                    put("releasedVersion", record.currentVersion)
-                },
+            ScriptSafeJson.forScriptBlock(
+                mapper.writeValueAsString(
+                    buildMap<String, Any?> {
+                        put("hasDraft", draft != null)
+                        put("draftVersion", draft?.version)
+                        put("draftHash", draft?.bodyHash)
+                        put("releasedVersion", record.currentVersion)
+                    },
+                ),
             ),
         )
         model.addAttribute("activeTheme", themeResolver.resolve(request))
