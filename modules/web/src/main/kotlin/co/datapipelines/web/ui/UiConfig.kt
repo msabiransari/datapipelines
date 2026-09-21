@@ -48,7 +48,7 @@ class UiConfig {
     /** 047: the templates screen's one model, shared by the page and the partial controllers. */
     @Bean
     fun templateBrowseModel(
-        templates: TemplateRepository,
+        templates: co.datapipelines.templates.TemplateService,
         usage: co.datapipelines.templates.TemplateUsageService,
         executions: co.datapipelines.executor.ExecutionRepository,
         actorNames: ActorNames,
@@ -110,10 +110,11 @@ class UiConfig {
     @Bean
     fun searchBrowseModel(
         pipelines: co.datapipelines.pipeline.PipelineService,
-        templates: TemplateRepository,
+        templates: co.datapipelines.templates.TemplateService,
         executions: co.datapipelines.executor.ExecutionRepository,
         pipelineNames: PipelineNames,
-    ): SearchBrowseModel = SearchBrowseModel(pipelines, templates, executions, pipelineNames)
+        lens: co.datapipelines.application.lens.PromoterLens,
+    ): SearchBrowseModel = SearchBrowseModel(pipelines, templates, executions, pipelineNames, lens)
 
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean

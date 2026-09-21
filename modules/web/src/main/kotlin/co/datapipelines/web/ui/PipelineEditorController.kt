@@ -46,6 +46,8 @@ class PipelineEditorController(
         request: HttpServletRequest,
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
+        // 178: no lens here by design — the editor is EXECUTE_PIPELINE (auth.md §7.6), which the
+        // interceptor refuses a promoter before this handler runs; the reads below are an author's.
         val record =
             pipelines.findRecord(workspaceId, ReadLens.Everything, id)
                 ?: throw NoSuchElementException("Pipeline $id not found")

@@ -39,7 +39,16 @@ class SearchControllerTest {
     private val templates = mockk<TemplateRepository>()
     private val executions = mockk<ExecutionRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
-    private val controller = SearchController(SearchBrowseModel(pipelines, templates, executions, pipelineNames))
+    private val controller =
+        SearchController(
+            SearchBrowseModel(
+                pipelines,
+                co.datapipelines.templates.TemplateService(templates),
+                executions,
+                pipelineNames,
+                co.datapipelines.web.EVERYTHING_LENS,
+            ),
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

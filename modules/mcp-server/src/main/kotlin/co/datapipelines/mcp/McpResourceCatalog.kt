@@ -1,9 +1,11 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionRepository
-import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.templates.TemplateService
 import io.modelcontextprotocol.spec.McpSchema
 import java.time.Clock
 import java.time.Duration
@@ -44,10 +46,12 @@ data class McpResourcePage(
  * the order is equally stable within a paging run and is the useful one for a 24-hour window.
  */
 class McpResourceCatalog(
-    private val pipelines: PipelineRepository,
-    private val templates: TemplateRepository,
+    private val pipelines: PipelineService,
+    private val templates: TemplateService,
     private val datasources: DatasourceRegistry,
     private val executions: ExecutionRepository,
+    /** 178 — the promoter lens: the catalogue lists the key's view of pipelines and templates. */
+    private val lens: PromoterLens,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     /**
@@ -62,7 +66,7 @@ class McpResourceCatalog(
         requireReadScope(ctx)
         val workspaceId = ctx.principal.requireWorkspace().id
         val start = cursor?.let { McpResourceCursor.decode(it, KINDS) } ?: McpResourceCursor.first(KINDS)
-        val scan = RequestScan(workspaceId)
+        val scan = RequestScan(workspaceId, lens.viewFor(ctx.principal))
         val page = mutableListOf<McpSchema.Resource>()
         var kindIndex = KINDS.indexOf(start.kind)
         var offset = start.offset
@@ -113,7 +117,7 @@ class McpResourceCatalog(
         when (kind) {
             McpResourceUri.DOCS -> skillDescriptors(offset, limit)
             McpResourceUri.PIPELINES -> pipelineDescriptors(offset, limit, scan)
-            McpResourceUri.TEMPLATES -> templateDescriptors(offset, limit, scan.workspaceId)
+            McpResourceUri.TEMPLATES -> templateDescriptors(offset, limit, scan)
             McpResourceUri.DATASOURCES -> datasourceDescriptors(offset, limit, scan)
             McpResourceUri.EXECUTIONS -> executionDescriptors(offset, limit, ctx)
             else -> emptyList()
@@ -177,10 +181,10 @@ class McpResourceCatalog(
     private fun templateDescriptors(
         offset: Int,
         limit: Int,
-        workspaceId: java.util.UUID,
+        scan: RequestScan,
     ): List<McpSchema.Resource> =
         templates
-            .list(workspaceId, offset = offset, limit = limit)
+            .list(scan.workspaceId, scan.view.templates, offset = offset, limit = limit)
             .map {
                 descriptor(
                     uri = McpResourceUri.template(it.id),
@@ -246,8 +250,9 @@ class McpResourceCatalog(
      */
     private inner class RequestScan(
         val workspaceId: java.util.UUID,
+        val view: LensedView,
     ) {
-        val pipelines by lazy { this@McpResourceCatalog.pipelines.findAll(workspaceId).sortedBy { it.id } }
+        val pipelines by lazy { this@McpResourceCatalog.pipelines.list(workspaceId, view.pipelines).sortedBy { it.id } }
 
         val datasources by lazy { this@McpResourceCatalog.datasources.listVisible(workspaceId = workspaceId).sortedBy { it.name } }
     }

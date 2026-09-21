@@ -43,7 +43,7 @@ class TemplatePartialControllerTest {
     private val browse = mockk<TemplateBrowseModel>(relaxed = true)
     private val validator = mockk<TemplateValidator>(relaxed = true)
     private val controller =
-        TemplatePartialController(templates, browse, validator, AuthoringGuard(true))
+        TemplatePartialController(templates, browse, validator, AuthoringGuard(true), co.datapipelines.web.EVERYTHING_LENS)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -86,7 +86,7 @@ class TemplatePartialControllerTest {
     fun `no prefix - the wrapper fragment with the trimmed query`() {
         controller.list(model, q = "  rev  ", dialect = null, type = null, prefix = null, offset = 0)
 
-        verify { browse.fillWrapper(model, workspaceId, q = "rev", dialect = null, type = null, offset = 0) }
+        verify { browse.fillWrapper(model, workspaceId, any(), q = "rev", dialect = null, type = null, offset = 0) }
     }
 
     @Test
@@ -94,23 +94,23 @@ class TemplatePartialControllerTest {
         controller.list(model, q = "rev", dialect = null, type = null, prefix = "acme/finance", offset = 0)
 
         verify {
-            browse.fillLevel(model, workspaceId, prefix = "acme/finance", dialect = null, type = null, offset = 0)
+            browse.fillLevel(model, workspaceId, any(), prefix = "acme/finance", dialect = null, type = null, offset = 0)
         }
-        verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `an empty-string prefix is the root level - still the level fragment`() {
         controller.list(model, q = null, dialect = null, type = null, prefix = "", offset = 0)
 
-        verify { browse.fillLevel(model, workspaceId, prefix = "", dialect = null, type = null, offset = 0) }
+        verify { browse.fillLevel(model, workspaceId, any(), prefix = "", dialect = null, type = null, offset = 0) }
     }
 
     @Test
     fun `a blank query is not a query`() {
         controller.list(model, q = "   ", dialect = null, type = null, prefix = null, offset = 0)
 
-        verify { browse.fillWrapper(model, workspaceId, q = null, dialect = null, type = null, offset = 0) }
+        verify { browse.fillWrapper(model, workspaceId, any(), q = null, dialect = null, type = null, offset = 0) }
     }
 
     // ------------------------------------------------------------ versions
@@ -120,22 +120,22 @@ class TemplatePartialControllerTest {
         // 106 moved the detail's every read into TemplateBrowseModel.fillDetail — one call, all
         // three regions. What this controller still owns is the workspace it asks about, so
         // that is what is asserted; the fill's own contents are TemplateBrowseModel's tests.
-        every { browse.fillDetail(model, workspaceId, "acme/rev") } returns "partials/template-detail"
+        every { browse.fillDetail(model, workspaceId, any(), "acme/rev") } returns "partials/template-detail"
 
         controller.versions(model, name = "acme/rev") shouldBe "partials/template-detail"
 
-        io.mockk.verify(exactly = 1) { browse.fillDetail(model, workspaceId, "acme/rev") }
+        io.mockk.verify(exactly = 1) { browse.fillDetail(model, workspaceId, any(), "acme/rev") }
     }
 
     @Test
     fun `the runs route passes the caller's identity, so a non-admin sees only their own runs`() {
         // The execution-history screen's visibility rule, unchanged: a second surface over the
         // same rows must not be a wider one. The principal here holds AUTHOR, not ADMIN.
-        every { browse.fillRuns(model, workspaceId, "acme/rev", userId, false) } returns "partials/template-runs"
+        every { browse.fillRuns(model, workspaceId, any(), "acme/rev", userId, false) } returns "partials/template-runs"
 
         controller.runs(model, name = "acme/rev") shouldBe "partials/template-runs"
 
-        io.mockk.verify(exactly = 1) { browse.fillRuns(model, workspaceId, "acme/rev", userId, false) }
+        io.mockk.verify(exactly = 1) { browse.fillRuns(model, workspaceId, any(), "acme/rev", userId, false) }
     }
 
     // ------------------------------------------------------------ create
@@ -263,6 +263,7 @@ class TemplatePartialControllerTest {
                 browse,
                 validator,
                 AuthoringGuard(false),
+                co.datapipelines.web.EVERYTHING_LENS,
             )
         every { templates.existsId(workspaceId, "acme/y") } returns false
 

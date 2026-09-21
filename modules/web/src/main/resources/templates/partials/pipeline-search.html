@@ -14,7 +14,10 @@
      level carries, so the search box and the pager address one id in both presentations
      (ui-screens.md §4.3). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" id="pipeline-list-wrapper">
-  <th:block th:if="${#lists.isEmpty(pipelines)}">
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(pipelines)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No pipelines match your search</p>
       <div class="ds-empty-actions">

@@ -147,7 +147,7 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 
 #### 3.4D The promoter lens event (178)
 
-A promoter sees only released, not-yet-promoted pipelines and templates ([Auth §11A.1](auth.md#11a1-the-lens-clause)); deciding that needs the higher environment's inventory, read through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`, [Configuration §3.19](configuration.md#319-deployment)). When the target cannot be read the lens FAILS CLOSED — every promoter read is empty, the screens say why — and one event says so per window.
+A promoter sees only released, not-yet-promoted pipelines and templates ([Auth §11A.1](auth.md#11a1-the-404-rule)); deciding that needs the higher environment's inventory, read through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`, [Configuration §3.19](configuration.md#319-deployment)). When the target cannot be read the lens FAILS CLOSED — every promoter read is empty, the screens say why — and one event says so per window.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|

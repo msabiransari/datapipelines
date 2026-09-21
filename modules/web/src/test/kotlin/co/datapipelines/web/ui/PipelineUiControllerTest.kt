@@ -34,7 +34,7 @@ class PipelineUiControllerTest {
     private val repository = mockk<PipelineRepository>()
     private val themeResolver = mockk<ThemeResolver>()
     private val browse = co.datapipelines.web.pipelineBrowseModelOver(repository)
-    private val controller = PipelineUiController(browse, themeResolver)
+    private val controller = PipelineUiController(browse, themeResolver, co.datapipelines.web.EVERYTHING_LENS)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

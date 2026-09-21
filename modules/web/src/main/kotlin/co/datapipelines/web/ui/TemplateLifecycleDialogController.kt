@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -308,7 +309,8 @@ class TemplateLifecycleDialogController(
         toastTitle: String,
         toastMessage: String,
     ): String {
-        browse.fillDetail(model, workspaceId, name)
+        // An author's re-render (the verbs are author/admin rows); the view is theirs — Everything.
+        browse.fillDetail(model, workspaceId, LensedView.EVERYTHING, name)
         model.addAttribute("lifecycleToastTitle", toastTitle)
         model.addAttribute("lifecycleToastMessage", toastMessage)
         val draft = templates.findDraftDetail(workspaceId, name)

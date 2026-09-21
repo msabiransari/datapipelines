@@ -38,13 +38,14 @@ class TemplateUiControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
     private val pipelines = mockk<PipelineRepository>()
     private val browse = co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, pipelines))
-    private val controller = TemplateUiController(browse, themeResolver)
+    private val controller = TemplateUiController(browse, themeResolver, co.datapipelines.web.EVERYTHING_LENS)
     private val partialController =
         TemplatePartialController(
             repository,
             browse,
             mockk<TemplateValidator>(),
             mockk<AuthoringGuard>(),
+            co.datapipelines.web.EVERYTHING_LENS,
         )
 
     private val userId = UUID.randomUUID()

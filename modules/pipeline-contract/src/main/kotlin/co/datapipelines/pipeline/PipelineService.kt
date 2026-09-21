@@ -360,6 +360,16 @@ open class PipelineService(
         return PipelineFolderLevel.of(pipelines.findAll(workspaceId).through(lens) { it.name }, normalized, offset, limit)
     }
 
+    /**
+     * How many live pipelines the caller can see — the rail badge and the dashboard tile
+     * (178: a lensed principal's count comes from the same admitted set every list shows, so
+     * "3 pipelines" never sits beside an empty list). `Everything` is the repository's COUNT.
+     */
+    open fun count(
+        workspaceId: UUID,
+        lens: ReadLens,
+    ): Int = if (lens.isEverything) pipelines.countAll(workspaceId) else list(workspaceId, lens).size
+
     /** The DRAFT detail of each of [pipelineIds] that has one — the list screens' badge (§7). */
     open fun findDrafts(
         workspaceId: UUID,

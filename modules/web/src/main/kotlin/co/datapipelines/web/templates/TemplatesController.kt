@@ -1,5 +1,6 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.CreateLifecycle
@@ -14,6 +15,7 @@ import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
@@ -76,6 +78,9 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/templates")
 class TemplatesController(
     private val templates: TemplateRepository,
+    /** 178 — the read façade the four GETs go through; the writes below stay on the repository (an author's). */
+    private val reads: TemplateService,
+    private val lens: PromoterLens,
     private val validator: TemplateValidator,
     private val templateEngines: WorkspaceTemplateEngines,
     private val importService: TemplateImportService,
@@ -116,11 +121,13 @@ class TemplatesController(
     fun get(
         @RequestParam name: String,
     ): ApiResponse<JsonNode> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val draft = templates.findDraftDetail(workspaceId, name)
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).templates
+        val draft = reads.findDraftDetail(workspaceId, view, name)
         val template =
-            draft?.let { templates.findVersion(workspaceId, name, it.version) }
-                ?: templates.findLatest(workspaceId, name)
+            draft?.let { reads.findVersion(workspaceId, view, name, it.version) }
+                ?: reads.findLatest(workspaceId, view, name)
                 ?: throw ApiErrors.templateNotFound(name)
         return ApiResponse.of(withDraftPointer(template, draft))
     }
@@ -132,11 +139,14 @@ class TemplatesController(
         @RequestParam name: String,
         @RequestParam version: Int,
     ): ApiResponse<Template> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).templates
         return ApiResponse.of(
-            templates.findVersion(workspaceId, name, version)
-                ?: throw if (templates.existsId(
+            reads.findVersion(workspaceId, view, name, version)
+                ?: throw if (reads.existsId(
                         workspaceId,
+                        view,
                         name,
                     )
                 ) {
@@ -161,13 +171,23 @@ class TemplatesController(
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<PagedData<Template>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val filter = dialect?.let { parseDialect(it) }
         val typeFilter = type?.let { parseType(it) }
         val raw =
-            templates.list(workspaceId, dialect = filter, type = typeFilter, q = q, offset = page, limit = size + 1)
+            reads.list(
+                workspaceId,
+                lens.viewFor(principal).templates,
+                dialect = filter,
+                type = typeFilter,
+                q = q,
+                offset = page,
+                limit =
+                    size + 1,
+            )
         val items = raw.take(size)
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
     }
@@ -194,7 +214,9 @@ class TemplatesController(
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<Map<String, Any?>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).templates
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         // Blank-is-root, exactly as the MCP tool's `string("prefix")` normalizes it: present
@@ -205,14 +227,14 @@ class TemplatesController(
         }
         val filter = dialect?.let { parseDialect(it) }
         val typeFilter = type?.let { parseType(it) }
-        val folders = templates.listChildFolders(workspaceId, normalized, filter, typeFilter, limit = TemplateRepository.MAX_PAGE_LIMIT)
-        val probe = templates.listChildTemplates(workspaceId, normalized, filter, typeFilter, offset = page, limit = size + 1)
+        val folders = reads.listChildFolders(workspaceId, view, normalized, filter, typeFilter, limit = TemplateRepository.MAX_PAGE_LIMIT)
+        val probe = reads.listChildTemplates(workspaceId, view, normalized, filter, typeFilter, offset = page, limit = size + 1)
         return ApiResponse.of(
             levelPayload(
                 normalized.orEmpty(),
                 folders,
                 probe.take(size),
-                total = templates.countChildTemplates(workspaceId, normalized, filter, typeFilter),
+                total = reads.countChildTemplates(workspaceId, view, normalized, filter, typeFilter),
                 hasMore = probe.size > size,
             ),
         )

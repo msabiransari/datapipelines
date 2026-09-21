@@ -1,9 +1,12 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.typesystem.Dialect
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -53,7 +56,9 @@ private const val TYPE_FILTER_DESC = "Filter by template kind: 'sql' (pipeline-r
  * disagree with what expanding the folder shows.
  */
 class TemplatesListTool(
-    private val templates: TemplateRepository,
+    private val templates: TemplateService,
+    /** 178 — the promoter lens; resolved from the KEY's principal, never a thread-local (134). */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -91,13 +96,15 @@ class TemplatesListTool(
         // `has` and not `string`: `prefix: ""` is PRESENT and means the root, while
         // `string("prefix")` normalizes blank to null. The distinction is the whole browse
         // contract — absent is "flat list", empty is "the tree's top level".
-        if (args.has("prefix")) return level(workspaceId, args.string("prefix"), dialect, type, isLibrary, limit)
+        val view = lens.viewFor(ctx.principal).templates
+        if (args.has("prefix")) return level(workspaceId, view, args.string("prefix"), dialect, type, isLibrary, limit)
         // `is_library` has no repository-level filter (templates.md §9 does not expose one), so it
         // is applied here. It narrows a page rather than paging past it — same visible-set rule the
         // REST listing has, and the alternative would be an unbounded scan.
         return templates
             .list(
                 workspaceId,
+                view,
                 dialect = dialect,
                 type = type,
                 q = args.string("q"),
@@ -117,6 +124,7 @@ class TemplatesListTool(
     @Suppress("LongParameterList") // one filter per schema property; a parameter object would just re-list them
     private fun level(
         workspaceId: java.util.UUID,
+        view: ReadLens,
         prefix: String?,
         dialect: Dialect?,
         type: TemplateType?,
@@ -132,13 +140,13 @@ class TemplatesListTool(
                 "has_more" to false,
             )
         }
-        val folders = templates.listChildFolders(workspaceId, prefix, dialect, type, limit = TemplateRepository.MAX_PAGE_LIMIT)
-        val probe = templates.listChildTemplates(workspaceId, prefix, dialect, type, offset = 0, limit = limit + 1)
+        val folders = templates.listChildFolders(workspaceId, view, prefix, dialect, type, limit = TemplateRepository.MAX_PAGE_LIMIT)
+        val probe = templates.listChildTemplates(workspaceId, view, prefix, dialect, type, offset = 0, limit = limit + 1)
         return mapOf(
             "prefix" to prefix.orEmpty(),
             "folders" to folders.map { mapOf("path" to it.path, "segment" to it.segment, "template_count" to it.templateCount) },
             "templates" to probe.take(limit).filter { isLibrary == null || it.isLibrary == isLibrary }.map { it.toMetadata() },
-            "total" to templates.countChildTemplates(workspaceId, prefix, dialect, type),
+            "total" to templates.countChildTemplates(workspaceId, view, prefix, dialect, type),
             "has_more" to (probe.size > limit),
         )
     }
@@ -167,7 +175,9 @@ class TemplatesListTool(
  * its `version` and `status`; an explicit `version` argument still wins.
  */
 class TemplatesGetTool(
-    private val templates: TemplateRepository,
+    private val templates: TemplateService,
+    /** 178 — the promoter lens: a hidden id resolves as not-found, exactly as an absent one. */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -197,15 +207,16 @@ class TemplatesGetTool(
         val id = args.requiredString("id")
         // The explicit argument wins BEFORE the working-version lookup (B3); the default
         // is the DRAFT when one exists, else the latest released (§7's template mirror).
-        val version = args.version() ?: templates.findDraftDetail(workspaceId, id)?.version
+        val view = lens.viewFor(ctx.principal).templates
+        val version = args.version() ?: templates.findDraftDetail(workspaceId, view, id)?.version
         return when (version) {
             null -> {
-                templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
+                templates.findLatest(workspaceId, view, id) ?: throw McpNotFound.template(id)
             }
 
             else -> {
-                templates.findVersion(workspaceId, id, version)
-                    ?: if (templates.existsId(workspaceId, id)) {
+                templates.findVersion(workspaceId, view, id, version)
+                    ?: if (templates.existsId(workspaceId, view, id)) {
                         throw McpNotFound.templateVersion(id, version)
                     } else {
                         throw McpNotFound.template(id)

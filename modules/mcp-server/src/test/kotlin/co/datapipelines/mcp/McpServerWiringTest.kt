@@ -53,8 +53,8 @@ class McpServerWiringTest {
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
         val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
         return listOf(
-            PipelinesListTool(service, pipelines),
-            PipelinesGetTool(service, usage),
+            PipelinesListTool(service, McpFixtures.EVERYTHING_LENS),
+            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS),
             PipelineExecuteTool(service, executor, executions, resultStore, resultUrls),
             PipelinesExecuteNodeTool(
                 co.datapipelines.templates.NodeSqlResolver(pipelines, templates, engines),
@@ -63,9 +63,9 @@ class McpServerWiringTest {
             ),
             PipelinesCreateTool(service, pipelines),
             PipelinesUpdateTool(service),
-            TemplatesListTool(templates),
-            TemplatesGetTool(templates),
-            TemplatesUsedByTool(usage),
+            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
+            TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
+            TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS),
             TemplatesCreateTool(templates, authoringGuard, templateValidator),
             TemplatesUpdateTool(templates, co.datapipelines.templates.TemplateDraftService(templates, authoringGuard), templateValidator),
             TemplatesRenderTool(templates, engines),
@@ -129,8 +129,22 @@ class McpServerWiringTest {
                 transport,
                 McpToolDispatcher(tools(), auditLogger),
                 McpPromptCatalog(),
-                McpResourceCatalog(pipelines, templates, datasources, executions),
-                McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events, auditLogger),
+                McpResourceCatalog(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
+                McpResourceReader(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    events,
+                    auditLogger,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
                 version = "1.0.0",
             )
 
@@ -229,10 +243,25 @@ class McpServerWiringTest {
         response.error().code() shouldBe McpArguments.INVALID_PARAMS
     }
 
-    private fun catalog() = McpResourceCatalog(pipelines, templates, datasources, executions)
+    private fun catalog() =
+        McpResourceCatalog(
+            McpFixtures.pipelineService(pipelines),
+            McpFixtures.templateService(templates),
+            datasources,
+            executions,
+            McpFixtures.EVERYTHING_LENS,
+        )
 
     private fun reader() =
-        McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events, auditLogger)
+        McpResourceReader(
+            McpFixtures.pipelineService(pipelines),
+            McpFixtures.templateService(templates),
+            datasources,
+            executions,
+            events,
+            auditLogger,
+            McpFixtures.EVERYTHING_LENS,
+        )
 
     private fun context(): McpTransportContext =
         McpTransportContext.create(

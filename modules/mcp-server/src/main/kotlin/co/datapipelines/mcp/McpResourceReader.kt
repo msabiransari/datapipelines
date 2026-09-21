@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
@@ -7,7 +8,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
 import org.slf4j.LoggerFactory
@@ -43,11 +44,13 @@ import java.util.UUID
  */
 class McpResourceReader(
     private val pipelines: PipelineService,
-    private val templates: TemplateRepository,
+    private val templates: TemplateService,
     private val datasources: DatasourceRegistry,
     private val executions: ExecutionRepository,
     private val events: ExecutionEventRepository,
     private val auditSink: AuditEventSink,
+    /** 178 — the promoter lens: a hidden pipeline or template resource is RESOURCE_NOT_FOUND, exactly as an absent one. */
+    private val lens: PromoterLens,
 ) {
     private val log = LoggerFactory.getLogger(McpResourceReader::class.java)
 
@@ -77,27 +80,28 @@ class McpResourceReader(
     ): McpSchema.ReadResourceResult {
         requireReadScope(ctx)
         val workspaceId = ctx.principal.requireWorkspace().id
+        val view = lens.viewFor(ctx.principal)
         val parsed = McpResourceUri.parse(uri) ?: throw notFound(uri)
         val contents =
             when (parsed) {
                 is McpResourceUri.PipelineLatest -> {
-                    json(uri, pipelineBody(workspaceId, parsed.id, null))
+                    json(uri, pipelineBody(workspaceId, view.pipelines, parsed.id, null))
                 }
 
                 is McpResourceUri.PipelineVersion -> {
-                    json(uri, pipelineBody(workspaceId, parsed.id, parsed.version))
+                    json(uri, pipelineBody(workspaceId, view.pipelines, parsed.id, parsed.version))
                 }
 
                 is McpResourceUri.PipelineParameters -> {
-                    json(uri, parameters(workspaceId, parsed.id))
+                    json(uri, parameters(workspaceId, view.pipelines, parsed.id))
                 }
 
                 is McpResourceUri.TemplateLatest -> {
-                    template(workspaceId, uri, parsed.id, null)
+                    template(workspaceId, view.templates, uri, parsed.id, null)
                 }
 
                 is McpResourceUri.TemplateVersion -> {
-                    template(workspaceId, uri, parsed.id, parsed.version)
+                    template(workspaceId, view.templates, uri, parsed.id, parsed.version)
                 }
 
                 is McpResourceUri.DatasourceList -> {
@@ -140,28 +144,31 @@ class McpResourceReader(
     @Suppress("ThrowsCount")
     private fun pipelineBody(
         workspaceId: UUID,
+        view: ReadLens,
         id: UUID,
         version: Int?,
     ): String {
-        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw notFound(McpResourceUri.pipeline(id))
+        val record = pipelines.findRecord(workspaceId, view, id) ?: throw notFound(McpResourceUri.pipeline(id))
         // D55: with no version in the URI this serves the WORKING version — the draft when one
         // exists, else the latest release — the same default `pipelines_execute` runs, so an
         // agent reading the body and then running it sees one pipeline, not two.
         val resolved = version ?: pipelines.workingVersion(workspaceId, record) ?: throw notFound(McpResourceUri.pipeline(id))
-        return pipelines.findVersionBody(workspaceId, ReadLens.Everything, id, resolved) ?: throw notFound(McpResourceUri.pipeline(id))
+        return pipelines.findVersionBody(workspaceId, view, id, resolved) ?: throw notFound(McpResourceUri.pipeline(id))
     }
 
     /** `…/parameters` — the pipeline's parameter declarations only (§7.1). */
     private fun parameters(
         workspaceId: UUID,
+        view: ReadLens,
         id: UUID,
     ): String {
-        val body = ExecutorJson.mapper.readTree(pipelineBody(workspaceId, id, null))
+        val body = ExecutorJson.mapper.readTree(pipelineBody(workspaceId, view, id, null))
         return ExecutorJson.write(body.path("parameters"))
     }
 
     private fun template(
         workspaceId: UUID,
+        view: ReadLens,
         uri: String,
         id: String,
         version: Int?,
@@ -171,9 +178,9 @@ class McpResourceReader(
                 // D55/§7.1: the WORKING version — `findLatest` is null for a template nobody has
                 // released yet, and the resource would have answered not-found for one an agent
                 // had just created.
-                templates.findWorking(workspaceId, id)?.body
+                templates.findWorking(workspaceId, view, id)?.body
             } else {
-                templates.lookupVersion(workspaceId, id, version)?.body
+                templates.lookupVersion(workspaceId, view, id, version)?.body
             } ?: throw notFound(uri)
         return McpSchema.TextResourceContents(uri, McpResourceCatalog.MIME_FREEMARKER_SQL, body, null)
     }

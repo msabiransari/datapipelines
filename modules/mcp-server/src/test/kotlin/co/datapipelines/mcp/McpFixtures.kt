@@ -92,6 +92,18 @@ object McpFixtures {
         McpToolContext(principal(*scopes, userId = userId, keyId = keyId, workspace = workspace), CORRELATION_ID, idempotencyKey)
 
     /**
+     * 178 — the promoter lens every read tool takes, as the view every non-promoter gets:
+     * `Everything`, at no cost. A test of the LENS builds its own.
+     */
+    val EVERYTHING_LENS: co.datapipelines.application.lens.PromoterLens =
+        co.datapipelines.application.lens
+            .PromoterLens { co.datapipelines.application.lens.LensedView.EVERYTHING }
+
+    /** 178 — the real read façade over a (usually mocked) repository: under `Everything` it delegates call for call. */
+    fun templateService(templates: co.datapipelines.templates.TemplateRepository): co.datapipelines.templates.TemplateService =
+        co.datapipelines.templates.TemplateService(templates)
+
+    /**
      * A REAL [PipelineService] over the suite's own mocked collaborators (056).
      *
      * The pipeline tools take the service rather than the repository now, but a suite's existing

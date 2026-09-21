@@ -84,6 +84,7 @@ class PipelinesControllerTest {
             audit = audit,
             checkRunner = io.mockk.mockk(relaxed = true),
             checkRuns = io.mockk.mockk(relaxed = true),
+            lens = co.datapipelines.web.EVERYTHING_LENS,
         )
 
     private val userId = UUID.randomUUID()
@@ -507,6 +508,7 @@ class PipelinesControllerTest {
                 audit = audit,
                 checkRunner = io.mockk.mockk(relaxed = true),
                 checkRuns = io.mockk.mockk(relaxed = true),
+                lens = co.datapipelines.web.EVERYTHING_LENS,
             )
 
         val body =

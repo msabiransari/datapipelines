@@ -1,9 +1,9 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -47,7 +47,8 @@ internal const val PREFIX_ARG_DESC: String =
  */
 class PipelinesListTool(
     private val pipelines: PipelineService,
-    private val repository: PipelineRepository,
+    /** 178 — the promoter lens; resolved from the KEY's principal, never a thread-local (134). */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -83,14 +84,15 @@ class PipelinesListTool(
     ): Any {
         val limit = args.int("limit", default = DEFAULT_LIMIT, min = 1, max = MAX_LIMIT)
         val workspaceId = ctx.principal.requireWorkspace().id
+        val view = lens.viewFor(ctx.principal).pipelines
         // `has` and not `string`: `prefix: ""` is PRESENT and means the root, while
         // `string("prefix")` normalizes blank to null. The distinction is the whole browse
         // contract — absent is "flat list", empty is "the tree's top level".
-        if (args.has("prefix")) return level(workspaceId, args.string("prefix"), limit)
+        if (args.has("prefix")) return level(workspaceId, view, args.string("prefix"), limit)
         return pipelines
             .list(
                 workspaceId = workspaceId,
-                lens = ReadLens.Everything,
+                lens = view,
                 ownerId = args.uuid("owner"),
                 datasourceName = args.string("datasource"),
                 query = args.string("q"),
@@ -111,11 +113,13 @@ class PipelinesListTool(
      */
     private fun level(
         workspaceId: java.util.UUID,
+        view: ReadLens,
         prefix: String?,
         limit: Int,
     ): Map<String, Any?> {
         if (prefix != null && !PipelineNameGrammar.matchesPrefix(prefix)) return emptyLevel(prefix)
-        val level = repository.listFolder(workspaceId, prefix, offset = 0, limit = limit)
+        // Through the service since 178 (the lens); `Everything` is the same SQL level.
+        val level = pipelines.browseLevel(workspaceId, view, prefix, offset = 0, limit = limit)
         return mapOf(
             "prefix" to prefix.orEmpty(),
             "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
@@ -198,6 +202,8 @@ class PipelinesListTool(
 class PipelinesGetTool(
     private val pipelines: PipelineService,
     private val usage: co.datapipelines.templates.TemplateUsageService,
+    /** 178 — the promoter lens: a hidden id resolves as not-found, exactly as an absent one. */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -229,7 +235,8 @@ class PipelinesGetTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("id")
-        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw McpNotFound.pipeline(id)
+        val view = lens.viewFor(ctx.principal).pipelines
+        val record = pipelines.findRecord(workspaceId, view, id) ?: throw McpNotFound.pipeline(id)
         // The explicit argument is validated and wins BEFORE any working-version lookup
         // (B3) — then the working version (§7): the draft if one exists, else
         // current_version. Derived, never stored — current_version keeps meaning
@@ -259,6 +266,7 @@ class PipelinesGetTool(
         tree.put("status", detail.status.name)
         tree.put("body_hash", detail.bodyHash)
         val draftPointer = tree.putObject("draft")
+        // A derived read: `record` was resolved through the caller's view three lines up.
         val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, id)
         if (draft != null) {
             draftPointer

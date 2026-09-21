@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -68,6 +69,8 @@ class PipelinesController(
     private val audit: AuditEventSink,
     private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
     private val checkRuns: co.datapipelines.application.checks.PipelineCheckRunRepository,
+    /** 178 — the promoter lens: every read below passes the caller's view, never `Everything`. */
+    private val lens: PromoterLens,
 ) {
     /**
      * §5.1 — create; the server assigns id, version 1 (**DRAFT**, D55), owner and timestamps.
@@ -99,8 +102,10 @@ class PipelinesController(
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<JsonNode> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val loaded = pipelines.findWorking(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val loaded =
+            pipelines.findWorking(workspaceId, lens.viewFor(principal).pipelines, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(PipelineResponses.full(loaded.record, loaded.bodyJson, loaded.version, loaded.draft))
     }
 
@@ -151,8 +156,10 @@ class PipelinesController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ): ApiResponse<JsonNode> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val record =
+            pipelines.findRecord(workspaceId, lens.viewFor(principal).pipelines, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val executable = pipelines.findExecutable(workspaceId, record, version) ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(
             PipelineResponses.checksLatest(version, executable.pipeline.checks, checkRuns.latestPerCheck(id, version)),
@@ -166,8 +173,10 @@ class PipelinesController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ): ApiResponse<JsonNode> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val record =
+            pipelines.findRecord(workspaceId, lens.viewFor(principal).pipelines, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val loaded =
             pipelines.findVersion(workspaceId, record, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
@@ -180,9 +189,11 @@ class PipelinesController(
     fun versions(
         @PathVariable id: UUID,
     ): ApiResponse<List<Map<String, Any?>>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        return ApiResponse.of(pipelines.listVersions(workspaceId, ReadLens.Everything, id).map(PipelineResponses::versionSummary))
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).pipelines
+        pipelines.findRecord(workspaceId, view, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        return ApiResponse.of(pipelines.listVersions(workspaceId, view, id).map(PipelineResponses::versionSummary))
     }
 
     /**
@@ -417,7 +428,8 @@ class PipelinesController(
             throw ApiErrors.pipelineNotFound(id.toString())
         }
         val target = body["version"].asInt()
-        val before = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val before =
+            pipelines.findRecord(workspaceId, lens.viewFor(principal).pipelines, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val record = pipelines.switchCurrent(workspaceId, id, target)
         LifecycleVerbs.audit(
             audit,
@@ -440,6 +452,8 @@ class PipelinesController(
         record: PipelineRecord,
     ): String =
         record.currentVersion
+            // The write just resolved the record through the caller's view; the pointer's body
+            // is a derived read of that same record (an author's, by the matrix).
             ?.let { pipelines.findVersionBody(workspaceId, ReadLens.Everything, id, it) }
             ?: "{}"
 
@@ -460,8 +474,16 @@ class PipelinesController(
     ): ApiResponse<PagedData<Map<String, Any?>>> {
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val filtered = pipelines.list(workspaceId, ReadLens.Everything, ownerId = owner, datasourceName = datasource, query = q)
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val filtered =
+            pipelines.list(
+                workspaceId,
+                lens.viewFor(principal).pipelines,
+                ownerId = owner,
+                datasourceName = datasource,
+                query = q,
+            )
         val shown = filtered.drop(page).take(size)
         // One batched draft lookup for the page, so each row can state its working version (D55).
         val drafts = pipelines.findDrafts(workspaceId, shown.map { it.id })
@@ -487,11 +509,12 @@ class PipelinesController(
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<Map<String, Any?>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val level =
             pipelines.browseLevel(
                 workspaceId,
-                ReadLens.Everything,
+                lens.viewFor(principal).pipelines,
                 prefix,
                 Pagination.clampOffset(offset),
                 Pagination.clampLimit(limit),

@@ -43,10 +43,33 @@ class McpProtocolIntegrationTest {
     init {
         McpServerFactory.server(
             transport = transport,
-            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(service, usage), PipelinesListTool(service, pipelines)), auditLogger),
+            dispatcher =
+                McpToolDispatcher(
+                    listOf(
+                        PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS),
+                        PipelinesListTool(service, McpFixtures.EVERYTHING_LENS),
+                    ),
+                    auditLogger,
+                ),
             prompts = McpPromptCatalog(),
-            catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
-            reader = McpResourceReader(service, templates, datasources, executions, events, auditLogger),
+            catalog =
+                McpResourceCatalog(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
+            reader =
+                McpResourceReader(
+                    service,
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    events,
+                    auditLogger,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
             version = "1.0.0",
         )
     }

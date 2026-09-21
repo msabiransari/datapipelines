@@ -1,12 +1,13 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
-import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.api.currentPrincipal
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -19,8 +20,10 @@ import java.time.ZoneOffset
 @RequestMapping("/partials")
 class DashboardPartialController(
     private val executions: ExecutionRepository,
-    private val pipelines: PipelineRepository,
+    private val pipelines: PipelineService,
     private val pipelineNames: PipelineNames,
+    /** 178 — the promoter lens: the pipelines tile counts the caller's view. */
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/dashboard-stats")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -29,7 +32,7 @@ class DashboardPartialController(
         val workspaceId = principal.requireWorkspace().id
         val isAdmin = principal.isWorkspaceAdmin
 
-        val totalPipelines = pipelines.countAll(workspaceId)
+        val totalPipelines = pipelines.count(workspaceId, lens.viewFor(principal).pipelines)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
         // D11 (2026-09-20): the execution figures follow the READ_EXECUTIONS row — own runs

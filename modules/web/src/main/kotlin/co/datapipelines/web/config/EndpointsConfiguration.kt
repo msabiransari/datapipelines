@@ -119,6 +119,8 @@ class EndpointsConfiguration {
         registry: EndpointRegistry,
         audit: AuditEventSink,
         properties: EndpointsProperties,
+        // 178 — the promoter lens on the endpoint reads (visible iff the pipeline is).
+        lens: co.datapipelines.application.lens.PromoterLens,
     ): EndpointPublishService =
         EndpointPublishService(
             endpoints = endpoints,
@@ -127,6 +129,7 @@ class EndpointsConfiguration {
             readOnlyRule = readOnlyRule,
             registry = registry,
             audit = audit,
+            lens = lens,
             timeouts =
                 EndpointPublishService.TimeoutBounds(
                     defaultSeconds = properties.timeoutDefaultSeconds,

@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.mcp.McpCallAudit
 import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.application.semantics.SemanticsService
@@ -22,6 +23,7 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.modelcontextprotocol.server.McpStatelessSyncServer
@@ -128,6 +130,11 @@ class McpServerAutoConfiguration {
         // contract and persists the same pipeline_check_runs rows. A plain parameter, the
         // 068/074 pattern.
         checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
+        // 178 — the promoter lens (declared by `web`'s PromotionConfiguration as the `application`
+        // port) and the template read façade (declared by `templates`), so the read tools
+        // narrow exactly as REST and the UI do. Plain parameters, the 068/074 pattern.
+        lens: PromoterLens,
+        templateService: TemplateService,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -148,8 +155,8 @@ class McpServerAutoConfiguration {
         val templateDrafts = co.datapipelines.templates.TemplateDraftService(templates, authoring)
         val (tableLearning, renderFreshness) = entryPointChecks(jdbc, templates, introspector, datasources)
         return listOf(
-            PipelinesListTool(pipelineService, pipelines),
-            PipelinesGetTool(pipelineService, usage),
+            PipelinesListTool(pipelineService, lens),
+            PipelinesGetTool(pipelineService, usage, lens),
             PipelineExecuteTool(
                 pipelines = pipelineService,
                 executor = executor,
@@ -165,9 +172,9 @@ class McpServerAutoConfiguration {
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner, renderFreshness),
             PipelinesCreateTool(pipelineService, pipelines, tableLearning),
             PipelinesUpdateTool(pipelineService, tableLearning),
-            TemplatesListTool(templates),
-            TemplatesGetTool(templates),
-            TemplatesUsedByTool(usage),
+            TemplatesListTool(templateService, lens),
+            TemplatesGetTool(templateService, lens),
+            TemplatesUsedByTool(usage, lens),
             TemplatesCreateTool(templates, authoring, templateValidator),
             TemplatesUpdateTool(templates, templateDrafts, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
@@ -232,11 +239,13 @@ class McpServerAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     fun mcpResourceCatalog(
-        pipelines: PipelineRepository,
-        templates: TemplateRepository,
+        pipelines: PipelineService,
+        templates: TemplateService,
         datasources: DatasourceRegistry,
         executions: ExecutionRepository,
-    ): McpResourceCatalog = McpResourceCatalog(pipelines, templates, datasources, executions)
+        // 178 — the promoter lens on the catalogue.
+        lens: PromoterLens,
+    ): McpResourceCatalog = McpResourceCatalog(pipelines, templates, datasources, executions, lens)
 
     @Bean
     @ConditionalOnMissingBean
@@ -244,13 +253,15 @@ class McpServerAutoConfiguration {
         // The SERVICE, not the repository: the pipeline resource serves the working version
         // (D56) and that resolution lives in PipelineService.
         pipelines: PipelineService,
-        templates: TemplateRepository,
+        templates: TemplateService,
         datasources: DatasourceRegistry,
         executions: ExecutionRepository,
         events: ExecutionEventRepository,
         // 120 — the reader's `mcp.resource.read` rows share the dispatcher's sink.
         auditSink: co.datapipelines.auth.AuditEventSink,
-    ): McpResourceReader = McpResourceReader(pipelines, templates, datasources, executions, events, auditSink)
+        // 178 — the promoter lens on the pipeline and template resources.
+        lens: PromoterLens,
+    ): McpResourceReader = McpResourceReader(pipelines, templates, datasources, executions, events, auditSink, lens)
 
     @Bean
     @ConditionalOnMissingBean

@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
@@ -406,7 +407,8 @@ class PipelineLifecycleDialogController(
         toastTitle: String,
         toastMessage: String,
     ): String {
-        browse.fillDetail(model, workspaceId, id)
+        // An author's re-render (the verbs are author/admin rows); the view is theirs — Everything.
+        browse.fillDetail(model, workspaceId, LensedView.EVERYTHING, id)
         model.addAttribute("lifecycleToastTitle", toastTitle)
         model.addAttribute("lifecycleToastMessage", toastMessage)
         // The payload's facts: the working version the tree badge shows (§4.3's rule), the

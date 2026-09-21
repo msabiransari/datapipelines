@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
@@ -52,6 +54,8 @@ class TemplatePartialController(
     private val browse: TemplateBrowseModel,
     private val validator: TemplateValidator,
     private val authoring: AuthoringGuard,
+    /** 178 — the promoter lens: every fragment here renders the caller's view. */
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/partials/templates")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -63,7 +67,9 @@ class TemplatePartialController(
         @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) offset: Int?,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal)
         val dialectFilter = TemplateFilters.dialect(dialect)
         val typeFilter = TemplateFilters.type(type)
         TemplateFilters.fill(model, dialect, type)
@@ -71,11 +77,12 @@ class TemplatePartialController(
         model.addAttribute("scopes", scopes())
         RoleModel.stamp(model)
         return if (prefix != null) {
-            browse.fillLevel(model, workspaceId, prefix, dialectFilter, typeFilter, offset ?: 0)
+            browse.fillLevel(model, workspaceId, view, prefix, dialectFilter, typeFilter, offset ?: 0)
         } else {
             browse.fillWrapper(
                 model,
                 workspaceId,
+                view,
                 q = q?.trim()?.takeIf { it.isNotEmpty() },
                 dialect = dialectFilter,
                 type = typeFilter,
@@ -108,7 +115,8 @@ class TemplatePartialController(
         @RequestParam name: String,
     ): String {
         RoleModel.stamp(model)
-        return browse.fillDetail(model, currentPrincipal().requireWorkspace().id, name)
+        val principal = currentPrincipal()
+        return browse.fillDetail(model, principal.requireWorkspace().id, lens.viewFor(principal), name)
     }
 
     /**
@@ -128,6 +136,7 @@ class TemplatePartialController(
         return browse.fillRuns(
             model,
             principal.requireWorkspace().id,
+            lens.viewFor(principal),
             name,
             principal.userId,
             principal.isWorkspaceAdmin,
@@ -189,7 +198,8 @@ class TemplatePartialController(
             model.addAttribute("q", "")
             model.addAttribute("scopes", scopes())
             RoleModel.stamp(model)
-            browse.fillWrapper(model, workspaceId, q = null, dialect = null, type = null, offset = 0)
+            // An author's re-render after a create (MUTATE row): the view is theirs — Everything.
+            browse.fillWrapper(model, workspaceId, LensedView.EVERYTHING, q = null, dialect = null, type = null, offset = 0)
             model.addAttribute("createdName", trimmedName)
             model.addAttribute("oob", true)
             "partials/template-created"

@@ -66,7 +66,7 @@ class PipelineChecksPartialsControllerTest {
             )
         mvc =
             MockMvcBuilders
-                .standaloneSetup(PipelineChecksPartialsController(pipelines, checkRunner, checkRuns))
+                .standaloneSetup(PipelineChecksPartialsController(pipelines, checkRunner, checkRuns, co.datapipelines.web.EVERYTHING_LENS))
                 .setControllerAdvice(UiExceptionHandler())
                 .build()
     }

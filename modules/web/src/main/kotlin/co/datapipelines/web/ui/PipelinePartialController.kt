@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
@@ -38,6 +39,8 @@ import java.util.UUID
 @Controller
 class PipelinePartialController(
     private val browse: PipelineBrowseModel,
+    /** 178 — the promoter lens: every fragment here renders the caller's view. */
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/partials/pipelines")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -47,13 +50,15 @@ class PipelinePartialController(
         @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) offset: Int?,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal)
         model.addAttribute("q", q ?: "")
         model.addAttribute("scopes", scopes())
         return if (prefix != null) {
-            browse.fillLevel(model, workspaceId, prefix, offset ?: 0)
+            browse.fillLevel(model, workspaceId, view, prefix, offset ?: 0)
         } else {
-            browse.fillWrapper(model, workspaceId, q?.trim()?.takeIf { it.isNotEmpty() }, offset ?: 0)
+            browse.fillWrapper(model, workspaceId, view, q?.trim()?.takeIf { it.isNotEmpty() }, offset ?: 0)
         }
     }
 
@@ -82,7 +87,8 @@ class PipelinePartialController(
         @RequestParam id: UUID,
     ): String {
         RoleModel.stamp(model)
-        return browse.fillDetail(model, currentPrincipal().requireWorkspace().id, id)
+        val principal = currentPrincipal()
+        return browse.fillDetail(model, principal.requireWorkspace().id, lens.viewFor(principal), id)
     }
 
     /**
@@ -103,6 +109,7 @@ class PipelinePartialController(
         return browse.fillRuns(
             model,
             principal.requireWorkspace().id,
+            lens.viewFor(principal),
             id,
             principal.userId,
             principal.isWorkspaceAdmin,
@@ -123,7 +130,10 @@ class PipelinePartialController(
     fun usage(
         model: Model,
         @PathVariable id: UUID,
-    ): String = browse.fillUsage(model, currentPrincipal().requireWorkspace().id, id)
+    ): String {
+        val principal = currentPrincipal()
+        return browse.fillUsage(model, principal.requireWorkspace().id, lens.viewFor(principal), id)
+    }
 
     private fun scopes(): Set<String> {
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

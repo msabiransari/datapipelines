@@ -66,6 +66,19 @@ open class TemplateService(
         version: Int,
     ): Template? = if (lens.admits(id)) templates.findVersion(workspaceId, id, version) else null
 
+    /**
+     * The engine's version record for an admitted template — [TemplateRepository.lookupVersion]'s
+     * "deleted or not, a pinned version still resolves" read, gated by the lens only. The MCP
+     * template resource reads a version through this so a retired template's pinned version
+     * keeps serving exactly as before 178.
+     */
+    open fun lookupVersion(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: String,
+        version: Int,
+    ): TemplateVersion? = if (lens.admits(id)) templates.lookupVersion(workspaceId, id, version) else null
+
     /** True when any version of [id] exists AND the lens admits it — the not-found split's first half. */
     open fun existsId(
         workspaceId: UUID,

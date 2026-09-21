@@ -44,7 +44,7 @@ class PipelineReadToolsTest {
     fun `list returns metadata only, never the body`() {
         every { pipelines.findAll(any(), null) } returns listOf(revenue)
 
-        val payload = PipelinesListTool(service, pipelines).call(McpArguments(emptyMap()), ctx)
+        val payload = PipelinesListTool(service, McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), ctx)
         val first = (payload as List<*>).first() as Map<*, *>
 
         assertAll(
@@ -60,7 +60,7 @@ class PipelineReadToolsTest {
     fun `q searches name, display name and description case-insensitively`() {
         every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
-        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("q" to "CHURN")), ctx) as List<*>
+        val hits = PipelinesListTool(service, McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("q" to "CHURN")), ctx) as List<*>
 
         hits.map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("customer_churn")
     }
@@ -70,7 +70,10 @@ class PipelineReadToolsTest {
         every { pipelines.findAll(any(), McpFixtures.OTHER_USER) } returns emptyList()
 
         val hits =
-            PipelinesListTool(service, pipelines).call(McpArguments(mapOf("owner" to McpFixtures.OTHER_USER.toString())), ctx) as List<*>
+            PipelinesListTool(
+                service,
+                McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("owner" to McpFixtures.OTHER_USER.toString())), ctx) as List<*>
 
         hits.size shouldBe 0
     }
@@ -79,7 +82,11 @@ class PipelineReadToolsTest {
     fun `the datasource filter is pushed down to SQL`() {
         every { pipelines.findAllByDatasource(any(), "mysql-prod", null) } returns listOf(churn)
 
-        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("datasource" to "mysql-prod")), ctx) as List<*>
+        val hits =
+            PipelinesListTool(
+                service,
+                McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("datasource" to "mysql-prod")), ctx) as List<*>
 
         hits.map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("customer_churn")
     }
@@ -88,7 +95,7 @@ class PipelineReadToolsTest {
     fun `limit caps the page`() {
         every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
-        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("limit" to 1)), ctx) as List<*>
+        val hits = PipelinesListTool(service, McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("limit" to 1)), ctx) as List<*>
 
         hits.size shouldBe 1
     }
@@ -106,7 +113,7 @@ class PipelineReadToolsTest {
                 hasMore = false,
             )
 
-        val payload = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("prefix" to "")), ctx) as Map<*, *>
+        val payload = PipelinesListTool(service, McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("prefix" to "")), ctx) as Map<*, *>
 
         assertAll(
             { payload["prefix"] shouldBe "" },
@@ -126,14 +133,18 @@ class PipelineReadToolsTest {
         every { pipelines.listFolder(McpFixtures.WORKSPACE_ID, "nyc/mobility", 0, 50) } returns
             PipelineFolderLevel(emptyList(), false, listOf(revenue), 1, false)
 
-        PipelinesListTool(service, pipelines).call(McpArguments(mapOf("prefix" to "nyc/mobility")), ctx)
+        PipelinesListTool(service, McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("prefix" to "nyc/mobility")), ctx)
 
         verify(exactly = 1) { pipelines.listFolder(McpFixtures.WORKSPACE_ID, "nyc/mobility", 0, 50) }
     }
 
     @Test
     fun `a prefix that is not a legal name answers an empty level and never reaches the database`() {
-        val payload = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("prefix" to "nyc/../etc")), ctx) as Map<*, *>
+        val payload =
+            PipelinesListTool(
+                service,
+                McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("prefix" to "nyc/../etc")), ctx) as Map<*, *>
 
         assertAll(
             { payload["prefix"] shouldBe "nyc/../etc" },
@@ -150,7 +161,7 @@ class PipelineReadToolsTest {
         // break every existing caller that searches.
         every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
-        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("q" to "revenue")), ctx) as List<*>
+        val hits = PipelinesListTool(service, McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("q" to "revenue")), ctx) as List<*>
 
         hits.map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("monthly_revenue")
     }
@@ -170,7 +181,13 @@ class PipelineReadToolsTest {
                 createdBy = McpFixtures.USER,
             )
 
-        val body = PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val body =
+            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to McpFixtures.PIPELINE_ID.toString()),
+                ),
+                ctx,
+            )
 
         McpTools.readTree(body.toString())["name"].asText() shouldBe "monthly_revenue"
         // 040 D5: an empty upgrade signal is OMITTED, not an empty array — the envelope's
@@ -199,7 +216,13 @@ class PipelineReadToolsTest {
                 createdBy = McpFixtures.USER,
             )
 
-        val body = PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val body =
+            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to McpFixtures.PIPELINE_ID.toString()),
+                ),
+                ctx,
+            )
         val parameters = McpTools.readTree(body.toString())["parameters"]
 
         val quarter = parameters["run_fiscal_quarter"]
@@ -245,7 +268,13 @@ class PipelineReadToolsTest {
                 upgrade("join_revenue", "join_revenue.sql", 1, 4),
             )
 
-        val body = PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val body =
+            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to McpFixtures.PIPELINE_ID.toString()),
+                ),
+                ctx,
+            )
         val signal = McpTools.readTree(body.toString())["upgrade_available"]
 
         signal.isArray shouldBe true
@@ -284,7 +313,13 @@ class PipelineReadToolsTest {
                 createdBy = McpFixtures.USER,
             )
 
-        val body = PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val body =
+            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to McpFixtures.PIPELINE_ID.toString()),
+                ),
+                ctx,
+            )
         val tree = McpTools.readTree(body.toString())
 
         // §7.1: the default is the working version — an agent must read the draft, never
@@ -311,7 +346,7 @@ class PipelineReadToolsTest {
             )
 
         val body =
-            PipelinesGetTool(service, usage).call(
+            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
                 McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to 2)),
                 ctx,
             )
@@ -325,7 +360,12 @@ class PipelineReadToolsTest {
 
         val error =
             shouldThrow<DatapipelinesException> {
-                PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+                PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
+                    McpArguments(
+                        mapOf("id" to McpFixtures.PIPELINE_ID.toString()),
+                    ),
+                    ctx,
+                )
             }
         error.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
     }
@@ -337,7 +377,7 @@ class PipelineReadToolsTest {
 
         val error =
             shouldThrow<DatapipelinesException> {
-                PipelinesGetTool(service, usage).call(
+                PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
                     McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to 9)),
                     ctx,
                 )
@@ -352,7 +392,7 @@ class PipelineReadToolsTest {
         assertAll(
             {
                 shouldThrow<McpError> {
-                    PipelinesGetTool(service, usage).call(
+                    PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
                         McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to 0)),
                         ctx,
                     )
@@ -360,7 +400,7 @@ class PipelineReadToolsTest {
             },
             {
                 shouldThrow<McpError> {
-                    PipelinesGetTool(service, usage).call(
+                    PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
                         McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to -3)),
                         ctx,
                     )
@@ -372,13 +412,22 @@ class PipelineReadToolsTest {
 
     @Test
     fun `a missing id is a protocol error, not a tool error`() {
-        val error = shouldThrow<McpError> { PipelinesGetTool(service, usage).call(McpArguments(emptyMap()), ctx) }
+        val error =
+            shouldThrow<McpError> { PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), ctx) }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
     @Test
     fun `a non-uuid id is a protocol error`() {
-        val error = shouldThrow<McpError> { PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to "not-a-uuid")), ctx) }
+        val error =
+            shouldThrow<McpError> {
+                PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS).call(
+                    McpArguments(
+                        mapOf("id" to "not-a-uuid"),
+                    ),
+                    ctx,
+                )
+            }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 

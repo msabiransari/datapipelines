@@ -1,9 +1,11 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.NodeSqlResolution
 import co.datapipelines.templates.NodeSqlResolver
 import co.datapipelines.templates.TemplateRepository
@@ -46,6 +48,9 @@ class PipelineNodeSqlPartialController(
     pipelines: PipelineRepository,
     templateEngines: WorkspaceTemplateEngines,
     templates: TemplateRepository,
+    /** 178 — the promoter lens gate: a hidden pipeline answers exactly as an absent one. */
+    private val pipelineService: PipelineService,
+    private val lens: PromoterLens,
 ) {
     private val resolver = NodeSqlResolver(pipelines, templates, templateEngines)
 
@@ -62,7 +67,12 @@ class PipelineNodeSqlPartialController(
         @RequestParam(required = false) parameters: String?,
         model: Model,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        // The resolver reads the repository; the lens is applied here, before it, with the
+        // same absence the resolver itself raises for an unknown pipeline.
+        pipelineService.findRecord(workspaceId, lens.viewFor(principal).pipelines, id)
+            ?: throw NoSuchElementException("Pipeline $id not found")
 
         // The E5 version default (draft-if-exists) applies here exactly as it does for the
         // node-run tool, so the two surfaces cannot disagree about which body the panel and

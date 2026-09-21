@@ -34,7 +34,15 @@ class McpResourceCatalogTest {
     private val clock: Clock = Clock.fixed(now, ZoneOffset.UTC)
     private val ctx = McpFixtures.ctx(Scope.READ)
 
-    private val catalog = McpResourceCatalog(pipelines, templates, datasources, executions, clock)
+    private val catalog =
+        McpResourceCatalog(
+            McpFixtures.pipelineService(pipelines),
+            McpFixtures.templateService(templates),
+            datasources,
+            executions,
+            McpFixtures.EVERYTHING_LENS,
+            clock,
+        )
 
     /**
      * The constant rows every listing now opens with (095): the skill and one row per

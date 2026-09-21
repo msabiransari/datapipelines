@@ -61,5 +61,7 @@ fun realShippedTools(): List<McpTool> {
         semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
         factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
         checkRunner = mockk<co.datapipelines.application.checks.PipelineCheckRunner>(),
+        lens = McpFixtures.EVERYTHING_LENS,
+        templateService = McpFixtures.templateService(mockk<TemplateRepository>()),
     )
 }

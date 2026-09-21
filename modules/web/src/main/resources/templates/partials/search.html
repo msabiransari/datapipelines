@@ -22,7 +22,12 @@
      refuses to pretend an empty box matched nothing. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results">
   <th:block th:if="${asked}">
-    <p class="app-search-empty" role="status" th:if="${empty}">
+    <p class="app-search-empty" role="status" th:if="${empty and lensUnavailable != null}">
+      Could not read the promotion target <code th:text="${lensUnavailable.target}">target</code>
+      (<code th:text="${lensUnavailable.reason}">reason</code>); your role sees only released items newer than
+      its, so nothing can be shown until it can be read.
+    </p>
+    <p class="app-search-empty" role="status" th:if="${empty and lensUnavailable == null}">
       No pipelines, templates or executions match “<span th:text="${q}">q</span>”.
     </p>
 

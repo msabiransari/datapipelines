@@ -41,8 +41,18 @@ class TemplateToolsTest {
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.template(), McpFixtures.template(id = "test/dates.ftl", isLibrary = true))
 
-        val all = TemplatesListTool(templates).call(McpArguments(emptyMap()), readCtx) as List<*>
-        val libraries = TemplatesListTool(templates).call(McpArguments(mapOf("is_library" to true)), readCtx) as List<*>
+        val all =
+            TemplatesListTool(
+                McpFixtures.templateService(templates),
+                McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(emptyMap()), readCtx) as List<*>
+        val libraries =
+            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("is_library" to true),
+                ),
+                readCtx,
+            ) as List<*>
 
         assertAll(
             {
@@ -59,7 +69,15 @@ class TemplateToolsTest {
         val q = slot<String>()
         every { templates.list(any(), capture(dialect), any(), capture(q), any(), any()) } returns emptyList()
 
-        TemplatesListTool(templates).call(McpArguments(mapOf("dialect" to "MYSQL", "q" to "revenue")), readCtx)
+        TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+            McpArguments(
+                mapOf(
+                    "dialect" to "MYSQL",
+                    "q" to "revenue",
+                ),
+            ),
+            readCtx,
+        )
 
         assertAll(
             { dialect.captured shouldBe Dialect.MYSQL },
@@ -78,7 +96,13 @@ class TemplateToolsTest {
             listOf(McpFixtures.template())
         every { templates.countChildTemplates(McpFixtures.WORKSPACE_ID, null, null, null) } returns 1
 
-        val payload = TemplatesListTool(templates).call(McpArguments(mapOf("prefix" to "")), readCtx) as Map<*, *>
+        val payload =
+            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("prefix" to ""),
+                ),
+                readCtx,
+            ) as Map<*, *>
 
         assertAll(
             { payload["prefix"] shouldBe "" },
@@ -98,14 +122,28 @@ class TemplateToolsTest {
         every { templates.listChildTemplates(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null, 0, 51) } returns emptyList()
         every { templates.countChildTemplates(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null) } returns 0
 
-        TemplatesListTool(templates).call(McpArguments(mapOf("prefix" to "nyc", "dialect" to "MYSQL")), readCtx)
+        TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+            McpArguments(
+                mapOf(
+                    "prefix" to "nyc",
+                    "dialect" to "MYSQL",
+                ),
+            ),
+            readCtx,
+        )
 
         verify(exactly = 1) { templates.listChildFolders(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null, 200) }
     }
 
     @Test
     fun `a prefix that is not a legal template name answers an empty level and never reaches the database`() {
-        val payload = TemplatesListTool(templates).call(McpArguments(mapOf("prefix" to "nyc/../etc")), readCtx) as Map<*, *>
+        val payload =
+            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("prefix" to "nyc/../etc"),
+                ),
+                readCtx,
+            ) as Map<*, *>
 
         (payload["templates"] as List<*>).size shouldBe 0
         verify(exactly = 0) { templates.listChildFolders(any(), any(), any(), any(), any()) }
@@ -114,7 +152,12 @@ class TemplateToolsTest {
     @Test
     fun `an unsupported dialect is a protocol error`() {
         shouldThrow<McpError> {
-            TemplatesListTool(templates).call(McpArguments(mapOf("dialect" to "SNOWFLAKE")), readCtx)
+            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("dialect" to "SNOWFLAKE"),
+                ),
+                readCtx,
+            )
         }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
@@ -139,8 +182,20 @@ class TemplateToolsTest {
         every { templates.findLatest(any(), "with_imports.sql") } returns
             McpFixtures.template(id = "with_imports.sql").copy(imports = listOf(TemplateImport("test/dates.ftl", 2, "dates")))
 
-        val template = TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "test/revenue.sql")), readCtx) as Template
-        val imported = TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "with_imports.sql")), readCtx) as Template
+        val template =
+            TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to "test/revenue.sql"),
+                ),
+                readCtx,
+            ) as Template
+        val imported =
+            TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to "with_imports.sql"),
+                ),
+                readCtx,
+            ) as Template
 
         assertAll(
             { template.body shouldBe "SELECT 1" },
@@ -173,7 +228,13 @@ class TemplateToolsTest {
                     bodyHash = "hash-v2",
                 )
 
-        val template = TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "test/revenue.sql")), readCtx) as Template
+        val template =
+            TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                McpArguments(
+                    mapOf("id" to "test/revenue.sql"),
+                ),
+                readCtx,
+            ) as Template
 
         template.version shouldBe 2
         template.body shouldBe "SELECT 2"
@@ -191,12 +252,22 @@ class TemplateToolsTest {
         assertAll(
             {
                 shouldThrow<DatapipelinesException> {
-                    TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "nope")), readCtx)
+                    TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                        McpArguments(
+                            mapOf("id" to "nope"),
+                        ),
+                        readCtx,
+                    )
                 }.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "test/revenue.sql", "version" to 9)), readCtx)
+                    TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                        McpArguments(
+                            mapOf("id" to "test/revenue.sql", "version" to 9),
+                        ),
+                        readCtx,
+                    )
                 }.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
             },
         )
@@ -297,7 +368,12 @@ class TemplateToolsTest {
         assertAll(
             {
                 shouldThrow<McpError> {
-                    TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "test/revenue.sql", "version" to 0)), readCtx)
+                    TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS).call(
+                        McpArguments(
+                            mapOf("id" to "test/revenue.sql", "version" to 0),
+                        ),
+                        readCtx,
+                    )
                 }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
             },
             {
@@ -319,7 +395,10 @@ class TemplateToolsTest {
         val limit = slot<Int>()
         every { templates.list(any(), any(), any(), any(), any(), capture(limit)) } returns emptyList()
 
-        TemplatesListTool(templates).call(McpArguments(mapOf("limit" to 10_000)), readCtx)
+        TemplatesListTool(
+            McpFixtures.templateService(templates),
+            McpFixtures.EVERYTHING_LENS,
+        ).call(McpArguments(mapOf("limit" to 10_000)), readCtx)
 
         limit.captured shouldBe TemplateRepository.MAX_PAGE_LIMIT
     }

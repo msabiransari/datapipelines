@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -24,6 +25,8 @@ import org.springframework.web.bind.annotation.RequestParam
 class PipelineUiController(
     private val browse: PipelineBrowseModel,
     private val themeResolver: ThemeResolver,
+    /** 178 — the promoter lens: the page renders the caller's view. */
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/pipelines")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -38,9 +41,11 @@ class PipelineUiController(
         model.addAttribute("scopes", scopes())
         RoleModel.stamp(model)
         model.addAttribute("q", q ?: "")
+        val principal = currentPrincipal()
         browse.fillWrapper(
             model,
-            currentPrincipal().requireWorkspace().id,
+            principal.requireWorkspace().id,
+            lens.viewFor(principal),
             q?.trim()?.takeIf { it.isNotEmpty() },
             maxOf(0, offset ?: 0),
         )

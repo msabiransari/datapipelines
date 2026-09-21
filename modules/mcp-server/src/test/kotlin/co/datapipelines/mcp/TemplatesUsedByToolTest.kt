@@ -22,7 +22,7 @@ import java.util.UUID
 class TemplatesUsedByToolTest {
     private val usage = mockk<TemplateUsageService>()
     private val ctx = McpFixtures.ctx(Scope.READ)
-    private val tool = TemplatesUsedByTool(usage)
+    private val tool = TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS)
 
     private val pipelineId = UUID.fromString("11111111-1111-1111-1111-111111111111")
 
