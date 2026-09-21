@@ -7,6 +7,7 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.LifecycleVerbs
@@ -77,7 +78,7 @@ class PipelineLifecycleDialogController(
         // The hash the DIALOG read (§4.2: you release what you tested); a draft that changed
         // in between is a stale hash and the service answers pipeline.version.conflict.
         val draft =
-            pipelines.findDraft(workspaceId, id)
+            pipelines.findDraft(workspaceId, ReadLens.Everything, id)
                 ?: throw DatapipelinesException(
                     code = PipelineErrorCodes.Versioning.NOT_DRAFT,
                     message = "This pipeline has no draft to release.",
@@ -320,7 +321,7 @@ class PipelineLifecycleDialogController(
         // The typed confirm names the PIPELINE (its name, which the dialog showed); the name
         // is read fresh — a rename between dialog and POST refuses rather than guesses.
         val record =
-            pipelines.findRecord(workspaceId, id)
+            pipelines.findRecord(workspaceId, ReadLens.Everything, id)
                 ?: throw DatapipelinesException(
                     code = PipelineErrorCodes.Validation.PIPELINE_NOT_FOUND,
                     message = "No pipeline with id '$id' in this workspace.",
@@ -410,8 +411,8 @@ class PipelineLifecycleDialogController(
         model.addAttribute("lifecycleToastMessage", toastMessage)
         // The payload's facts: the working version the tree badge shows (§4.3's rule), the
         // draft flag, and the leaf id the badge hangs on.
-        val record = pipelines.findRecord(workspaceId, id)
-        val draft = pipelines.findDraft(workspaceId, id)
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id)
+        val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, id)
         val working = (draft?.version ?: record?.currentVersion)?.toString() ?: "null"
         response.setHeader(
             "HX-Trigger",

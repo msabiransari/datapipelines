@@ -156,7 +156,7 @@ class EndpointPublishServiceTest {
                 createdAt = Instant.EPOCH,
                 updatedAt = Instant.EPOCH,
             )
-        every { pipelines.findCurrentVersion(WORKSPACE, PIPELINE_ID) } returns null
+        every { pipelines.findCurrentVersion(WORKSPACE, any(), PIPELINE_ID) } returns null
 
         val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
 
@@ -277,7 +277,7 @@ class EndpointPublishServiceTest {
                 updatedAt = Instant.EPOCH,
             )
         every { pipelineRepository.findByName(WORKSPACE, PIPELINE_NAME) } returns record
-        every { pipelines.findCurrentVersion(WORKSPACE, PIPELINE_ID) } returns
+        every { pipelines.findCurrentVersion(WORKSPACE, any(), PIPELINE_ID) } returns
             PipelineVersionDetail(
                 pipelineId = PIPELINE_ID,
                 version = 1,

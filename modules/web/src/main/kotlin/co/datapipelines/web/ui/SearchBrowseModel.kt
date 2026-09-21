@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.ui.Model
@@ -86,7 +87,7 @@ class SearchBrowseModel(
 
         val workspaceId = workspace.id
 
-        val pipelineProbe = pipelines.list(workspaceId, query = q)
+        val pipelineProbe = pipelines.list(workspaceId, ReadLens.Everything, query = q)
         model.addAttribute("pipelineHits", pipelineProbe.take(GROUP_LIMIT))
         model.addAttribute("pipelinesMore", pipelineProbe.size > GROUP_LIMIT)
 
@@ -103,9 +104,9 @@ class SearchBrowseModel(
         // name / display name / description): a pasted pipeline UUID has no name to contain
         // it. One extra in-memory scan over THIS workspace's rows, deduplicated with the
         // service's own matches — no second copy of the name matching, no third query shape.
-        val byIdPrefix = pipelines.list(workspaceId).filter { it.matchesIdPrefix(needle) }
+        val byIdPrefix = pipelines.list(workspaceId, ReadLens.Everything).filter { it.matchesIdPrefix(needle) }
         val candidates =
-            (pipelines.list(workspaceId, query = q) + byIdPrefix)
+            (pipelines.list(workspaceId, ReadLens.Everything, query = q) + byIdPrefix)
                 .distinctBy { it.id }
                 .sortedBy(PipelineRecord::name)
         val rows =

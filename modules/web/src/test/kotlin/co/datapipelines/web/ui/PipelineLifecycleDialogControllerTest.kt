@@ -99,7 +99,7 @@ class PipelineLifecycleDialogControllerTest {
         happyPathReads(record(currentVersion = 3))
         // The draft exists FOR the release and is GONE after it — the payload's hasDraft
         // reads the post-state, and a mock that keeps answering "draft" would lie about it.
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
             PipelineReleaseService.Released(
                 record = record(currentVersion = 3),
@@ -146,7 +146,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - the re-rendered detail carries the role attributes its verbs are guarded on`() {
         happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
             PipelineReleaseService.Released(
                 record = record(currentVersion = 3),
@@ -171,7 +171,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - the HX-Trigger payload carries the POST's own working-version facts`() {
         happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
             PipelineReleaseService.Released(record(currentVersion = 3), draftDetail().copy(status = PipelineVersionStatus.RELEASED), "{}")
 
@@ -191,7 +191,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - the editor surface answers HX-Redirect, the reload the editor needs`() {
         happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
             PipelineReleaseService.Released(record(currentVersion = 3), draftDetail().copy(status = PipelineVersionStatus.RELEASED), "{}")
 
@@ -207,7 +207,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - 142 - the consent checkbox posts the flag, the toast lists the templates, the audit is templates first`() {
         happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         // Answers only for releasePinnedTemplates = true: a controller that dropped the flag
         // would hit an unstubbed call, not a silently-passing default.
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
@@ -240,7 +240,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - 142 - the editor surface names the cascade in its flash code`() {
         happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns draftDetail() andThen null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
             PipelineReleaseService.Released(
                 record(currentVersion = 3),
@@ -328,7 +328,7 @@ class PipelineLifecycleDialogControllerTest {
 
     @Test
     fun `purge entity - the offer flag rides the form, the confirm names the pipeline`() {
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns record(currentVersion = null)
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record(currentVersion = null)
         every { pipelines.purgeEntity(WORKSPACE, PIPELINE, includeExclusiveDraftTemplates = true) } returns
             PipelineService.EntityPurgeResult(1, listOf("test/only_here.sql"), true)
 
@@ -346,7 +346,7 @@ class PipelineLifecycleDialogControllerTest {
 
     @Test
     fun `purge entity - a confirm that names anything else never reaches the service`() {
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns record(currentVersion = null)
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record(currentVersion = null)
         mvc
             .perform(
                 post("/partials/pipelines/$PIPELINE/lifecycle/purge-entity")
@@ -394,12 +394,12 @@ class PipelineLifecycleDialogControllerTest {
     /** The reads `applied` performs through the browse model and its own re-reads. */
     private fun happyPathReads(record: PipelineRecord) {
         every { repository.findById(WORKSPACE, PIPELINE) } returns record
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns record
-        every { pipelines.findWorking(WORKSPACE, PIPELINE) } returns null
-        every { pipelines.listVersions(WORKSPACE, PIPELINE) } returns emptyList()
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record
+        every { pipelines.findWorking(WORKSPACE, any(), PIPELINE) } returns null
+        every { pipelines.listVersions(WORKSPACE, any(), PIPELINE) } returns emptyList()
         every { repository.listVersions(WORKSPACE, PIPELINE) } returns emptyList()
         every { repository.findDraftDetail(WORKSPACE, PIPELINE) } returns null
-        every { pipelines.findDraft(WORKSPACE, PIPELINE) } returns null
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns null
     }
 
     private fun record(currentVersion: Int?) =

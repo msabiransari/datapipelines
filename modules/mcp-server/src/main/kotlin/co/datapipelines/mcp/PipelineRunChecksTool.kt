@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.CheckExpectation
 import co.datapipelines.pipeline.CheckRunOutcome
 import co.datapipelines.pipeline.CheckRunVia
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -84,7 +85,7 @@ class PipelineRunChecksTool(
         val id = args.requiredUuid("id")
         // The pipelines_execute resolution (B1/D55): never clamped, and the default is the
         // WORKING version — the draft when one exists, else the latest release.
-        val record = pipelines.findRecord(workspace.id, id) ?: throw McpNotFound.pipeline(id)
+        val record = pipelines.findRecord(workspace.id, ReadLens.Everything, id) ?: throw McpNotFound.pipeline(id)
         val version =
             args.version()
                 ?: pipelines.workingVersion(workspace.id, record)

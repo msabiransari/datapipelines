@@ -14,6 +14,7 @@ import co.datapipelines.pipeline.CheckRunVia
 import co.datapipelines.pipeline.PipelineCheck
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.currentPrincipal
@@ -106,7 +107,7 @@ class PipelineChecksPartialsController(
         id: UUID,
         version: Int,
     ): List<PipelineCheck> {
-        val record = pipelines.findRecord(workspaceId, id) ?: throw notFound(id)
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw notFound(id)
         val executable = pipelines.findExecutable(workspaceId, record, version) ?: throw notFound(id)
         return executable.pipeline.checks
     }

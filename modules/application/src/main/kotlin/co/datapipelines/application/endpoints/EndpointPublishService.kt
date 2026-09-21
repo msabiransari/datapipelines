@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
 import java.util.UUID
@@ -214,7 +215,7 @@ class EndpointPublishService(
         workspaceId: UUID,
         record: PipelineRecord,
     ): PipelineService.ExecutablePipeline? {
-        val detail = pipelines.findCurrentVersion(workspaceId, record.id) ?: return null
+        val detail = pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id) ?: return null
         if (detail.status != PipelineVersionStatus.RELEASED) return null
         return pipelines.findExecutable(workspaceId, record, detail.version)
     }

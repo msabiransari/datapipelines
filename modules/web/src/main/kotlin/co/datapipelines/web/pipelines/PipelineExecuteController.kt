@@ -5,6 +5,7 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.CorrelationId
@@ -62,7 +63,7 @@ class PipelineExecuteController(
     ): SseEmitter {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val record = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
 
         val tree = parseBody(body)
         // The whole request is read and validated BEFORE anything is looked up: a malformed

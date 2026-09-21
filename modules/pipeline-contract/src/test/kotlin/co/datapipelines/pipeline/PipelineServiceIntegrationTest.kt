@@ -144,7 +144,7 @@ class PipelineServiceIntegrationTest {
         released.version.version shouldBe 1
         released.version.status shouldBe PipelineVersionStatus.RELEASED
         released.record.currentVersion shouldBe 1
-        service.findDraft(WORKSPACE_ID, created.record.id).shouldBeNull()
+        service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
         withClue("and the released body is the one that was drafted") {
             released.bodyJson shouldContain "test/monthly_revenue"
         }
@@ -153,13 +153,13 @@ class PipelineServiceIntegrationTest {
     @Test
     fun `workingVersion is the draft when one exists, else the release, and null when there is neither`() {
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
-        val fresh = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
+        val fresh = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("a fresh create: the draft v1 is the only thing there is to run") {
             service.workingVersion(WORKSPACE_ID, fresh) shouldBe 1
         }
 
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
-        val releasedOnly = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
+        val releasedOnly = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("released, no draft: the release") { service.workingVersion(WORKSPACE_ID, releasedOnly) shouldBe 1 }
 
         val draft =
@@ -167,11 +167,11 @@ class PipelineServiceIntegrationTest {
                 WORKSPACE_ID,
                 created.record.id,
                 body(renamed("Edited")),
-                checkNotNull(service.findCurrentVersion(WORKSPACE_ID, created.record.id)).bodyHash,
+                checkNotNull(service.findCurrentVersion(WORKSPACE_ID, ReadLens.Everything, created.record.id)).bodyHash,
                 owner,
                 WriteSurface.SESSION,
             )
-        val withDraft = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
+        val withDraft = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("release v1 + draft v2: the DRAFT wins — 'the last version' is what the pipeline IS") {
             service.workingVersion(WORKSPACE_ID, withDraft) shouldBe 2
             withDraft.currentVersion shouldBe 1
@@ -179,7 +179,11 @@ class PipelineServiceIntegrationTest {
 
         service.purge(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
         withClue("purging the draft falls back to the release") {
-            service.workingVersion(WORKSPACE_ID, checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))) shouldBe 1
+            service.workingVersion(
+                WORKSPACE_ID,
+                checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id)),
+            ) shouldBe
+                1
         }
     }
 
@@ -191,7 +195,7 @@ class PipelineServiceIntegrationTest {
 
         service.purge(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash)
 
-        service.findRecord(WORKSPACE_ID, created.record.id).shouldBeNull()
+        service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
         withClue("the entity row went with its only draft — D57's entity purge") {
             countRows("pipelines") shouldBe 0
         }
@@ -253,7 +257,7 @@ class PipelineServiceIntegrationTest {
                     WORKSPACE_ID,
                     record.id,
                     body(renamed("Edited on a receiver")),
-                    checkNotNull(receiver.findCurrentVersion(WORKSPACE_ID, record.id)).bodyHash,
+                    checkNotNull(receiver.findCurrentVersion(WORKSPACE_ID, ReadLens.Everything, record.id)).bodyHash,
                     owner,
                     WriteSurface.SESSION,
                 )
@@ -308,7 +312,7 @@ class PipelineServiceIntegrationTest {
             noop.version?.status shouldBe PipelineVersionStatus.RELEASED
             noop.draft.shouldBeNull()
         }
-        service.findDraft(WORKSPACE_ID, created.record.id).shouldBeNull()
+        service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
     }
 
     @Test
@@ -341,7 +345,7 @@ class PipelineServiceIntegrationTest {
 
         released.version.status shouldBe PipelineVersionStatus.RELEASED
         released.record.currentVersion shouldBe 2
-        service.findDraft(WORKSPACE_ID, created.record.id).shouldBeNull()
+        service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
     }
 
     @Test
@@ -367,7 +371,7 @@ class PipelineServiceIntegrationTest {
 
         error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
         withClue("nothing was released: the draft is still there") {
-            service.findDraft(WORKSPACE_ID, created.record.id) shouldNotBe null
+            service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id) shouldNotBe null
         }
     }
 
@@ -412,7 +416,7 @@ class PipelineServiceIntegrationTest {
         val outcome = service.purge(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash)
 
         outcome.shouldBeInstanceOf<PipelineReleaseService.Purged.Version>()
-        service.findDraft(WORKSPACE_ID, created.record.id).shouldBeNull()
+        service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
         withClue("the version number returns to the pool — the draft row is gone, not flipped") {
             repository.listVersions(WORKSPACE_ID, created.record.id).map { it.version } shouldContainExactly listOf(1)
         }
@@ -425,12 +429,13 @@ class PipelineServiceIntegrationTest {
         val created = createReleased()
 
         withClue("no draft: the working version is the released one") {
-            service.findWorking(WORKSPACE_ID, created.record.id)?.version?.status shouldBe PipelineVersionStatus.RELEASED
+            service.findWorking(WORKSPACE_ID, ReadLens.Everything, created.record.id)?.version?.status shouldBe
+                PipelineVersionStatus.RELEASED
         }
 
         service.update(WORKSPACE_ID, created.record.id, body(renamed("Edited")), created.version.bodyHash, owner, WriteSurface.SESSION)
 
-        val working = checkNotNull(service.findWorking(WORKSPACE_ID, created.record.id))
+        val working = checkNotNull(service.findWorking(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("versioning §7 — an authoring read must show the draft, or an editor rebases on stale content") {
             working.version.status shouldBe PipelineVersionStatus.DRAFT
             working.draft shouldNotBe null
@@ -443,8 +448,8 @@ class PipelineServiceIntegrationTest {
         // The service does not own the 404: `ApiErrors.pipelineNotFound` on REST and
         // `McpNotFound.pipeline` on MCP are the same catalogued code in two carriers, and
         // choosing the carrier is the surface's job.
-        service.findRecord(WORKSPACE_ID, UUID.randomUUID()).shouldBeNull()
-        service.findWorking(WORKSPACE_ID, UUID.randomUUID()).shouldBeNull()
+        service.findRecord(WORKSPACE_ID, ReadLens.Everything, UUID.randomUUID()).shouldBeNull()
+        service.findWorking(WORKSPACE_ID, ReadLens.Everything, UUID.randomUUID()).shouldBeNull()
     }
 
     @Test
@@ -456,15 +461,18 @@ class PipelineServiceIntegrationTest {
         service.create(WORKSPACE_ID, body(named("test/monthly_revenue", "Monthly Revenue", "By customer")), owner, WriteSurface.SESSION)
         service.create(WORKSPACE_ID, body(named("test/daily_churn", "Daily Churn", "Cancellations per day")), owner, WriteSurface.SESSION)
 
-        service.list(WORKSPACE_ID, query = "REVENUE").map { it.name } shouldContainExactly listOf("test/monthly_revenue")
+        service.list(WORKSPACE_ID, ReadLens.Everything, query = "REVENUE").map { it.name } shouldContainExactly
+            listOf("test/monthly_revenue")
         withClue("display_name is matched too, case-insensitively") {
-            service.list(WORKSPACE_ID, query = "daily churn").map { it.name } shouldContainExactly listOf("test/daily_churn")
+            service.list(WORKSPACE_ID, ReadLens.Everything, query = "daily churn").map { it.name } shouldContainExactly
+                listOf("test/daily_churn")
         }
         withClue("description is matched too") {
-            service.list(WORKSPACE_ID, query = "CANCELLATIONS").map { it.name } shouldContainExactly listOf("test/daily_churn")
+            service.list(WORKSPACE_ID, ReadLens.Everything, query = "CANCELLATIONS").map { it.name } shouldContainExactly
+                listOf("test/daily_churn")
         }
-        service.list(WORKSPACE_ID, query = "unrelated").shouldBeEmptyList()
-        withClue("no query means no filtering") { service.list(WORKSPACE_ID).size shouldBe 2 }
+        service.list(WORKSPACE_ID, ReadLens.Everything, query = "unrelated").shouldBeEmptyList()
+        withClue("no query means no filtering") { service.list(WORKSPACE_ID, ReadLens.Everything).size shouldBe 2 }
     }
 
     @Test
@@ -473,7 +481,7 @@ class PipelineServiceIntegrationTest {
         service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/mine")), owner, WriteSurface.SESSION)
         service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/theirs")), other, WriteSurface.SESSION)
 
-        service.list(WORKSPACE_ID, ownerId = other).map { it.name } shouldContainExactly listOf("test/theirs")
+        service.list(WORKSPACE_ID, ReadLens.Everything, ownerId = other).map { it.name } shouldContainExactly listOf("test/theirs")
     }
 
     @Test
@@ -496,7 +504,7 @@ class PipelineServiceIntegrationTest {
             WriteSurface.SESSION,
         )
 
-        val page = service.page(WORKSPACE_ID, query = null, offset = 0, size = 2)
+        val page = service.page(WORKSPACE_ID, ReadLens.Everything, query = null, offset = 0, size = 2)
 
         page.items.size shouldBe 2
         withClue("034 E3 — a COUNT(*), not 'rows so far + 1 if more'") { page.total shouldBe PAGED_ROWS }
@@ -515,27 +523,83 @@ class PipelineServiceIntegrationTest {
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
 
         withClue("list by datasource name resolves through the repository's pushed-down filter") {
-            service.list(WORKSPACE_ID, datasourceName = "pg-prod").map { it.name } shouldContainExactly listOf("test/monthly_revenue")
-            service.list(WORKSPACE_ID, datasourceName = "nope").shouldBeEmpty()
+            service.list(WORKSPACE_ID, ReadLens.Everything, datasourceName = "pg-prod").map { it.name } shouldContainExactly
+                listOf("test/monthly_revenue")
+            service.list(WORKSPACE_ID, ReadLens.Everything, datasourceName = "nope").shouldBeEmpty()
         }
         withClue("page with q filters in memory with a truthful total") {
-            val page = service.page(WORKSPACE_ID, "monthly", 0, 10)
+            val page = service.page(WORKSPACE_ID, ReadLens.Everything, "monthly", 0, 10)
             page.total shouldBe 1
             page.hasMore shouldBe false
         }
         withClue("browseLevel answers one level and treats an illegal prefix as empty") {
             // The root's level shows `test` as a FOLDER; the pipeline is the `test` prefix's leaf.
-            service.browseLevel(WORKSPACE_ID, null).pipelines.shouldBeEmpty()
-            service.browseLevel(WORKSPACE_ID, "test").pipelines.map { it.name } shouldContainExactly listOf("test/monthly_revenue")
-            service.browseLevel(WORKSPACE_ID, "not a legal prefix!!").pipelines.shouldBeEmpty()
+            service.browseLevel(WORKSPACE_ID, ReadLens.Everything, null).pipelines.shouldBeEmpty()
+            service.browseLevel(WORKSPACE_ID, ReadLens.Everything, "test").pipelines.map { it.name } shouldContainExactly
+                listOf("test/monthly_revenue")
+            service.browseLevel(WORKSPACE_ID, ReadLens.Everything, "not a legal prefix!!").pipelines.shouldBeEmpty()
         }
-        val record = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
+        val record = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("the versioned reads compose record, body and detail") {
             service.findVersion(WORKSPACE_ID, record, 1)?.bodyJson shouldNotBe null
-            service.findVersionBody(WORKSPACE_ID, record.id, 1) shouldNotBe null
+            service.findVersionBody(WORKSPACE_ID, ReadLens.Everything, record.id, 1) shouldNotBe null
             service.findExecutable(WORKSPACE_ID, record, 1)?.pipeline shouldNotBe null
             service.findDrafts(WORKSPACE_ID, listOf(record.id)) shouldBe emptyMap()
-            service.findCurrentVersion(WORKSPACE_ID, record.id)?.version shouldBe 1
+            service.findCurrentVersion(WORKSPACE_ID, ReadLens.Everything, record.id)?.version shouldBe 1
+        }
+    }
+
+    @Test
+    fun `a narrowing lens hides rows from every read, and a hidden id answers exactly as an absent one`() {
+        // 178, the promoter lens: three pipelines under two folders; the lens admits one.
+        val shown = createReleased(Fixtures.pipeline(name = "finance/daily")).record
+        val hidden = createReleased(Fixtures.pipeline(name = "finance/weekly")).record
+        val other = createReleased(Fixtures.pipeline(name = "ops/nightly")).record
+        val lens = ReadLens.Only(setOf("finance/daily"))
+
+        withClue("list, page and search keep only the admitted names, with a truthful total") {
+            service.list(WORKSPACE_ID, lens).map { it.name } shouldContainExactly listOf("finance/daily")
+            service.list(WORKSPACE_ID, lens, query = "finance").map { it.name } shouldContainExactly listOf("finance/daily")
+            val page = service.page(WORKSPACE_ID, lens, null, 0, 10)
+            page.items.map { it.name } shouldContainExactly listOf("finance/daily")
+            page.total shouldBe 1
+        }
+        withClue("the lensed tree level is derived from the admitted set: its folder counts follow the lens") {
+            service.browseLevel(WORKSPACE_ID, lens, null).folders shouldContainExactly
+                listOf(PipelineFolder("finance", "finance", pipelineCount = 1))
+            service.browseLevel(WORKSPACE_ID, lens, "finance").pipelines.map { it.name } shouldContainExactly listOf("finance/daily")
+            service.browseLevel(WORKSPACE_ID, lens, "ops").pipelines.shouldBeEmpty()
+        }
+        withClue("the in-memory level under Everything reproduces the SQL level row for row") {
+            val sql = service.browseLevel(WORKSPACE_ID, ReadLens.Everything, "finance")
+            val memory = PipelineFolderLevel.of(repository.findAll(WORKSPACE_ID), "finance")
+            memory shouldBe sql
+            PipelineFolderLevel.of(repository.findAll(WORKSPACE_ID), null) shouldBe
+                service.browseLevel(WORKSPACE_ID, ReadLens.Everything, null)
+        }
+        withClue("every id-keyed read of a hidden pipeline is the absent answer") {
+            service.findRecord(WORKSPACE_ID, lens, hidden.id) shouldBe null
+            service.findWorking(WORKSPACE_ID, lens, hidden.id) shouldBe null
+            service.findDraft(WORKSPACE_ID, lens, hidden.id) shouldBe null
+            service.findVersionBody(WORKSPACE_ID, lens, hidden.id, 1) shouldBe null
+            service.findCurrentVersion(WORKSPACE_ID, lens, hidden.id) shouldBe null
+            service.listVersions(WORKSPACE_ID, lens, hidden.id).shouldBeEmpty()
+            service.findRecord(WORKSPACE_ID, lens, other.id) shouldBe null
+        }
+        withClue("the admitted pipeline reads exactly as it does without a lens") {
+            service.findWorking(WORKSPACE_ID, lens, shown.id) shouldBe service.findWorking(WORKSPACE_ID, ReadLens.Everything, shown.id)
+            service.listVersions(WORKSPACE_ID, lens, shown.id).size shouldBe 1
+            service.findVersionBody(WORKSPACE_ID, lens, shown.id, 1) shouldNotBe null
+        }
+        withClue("findCurrentVersions is §10.2's whole input in one read: released pointers only, by name") {
+            val draftOnly = service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "ops/draft_only")), owner, WriteSurface.SESSION)
+            val current = repository.findCurrentVersions(WORKSPACE_ID)
+            current.map { it.name } shouldContainExactly listOf("finance/daily", "finance/weekly", "ops/nightly")
+            current.map { it.id }.contains(draftOnly.record.id) shouldBe false
+            val weekly = current.single { it.id == hidden.id }
+            weekly.version shouldBe 1
+            weekly.bodyHash shouldBe checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, hidden.id)).bodyHash
+            weekly.displayName shouldBe hidden.displayName
         }
     }
 
@@ -638,7 +702,7 @@ class PipelineServiceIntegrationTest {
 
         val result = service.purgeEntity(WORKSPACE_ID, created.record.id)
 
-        service.findRecord(WORKSPACE_ID, created.record.id).shouldBeNull()
+        service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
         withClue("the entity row went, with its only draft (D57)") {
             countRows("pipelines") shouldBe 0
             countRows("pipeline_versions") shouldBe 0
@@ -651,7 +715,7 @@ class PipelineServiceIntegrationTest {
     @Test
     fun `findExecutable resolves the body and the parsed pipeline for a version`() {
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
-        val record = checkNotNull(service.findRecord(WORKSPACE_ID, created.record.id))
+        val record = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
 
         // D55: a create lands a DRAFT, so the version to resolve is the WORKING one —
         // `record.currentVersion` is null here, which is the point of the ruling.

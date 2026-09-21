@@ -79,7 +79,7 @@ class PipelineChecksPartialsControllerTest {
     @Test
     fun `GET renders the partial from the version's definitions and their latest runs`() {
         authenticate(AuthMethod.OIDC)
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns record()
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record()
         every { pipelines.findExecutable(WORKSPACE, record(), 3) } returns executable()
         every { checkRuns.latestPerCheck(PIPELINE, 3) } returns
             listOf(
@@ -102,7 +102,7 @@ class PipelineChecksPartialsControllerTest {
     @Test
     fun `POST run commissions the fresh run - via ui, the session actor, the correlation id - and renders the same partial`() {
         authenticate(AuthMethod.OIDC)
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns record()
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record()
         every { pipelines.findExecutable(WORKSPACE, record(), 3) } returns executable()
         val via = slot<CheckRunVia>()
         val actor = slot<UUID>()
@@ -135,7 +135,7 @@ class PipelineChecksPartialsControllerTest {
     @Test
     fun `POST run without the footer parameter carries no release footer`() {
         authenticate(AuthMethod.OIDC)
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns record()
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record()
         every { pipelines.findExecutable(WORKSPACE, record(), 3) } returns executable()
         every { checkRunner.run(WORKSPACE, PIPELINE, 3, emptyMap(), any(), any(), any()) } returns
             listOf(outcome("share_matches", CheckRunVerdict.FAIL))
@@ -167,7 +167,7 @@ class PipelineChecksPartialsControllerTest {
     @Test
     fun `GET on an unknown pipeline is the house 404`() {
         authenticate(AuthMethod.OIDC)
-        every { pipelines.findRecord(WORKSPACE, PIPELINE) } returns null
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns null
 
         mvc
             .perform(get("/partials/pipelines/$PIPELINE/versions/3/checks").header("HX-Request", "true"))

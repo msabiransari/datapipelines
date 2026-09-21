@@ -20,6 +20,7 @@ import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
@@ -156,7 +157,7 @@ class PipelineExecuteTool(
     ): Any {
         val workspace = ctx.principal.requireWorkspace()
         val id = args.requiredUuid("id")
-        val record = pipelines.findRecord(workspace.id, id) ?: throw McpNotFound.pipeline(id)
+        val record = pipelines.findRecord(workspace.id, ReadLens.Everything, id) ?: throw McpNotFound.pipeline(id)
         // B1: never clamped — `{version: 0}` is refused, not silently run as version 1.
         // D55: the default is the WORKING version (the draft when one exists, else the latest
         // release), resolved by the aggregate — never `current_version` directly.
@@ -171,7 +172,7 @@ class PipelineExecuteTool(
         // checked (RELEASED pins cannot change), and only when THIS is the version being
         // run — the working version when no version argument was given, so an agent
         // executing its own draft is exactly the caller the check addresses.
-        pipelines.findDraft(workspace.id, id)?.takeIf { it.version == version }?.let { draft ->
+        pipelines.findDraft(workspace.id, ReadLens.Everything, id)?.takeIf { it.version == version }?.let { draft ->
             renderFreshness?.require(workspace.id, ctx.principal.keyId, draft, executable.pipeline.nodes)
         }
 

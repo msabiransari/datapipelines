@@ -22,6 +22,7 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import kotlinx.coroutines.CoroutineScope
@@ -287,8 +288,8 @@ class PublishedEndpointServeService(
      * is the §5.6 `pipeline_not_released` refusal.
      */
     private fun pointedVersion(endpoint: PublishedEndpoint): PipelineService.ExecutablePipeline? {
-        val record = pipelines.findRecord(endpoint.workspaceId, endpoint.pipelineId) ?: return null
-        val detail = pipelines.findCurrentVersion(endpoint.workspaceId, endpoint.pipelineId) ?: return null
+        val record = pipelines.findRecord(endpoint.workspaceId, ReadLens.Everything, endpoint.pipelineId) ?: return null
+        val detail = pipelines.findCurrentVersion(endpoint.workspaceId, ReadLens.Everything, endpoint.pipelineId) ?: return null
         if (!servable(detail.status)) return null
         return pipelines.findExecutable(endpoint.workspaceId, record, detail.version)
     }

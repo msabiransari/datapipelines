@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
@@ -89,6 +90,7 @@ class PipelinesListTool(
         return pipelines
             .list(
                 workspaceId = workspaceId,
+                lens = ReadLens.Everything,
                 ownerId = args.uuid("owner"),
                 datasourceName = args.string("datasource"),
                 query = args.string("q"),
@@ -227,7 +229,7 @@ class PipelinesGetTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("id")
-        val record = pipelines.findRecord(workspaceId, id) ?: throw McpNotFound.pipeline(id)
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw McpNotFound.pipeline(id)
         // The explicit argument is validated and wins BEFORE any working-version lookup
         // (B3) — then the working version (§7): the draft if one exists, else
         // current_version. Derived, never stored — current_version keeps meaning
@@ -257,7 +259,7 @@ class PipelinesGetTool(
         tree.put("status", detail.status.name)
         tree.put("body_hash", detail.bodyHash)
         val draftPointer = tree.putObject("draft")
-        val draft = pipelines.findDraft(workspaceId, id)
+        val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, id)
         if (draft != null) {
             draftPointer
                 .put("version", draft.version)

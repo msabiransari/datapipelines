@@ -15,6 +15,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import org.springframework.ui.Model
 import java.security.MessageDigest
 import java.time.Instant
@@ -160,7 +161,7 @@ class PipelineBrowseModel(
         offset: Int,
     ): String {
         val page = maxOf(0, offset)
-        val result = pipelines.page(workspaceId, q, page, PAGE_SIZE)
+        val result = pipelines.page(workspaceId, ReadLens.Everything, q, page, PAGE_SIZE)
         model.addAttribute("searching", true)
         model.addAttribute("pipelines", result.items)
         model.addAttribute("drafts", result.drafts)
@@ -221,7 +222,7 @@ class PipelineBrowseModel(
         // came back with no role attributes at all, so every verb on it silently vanished until
         // the next selection re-fetched the pane. One model call, one answer.
         RoleModel.stamp(model)
-        val record = pipelines.findRecord(workspaceId, id)
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id)
         model.addAttribute("pipelineId", id)
         model.addAttribute("pipeline", record)
         if (record == null) return DETAIL_VIEW
@@ -231,9 +232,9 @@ class PipelineBrowseModel(
         // shows what this pane just showed. A body that fails to parse renders as no chips and
         // no parameters rather than as an error page: the pane reads someone else's authored
         // content and the editor is where a malformed body is repaired.
-        val working = pipelines.findWorking(workspaceId, id)
+        val working = pipelines.findWorking(workspaceId, ReadLens.Everything, id)
         val body = working?.bodyJson?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
-        val versions = pipelines.listVersions(workspaceId, id)
+        val versions = pipelines.listVersions(workspaceId, ReadLens.Everything, id)
 
         model.addAttribute("draftHash", working?.draft?.bodyHash)
         fillIdentity(model, record)
@@ -369,7 +370,7 @@ class PipelineBrowseModel(
         workspaceId: UUID,
         pipelineId: UUID,
     ): String {
-        val record = pipelines.findRecord(workspaceId, pipelineId)
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, pipelineId)
         model.addAttribute("usage", record?.let { usage(workspaceId, it) } ?: UsageView(emptyList(), emptyList()))
         return USAGE_VIEW
     }

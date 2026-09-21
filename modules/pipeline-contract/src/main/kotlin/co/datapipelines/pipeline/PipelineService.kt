@@ -266,9 +266,17 @@ open class PipelineService(
      *
      * Datasource filtering is pushed down to SQL ([PipelineRepository.findAllByDatasource]);
      * `q` stays in memory because it matches across three columns.
+     *
+     * ## The lens (178)
+     * Every read here takes a [ReadLens] and no default — the promoter lens (roles design §3.1)
+     * narrows what a lensed principal sees on EVERY surface, and the surfaces that hold the
+     * principal decide the lens; this service only applies it. [ReadLens.Everything] leaves each
+     * read exactly as it was; [ReadLens.Only] filters by name, and an id-keyed read of a name
+     * the lens does not admit answers null — the same null a row in another workspace gets.
      */
     open fun list(
         workspaceId: UUID,
+        lens: ReadLens,
         ownerId: UUID? = null,
         datasourceName: String? = null,
         query: String? = null,
@@ -278,7 +286,7 @@ open class PipelineService(
                 pipelines.findAllByDatasource(workspaceId, datasourceName, ownerId)
             } else {
                 pipelines.findAll(workspaceId, ownerId)
-            }
+            }.through(lens) { it.name }
         val needle = query?.lowercase() ?: return records
         return records.filter { it.matches(needle) }
     }
@@ -298,17 +306,22 @@ open class PipelineService(
      */
     open fun page(
         workspaceId: UUID,
+        lens: ReadLens,
         query: String?,
         offset: Int,
         size: Int,
     ): PipelinePage {
         val needle = query?.trim()?.takeIf { it.isNotEmpty() }
         val page =
-            if (needle == null) {
+            if (needle == null && lens.isEverything) {
                 val rows = pipelines.findAll(workspaceId, null, size + 1, offset)
                 PipelinePage(rows.take(size), pipelines.countAll(workspaceId), rows.size > size, emptyMap())
             } else {
-                val all = list(workspaceId, query = needle)
+                // A lensed principal's page is taken in memory even without a `q`: the admitted
+                // set is a per-request name set the SQL pager cannot take, and it is small by
+                // construction (what is promotable, never the workspace). Its total is the
+                // filtered size — the same rule the search path already follows.
+                val all = list(workspaceId, lens, query = needle)
                 PipelinePage(all.drop(offset).take(size), all.size, all.size > offset + size, emptyMap())
             }
         // versioning §7: the "unreleased edits exist" badge, for the rows actually shown.
@@ -330,6 +343,7 @@ open class PipelineService(
      */
     open fun browseLevel(
         workspaceId: UUID,
+        lens: ReadLens,
         prefix: String?,
         offset: Int = 0,
         limit: Int = PipelineFolderLevel.DEFAULT_PAGE_LIMIT,
@@ -338,7 +352,12 @@ open class PipelineService(
         if (normalized != null && !PipelineNameGrammar.matchesPrefix(normalized)) {
             return PipelineFolderLevel(emptyList(), foldersTruncated = false, emptyList(), total = 0, hasMore = false)
         }
-        return pipelines.listFolder(workspaceId, normalized, offset, limit)
+        if (lens.isEverything) return pipelines.listFolder(workspaceId, normalized, offset, limit)
+        // The lensed tree: the SQL level cannot take a per-request name set, so the level is
+        // derived in memory from the admitted index rows by the SQL's own rules
+        // ([PipelineFolderLevel.of]) — folder counts and leaf totals then come from the same
+        // set every other lensed read shows.
+        return PipelineFolderLevel.of(pipelines.findAll(workspaceId).through(lens) { it.name }, normalized, offset, limit)
     }
 
     /** The DRAFT detail of each of [pipelineIds] that has one — the list screens' badge (§7). */
@@ -357,11 +376,15 @@ open class PipelineService(
     // Reads — null on absence; the surface owns the 404
     // -------------------------------------------------------------------------------------
 
-    /** The index row, or null when it is unknown, soft-deleted, or in another workspace. */
+    /**
+     * The index row, or null when it is unknown, soft-deleted, in another workspace — or, for
+     * a lensed principal, not admitted by the [lens] (178: a hidden row IS an absent row).
+     */
     open fun findRecord(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineId: UUID,
-    ): PipelineRecord? = pipelines.findById(workspaceId, pipelineId)
+    ): PipelineRecord? = pipelines.findById(workspaceId, pipelineId)?.takeIf { lens.admits(it.name) }
 
     /**
      * The **working version** (versioning §7): the DRAFT when one exists, else the current
@@ -370,14 +393,26 @@ open class PipelineService(
      */
     open fun findWorking(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineId: UUID,
     ): LoadedPipeline? {
-        val record = pipelines.findById(workspaceId, pipelineId) ?: return null
+        val record = findRecord(workspaceId, lens, pipelineId) ?: return null
         val draft = pipelines.findDraftDetail(workspaceId, record.id)
         val version = draft ?: pipelines.findCurrentVersionDetail(workspaceId, record.id) ?: return null
         val body = pipelines.findVersionBody(workspaceId, record.id, version.version) ?: return null
         return LoadedPipeline(record, body, version, draft)
     }
+
+    /**
+     * The id-keyed reads below under a narrowing lens: the index row is resolved first (one
+     * PK read, paid by lensed principals only) and a name the lens does not admit answers
+     * null before the version table is touched. Under [ReadLens.Everything] this is free.
+     */
+    private fun admitted(
+        workspaceId: UUID,
+        lens: ReadLens,
+        pipelineId: UUID,
+    ): Boolean = lens.isEverything || findRecord(workspaceId, lens, pipelineId) != null
 
     /** One specific version of a known pipeline, body and detail together. */
     open fun findVersion(
@@ -393,8 +428,12 @@ open class PipelineService(
     /** The draft pointer, or null when the pipeline has no unreleased edits. */
     open fun findDraft(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineId: UUID,
-    ): PipelineVersionDetail? = pipelines.findDraftDetail(workspaceId, pipelineId)
+    ): PipelineVersionDetail? {
+        if (!admitted(workspaceId, lens, pipelineId)) return null
+        return pipelines.findDraftDetail(workspaceId, pipelineId)
+    }
 
     /**
      * One version's stored body, without its detail row.
@@ -406,21 +445,33 @@ open class PipelineService(
      */
     open fun findVersionBody(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineId: UUID,
         version: Int,
-    ): String? = pipelines.findVersionBody(workspaceId, pipelineId, version)
+    ): String? {
+        if (!admitted(workspaceId, lens, pipelineId)) return null
+        return pipelines.findVersionBody(workspaceId, pipelineId, version)
+    }
 
     /** The current RELEASED version's detail, or null — the execute-default pointer's row. */
     open fun findCurrentVersion(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineId: UUID,
-    ): PipelineVersionDetail? = pipelines.findCurrentVersionDetail(workspaceId, pipelineId)
+    ): PipelineVersionDetail? {
+        if (!admitted(workspaceId, lens, pipelineId)) return null
+        return pipelines.findCurrentVersionDetail(workspaceId, pipelineId)
+    }
 
     /** §5.4 — version metadata, newest first; no bodies. */
     open fun listVersions(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineId: UUID,
-    ): List<PipelineVersionRecord> = pipelines.listVersions(workspaceId, pipelineId)
+    ): List<PipelineVersionRecord> {
+        if (!admitted(workspaceId, lens, pipelineId)) return emptyList()
+        return pipelines.listVersions(workspaceId, pipelineId)
+    }
 
     // -------------------------------------------------------------------------------------
     // D6 — the aggregate's half of execute

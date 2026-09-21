@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateRepository
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
@@ -142,12 +143,12 @@ class McpResourceReader(
         id: UUID,
         version: Int?,
     ): String {
-        val record = pipelines.findRecord(workspaceId, id) ?: throw notFound(McpResourceUri.pipeline(id))
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw notFound(McpResourceUri.pipeline(id))
         // D55: with no version in the URI this serves the WORKING version — the draft when one
         // exists, else the latest release — the same default `pipelines_execute` runs, so an
         // agent reading the body and then running it sees one pipeline, not two.
         val resolved = version ?: pipelines.workingVersion(workspaceId, record) ?: throw notFound(McpResourceUri.pipeline(id))
-        return pipelines.findVersionBody(workspaceId, id, resolved) ?: throw notFound(McpResourceUri.pipeline(id))
+        return pipelines.findVersionBody(workspaceId, ReadLens.Everything, id, resolved) ?: throw notFound(McpResourceUri.pipeline(id))
     }
 
     /** `…/parameters` — the pipeline's parameter declarations only (§7.1). */

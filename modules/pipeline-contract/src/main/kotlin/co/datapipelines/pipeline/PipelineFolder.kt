@@ -57,5 +57,47 @@ data class PipelineFolderLevel(
 
         /** The hard cap on one level's leaves, and on its sub-folders before [foldersTruncated] fires. */
         const val MAX_PAGE_LIMIT: Int = 200
+
+        /**
+         * One level computed IN MEMORY over [records] — the lensed principal's tree (178).
+         *
+         * `PipelineTreeQueries.level` derives the same level in SQL over the whole workspace;
+         * a lensed principal sees a name SET decided per request, and a `GROUP BY` cannot take
+         * a set the query does not know. So the lensed read fetches the workspace's index rows
+         * (metadata only — the same rows `PromotionService.plan` already read), keeps the
+         * admitted ones, and this function applies the SQL's exact rules to them: scope by
+         * `prefix/`, a sub-folder per first segment of the remainder that still carries a `/`,
+         * a leaf per remainder that does not, folders ordered by segment and capped with the
+         * overflow reported, leaves ordered by name and paged with the truthful total. The
+         * unit test pins each rule against the SQL's stated contract so the two presentations
+         * cannot drift.
+         */
+        fun of(
+            records: List<PipelineRecord>,
+            prefix: String?,
+            offset: Int = 0,
+            limit: Int = DEFAULT_PAGE_LIMIT,
+            folderLimit: Int = MAX_PAGE_LIMIT,
+        ): PipelineFolderLevel {
+            val page = maxOf(0, offset)
+            val leafLimit = limit.coerceIn(1, MAX_PAGE_LIMIT)
+            val folderCap = folderLimit.coerceIn(1, MAX_PAGE_LIMIT)
+            val scope = if (prefix.isNullOrEmpty()) "" else "$prefix/"
+            val inScope = records.filter { it.name.startsWith(scope) }.map { it to it.name.removePrefix(scope) }
+            val folders =
+                inScope
+                    .filter { (_, remainder) -> '/' in remainder }
+                    .groupBy { (_, remainder) -> remainder.substringBefore('/') }
+                    .toSortedMap()
+                    .map { (segment, rows) -> PipelineFolder(path = scope + segment, segment = segment, pipelineCount = rows.size) }
+            val leaves = inScope.filter { (_, remainder) -> '/' !in remainder }.map { it.first }.sortedBy { it.name }
+            return PipelineFolderLevel(
+                folders = folders.take(folderCap),
+                foldersTruncated = folders.size > folderCap,
+                pipelines = leaves.drop(page).take(leafLimit),
+                total = leaves.size,
+                hasMore = leaves.size > page + leafLimit,
+            )
+        }
     }
 }
