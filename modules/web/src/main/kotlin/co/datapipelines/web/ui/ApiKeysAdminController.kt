@@ -123,7 +123,12 @@ class ApiKeysAdminController(
 
     /**
      * Delete an API key of this workspace, whoever created it (D17). Owner-scoped revocation
-     * is the MCP key's rule (the top bar); this page administers the WORKSPACE's keys.
+     * is the MCP key's rule (the top bar); this page administers the WORKSPACE's keys — and
+     * since #191's functional note that means BOTH kinds it lists: the table's server-key rows
+     * used to carry a delete button whose service verb refused them, silently doing nothing.
+     * The key is resolved inside the caller's workspace FIRST (a foreign id is not-found, the
+     * non-disclosure rule), then revoked through the kind's own workspace-scoped verb — never
+     * by key id alone.
      */
     @DeleteMapping("/partials/api-keys/{keyId}")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
@@ -132,7 +137,14 @@ class ApiKeysAdminController(
         model: Model,
     ): String {
         val principal = requirePrincipal()
-        apiKeyService.revokeWorkspaceEndpointKey(keyId, principal.requireWorkspace().id, principal.userId)
+        val workspaceId = principal.requireWorkspace().id
+        when (apiKeyRepository.findById(keyId)?.takeIf { it.workspaceId == workspaceId }?.kind) {
+            ApiKeyKind.SERVER -> apiKeyService.revokeWorkspaceServerKey(keyId, workspaceId, principal.userId)
+            ApiKeyKind.ENDPOINT -> apiKeyService.revokeWorkspaceEndpointKey(keyId, workspaceId, principal.userId)
+            // A user key is the top bar's, never this page's; an unknown or foreign id is
+            // not-found. Either way the answer is the same redrawn table, revealing nothing.
+            else -> {}
+        }
         model.addAttribute("keys", rows(principal))
         RoleModel.stamp(model, principal)
         return "partials/api-keys-rows"

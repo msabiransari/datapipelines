@@ -243,6 +243,7 @@ class ApiKeysAdminControllerTest {
     // stubbed — a mock here would let a contradiction through that production refuses.
     private val bindingRepository = mockk<EndpointKeyBindingRepository>(relaxed = true)
     private val auditSink = mockk<AuditEventSink>(relaxed = true)
+    private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository>()
     private val publishing = mockk<EndpointPublishService>()
     private val userRepository = mockk<UserRepository>()
     private val themeResolver = mockk<ThemeResolver>()
@@ -250,7 +251,7 @@ class ApiKeysAdminControllerTest {
         ApiKeysAdminController(
             apiKeyService,
             apiKeyRepository,
-            EndpointKeyService(apiKeyService, bindingRepository, auditSink),
+            EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints),
             publishing,
             ApiKeyRows(bindingRepository),
             bindingRepository,
@@ -308,7 +309,25 @@ class ApiKeysAdminControllerTest {
         every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT) } returns listOf(sampleKey())
         every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.SERVER) } returns emptyList()
         every { userRepository.findById(userId) } returns null
+        // #191: the bind-time check reads the workspace's published tree; these fixtures bind
+        // under /nyc and /lending, so both subtrees are published here.
+        every { publishedEndpoints.findByWorkspace(workspaceId) } returns
+            listOf(publishedAt("/nyc/v1/revenue/{borough}"), publishedAt("/lending/v1/summary"))
     }
+
+    private fun publishedAt(pattern: String) =
+        co.datapipelines.application.endpoints.PublishedEndpoint.of(
+            id = UUID.randomUUID(),
+            workspaceId = workspaceId,
+            pathPattern = pattern,
+            pipelineId = UUID.randomUUID(),
+            timeoutSeconds = 60,
+            description = "",
+            isEnabled = true,
+            createdBy = userId,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+        )
 
     @Test
     fun `create mints through the shared service and returns the once-shown panel`() {
@@ -423,6 +442,7 @@ class ApiKeysAdminControllerTest {
     @Test
     fun `delete revokes the workspace's key and rebuilds the rows from the page's fragment`() {
         authenticate()
+        every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
         every { apiKeyService.revokeWorkspaceEndpointKey("dpk_abc123", workspaceId, userId) } returns true
         every { publishing.list(any()) } returns emptyList()
         every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT) } returns
@@ -444,6 +464,37 @@ class ApiKeysAdminControllerTest {
         verify { apiKeyService.revokeWorkspaceEndpointKey("dpk_abc123", workspaceId, userId) }
         html shouldContain "hx-swap-oob=\"beforeend:#toast\""
         html shouldContain ">deleted<"
+    }
+
+    @Test
+    fun `delete works for a SERVER key of this workspace too (#191 functional note)`() {
+        // The table lists server keys, so its delete verb has to serve them: before the fix the
+        // button rendered and the service refused the kind — a silent no-op on a live credential.
+        authenticate()
+        stubPageReads()
+        every { apiKeyRepository.findById("dpk_srv456") } returns
+            sampleKey("dpk_srv456").copy(kind = ApiKeyKind.SERVER)
+        every { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, userId) } returns true
+
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val view = controller.revoke("dpk_srv456", model)
+
+        view shouldBe "partials/api-keys-rows"
+        verify { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, userId) }
+        verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a foreign key id is not-found to the delete verb - no revoke, no disclosure (#191)`() {
+        authenticate()
+        stubPageReads()
+        every { apiKeyRepository.findById("dpk_other") } returns
+            sampleKey("dpk_other").copy(workspaceId = UUID.randomUUID())
+
+        controller.revoke("dpk_other", ExtendedModelMap())
+
+        verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
+        verify(exactly = 0) { apiKeyService.revokeWorkspaceServerKey(any(), any(), any()) }
     }
 
     @Test

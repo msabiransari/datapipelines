@@ -243,7 +243,9 @@ class EndpointsController(
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",
-            "bindings" to bindings.findAll().filter { it.pathPrefix == pathPattern }.map { it.apiKeyId },
+            // #191 — this endpoint's workspace's bindings only: a foreign row is inert at serve
+            // time and its key id is nobody else's to list.
+            "bindings" to bindings.findAll().filter { it.pathPrefix == pathPattern && it.workspaceId == workspaceId }.map { it.apiKeyId },
             "created_at" to createdAt.toString(),
             "updated_at" to updatedAt.toString(),
         )

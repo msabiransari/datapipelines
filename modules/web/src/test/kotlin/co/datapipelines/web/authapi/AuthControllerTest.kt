@@ -39,10 +39,14 @@ class AuthControllerTest {
     // 074 §7.7 — the REAL issuance service over the mocked key service, so the controller's
     // kind/bindings handling is exercised rather than stubbed away. The binding repository is
     // relaxed: this suite asks "what was issued", not "what was written to the binding table",
-    // which EndpointKeyServiceTest owns.
+    // which EndpointKeyServiceTest owns. The published-tree mock answers everything empty —
+    // these requests carry no bindings — so the #191 bind-time check is a no-op here.
     private val bindingRepository = mockk<EndpointKeyBindingRepository>(relaxed = true)
     private val auditSink = mockk<AuditEventSink>(relaxed = true)
-    private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink)
+    private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository> {
+        every { findByWorkspace(any()) } returns emptyList()
+    }
+    private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints)
     private val controller = AuthController(apiKeyService, apiKeyRepository, userService, endpointKeys)
 
     private val userId = UUID.randomUUID()

@@ -39,6 +39,8 @@ class EndpointKeyService(
     private val apiKeys: ApiKeyService,
     private val bindings: EndpointKeyBindingRepository,
     private val audit: AuditEventSink,
+    /** The published paths of a workspace — what a binding of that workspace may name (#191). */
+    private val publishedEndpoints: PublishedEndpointRepository,
 ) {
     /**
      * Issues a key of [kind], binding it at every path in [bindingPaths].
@@ -88,6 +90,12 @@ class EndpointKeyService(
         // Not a refusal: an endpoint key with no bindings is legal and authorises nothing, which
         // is a coherent thing to mint (bind it later). It is worth an audit detail, not an error.
 
+        // #191 — every requested prefix is checked BEFORE the key is minted, for the same
+        // ordering reason the kind checks above run first where they do: a refusal must cost
+        // nothing, and the D16 refusal stays the FIRST word so it never depends on which other
+        // argument would also have failed.
+        normalized.forEach { requireInsideWorkspace(it, workspaceId) }
+
         val issued =
             apiKeys.issue(
                 issuer = principal,
@@ -119,7 +127,13 @@ class EndpointKeyService(
         return issued
     }
 
-    /** Binds an existing key at [pathPrefix] (§6). Idempotent. */
+    /**
+     * Binds an existing key at [pathPrefix] (§6). Idempotent.
+     *
+     * #191: the prefix must lie at or above a path the caller's OWN workspace publishes. A
+     * workspace that publishes nothing at or under the prefix is refused exactly like one that
+     * cannot name it — the message says nothing about anyone else's tree.
+     */
     fun bind(
         principal: AuthenticatedPrincipal,
         apiKeyId: String,
@@ -127,6 +141,7 @@ class EndpointKeyService(
     ): Boolean {
         val prefix = normalizeBinding(pathPrefix)
         val workspaceId = principal.requireWorkspace().id
+        requireInsideWorkspace(prefix, workspaceId)
         val added =
             bindings.insert(
                 EndpointKeyBinding(prefix, apiKeyId, workspaceId, principal.userId, Instant.now()),
@@ -182,6 +197,39 @@ class EndpointKeyService(
             }.pattern
     }
 
+    /**
+     * A binding of [workspaceId] may name the root `/` or a node at or above a path that
+     * workspace actually publishes (#191). Anything else is refused with the bindings'
+     * validation code and a message that names ONLY the caller's own tree: whether some other
+     * workspace publishes at the prefix is exactly what the refusal must not reveal — the same
+     * non-disclosure rule the serve path's 404 follows (auth.md §11A.1).
+     *
+     * The root stays legal (it always was, and `ApiKeyForm.bindingNodes` offers it first), but
+     * since #191's serve-time rule it only ever exercises bindings of the serving key's own
+     * workspace — binding at `/` confers no reach into anyone else's tree.
+     *
+     * The comparison runs over [EndpointPath.ancestors] of each published PATTERN, so a binding
+     * at a literal node above a `{variable}` leaf (`/nyc` for `/nyc/v1/revenue/{borough}`) is
+     * accepted — the same relationship the authorizer walks at serve time.
+     */
+    private fun requireInsideWorkspace(
+        prefix: String,
+        workspaceId: UUID,
+    ) {
+        if (prefix == ROOT) return
+        val published = publishedEndpoints.findByWorkspace(workspaceId)
+        val inside = published.any { endpoint -> prefix in EndpointPath.ancestors(endpoint.pathPattern) }
+        if (!inside) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Endpoint.PATH_INVALID,
+                message =
+                    "No published path of your workspace lies at or under '$prefix'. " +
+                        "Bind the key at a node of your own published tree, or at the root.",
+                details = mapOf("path_prefix" to prefix),
+            )
+        }
+    }
+
     /** What decides a kind's authority, for a refusal that tells the caller what to do instead. */
     private fun authorityOf(kind: ApiKeyKind): String =
         when (kind) {
@@ -200,5 +248,6 @@ class EndpointKeyService(
     private companion object {
         const val AUDIT_BOUND = "endpoint.key_bound"
         const val AUDIT_UNBOUND = "endpoint.key_unbound"
+        const val ROOT = "/"
     }
 }

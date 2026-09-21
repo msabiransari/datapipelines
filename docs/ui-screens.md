@@ -1437,7 +1437,9 @@ on hover, like every table here. Deleted and expired keys keep their row and los
   table out-of-band (at TABLE level — a `tbody` OOB element dies in the browser's fragment
   parser) and points a toast at the panel.
 - **Delete** — revokes the key (a workspace-scoped, kind-pinned SQL revoke: it cannot touch
-  a user's MCP key or another workspace's).
+  a user's MCP key or another workspace's). Since 2026-09-21 (#191) it works for BOTH kinds
+  the table lists — `endpoint` and `server` — through each kind's own workspace-scoped verb;
+  before then a server-key row's delete silently did nothing.
 - **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
   current bindings; Save posts the whole SET and the service writes the delta (add/remove),
   so a checkbox never maps to "add" or "remove" by itself.

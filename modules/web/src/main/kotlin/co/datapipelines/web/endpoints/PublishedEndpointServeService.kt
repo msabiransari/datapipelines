@@ -317,7 +317,10 @@ class PublishedEndpointServeService(
         endpoint: PublishedEndpoint,
     ): Outcome.Refused? {
         val ancestors = EndpointPath.ancestors(path)
-        val decision = authorizer.authorize(path, principal, endpoint.workspaceId, bindings.findByPrefixes(ancestors))
+        // #191 — the endpoint's OWN workspace: the query already filters to it (D11 — filter in
+        // the query), and the authorizer re-checks in memory as the fail-closed backstop.
+        val decision =
+            authorizer.authorize(path, principal, endpoint.workspaceId, bindings.findByPrefixes(ancestors, endpoint.workspaceId))
         return when (decision) {
             is EndpointAuthorizer.Decision.Allowed -> null
             is EndpointAuthorizer.Decision.Refused -> Outcome.Refused(HTTP_FORBIDDEN, decision.code, decision.message)

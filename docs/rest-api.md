@@ -1664,7 +1664,7 @@ Content-Type: application/json
 | `kind` | `scopes` | `bindings` | Who may mint |
 |---|---|---|---|
 | `user` | — | — | **Nobody, on any request surface (179, D16)**: minted by the login/switch hook, one per user per workspace. `400 auth.key_kind_not_mintable` for every role — and an ABSENT `kind` means `user`, so a pre-179 client gets the refusal, not a silently different credential |
-| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted | Workspace admins and super admins (`MANAGE_API_KEYS`) |
+| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`MANAGE_API_KEYS`) |
 | `server` | **Refused if present** — a server key's authority is a route family | Refused | Super admin only |
 
 An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
@@ -2019,7 +2019,11 @@ the endpoint that publishes it.
 
 Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, and since 179 (D17) they are a
 **workspace admin's verb** (`MANAGE_API_KEYS` — associating a credential with an endpoint tree is
-no longer the publisher's). The key is named by **`api_key_id`** (the `/api-keys` page's shape —
+no longer the publisher's). A prefix is refused with `endpoint.path_invalid` unless it is the
+root or lies at or above a path the CALLER'S workspace publishes (2026-09-21, #191 — the refusal
+names only the caller's own tree), and at serve time a binding decides only for an endpoint of
+its own workspace ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)). The key is
+named by **`api_key_id`** (the `/api-keys` page's shape —
 unambiguous, workspace-scoped, `endpoint` kind required) or, kept for REST compatibility, by
 **`api_key_name`** — which resolves within the caller's OWN keys only, exactly as before:
 `api_keys.name` carries no uniqueness constraint, so "the key named `ci`" is ambiguous

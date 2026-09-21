@@ -19,18 +19,26 @@ class EndpointKeyBindingRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
     /**
-     * Every binding on any of [prefixes], in one query.
+     * Every binding of [workspaceId] on any of [prefixes], in one query.
      *
      * The caller ([EndpointAuthorizer]) supplies the ancestor chain and decides which node wins;
      * this repository deliberately does not, because "the most specific node carrying ANY
      * binding decides" is a rule about the tree, not about storage, and it is unit-tested
      * without a database.
+     *
+     * The workspace predicate (#191) is the D11 rule — filter in the query, never after —
+     * applied to bindings: a binding only ever decides for an endpoint of ITS OWN workspace,
+     * so rows pinned elsewhere are not fetched on the serve path at all. [EndpointAuthorizer]
+     * re-checks the surviving rows in memory as the fail-closed backstop.
      */
-    fun findByPrefixes(prefixes: Collection<String>): List<EndpointKeyBinding> {
+    fun findByPrefixes(
+        prefixes: Collection<String>,
+        workspaceId: UUID,
+    ): List<EndpointKeyBinding> {
         if (prefixes.isEmpty()) return emptyList()
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE path_prefix IN (:prefixes)",
-            mapOf("prefixes" to prefixes),
+            "$SELECT_COLUMNS WHERE path_prefix IN (:prefixes) AND workspace_id = :workspaceId",
+            mapOf("prefixes" to prefixes, "workspaceId" to workspaceId),
             MAPPER,
         )
     }

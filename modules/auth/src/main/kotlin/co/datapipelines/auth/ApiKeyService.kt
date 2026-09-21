@@ -322,6 +322,32 @@ class ApiKeyService(
     }
 
     /**
+     * Revokes a `server` key of [workspaceId] — the `/api-keys` page's delete extended to the
+     * whole table it renders (#191 functional note, D17/D18): the page administers the
+     * workspace's keys, whoever created them, and a row it lists with a delete button that
+     * silently did nothing was worse than not listing it. The same rails as the endpoint twin:
+     * the kind and workspace predicates in SQL keep this off a user's MCP key and off every
+     * other workspace's server key.
+     */
+    fun revokeWorkspaceServerKey(
+        keyId: String,
+        workspaceId: UUID,
+        actorId: UUID,
+    ): Boolean {
+        val revoked = apiKeyRepository.revokeInWorkspace(keyId, workspaceId, ApiKeyKind.SERVER)
+        if (revoked) {
+            authCache.invalidateKey(keyId)
+            auditLogger.log(
+                event = "auth.api_key.revoked",
+                userId = actorId,
+                keyId = keyId,
+                details = mapOf("workspace_id" to workspaceId.toString(), "kind" to ApiKeyKind.SERVER.wire),
+            )
+        }
+        return revoked
+    }
+
+    /**
      * **The login mint (D16, §3.3)** — called by [WorkspaceService.workspaceForLogin] and the
      * workspace switch through the `McpKeyMint` port, never from a request surface. If the
      * user holds no live `user` key in [context]'s workspace, mint one:

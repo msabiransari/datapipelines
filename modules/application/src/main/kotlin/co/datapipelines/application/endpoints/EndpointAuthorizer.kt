@@ -53,9 +53,14 @@ class EndpointAuthorizer {
      *
      * @param requestPath the published path — the part after `/api`, with its leading `/`.
      * @param endpointWorkspaceId the workspace of the endpoint being called — the one a `user`
-     *   key must be pinned to on an unbound path.
+     *   key must be pinned to on an unbound path, and (#191) the ONLY workspace whose bindings
+     *   are visible here.
      * @param bindings every binding on any ancestor of [requestPath]; extra rows are harmless,
-     *   because the walk selects by prefix rather than trusting the query.
+     *   because the walk selects by prefix rather than trusting the query. Rows of ANOTHER
+     *   workspace are invisible (#191): a foreign binding at a nearer node neither decides nor
+     *   shadows — the walk continues past it as if the node carried nothing, which is why this
+     *   in-memory filter stays even though the repository query already applies the same
+     *   predicate. Fail closed: if either layer were dropped, the other still refuses.
      */
     fun authorize(
         requestPath: String,
@@ -63,7 +68,11 @@ class EndpointAuthorizer {
         endpointWorkspaceId: UUID,
         bindings: Collection<EndpointKeyBinding>,
     ): Decision {
-        val byPrefix = bindings.groupBy { it.pathPrefix }
+        val byPrefix =
+            bindings
+                .asSequence()
+                .filter { it.workspaceId == endpointWorkspaceId }
+                .groupBy { it.pathPrefix }
         val deciding = EndpointPath.ancestors(requestPath).firstOrNull { byPrefix[it]?.isNotEmpty() == true }
 
         return if (deciding == null) {
