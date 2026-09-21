@@ -433,7 +433,7 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 | Attribute | Value |
 |---|---|
 | URL | `GET /dashboard` |
-| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `READ_EXECUTIONS` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own unless workspace admin) |
+| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `READ_EXECUTIONS` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own unless workspace admin). The **Pipelines** tile counts the caller's VIEW (178): for a promoter, the released-and-newer set the lens admits ([Auth §11A.1](auth.md#11a1-the-404-rule)), the same number the rail badge and the explorer show |
 | Purpose | Landing page — overview of recent activity |
 | Design primitives | `.ds-card`, `.ds-badge`, `.ds-table` |
 | JS | None |
@@ -694,6 +694,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Shell (§3.4) | the **Executions**, **Promotion** and **Workspaces** rail items (177) | `navExecutions` (= `canReadExecutions`), `navPromotion` (= `canReadPromotion`), `navWorkspaces` (workspace admin, super admin, or a principal with no workspace — the no-workspace page is the one screen that explains their state) | `READ_EXECUTIONS` / `PROMOTION_READ` / `WORKSPACES_READ` |
 | Shell (§3.4) | the header search (161, #155) | every role — a READ over what the session's workspace already shows; each result is a link to a page the destination screen's own guards govern | `READ_RESOURCES` |
 | Dashboard (§4.2) | the Recent executions panel and the execution figures (177) | `canReadExecutions` — the promoter's dashboard draws neither | `READ_EXECUTIONS` |
+| Every pipeline/template read — the explorers (§4.3/§4.6), the detail panes, the editors' read-only view, the header search, the rail badges, the dashboard tile (178) | not a verb: WHAT the screen shows. A **promoter** sees the LENS — released pipelines and templates newer than the promotion target's, and the endpoints of those pipelines; a hidden object is absent (its URL is the not-found page, its id 404s), and when the target cannot be read the lists are empty and say why | the principal's `LensedView`, passed into every read ([Auth §11A.1](auth.md#11a1-the-404-rule)) | `READ_RESOURCES` (the cell is `lens`) |
 | Datasources (§4.5) | Register, Edit, Delete | `canAdminWorkspace` | `MUTATE_WORKSPACE_DATASOURCES` |
 | Datasources | **Test** | `canExecute` — the connection test **follows execute** (ratified 2026-09-20) | `TEST_DATASOURCE` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `MANAGE_DATASOURCE_GRANTS` |
@@ -720,7 +721,7 @@ links render for every reader, so the page they lead to must open for every read
 like the pipeline editor. `readOnly` is the author permission combined with the version rule
 (`TemplateEditorController.fillSource`), on the page and on the source partial; the editable
 textarea, Preview, the context rail and Release are an author's; the read-only line renders for a
-viewer and for a promoter. Every version-row Open carries its row's version.
+viewer and for a promoter — a promoter, through the lens (178): a template the lens hides opens as not-found, exactly as an unknown name does. Every version-row Open carries its row's version.
 
 Three rows are worth reading twice, because each is a place a reasonable guess is wrong:
 
@@ -1292,9 +1293,20 @@ The signed-in index's page header carries the app's second **Report a problem** 
 | Rendered for (114) | The PLAN renders for every member — it is a read, and hiding it would leave an author unable to see what is waiting. **Promote** renders for `canPromote` **in the SOURCE workspace** (the ACTIVE one: `PromotionUiController` reads `principal.requireWorkspace()` and the interceptor judges `PROMOTE_VERSION` against that same context; no target-side role is consulted). A member without it reads a line naming who to ask — the one place this round explains an absence rather than leaving one, because a promotion screen with no button and no words reads as broken. **Since 143 the reader's plan is a plain table** (`data-promotion-plan="read-only"`: Pipeline / Here / On target) — no `<form>`, no Send column, no selection boxes; the form with its controls renders for `canPromote` only |
 | Purpose | Push released content from this deployment to its one configured higher environment ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)) |
 | Endpoints called | The target's [REST API §18](rest-api.md#18-promotion-endpoints-receiver) pair, server-side. The browser never talks to the target |
-| Design primitives | `.ds-table` (the listing), `.ds-empty` (the three empty states), `.ds-badge` (the target label and `absent`) |
+| Design primitives | `.ds-table` (the listing), `.ds-empty` (the three empty states — the "Could not read the target" one is reused by every list screen a promoter sees while the target is unreadable, 178), `.ds-badge` (the target label and `absent`) |
 | JS | None |
 | htmx | No — a plain form POST with a redirect flash. A promotion is a whole-environment action, not a fragment swap |
+
+**178 — the listing IS the lens.** The plan this page renders is `PromotableView`, the same
+computation every other read a promoter makes narrows by ([Auth §11A.1](auth.md#11a1-the-404-rule),
+[Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)): what is listed here is
+exactly what a promoter sees in the explorers, the search, the rail badges and over MCP, and
+nothing a promoter sees elsewhere is missing here. The inventory behind it is cached per
+workspace (`inventory-cache-ttl-seconds`, default a minute), so the page and the lens agree
+within a window; a successful Promote invalidates the entry. The third empty state ("Could not
+read the target", with the code) is the one place the target's state is shown as an ERROR to a
+promoter — every list screen shows the same sentence as its empty state instead, and no read
+ever answers a 502.
 
 **079 §F: the redirect flash is a TOAST, not a banner.** `?ok=`/`?error=` used to render two
 full-width `.ds-card` blocks at the top of the screen that pushed the page down and stayed
@@ -1581,6 +1593,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.60 | 178 (#178) roles R2 | **The promoter lens on every screen** ([Auth §11A.1](auth.md#11a1-the-404-rule)): the pipeline and template explorers, detail panes, the editors' read-only view, the header search, the dashboard's Pipelines tile and the rail badges show a promoter the released-and-newer set and nothing else (§4.2, §4.3e's new row, §4.7); a hidden object's URL is the not-found page. New fragment `partials/lens-unavailable` — the promotion page's "Could not read the target" sentence, rendered by the list fragments (`pipeline-tree-level`, `pipeline-search`, `template-tree-level`, `template-search`, `search`) in place of their empty state when a lensed principal's list is empty because the target could not be read (fail closed). §4.17: the plan is the lens's own computation, cached per workspace. |
 | 2026-09-20 | v1.59 | 177 (#177) roles R1 | §4.13 the workspaces page is a **workspace admin's** (D13: `WORKSPACES_READ` → `ws_admin`; the rail draws the item for admins and for a principal with no workspace; the switcher stays every member's under its own `WORKSPACE_SWITCH` row); the members table is **one role dropdown per row** (D22) with a Save through the one htmx partial (`POST /partials/workspaces/{name}/members/{userId}/role`, row swap + toast), the add form takes the same dropdown, the checkbox script is gone, the last-admin toast names the workspace admin role. §4.12's create form takes the dropdown too. §4.3e rewritten to the ratified rows: Release and Switch are `canAuthor` (D8), datasource **Test** is `canExecute` (follows execute — ratified), the promotion page is `canReadPromotion` (rule 13), the Executions rail item and the dashboard's runs are `canReadExecutions` (D11 — the promoter has neither), the lifecycle and datasource dialogs guard their verbs in the markup (the route-guarded exemption list is empty). §3.4 the badge prints the one role (`workspace admin`, not `admin`). §4.4/§4.7 the promoter's editors are read-only with no Release. Vocabulary: role and permission; the word "flags" leaves this document (D21). |
 | 2026-09-19 | v1.58 | 161 (#161) the login page renders the one brand mark | §3.4 brand mark: `login.html`'s card brand and `layouts/auth.html`'s brand link had kept the retired filled-tile SVG inline (163's sweep rendered the rail, the top bar and the site only); both now include `partials/brand-mark.html` exactly as `layouts/default.html` does — no CSS change, the tile and mark are sized by class. `BrandMarkParityRenderTest` renders the login page and the forced-password gate as two more surfaces (each divergence named) and sweeps every template source for the retired rect. |
 | 2026-09-19 | v1.57 | 172 (#172) | The `/api-console` route rationale reworded for the re-rooted published-endpoint tree (R-EP5); no screen, route or verb changed. |

@@ -1,6 +1,5 @@
 package co.datapipelines.web.config
 
-import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
@@ -116,10 +115,11 @@ class PromotionConfiguration {
     ): PromotionTargetClient = PromotionTargetClient(promotionProperties, meterRegistry = meterRegistry)
 
     /**
-     * 178 — §10.2 computed once for the promotion page AND the promoter lens. Declared as the
-     * `application` port so the MCP read tools (which `web` depends on, not the reverse) and
-     * every controller resolve their [co.datapipelines.application.lens.LensedView] through
-     * the same bean the page plans with.
+     * 178 — §10.2 computed once for the promotion page AND the promoter lens. ONE bean: it is
+     * the `application` port ([co.datapipelines.application.lens.PromoterLens]) by type, so the
+     * MCP read tools (which `web` depends on, not the reverse) and every controller resolve
+     * their view through the same object the page plans with — a second `PromoterLens`-typed
+     * bean would make every injection ambiguous (the sweep's context refused to start on one).
      */
     @Bean
     fun promotableViews(
@@ -127,9 +127,6 @@ class PromotionConfiguration {
         templates: TemplateRepository,
         client: PromotionTargetClient,
     ): PromotableViews = PromotableViews(pipelines, templates, client)
-
-    @Bean
-    fun promoterLens(views: PromotableViews): PromoterLens = views
 
     @Bean
     fun promotionService(

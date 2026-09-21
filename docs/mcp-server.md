@@ -100,6 +100,8 @@ API keys are:
 
 **A key can do at most what its ISSUER can do NOW.** On every request the key's own scope is checked against the tool's minimum, AND the issuer's CURRENT membership in the pinned workspace is checked against the tool's minimum role — re-read inside the same 60s validation-cache TTL as revocation. So a key whose issuer was demoted or removed from the workspace stops working within about a minute, and the refusal is `auth.key_issuer_role_lost` rather than `auth.role_required`: retrying with that key will never work, and a new key from someone who still holds the role is the fix.
 
+**A promoter's key sees through the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** The role narrows what a READ returns, never who may read: `pipelines_list/get`, `templates_list/get/used_by`, `endpoints_list/get`, the resource catalogue and the pipeline/template resources answer a promoter with RELEASED objects newer than the promotion target's inventory entry ([Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)) and nothing else — a draft, an already-promoted object, or a pipeline behind the target is ABSENT for that key and resolves as not-found, exactly as another workspace's would. The inventory is read through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`); when the target cannot be read the lens fails CLOSED — lists are empty, gets are not-found, never a 502 to a read — and the server logs `pipeline.promotion.lens_unavailable` once per window. Every other role's key is unaffected and triggers no target call.
+
 No MCP tool's minimum role is `promote` or `super_admin`, and none is `ws_admin` except `datasources_test` (it opens a live connection and writes the datasource's health down — an operational act). Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key holds `admin` scope. Registering, editing and deleting datasources remain UI/REST-only.
 
 **Datasource visibility is a GRANT** ([Auth §11A](auth.md#11a-roles)). A datasource not granted to the key's pinned workspace does not exist for it: `datasources_list` is the truth, and guessing a name gets the not-found envelope, never a "forbidden".
@@ -232,7 +234,7 @@ List pipelines the caller has access to.
 ```json
 {
   "name": "pipelines_list",
-  "description": "List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, status, updated_at) — version is the WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. Not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:\"\" lists the roots, prefix:\"finance\" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:\"\" to see which roots this workspace already uses before creating a pipeline under a new one.",
+  "description": "List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, status, updated_at) — version is the WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. Not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:\"\" lists the roots, prefix:\"finance\" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:\"\" to see which roots this workspace already uses before creating a pipeline under a new one. A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter lens); every other pipeline is absent for it and resolves as not-found by id.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -278,7 +280,7 @@ Fetch a full pipeline definition.
 ```json
 {
   "name": "pipelines_get",
-  "description": "Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it. The result carries the version, its status and body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased edits exist. When a node pins a template version that a newer released version outdates, an upgrade_available array names the node, the template and both versions — an offer to re-pin via pipelines_update, never an automatic change.",
+  "description": "Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it. The result carries the version, its status and body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased edits exist. When a node pins a template version that a newer released version outdates, an upgrade_available array names the node, the template and both versions — an offer to re-pin via pipelines_update, never an automatic change. A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter lens); every other pipeline is absent for it and resolves as not-found by id.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
@@ -408,7 +410,7 @@ List templates.
 ```json
 {
   "name": "templates_list",
-  "description": "List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found.",
+  "description": "List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -453,7 +455,7 @@ Fetch a template body.
 ```json
 {
   "name": "templates_get",
-  "description": "Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released.",
+  "description": "Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
@@ -899,7 +901,7 @@ Which pipelines pin a given template version — the reverse arrow of a node's `
 ```json
 {
   "name": "templates_used_by",
-  "description": "Which pipelines pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything.",
+  "description": "Which pipelines pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found, and pinning pipelines it cannot see are left out of the answer.",
   "inputSchema": {
     "type": "object",
     "required": ["id", "version"],
@@ -971,7 +973,7 @@ The published endpoints of the key's pinned workspace.
 ```json
 {
   "name": "endpoints_list",
-  "description": "List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists.",
+  "description": "List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists. A promoter's key lists only the endpoints of pipelines it can see (the promoter lens: released, newer than the promotion target's).",
   "inputSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -989,7 +991,7 @@ One published endpoint, by its path PATTERN.
 ```json
 {
   "name": "endpoints_get",
-  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}').",
+  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}'). For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "required": [

@@ -33,8 +33,10 @@ enum class WorkspaceRole {
 
     /**
      * The ops role (D5): reads datasources and promotes. Executes nothing, reads no
-     * executions, authors nothing, releases nothing. R2 (#178) narrows what it SEES to
-     * released-and-newer objects; R1 only takes away the verbs §2 says it lacks.
+     * executions, authors nothing, releases nothing. R1 took away the verbs §2 says it lacks;
+     * R2 (#178) narrows what it SEES — pipelines, templates and endpoints — to the released
+     * objects newer than the promotion target's, through the lens ([AuthenticatedPrincipal.isLensed],
+     * auth.md §11A.1). The lens is not a permission: this role's rows are unchanged.
      */
     PROMOTER,
 

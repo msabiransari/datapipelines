@@ -91,17 +91,18 @@ Five verbs act on versions, and they pair with the statuses exactly:
 - **Restore** is the DISCARDED verb (`POST …/versions/{v}/restore`): the row returns to
   RELEASED — its original `released_at`/`released_by` return, the discard stamps clear.
   **Discard is reversible; purge is not.**
-- **Release** is the DRAFT→RELEASED verb (§5.3, unchanged). **Who may:** a **promoter** or a
-  workspace admin — deliberately NOT an author. The promoter role exists precisely so that
-  "can edit" and "can release" are two separate answers ([Auth §11A](auth.md#11a-roles)).
-- **Switch** is the pointer verb (§3.4). **Who may:** an **author, a promoter or a workspace
-  admin** — the one verb all three hold and none implies. It is the rollback lever, and taking
-  it from the author who owns the content or the promoter who runs the environment would leave
-  the wrong person holding it.
+- **Release** is the DRAFT→RELEASED verb (§5.3, unchanged). **Who may:** an **author** or a
+  workspace admin (roles design D8, ratified 2026-09-20: "the author releases, the promoter
+  promotes"). Before R1 (#177) this was the promoter's; the promoter is now an ops role that
+  authors nothing and sees, through the lens (§10.2), only what is promotable
+  ([Auth §11A](auth.md#11a-roles)).
+- **Switch** is the pointer verb (§3.4). **Who may:** an **author or a workspace admin** — the
+  rollback lever stays with whoever owns the content; the promoter lost it with release.
 
 **Who may run the rest:** discard, restore and purge are AUTHORING verbs — an author holds all
 three. That is safe because the system does not allow purging a release: purge is the DRAFT
-verb, and discard is reversible. Promotion is the promoter's, with release.
+verb, and discard is reversible. Promotion is the promoter's (and the workspace admin's);
+release is not.
 
 A DRAFT is never discarded and a RELEASED version is never purged: the verbs refuse with
 `pipeline.version.not_released` / `template.version.not_released` and
@@ -980,6 +981,17 @@ endpoints are specified in [REST API §18](rest-api.md#18-promotion-endpoints-re
 > target does not have counts as target version 0). Drafts are never listed. Same-version
 > entries are never listed.
 
+**The same rule is the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** Since
+R2 a promoter sees, on EVERY read surface — lists, levels, counts, search, gets, the editor
+source, the MCP tools and resources — exactly the set this screen lists, for pipelines AND
+templates: the rule is computed once per request (`PromotableView`) and the page and the lens
+read the same object, so they cannot disagree. **The template arm**, stated for the first
+time here (the push closure only implied it): a template is promotable iff it has a current
+RELEASED version and the target lacks its id, or holds a different hash at a lower version —
+the four lines above with the template's id for its name. A hidden object answers a promoter
+exactly as an absent one; when the target cannot be read the lens shows NOTHING (fail closed)
+and the screens say why.
+
 The delta is computed from the target's inventory: the promotion orchestrator reads the
 target's per-pipeline and per-template `(name, current_version, body_hash)`
 ([REST API §18.1](rest-api.md#181-promotion-inventory)) and compares. **By name, not by id**
@@ -1315,6 +1327,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.13 | 178 (#178) | §10.2's rule is now also the **promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)): computed once per request (`PromotableView`) for pipelines AND templates — the template arm stated for the first time — and read by the promotion page and by every promoter read alike; the push path's root guard decides "not newer" from the same object (a same-hash root at a higher number is refused `promotion.not_newer` with "same content", where the page already hid it). The 2026-09-20 verb ownership corrected in the lifecycle-verbs block: release and switch are the author's (D8), promote the promoter's. |
 | 2026-09-19 | v1.12 | 172 (#172) | The serving table's published-endpoint row follows the re-rooted URL shape (R-EP5, `/api/<category>/<version>/<path…>`); the rule — the endpoint serves whatever the pointer names — is unchanged. |
 | 2026-09-15 | v1.11 | 142 release cascade | §5.3 precondition 2 gains **the cascade**: `release(releasePinnedTemplates = true)` — REST `?release_pinned_templates=true`, the dialog's checked-by-default consent group — releases every DRAFT template version the draft body pins in the SAME metadata transaction as the pipeline flip, templates first, through the new `TemplateReleaser` port (`pipeline-contract`, implemented in `web` over `TemplateReleaseService.releasePinned` so the direct and cascaded verbs share one implementation); any refusal rolls everything back. Audit: one `template.version.released` per cascaded template with `cascade_from_pipeline_id` / `cascade_from_version`, then `pipeline.version.released` with `templates_released`. The default is the pre-142 refusal byte for byte; its details gain `pins_not_released`. DISCARDED / MISSING pins stay unreleasable; promotion receive unexposed (§10); no MCP tool releases anything. §3.5.2 gains the `{R,D} release(releasePinnedTemplates)` row (excluded from the model replay like the template-twin rows; `ReleaseCascadeE2eTest` owns it). |
 | 2026-09-14 | v1.10 | 140 release checks | §5.3 gains **precondition 4 — the release-check gate**: a body carrying `checks[]` (pipeline-contract §3.3) gets a fresh server run (`via = release`, one `pipeline_check_runs` row per check, outside the metadata transaction) before the flip; any `fail`/`error` refuses with `409 pipeline.check.failed` (`details.checks` = expected/observed/message per failing check) unless the request carries `override_checks_reason` (non-blank, ≥ 10 chars), which releases and adds `checks_overridden` + `override_reason` to the `pipeline.version.released` audit event. Checks are opt-in — a check-less version releases exactly as before — and the agent never supplies an observed value: only the server's own run produces `observed`. §10.5 records that a promoted release's checks travel in the body and the receiver re-runs them on its own datasources at its release step (no override channel; a missing datasource is `error`, the truth). The gate's placement moved `PipelineService.release`'s transaction boundary: the template-pin guard and the flip still share one transaction; the check runs deliberately run outside it (`datasource.lease_in_transaction`). |

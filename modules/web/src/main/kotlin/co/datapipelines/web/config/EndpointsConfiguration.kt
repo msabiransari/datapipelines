@@ -111,6 +111,9 @@ class EndpointsConfiguration {
      * surface.
      */
     @Bean
+    // A DI factory's arity is the container's business: every parameter is a bean the service
+    // genuinely needs (178 added the promoter lens), and a holder type would exist only to be counted.
+    @Suppress("LongParameterList")
     fun endpointPublishService(
         endpoints: PublishedEndpointRepository,
         pipelines: PipelineService,

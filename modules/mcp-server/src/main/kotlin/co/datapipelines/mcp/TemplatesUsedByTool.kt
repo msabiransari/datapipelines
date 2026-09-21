@@ -31,7 +31,10 @@ class TemplatesUsedByTool(
                     "node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it " +
                     "before editing or retiring a template version to see who you would affect. It does not answer " +
                     "'is it safe to delete' (that scan includes historical pipeline versions and lives in the " +
-                    "delete refusal), and it never changes anything.",
+                    "delete refusal), and it never changes anything." +
+                    " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
+                    "lens); every other template resolves as not-found, and pinning pipelines it cannot see are " +
+                    "left out of the answer.",
             schema =
                 """
                 {

@@ -73,7 +73,12 @@ import org.springframework.web.bind.annotation.RestController
  * `PUT` always writes the DRAFT branch — copy-on-write first (§5.1), in-place overwrite
  * after (§5.2) — with the `If-Match` hash precondition (§4.2). `POST` still lands v1
  * RELEASED. Release/discard are hash-guarded, UI-driven actions; agents never release (D4).
+ *
+ * The constructor's arity is suppressed: the surface's collaborators are one per concern (178
+ * added the read façade and the lens), a holder type would exist only to be counted, and the
+ * constructor is the container's business.
  */
+@Suppress("LongParameterList")
 @RestController
 @RequestMapping("/api/v1/templates")
 class TemplatesController(

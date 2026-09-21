@@ -67,7 +67,9 @@ class TemplatesListTool(
                 "List the templates of the key's pinned workspace. Templates are reusable generators authored in " +
                     "Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline " +
                     "nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are " +
-                    "unique per workspace — another workspace's template resolves as not-found.",
+                    "unique per workspace — another workspace's template resolves as not-found." +
+                    " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
+                    "lens); every other template resolves as not-found.",
             schema =
                 """
                 {
@@ -185,7 +187,9 @@ class TemplatesGetTool(
             description =
                 "Get the body and metadata of a template version, including its imports array (the library " +
                     "macros it can call). Defaults to the working version — the draft when unreleased edits " +
-                    "exist, else the latest released.",
+                    "exist, else the latest released." +
+                    " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
+                    "lens); every other template resolves as not-found.",
             schema =
                 """
                 {

@@ -26,7 +26,10 @@ enum class Permission(
     /** The workspace roles this permission admits. A super admin is admitted regardless (D7). */
     val roles: Set<WorkspaceRole>,
 ) {
-    /** Read the workspace's objects: every role. The promoter's LENS over what it reads is R2's. */
+    /**
+     * Read the workspace's objects: every role. The promoter's LENS over WHAT it reads is a
+     * value on every read, not a row here (178, auth.md §11A.1).
+     */
     VIEW(setOf(WorkspaceRole.VIEWER, WorkspaceRole.AUTHOR, WorkspaceRole.PROMOTER, WorkspaceRole.WORKSPACE_ADMIN)),
 
     /**

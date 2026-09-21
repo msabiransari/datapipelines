@@ -62,7 +62,9 @@ class PipelinesListTool(
                     "resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): " +
                     "pass prefix to BROWSE one level of that tree — prefix:\"\" lists the roots, prefix:\"finance\" lists " +
                     "what is directly under finance — and q to SEARCH across full paths. Start with prefix:\"\" to see " +
-                    "which roots this workspace already uses before creating a pipeline under a new one.",
+                    "which roots this workspace already uses before creating a pipeline under a new one." +
+                    " A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter " +
+                    "lens); every other pipeline is absent for it and resolves as not-found by id.",
             schema =
                 """
                 {
@@ -215,7 +217,9 @@ class PipelinesGetTool(
                     "body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present " +
                     "when unreleased edits exist. When a node pins a template version that a newer released version " +
                     "outdates, an upgrade_available array names the node, the template and both versions — an offer " +
-                    "to re-pin via pipelines_update, never an automatic change.",
+                    "to re-pin via pipelines_update, never an automatic change." +
+                    " A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter " +
+                    "lens); every other pipeline is absent for it and resolves as not-found by id.",
             schema =
                 """
                 {

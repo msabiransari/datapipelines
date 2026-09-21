@@ -133,7 +133,9 @@ object EndpointsTools {
                 description =
                     "List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is " +
                         "enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an " +
-                        "unpublished one, so this listing is the only way to see that it exists.",
+                        "unpublished one, so this listing is the only way to see that it exists. A promoter's key " +
+                        "lists only the endpoints of pipelines it can see (the promoter lens: released, newer than the " +
+                        "promotion target's).",
                 schema = EMPTY_SCHEMA,
             )
 
@@ -150,7 +152,9 @@ object EndpointsTools {
         override val definition: McpSchema.Tool =
             McpTools.tool(
                 name = "endpoints_get",
-                description = "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}').",
+                description =
+                    "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}'). " +
+                        "For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
                 schema = PATH_SCHEMA,
             )
 
