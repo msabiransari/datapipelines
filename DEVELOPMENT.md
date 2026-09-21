@@ -626,6 +626,18 @@ fewer result files than it has `*Test.kt` sources — which is *always* true of 
 run. That `BUILD FAILED` is the guard doing its job, not a red suite: read the XML (or run the
 recount) for the verdict. Filtered runs are for iterating; the gate is unfiltered.
 
+**The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` runs, in a few
+minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
+three runs late: (1) `ktlintCheck detekt` over the whole tree; (2) the **unfiltered** `test` task
+of every module the diff touched (so `verifyTestsExecuted` stays meaningful); (3) the
+cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
+spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
+the skill mirror, the config-key drift tests (the list lives in the script; a new guard that
+reads the whole tree or the docs is added there in the same commit). Iterate on its output,
+then run the gate once. It is not the gate: its exit code decides nothing about a merge.
+Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
+cross-cutting guards or foreign fixtures.
+
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any
 conclusion. `scripts/gate.sh` classifies these for you and is the scripted form of all of the
