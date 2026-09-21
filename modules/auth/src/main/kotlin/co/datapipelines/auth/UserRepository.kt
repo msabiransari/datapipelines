@@ -162,6 +162,27 @@ class UserRepository(
         ) > 0
 
     /**
+     * Resets a user's identity to the bootstrap placeholder (#187, §4.2): `provider =
+     * 'bootstrap'`, `provider_subject` = the row's own (already normalized) email — exactly
+     * the shape [UserService.provisionBootstrapActor] seeds, so the next OIDC sign-in with
+     * that email claims the row through §4.2's link step. Returns true on a real transition
+     * (a row already on the placeholder is not an event — §10.1). Nothing else on the row
+     * changes: not liveness, not the admin flag, not the local credential.
+     */
+    fun resetIdentityToBootstrap(id: UUID): Boolean =
+        jdbc.update(
+            """
+            UPDATE users
+               SET provider = :provider,
+                   provider_subject = email,
+                   updated_at = NOW()
+             WHERE id = :id
+               AND (provider <> :provider OR provider_subject <> email)
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("id", id).addValue("provider", UserService.BOOTSTRAP_PROVIDER),
+        ) > 0
+
+    /**
      * Activates / deactivates a user (§4.2, §10.1). Returns true if the flag changed,
      * so the caller only audits and invalidates on a real transition.
      */

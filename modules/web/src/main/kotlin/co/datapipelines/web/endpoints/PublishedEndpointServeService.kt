@@ -27,9 +27,9 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -264,7 +264,11 @@ class PublishedEndpointServeService(
                         auditServe(endpoint, principal, executionId, OUTCOME_ACCEPTED)
                     }
                     throw e
-                } catch (e: Throwable) {
+                } catch (
+                    // The Deferred may fail with anything the run's coroutine threw; the
+                    // terminal audit row must name it FAILED whichever exception type it is.
+                    @Suppress("TooGenericExceptionCaught") e: Throwable,
+                ) {
                     // The await died of something else (the run crashed the coroutine): the
                     // execution is over and it did not succeed.
                     withContext(NonCancellable) {

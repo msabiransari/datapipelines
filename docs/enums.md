@@ -363,6 +363,8 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
 | `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
 | `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.login.email_verified_assumed` | OIDC login accepted WITHOUT an `email_verified` claim under the provider's `trust-email-without-verified-claim` knob — the acceptance was configuration's decision, not the IdP's vouching (#187, [Auth §4.2](auth.md#42-user-provisioning)) |
+| `auth.login.identity_mismatch` | OIDC login refused: the email's stored identity belongs to a different sign-in — nothing was updated; `details` name the two PROVIDERS, never the subjects (#187, [Auth §4.2](auth.md#42-user-provisioning)) |
 | `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable ([Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)) |
 | `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
 | `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)) |
@@ -383,6 +385,7 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 | `auth.user.activated` | Admin reactivated a user |
 | `auth.user.admin_granted` | Admin granted admin scope to user |
 | `auth.user.admin_revoked` | Admin revoked admin scope from user |
+| `auth.user.identity_reset` | Admin reset a user's linked sign-in identity to the bootstrap placeholder so the next OIDC sign-in with that email claims the row — the explicit answer to `auth.login.identity_mismatch` (#187, [Auth §4.2](auth.md#42-user-provisioning)) |
 | `auth.workspace.created` | Workspace created — by a super admin through the service path, or by the boot seeder for `demo` (details carry `actor: system`) |
 | `auth.workspace.updated` | A workspace's display name was changed |
 | `auth.workspace.deleted` | A workspace was soft-deleted (empty only) — distinct from `workspace.deactivated`, which purges nothing |

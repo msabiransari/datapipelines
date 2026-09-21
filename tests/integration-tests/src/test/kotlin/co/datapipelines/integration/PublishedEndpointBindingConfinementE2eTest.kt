@@ -59,13 +59,13 @@ class PublishedEndpointBindingConfinementE2eTest {
 
     @Test
     fun `minting a key bound at another workspace's published prefix is refused`() {
-        // Workspace B published /x/v1/p; workspace A's admin names /x. The prefix is exactly
-        // what makes the attack interesting: /x IS published — by someone else.
+        // Workspace B published /conf/v1/p; workspace A's admin names /conf. The prefix is
+        // exactly what makes the attack interesting: /conf IS published — by someone else.
         given()
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, FOREIGN_KEY.plaintext)
-            .body("""{"name": "cross-ws", "kind": "endpoint", "bindings": ["/x"]}""")
+            .body("""{"name": "cross-ws", "kind": "endpoint", "bindings": ["/conf"]}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
             .then()
@@ -81,7 +81,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, FOREIGN_KEY.plaintext)
-            .body("""{"api_key_name": "ep-foreign-key", "path_prefix": "/x"}""")
+            .body("""{"api_key_name": "ep-foreign-key", "path_prefix": "/conf"}""")
             .`when`()
             .post("/api/v1/endpoints/bindings")
             .then()
@@ -92,14 +92,14 @@ class PublishedEndpointBindingConfinementE2eTest {
 
     @Test
     fun `a node of the workspace's OWN published tree is still accepted`() {
-        // The rule narrows; it does not strangle. B published /x/v1/p, so B's admin binds a
+        // The rule narrows; it does not strangle. B published /conf/v1/p, so B's admin binds a
         // deeper node of the same tree by name — the legitimate act this fix keeps working.
-        // (The seed's 201 mint bound at /x is the same property through issuance.)
+        // (The seed's 201 mint bound at /conf is the same property through issuance.)
         given()
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"api_key_name": "conf-admin-key", "path_prefix": "/x/v1"}""")
+            .body("""{"api_key_name": "conf-admin-key", "path_prefix": "/conf/v1"}""")
             .`when`()
             .post("/api/v1/endpoints/bindings")
             .then()
@@ -109,19 +109,21 @@ class PublishedEndpointBindingConfinementE2eTest {
     // ----------------------------------------------------------------- serve time (#191)
 
     @Test
-    fun `a foreign binding row is inert - the answer is the unbound key's, byte for byte`() {
+    fun `a foreign binding row is inert - the answer is the unbound key's, error payload for payload`() {
         // Before the row exists: the unbound refusal, captured.
         val unbound =
             given()
                 .port(port)
                 .header(API_KEY_HEADER, FOREIGN_KEY.plaintext)
                 .`when`()
-                .get("/api/x/v1/p")
+                .get("/api/conf/v1/p")
                 .then()
                 .statusCode(403)
                 .extract()
+                .jsonPath()
+                .getMap<String, Any>("error")
 
-        // The row an older release could have left behind: A's key bound at /x, written
+        // The row an older release could have left behind: A's key bound at /conf, written
         // directly. The bind-time rule above cannot see history; serve time must not care.
         insertForeignBinding()
 
@@ -130,15 +132,20 @@ class PublishedEndpointBindingConfinementE2eTest {
                 .port(port)
                 .header(API_KEY_HEADER, FOREIGN_KEY.plaintext)
                 .`when`()
-                .get("/api/x/v1/p")
+                .get("/api/conf/v1/p")
                 .then()
                 .statusCode(403)
-                .body("error.code", equalTo("endpoint.key_kind_refused"))
+                // A USER key of another workspace on a path nobody of ITS workspace bound is
+                // the unbound rule's other-workspace arm.
+                .body("error.code", equalTo("endpoint.key_not_bound"))
                 .extract()
+                .jsonPath()
+                .getMap<String, Any>("error")
 
-        // Same status, same code, same body: the foreign row neither authorised nor shadowed
-        // anything — the walk behaves exactly as if the node carried no binding.
-        withForeignRow.body().asString() shouldBe unbound.body().asString()
+        // Same refusal, field for field of the error payload (the envelope's correlation_id
+        // is per-request by design): the foreign row neither authorised nor shadowed anything
+        // — the walk behaves exactly as if the node carried no binding.
+        withForeignRow shouldBe unbound
     }
 
     @Test
@@ -147,7 +154,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             .port(port)
             .header(API_KEY_HEADER, ownKey)
             .`when`()
-            .get("/api/x/v1/p")
+            .get("/api/conf/v1/p")
             .then()
             .statusCode(200)
             .body("rows.size()", equalTo(1))
@@ -192,7 +199,7 @@ class PublishedEndpointBindingConfinementE2eTest {
                 connection
                     .prepareStatement(
                         "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by)" +
-                            " VALUES ('/x', ?, ?::uuid, ?::uuid) ON CONFLICT DO NOTHING",
+                            " VALUES ('/conf', ?, ?::uuid, ?::uuid) ON CONFLICT DO NOTHING",
                     ).use { ps ->
                         ps.setString(1, FOREIGN_KEY.id)
                         ps.setString(2, OTHER_WORKSPACE)
@@ -207,7 +214,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"name": "conf-serving", "kind": "endpoint", "bindings": ["/x"]}""")
+            .body("""{"name": "conf-serving", "kind": "endpoint", "bindings": ["/conf"]}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
             .then()
@@ -217,7 +224,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             .getString("data.key")
 
     private fun publish() {
-        publish("/x/v1/p", pipeline = "conf/x_summary")
+        publish("/conf/v1/p", pipeline = "conf/x_summary")
     }
 
     private fun publish(
@@ -359,7 +366,7 @@ class PublishedEndpointBindingConfinementE2eTest {
          * prefix (auth.md §11A.1's non-disclosure rule, applied to bindings).
          */
         private const val REFUSAL_MESSAGE =
-            "No published path of your workspace lies at or under '/x'. " +
+            "No published path of your workspace lies at or under '/conf'. " +
                 "Bind the key at a node of your own published tree, or at the root."
 
         private val ADMIN_KEY = E2eAuth.generateKey("conf-admin-key", arrayOf("read", "execute", "author"))

@@ -138,9 +138,16 @@ class ApiKeysAdminController(
     ): String {
         val principal = requirePrincipal()
         val workspaceId = principal.requireWorkspace().id
-        when (apiKeyRepository.findById(keyId)?.takeIf { it.workspaceId == workspaceId }?.kind) {
-            ApiKeyKind.SERVER -> apiKeyService.revokeWorkspaceServerKey(keyId, workspaceId, principal.userId)
-            ApiKeyKind.ENDPOINT -> apiKeyService.revokeWorkspaceEndpointKey(keyId, workspaceId, principal.userId)
+        val kind = apiKeyRepository.findById(keyId)?.takeIf { it.workspaceId == workspaceId }?.kind
+        when (kind) {
+            ApiKeyKind.SERVER -> {
+                apiKeyService.revokeWorkspaceServerKey(keyId, workspaceId, principal.userId)
+            }
+
+            ApiKeyKind.ENDPOINT -> {
+                apiKeyService.revokeWorkspaceEndpointKey(keyId, workspaceId, principal.userId)
+            }
+
             // A user key is the top bar's, never this page's; an unknown or foreign id is
             // not-found. Either way the answer is the same redrawn table, revealing nothing.
             else -> {}

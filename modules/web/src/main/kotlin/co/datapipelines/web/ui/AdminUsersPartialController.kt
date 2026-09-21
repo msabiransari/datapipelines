@@ -244,6 +244,12 @@ class AdminUsersPartialController(
         }
     }
 
+    /**
+     * The row's action endpoint: the admin-users page's existing verb family (route prefix,
+     * the `PATCH` + row-swap shape, CSRF from the layout). The identity reset (#187) has its
+     * OWN literal route below — a new `RestOperation` — but renders through the same
+     * [saved] response the family shares.
+     */
     @PatchMapping("/partials/admin/users/{userId}/{action}")
     @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun toggle(
@@ -306,6 +312,37 @@ class AdminUsersPartialController(
             variant = "success",
             title = title,
             message = "${updated.email} $outcome",
+        )
+    }
+
+    /**
+     * #187 — reset a user's linked sign-in identity to the bootstrap placeholder, so the
+     * NEXT OIDC sign-in with that email claims the row. The explicit answer to
+     * `auth.login.identity_mismatch`: a login never re-links silently, so moving an account
+     * between sign-in identities is this super-admin decision, audited
+     * (`auth.user.identity_reset`). Its own literal route and its own operation
+     * (`USER_IDENTITY_RESET` — see the matrix) beside the `{action}` family above, whose
+     * response shape it shares. Liveness, admin flag, password and memberships are
+     * untouched: a deactivated user stays deactivated (180).
+     */
+    @PatchMapping("/partials/admin/users/{userId}/identity-reset")
+    @RequiredScope(ScopeMatrix.RestOperation.USER_IDENTITY_RESET)
+    fun resetIdentity(
+        model: Model,
+        @PathVariable userId: UUID,
+    ): Any {
+        requireAdmin()
+        val actor = currentPrincipal().userId
+        userService.resetIdentity(userId, actor)
+        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        return saved(
+            model,
+            updated,
+            oneTimePassword = null,
+            mailNotice = null,
+            variant = "success",
+            title = "Identity reset",
+            message = "${updated.email} can be claimed at the next sign-in with that email.",
         )
     }
 

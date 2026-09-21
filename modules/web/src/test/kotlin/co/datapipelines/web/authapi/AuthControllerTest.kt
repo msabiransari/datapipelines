@@ -43,9 +43,8 @@ class AuthControllerTest {
     // these requests carry no bindings — so the #191 bind-time check is a no-op here.
     private val bindingRepository = mockk<EndpointKeyBindingRepository>(relaxed = true)
     private val auditSink = mockk<AuditEventSink>(relaxed = true)
-    private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository> {
-        every { findByWorkspace(any()) } returns emptyList()
-    }
+    private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository>()
+
     private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints)
     private val controller = AuthController(apiKeyService, apiKeyRepository, userService, endpointKeys)
 

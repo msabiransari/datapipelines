@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContain
@@ -144,7 +145,7 @@ class UserAdminIntegrationTest {
     @Test
     fun `emails are stored and matched lowercase so provider casing cannot fork a row`() {
         val first = service.findOrCreateByEmail("Alice@Company.COM", "Alice", null, "keycloak", "sub-1")
-        val second = service.findOrCreateByEmail("ALICE@company.com", "Alice Wang", null, "okta", "sub-2")
+        val second = service.findOrCreateByEmail("ALICE@company.com", "Alice Wang", null, "keycloak", "sub-1")
         val created = first.user
         val again = second.user
 
@@ -154,7 +155,25 @@ class UserAdminIntegrationTest {
         again.id shouldBe created.id
         created.email shouldBe "alice@company.com"
         jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Int::class.java) shouldBe 1
-        again.provider shouldBe "okta"
+        again.displayName shouldBe "Alice Wang"
+    }
+
+    @Test
+    fun `the same email under a DIFFERENT identity is refused, the row untouched (#187)`() {
+        val first = service.findOrCreateByEmail("Alice@Company.COM", "Alice", null, "keycloak", "sub-1")
+
+        val refused =
+            shouldThrow<IdentityMismatchException> {
+                service.findOrCreateByEmail("ALICE@company.com", "Alice Wang", null, "okta", "sub-2")
+            }
+
+        refused.userId shouldBe first.user.id
+        refused.storedProvider shouldBe "keycloak"
+        refused.incomingProvider shouldBe "okta"
+        // The row was linked ONCE: no re-link, no second row.
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Int::class.java) shouldBe 1
+        jdbc.jdbcTemplate
+            .queryForObject("SELECT provider FROM users WHERE email = 'alice@company.com'", String::class.java) shouldBe "keycloak"
     }
 
     private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()

@@ -77,6 +77,16 @@ data class AuthProperties(
         val clientSecret: String = "",
         val issuerUri: String = "",
         val displayName: String? = null,
+        /**
+         * `trust-email-without-verified-claim` (auth.md §5.1, #187): for an IdP that never
+         * emits the `email_verified` claim, accept the address as verified. **Default
+         * `false`** — a MISSING claim is treated as UNVERIFIED (fail closed): provisioning is
+         * keyed on email, so a provider that would not vouch for an address must not hand the
+         * account to whoever asserts it. A claim that is PRESENT and `false` is refused
+         * regardless of this knob. An acceptance under the knob is audited once per login
+         * (`auth.login.email_verified_assumed`).
+         */
+        val trustEmailWithoutVerifiedClaim: Boolean = false,
     )
 
     /**
@@ -137,6 +147,9 @@ data class AuthProperties(
         val domain = email.substringAfterLast('@', missingDelimiterValue = "").lowercase()
         return domain.isNotEmpty() && domain in domains
     }
+
+    /** The configured OIDC provider with this registration id, or null (#187's per-provider knobs). */
+    fun oidcProvider(registrationId: String): Provider? = oidc.providers.firstOrNull { it.name == registrationId }
 
     /**
      * Whether the cookies this module mints (`dp_session`, `dp_oauth2_authz`, `dp_csrf`)

@@ -99,6 +99,12 @@ class AdminUsersBrowseModel(
                 add(AdminUserAction("disable-local", "Disable local", DANGER))
             }
             if (locked) add(AdminUserAction("unlock", "Unlock", SUCCESS))
+            // #187 — the explicit re-link: releases the row's identity to the next OIDC
+            // sign-in with this email. The row template concatenates the action into
+            // `/partials/admin/users/{id}/{action}`, but this one resolves to the LITERAL
+            // `.../identity-reset` route, whose handler declares `USER_IDENTITY_RESET` —
+            // a more specific mapping than the `{action}` pattern, so Spring routes it there.
+            add(AdminUserAction("identity-reset", "Reset identity", WARNING))
         }
 
     companion object {

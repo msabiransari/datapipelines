@@ -10,10 +10,11 @@ import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceLiveness
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
@@ -27,15 +28,15 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.web.config.EndpointsProperties
-import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -83,6 +84,7 @@ class PublishedEndpointServeAuditOutcomeTest {
     private val audit = RecordingAudit()
     private val runner = mockk<RecordingExecutionRunner>()
     private val resultStore = mockk<ResultStore>()
+    private val readOnlyRule = mockk<ReadOnlyPipelineRule>()
 
     private val endpoint =
         PublishedEndpoint.of(
@@ -118,18 +120,14 @@ class PublishedEndpointServeAuditOutcomeTest {
         every { pipelines.findRecord(workspaceId, any(), endpoint.pipelineId) } returns record()
         every { pipelines.findCurrentVersion(workspaceId, any(), endpoint.pipelineId) } returns versionDetail()
         every { pipelines.findExecutable(workspaceId, any(), any(), 3) } returns executable()
+        val bindings = mockk<EndpointKeyBindingRepository>()
+        every { bindings.findByPrefixes(any(), any()) } returns emptyList()
+        every { readOnlyRule.check(any(), any()) } returns ValidationResult(emptyList())
         return PublishedEndpointServeService(
             registry = registry,
-            bindings = mockk<EndpointKeyBindingRepository> {
-                every { findByPrefixes(any(), any()) } returns emptyList()
-            },
+            bindings = bindings,
             authorizer = EndpointAuthorizer(),
-            readOnlyRule = mockk<ReadOnlyPipelineRule> {
-                every { check(any(), any()) } returns mockk {
-                    every { isValid } returns true
-                    every { failures } returns emptyList()
-                }
-            },
+            readOnlyRule = readOnlyRule,
             pipelines = pipelines,
             runner = runner,
             resultStore = resultStore,

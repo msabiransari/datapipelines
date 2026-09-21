@@ -361,6 +361,7 @@ class RoleMatrixTest {
         val SUPER_ADMIN_ONLY =
             setOf(
                 Op.USER_ADMINISTRATION,
+                Op.USER_IDENTITY_RESET,
                 Op.WORKSPACE_CREATE,
                 Op.MANAGE_INSTANCE_WORKSPACES,
                 Op.MANAGE_DATASOURCE_GRANTS,
