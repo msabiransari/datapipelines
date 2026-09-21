@@ -4,8 +4,8 @@ import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.ApiKeyCredential
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
-import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -16,7 +16,6 @@ import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
-import java.time.Instant
 
 /**
  * 079 §C — the API section (T139, and the owner's "I don't see any API menu", which was
@@ -43,24 +42,19 @@ import java.time.Instant
  * and it is also what refuses an `endpoint`-kind key here (that key kind carries no scopes
  * and reaches only the published-endpoint surface, auth §7.7).
  *
- * ## Read-only about ENDPOINTS, the management screen for KEYS (091)
+ * ## Read-only about endpoints AND keys (179, D17)
  *
- * Publishing and binding an existing endpoint stay on REST/MCP (074 step 6's intent) — the
- * endpoints card is a truthful inventory plus links. Keys are different: 091 moves their
- * issuance and revocation HERE, because "the keys that may call this" and "the endpoints they
- * may call" are one question, and `/settings/api-keys` kept them a page apart. Settings now
- * holds nothing but a link to this screen.
- *
- * The key surface is `MANAGE_OWN_API_KEYS` — any authenticated principal, own keys only — and
- * it is the partial controller's annotation that enforces it, not this page's `read` floor. The
- * UI is a convenience, never the enforcement point (ui-screens.md §4 preamble).
+ * The keys card lived here until 179; it moved to `/api-keys`, the workspace admin's
+ * `MANAGE_API_KEYS` page, and the per-endpoint table now shows each path's ASSOCIATED key
+ * names with a manage link for the roles that hold that row. What stays is the endpoints
+ * inventory and the MCP connection card — and the top bar's chip, not this page, is where a
+ * user copies their own MCP key.
  */
 @Controller
 class ApiConsoleController(
     private val publishing: EndpointPublishService,
     private val bindings: EndpointKeyBindingRepository,
     private val apiKeys: ApiKeyRepository,
-    private val keyRows: ApiKeyRows,
     private val pipelineNames: PipelineNames,
     private val endpointsProperties: EndpointsProperties,
     private val authProperties: AuthProperties,
@@ -82,13 +76,19 @@ class ApiConsoleController(
         val names = pipelineNames.lookup(workspaceId, endpoints.map { it.pipelineId }.toSet())
         val served = pipelineNames.servedVersions(workspaceId, endpoints.map { it.pipelineId }.toSet())
 
-        // "Bound keys" is the EXACT-NODE count, which is what the REST surface reports and
+        // "Associated keys" is the EXACT-NODE set, which is what the REST surface reports and
         // what a reader can act on ("this path has bindings"). It is deliberately NOT the
         // EFFECTIVE authorization — that walks ancestors and takes the nearest node with any
         // binding (EndpointAuthorizer), and zero bindings does not mean nobody can call the
         // endpoint: a `user` key pinned to this workspace with `execute` still may.
         val allBindings = bindings.findAll().filter { it.workspaceId == workspaceId }
         val boundByPath = allBindings.groupBy { it.pathPrefix }
+        // 179: the column names the keys, so the key ids resolve to names in one batch —
+        // the workspace's API keys, not the caller's.
+        val keyNames =
+            apiKeys
+                .findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT)
+                .associate { it.id to it.name }
 
         model.addAttribute(
             "endpoints",
@@ -102,36 +102,12 @@ class ApiConsoleController(
                     servedVersion = served[endpoint.pipelineId]?.version,
                     servedDraft = served[endpoint.pipelineId]?.draft ?: false,
                     timeoutSeconds = endpoint.timeoutSeconds,
-                    boundKeys = boundByPath[endpoint.pathPattern]?.size ?: 0,
+                    boundKeyNames = boundByPath[endpoint.pathPattern].orEmpty().mapNotNull { keyNames[it.apiKeyId] }.sorted(),
                     enabled = endpoint.isEnabled,
                 )
             },
         )
         model.addAttribute("defaultTimeoutSeconds", endpointsProperties.timeoutDefaultSeconds)
-
-        // The key list is the caller's OWN keys, revoked ones included: `is_revoked` is a fact
-        // an operator checks, and a list that hides them cannot answer "did I revoke that?".
-        // Endpoint keys show the paths they are bound to instead of scopes, because an endpoint
-        // key HAS no scopes (§7.7): an empty scope cell would read as "this key can do nothing".
-        // Named `keys`, not `apiKeys`: the table is a Thymeleaf FRAGMENT with a `keys`
-        // parameter, and a page that renders it inline resolves that name from the model.
-        // A different attribute name renders the empty state on a page full of keys —
-        // silently, because a fragment parameter that is not supplied is simply null.
-        model.addAttribute("keys", keyRows.of(apiKeys.findByUser(principal.userId), Instant.now()))
-
-        // 091 — the form's options. Rendered from the SAME source the partial validates against
-        // (`ApiKeyForm`), so a select can never offer a value the server refuses. Order is the
-        // owner's ruling: Kind → Scope → Name → Expiry → Bindings, scope and bindings conditional.
-        model.addAttribute("kindChoices", ApiKeyForm.kindChoices(principal.isSuperAdmin))
-        // RBAC (112 merge review): the form offers what the SERVICE would accept — the issuance
-        // ceiling — never the session scope set, which is empty for every human since D-R1.
-        model.addAttribute("scopeChoices", ApiKeyForm.scopeChoices(ApiKeyService.issuanceCeiling(principal)))
-        model.addAttribute("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
-        model.addAttribute("expiryCustomWire", ApiKeyForm.CUSTOM)
-        // The picker offers the LITERAL prefixes of this workspace's published paths, never a
-        // node with a `{variable}` segment: the authorizer walks the concrete request path's
-        // ancestors, so a binding on a variable node would authorise nothing (see ApiKeyForm).
-        model.addAttribute("bindingNodes", ApiKeyForm.bindingNodes(endpoints.map { it.pathPattern }))
 
         model.addAttribute("mcpUrl", mcpUrl())
         model.addAttribute("mcpHeader", ApiKeyCredential.HEADER)
@@ -184,6 +160,9 @@ class ApiConsoleController(
      * One published endpoint, as the table renders it. [segments] marks which path segments
      * are `{variables}` so the template can chip them without re-parsing a string — the
      * parsed form is already on the row.
+     *
+     * [boundKeyNames] are the API keys associated at the EXACT node (179: names, not a
+     * count — the reader's question is "which", not "how many").
      */
     data class EndpointRow(
         val url: String,
@@ -193,7 +172,7 @@ class ApiConsoleController(
         val servedVersion: Int?,
         val servedDraft: Boolean,
         val timeoutSeconds: Int,
-        val boundKeys: Int,
+        val boundKeyNames: List<String>,
         val enabled: Boolean,
     )
 

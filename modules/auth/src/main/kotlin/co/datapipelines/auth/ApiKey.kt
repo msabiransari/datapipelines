@@ -28,6 +28,14 @@ data class ApiKey(
      * `DEFAULT 'user'` makes for every stored row.
      */
     val kind: ApiKeyKind = ApiKeyKind.DEFAULT,
+    /**
+     * Whether `api_keys.secret_sealed` holds the openable plaintext (V31, D16). The flag
+     * travels on the model — the top bar renders Copy from it — while the sealed BLOB never
+     * does: [ApiKeyRepository.sealedSecretOf] is the only read that touches the column.
+     */
+    val hasSealedSecret: Boolean = false,
+    /** True when the login/switch hook minted this key rather than a person on demand (D16). */
+    val mintedAtLogin: Boolean = false,
 ) {
     /** True when this key's authority is its endpoint bindings rather than its scopes (§7.7). */
     val isEndpointKey: Boolean get() = kind == ApiKeyKind.ENDPOINT

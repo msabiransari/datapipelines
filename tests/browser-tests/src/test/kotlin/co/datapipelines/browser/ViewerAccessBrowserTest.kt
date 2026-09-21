@@ -572,7 +572,9 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val email: String,
         private val session: Session,
     ) {
-        fun verbs(): List<String> = page.locator("[data-verb]").all().map { it.getAttribute("data-verb") }
+        // 179: the SCREEN's verbs, never the shell's — the top bar's MCP-key chip carries
+        // copy/rotate for every role, and a page-wide read mixes chrome into the assertion.
+        fun verbs(): List<String> = page.locator("#app-main [data-verb]").all().map { it.getAttribute("data-verb") }
 
         fun roleBadge(): String = page.locator("[data-role]").first().getAttribute("data-role")
 

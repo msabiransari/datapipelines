@@ -390,6 +390,135 @@ class ApiKeyServiceTest {
         shouldThrow<ApiKeyExpiredException> { service.validateServerKey(issued.plaintext) }
     }
 
+    // ------------------------------------------------------- D16: the login mint (179)
+
+    /**
+     * A REAL in-memory sealer, never a strict mock (the "must be CALLED" lesson): the mint's
+     * contract is that the plaintext is sealed and storable, and the copy path's is that what
+     * was sealed opens back to exactly it. The fake makes both assertable as EFFECTS.
+     */
+    private class FakeSealer : SecretSealer {
+        override fun seal(
+            plaintext: String,
+            aad: String,
+        ): ByteArray = "$aad|$plaintext".toByteArray()
+
+        override fun open(
+            sealed: ByteArray,
+            aad: String,
+        ): String {
+            val text = String(sealed)
+            check(text.startsWith("$aad|")) { "sealed under a different AAD" }
+            return text.removePrefix("$aad|")
+        }
+    }
+
+    private val sealer = FakeSealer()
+    private val mintingService =
+        ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService, sealer)
+
+    private fun owner(
+        mustChange: Boolean = false,
+        superAdmin: Boolean = false,
+    ) = activeOwner().copy(mustChangePassword = mustChange, isAdmin = superAdmin)
+
+    private fun contextOf(role: WorkspaceRole) = WorkspaceContext(workspaceId, "acme", role)
+
+    /** Captures one mint's insert and answers with the record the repository would return. */
+    private fun captureMint(): io.mockk.CapturingSlot<Boolean> {
+        val mintedAtLogin = slot<Boolean>()
+        every { repo.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), capture(mintedAtLogin)) } answers {
+            record(
+                id = firstArg(),
+                name = thirdArg(),
+                scopes = arg(4),
+                workspaceId = arg(6),
+            )
+        }
+        return mintedAtLogin
+    }
+
+    @Test
+    fun `the login mint seals the secret, marks the row, and an existing key makes it a no-op`() {
+        val mintedAtLogin = captureMint()
+        every { repo.findLiveUserKey(ownerId, workspaceId) } returns null
+
+        val minted = mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR))!!
+
+        mintedAtLogin.captured shouldBe true
+        minted.name shouldBe "mcp/acme"
+        minted.kind shouldBe ApiKeyKind.USER
+        minted.expiresAt shouldBe null
+        minted.scopes shouldBe Scope.AUTHOR.expand()
+        // The plaintext never leaves the mint — what the row holds is the hash and the seal.
+        minted.keyHash shouldStartWith "\$argon2id\$"
+
+        // Second call: the key exists, nothing happens.
+        every { repo.findLiveUserKey(ownerId, workspaceId) } returns minted
+        mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR)) shouldBe null
+    }
+
+    @Test
+    fun `the mint's scopes are the role's reach - and a super admin is never capped by a viewer membership`() {
+        captureMint()
+        every { repo.findLiveUserKey(any(), any()) } returns null
+
+        fun scopesFor(
+            role: WorkspaceRole,
+            superAdmin: Boolean = false,
+        ) = mintingService.mintLoginKey(owner(superAdmin = superAdmin), contextOf(role))!!.scopes
+
+        scopesFor(WorkspaceRole.VIEWER) shouldBe Scope.EXECUTE.expand()
+        scopesFor(WorkspaceRole.PROMOTER) shouldBe setOf(Scope.READ)
+        scopesFor(WorkspaceRole.AUTHOR) shouldBe Scope.AUTHOR.expand()
+        scopesFor(WorkspaceRole.WORKSPACE_ADMIN) shouldBe Scope.AUTHOR.expand()
+        // D7: the demo join's viewer row must not cap the instance's owner (found on the lane).
+        scopesFor(WorkspaceRole.VIEWER, superAdmin = true) shouldBe Scope.AUTHOR.expand()
+    }
+
+    @Test
+    fun `a user owing a password change gets no key`() {
+        mintingService.mintLoginKey(owner(mustChange = true), contextOf(WorkspaceRole.AUTHOR)) shouldBe null
+        io.mockk.verify(exactly = 0) { repo.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a lost race is the index's answer, re-read as nothing-to-do`() {
+        every { repo.findLiveUserKey(ownerId, workspaceId) } returns null
+        every { repo.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            org.springframework.dao.DuplicateKeyException("api_keys_one_live_user_key")
+
+        mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR)) shouldBe null
+    }
+
+    @Test
+    fun `the copy path opens only the owner's live key's sealed secret`() {
+        val key = record(id = "dpk_SEALED000001")
+        every { repo.findLiveUserKey(ownerId, workspaceId) } returns key
+        val fullKey = "dpk_SEALED000001.${"A".repeat(48)}"
+        every { repo.sealedSecretOf(key.id) } returns sealer.seal(fullKey, key.id)
+
+        mintingService.openOwnMcpKey(ownerId, workspaceId) shouldBe fullKey
+
+        // A pre-V31 key (nothing sealed) and no key at all both answer null — the chip shows
+        // the prefix without a copy button for the first and is absent for the second.
+        every { repo.sealedSecretOf(key.id) } returns null
+        mintingService.openOwnMcpKey(ownerId, workspaceId) shouldBe null
+        every { repo.findLiveUserKey(ownerId, workspaceId) } returns null
+        mintingService.openOwnMcpKey(ownerId, workspaceId) shouldBe null
+    }
+
+    @Test
+    fun `the workspace revoke is the endpoint kind's only - a flipped row audits, a foreign id does not`() {
+        every { repo.revokeInWorkspace("dpk_EP0000000001", workspaceId, ApiKeyKind.ENDPOINT) } returns true
+        mintingService.revokeWorkspaceEndpointKey("dpk_EP0000000001", workspaceId, ownerId) shouldBe true
+        io.mockk.verify { auditLogger.log(event = "auth.api_key.revoked", userId = ownerId, keyId = "dpk_EP0000000001", details = any()) }
+
+        every { repo.revokeInWorkspace("dpk_FOREIGN00001", workspaceId, ApiKeyKind.ENDPOINT) } returns false
+        mintingService.revokeWorkspaceEndpointKey("dpk_FOREIGN00001", workspaceId, ownerId) shouldBe false
+        io.mockk.verify(exactly = 1) { auditLogger.log(event = "auth.api_key.revoked", userId = any(), keyId = any(), details = any()) }
+    }
+
     /** Collects WARN-level messages emitted by [type]'s logger while [block] runs. */
     private fun captureWarnings(
         type: Class<*>,

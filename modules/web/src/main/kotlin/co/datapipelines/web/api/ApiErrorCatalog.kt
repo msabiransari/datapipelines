@@ -225,6 +225,10 @@ object ApiErrorCatalog {
             // The credential making the request is fine; the requested scope is not one keys
             // have (O-2) — a 400, like `auth.api_key.expiry_invalid` and for the same reason.
             co.datapipelines.auth.AuthErrorCodes.KEY_SCOPE_UNAVAILABLE to HttpStatus.BAD_REQUEST,
+            // 179 (D16) — a `user` key is minted by the login hook, never on demand. The same
+            // 400 shape as the scope refusal beside it: the credential is fine, the KIND is
+            // not mintable on a request surface.
+            co.datapipelines.auth.AuthErrorCodes.KEY_KIND_NOT_MINTABLE to HttpStatus.BAD_REQUEST,
             // D-R7: an ungranted datasource is INVISIBLE, so its refusal is the not-found
             // status, not the datasource family's default.
             co.datapipelines.datasources.DatasourceErrorCodes.GRANT_REQUIRED to HttpStatus.NOT_FOUND,

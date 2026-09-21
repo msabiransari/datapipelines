@@ -135,6 +135,19 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
                             rs.getObject(1, UUID::class.java)
                         }
                     }
+                // 179 (D16/V31): the sign-in and the switch into the workspace minted the
+                // user's login key already — one live `user` key per (user, workspace) is a
+                // UNIQUE INDEX now. The fixture's key replaces it (revoke, never delete:
+                // audit_log.key_id keeps resolving).
+                connection
+                    .prepareStatement(
+                        "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND workspace_id = ?" +
+                            " AND kind = 'user' AND is_revoked = FALSE",
+                    ).use { ps ->
+                        ps.setObject(1, userId)
+                        ps.setObject(2, workspaceId)
+                        ps.executeUpdate()
+                    }
                 // D-R12: a key can do at most what its ISSUER can do in the pinned workspace
                 // NOW. Without a membership there the issuer is a viewer, and every authoring
                 // call the suite makes would be `auth.key_issuer_role_lost` — a correct refusal

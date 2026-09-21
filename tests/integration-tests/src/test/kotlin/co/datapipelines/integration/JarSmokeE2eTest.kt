@@ -34,8 +34,10 @@ import javax.crypto.spec.SecretKeySpec
  * suite precisely because nothing ever rendered a screen from inside a jar.
  *
  * Authentication is the deployment's own: a session JWT minted locally over the
- * configured HS256 secret mints an API key through the real endpoint (CSRF double-submit
- * included), and the screens are then fetched with `DP-API-Key` — a credential that
+ * configured HS256 secret; since 179 (D16) a `user` key is minted by the login hook, so the
+ * screen-fetch keys are seeded by SQL (E2eAuth) and the real mint endpoint is exercised once —
+ * its answer for an on-demand `user` key is the catalogued refusal. The screens are fetched
+ * with `DP-API-Key` — a credential that
  * authenticates on every path (`ApiKeyFilter` has no path test), which is exactly the
  * honest first-visitor shape.
  *
@@ -78,9 +80,12 @@ class JarSmokeE2eTest {
         startOidcStub()
         startApp()
         seed()
-        apiKey = mintApiKey("smoke-key", "read")
-        authorKey = mintApiKey("smoke-author-key", "author")
-        executeKey = mintApiKey("smoke-execute-key", "execute")
+        apiKey = seedKey("smoke-key", "read", READER_USER).plaintext
+        authorKey = seedKey("smoke-author-key", "author", AUTHOR_USER).plaintext
+        executeKey = seedKey("smoke-execute-key", "execute", EXECUTOR_USER).plaintext
+        // 179 (D16): the mint endpoint itself is still exercised on the packaged jar — and
+        // its answer for a `user` key is the refusal, because the login hook mints those.
+        mintApiKeyRefused()
     }
 
     @AfterAll
@@ -328,6 +333,7 @@ class JarSmokeE2eTest {
 
     // ------------------------------------------------------------------ seeding + auth
 
+    @Suppress("LongMethod") // the seed IS the fixture: one statement per table, spelled out
     private fun seed() {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c ->
             c.createStatement().use { s ->
@@ -341,6 +347,19 @@ class JarSmokeE2eTest {
                     "INSERT INTO workspace_members (workspace_id, user_id, role) " +
                         "VALUES ('$WORKSPACE', '$USER', 'workspace_admin')",
                 )
+                // 179 (V31): one live `user` key per (user, workspace) — the three
+                // scope-graded keys get three owners, each a member of the smoke workspace.
+                listOf(READER_USER to "smoke-read@test", AUTHOR_USER to "smoke-author@test", EXECUTOR_USER to "smoke-execute@test")
+                    .forEach { (id, email) ->
+                        s.execute(
+                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) " +
+                                "VALUES ('$id', '$email', 'Smoke', 'google', '$email-sub', TRUE, FALSE)",
+                        )
+                        s.execute(
+                            "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                                "VALUES ('$WORKSPACE', '$id', 'workspace_admin')",
+                        )
+                    }
                 s.execute(
                     "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, " +
                         "credential_encrypted, created_by, is_readonly) VALUES ('$SEEDED_DATASOURCE', " +
@@ -406,11 +425,39 @@ class JarSmokeE2eTest {
         return "$header.$payload.$signature"
     }
 
-    /** Mints the API key through the real endpoint: session cookie, CSRF double-submit. */
-    private fun mintApiKey(
+    /**
+     * Seeds the key by SQL (179, D16: a `user` key is minted by the login hook, never by a
+     * request) — the same shape every other suite's fixture takes (E2eAuth hashes; the row
+     * is the suite's to write).
+     */
+    private fun seedKey(
         name: String,
         scope: String,
-    ): String {
+        ownerId: String,
+    ): E2eAuth.SeededKey {
+        val key = E2eAuth.generateKey(name, arrayOf(scope), ownerId = ownerId)
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c ->
+            c
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
+                        " VALUES (?, ?, ?, ?, ?, '$WORKSPACE')",
+                ).use { ps ->
+                    ps.setString(1, key.id)
+                    ps.setObject(2, UUID.fromString(ownerId))
+                    ps.setString(3, key.name)
+                    ps.setString(4, key.hash)
+                    ps.setArray(5, c.createArrayOf("text", key.scopes))
+                    ps.executeUpdate()
+                }
+        }
+        return key
+    }
+
+    /**
+     * 179 (D16) — the jar's mint endpoint answers the on-demand `user` kind with the
+     * catalogued refusal: session cookie, CSRF double-submit, 400 `auth.key_kind_not_mintable`.
+     */
+    private fun mintApiKeyRefused() {
         val csrf =
             HttpRequest
                 .newBuilder(URI.create("$base/settings"))
@@ -431,12 +478,12 @@ class JarSmokeE2eTest {
                 .header("Content-Type", "application/json")
                 .header("Cookie", "dp_session=${sessionJwt()}; dp_csrf=$token")
                 .header("DP-CSRF-Token", token)
-                .POST(HttpRequest.BodyPublishers.ofString("""{"name":"$name","scopes":["$scope"]}"""))
+                .POST(HttpRequest.BodyPublishers.ofString("""{"name":"smoke-refused"}"""))
                 .build()
         val minted = http.send(mint, HttpResponse.BodyHandlers.ofString())
-        check(minted.statusCode() == 201) { "key mint failed ${minted.statusCode()}: ${minted.body()}" }
-        val match = Regex(""""key"\s*:\s*"(dpk_[^"]+)"""").find(minted.body()) ?: error("no key in ${minted.body()}")
-        return match.groupValues[1]
+        check(minted.statusCode() == 400 && minted.body().contains("auth.key_kind_not_mintable")) {
+            "an on-demand user key mint must be refused: ${minted.statusCode()}: ${minted.body()}"
+        }
     }
 
     // ------------------------------------------------------------------ http helpers
@@ -477,6 +524,9 @@ class JarSmokeE2eTest {
 
     private companion object {
         val USER = UUID.randomUUID().toString()
+        val READER_USER = UUID.randomUUID().toString()
+        val AUTHOR_USER = UUID.randomUUID().toString()
+        val EXECUTOR_USER = UUID.randomUUID().toString()
         val WORKSPACE = UUID.randomUUID().toString()
         val PIPELINE = UUID.randomUUID().toString()
         val TEMPLATE = UUID.randomUUID().toString()

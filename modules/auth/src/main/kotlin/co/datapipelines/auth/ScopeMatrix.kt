@@ -97,18 +97,30 @@ object ScopeMatrix {
         MUTATE_WORKSPACE_DATASOURCES(Scope.AUTHOR, Permission.WS_ADMIN),
 
         /**
-         * "Manage own API keys — any authenticated" (§7.6). [Scope.READ] is the floor
-         * of the §7.5 hierarchy: every scope implies it, so requiring `read` is exactly
-         * "any authenticated principal" and nothing weaker exists to express. The real
-         * guard on this operation is the key-scopes ⊆ creator-scopes subset check in
-         * [ApiKeyService.issue] (§7.4), not a scope minimum. R3 (#179) reshapes this row.
+         * "See, copy and delete your own MCP key" (§7.6; D16, 179). The `user`-kind key the
+         * login hook minted for the caller in the active workspace: the top-bar chip, its
+         * copy endpoint, and the delete that ROTATES it (the next login mints a new one).
+         * Renamed from `MANAGE_OWN_API_KEYS` when R3 took CREATION off this row entirely —
+         * a user key is minted at login or not at all, so "manage" was a promise the row no
+         * longer keeps. [Scope.READ] is the floor of the §7.5 hierarchy: every scope implies
+         * it, so requiring `read` is exactly "any authenticated principal" and nothing weaker
+         * exists to express.
          */
-        MANAGE_OWN_API_KEYS(Scope.READ, Permission.VIEW),
+        VIEW_OWN_MCP_KEY(Scope.READ, Permission.VIEW),
+
+        /**
+         * "Manage the workspace's API keys" (§7.6; D17, 179): the `/api-keys` page and its
+         * partials — create/delete `endpoint` keys, associate them with published paths — and
+         * the REST bindings routes. ws_admin and super admin only (owner ruling 8). The
+         * `author` scope floor matches every other workspace-admin verb; the ROLE axis is the
+         * one that excludes the author.
+         */
+        MANAGE_API_KEYS(Scope.AUTHOR, Permission.WS_ADMIN),
 
         /**
          * "Get current principal — any authenticated" (§7.6 v2.5, `GET /api/v1/auth/me`,
          * rest-api §16.2). Same [Scope.READ] floor and same reasoning as
-         * [MANAGE_OWN_API_KEYS]: `read` is the weakest scope the §7.5 hierarchy can
+         * [VIEW_OWN_MCP_KEY]: `read` is the weakest scope the §7.5 hierarchy can
          * express, so requiring it IS "any authenticated principal".
          */
         CURRENT_PRINCIPAL(Scope.READ, Permission.VIEW),
@@ -116,7 +128,7 @@ object ScopeMatrix {
         /**
          * "Set own theme preference" (§7.6, `PATCH /partials/profile/theme`): a mutation
          * of the caller's OWN user row and nothing else — the sibling of
-         * [MANAGE_OWN_API_KEYS]. [Scope.READ] is the §7.5 floor, so this IS "any
+         * [VIEW_OWN_MCP_KEY]. [Scope.READ] is the §7.5 floor, so this IS "any
          * authenticated principal": the operation writes only the principal's own row
          * (the handler resolves the caller's userId; there is no payload-chosen target),
          * so no scope above `read` is meaningful and none weaker exists to express.
@@ -169,7 +181,7 @@ object ScopeMatrix {
         /**
          * "Change own password — any authenticated" (§7.6, §5A.4): the honest floor
          * is [Scope.READ], the "any authenticated principal" convention of
-         * [MANAGE_OWN_API_KEYS] — every session may rotate its OWN credential. The
+         * [VIEW_OWN_MCP_KEY] — every session may rotate its OWN credential. The
          * real guards live in the handler and `LocalPasswordService`: the current
          * password is verified (a hijacked session cannot rotate), and the account
          * is the principal's own by construction.

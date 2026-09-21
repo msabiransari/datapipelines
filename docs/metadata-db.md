@@ -142,6 +142,8 @@ CREATE TABLE api_keys (
     last_used_ip          INET,
     last_used_user_agent  TEXT,
     kind                  TEXT        NOT NULL DEFAULT 'user',   -- 'user' | 'endpoint' (V11) | 'server' (V17)
+    secret_sealed         BYTEA,                       -- V31: the full key, sealed (D16); NULL pre-R3
+    minted_at_login       BOOLEAN     NOT NULL DEFAULT FALSE,    -- V31: the login hook minted this (D16)
     CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'endpoint', 'server'))
 );
 
@@ -150,6 +152,10 @@ CREATE INDEX idx_api_keys_expires ON api_keys(expires_at)
     WHERE expires_at IS NOT NULL AND is_revoked = FALSE;
 CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
     WHERE kind = 'endpoint' AND is_revoked = FALSE;
+-- V31 (D16): ONE live `user` key per (user, workspace) — the login hook's "none yet"
+-- check is a read; this index is the arbiter of the race.
+CREATE UNIQUE INDEX api_keys_one_live_user_key ON api_keys(user_id, workspace_id)
+    WHERE kind = 'user' AND is_revoked = FALSE;
 ```
 
 **Notes:**
@@ -158,6 +164,7 @@ CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
 - `scopes` is a `TEXT[]`; a key's scopes must be a subset of its creator's scopes at creation time (enforced by the application, not the schema — the creator's scopes are derived per D14, not stored).
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful.
+- `secret_sealed` / `minted_at_login` (V31, [Auth §7.4](auth.md#74-issuance), D16): a `user` key is minted by the login/switch hook, never on demand, and its plaintext is sealed with the deployment's credential-encryption key (AAD = the key id) so the top bar's copy endpoint can open it later. NULL for keys minted before R3 — they show their prefix with no copy button. `minted_at_login` marks the hook's rows; the Argon2id `key_hash` stays the authentication half. The partial unique index `api_keys_one_live_user_key` enforces one live `user` key per (user, workspace); `endpoint` and `server` keys are excluded, and revoked rows do not block the rotation re-mint. The migration revokes all but the newest live `user` key per pair (a NOTICE reports the count) before creating the index.
 - `kind` (V11) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `user` is every key that existed before it — scopes, a workspace, the whole API surface its scopes allow — and `endpoint` is a credential for published endpoints only. An `endpoint` key's scopes are never consulted; its authority is its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings), and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
 - No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 
@@ -836,6 +843,7 @@ CREATE INDEX idx_pipeline_check_runs_latest
 | `api_keys` | `idx_api_keys_user` | explicit (partial) | List a user's active keys |
 | `api_keys` | `idx_api_keys_expires` | explicit (partial) | Find expiring/expired keys for cleanup |
 | `api_keys` | `idx_api_keys_endpoint_kind` | explicit (partial) | The endpoint keys of a workspace — the endpoints screen and binding resolution; partial because user keys are the overwhelming majority (V11) |
+| `api_keys` | `api_keys_one_live_user_key` | explicit (partial, unique) | V31 (D16): ONE live `user` key per `(user_id, workspace_id)` — the login mint's race arbiter |
 | `audit_log` | `audit_log_pkey` | via PK | Surrogate `BIGSERIAL` id |
 | `audit_log` | `idx_audit_timestamp` | explicit | Recent events (DESC) |
 | `audit_log` | `idx_audit_user` | explicit (partial) | Per-user audit trail |
@@ -1197,6 +1205,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.23 | V31 (179, roles R3) | §4.2 `api_keys` gains `secret_sealed BYTEA` (the login-minted key's plaintext sealed under the credential-encryption key, AAD = the key id) and `minted_at_login BOOLEAN`, plus the partial UNIQUE `api_keys_one_live_user_key` (`(user_id, workspace_id)` where `kind = 'user' AND NOT is_revoked`) — the migration revokes all but the newest live user key per pair first, with the count in a NOTICE. §5's table gains the index. |
 | 2026-09-20 | v1.22 | V29 + V30 (177, roles R1) | **§4.12 `workspace_members` and §4.17 `workspace_invitations` carry ONE `role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`, CHECK'd) — V23's three booleans folded back by V29 with the precedence admin → workspace_admin, else promoter, else author, else viewer; `idx_workspace_members_admins` keeps its name over the new predicate; the down path is in the migration and proven up-and-down by `WorkspaceRolesMigrationTest`. **§4.6 `pipeline_executions.triggered_by` → `executed_by`** (V30, D11 — the same NOT NULL FK, every actor kept) plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| NULL, CHECK'd; backfilled from `triggered_via`: ENDPOINT → endpoint, MCP → user); the ERD edge follows. §4.6 also records `ENDPOINT` in `chk_triggered_via`, which V11 had widened without this document noticing. |
 | 2026-09-19 | v1.21 | 172 (#172) | No schema change. §4.13 reworded for R-EP5: the stored `path_pattern` is the part after `/api` in the `/api/<category>/<version>/<path…>` shape — the column, the constraint and every index are exactly as V11 wrote them. |
 | 2026-09-14 | v1.20 | V28 migration (140 release checks) | New **§4.20 `pipeline_check_runs`** — the server-side record of every release check run ([Pipeline Contract §3.3/§12.12](pipeline-contract.md)): one append-only row per check per run, `via` CHECK'd over `mcp` \| `rest` \| `ui` \| `release`, `verdict` CHECK'd over `pass` \| `fail` \| `error` (error = no verdict could be formed, recorded — never silently a fail), `parameters_json` the BOUND context, `observed_json` one small object (`{"value": …}` or `{"rows": …}`, NULL when the run errored before a value was read). FK to `pipelines(id)` only, deliberately not the composite version FK — a purged draft's runs are history to keep. §5 gains `idx_pipeline_check_runs_latest`; §5A classifies it derived; the ERD gains `pipelines ──1:N── pipeline_check_runs`. Nineteen tables. |

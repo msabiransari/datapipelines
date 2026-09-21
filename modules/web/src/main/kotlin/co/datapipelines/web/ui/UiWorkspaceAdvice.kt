@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceService
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
 class UiWorkspaceAdvice(
     private val workspaceService: WorkspaceService,
     private val themeResolver: ThemeResolver,
+    private val apiKeyRepository: ApiKeyRepository,
 ) {
     /**
      * The switcher's options.
@@ -49,6 +51,24 @@ class UiWorkspaceAdvice(
 
     @ModelAttribute("activeWorkspace")
     fun activeWorkspace(): String? = principal()?.workspace?.name
+
+    /**
+     * 179 (D16) — the top bar's MCP-key chip: the caller's ONE login-minted `user` key in the
+     * ACTIVE workspace, as its display prefix and whether its sealed secret can be copied
+     * (V31). Null when there is no live key — after a delete-to-rotate, before the next
+     * sign-in — and the bar renders nothing rather than a hollow chip.
+     *
+     * Shell chrome, so it lives here with the switcher: the bar is painted at every full
+     * paint and persists across boosted swaps, and a per-controller stamp would be a rule
+     * sixteen screens have to remember. One indexed read per full-page render.
+     */
+    @ModelAttribute("mcpKey")
+    fun mcpKey(): McpKeyChip? {
+        val principal = principal() ?: return null
+        val workspace = principal.workspace ?: return null
+        val key = apiKeyRepository.findLiveUserKey(principal.userId, workspace.id) ?: return null
+        return McpKeyChip(prefix = key.id.take(ApiKeyRows.PREFIX_CHARS) + "…", copyable = key.hasSealedSecret)
+    }
 
     /**
      * 114 §C.4 — the role badge beside the switcher's workspace name.
@@ -85,6 +105,10 @@ class UiWorkspaceAdvice(
     @ModelAttribute("navWorkspaces")
     fun navWorkspaces(): Boolean = RoleModel.shell(principal()).workspaces
 
+    /** 179 (D17) — the avatar menu's "API keys" link: the `/api-keys` page is `MANAGE_API_KEYS`. */
+    @ModelAttribute("navApiKeys")
+    fun navApiKeys(): Boolean = RoleModel.shell(principal()).apiKeys
+
     @ModelAttribute("activeTheme")
     fun activeTheme(request: HttpServletRequest): String = themeResolver.resolve(request)
 
@@ -116,3 +140,15 @@ class UiWorkspaceAdvice(
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 }
+
+/**
+ * The top bar's MCP-key chip (179, D16): the display prefix, and whether the key carries a
+ * sealed secret the copy endpoint can open (false for keys minted before V31 — they show
+ * the prefix with the "delete and sign in again" hint and no Copy). The id and the secret
+ * never appear here: deletion needs no id (one key per user per workspace, resolved
+ * server-side) and the secret is fetched on the click.
+ */
+data class McpKeyChip(
+    val prefix: String,
+    val copyable: Boolean,
+)

@@ -1,0 +1,30 @@
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="chip(mcpKey)" class="app-mcpkey" id="app-mcpkey">
+  <!-- 179 (D16) — the top bar's MCP key, right side beside the user menu: the caller's ONE
+       login-minted `user` key in the ACTIVE workspace. Prefix always; Copy only when the key
+       carries a sealed secret (V31 — a pre-R3 key has none, so it offers rotation instead);
+       Delete rotates (the next login or switch mints a fresh key). Every role may do all
+       three on their OWN key — §7.6's VIEW_OWN_MCP_KEY row — so `mcpKey != null` (a live key
+       exists) IS the guard, and the partial's own th:if carries it for the sweep.
+       The secret is never in the page: Copy fetches it (shell.js) from
+       /partials/mcp-key/secret, which opens the sealed store for the caller's own key only. -->
+  <th:block th:if="${mcpKey != null}">
+    <span class="app-mcpkey-label" title="Your MCP key for this workspace — minted at sign-in">MCP key</span>
+    <span class="app-mcpkey-prefix ds-mono" th:text="${mcpKey.prefix}"
+          th:title="${mcpKey.copyable} ? 'Your MCP key for this workspace' : 'Minted before keys became copyable — delete it and sign in again to get one you can copy'">dpk_RGAXQ7T2…</span>
+    <button type="button" th:if="${mcpKey.copyable}" data-verb="mcp-key-copy" class="ds-button ds-button-ghost ds-button-sm"
+            data-mcp-copy="/partials/mcp-key/secret" title="Copy the full key">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#copy"></use></svg> Copy
+    </button>
+    <a class="ds-button ds-button-ghost ds-button-sm" th:href="@{/api-console}" title="The MCP connection details live on the API screen"
+       hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg></a>
+    <button type="button" data-verb="mcp-key-delete" class="ds-button ds-button-ghost ds-button-sm u-danger"
+            hx-delete="/partials/mcp-key" hx-target="#app-mcpkey" hx-swap="outerHTML"
+            hx-confirm="Delete this MCP key? It stops authenticating within about a minute, and a fresh one is minted at your next sign-in."
+            title="Delete to rotate — a fresh key is minted at your next sign-in">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
+    </button>
+  </th:block>
+  <th:block th:if="${mcpKey == null}">
+    <span class="app-mcpkey-label u-secondary">No MCP key here — one is minted when you next sign in or switch workspace.</span>
+  </th:block>
+</div>

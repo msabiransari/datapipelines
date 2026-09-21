@@ -193,6 +193,15 @@ class AuthHttpBoundaryTest {
         // Keys pin the seeded `default` workspace. The issuer is a SUPER ADMIN here, which is
         // what reaches a workspace this user holds no membership row in (D-R8) — round 1 moved
         // that bypass off the `admin` SCOPE, which no key may hold any more (O-2).
+        //
+        // 179 (V31): ONE live `user` key per (user, workspace) — so the dead keys this
+        // fixture needs belong to OTHER users; an expired-but-unrevoked key still counts as
+        // live, and the revoked one is inserted live BEFORE its revoke, so it cannot share
+        // an owner either.
+        val deadKeyOwner = UserRepository(jdbc).insert("agent-dead@company.com", "Agent Dead", null, "keycloak", "sub-2", isAdmin = false)
+        val revokedKeyOwner =
+            UserRepository(jdbc)
+                .insert("agent-revoked@company.com", "Agent Revoked", null, "keycloak", "sub-3", isAdmin = false)
         readKey =
             apiKeyService
                 .issue(superAdminIssuer, user.id, "read-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
@@ -201,15 +210,15 @@ class AuthHttpBoundaryTest {
             apiKeyService
                 .issue(
                     superAdminIssuer,
-                    user.id,
+                    deadKeyOwner.id,
                     "expired-key",
                     setOf(Scope.READ),
                     DEFAULT_WORKSPACE_ID,
                     Instant.now().minusSeconds(3600),
                 ).plaintext
         val revocable =
-            apiKeyService.issue(superAdminIssuer, user.id, "revoked-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
-        apiKeyService.revoke(revocable.plaintext.substringBefore('.'), user.id)
+            apiKeyService.issue(superAdminIssuer, revokedKeyOwner.id, "revoked-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
+        apiKeyService.revoke(revocable.plaintext.substringBefore('.'), revokedKeyOwner.id)
         revokedKey = revocable.plaintext
         session = jwtService.issue(user)
 

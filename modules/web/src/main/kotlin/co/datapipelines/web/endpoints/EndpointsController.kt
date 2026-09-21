@@ -4,6 +4,8 @@ import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.PublishedEndpoint
+import co.datapipelines.auth.ApiKey
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -37,12 +39,18 @@ data class CreateEndpointRequest(
     val description: String? = null,
 )
 
-/** §19.5 binding body — a key by NAME, so the same request shape works on any deployment. */
+/**
+ * §19.5 binding body — a key by NAME, so the same request shape works on any deployment,
+ * or (179, D17) by ID, which is what the `/api-keys` page's association UI sends: a name is
+ * owner-scoped and ambiguous deployment-wide, an id is neither.
+ */
 data class BindEndpointKeyRequest(
     @field:JsonProperty("path_prefix") @get:JsonProperty("path_prefix") @param:JsonProperty("path_prefix")
     val pathPrefix: String,
     @field:JsonProperty("api_key_name") @get:JsonProperty("api_key_name") @param:JsonProperty("api_key_name")
-    val apiKeyName: String,
+    val apiKeyName: String? = null,
+    @field:JsonProperty("api_key_id") @get:JsonProperty("api_key_id") @param:JsonProperty("api_key_id")
+    val apiKeyId: String? = null,
 )
 
 /**
@@ -55,12 +63,13 @@ data class BindEndpointKeyRequest(
  * the pinned Tomcat an encoded `%2F` is refused with a `400` below routing and below the security
  * chain, so `/api/v1/endpoints/{path}` cannot carry `/lending/{borough}/home` at all.
  *
- * ## Why publishing is `author` and binding is owner-or-admin
+ * ## Why publishing is `author` and binding is the workspace admin's
  *
  * Publishing exposes a released pipeline at a URL — an authoring act over content the author
- * already owns. Binding hands a CREDENTIAL authority over a subtree, which is a different kind of
- * decision, so it additionally requires the key's owner or an admin. Admin-ness is not a scope
- * (auth.md §7.6), so that half is enforced here rather than by the annotation.
+ * already owns (`MANAGE_ENDPOINTS`, D9). Binding hands a CREDENTIAL authority over a subtree:
+ * since 179 (D17) that is `MANAGE_API_KEYS`, the workspace admin's row, and the key is
+ * addressed by id (the `/api-keys` page) or — the pre-179 shape, kept — by the caller's OWN
+ * key's name.
  */
 @RestController
 @RequestMapping("/api/v1/endpoints")
@@ -119,33 +128,73 @@ class EndpointsController(
         if (!publishing.unpublish(currentPrincipal(), path)) throw notFound(path)
     }
 
-    /** §19.5 — bind a key to a node of the tree. Owner-or-admin, by key NAME. */
+    /**
+     * §19.5 — bind a key to a node of the tree.
+     *
+     * 179 (D17): this route moved from `MANAGE_ENDPOINTS` to `MANAGE_API_KEYS` — association
+     * is the workspace admin's verb now, on both request shapes. The BY-NAME shape is kept
+     * for REST compatibility: it resolves within the caller's OWN keys, exactly as before
+     * (an admin binding their own named key), and nothing else changed about it.
+     */
     @PostMapping("/bindings")
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
     @Transactional("metadataTransactionManager")
     fun bind(
         @RequestBody body: BindEndpointKeyRequest,
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
-        val key = requireOwnedKey(body.apiKeyName)
+        val key = resolveKey(body.apiKeyId, body.apiKeyName)
         endpointKeys.bind(principal, key.id, body.pathPrefix)
         return ApiResponse.of(mapOf("path_prefix" to body.pathPrefix, "api_key_name" to key.name, "api_key_id" to key.id))
     }
 
-    /** §19.5 — unbind. */
+    /** §19.5 — unbind. Both addressing forms, exactly as [bind]. */
     @DeleteMapping("/bindings")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
     @Transactional("metadataTransactionManager")
     fun unbind(
         @RequestParam pathPrefix: String,
-        @RequestParam apiKeyName: String,
+        @RequestParam(required = false) apiKeyName: String?,
+        @RequestParam(required = false) apiKeyId: String?,
     ) {
-        val key = requireOwnedKey(apiKeyName)
+        val key = resolveKey(apiKeyId, apiKeyName)
         if (!endpointKeys.unbind(currentPrincipal(), key.id, pathPrefix)) {
             throw notFound(pathPrefix)
         }
+    }
+
+    /**
+     * The key a binding request addresses. BY ID (the `/api-keys` page's shape): an
+     * `endpoint` key of the ACTIVE workspace — a foreign or wrong-kind id is not-found,
+     * the non-disclosure rule the whole key surface follows. BY NAME (REST compatibility):
+     * the caller's OWN live key, owner-scoped in SQL exactly as before 179.
+     */
+    private fun resolveKey(
+        apiKeyId: String?,
+        apiKeyName: String?,
+    ): ApiKey {
+        if (apiKeyId != null) {
+            val key = apiKeys.findById(apiKeyId)
+            val foreign =
+                key == null || key.kind != ApiKeyKind.ENDPOINT || key.isRevoked ||
+                    key.workspaceId != currentPrincipal().requireWorkspace().id
+            if (foreign) {
+                throw ApiException(
+                    PipelineErrorCodes.Endpoint.NOT_FOUND,
+                    "No API key with that id in this workspace.",
+                    mapOf("api_key_id" to apiKeyId),
+                )
+            }
+            return key
+        }
+        if (apiKeyName != null) return requireOwnedKey(apiKeyName)
+        throw ApiException(
+            PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+            "A binding names its key by api_key_id or api_key_name.",
+            mapOf("reason" to "key_reference_missing"),
+        )
     }
 
     /**

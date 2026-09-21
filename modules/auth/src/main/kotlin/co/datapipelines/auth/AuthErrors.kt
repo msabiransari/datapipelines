@@ -78,6 +78,14 @@ object AuthErrorCodes {
     const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
 
     /**
+     * 400 — on-demand issuance asked for a `user` key (roles design 2026-09-20, D16/§3.3).
+     * User keys are minted by the login/switch hook and nowhere else — one per user per
+     * workspace — so no request surface may create one. A 400, not a 403: the caller's
+     * credential and role are fine; the KIND is not mintable on demand.
+     */
+    const val KEY_KIND_NOT_MINTABLE = "auth.key_kind_not_mintable"
+
+    /**
      * 404 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
      * The same status a member gets: the owner ruled (2026-09-14) that a deactivated
      * workspace answers not-found on EVERY surface, keys included — deactivation must not
@@ -131,6 +139,7 @@ object AuthErrorCodes {
             ROLE_REQUIRED,
             KEY_ISSUER_ROLE_LOST,
             KEY_SCOPE_UNAVAILABLE,
+            KEY_KIND_NOT_MINTABLE,
             KEY_WORKSPACE_INACTIVE,
         )
 
@@ -173,7 +182,8 @@ class ApiKeyInvalidException(
         AuthErrorCodes.API_KEY_INVALID,
         HTTP_UNAUTHORIZED,
         reason,
-        "That API key is not valid. Generate a new one from the API Keys page.",
+        "That key is not valid. Your MCP key rotates by deleting it in the top bar and signing in again; " +
+            "an API key is created on /api-keys by a workspace admin.",
     )
 
 /**
@@ -199,7 +209,8 @@ class ApiKeyExpiredException :
         AuthErrorCodes.API_KEY_EXPIRED,
         HTTP_UNAUTHORIZED,
         "API key past expiration",
-        "That API key has expired. Generate a new one from the API Keys page.",
+        "That key has expired. Your MCP key rotates by deleting it in the top bar and signing in again; " +
+            "an API key is created on /api-keys by a workspace admin.",
     )
 
 class SessionInvalidException(
@@ -388,6 +399,22 @@ class KeyScopeUnavailableException(
         "Scope '${requested.wire}' is not available to API keys",
         "API keys can be granted read, execute or author. Administrative actions need a signed-in person.",
         details = mapOf("requested" to requested.wire, "available" to KEY_SCOPES.map { it.wire }),
+    )
+
+/**
+ * On-demand issuance asked for a `user` key (D16 — roles design 2026-09-20 §3.3). A user
+ * key is minted by the login/switch hook and nowhere else: exactly one per user per
+ * workspace, rotated by deleting it and signing in again. No request surface — REST, htmx
+ * or MCP — may create one, so the kind is refused for EVERY role rather than gated to one.
+ */
+class KeyKindNotMintableException(
+    kind: ApiKeyKind,
+) : AuthException(
+        AuthErrorCodes.KEY_KIND_NOT_MINTABLE,
+        HTTP_BAD_REQUEST,
+        "Keys of kind '${kind.wire}' are not mintable on demand",
+        "Your MCP key is created for you when you sign in. To rotate it, delete it from the top bar and sign in again.",
+        details = mapOf("kind" to kind.wire),
     )
 
 /**

@@ -47,8 +47,9 @@ class ApiKeyRowsTest {
                 ).single()
 
         assertAll(
-            // `dpk_` plus four characters — enough to recognise a key, useless to anyone else.
-            { row.prefix shouldBe "dpk_RGAX…" },
+            // `dpk_` plus eight characters (12 total, D16's top-bar length) — enough to
+            // recognise a key, useless to anyone else.
+            { row.prefix shouldBe "dpk_RGAXQ7T2…" },
             { row.scopes shouldBe listOf("execute", "read") },
             { row.createdRelative shouldBe "3 days ago" },
             { row.createdAbsolute shouldBe "2026-09-05 09:00 UTC" },

@@ -102,8 +102,9 @@ import java.nio.file.StandardCopyOption
  * `-PshotsSet=tutorial` photographs the three screens the `/how-it-works` tutorial steps
  * embed and no other set covers: `tutorial-login` (the sign-in screen, the one ANONYMOUS
  * shot — captured before sign-in), `tutorial-release` (the release dialog — [releaseStep]'s
- * seeding, so a lane instance, never prod) and `tutorial-endpoint-key` (an `endpoint`-kind
- * key bound to the demo path in the keys table, whose reach cell is the bound path). The
+ * seeding, so a lane instance, never prod) and `tutorial-endpoint-key` (an API key — the
+ * `endpoint` kind on the wire — associated with the demo path on the `/api-keys` page, whose
+ * associations cell is the bound path; the page and its mint moved there in 179). The
  * mechanics are the `home` set's — [HOME_SCALE], `-PshotsTheme`, the write audit — but the
  * set is NOT read-only: the key and the endpoint are its subject, so lane instances only.
  */
@@ -713,13 +714,13 @@ object SiteShotsMain {
             return written
         }
 
-        /** Step 7's capture: the endpoint-kind key in the keys table, its reach cell the bound path. */
+        /** Step 7's capture: the API key on the `/api-keys` page, its associations cell the bound path. */
         private fun tutorialEndpointKey() {
             publishDemoEndpoint()
-            page.navigate("$baseUrl/api-console")
+            page.navigate("$baseUrl/api-keys")
             waitFor(".ds-table, .ds-empty")
             mintKeyIfAbsent("tutorial-weather-app", kind = "endpoint", binding = DEMO_ENDPOINT_PATH)
-            page.navigate("$baseUrl/api-console")
+            page.navigate("$baseUrl/api-keys")
             waitFor(".ds-table")
             refuseVisibleSecret()
             shoot("tutorial-endpoint-key.png")
@@ -900,19 +901,16 @@ object SiteShotsMain {
         }
 
         /**
-         * The key-minting ceremony (091): the modal's field ORDER is the claim — Kind → Scope →
-         * Name → Expiry → Bindings, scope and bindings conditional on the kind — so the shot is
-         * the open form, not the table. The table is [apiConsole]'s business: at 1440x900 the
-         * whole API section fits one viewport, so two captures of it would be the same bytes
-         * (measured 2026-09-08: byte-identical files).
+         * 179 (D16): the key shot is the TOP BAR, not a modal — your MCP key is minted by
+         * the sign-in itself (this driver's included) and the chip carries its prefix, the
+         * Copy button and delete-to-rotate. The clip keeps the bar and a little air under
+         * it: the chip IS the claim, and a full 1440x900 of dashboard would bury it.
          *
-         * The two keys are minted first because [apiConsole] needs them: a `user` key (an agent's
-         * and a program's key are the same credential) and an `endpoint` key bound to a published
-         * path, whose "reach" cell is a path and not a scope — the distinction the column exists
-         * to make.
+         * The `endpoint`-kind key is still minted first because [apiConsole]'s association
+         * column needs it — on the `/api-keys` page, where key management moved (D17).
          */
         private fun keys() {
-            page.navigate("$baseUrl/api-console")
+            page.navigate("$baseUrl/api-keys")
             // The table arrives with the page but the EMPTY state is a different element —
             // wait for whichever landed. Counting rows before either exists reports zero, and
             // this method would mint a fresh key on every run (it minted five before this
@@ -920,20 +918,11 @@ object SiteShotsMain {
             waitFor(".ds-table, .ds-empty")
             // Fixed names, not timestamped ones: two runs of this command must produce the
             // same pixels, and "agent-2026-09-04" in a table cell would differ tomorrow.
-            mintKeyIfAbsent("analytics-agent", kind = "user", binding = null)
             mintKeyIfAbsent("reporting-endpoint", kind = "endpoint", binding = DEMO_ENDPOINT_PATH)
-            page.navigate("$baseUrl/api-console")
-            waitFor(".ds-table")
+            page.navigate("$baseUrl/dashboard")
+            waitFor("#app-mcpkey")
             refuseVisibleSecret()
-            // The MINT ceremony, which is the 091 claim the page makes: Kind → Scope → Name →
-            // Expiry → Bindings, in that order, with scope and bindings conditional on the kind.
-            // The default kind is `user`, so this is the form as it opens — nothing is driven
-            // into an unusual state for the camera.
-            page.click("button:has-text('New key')")
-            page.locator("#key-modal").waitFor()
-            waitFor("#key-scope-field")
-            shoot("keys.png")
-            page.keyboard().press("Escape")
+            shoot("keys.png", clipHeight = 176.0)
         }
 
         /**
@@ -967,7 +956,7 @@ object SiteShotsMain {
             binding: String?,
         ) {
             if (page.locator("#keys-table-body span:text-is('$name')").count() > 0) return
-            page.click("button:has-text('New key')")
+            page.click("button:has-text('New API key')")
             page.locator("#key-modal").waitFor()
             page.locator("#key-modal input[name=kind][value=$kind]").check()
             if (binding != null) {
@@ -1580,19 +1569,25 @@ object SiteShotsMain {
             }
         }
 
-        private fun shoot(file: String) {
+        private fun shoot(
+            file: String,
+            clipHeight: Double? = null,
+        ) {
             settle()
             val target = outDir.resolve(file)
             // Clip to the CURRENT viewport, not a constant: the `app` set resizes the page
             // between passes, and a hard-coded 1440x900 clip would crop the 2560x1440 pass.
             // The scale is the set's ([shotScale]) — DEVICE on a DPR-2 context is what makes
             // the `home` set's PNGs 2880x1800 rather than a CSS-sized bitmap.
+            // [clipHeight] (179's top-bar chip) shortens the shot from the top: the bar is at
+            // the top of every page, and a full-height capture would bury it in chrome-free
+            // dashboard.
             val viewport = page.viewportSize()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
                     .setPath(target)
-                    .setClip(0.0, 0.0, viewport.width.toDouble(), viewport.height.toDouble())
+                    .setClip(0.0, 0.0, viewport.width.toDouble(), clipHeight ?: viewport.height.toDouble())
                     .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
                     .setScale(shotScale),
             )

@@ -206,13 +206,13 @@ class RoleModelTest {
     @Test
     fun `a workspace admin's Admin entry is the active workspace's members, never the instance`() {
         RoleModel.shell(session(WorkspaceRole.WORKSPACE_ADMIN)) shouldBe
-            shell(adminMembers = true, executions = true, promotion = true, workspaces = true)
+            shell(adminMembers = true, executions = true, promotion = true, workspaces = true, apiKeys = true)
     }
 
     @Test
     fun `a super admin's Admin entry is instance users, with or without a workspace`() {
         RoleModel.shell(superAdminSession(explicitRole = null)) shouldBe
-            shell(adminUsers = true, executions = true, promotion = true, workspaces = true)
+            shell(adminUsers = true, executions = true, promotion = true, workspaces = true, apiKeys = true)
         // No active workspace: the workspace-bound Roles are NONE, the shell entry survives,
         // and the Workspaces item stays (the no-workspace page is the one screen that explains).
         RoleModel.roles(session(role = null, superAdmin = true)) shouldBe RoleModel.NONE
@@ -223,7 +223,7 @@ class RoleModelTest {
     fun `a key narrows the shell entry like every other boolean`() {
         // O-2: no key holds `admin`, so a super admin's key never shows instance users.
         RoleModel.shell(superAdminKey(Scope.AUTHOR)) shouldBe
-            shell(adminMembers = true, executions = true, promotion = true, workspaces = true)
+            shell(adminMembers = true, executions = true, promotion = true, workspaces = true, apiKeys = true)
         // A read key of a workspace admin shows neither Admin item (the member verbs floor at
         // `author`); Executions stays (it floors at `read`), and so does the Workspaces page
         // link — WORKSPACES_READ floors at `read`, the issuer administers the workspace.
@@ -282,7 +282,8 @@ class RoleModelTest {
         executions: Boolean = false,
         promotion: Boolean = false,
         workspaces: Boolean = false,
-    ) = RoleModel.Shell(adminUsers, adminMembers, executions, promotion, workspaces)
+        apiKeys: Boolean = false,
+    ) = RoleModel.Shell(adminUsers, adminMembers, executions, promotion, workspaces, apiKeys)
 
     private fun session(
         role: WorkspaceRole?,

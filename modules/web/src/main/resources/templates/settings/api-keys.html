@@ -2,26 +2,29 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- 091 — this screen used to issue and revoke keys. It holds nothing but the link now:
-       "the keys that may call this deployment" and "the endpoints they may call" are one
-       question, and keeping them a page apart made the API screen a read-only shadow of a
-       settings page nobody found. The route stays so existing bookmarks and the avatar
-       menu still land somewhere true. -->
+  <!-- 091 reduced this screen to a link; 179 (D16/D17) repointed it. Your MCP key is
+       minted at sign-in and lives in the TOP BAR — copy it from the chip, delete it there
+       to rotate. The workspace's API keys (the kind programs call published endpoints
+       with) are created and associated by workspace admins on /api-keys. The route stays
+       so existing bookmarks land somewhere true. -->
   <div class="app-page-h">
     <div>
       <h1 class="ds-headline">API keys</h1>
-      <p class="app-page-sub">API keys live on the API screen, beside the endpoints and the MCP connection they are used with.</p>
+      <p class="app-page-sub">Your MCP key is in the top bar, beside your account menu — minted when you signed in.</p>
     </div>
-    <div class="app-page-actions">
-      <a class="ds-button ds-button-primary" th:href="@{/api-console}">Go to API</a>
+    <div class="app-page-actions" th:if="${navApiKeys == true}">
+      <a class="ds-button ds-button-primary" th:href="@{/api-keys}">Manage API keys</a>
     </div>
   </div>
 
   <div class="ds-card">
     <div class="app-card-b">
       <div class="app-empty">
-        <b>Moved to the API screen</b>
-        Issue, inspect and revoke your keys — agent keys, endpoint keys and server keys — at
+        <b>Your MCP key is in the top bar</b>
+        Signed in, you hold exactly one per workspace — copy it from the chip at the top right, or delete
+        it there and sign in again to rotate. API keys for published endpoints are managed by a workspace
+        admin at <a th:if="${navApiKeys == true}" th:href="@{/api-keys}" class="ds-mono">/api-keys</a><span
+          th:if="${navApiKeys != true}" class="ds-mono">/api-keys</span>; the endpoints themselves are on
         <a th:href="@{/api-console}" class="ds-mono">/api-console</a>.
       </div>
     </div>

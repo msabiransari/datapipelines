@@ -371,6 +371,10 @@ class WorkspaceIsolationIntegrationTest {
         const val BOB = "bbb00000-0000-0000-0000-000000000002"
         const val GLOBEX_INVITATION_EMAIL = "dana@globex.test"
         private const val CAROL = "ccc00000-0000-0000-0000-000000000003"
+
+        // 179 (V31): one live `user` key per (user, workspace) — the deactivation test's
+        // second globex key needs its OWN owner, a globex member.
+        private const val DAVE = "ddd00000-0000-0000-0000-000000000004"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
         private const val PIPE_ACME = "a1b00000-0000-0000-0000-000000000001"
@@ -396,8 +400,12 @@ class WorkspaceIsolationIntegrationTest {
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
 
-        /** Pinned to globex but seeded only by the deactivation test — a key no other test validates. */
-        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", arrayOf("read", "execute", "author"), ownerId = BOB)
+        /**
+         * Pinned to globex but seeded only by the deactivation test — a key no other test
+         * validates. Owned by DAVE since 179: V31's one-live-user-key-per-(user, workspace)
+         * index makes a second live `user` key for BOB in globex uninsertable.
+         */
+        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", arrayOf("read", "execute", "author"), ownerId = DAVE)
 
         /**
          * Mints the session JWT exactly as `JwtService.issue` does (HS256, `iss`, iat/exp,
@@ -476,14 +484,16 @@ class WorkspaceIsolationIntegrationTest {
                     INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
                         ('$ALICE', 'alice@acme.test', 'Alice', 'test', 'alice-sub', TRUE, FALSE),
                         ('$BOB', 'bob@globex.test', 'Bob', 'test', 'bob-sub', TRUE, FALSE),
-                        ('$CAROL', 'carol@nowhere.test', 'Carol', 'test', 'carol-sub', TRUE, FALSE)
+                        ('$CAROL', 'carol@nowhere.test', 'Carol', 'test', 'carol-sub', TRUE, FALSE),
+                        ('$DAVE', 'dave@globex.test', 'Dave', 'test', 'dave-sub', TRUE, FALSE)
                     """.trimIndent(),
                 )
                 statement.execute(
                     """
                     INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
                         ('$WS_ACME', '$ALICE', 'workspace_admin'),
-                        ('$WS_GLOBEX', '$BOB', 'workspace_admin')
+                        ('$WS_GLOBEX', '$BOB', 'workspace_admin'),
+                        ('$WS_GLOBEX', '$DAVE', 'viewer')
                     """.trimIndent(),
                 )
                 // 113: one PENDING invitation in globex — the row that must be invisible

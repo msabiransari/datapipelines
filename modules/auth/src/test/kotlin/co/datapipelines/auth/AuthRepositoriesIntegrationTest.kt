@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -222,6 +223,95 @@ class AuthRepositoriesIntegrationTest {
     @Test
     fun `an unknown key id reads as null`() {
         keys.findById("dpk_DOESNOTEXIST").shouldBeNull()
+    }
+
+    // ------------------------------------------------------------ the login-minted key (V31, D16)
+
+    @Test
+    fun `the login-mint columns round-trip - sealed blob, the flag, and the model never carries the blob`() {
+        val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
+        val sealed = byteArrayOf(1, 2, 3, 4)
+
+        val key =
+            keys.insert(
+                "dpk_MINTED000001",
+                owner.id,
+                "mcp/default",
+                "hash",
+                setOf(Scope.READ, Scope.EXECUTE),
+                null,
+                DEFAULT_WORKSPACE_ID,
+                ApiKeyKind.USER,
+                sealed,
+                mintedAtLogin = true,
+            )
+
+        key.mintedAtLogin.shouldBeTrue()
+        // The flag rides the model; the blob never does — it is read only by the copy path.
+        key.hasSealedSecret.shouldBeTrue()
+        keys.sealedSecretOf(key.id)!!.toList() shouldBe sealed.toList()
+        keys.sealedSecretOf("dpk_DOESNOTEXIST").shouldBeNull()
+
+        // …and a pre-V31 row (no sealed copy) reads false, with nothing to open. Another
+        // owner: the index allows ONE live user key per (user, workspace).
+        val legacyOwner = users.insert("legacy@company.com", "Legacy", null, "google", "sub2", isAdmin = false)
+        val legacy = keys.insert("dpk_LEGACY000001", legacyOwner.id, "old", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        legacy.hasSealedSecret.shouldBeFalse()
+        legacy.mintedAtLogin.shouldBeFalse()
+    }
+
+    @Test
+    fun `one live user key per user and workspace - the index is the arbiter, revocation frees the slot`() {
+        val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
+        keys.insert("dpk_FIRST0000001", owner.id, "k1", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+
+        // A second live `user` key for the same pair cannot be inserted — the login mint's
+        // lost race lands here.
+        shouldThrow<org.springframework.dao.DuplicateKeyException> {
+            keys.insert("dpk_SECOND000001", owner.id, "k2", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        }
+
+        // Endpoint keys are NOT one-per: an admin may hold several (the index's WHERE excludes them).
+        keys.insert("dpk_SECOND000001", owner.id, "k2", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+
+        // Revoking the user key frees the slot — rotation is exactly this.
+        keys.revoke("dpk_FIRST0000001", owner.id).shouldBeTrue()
+        keys.insert("dpk_THIRD00000001", owner.id, "k3", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+    }
+
+    @Test
+    fun `findLiveUserKey answers the one live user key, newest on a tie it cannot have`() {
+        val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
+        keys.findLiveUserKey(owner.id, DEFAULT_WORKSPACE_ID).shouldBeNull()
+
+        val key = keys.insert("dpk_LIVE00000001", owner.id, "mcp/default", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        keys.findLiveUserKey(owner.id, DEFAULT_WORKSPACE_ID) shouldBe key
+
+        // Revoked is invisible; an endpoint key in the same pair is not the answer either.
+        keys.revoke(key.id, owner.id)
+        keys.insert("dpk_EP0000000001", owner.id, "ep", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.findLiveUserKey(owner.id, DEFAULT_WORKSPACE_ID).shouldBeNull()
+    }
+
+    @Test
+    fun `the workspace listing and revoke are kind-pinned and workspace-pinned`() {
+        val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
+        val other = users.insert("other@company.com", "Other", null, "google", "sub2", isAdmin = false)
+        keys.insert("dpk_EP0000000001", owner.id, "ep-mine", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert("dpk_EP0000000002", other.id, "ep-theirs", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert("dpk_SRV000000001", owner.id, "srv", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.SERVER)
+
+        // The /api-keys table: the workspace's keys of one kind, whoever created them.
+        keys.findByWorkspaceAndKind(DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT).map { it.name } shouldContainExactlyInAnyOrder
+            listOf("ep-mine", "ep-theirs")
+        keys.findByWorkspaceAndKind(DEFAULT_WORKSPACE_ID, ApiKeyKind.SERVER).map { it.name } shouldContainExactlyInAnyOrder
+            listOf("srv")
+
+        // The page's delete: flips an endpoint key of the workspace regardless of owner…
+        keys.revokeInWorkspace("dpk_EP0000000002", DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT).shouldBeTrue()
+        // …and CANNOT touch a user key (the MCP key is the top bar's) or a wrong-kind id.
+        keys.revokeInWorkspace("dpk_SRV000000001", DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT).shouldBeFalse()
+        checkNotNull(keys.findById("dpk_SRV000000001")).isRevoked.shouldBeFalse()
     }
 
     // ------------------------------------------------------------ Local password auth (V5, §5A)

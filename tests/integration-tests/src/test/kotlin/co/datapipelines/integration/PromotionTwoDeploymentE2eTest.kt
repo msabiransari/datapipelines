@@ -381,7 +381,14 @@ class PromotionTwoDeploymentE2eTest {
         // not be able to classify a credential by presenting it here. Each key is presented for
         // the FIRST time in this test: a key validated once is cached for the TTL (auth §7.3),
         // so revoking a key mid-test would prove the cache, not the check.
-        val wrongKind = seedServerKeyOnUat("an ordinary agent key", kind = "user")
+        // 179 (V31): one live `user` key per (user, workspace) — uatKey already holds that
+        // slot for the admin, so the wrong-kind probe gets its own owner.
+        uatJdbc.execute(
+            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)" +
+                " VALUES ('$WRONG_KIND_USER_ID', 'e2e-wrong-kind@datapipelines.test', 'E2E WrongKind'," +
+                " 'test', 'e2e-wrong-sub', TRUE, FALSE)",
+        )
+        val wrongKind = seedServerKeyOnUat("an ordinary agent key", kind = "user", ownerId = WRONG_KIND_USER_ID)
         val revoked = seedServerKeyOnUat("revoked receiver", revoked = true)
         val expired = seedServerKeyOnUat("expired receiver", expiresAt = "2020-01-01T00:00:00Z")
 
@@ -429,12 +436,13 @@ class PromotionTwoDeploymentE2eTest {
         kind: String = "server",
         revoked: Boolean = false,
         expiresAt: String? = null,
+        ownerId: String = ADMIN_USER_ID,
     ): E2eAuth.SeededKey {
         val key = E2eAuth.generateKey(name, emptyArray())
         val expiry = expiresAt?.let { "'$it'::timestamptz" } ?: "NULL"
         uatJdbc.execute(
             "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind, is_revoked, expires_at)" +
-                " VALUES ('${key.id}', '$ADMIN_USER_ID', '$name', '${key.hash}', '{}'::text[], '$WORKSPACE_ID_TEXT'," +
+                " VALUES ('${key.id}', '$ownerId', '$name', '${key.hash}', '{}'::text[], '$WORKSPACE_ID_TEXT'," +
                 " '$kind', $revoked, $expiry)",
         )
         return key
@@ -912,6 +920,7 @@ class PromotionTwoDeploymentE2eTest {
         private const val WORKSPACE_ID_TEXT = "defa0000-0000-0000-0000-000000000001"
         private val WORKSPACE_ID: UUID = UUID.fromString(WORKSPACE_ID_TEXT)
         private const val ADMIN_USER_ID = "aaaa0000-0000-0000-0000-0000000000e2"
+        private const val WRONG_KIND_USER_ID = "aaaa0000-0000-0000-0000-0000000000e3"
 
         private const val DATASOURCE = "promo_e2e_ds"
         private const val ABSENT_DATASOURCE = "promo_e2e_missing_on_uat"

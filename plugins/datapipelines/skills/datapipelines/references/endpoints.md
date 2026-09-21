@@ -21,11 +21,14 @@ endpoints_create {"path": "/finance/v1/revenue/{region}", "pipeline": "revenue_b
 The stored form is always the part after `/api`: write the path without the prefix (one prefix,
 if present, is stripped — never stored).
 
-Then mint a key for it and bind it (REST or the UI — there is no key-minting MCP tool, on
-purpose: a minted key is a live credential and a tool result travels through your context and
-transcript):
+Then an **admin creates an API key for it and associates it** — you never mint keys (there is
+no key-minting MCP tool, on purpose: a minted key is a live credential and a tool result travels
+through your context and transcript; and since 179 key creation is the workspace admin's
+`MANAGE_API_KEYS` verb, not yours). The admin does it on the `/api-keys` page — create, then
+"Edit associations" — or over REST, with the key by id:
 
 ```bash
+# an admin, on the /api-keys page or over REST:
 curl -s http://localhost:8080/api/v1/auth/api-keys -X POST \
   -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
   -d '{"name": "finance-serving", "kind": "endpoint", "bindings": ["/finance"]}'

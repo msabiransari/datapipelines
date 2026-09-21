@@ -4,13 +4,14 @@ import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import java.time.Instant
+import java.util.UUID
 
 /**
- * The API-key table's row model (091, ui-screens.md §4.18) — built in ONE place because three
- * renders show the same table: the page, the post-create out-of-band refresh, and the rows a
- * revoke swaps in. Before 091 the third of those was a Kotlin string builder kept "byte-for-byte
- * the shape of" the template's fragment by a parity test; there is now one fragment and one row
- * model, so the two cannot disagree.
+ * The API-key table's row model (091, ui-screens.md §4.18; the `/api-keys` page's since 179) —
+ * built in ONE place because three renders show the same table: the page, the post-create
+ * out-of-band refresh, and the rows a revoke swaps in. Before 091 the third of those was a
+ * Kotlin string builder kept "byte-for-byte the shape of" the template's fragment by a parity
+ * test; there is now one fragment and one row model, so the two cannot disagree.
  *
  * Every derived value is computed HERE rather than in Thymeleaf: the relative ages need a `now`,
  * and a template that calls `#temporals` on one render and a Kotlin helper on another is exactly
@@ -21,13 +22,18 @@ class ApiKeyRows(
 ) {
     /**
      * One key as the table shows it. [prefix] is the public `dpk_…` handle — never the secret,
-     * which exists only in the response that minted it.
+     * which exists only in the response that minted it (and, since V31, in the sealed column
+     * the top bar's copy endpoint opens).
+     *
+     * [createdBy] is the OWNER's display label — the `/api-keys` page lists the whole
+     * workspace's API keys (D17), so who created each one is a column, not an assumption.
      */
     data class Row(
         val id: String,
         val name: String,
         val kind: String,
         val prefix: String,
+        val createdBy: String,
         val scopes: List<String>,
         val boundPaths: List<String>,
         val createdRelative: String,
@@ -41,6 +47,9 @@ class ApiKeyRows(
     ) {
         /** A key that can still authenticate — the only kind with a revoke affordance. */
         val isLive: Boolean get() = !isRevoked && !isExpired
+
+        /** D17: the UI name — `endpoint` reads "API key" everywhere a person looks. */
+        val kindLabel: String get() = if (kind == ApiKeyKind.ENDPOINT.wire) "API key" else "Server key"
     }
 
     /**
@@ -53,20 +62,23 @@ class ApiKeyRows(
     fun of(
         keys: List<ApiKey>,
         now: Instant,
+        ownerLabels: Map<UUID, String> = emptyMap(),
     ): List<Row> =
         keys
             .sortedWith(compareBy({ it.isRevoked }, { -it.createdAt.epochSecond }))
-            .map { key -> row(key, now) }
+            .map { key -> row(key, now, ownerLabels) }
 
     private fun row(
         key: ApiKey,
         now: Instant,
+        ownerLabels: Map<UUID, String>,
     ): Row =
         Row(
             id = key.id,
             name = key.name,
             kind = key.kind.wire,
             prefix = key.id.take(PREFIX_CHARS) + "…",
+            createdBy = ownerLabels[key.userId] ?: UNKNOWN_OWNER,
             scopes = key.scopes.map { it.wire }.sorted(),
             boundPaths =
                 if (key.kind == ApiKeyKind.ENDPOINT) {
@@ -86,11 +98,14 @@ class ApiKeyRows(
             isExpired = key.expiresAt?.isBefore(now) ?: false,
         )
 
-    private companion object {
-        /** `dpk_` plus four characters — enough to recognise a key, useless to anyone else. */
-        const val PREFIX_CHARS = 8
+    companion object {
+        /** `dpk_` plus eight characters — the D16 top-bar prefix length, shared by the table. */
+        const val PREFIX_CHARS = 12
 
         /** The word both null cases render as; "—" would leave the reader guessing which. */
         const val NEVER = "never"
+
+        /** The owner of a key whose user row is gone — shown, never crashed on. */
+        const val UNKNOWN_OWNER = "(deleted user)"
     }
 }

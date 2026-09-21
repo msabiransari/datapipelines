@@ -71,6 +71,8 @@ class ReadFloorTest {
         familyOf("/admin/users") shouldBeFamily Family.USER_ADMINISTRATION
         familyOf("/api/v1/pipelines") shouldBeFamily Family.RESOURCES
         familyOf("/pipelines/{id}/editor") shouldBeFamily Family.PIPELINE_EDITOR
+        familyOf("/api-keys") shouldBeFamily Family.API_KEYS
+        familyOf("/partials/mcp-key/secret") shouldBeFamily Family.SELF
     }
 
     private infix fun Family.shouldBeFamily(expected: Family) {
@@ -168,8 +170,18 @@ class ReadFloorTest {
         /** The self verbs' reads. */
         SELF(
             floor = 2,
-            operations = setOf(RestOperation.CURRENT_PRINCIPAL, RestOperation.MANAGE_OWN_API_KEYS),
-            matches = { path -> path == "/api/v1/auth/me" || path.startsWith("/api/v1/auth/api-keys") },
+            operations = setOf(RestOperation.CURRENT_PRINCIPAL, RestOperation.VIEW_OWN_MCP_KEY),
+            matches = { path ->
+                path == "/api/v1/auth/me" || path.startsWith("/api/v1/auth/api-keys") ||
+                    path.startsWith("/partials/mcp-key")
+            },
+        ),
+
+        /** 179 (D17): the workspace's API keys page — a workspace admin's read (MANAGE_API_KEYS). */
+        API_KEYS(
+            floor = 1,
+            operations = setOf(RestOperation.MANAGE_API_KEYS),
+            matches = { path -> path == "/api-keys" },
         ),
 
         /** The promotion RECEIVER's inventory read — the server-key route family (§7.7); its row is the second gate. */

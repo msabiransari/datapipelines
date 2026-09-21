@@ -37,9 +37,10 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "How do I revoke one agent?",
-                "Revoke its key — one checkbox, and the agent stops working within about a minute, the validation " +
-                    "cache's TTL. No shared password to rotate, and nobody else's key is touched. Revocation and " +
-                    "the validation cache are docs/auth.md §11.4.",
+                "Delete its key from the top bar's MCP-key chip, and the agent stops working within about a minute, " +
+                    "the validation cache's TTL; your next sign-in mints you a fresh one. No shared password to " +
+                    "rotate, and nobody else's key is touched. Revocation and the validation cache are " +
+                    "docs/auth.md §11.4.",
                 "docs/auth.md §11.4",
             ),
             FaqEntry(
@@ -63,9 +64,9 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "What scope should the agent's key carry?",
-                "The smallest one that does the job: read to browse pipelines and schemas, execute to also run " +
-                    "them, author to also create and edit drafts. The key can never exceed its creator's scopes " +
-                    "at issue time. The scope table is docs/auth.md §7.5.",
+                "None to pick: since 179 the key is minted at sign-in and carries YOUR role in that workspace — " +
+                    "a viewer's key browses and runs, an author's also creates and edits drafts, a promoter's reads " +
+                    "released content. The ladder behind that is docs/auth.md §7.5.",
                 "docs/auth.md §7.5",
             ),
             FaqEntry(

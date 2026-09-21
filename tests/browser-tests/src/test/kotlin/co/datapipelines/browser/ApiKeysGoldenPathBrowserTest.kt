@@ -6,17 +6,19 @@ import com.microsoft.playwright.options.AriaRole
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 
 /**
- * Golden path 8 of the release checklist: API-key minting and revocation — on the API screen
- * since 091, where the endpoints and the MCP connection those keys are used with also live.
+ * Golden path 8 of the release checklist: API keys — since 179 (D16/D17) split in two:
+ * the workspace's API keys on `/api-keys` (a workspace admin's), and the user's own MCP key
+ * in the top bar (minted at sign-in, delete-to-rotate).
  *
- * The property that matters most for release confidence is ONCE-NESS: the plaintext key appears
- * in exactly ONE render (`#keyCreated`) and never again — a reload must not show it. Around it,
- * 091 adds the three KINDS: each mints from the same form, each shows a different REACH in the
- * table, and the form's conditional fields have to follow the kind the user picked (a scope
- * posted with an endpoint key is refused by the server, so the screen must not send one).
+ * The property that matters most for release confidence is ONCE-NESS: the plaintext of an
+ * admin-minted key appears in exactly ONE render (`#keyCreated`) and never again — a reload
+ * must not show it. Around it, the KINDS contract: `endpoint` and `server` mint from the
+ * form, and `user` is REFUSED (the login hook mints those) — with the refusal surfacing as
+ * the toast, not a dead form.
  */
 class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
     private fun loginReadyUser(): LocalUser {
@@ -32,13 +34,13 @@ class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
         return user
     }
 
-    /** Opens the modal, fills the form for [kind], submits, and waits for the secret panel. */
+    /** Opens the modal on /api-keys, fills the form for [kind], submits, waits for the secret panel. */
     private fun mint(
         kind: String,
         name: String,
         bind: String? = null,
     ): String {
-        page.click("text=New key")
+        page.click("text=New API key")
         page.check("#createKeyForm input[name=kind][value=$kind]")
         page.fill("#key-name", name)
         if (bind != null) page.check("#createKeyForm input[name=bindings][value=\"$bind\"]")
@@ -56,17 +58,17 @@ class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
     private fun rowFor(name: String): Locator = page.locator("tr", Page.LocatorOptions().setHasText(name)).first()
 
     @Test
-    fun `a minted key's secret is shown exactly once`() {
+    fun `a minted API key's secret is shown exactly once`() {
         startTrace()
         loginReadyUser()
 
-        page.navigate("$baseUrl/api-console")
-        page.waitForURL("**/api-console")
-        val credential = mint(kind = "user", name = "browser-ci")
+        page.navigate("$baseUrl/api-keys")
+        page.waitForURL("**/api-keys")
+        val credential = mint(kind = "endpoint", name = "browser-ci")
 
         credential shouldContain "dpk_"
         // The SECRET half is what must never appear again — the id half legitimately stays
-        // (the create panel's prefix chip and the revoke URLs).
+        // (the create panel's prefix chip and the row's prefix).
         val secretHalf = credential.substringAfterLast(".")
         rowFor("browser-ci").waitFor()
 
@@ -78,15 +80,14 @@ class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `all three kinds mint from the one form, and each row states its own reach`() {
+    fun `endpoint and server mint from the one form, and user is not offered at all`() {
         startTrace()
         loginReadyUser()
-        page.navigate("$baseUrl/api-console")
-        page.waitForURL("**/api-console")
+        page.navigate("$baseUrl/api-keys")
+        page.waitForURL("**/api-keys")
 
-        mint(kind = "user", name = "kind-user")
         // The binding picker always offers the root, whether or not this workspace has
-        // published anything — binding there authorises the whole tree.
+        // published anything — associating there authorises the whole tree.
         mint(kind = "endpoint", name = "kind-endpoint", bind = "/")
         // The seeded browser user is an admin, which is what makes the server card visible.
         mint(kind = "server", name = "kind-server")
@@ -94,43 +95,90 @@ class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
         page.reload()
         page.waitForSelector("#keys-table")
 
-        // Each kind is TAGGED, and its reach is the thing that decides what it may do: a scope
-        // for a user key, a bound path for an endpoint key, the route family for a server key.
-        rowFor("kind-user").locator("text=read").first().waitFor()
         rowFor("kind-endpoint").locator("text=/**").first().waitFor()
-        rowFor("kind-server").locator("text=promotion routes").first().waitFor()
+        // A server key has no bindings to show: never an empty-looking cell.
+        rowFor("kind-server").waitFor()
+
+        // D16: `user` is not offered at all — the login hook mints those, and a form that
+        // offered it would be offering the service's `auth.key_kind_not_mintable` refusal
+        // (the refusal of a hand-crafted POST is ApiKeyMintingTest's, over the wire).
+        page.click("text=New API key")
+        page.locator("#key-modal").waitFor()
+        page.locator("#createKeyForm input[name=kind][value=user]").count() shouldBe 0
     }
 
     @Test
-    fun `revoking removes the live affordance and marks the row dead`() {
+    fun `deleting removes the live affordance and marks the row dead`() {
         startTrace()
         loginReadyUser()
-        page.navigate("$baseUrl/api-console")
-        page.waitForURL("**/api-console")
-        mint(kind = "user", name = "to-revoke")
+        page.navigate("$baseUrl/api-keys")
+        page.waitForURL("**/api-keys")
+        mint(kind = "endpoint", name = "to-delete")
 
         // The confirm dialog is a native confirm() — accept it for this run.
         page.onDialog { it.accept() }
         page.waitForResponse("**/partials/api-keys/*") {
-            rowFor("to-revoke")
-                .getByRole(AriaRole.BUTTON, Locator.GetByRoleOptions().setName("Revoke"))
+            rowFor("to-delete")
+                .getByRole(AriaRole.BUTTON, Locator.GetByRoleOptions().setName("Delete"))
                 .click()
         }
-        rowFor("to-revoke").locator("text=revoked").waitFor()
+        rowFor("to-delete").locator("text=deleted").waitFor()
     }
 
     @Test
-    fun `the old settings screen is a link, not a second key surface`() {
+    fun `the top bar carries the login-minted MCP key - prefix, copy, delete-to-rotate`() {
+        startTrace()
+        val user = loginReadyUser()
+
+        // The sign-in (and the workspace switch inside createWorkspace) minted the key:
+        // the chip shows its prefix, Copy, and the rotate verb — no ceremony, no page.
+        page.waitForSelector("#app-mcpkey")
+        val prefix = page.locator("#app-mcpkey .app-mcpkey-prefix").textContent()
+        prefix shouldStartWith "dpk_"
+        page.waitForSelector("[data-mcp-copy]")
+
+        // The copy endpoint serves the OPENED secret, and only to the owner's session.
+        val secret =
+            page
+                .request()
+                .get("$baseUrl/partials/mcp-key/secret")
+                .text()
+        secret shouldStartWith prefix.removeSuffix("…")
+        secret.length shouldBe 65
+
+        // Delete-to-rotate: the chip swaps to the no-key note, and the next sign-in mints
+        // a NEW id — the prefix visibly changes.
+        page.onDialog { it.accept() }
+        page.waitForResponse("**/partials/mcp-key") {
+            page.locator("[data-verb=mcp-key-delete]").click()
+        }
+        page.waitForSelector("text=sign in")
+        page.locator("[data-mcp-copy]").count() shouldBe 0
+
+        // A NEW login, not the live session: the mint is the login hook's, so the browser
+        // must actually cross the sign-in boundary again.
+        page.context().clearCookies()
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        val rotated = page.locator("#app-mcpkey .app-mcpkey-prefix").textContent()
+        rotated shouldStartWith "dpk_"
+        (rotated != prefix) shouldBe true
+    }
+
+    @Test
+    fun `the old settings screen points at the top bar and the admin page`() {
         startTrace()
         loginReadyUser()
 
         page.navigate("$baseUrl/settings/api-keys")
         page.waitForURL("**/settings/api-keys")
 
-        // 091 reduced it to the link. Two key tables would be two answers to one question.
+        // 091 reduced it to a link; 179 repointed it. Two key tables would be two answers
+        // to one question.
         page.content() shouldNotContain "id=\"keys-table\""
-        page.click("text=Go to API")
-        page.waitForURL("**/api-console")
+        page.content() shouldContain "top bar"
+        page.click("text=Manage API keys")
+        page.waitForURL("**/api-keys")
         page.waitForSelector("#keys-table")
     }
 }

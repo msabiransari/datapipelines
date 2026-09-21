@@ -26,7 +26,7 @@
       <p class="eyebrow">Run it, then build on it</p>
       <h1 id="hiw-hero-title" class="ds-display">How it works: the MCP server tutorial, end to end on your laptop</h1>
       <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
-      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here: start the server with sample data, mint a key, connect Claude Code, Cursor or Copilot over MCP, let the agent author and run a pipeline, release it, publish it as an API, scope a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
+      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here: start the server with sample data, copy your MCP key from the top bar, connect Claude Code, Cursor or Copilot over MCP, let the agent author and run a pipeline, release it, publish it as an API, scope a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#quickstart">Start at step 1 <span aria-hidden="true">&rarr;</span></a>
         <a class="btn btn-secondary" href="#engineering">Skip to the engineering depth</a>
@@ -72,26 +72,19 @@
   <section class="section band" id="step-key" aria-labelledby="step-key-title">
     <div class="container">
       <p class="kicker">Step 2</p>
-      <h2 id="step-key-title" class="ds-headline">Mint the agent's key</h2>
-      <!-- claim: docs/ui-screens.md §4.18 (the API console and the modal's field order), docs/auth.md §7.4 (issuance), §7.5 (admin is not a key scope) -->
-      <p class="section-lede"><strong>What you do.</strong> Open the <strong>API</strong> section (<code>/api-console</code>), choose <strong>New key</strong>, and fill the modal in its own order: Kind <em>Agent / API key</em> → scopes <code>read</code>, <code>execute</code>, <code>author</code> → a name → an expiry if you want one. The agent that authors pipelines needs exactly those three scopes.</p>
+      <h2 id="step-key-title" class="ds-headline">Copy your MCP key from the top bar</h2>
+      <!-- claim: docs/ui-screens.md §3.4 (the top bar's MCP-key chip), docs/auth.md §7.4 (login-minted issuance), §7.5 (admin is not a key scope) -->
+      <p class="section-lede"><strong>What you do.</strong> Sign in — that is the whole mint. Your MCP key is waiting in the <strong>top bar</strong>, right side: the <code>dpk_…</code> chip beside your account menu. <strong>Copy</strong> puts the full key on your clipboard; paste it into the client config in step 3.</p>
       <div>
         <figure class="media-frame">
-        <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
-        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The new-key modal open over the keys table: kind first, then scope, name and expiry.">
-        <figcaption>The new-key modal: kind first, then scope, name and expiry.</figcaption>
+        <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Top bar</span><span class="tag">Screenshot</span></div>
+        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The top bar's right side: the MCP-key chip with its prefix, a Copy button and a delete-to-rotate button, beside the account menu.">
+        <figcaption>The MCP-key chip in the top bar: prefix, Copy, and delete-to-rotate.</figcaption>
         </figure>
       </div>
-      <p><strong>What you see.</strong> The secret exactly once — <code>dpk_…</code> — in the modal after creation. Copy it into the client config in step 3; it is stored hashed and is never retrievable again.</p>
-      <!-- claim: docs/auth.md §7.4 (a key is pinned to the creator's active workspace; scopes can never exceed the creator's), docs/rest-api.md §16.1 (the REST twin, the once-only secret) -->
-      <p><strong>What just happened.</strong> The key is pinned to your active workspace — <code>demo</code> here — and its scopes can never exceed yours; administration is for signed-in people — no key can hold it. Everything is a REST call too:</p>
-      <div class="code-block">
-        <pre><code>curl -X POST http://localhost:8080/api/v1/auth/api-keys \
-  -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;" -H "Content-Type: application/json" \
-  -d '{"name": "claude-code-tutorial", "scopes": ["read", "execute", "author"]}'</code></pre>
-        <button type="button" class="copy-btn" hidden>Copy</button>
-      </div>
-      <p>The answer is <code>201</code> with the full key in <code>data.key</code> — the only time it exists in a response.</p>
+      <p><strong>What you see.</strong> Exactly one key per workspace per person — the demo login's role there is admin, so its reach is <code>read</code>, <code>execute</code> and <code>author</code>: the whole ladder an authoring agent needs. A viewer's key would carry read and execute; the role decides, never a form.</p>
+      <!-- claim: docs/auth.md §7.4 (minted at login; pinned to the workspace; rotation is delete + sign in), docs/rest-api.md §16.1 (the /mine read) -->
+      <p><strong>What just happened.</strong> The key was minted when you signed in, pinned to the workspace you entered — <code>demo</code> here — and sealed at rest so the top bar can open it for a copy. There is no mint endpoint for it, on purpose: <code>GET /api/v1/auth/api-keys/mine</code> reads it, and rotating it is delete (the chip's button) plus your next sign-in. Administration stays with signed-in people — no key can hold it.</p>
     </div>
   </section>
 
@@ -219,8 +212,8 @@ anything. Stop after reporting.</code></pre>
   <section class="section" id="step-endpoint-key" aria-labelledby="step-endpoint-key-title">
     <div class="container">
       <p class="kicker">Step 7</p>
-      <h2 id="step-endpoint-key-title" class="ds-headline">Scope a key to the endpoint</h2>
-      <p class="section-lede"><strong>What you do.</strong> Mint a second key — kind <code>endpoint</code> — whose bindings name the path, in the same modal (kind decides what the rest of the form means) or over REST:</p>
+      <h2 id="step-endpoint-key-title" class="ds-headline">Scope an API key to the endpoint</h2>
+      <p class="section-lede"><strong>What you do.</strong> An <strong>admin creates an API key</strong> on the <strong>API keys</strong> page (<code>/api-keys</code>) and <strong>associates</strong> it with the endpoint's path — in the demo you are the admin, so this is you. Kind <em>API key</em> (the <code>endpoint</code> kind on the wire), a name, the path under <em>Associated endpoints</em> — or over REST:</p>
       <div class="code-block">
         <pre><code>curl -X POST http://localhost:8080/api/v1/auth/api-keys \
   -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;" -H "Content-Type: application/json" \
@@ -231,8 +224,8 @@ anything. Stop after reporting.</code></pre>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
-        <img src="/site/img/tutorial-endpoint-key.png" width="2880" height="1800" loading="lazy" alt="The API section's keys table: an endpoint-kind key whose reach cell is its bound path, beside a user key whose reach is its scopes.">
-        <figcaption>The endpoint key in the keys table: its reach is the bound path, not a scope list.</figcaption>
+        <img src="/site/img/tutorial-endpoint-key.png" width="2880" height="1800" loading="lazy" alt="The API keys page: an API key whose associated-endpoints cell names the bound path.">
+        <figcaption>The API key in the keys table: its reach is the associated path, not a scope list.</figcaption>
         </figure>
       </div>
       <!-- claim: docs/auth.md §7.7 (an endpoint key's authority is its bindings; nearest ancestor wins), docs/rest-api.md §19.3 (a session is a 401 here) -->
@@ -332,8 +325,8 @@ anything. Stop after reporting.</code></pre>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
-          <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The new-key modal open over the keys table: kind first, then scope, name and expiry.">
-          <figcaption>Minting a key — kind first, then scope, name and expiry.</figcaption>
+          <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The top bar's right side: the MCP-key chip with its prefix, a Copy button and a delete-to-rotate button.">
+          <figcaption>Your MCP key — copy it from the top bar.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Executions</span><span class="tag">Screenshot</span></div>

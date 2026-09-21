@@ -101,6 +101,9 @@ object AppNav {
      */
     private val OFF_RAIL: Map<String, String> =
         mapOf(
+            // 179 (D17): the workspace's API keys page — reached from the avatar menu and the
+            // console's Manage links, deliberately not a rail item (an admins' screen).
+            "/api-keys" to "API keys",
             "/settings/api-keys" to "API keys",
             "/settings/password" to "Password",
             "/settings" to "Settings",

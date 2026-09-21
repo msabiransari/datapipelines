@@ -251,7 +251,7 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 
 | Value | Description |
 |---|---|
-| `user` | Every key that existed before round 074, and the default for any key minted without an explicit kind: scopes, a pinned workspace, and the whole API surface those scopes allow |
+| `user` | Every key that existed before round 074, and — since 179 (D16) — minted ONLY by the login/switch hook, one per user per workspace: scopes derived from the role, a pinned workspace, and the whole API surface those scopes allow |
 | `endpoint` | A credential for published endpoints only: no scopes are consulted, workspace-pinned, and it authorises exactly the endpoints its bindings cover plus the result cursor of executions it started |
 | `server` | The promotion peer's credential (091): minted by an `admin`, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. No scopes are consulted; its authority is that route family |
 
@@ -661,6 +661,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.14 | 179 (#179) keys | §8A `user`: minted ONLY by the login/switch hook, one per user per workspace (D16) — the "default for any key minted without an explicit kind" sentence is gone with on-demand minting. No value added, removed or renamed; the wire set is unchanged |
 | 2026-09-20 | v1.16 | 177 (#177) roles R1 | §8B `Capability` → **`Permission`** (D21), redefined as the role SETS of the ratified matrix: `switch` gone (release and switch are the author's, D8), **`promotion_read`** new (owner rule 13), `execute` no longer admits the promoter (D5), `ws_admin` gains the workspaces page (D13). New **§8C `WorkspaceRole`** — the ONE role a membership holds (V29; `viewer` \| `author` \| `promoter` \| `workspace_admin`). New **§18A `ExecutedByKeyKind`** (`user` \| `endpoint` \| `server`, V30) beside the `executed_by` rename in §18. §15: `workspace.member_flags_changed` → `workspace.member_role_changed`; the member-added / invited / materialised rows carry `role`, not `flags`. |
 | 2026-09-19 | v1.15 | 172 (#172) | §18's `ENDPOINT` row reworded for the re-rooted published-endpoint URL shape (R-EP5); the enum and its wire value are unchanged. |
 | 2026-09-16 | v1.14 | 149 / #125 node_progress | §11 gains **`node_progress`** — the measured per-node operation sample ([REST API §6.4.9](rest-api.md#649-node_progress)); zero or more between a node's `node_started` and its terminal event, never terminal. |

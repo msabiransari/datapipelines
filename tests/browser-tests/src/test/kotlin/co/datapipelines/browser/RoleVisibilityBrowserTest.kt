@@ -50,9 +50,8 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
 
         viewer.page.navigate("$baseUrl/api-console")
         viewer.page.waitForSelector(".app-page-h")
-        // O-2: viewers never mint keys. Revoke is a different rung (§7.6's MANAGE_OWN_API_KEYS
-        // is `view`), so it is present whenever there is a live key to revoke — there is none
-        // in a fresh session, and its absence here is data, not policy.
+        // 179: the console is read-only (the keys card moved to /api-keys, D17) — no key verb
+        // for anyone here. The viewer's OWN MCP key is the top bar's chip (`VIEW_OWN_MCP_KEY`).
         viewer.verbs().contains("key-create") shouldBe false
         viewer.close()
 
@@ -63,7 +62,9 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         author.roleBadge() shouldBe "author"
         author.page.navigate("$baseUrl/api-console")
         author.page.waitForSelector(".app-page-h")
-        author.verbs().contains("key-create") shouldBe true
+        // 179 (D17): authors PUBLISH endpoints but do not manage API keys — create/delete/
+        // associate are the workspace admin's `MANAGE_API_KEYS`, on /api-keys.
+        author.verbs().contains("key-create") shouldBe false
 
         author.page.navigate("$baseUrl/datasources")
         author.page.waitForSelector(".app-page-h")
@@ -93,6 +94,11 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         admin.verbs().contains("datasource-register") shouldBe true
         // Grants is a SUPER admin's verb, one rung up (§7.6 MANAGE_DATASOURCE_GRANTS).
         admin.verbs().contains("datasource-grants") shouldBe false
+
+        // 179 (D17): the workspace admin owns /api-keys — create and the per-row verbs.
+        admin.page.navigate("$baseUrl/api-keys")
+        admin.page.waitForSelector(".app-page-h")
+        admin.verbs().contains("key-create") shouldBe true
         admin.close()
     }
 
@@ -326,10 +332,15 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         val email: String,
         private val session: Session,
     ) {
-        /** Every `data-verb` the current page renders, in document order. */
+        /**
+         * Every `data-verb` the current SCREEN renders, in document order — the main region's,
+         * never the shell's: since 179 the top bar carries the MCP-key chip's copy/rotate
+         * (every role, their own key), and a page-wide read would mix chrome into what is a
+         * statement about the SCREEN.
+         */
         fun verbs(): List<String> =
             page
-                .locator("[data-verb]")
+                .locator("#app-main [data-verb]")
                 .all()
                 .map { it.getAttribute("data-verb") }
 

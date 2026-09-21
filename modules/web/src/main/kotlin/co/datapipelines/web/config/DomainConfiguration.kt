@@ -216,6 +216,30 @@ class DomainConfiguration {
         )
 
     /**
+     * D16 (179) — the auth module's [co.datapipelines.auth.SecretSealer] port, bound to the
+     * credential encryptor: the login-minted MCP key's plaintext is sealed with the SAME key
+     * and the SAME AES-256-GCM discipline as datasource passwords (datasources §7.1), with
+     * the key id as the AAD so a blob lifted onto another row fails the tag. `auth` may not
+     * name `datasources` (module-structure §4.2), so the port is declared there and bound
+     * here. The encryptor's parameter is named `datasourceName`; here it carries the key id —
+     * both are "the row's immutable identifier as associated data", which is all the
+     * encryptor's contract asks.
+     */
+    @Bean
+    fun secretSealer(encryptor: CredentialEncryptor): co.datapipelines.auth.SecretSealer =
+        object : co.datapipelines.auth.SecretSealer {
+            override fun seal(
+                plaintext: String,
+                aad: String,
+            ): ByteArray = encryptor.encrypt(plaintext, aad)
+
+            override fun open(
+                sealed: ByteArray,
+                aad: String,
+            ): String = encryptor.decrypt(sealed, aad)
+        }
+
+    /**
      * The pipeline-name lookup a datasource delete needs (datasources §9, `datasource.in_use`).
      *
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the

@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.43 (frozen contract — additive-only changes after this point)
+**Status:** v1.44 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-16
@@ -13,7 +13,7 @@ datapipelines.co is **MCP-native**. Agentic tools (Claude Desktop, GLM, Copilot,
 
 This spec defines:
 - The **MCP transport** (Streamable HTTP) and how clients connect.
-- The **authentication model** (API key issued per-user-per-agent from the UI).
+- The **authentication model** (the user's MCP key — minted at sign-in, one per workspace, copied from the top bar).
 - The **tool surface** (functions the agent can call).
 - The **resource surface** (entities the agent can read as files).
 - The **prompt surface** (predefined workflows the agent can invoke).
@@ -25,7 +25,7 @@ This spec defines:
 
 1. **MCP is a thin adapter over REST.** Every MCP tool maps to one or more REST endpoints defined in [REST API spec](rest-api.md). No business logic in the MCP layer — it's translation only.
 2. **Tools for actions, resources for inspection.** If an agent needs to *do* something (execute a pipeline, create a template), it calls a tool. If it needs to *read* something (look at a pipeline definition), it reads a resource. We avoid duplicating read operations as both.
-3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user grabs an API key from the UI, passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
+3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user copies their MCP key from the top bar (minted at sign-in — [Auth §7.4](auth.md#74-issuance), D16), passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 4. **MCP versioning follows the protocol.** We commit to a specific MCP protocol version per datapipelines.co release, and document upgrade paths when the protocol evolves.
 5. **Fail loudly, never silently.** MCP-level errors (transport, auth) and application errors (pipeline validation, datasource unreachable) both surface as structured errors the agent can act on. No silent fallbacks.
 6. **Workspace-scoped by the key (workspaces design §5.2/§9).** Every tool and resource operates inside the workspace the API key is PINNED to at issuance — `DP-Workspace` is refused on MCP requests (`400 workspace.header_forbidden`), because a header-switchable agent key would make every leaked key a skeleton key across the user's workspaces. Pipelines, templates and executions of other workspaces are ABSENT (not hidden): their ids resolve as not-found. Datasources visible here are exactly the ones GRANTED to the pinned workspace (D-R7): there is no global datasource, and one that is not granted is ABSENT, not hidden. The `initialize` result's `instructions` field states this so an agent does not reason about invisible siblings.
@@ -89,12 +89,12 @@ Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, 
 
 **Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
-API keys are:
-- Issued per-user-per-agent from the UI's API screen (e.g., "Claude Desktop key", "GLM key"); HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only).
-- Revocable, optionally expiring.
-- Scoped `read` / `execute` / `author` (hierarchical, [Auth §7.5](auth.md#75-scopes)). **`admin` is no longer issuable to a key** — it was the only scope that ever bought a key an INSTANCE verb, and instance verbs are human. A key's scopes are a subset of what its issuer can do in the pinned workspace at issue time.
+API keys (the `user` kind — "your MCP key") are:
+- **Minted by the login/switch hook, one per user per workspace** (179, D16) — never on demand (`auth.key_kind_not_mintable` answers any attempt); shown in the top bar with a copy button; rotation is delete there and sign in again.
+- Never expiring, owner-scoped to delete; HTTP reads in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179).
+- Scoped by the ROLE the user holds in the pinned workspace (hierarchical `read` / `execute` / `author`, [Auth §7.5](auth.md#75-scopes)) — since 179 nobody chooses scopes at issuance. **`admin` is no longer issuable to a key** — it was the only scope that ever bought a key an INSTANCE verb, and instance verbs are human. The key's effective reach is additionally capped by what its issuer can do in the pinned workspace RIGHT NOW, re-read per request.
 
-**An agent's key is a `user` key — the same kind a program uses over REST.** The UI labels it "Agent / API key" for exactly that reason: one credential kind, two surfaces. The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
+**An agent's key is a `user` key — the same kind a program uses over REST:** one credential kind, two surfaces. (The form label "Agent / API key" left with on-demand minting in 179 — the kind needs no label where it is never chosen.) The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
 
 **Enforcement is TWO axes, and a key must satisfy both** ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative), [§11A](auth.md#11a-roles)). The minimum SCOPE and the minimum ROLE for every MCP tool are defined once in that matrix — this spec restates each tool's requirement in §6.2 for readability, but the matrix is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers both here and at the REST interceptor.
 
@@ -1940,7 +1940,7 @@ The error payload inside the tool result matches the [REST API `error` object](r
 ### 9.3 Transport errors
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
-- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
+- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help: since 179 a user key's scope IS the owner's role, so the fix is a higher role in that workspace, not a new key.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -1984,7 +1984,7 @@ Agents can use these for visibility into an execution while a `pipelines_execute
 Users discover the MCP endpoint via the UI's "Connect an Agent" page, which exposes:
 
 - The full MCP endpoint URL (`https://{host}/mcp`).
-- API key creation/management ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only)), including the scope picker — the page must state which scope an agent needs for what it will do (`read` to browse, `execute` to run pipelines, `author` to create them) and that a key's scopes cannot exceed the creator's.
+- The MCP key's home ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179)): the top bar's chip — the page must make the prefix, the copy and the delete-to-rotate findable, and state that the key's reach IS the owner's role in the workspace (a viewer's key reads and runs; an author's also creates; a promoter's only reads released content).
 - A copy-pasteable configuration snippet for common agents, using whichever header that client supports (`DP-API-Key` or `Authorization: Bearer dpk_...` — §3.2):
   - Claude Desktop: `mcpServers` JSON for `claude_desktop_config.json`.
   - Cursor: settings JSON.
@@ -2141,6 +2141,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.44 | 179 (#179) | No tool, no schema, no permission change on the MCP surface. The KEY an agent presents changed how it is born: §1/§2/§3 (authentication model, principle 3, the key bullet list) now say the user's key is minted at sign-in (D16) and copied from the top bar, one per workspace, its reach the owner's role re-read per request; the "Agent / API key" form label is gone with on-demand minting. §4.2's troubleshooting line points at the role, not a re-mint. |
 | 2026-09-19 | v1.43 | 172 (#172) | §6.2.23 `endpoints_create` description and `path` schema text: published endpoints serve at `/api/<category>/<version>/<path…>` (R-EP5) — the category is the caller's namespace with `v[0-9]+` and `api` reserved (`endpoint.path_reserved`), the version free-form, one leading `/api` prefix normalised away; `endpoints_*` responses' `url` carries the full served URL. No tool added, removed or renamed; no scope change. |
 | 2026-09-18 | v1.42 | 171 (#171) | No new tools, no schema change (`inputSchema` unaffected). **§6.2.23 `endpoints_create`** description text updated: a `DML`/`DDL` node whose `source` is `tempdb` is now side-effect-free and publishable — previously every `DML`/`DDL` node was refused regardless of source. Same rule, same code (`endpoint.pipeline_not_readonly`), same service both REST and this tool call ([REST API §19.2](rest-api.md#192-what-may-be-published)). |
 | 2026-09-16 | v1.41 | 147 incomplete tempdb validation (#119) | No new tools, no argument change. **§6.2.34 `sql_probe`, `name: "tempdb"`**: a missing staged table is an INCOMPLETE validation, not a pass — the payload gains **`validation_status`** (`"incomplete"` \| `"executed"`) and `parsed` becomes `null` on the incomplete branch (present, not omitted; `true` only when the statement executed); the note says what was NOT checked and names the two ways to finish (a self-contained `VALUES` restatement, or a run with the real staged inputs). Measured on H2 2.3.232: a missing table stops preparation before a later syntax error, so the pre-#119 "parsed, every self-defined name resolved" claim was false (an acceptance run matched a passing probe's SQL hash to its failing execution). Tool and `name` descriptions updated (drift-pinned); guards `SqlProbeH2Test` (real engine, with the tables-present counterexample) and `SqlProbeTempdbWireTest` (real dispatcher, real JSON). Errors, binds, limits, cleanup, scope and the hash-only audit unchanged. |

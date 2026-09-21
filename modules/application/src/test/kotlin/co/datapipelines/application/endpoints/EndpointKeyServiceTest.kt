@@ -86,29 +86,36 @@ class EndpointKeyServiceTest {
     }
 
     @Test
-    fun `bindings on a USER key are refused — a user key is authorised by its scopes`() {
-        val refused =
-            shouldThrow<DatapipelinesException> {
-                service.issue(principal(), "x", setOf(Scope.EXECUTE), ApiKeyKind.USER, listOf("/nyc"), null)
-            }
-
-        refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
+    fun `a USER key is refused on this surface for every role - the login hook mints those (D16)`() {
+        // 179: on-demand `user` minting is gone, with or without bindings, with or without
+        // scopes. The refusal is FIRST in the funnel so it never depends on which other
+        // argument would have failed, and it is its own catalogued code because the recovery
+        // differs: sign in, don't retry with different arguments.
+        listOf(emptyList(), listOf("/nyc")).forEach { paths ->
+            val refused =
+                shouldThrow<DatapipelinesException> {
+                    service.issue(principal(), "x", setOf(Scope.EXECUTE), ApiKeyKind.USER, paths, null)
+                }
+            refused.code shouldBe "auth.key_kind_not_mintable"
+        }
     }
 
     @Test
-    fun `the kind matrix - each kind accepts exactly what its authority is made of (091)`() {
+    fun `the kind matrix - each kind accepts exactly what its authority is made of (091, 179)`() {
         // One table for the whole rule, because the failure it guards against is a kind added
         // later falling through a check written as "is user" instead of "is not endpoint".
+        // Since 179 the USER row is a refusal in every column: the login hook mints those.
         stubIssue()
 
         assertAll(
-            // scopes: only a USER key
-            { service.issue(principal(), "u", setOf(Scope.READ), ApiKeyKind.USER, emptyList(), null) },
+            // user: never mintable on demand (D16)
+            { notMintable { service.issue(principal(), "u", setOf(Scope.READ), ApiKeyKind.USER, emptyList(), null) } },
+            { notMintable { service.issue(principal(), "u", emptySet(), ApiKeyKind.USER, listOf("/nyc"), null) } },
+            // scopes: refused on both scopeless kinds
             { refusalFor { service.issue(principal(), "e", setOf(Scope.READ), ApiKeyKind.ENDPOINT, emptyList(), null) } },
             { refusalFor { service.issue(principal(), "s", setOf(Scope.READ), ApiKeyKind.SERVER, emptyList(), null) } },
             // bindings: only an ENDPOINT key
             { service.issue(principal(), "e", emptySet(), ApiKeyKind.ENDPOINT, listOf("/nyc"), null) },
-            { refusalFor { service.issue(principal(), "u", emptySet(), ApiKeyKind.USER, listOf("/nyc"), null) } },
             { refusalFor { service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, listOf("/nyc"), null) } },
             // expiry: every kind takes one — a promotion credential that never expires is the
             // whole problem 091 set out to fix.
@@ -210,6 +217,11 @@ class EndpointKeyServiceTest {
     /** Asserts the block refuses with the kind-contradiction code. */
     private fun refusalFor(block: () -> Unit) {
         shouldThrow<DatapipelinesException> { block() }.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
+    }
+
+    /** Asserts the block refuses with the D16 not-mintable-on-demand code. */
+    private fun notMintable(block: () -> Unit) {
+        shouldThrow<DatapipelinesException> { block() }.code shouldBe "auth.key_kind_not_mintable"
     }
 
     private fun principal() =

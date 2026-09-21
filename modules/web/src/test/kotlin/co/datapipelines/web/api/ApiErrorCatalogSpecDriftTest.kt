@@ -211,8 +211,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `endpoint.path_reserved` (400 — the `endpoint.` family default, so no catalog row),
          * landed in the SAME commit as its `PipelineErrorCodes.Endpoint` constant. Re-derived
          * from the document's own parse.
+         *
+         * 180 → 181 with 179 (roles R3, D16): §13.7 gains `auth.key_kind_not_mintable`
+         * (400 — on-demand `user` key issuance is refused on every surface; the login hook
+         * mints those), landed in the SAME commit as its constants (both mirrors) and its
+         * catalog row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 180
+        const val SECTION_13_ROW_COUNT = 181
 
         /**
          * §12's distinct validation codes.

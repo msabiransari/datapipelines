@@ -290,6 +290,97 @@ class RoleVisibilityRenderTest {
         }
     }
 
+    // ------------------------------------------------------------------ 179: keys
+
+    /**
+     * D16 — the top bar's chip (partials/mcp-key-chip): prefix and BOTH verbs when a
+     * copyable key exists; NO copy control for a key minted before V31 (there is no sealed
+     * secret to serve, and a button that 404s is a lie); the rotation hint in its place.
+     * Every role holds VIEW_OWN_MCP_KEY, so the role question does not arise here — what
+     * this pins is the copyable state machine.
+     */
+    @Test
+    fun `the top bar chip shows copy only when the key has a sealed secret`() {
+        val copyable =
+            engine().process(
+                "partials/mcp-key-chip",
+                bare().apply { setVariable("mcpKey", McpKeyChip(prefix = "dpk_ABCDEFGH…", copyable = true)) },
+            )
+        copyable shouldContain "dpk_ABCDEFGH…"
+        copyable shouldContain "data-mcp-copy=\"/partials/mcp-key/secret\""
+        copyable shouldContain "hx-delete=\"/partials/mcp-key\""
+
+        val legacy =
+            engine().process(
+                "partials/mcp-key-chip",
+                bare().apply { setVariable("mcpKey", McpKeyChip(prefix = "dpk_ABCDEFGH…", copyable = false)) },
+            )
+        legacy shouldContain "dpk_ABCDEFGH…"
+        legacy shouldNotContain "data-mcp-copy"
+        // Rotation is the pre-V31 key's way to a copyable one — the delete stays.
+        legacy shouldContain "hx-delete=\"/partials/mcp-key\""
+        legacy shouldContain "sign in again"
+
+        val none =
+            engine().process("partials/mcp-key-chip", bare().apply { setVariable("mcpKey", null) })
+        none shouldNotContain "data-verb="
+        none shouldContain "minted when you next sign in"
+    }
+
+    /**
+     * D17 — the `/api-keys` page's verbs are inside the `MANAGE_API_KEYS` guard
+     * (`canAdminWorkspace` / `isSuperAdmin`) even though the route refuses everyone else:
+     * a fragment rendered off its route — a test, a reuse — must not leak the verbs.
+     */
+    @Test
+    fun `the api-keys page draws no verb for a reader and all of them for a workspace admin`() {
+        val admin =
+            render("api/keys") { apiKeysModel() }
+        admin shouldContain "data-verb=\"key-create\""
+        admin shouldContain "data-verb=\"key-revoke\""
+        admin shouldContain "data-verb=\"key-bind\""
+
+        // The page's own route refuses this render; what is pinned here is that the TEMPLATE
+        // would not leak the verbs if it ever rendered off its route.
+        val reader =
+            render("api/keys") {
+                apiKeysModel()
+                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
+            }
+        reader shouldNotContain "data-verb="
+    }
+
+    private fun WebContext.apiKeysModel() {
+        chrome()
+        setVariable("currentPath", "/api-keys")
+        setVariable(
+            "keys",
+            listOf(
+                ApiKeyRows.Row(
+                    id = "dpk_A7QxKF2MPLQR",
+                    name = "ci",
+                    kind = "endpoint",
+                    prefix = "dpk_A7QxKF2M…",
+                    createdBy = "Alice",
+                    scopes = emptyList(),
+                    boundPaths = listOf("/nyc"),
+                    createdRelative = "3 days ago",
+                    createdAbsolute = "2026-09-05 09:00 UTC",
+                    lastUsedRelative = "never",
+                    lastUsedAbsolute = null,
+                    expiresRelative = "never",
+                    expiresAbsolute = null,
+                    isRevoked = false,
+                    isExpired = false,
+                ),
+            ),
+        )
+        setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = true))
+        setVariable("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
+        setVariable("expiryCustomWire", ApiKeyForm.CUSTOM)
+        setVariable("bindingNodes", listOf("/", "/nyc"))
+    }
+
     // ------------------------------------------------------------------ the inventory
 
     /**
@@ -609,6 +700,11 @@ class RoleVisibilityRenderTest {
                 "isSuperAdmin",
                 "canCancel",
                 "canCreate",
+                // 179 (D16) — the top-bar chip's copy/delete are EVERY role's on their OWN key
+                // (VIEW_OWN_MCP_KEY), so the guard is not a role boolean but the key's
+                // existence: `mcpKey` is non-null exactly when a live login-minted key is in
+                // the active workspace, and the verbs render only inside it.
+                "mcpKey",
             )
 
         /**

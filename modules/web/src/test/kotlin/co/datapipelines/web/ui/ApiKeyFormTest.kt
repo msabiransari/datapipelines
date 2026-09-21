@@ -2,8 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
-import co.datapipelines.auth.KEY_SCOPES
-import co.datapipelines.auth.Scope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -88,40 +86,12 @@ class ApiKeyFormTest {
     }
 
     @Test
-    fun `scope choices are the caller's own scopes and everything below them`() {
-        // §7.4: a key's scopes must be a subset of its creator's. The UI filter is convenience —
-        // ApiKeyService refuses a superset regardless — but offering a checkbox the server will
-        // refuse is a form that lies.
+    fun `the server kind is offered to an admin only, and the user kind to nobody (D16)`() {
         assertAll(
-            { ApiKeyForm.scopeChoices(setOf(Scope.READ)).map { it.wire } shouldBe listOf("read") },
-            { ApiKeyForm.scopeChoices(setOf(Scope.EXECUTE)).map { it.wire } shouldBe listOf("read", "execute") },
-            { ApiKeyForm.scopeChoices(setOf(Scope.AUTHOR)).map { it.wire } shouldBe listOf("read", "execute", "author") },
-            // O-2: `admin` is not offered even to a principal who satisfies it — no key may
-            // hold it, and a form that offers what issuance refuses teaches the wrong model.
-            { ApiKeyForm.scopeChoices(setOf(Scope.ADMIN)).map { it.wire } shouldBe listOf("read", "execute", "author") },
-            { ApiKeyForm.scopeChoices(emptySet()) shouldBe emptyList() },
-        )
-    }
-
-    @Test
-    fun `every scope has a meaning, and none of them is an HTTP verb`() {
-        assertAll(
-            { ApiKeyForm.SCOPE_MEANINGS.keys shouldBe KEY_SCOPES },
-            {
-                withClue("a verb leaked into the capability vocabulary") {
-                    ApiKeyForm.SCOPE_MEANINGS.values.none { meaning ->
-                        listOf("GET", "POST", "PUT", "DELETE").any { meaning.contains(it) }
-                    } shouldBe true
-                }
-            },
-        )
-    }
-
-    @Test
-    fun `the server kind is offered to an admin only`() {
-        assertAll(
-            { ApiKeyForm.kindChoices(isAdmin = false).map { it.wire } shouldBe listOf("user", "endpoint") },
-            { ApiKeyForm.kindChoices(isAdmin = true).map { it.wire } shouldBe listOf("user", "endpoint", "server") },
+            { ApiKeyForm.kindChoices(isAdmin = false).map { it.wire } shouldBe listOf("endpoint") },
+            { ApiKeyForm.kindChoices(isAdmin = true).map { it.wire } shouldBe listOf("endpoint", "server") },
+            // 179: `user` is minted by the login hook only — no form offers it, on any role.
+            { ApiKeyForm.kindChoices(isAdmin = true).none { it.wire == "user" } shouldBe true },
         )
     }
 
@@ -130,14 +100,12 @@ class ApiKeyFormTest {
         val byWire = ApiKeyForm.kindChoices(isAdmin = true).associateBy { it.wire }
 
         assertAll(
-            { byWire.getValue(ApiKeyKind.USER.wire).takesScope shouldBe true },
-            { byWire.getValue(ApiKeyKind.USER.wire).takesBindings shouldBe false },
             { byWire.getValue(ApiKeyKind.ENDPOINT.wire).takesScope shouldBe false },
             { byWire.getValue(ApiKeyKind.ENDPOINT.wire).takesBindings shouldBe true },
             { byWire.getValue(ApiKeyKind.SERVER.wire).takesScope shouldBe false },
             { byWire.getValue(ApiKeyKind.SERVER.wire).takesBindings shouldBe false },
-            // The same statement the issuance service makes, from the other side: a kind that
-            // takes no scope is exactly a SCOPELESS kind.
+            // The same statement the issuance service makes, from the other side: every kind
+            // the form offers is a SCOPELESS kind (the user kind, which took scopes, is gone).
             {
                 val scopeless =
                     byWire.values
@@ -150,10 +118,11 @@ class ApiKeyFormTest {
     }
 
     @Test
-    fun `the user kind is labelled for both surfaces it serves`() {
-        // The owner's ruling: an agent's key over MCP and a program's key over REST are ONE
-        // kind. Naming them separately would invent a distinction the system does not make.
-        ApiKeyForm.kindChoices(isAdmin = false).first().label shouldBe "Agent / API key"
+    fun `the endpoint kind is labelled API key - D17's rename, the wire value unchanged`() {
+        // "API key" is what a person reads; `endpoint` stays the wire and storage value.
+        val choice = ApiKeyForm.kindChoices(isAdmin = false).single()
+        choice.label shouldBe "API key"
+        choice.wire shouldBe "endpoint"
     }
 
     @Test
