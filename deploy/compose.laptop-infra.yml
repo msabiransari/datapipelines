@@ -87,6 +87,8 @@ services:
       --requirepass ${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}
       --maxmemory 256mb
       --maxmemory-policy noeviction
+    environment:
+      REDISCLI_AUTH: ${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}
     ports:
       # Loopback-only bind (2026-08-07 security review MEDIUM-4). Dev infra must never
       # be reachable off-host.
@@ -95,7 +97,9 @@ services:
       # deploy/env/defaults.env, DEVELOPMENT.md §2/§4 and configuration.md §6.
       - "127.0.0.1:${LAPTOP_REDIS_PORT:-6381}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}", "ping"]
+      # REDISCLI_AUTH from the environment, never `-a` on argv (#189; deploy/compose.yml's
+      # redis service explains why).
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10

@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.23
+**Status:** v1.24
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -524,7 +524,8 @@ lifecycle:
 - [ ] Metadata DB password rotated and not in source control.
 - [ ] `DATAPIPELINES_JWT_SECRET` is high-entropy (≥ 32 bytes random).
 - [ ] `DATAPIPELINES_DB_ENCRYPTION_KEY` is high-entropy (32 bytes random) and stored in a secret manager, not a plaintext env file.
-- [ ] Redis password set if Redis is networked (`requirepass` on the server, `datapipelines.redis.password` on every app instance — they must match).
+- [ ] Redis password set if Redis is networked (`requirepass` on the server, `datapipelines.redis.password` on every app instance — they must match). Under the `hardened` posture an empty password with a non-loopback Redis host is REFUSED at boot ([Configuration §3.23](configuration.md#323-environment-and-posture), #189); `development` warns.
+- [ ] No credential on a command line inside a container: the reference compose files give `redis-cli` its password through `REDISCLI_AUTH` in the redis service's environment and `mysqladmin` through `MYSQL_PWD` — an argv password is readable in `ps` by every process in the container. The Redis server's own `--requirepass` argument is the one remaining argv credential in the reference stack (tracked separately).
 - [ ] Redis `maxmemory-policy noeviction` (§4.2.1) — correctness, not tuning.
 - [ ] OIDC client secrets from a secret manager, not a plaintext env file; at least one provider configured (§5.1).
 - [ ] NetworkPolicy restricts app's egress.
@@ -536,7 +537,7 @@ lifecycle:
 - [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace.
 - [ ] Internet-exposed deployments may prefer to omit `-Pdatapipelines.commit` at build time — a public `/info` commit hash maps the instance to exact source revisions.
 - [ ] The `lib/` driver drop-in mount is **read-only** in the container, populated at image build or by a trusted init container, never writable by the app user; `LOADER_PATH`, if set, comes from the image — never inherited from the deployment environment (a writable `lib/` is code-execution-by-file-drop).
-- [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback ([Configuration §7](configuration.md#7-config-validation)).
+- [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback under `development`, and refuses to start under `hardened` ([Configuration §7](configuration.md#7-config-validation)).
 
 ---
 
@@ -960,6 +961,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.24 | 188 (#189) Redis credentials | §9: the hardened posture refuses a passwordless non-loopback Redis; the reference compose files pass the healthcheck password as `REDISCLI_AUTH` (environment), never `redis-cli -a` (argv); the server's `--requirepass` argv named as the remaining exposure. |
 | 2026-09-19 | v1.23 | 173 (#173) the agent surface before indexing | §6.7: `/llms.txt`, `/llms-full.txt` and `/docs/{slug}.md` listed beside the crawler surfaces; the Search Console note says llms.txt needs no submission; the sitemap bullet corrected — `lastmod` has been absent since 145, not read from `build-info.properties`. |
 | 2026-09-17 | v1.22 | Writable temporary storage (#133) | §6.4: disk-backed `/tmp` emptyDir with optional size limit while preserving the read-only root filesystem; LAKE disk sizing and cleanup requirements. |
 | 2026-09-14 | v1.21 | 137 mail notices | §5.1: the first-admin story no longer says "no SMTP" — with `DATAPIPELINES_MAIL_HOST` + `_FROM` set the one-time credential is emailed to the user and sys-ops (`DATAPIPELINES_MAIL_OPS_TO`) is told about every new user ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)); the variables are catalogued in [Configuration §3.27](configuration.md#327-mail) and named in `deploy/secrets.env.example`, per this doc's no-restated-keys rule. |

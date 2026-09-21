@@ -55,9 +55,10 @@ class ConfigValidator(
          * provisioning-mode value check, the open-join/mode agreement check and the
          * examples-file/mode cross-key rule — and added one that refuses both removed keys by
          * name. 24 since 137 added the two mail rules (`MailRules`). 25 since 156 added
-         * `checkExecutorQueryTimeoutByDialect` (#2).
+         * `checkExecutorQueryTimeoutByDialect` (#2). 26 since 188 added
+         * `PostureRules.checkHardenedRedisPassword` (#189).
          */
-        internal const val CHECK_COUNT = 25
+        internal const val CHECK_COUNT = 26
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -108,12 +109,13 @@ class ConfigValidator(
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
-            // §3.23 (075) — the four posture rules live in their own file (PostureRules); the
+            // §3.23 (075) — the posture rules live in their own file (PostureRules); the
             // CHECK_COUNT guard counts `check*` across both, so moving them cannot hide one.
             PostureRules.checkEnvName(snapshot, violations, warnings)
             PostureRules.checkPosture(snapshot, violations)
             PostureRules.checkPostureProfileAlignment(snapshot, violations)
             PostureRules.checkHardenedPosture(snapshot, violations, warnings)
+            PostureRules.checkHardenedRedisPassword(snapshot, violations)
             checkRemovedWorkspaceKeys(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
@@ -758,11 +760,18 @@ class ConfigValidator(
         /** True for a zone id this JVM's tz database knows; a fixed offset (`+02:00`) is not one. */
         private fun isIanaZone(value: String): Boolean = value in java.time.ZoneId.getAvailableZoneIds()
 
-        /** §7 — passwordless Redis off loopback is a WARNING, not a refusal. */
+        /**
+         * §7 — passwordless Redis off loopback is a WARNING under `development`. Under
+         * `hardened` the same state is [PostureRules.checkHardenedRedisPassword]'s REFUSAL
+         * (#189), and this rule stays quiet there: one line per fact, and a refusal's line
+         * is the one that matters.
+         */
         private fun checkRedisAuthWarning(
             snapshot: ConfigSnapshot,
             warnings: MutableList<String>,
         ) {
+            val env = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+            if (DeploymentEnv.resolvePosture(snapshot.posture, env) == DeploymentEnv.HARDENED) return
             val redisHost = snapshot.redisHost?.trim()
             if (snapshot.redisPassword.isNullOrBlank() && redisHost != null && !isLoopback(redisHost)) {
                 warnings +=

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.25 (single source of truth for every config key)
+**Status:** v1.26 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-17
 
@@ -53,7 +53,7 @@ The deployment defines these env var names in `application.yml` — they're not 
 | YAML path | Default | Description |
 |---|---|---|
 | `datapipelines.redis.port` | `6379` | Redis port |
-| `datapipelines.redis.password` | (none) | Redis password |
+| `datapipelines.redis.password` | (none) | Redis password. Empty while `datapipelines.redis.host` is not loopback is a WARN under `development` and a **refusal under `hardened`** (§3.23, §7; #189) |
 
 > Env vars are derived per §1 (e.g. `DATAPIPELINES_REDIS_PORT`) and are omitted from the tables below for brevity.
 
@@ -350,6 +350,7 @@ The two variables an organisation sets (round 075). [Environments](environments.
 | `datapipelines.demo` | allowed | **refused** at boot |
 | local bootstrap password (`datapipelines.auth.local.bootstrap-password[-hash]`) | allowed | **refused** at boot. Local accounts themselves stay allowed — a seeded credential is what has no place in a hardened deployment |
 | loopback metadata DB / Redis | allowed | **refused** at boot |
+| passwordless Redis off loopback (`datapipelines.redis.password` empty, host not loopback) | WARN (`config.redis_no_password`) | **refused** at boot, naming the key and the host (#189) |
 | `datapipelines.auth.cookie-secure` default | derived from `base-url`'s scheme | **`true`** |
 | OIDC | optional | **required unless `DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true`** (an explicit acknowledgement, logged) |
 | boot line | `event=config.posture env=<env> posture=development authoring=on demo=nyc,trade` | same shape |
@@ -768,7 +769,7 @@ On startup, the app validates:
 - **Posture / profile alignment (§3.23):** `spring.profiles.active` is derived from the posture, so setting `SPRING_PROFILES_ACTIVE` to a DIFFERENT posture refuses startup naming both — otherwise one posture's defaults would load while every posture rule below judged the other. The `dev` profile was renamed `development` in 075; a deployment still asking for `dev` is refused rather than silently getting no posture file at all.
 - **The `hardened` posture (§3.23),** each refusal naming the variable and the posture: `datapipelines.demo` must be empty; no local bootstrap credential may be set (`bootstrap-password` or `bootstrap-password-hash` — local accounts themselves stay allowed); `spring.datasource.url` and `datapipelines.redis.host` must not be loopback (039's dev-profile guard, inverted and reused — "dev convenience must never touch production infrastructure" is the same fact as "a hardened deployment does not run against a laptop's database"); and at least one OIDC provider must be fully configured unless `datapipelines.auth.allow-local-only=true`, which is logged as `event=config.auth_local_only`.
 - **Organisation (§3.21):** `datapipelines.org.fiscal-start-date` is `MM-DD` and a day the calendar has — `02-30` and `13-01` are refused, and a month name (`SEP-15`) is refused with a message naming the `MM-DD` form; `datapipelines.org.week-start` is `monday` or `sunday`; `datapipelines.org.timezone` is an IANA zone id (a fixed offset such as `+02:00` is not one); `datapipelines.org.currency.name` and `.symbol` are non-blank. All four report together — every value is in every Context, so a wrong one is a wrong number in every report the deployment produces.
-- **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
+- **Redis auth:** when `datapipelines.redis.password` is empty (after trimming) and `datapipelines.redis.host` is not loopback — under `development`, log a structured WARN `event=config.redis_no_password` (production Redis holds materialized caller results — [Deployment §9](deployment.md#9-security-hardening-checklist-deployment)); under the **`hardened` posture** it is a REFUSAL naming the key and the host, the same treatment Postgres's password gets as a §2 required key (#189). The refusal replaces the warning; a hardened boot never logs both.
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
 - **Mail (§3.27, 137):** `datapipelines.mail.host` and `datapipelines.mail.from` are set together or not at all — one without the other refuses startup naming the missing one; `datapipelines.mail.ops-to` without `host` is refused (a sink nobody can reach); mail on (both set) without `datapipelines.auth.base-url` is refused (the welcome mail's login URL); `port` is a port in `1..65535`; `from` is an address (a bare address or `Display Name <address>`). Under the **`hardened` posture**, with mail on: `starttls` must be `true`, and `username` set requires `password` set — each refusal naming the variable and the posture. The SMTP password is carried as PRESENCE only; no violation ever prints it.
@@ -784,6 +785,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.26 | 188 (#189) | §3.23's posture table and the §7 rule list gain the Redis-password row: passwordless Redis off loopback stays a WARN under `development` and is a REFUSAL under `hardened` (`PostureRules.checkHardenedRedisPassword`, check 26); the §3 Redis row says so. |
 | 2026-09-21 | v1.25 | 180 (#180, #182) | Doc-only, no key change. §3.18's `examples-file` row, its cross-key paragraph and the three §7 bullets (`provisioning-mode` value, open-join/mode agreement, examples-file/mode) described rules `ConfigValidator` dropped in v1.9 — the document contradicted its own §3.17 and v1.9 row. Each now states that the rule was dropped and why (the seeder runs at `demo`'s creation in every deployment). |
 | 2026-09-19 | v1.24 | 172 (#172) | §3.22: the published-endpoint surface re-rooted to `/api/<category>/<version>/<path…>` (R-EP5); the `datapipelines.endpoints.*` keys and their bounds are unchanged. |
 | 2026-09-17 | v1.23 | 155 / #122 staging memory guard scope | §3.3: `max-memory-mb` re-described truthfully — the threshold is per-execution (the pipeline override changes the number one execution compares, never what is measured), but the MEASUREMENT is the whole JVM's used heap, sampled, so the guard is a shared circuit breaker, not an isolated budget, a reservation, or an OOM guarantee (Staging §8.2 says the same; one cross-link, not two copies). Sizing guidance rewritten from the demand side: worst-case heap demand stays `max-memory-mb` × `max-concurrent-executions-per-instance` per instance and `-Xmx`/container memory must cover it. No behaviour change; the 108 §C startup warn line is unchanged. |
