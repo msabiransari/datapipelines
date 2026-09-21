@@ -628,10 +628,10 @@ start() {
   verify_demo_loaders # exits 1, naming the loader, when a family's data did not land
   if ((DEMO_NYC || DEMO_TRADE || DEMO_LAKE)); then
     cat <<EOM
-==> demo data loaded (${DEMO_FAMILIES}). Your personal workspace is provisioned with
-    the example pipelines. To point an agent at it: log in -> mint an API key in the
-    UI -> give the agent ${APP_URL}/mcp with that key. See docs/deployment.md
-    Appendix B.
+==> demo data loaded (${DEMO_FAMILIES}). The example pipelines are seeded into the
+    shipped 'demo' workspace — the one every login lands in (auth.md §4.2 step 4).
+    To point an agent at it: log in -> mint an API key in the UI -> give the agent
+    ${APP_URL}/mcp with that key. See docs/deployment.md Appendix B.
 EOM
   fi
 }

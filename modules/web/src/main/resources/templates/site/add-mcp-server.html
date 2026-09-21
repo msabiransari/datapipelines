@@ -86,52 +86,9 @@
         rejected on <code>/mcp</code>, deliberately.
       </p>
 
-      <h2 id="claude-code-config" class="ds-subheadline">The Claude Code MCP server config</h2>
-      <div class="code-block">
-        <pre><code>claude mcp add --transport http datapipelines https://your-host/mcp \
-  --header "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
-        <button type="button" class="copy-btn" hidden>Copy</button>
-      </div>
-
-      <h2 id="cursor-config" class="ds-subheadline">The Cursor MCP server config — <code>~/.cursor/mcp.json</code></h2>
-      <div class="code-block">
-        <pre><code>{
-  "mcpServers": {
-    "datapipelines": {
-      "url": "https://your-host/mcp",
-      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
-    }
-  }
-}</code></pre>
-        <button type="button" class="copy-btn" hidden>Copy</button>
-      </div>
-
-      <h2 id="copilot-config" class="ds-subheadline">The GitHub Copilot MCP server config — <code>.vscode/mcp.json</code></h2>
-      <div class="code-block">
-        <pre><code>{
-  "servers": {
-    "datapipelines": {
-      "type": "http",
-      "url": "https://your-host/mcp",
-      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
-    }
-  }
-}</code></pre>
-        <button type="button" class="copy-btn" hidden>Copy</button>
-      </div>
-
-      <h2 id="other-clients-config" class="ds-subheadline">Claude Desktop and other JSON-configured clients</h2>
-      <div class="code-block">
-        <pre><code>{
-  "mcpServers": {
-    "datapipelines": {
-      "url": "https://your-host/mcp",
-      "headers": { "Authorization": "Bearer dpk_&lt;id&gt;.&lt;secret&gt;" }
-    }
-  }
-}</code></pre>
-        <button type="button" class="copy-btn" hidden>Copy</button>
-      </div>
+      <!-- The four client blocks live in site/fragments/mcp-client-configs.html, shared with the
+           /how-it-works tutorial so the two pages cannot drift (174). -->
+      <div th:replace="~{site/fragments/mcp-client-configs :: clientConfigs('https://your-host')}"></div>
 
       <p class="demo-note">
         The URL and the header are ours, and specified above. The file names and the JSON shape around them belong

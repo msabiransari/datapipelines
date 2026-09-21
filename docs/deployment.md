@@ -747,8 +747,10 @@ or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade[,lake]]` does t
    after the stack is healthy and prints the login that actually exists — the seed
    fires once, at row creation, so a `DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL`
    changed later names an account that was never created ([Environments
-   §8](environments.md#8-first-login)). The first login provisions your personal
-   workspace and seeds the example pipelines into it.
+   §8](environments.md#8-first-login)). The first login lands you in the shipped
+   `demo` workspace — workspaces are created by super admins, not provisioned per
+   user ([Auth §4.2](auth.md#42-user-provisioning) step 4, D-R11) — which is where
+   the example pipelines are seeded.
 2. **Mint an API key** from the UI (or `POST /api/v1/auth/api-keys`). The secret
    is shown exactly once.
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
@@ -766,8 +768,7 @@ secret and is GENERATED into that same file — never a constant in a tracked fi
 an app that binds every interface ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)).
 There is now exactly ONE place the credential is written and ONE place it is read
 back from, which is why `app.sh` can print a login that works. It also sets the §7
-demo posture: `auto-per-user` provisioning (every
-visitor gets their own workspace) and `member-datasources-enabled=false` (an
+demo posture: `member-datasources-enabled=false` (an
 open datasource form on a public server is an SSRF and port-scan primitive —
 demo users get the seeded datasources only). Without `--profile demo` none of
 it exists: both `datapipelines.bootstrap.*` keys are paths and empty means
