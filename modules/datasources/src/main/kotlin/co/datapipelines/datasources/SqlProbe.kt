@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.H2RestrictedSession
 import co.datapipelines.typesystem.JsonEncoder
 import org.slf4j.LoggerFactory
 import org.springframework.dao.InvalidDataAccessApiUsageException
@@ -9,7 +10,6 @@ import org.springframework.jdbc.core.StatementCreatorUtils
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterUtils
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.SQLException
 import java.util.UUID
@@ -77,10 +77,11 @@ class SqlProbe(
     }
 
     /**
-     * The tempdb scratch check (2026-09-11; its contract corrected 2026-09-16, #119): the
-     * statement is PREPARED against a FRESH, EMPTY in-memory H2 opened in the staging engine's
-     * own `MODE` and lower-folding — the same URL shape `StagingFactory` builds, minus the
-     * execution. Staging tables do not exist here, so the outcomes are:
+     * The tempdb scratch check (2026-09-11; its contract corrected 2026-09-16, #119; the scratch
+     * de-privileged 2026-09-21, #186): the statement is PREPARED against a FRESH, EMPTY in-memory
+     * H2 opened in the staging engine's own `MODE` and lower-folding — the same URL shape
+     * `StagingFactory` builds, minus the execution. Staging tables do not exist here, so the
+     * outcomes are:
      *
      *  - **H2 reports a missing table** (`42102`/`42103`/`42104`, the first `FROM` it could not
      *    resolve) → validation is INCOMPLETE: H2 stops preparing at that name, so whatever
@@ -108,6 +109,17 @@ class SqlProbe(
      *
      * No registry, no lease, no visibility gate: nothing here can read data. The database is
      * discarded when the connection closes (no `DB_CLOSE_DELAY`, the staging rule).
+     *
+     * ## The scratch is de-privileged (#186)
+     *
+     * The classifier admits only SELECT/WITH, but a bare `DriverManager.getConnection(url)` is
+     * an **admin** session — H2 makes the first user of a fresh in-memory database its admin —
+     * and a SELECT reaches the host from there: `SELECT FILE_READ('/proc/self/environ')`,
+     * `CSVREAD('/etc/hosts')`. The scratch therefore opens through [H2RestrictedSession.open],
+     * the staging factory's own two-phase shape (staging.md §9.5): a transient `sa` bootstrap
+     * creates the database and a grantless restricted user, the probe runs as that user, and
+     * the host-reaching functions answer SQLState `90040` — which `isPermissionDenied` classifies,
+     * so the wire answer is the probe's existing not-permitted mapping, never a 500.
      */
     fun probeScratch(
         sql: String,
@@ -129,21 +141,24 @@ class SqlProbe(
                 jdbcUrl = "jdbc:h2:mem:probe_${UUID.randomUUID()};MODE=$mode;DATABASE_TO_LOWER=TRUE",
             )
         val startedAt = System.nanoTime()
-        DriverManager.getConnection(scratch.jdbcUrl).use { connection ->
-            try {
-                connection.prepareStatement(positionalSql).use { prepared ->
-                    prepared.queryTimeout = timeout
-                    prepared.maxRows = rowCap + 1
-                    bind(prepared, bindValues)
-                    return ScratchProbeOutcome.Rows(SqlProbeResult(readRows(prepared, scratch, rowCap), wallMs(startedAt), null))
+        // The scratch user gets NO grants: a probe runs one classified SELECT, which needs none.
+        H2RestrictedSession
+            .open(scratch.jdbcUrl, user = SCRATCH_USER)
+            .firstConnection.use { connection ->
+                try {
+                    connection.prepareStatement(positionalSql).use { prepared ->
+                        prepared.queryTimeout = timeout
+                        prepared.maxRows = rowCap + 1
+                        bind(prepared, bindValues)
+                        return ScratchProbeOutcome.Rows(SqlProbeResult(readRows(prepared, scratch, rowCap), wallMs(startedAt), null))
+                    }
+                } catch (e: SQLException) {
+                    if (e.errorCode in H2_TABLE_NOT_FOUND_CODES) {
+                        return ScratchProbeOutcome.Incomplete(missingTable = missingTableOf(e), wallMs = wallMs(startedAt))
+                    }
+                    throw SqlProbeExecutionException(scratch.name, e)
                 }
-            } catch (e: SQLException) {
-                if (e.errorCode in H2_TABLE_NOT_FOUND_CODES) {
-                    return ScratchProbeOutcome.Incomplete(missingTable = missingTableOf(e), wallMs = wallMs(startedAt))
-                }
-                throw SqlProbeExecutionException(scratch.name, e)
             }
-        }
     }
 
     /** H2's `Table "STG_X" not found` — the quoted name, lower-folded like the staging tables are. */
@@ -310,6 +325,9 @@ class SqlProbe(
         /** The staging engine's default `MODE` (`H2StagingProperties.mode`); callers pass the configured one. */
         const val DEFAULT_SCRATCH_MODE = "PostgreSQL"
         const val SCRATCH_NAME = "tempdb"
+
+        /** The grantless non-admin identity the scratch engine's probe connection runs as (#186). */
+        const val SCRATCH_USER = "PROBE_SCRATCH"
 
         /**
          * H2's table-not-found family: `TABLE_OR_VIEW_NOT_FOUND_1` (42102), `…_WITH_CANDIDATES_2`

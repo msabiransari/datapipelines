@@ -39,6 +39,13 @@ class SqlProbePermissionDeniedTest {
     }
 
     @Test
+    fun `h2 admin-rights-required is classified - the de-privileged in-process shape`() {
+        // H2 2.3.232's refusal of a host-reaching function to a non-admin session — its
+        // SQLState IS the vendor code (186).
+        SQLException("Admin rights are required for this operation", "90040", 90040).isPermissionDenied() shouldBe true
+    }
+
+    @Test
     fun `unrelated failures are not classified`() {
         assertAll(
             { SQLException("ERROR: relation \"orders\" does not exist", "42P01").isPermissionDenied() shouldBe false },
