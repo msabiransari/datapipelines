@@ -97,6 +97,18 @@ object AuthErrorCodes {
     const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
 
     /**
+     * 401 — the principal's USER is deactivated (D15, roles design §3.5): a session, a `user`
+     * key, or the owner of an `endpoint`/`server` key. Judged by [PrincipalLiveness] where the
+     * credential becomes a principal, through the same TTL as revocation, so deactivation kills
+     * every credential within one window and reactivation restores them (deactivation is
+     * reversible — nothing is revoked). Distinct from [API_KEY_INVALID], which since 180 means
+     * only "no such usable key"; and NOT the code for a deactivated workspace, which keeps the
+     * 404 rule ([KEY_WORKSPACE_INACTIVE], `workspace.not_found`). The promotion peer never
+     * emits it — every refusal there is [PROMOTION_KEY_INVALID].
+     */
+    const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
+
+    /**
      * 091 — an issuance whose EXPIRY is not a usable one: an unknown preset, a custom date
      * that is not a date, or an expiry already in the past. A 400, unlike every other code
      * here: nothing is wrong with the caller's credential, the request body is wrong.
@@ -141,6 +153,7 @@ object AuthErrorCodes {
             KEY_SCOPE_UNAVAILABLE,
             KEY_KIND_NOT_MINTABLE,
             KEY_WORKSPACE_INACTIVE,
+            PRINCIPAL_DEACTIVATED,
         )
 
     /**
@@ -351,14 +364,17 @@ class RateLimitExceededException(
     )
 
 /**
- * A JWT (or API key) whose owner is no longer `is_active`. Distinct type so the
- * filter's defined failure boundary (auth.md §6.3, rules/02) can log it as a
- * liveness rejection rather than a malformed-token error.
+ * The principal's user is deactivated (D15, roles design §3.5) — the one refusal
+ * [PrincipalLiveness] raises for a session, a `user` key, or the owner of an `endpoint` or
+ * `server` key. Distinct type so `JwtAuthenticationFilter`'s defined failure boundary
+ * (auth.md §6.3, rules/02) can clear the cookie and log a liveness rejection rather than a
+ * malformed-token error, and so `AuthEntryPoint` can send an HTML navigation to
+ * `/login?error=inactive`. Carries no workspace: the refusal is about the person.
  */
-class DeactivatedUserException(
+class PrincipalDeactivatedException(
     val userId: java.util.UUID,
 ) : AuthException(
-        AuthErrorCodes.API_KEY_INVALID,
+        AuthErrorCodes.PRINCIPAL_DEACTIVATED,
         HTTP_UNAUTHORIZED,
         "Account deactivated",
         "This account has been deactivated. Contact an administrator.",

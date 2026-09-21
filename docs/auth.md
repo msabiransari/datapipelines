@@ -1171,7 +1171,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.session.expired` | 401 | JWT expired |
 | `auth.session.invalid` | 401 | JWT signature invalid or malformed |
 | `auth.api_key.missing` | 401 | No `DP-API-Key` header, no Bearer `dpk_` token, no `dp_session` cookie |
-| `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or owner deactivated |
+| `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or the owner row gone — a deactivated owner is `auth.principal_deactivated` |
 | `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
 | `auth.scope.insufficient` | 403 | Principal lacks the required SCOPE — the credential axis of the §7.6 matrix. Since RBAC round 1 only an API key can fail this way: a session carries no scopes (§11A) |
 | `auth.role_required` | 403 | Principal's role lacks the required PERMISSION in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` (the permission) / `details.held` |
@@ -1179,6 +1179,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.key_scope_unavailable` | 400 | Issuance requested `admin`, which keys may no longer hold (§7.5) |
 | `auth.key_kind_not_mintable` | 400 | Issuance requested kind `user` on a request surface (§7.4) — user keys are minted at login only, one per user per workspace; rotation is delete + sign in again |
 | `auth.key_workspace_inactive` | 404 | The key's pinned workspace is deactivated (§11A); reactivating it restores the key |
+| `auth.principal_deactivated` | 401 | The principal's user is deactivated (§11A.3) — session, `user` key, or the owner of an `endpoint`/`server` key; judged by `PrincipalLiveness` where the credential becomes a principal, within the §11.4 window. A session's cookie is cleared and an HTML navigation lands on `/login?error=inactive`. Never on `/api/v1/promotion/**`, where every refusal is `auth.promotion.key_invalid` |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
 | `auth.promotion.key_invalid` | 401 | The promotion peer's pre-shared server key was absent, malformed, or did not match — and the same code when the receiver has no key configured, so promotion-disabled is indistinguishable from wrong-key ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 

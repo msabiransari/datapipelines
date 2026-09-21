@@ -169,6 +169,8 @@ class PipelineErrorCodesSpecDriftTest {
                 // like its key_* siblings above.
                 PipelineErrorCodes.Auth.KEY_KIND_NOT_MINTABLE,
                 PipelineErrorCodes.Auth.KEY_WORKSPACE_INACTIVE,
+                // 180 — "deactivated" is a state of the PRINCIPAL, not of a named entity.
+                PipelineErrorCodes.Auth.PRINCIPAL_DEACTIVATED,
                 // 112 — the workspace domain's two: "the last admin" and "deactivated" are
                 // states of the WORKSPACE, with no entity dimension under it.
                 PipelineErrorCodes.Workspace.LAST_ADMIN,

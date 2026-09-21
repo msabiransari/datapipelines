@@ -82,7 +82,7 @@ class JwtAuthenticationFilter(
             // The live user row, not just its liveness: `is_admin` is the ONE global capability
             // left (D-R1) and it is read here, per request, through the same 60s cache. A JWT
             // claim would keep a revoked super admin super for the token's whole 8h life.
-            val user = userService.snapshot(userId)?.takeIf { it.isActive } ?: throw DeactivatedUserException(userId)
+            val user = userService.snapshot(userId)?.takeIf { it.isActive } ?: throw PrincipalDeactivatedException(userId)
             val principal =
                 AuthenticatedPrincipal(
                     userId = userId,
@@ -108,7 +108,7 @@ class JwtAuthenticationFilter(
             reject("session_expired", request, response, e)
         } catch (e: SessionInvalidException) {
             reject("session_invalid", request, response, e)
-        } catch (e: DeactivatedUserException) {
+        } catch (e: PrincipalDeactivatedException) {
             reject("user_inactive", request, response, e, userId = e.userId)
         } catch (e: IllegalArgumentException) {
             // Malformed subject/scope token — a bad JWT, not an unexpected fault.
