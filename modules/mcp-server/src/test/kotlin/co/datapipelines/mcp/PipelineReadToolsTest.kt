@@ -373,6 +373,8 @@ class PipelineReadToolsTest {
     @Test
     fun `an unknown version of a known pipeline is a catalogued not-found`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        // 178: the version's DETAIL is read first (a DRAFT is absent under a narrowing lens), then its body.
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 9) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 9) } returns null
 
         val error =
