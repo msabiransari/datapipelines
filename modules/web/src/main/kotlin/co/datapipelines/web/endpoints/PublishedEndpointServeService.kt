@@ -15,6 +15,7 @@ import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionResult
+import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
@@ -28,8 +29,11 @@ import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import java.time.Instant
@@ -224,15 +228,50 @@ class PublishedEndpointServeService(
         val deferred: Deferred<ExecutionResult> = scope.async { runner.run(request, endpoint.workspaceId, ExecutionTrigger.ENDPOINT) }
         val timeout = endpointsProperties.clampTimeout(endpoint.timeoutSeconds)
 
-        // The audit row is written for BOTH outcomes and BEFORE the answer, because it is what
-        // lets this key read the result later — including the 202 case, where reading it later is
-        // the entire contract.
-        auditServe(endpoint, principal, executionId, if (deferred.isCompleted) "completed" else "started")
+        // #192 — the audit tells the truth about WHAT HAPPENED, in two rows. The first is
+        // written BEFORE the answer and is what lets this key read the result later — including
+        // the 202 case, where reading it later is the entire contract. The second is the
+        // terminal outcome OBSERVED after the wait, so forensics can tell "still running when
+        // we answered" from "finished" — the pre-#192 row guessed with `deferred.isCompleted`
+        // sampled before the await, which recorded `started` for answers that had in fact
+        // finished. The audit log is append-only evidence, so the outcome is a SECOND row
+        // (AuditEventSink has no update), same event, `outcome` telling them apart.
+        auditServe(endpoint, principal, executionId, OUTCOME_STARTED)
 
-        val result =
+        val result: ExecutionResult? =
             runBlocking {
-                // Cancels the AWAIT, never the run: the Deferred is owned by `scope`.
-                withTimeoutOrNull(timeout.seconds) { deferred.await() }
+                try {
+                    val awaited = withTimeoutOrNull(timeout.seconds) { deferred.await() }
+                    // Cancels the AWAIT, never the run: the Deferred is owned by `scope`. A null
+                    // here is the 202 branch — the execution continues without us.
+                    val observed =
+                        when {
+                            awaited == null -> OUTCOME_ACCEPTED
+                            awaited.status == ExecutionStatus.SUCCESS -> OUTCOME_COMPLETED
+                            else -> OUTCOME_FAILED
+                        }
+                    // The terminal write is THIS method's to make, and it must survive the
+                    // awaiting coroutine being cancelled out from under it — a cleanup on an
+                    // already-cancelled job is silently skipped unless it runs NonCancellable.
+                    withContext(NonCancellable) {
+                        auditServe(endpoint, principal, executionId, observed)
+                    }
+                    awaited
+                } catch (e: CancellationException) {
+                    // The wait was cancelled from outside; the execution itself continues, so
+                    // `accepted` is the truthful terminal even though no answer went out.
+                    withContext(NonCancellable) {
+                        auditServe(endpoint, principal, executionId, OUTCOME_ACCEPTED)
+                    }
+                    throw e
+                } catch (e: Throwable) {
+                    // The await died of something else (the run crashed the coroutine): the
+                    // execution is over and it did not succeed.
+                    withContext(NonCancellable) {
+                        auditServe(endpoint, principal, executionId, OUTCOME_FAILED)
+                    }
+                    throw e
+                }
             }
         return if (result == null) accepted(executionId, validated) else served(result, validated)
     }
@@ -380,6 +419,17 @@ class PublishedEndpointServeService(
         )
 
     private companion object {
+        /**
+         * The serve audit's `outcome` vocabulary (#192): `started` (pre-answer, the key's read
+         * ticket), then exactly one terminal row — `completed` (the run finished and succeeded),
+         * `failed` (the run finished and did not), or `accepted` (the wait expired or the wait
+         * itself was cancelled: the execution CONTINUES — "still running when we answered").
+         */
+        const val OUTCOME_STARTED = "started"
+        const val OUTCOME_COMPLETED = "completed"
+        const val OUTCOME_FAILED = "failed"
+        const val OUTCOME_ACCEPTED = "accepted"
+
         const val HTTP_BAD_REQUEST = 400
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403
