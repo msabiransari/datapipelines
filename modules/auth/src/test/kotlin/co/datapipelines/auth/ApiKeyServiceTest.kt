@@ -417,8 +417,10 @@ class ApiKeyServiceTest {
     private val mintingService =
         ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService, sealer)
 
-    private fun owner(mustChange: Boolean = false, superAdmin: Boolean = false) =
-        activeOwner().copy(mustChangePassword = mustChange, isAdmin = superAdmin)
+    private fun owner(
+        mustChange: Boolean = false,
+        superAdmin: Boolean = false,
+    ) = activeOwner().copy(mustChangePassword = mustChange, isAdmin = superAdmin)
 
     private fun contextOf(role: WorkspaceRole) = WorkspaceContext(workspaceId, "acme", role)
 
@@ -461,8 +463,10 @@ class ApiKeyServiceTest {
         captureMint()
         every { repo.findLiveUserKey(any(), any()) } returns null
 
-        fun scopesFor(role: WorkspaceRole, superAdmin: Boolean = false) =
-            mintingService.mintLoginKey(owner(superAdmin = superAdmin), contextOf(role))!!.scopes
+        fun scopesFor(
+            role: WorkspaceRole,
+            superAdmin: Boolean = false,
+        ) = mintingService.mintLoginKey(owner(superAdmin = superAdmin), contextOf(role))!!.scopes
 
         scopesFor(WorkspaceRole.VIEWER) shouldBe Scope.EXECUTE.expand()
         scopesFor(WorkspaceRole.PROMOTER) shouldBe setOf(Scope.READ)

@@ -234,8 +234,16 @@ class AuthRepositoriesIntegrationTest {
 
         val key =
             keys.insert(
-                "dpk_MINTED000001", owner.id, "mcp/default", "hash", setOf(Scope.READ, Scope.EXECUTE),
-                null, DEFAULT_WORKSPACE_ID, ApiKeyKind.USER, sealed, mintedAtLogin = true,
+                "dpk_MINTED000001",
+                owner.id,
+                "mcp/default",
+                "hash",
+                setOf(Scope.READ, Scope.EXECUTE),
+                null,
+                DEFAULT_WORKSPACE_ID,
+                ApiKeyKind.USER,
+                sealed,
+                mintedAtLogin = true,
             )
 
         key.mintedAtLogin.shouldBeTrue()
