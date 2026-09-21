@@ -2,7 +2,9 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplatePin
+import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import java.util.UUID
 
@@ -46,15 +48,22 @@ class TemplateUsageService(
      *   the workspace (a soft-deleted template is NOT unknown here: its versions still resolve
      *   for existing pins, which is exactly the retirement case the question serves), and the
      *   same code with a `version` detail when the id exists but that version does not.
+     *
+     * The two lenses (178): a template the [templateLens] does not admit is `template.not_found`
+     * — a hidden object answers exactly as an absent one — and pinning pipelines the
+     * [pipelineLens] does not admit are dropped from [UsedBy.references] and the count, so a
+     * hidden pipeline never leaks through the reverse arrow.
      */
     fun usedBy(
         workspaceId: UUID,
+        templateLens: ReadLens,
+        pipelineLens: ReadLens,
         id: String,
         version: Int,
     ): UsedBy {
-        if (!templates.existsId(workspaceId, id)) throw templateNotFound(id)
+        if (!templateLens.admits(id) || !templates.existsId(workspaceId, id)) throw templateNotFound(id)
         if (templates.findVersionStatus(workspaceId, id, version) == null) throw templateVersionNotFound(id, version)
-        val references = pipelines.findWorkingVersionTemplatePins(workspaceId, id, version)
+        val references = pipelines.findWorkingVersionTemplatePins(workspaceId, id, version).through(pipelineLens) { it.pipelineName }
         return UsedBy(
             templateId = id,
             version = version,

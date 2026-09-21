@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateUsageService
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -52,7 +53,7 @@ class TemplatesUsedByTool(
         // Never clamped (the McpArguments.version rule): an off-by-one version must refuse,
         // not silently answer for a neighbouring version.
         val version = args.version() ?: throw McpArguments.invalidParams("Missing required argument 'version'.")
-        val used = usage.usedBy(workspaceId, id, version)
+        val used = usage.usedBy(workspaceId, ReadLens.Everything, ReadLens.Everything, id, version)
         return mapOf(
             "template" to mapOf("id" to used.templateId, "version" to used.version),
             "scan" to "working_version",

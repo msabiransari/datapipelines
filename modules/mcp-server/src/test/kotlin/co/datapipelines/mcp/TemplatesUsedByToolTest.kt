@@ -35,7 +35,7 @@ class TemplatesUsedByToolTest {
 
     @Test
     fun `the payload names pipeline, node and carrying pipeline version - enough to act on`() {
-        every { usage.usedBy(any(), "fetch_orders.sql", 2) } returns
+        every { usage.usedBy(any(), any(), any(), "fetch_orders.sql", 2) } returns
             TemplateUsageService.UsedBy(
                 templateId = "fetch_orders.sql",
                 version = 2,
@@ -64,7 +64,7 @@ class TemplatesUsedByToolTest {
 
     @Test
     fun `an unknown template is the catalogued not-found, a missing version a protocol error`() {
-        every { usage.usedBy(any(), "nope.sql", 1) } throws
+        every { usage.usedBy(any(), any(), any(), "nope.sql", 1) } throws
             co.datapipelines.typesystem.DatapipelinesException(
                 code = co.datapipelines.pipeline.PipelineErrorCodes.Template.NOT_FOUND,
                 message = "Template 'nope.sql' does not exist.",
