@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.64
+**Status:** v1.65
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-19 (173)
@@ -443,7 +443,7 @@ by `OidcSignedInBounceFilter`, installed ahead of Spring Security's `OAuth2Autho
 same `JwtService.validate` + `UserService.isActive` pair the JWT filter uses). Everything that is not a live
 session — no cookie, expired, invalid, deactivated owner — proceeds to the provider untouched.
 
-Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not_allowed`, `oidc_error` (OIDC); `credentials` (unknown email or wrong password — deliberately identical, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)), `locked` (per-account lockout), `inactive` (deactivated account, either method — and, since 180, where a live session lands when its account is deactivated mid-life: the JWT filter clears the cookie and the entry point sends the next page navigation here, [Auth §11A.3](auth.md#11a3-deactivation)).
+Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not_allowed`, `oidc_error` (OIDC), `identity_mismatch` (#187 — the email is already linked to a different sign-in identity; nothing was changed, and the banner says to ask an administrator for a reset, [Auth §4.2](auth.md#42-user-provisioning)); `credentials` (unknown email or wrong password — deliberately identical, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)), `locked` (per-account lockout), `inactive` (deactivated account, either method — and, since 180, where a live session lands when its account is deactivated mid-life: the JWT filter clears the cookie and the entry point sends the next page navigation here, [Auth §11A.3](auth.md#11a3-deactivation)).
 
 ### 4.2 Dashboard
 
@@ -1117,13 +1117,14 @@ Content:
 | Purpose | View all users, activate/deactivate, grant/revoke admin |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button` |
 | JS | None |
-| htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-patch="/partials/admin/users/{id}/{action}"`, row-level swap) |
+| htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-patch="/partials/admin/users/{id}/{action}"`, row-level swap), identity reset (#187, its own literal route `hx-patch="/partials/admin/users/{id}/identity-reset"` — `USER_IDENTITY_RESET`, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) |
 
 Content: table of all users (email, display_name, `is_active` and `is_admin` as `.ds-badge` variants — success/danger for status, primary/default for role — local-access status). Admin can toggle `is_active` and `is_admin` per user, and — for local accounts ([Auth §5A.1](auth.md#5a1-accounts)) — create local users, reset passwords, disable local access, and clear lockouts.
 
 - Partials delegate to [REST §16.3](rest-api.md#163-user-administration-admin-scope) (`activate`, `deactivate`, `grant-admin`, `revoke-admin`), which writes the `auth.user.*` audit events. Every row action keeps its `#user-row-{id}` outerHTML swap and reports the outcome as a success toast naming the action and the user's email (§5.1 Shape A).
 - **Create local user** (rendered only when local accounts are enabled): email + optional display name, plus the OPTIONAL workspace and its role (113 §B.3, [Auth §4.6](auth.md#46-invitations)) — a workspace name field and the same single-select role dropdown the workspaces page uses (D22: `viewer` / `author` / `promoter` / `workspace admin`). When the workspace is named, the new account's membership is written in the same act: no invitation is needed because the user row exists by the time the membership is written ([Auth §4.6](auth.md#46-invitations) rule 1), and a workspace the super admin cannot add to is refused as a toast note while the USER ROW still stands (the fix is the workspaces screen). The server generates a random one-time password shown to the admin exactly once (out-of-band notice — PERSISTENT and inline per §5.1's hard rule; the success toast only points at it) with `must_change_password = TRUE` — there is no email flow, so the admin conveys it out-of-band ([Auth §5A.1](auth.md#5a1-accounts)). A taken email answers `409` and an invalid email `400`, both as danger toasts (§5.1 Shape C) — before the toast bridge existed these refusals were invisible: htmx never swapped the 4xx bodies and the screen had no error listener.
 - **Reset PW** issues a new one-time password under the same rules (and clears any lockout); **Disable local** clears the hash (account becomes OIDC-only); **Unlock** clears the lockout only. The `Local` column shows `local`, `local · locked`, or `—` (OIDC-only).
+- **Reset identity** (#187) — the explicit answer to a refused login with `?error=identity_mismatch`: returns the row to the bootstrap placeholder so the NEXT OIDC sign-in with that email claims it (audited `auth.user.identity_reset`, [Auth §4.2](auth.md#42-user-provisioning)). Liveness, admin flag, password and memberships are untouched — a deactivated user stays deactivated. Never needed after a mere role change; only when an account must move to a different sign-in identity.
 - **When mail is configured** (137, [Configuration §3.27](configuration.md#327-mail), [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)) the create and reset responses **do not show the one-time password** — it was emailed to the user, and two copies of a credential are one too many. The same persistent `#admin-notice` box says *Emailed to \<address\> — sending…* and polls its own outcome (`hx-get="/partials/admin/users/{id}/mail/{kind}?act={act}"`, every 2 s, swapping itself) until the claim row is terminal: *sent* (with the first-login sentence) or *failed: \<error\>* (with "reset the password to send again"). A terminal render carries no `hx-get`. The toast says the password was emailed and, as before, only points at the notice. `AdminUsersPartialController` reads `MailProperties.enabled` — one Thymeleaf branch in `partials/admin-user-saved`; with mail off the password renders exactly as above.
 - Deactivation copy states the effect window: existing JWTs and API keys stop working within the liveness-cache TTL (~60s — `datapipelines.auth.api-keys.cache-ttl-seconds`, default 60), not instantly and not at JWT expiry. Since 180 the refusal is `auth.principal_deactivated` on every API surface, a page navigation lands on `/login?error=inactive`, and the promotion peer folds a deactivated owner into its one answer ([Auth §11A.3](auth.md#11a3-deactivation)). Nothing is revoked: Activate restores the same sessions and keys.
 - Scopes are derived, not assigned, in v1: `is_admin` → `admin`, every other active user → `author` ([Auth §7.5](auth.md#75-scopes)). So the "grant admin" toggle *is* the scope control — there is no per-user scope editor to build.
@@ -1442,7 +1443,9 @@ on hover, like every table here. Deleted and expired keys keep their row and los
   table out-of-band (at TABLE level — a `tbody` OOB element dies in the browser's fragment
   parser) and points a toast at the panel.
 - **Delete** — revokes the key (a workspace-scoped, kind-pinned SQL revoke: it cannot touch
-  a user's MCP key or another workspace's).
+  a user's MCP key or another workspace's). Since 2026-09-21 (#191) it works for BOTH kinds
+  the table lists — `endpoint` and `server` — through each kind's own workspace-scoped verb;
+  before then a server-key row's delete silently did nothing.
 - **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
   current bindings; Save posts the whole SET and the service writes the delta (add/remove),
   so a checkbox never maps to "add" or "remove" by itself.
@@ -1579,7 +1582,7 @@ These are **full-page** errors — the result of a browser navigation to a page 
 | 403 (Forbidden) | `GET /error?status=403` | "You don't have permission to access this page" + link back to dashboard |
 | 404 (Not Found) | `GET /error?status=404` | "Page not found" + link to dashboard |
 | 500 (Server Error) | `GET /error?status=500` | "Something went wrong" + correlation_id for support |
-| Login errors | `GET /login?error={code}` | Login page with error message (domain_not_allowed, inactive, oidc_error) |
+| Login errors | `GET /login?error={code}` | Login page with error message (domain_not_allowed, inactive, oidc_error, identity_mismatch) |
 
 All error pages use the design system's `.ds-card` with appropriate `.ds-text--danger` or `.ds-text--warning` classes.
 
@@ -1610,6 +1613,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.65 | 191 (#187) — OIDC identity | Login page gains `?error=identity_mismatch` (the email is already linked to a different sign-in identity; nothing changed, ask an administrator). §4.12 gains the **Reset identity** verb — its own literal route and `USER_IDENTITY_RESET` row, rendering the shared row-swap + toast. |
 | 2026-09-21 | v1.64 | 188 (#188) security headers + CSP | Doc-only for the screens (no visible behaviour changes). §3.4: the rail's first-paint script is `/js/rail.js`, not an inline block — the enforced CSP (`script-src 'self'; style-src 'self'`, no `'unsafe-inline'`) forbids every inline script, `on*=` handler and `style=` attribute in a template; the five page scripts and twenty-three handlers moved into `/js` (`api-keys.js`, `datasources.js`, `template-create-modal.js`, `password-card.js`, `rail.js`; the rest into `shell.js` and `template-editor/lifecycle.js` as `data-action` controls), the executions rows navigate by `data-href`, and the type-coloured editor elements carry `data-type` instead of a style attribute. The pipeline editor's route alone allows `'unsafe-eval'` for Alpine (#195). Guards: `InlineScriptAuditTest`, the browser suite's zero-violation rule, `SecurityHeadersTest`. |
 | 2026-09-21 | v1.63 | 180 (#180) roles R4 — deactivation | Doc-only. §4.11: `?error=inactive` is also where a session deactivated mid-life lands (cookie cleared by the filter, redirect by the entry point). §4.12: the deactivation window sentence names the knob and the new code `auth.principal_deactivated`; nothing is revoked, Activate restores. |
 | 2026-09-21 | v1.62 | 185 (#185) script-block escaping | §4.4: the editor's two JSON blobs are written through `ScriptSafeJson.forScriptBlock`, so a closing-tag sequence inside any free-text field the pipeline carries cannot close the `<script type="application/json">` block the blob is inserted into (stored XSS, #185). One shared escaper with the docs' and FAQ's JSON-LD writers; guarded by `PipelineEditorJsonRenderTest` (jsoup) and `ScriptBlockUtextAuditTest`'s closed `th:utext` allowlist. |

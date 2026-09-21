@@ -89,14 +89,17 @@ class EndpointsConfiguration {
 
     /**
      * Issuance that writes a key and its bindings together (§5.2) — cross-aggregate, so the
-     * service lives in `modules/application` and only its wiring is here.
+     * service lives in `modules/application` and only its wiring is here. The published-endpoint
+     * repository is what #191's bind-time rule reads: a binding of a workspace must name its own
+     * published tree.
      */
     @Bean
     fun endpointKeyService(
         apiKeys: ApiKeyService,
         bindings: EndpointKeyBindingRepository,
         audit: AuditEventSink,
-    ): EndpointKeyService = EndpointKeyService(apiKeys, bindings, audit)
+        publishedEndpoints: PublishedEndpointRepository,
+    ): EndpointKeyService = EndpointKeyService(apiKeys, bindings, audit, publishedEndpoints)
 
     /**
      * The §7.7 proof that an execution belongs to the endpoint key asking for its result. Reads

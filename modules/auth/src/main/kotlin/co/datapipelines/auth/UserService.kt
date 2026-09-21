@@ -31,8 +31,15 @@ class UserService(
     )
 
     /**
-     * Find-or-create by email (auth.md §4.2). On an existing account the OIDC
-     * identity is (re)linked.
+     * Find-or-create by email (auth.md §4.2). On an existing account the OIDC identity is
+     * linked **only when it is compatible** (#187): the stored row is the bootstrap
+     * placeholder (this login COMPLETES a pre-provisioned identity), or its
+     * `(provider, provider_subject)` equals the incoming pair (the same person signing in
+     * again — display name and picture refresh). Anything else — a different provider, a
+     * different subject under the same provider, or a `local`/`system` row — refuses with
+     * [IdentityMismatchException]: NO row is updated, and the caller redirects to
+     * `/login?error=identity_mismatch`. An identity is linked once; re-linking is the super
+     * admin's explicit [resetIdentity], never a side effect of a login.
      *
      * Bootstrap-admin (§4.4) fires **only when the row is created**: a later login
      * changes nothing, and after an admin deliberately revokes admin
@@ -54,7 +61,7 @@ class UserService(
         val normalized = normalize(email)
         val existing = userRepository.findByEmail(normalized)
         if (existing != null) {
-            return Provisioned(linkIdentity(existing.id, displayName, pictureUrl, provider, providerSubject), created = false)
+            return Provisioned(linkIfCompatible(existing, displayName, pictureUrl, provider, providerSubject), created = false)
         }
 
         return try {
@@ -77,8 +84,34 @@ class UserService(
                 checkNotNull(userRepository.findByEmail(normalized)) {
                     "User $normalized lost the insert race but is absent on re-read"
                 }
-            Provisioned(linkIdentity(winner.id, displayName, pictureUrl, provider, providerSubject), created = false)
+            Provisioned(linkIfCompatible(winner, displayName, pictureUrl, provider, providerSubject), created = false)
         }
+    }
+
+    /**
+     * The §4.2 link decision for an account that already exists (#187). A bootstrap
+     * placeholder is claimable by the first real sign-in; the SAME `(provider, subject)`
+     * refreshes; everything else is a refusal — the stored identity is evidence, and a
+     * login that cannot prove it is the same person must not overwrite it.
+     */
+    private fun linkIfCompatible(
+        stored: User,
+        displayName: String,
+        pictureUrl: String?,
+        provider: String,
+        providerSubject: String,
+    ): User {
+        val compatible =
+            stored.provider == BOOTSTRAP_PROVIDER ||
+                (stored.provider == provider && stored.providerSubject == providerSubject)
+        if (!compatible) {
+            throw IdentityMismatchException(
+                userId = stored.id,
+                storedProvider = stored.provider,
+                incomingProvider = provider,
+            )
+        }
+        return linkIdentity(stored.id, displayName, pictureUrl, provider, providerSubject)
     }
 
     /**
@@ -249,8 +282,9 @@ class UserService(
      * here — an admin who creates the bootstrap address creates an admin, the
      * same rule as every other path — and the caller audits `auth.user.created`
      * with the acting admin's id. The `provider = 'local'` placeholder
-     * ([LOCAL_PROVIDER]) marks "no OIDC identity linked"; §4.2's linking step
-     * replaces it if the person later signs in via OIDC. [email] is normalized
+     * ([LOCAL_PROVIDER]) marks "no OIDC identity linked"; since #187 a later OIDC
+     * sign-in with this email REFUSES rather than re-linking — moving the account
+     * to OIDC is the super admin's explicit [resetIdentity]. [email] is normalized
      * by the caller.
      */
     fun createLocalAccount(
@@ -316,6 +350,28 @@ class UserService(
         targetId: UUID,
         actorId: UUID,
     ): Boolean = auditedFlip(targetId, actorId, "auth.user.admin_revoked") { userRepository.revokeAdmin(it) }
+
+    /**
+     * Resets a user's linked identity to the bootstrap placeholder (#187, §4.2): the NEXT
+     * OIDC sign-in with this email claims the row. The super admin's explicit answer to the
+     * `auth.login.identity_mismatch` refusal — a login never re-links silently, so moving an
+     * account between sign-in identities is a human decision, audited
+     * (`auth.user.identity_reset`, actor + target). The row's liveness, admin flag, password
+     * and memberships are untouched; a deactivated user stays deactivated (180).
+     *
+     * No transition → no event: a row already sitting on the placeholder is a no-op (§10.1).
+     */
+    fun resetIdentity(
+        targetId: UUID,
+        actorId: UUID,
+    ): Boolean {
+        val changed = userRepository.resetIdentityToBootstrap(targetId)
+        if (changed) {
+            authCache.invalidateUser(targetId)
+            auditLogger.log(event = "auth.user.identity_reset", userId = targetId, details = mapOf("actor" to actorId.toString()))
+        }
+        return changed
+    }
 
     /** Stores the user's theme choice (metadata-db §4.1); `null` = follow the deployment default. */
     fun setThemePreference(

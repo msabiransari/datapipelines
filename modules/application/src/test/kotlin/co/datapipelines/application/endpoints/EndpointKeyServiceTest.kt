@@ -14,10 +14,12 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import java.time.Instant
@@ -40,7 +42,8 @@ class EndpointKeyServiceTest {
     private val apiKeys = mockk<ApiKeyService>()
     private val bindings = mockk<EndpointKeyBindingRepository>(relaxed = true)
     private val audit = mockk<AuditEventSink>(relaxed = true)
-    private val service = EndpointKeyService(apiKeys, bindings, audit)
+    private val publishedEndpoints = mockk<PublishedEndpointRepository>()
+    private val service = EndpointKeyService(apiKeys, bindings, audit, publishedEndpoints)
 
     @Test
     fun `an endpoint key is minted with its bindings, in one call`() {
@@ -158,9 +161,9 @@ class EndpointKeyServiceTest {
         val written = slot<EndpointKeyBinding>()
         every { bindings.insert(capture(written)) } returns true
 
-        service.issue(principal(), "n", emptySet(), ApiKeyKind.ENDPOINT, listOf("nyc/revenue/"), null)
+        service.issue(principal(), "n", emptySet(), ApiKeyKind.ENDPOINT, listOf("nyc/v1/revenue/"), null)
 
-        written.captured.pathPrefix shouldBe "/nyc/revenue"
+        written.captured.pathPrefix shouldBe "/nyc/v1/revenue"
     }
 
     @Test
@@ -191,6 +194,85 @@ class EndpointKeyServiceTest {
             { verify(exactly = 1) { audit.log("endpoint.key_unbound", any(), KEY_ID, any(), any(), any()) } },
         )
     }
+
+    // ----------------------------------------------------------------------- #191
+
+    @Test
+    fun `a prefix outside the workspace's published tree is refused at bind (#191)`() {
+        // The workspace publishes under /nyc and /trade only; /lending belongs to nobody here.
+        // The refusal names only the caller's own tree — whether ANOTHER workspace publishes at
+        // /lending is exactly what the message must not reveal.
+        val refused =
+            shouldThrow<DatapipelinesException> {
+                service.bind(principal(), KEY_ID, "/lending")
+            }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
+            { refused.message.orEmpty() shouldContain "your workspace" },
+            { refused.message.orEmpty() shouldNotContain "other" },
+            { verify(exactly = 0) { bindings.insert(any()) } },
+            { verify(exactly = 0) { audit.log(any(), any(), any(), any(), any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `a prefix the workspace publishes - or an ancestor of one - is accepted (#191)`() {
+        every { bindings.insert(any()) } returns true
+
+        assertAll(
+            { service.bind(principal(), KEY_ID, "/nyc") shouldBe true },
+            { service.bind(principal(), KEY_ID, "/nyc/v1") shouldBe true },
+            { service.bind(principal(), KEY_ID, "/nyc/v1/revenue") shouldBe true },
+        )
+    }
+
+    @Test
+    fun `issue validates its binding paths against the workspace's published tree too (#191)`() {
+        // The same property at the mint-and-bind funnel: a key cannot be CREATED bound at a
+        // foreign prefix any more than it can be bound there later.
+        val refused =
+            shouldThrow<DatapipelinesException> {
+                service.issue(principal(), "x", emptySet(), ApiKeyKind.ENDPOINT, listOf("/lending"), null)
+            }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `the root binding stays legal - it is confined at serve time, not refused at bind (#191)`() {
+        // Binding at `/` was always legal and stays so; the #191 rule that keeps it inside the
+        // workspace lives in EndpointAuthorizer, not here. Refusing it here would break a real
+        // operator intent the form still offers first.
+        every { bindings.insert(any()) } returns true
+
+        service.bind(principal(), KEY_ID, "/") shouldBe true
+    }
+
+    /** The workspace's published tree the #191 bind-time check reads: two patterns under /nyc and /trade. */
+    @BeforeEach
+    fun stubPublishedTree() {
+        every { publishedEndpoints.findByWorkspace(neq(WORKSPACE)) } returns emptyList()
+        every { publishedEndpoints.findByWorkspace(WORKSPACE) } returns
+            listOf(publishedAt("/nyc/v1/revenue/{borough}"), publishedAt("/trade/v1/summary"))
+    }
+
+    private fun publishedAt(pattern: String) =
+        PublishedEndpoint.of(
+            id = UUID.randomUUID(),
+            workspaceId = WORKSPACE,
+            pathPattern = pattern,
+            pipelineId = UUID.randomUUID(),
+            timeoutSeconds = 60,
+            description = "",
+            isEnabled = true,
+            createdBy = ACTOR,
+            createdAt = Instant.EPOCH,
+            updatedAt = Instant.EPOCH,
+        )
 
     private fun stubIssue() {
         every { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } returns

@@ -20,6 +20,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -303,6 +304,20 @@ class AdminUsersPartialControllerTest {
     fun `toggle unknown action returns bad request`() {
         authenticate()
         refusal(partialController.toggle(model, userId, "unknown_action")).statusCode shouldBe HttpStatus.BAD_REQUEST
+    }
+
+    @Test
+    fun `identity reset returns the refreshed row and a toast that says what comes next (#187)`() {
+        authenticate()
+        every { userService.resetIdentity(userId, adminPrincipal.userId) } returns true
+        every { userService.snapshot(userId) } returns sampleUser()
+
+        val html = render(partialController.resetIdentity(model, userId))
+
+        html shouldContain "user-row-$userId"
+        html shouldContain "Identity reset"
+        html shouldContain "next sign-in"
+        verify { userService.resetIdentity(userId, adminPrincipal.userId) }
     }
 
     @Test

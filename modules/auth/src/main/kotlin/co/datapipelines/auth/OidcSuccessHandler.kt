@@ -27,13 +27,20 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
  * |---|---|---|
  * | no `email` claim | `auth.login.oidc_error` | `/login?error=oidc_error` |
  * | `email_verified: false` | `auth.login.oidc_error` | `/login?error=oidc_error` |
+ * | `email_verified` MISSING (unless the provider's trust knob, §5.1) | `auth.login.oidc_error` | `/login?error=oidc_error` |
+ * | stored identity differs from the incoming one (#187) | `auth.login.identity_mismatch` | `/login?error=identity_mismatch` |
  * | domain not allowlisted | `auth.login.domain_not_allowed` | `/login?error=domain_not_allowed` |
  * | `is_active = false` | `auth.login.user_inactive` | `/login?error=inactive` |
  *
  * The `email_verified` gate (§4.2) is the one that is easy to miss and expensive to
  * get wrong: provisioning is keyed on email, so an unverified self-registered account
- * at the provider would **take over** the existing row for that address. A provider
- * that omits the claim entirely is treated as vouching for the address.
+ * at the provider would **take over** the existing row for that address. Since #187
+ * a MISSING claim counts as UNVERIFIED (fail closed); an IdP that never emits the
+ * claim must be trusted explicitly, per provider, with
+ * `trust-email-without-verified-claim` (§5.1) — and each such acceptance is audited
+ * (`auth.login.email_verified_assumed`). The link-once rule (#187) lives in
+ * [UserService]: a login whose identity does not match the stored row refuses — an
+ * identity is re-linked only by the super admin's explicit reset, never by a login.
  */
 class OidcSuccessHandler(
     private val userService: UserService,
@@ -61,33 +68,111 @@ class OidcSuccessHandler(
             rejectOidc(request, response, registrationId, reason = "missing_email")
             return
         }
-        if (isEmailUnverified(claims["email_verified"])) {
-            rejectOidc(request, response, registrationId, reason = "email_not_verified", email = email)
-            return
-        }
+        if (claimsUnverifiedOrRedirect(claims, registrationId, email, request, response)) return
+        if (domainRefused(email, request, response)) return
+
         val displayName = claims["name"] as String? ?: email
         val pictureUrl = claims["picture"] as String?
         val providerSubject = claims["sub"] as String
 
-        if (!authProperties.isDomainAllowed(email)) {
-            auditLogger.log(
-                "auth.login.domain_not_allowed",
-                sourceIp = clientAddressResolver.clientAddressOf(request),
-                details = mapOf("email" to email),
-            )
-            redirectStrategy.sendRedirect(request, response, "/login?error=domain_not_allowed")
-            return
-        }
-
         val (user, created) =
+            provisionOrRedirect(email, displayName, pictureUrl, registrationId, providerSubject, request, response)
+                ?: return
+        completeLogin(user, created, email, registrationId, request, response)
+    }
+
+    /** The §4.3 allowlist gate — false when the login may proceed; redirects on refusal. */
+    private fun domainRefused(
+        email: String,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ): Boolean {
+        if (authProperties.isDomainAllowed(email)) return false
+        auditLogger.log(
+            "auth.login.domain_not_allowed",
+            sourceIp = clientAddressResolver.clientAddressOf(request),
+            details = mapOf("email" to email),
+        )
+        redirectStrategy.sendRedirect(request, response, "/login?error=domain_not_allowed")
+        return true
+    }
+
+    /**
+     * The §4.2 `email_verified` gate (#187) — false when the login may proceed. Default is
+     * to treat a MISSING claim as unverified; a claim PRESENT and false is refused whatever
+     * the provider's trust knob says. An acceptance UNDER THE KNOB is audited here, once per
+     * login, so an audit can tell "vouched" from "assumed".
+     */
+    private fun claimsUnverifiedOrRedirect(
+        claims: Map<String, Any>,
+        registrationId: String,
+        email: String,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ): Boolean {
+        val trustWithoutClaim = authProperties.oidcProvider(registrationId)?.trustEmailWithoutVerifiedClaim ?: false
+        if (isEmailUnverified(claims["email_verified"], trustWithoutClaim)) {
+            rejectOidc(request, response, registrationId, reason = "email_not_verified", email = email)
+            return true
+        }
+        if (claims["email_verified"] == null && trustWithoutClaim) {
+            auditLogger.log(
+                event = "auth.login.email_verified_assumed",
+                sourceIp = clientAddressResolver.clientAddressOf(request),
+                details = mapOf("provider" to registrationId, "email" to email),
+            )
+        }
+        return false
+    }
+
+    /**
+     * Provision-or-refuse (#187): the stored identity must be the bootstrap placeholder or
+     * the SAME `(provider, provider_subject)`. Anything else is the mismatch refusal —
+     * nothing was changed; the audit names the two PROVIDERS and never the subject values.
+     * Null means the redirect has been sent.
+     */
+    private fun provisionOrRedirect(
+        email: String,
+        displayName: String,
+        pictureUrl: String?,
+        provider: String,
+        providerSubject: String,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ): UserService.Provisioned? =
+        try {
             userService.findOrCreateByEmail(
                 email = email,
                 displayName = displayName,
                 pictureUrl = pictureUrl,
-                provider = registrationId,
+                provider = provider,
                 providerSubject = providerSubject,
             )
+        } catch (e: IdentityMismatchException) {
+            auditLogger.log(
+                event = "auth.login.identity_mismatch",
+                userId = e.userId,
+                sourceIp = clientAddressResolver.clientAddressOf(request),
+                details =
+                    mapOf(
+                        "stored_provider" to e.storedProvider,
+                        "incoming_provider" to e.incomingProvider,
+                        "email" to email,
+                    ),
+            )
+            redirectStrategy.sendRedirect(request, response, "/login?error=identity_mismatch")
+            null
+        }
 
+    /** The tail of a successful login: workspace, notice, cookie, last-login stamp, audit. */
+    private fun completeLogin(
+        user: User,
+        created: Boolean,
+        email: String,
+        registrationId: String,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ) {
         if (!user.isActive) {
             auditLogger.log("auth.login.user_inactive", userId = user.id, sourceIp = clientAddressResolver.clientAddressOf(request))
             redirectStrategy.sendRedirect(request, response, "/login?error=inactive")
@@ -124,16 +209,25 @@ class OidcSuccessHandler(
     }
 
     /**
-     * True only when the provider explicitly asserts the address is NOT verified.
-     * Absent → accepted (§4.2). The claim arrives as a JSON boolean from most
-     * providers and as the string `"false"` from a few, so both are honored.
+     * True when the login must NOT proceed on the strength of this claim (#187).
+     * Absent → UNVERIFIED by default — the fail-closed reading of §4.2: provisioning is
+     * keyed on email, and a provider that stays silent has not vouched for the address.
+     * An IdP that never emits the claim is trusted only through its explicit
+     * `trust-email-without-verified-claim` knob (§5.1), which this function takes as
+     * [trustWithoutVerifiedClaim]. A claim that is PRESENT and false is refused whatever
+     * the knob says. The claim arrives as a JSON boolean from most providers and as the
+     * string `"false"` from a few, so both are honored; an unrecognized shape is treated
+     * as absent (knob-aware) rather than guessed about.
      */
-    private fun isEmailUnverified(claim: Any?): Boolean =
+    private fun isEmailUnverified(
+        claim: Any?,
+        trustWithoutVerifiedClaim: Boolean,
+    ): Boolean =
         when (claim) {
-            null -> false
+            null -> !trustWithoutVerifiedClaim
             is Boolean -> !claim
             is String -> claim.equals("false", ignoreCase = true)
-            else -> false
+            else -> !trustWithoutVerifiedClaim
         }
 
     private fun rejectOidc(

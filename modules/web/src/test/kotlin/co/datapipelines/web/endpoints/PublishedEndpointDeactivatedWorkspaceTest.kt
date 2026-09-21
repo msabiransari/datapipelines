@@ -113,7 +113,7 @@ class PublishedEndpointDeactivatedWorkspaceTest {
         deactivated.code shouldBe PipelineErrorCodes.Endpoint.NOT_FOUND
         deactivated shouldBe unknown
         verify(exactly = 0) { pipelines.findRecord(any(), any(), any()) }
-        verify(exactly = 0) { bindings.findByPrefixes(any()) }
+        verify(exactly = 0) { bindings.findByPrefixes(any(), any()) }
     }
 
     @Test

@@ -159,6 +159,39 @@ class EndpointAuthorizerTest {
             PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
     }
 
+    @Test
+    fun `a binding of ANOTHER workspace is invisible - it neither decides nor shadows (#191)`() {
+        // The exploit shape #191 closes: workspace B publishes /lending/**; A's key is bound at
+        // /lending in A's workspace. Before the fix the nearer foreign node decided and the
+        // presented-key comparison was workspace-blind, so A's key served B's endpoint. Now the
+        // foreign row is not even consulted: the walk continues as if /lending carried nothing.
+        val foreign =
+            EndpointKeyBinding("/lending", "dpk_FOREIGNKEY", OTHER_WORKSPACE, USER, Instant.EPOCH)
+        val own = binding("/", "dpk_A")
+
+        assertAll(
+            // The foreign binding does not let its own key in either...
+            {
+                codeOf(authorizer.authorize("/lending/home", endpointKey("dpk_FOREIGNKEY"), WORKSPACE, listOf(foreign))) shouldBe
+                    PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
+            },
+            // ...does not keep a same-workspace key out of its own subtree (no shadowing)...
+            {
+                codeOf(authorizer.authorize("/lending/home", endpointKey("dpk_A"), WORKSPACE, listOf(foreign, own))) shouldBe null
+            },
+            // ...and leaves the unbound rule exactly where it was for this workspace.
+            {
+                codeOf(authorizer.authorize("/lending/home", endpointKey("dpk_A"), WORKSPACE, listOf(foreign))) shouldBe
+                    PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
+            },
+            {
+                codeOf(
+                    authorizer.authorize("/lending/home", userKey(Scope.EXECUTE), WORKSPACE, listOf(foreign)),
+                ) shouldBe null
+            },
+        )
+    }
+
     private fun decide(
         path: String,
         principal: AuthenticatedPrincipal,

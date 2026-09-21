@@ -160,10 +160,12 @@ class BootstrapActorProvisioningIntegrationTest {
         val service = service(bootstrapAdmin = null)
         service.findOrCreateByEmail("bob@example.com", "Bob", null, "google", "bob-sub")
 
-        val relogin = service.findOrCreateByEmail("bob@example.com", "Robert", null, "okta", "bob-okta").user
+        // The SAME identity re-login refreshes the profile (#187: a DIFFERENT identity under
+        // the same email is a refusal now, not a re-link).
+        val relogin = service.findOrCreateByEmail("bob@example.com", "Robert", null, "google", "bob-sub").user
 
         relogin.displayName shouldBe "Robert"
-        relogin.provider shouldBe "okta"
+        relogin.provider shouldBe "google"
         adminGrantedEvents() shouldBe 0
     }
 

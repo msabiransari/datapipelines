@@ -137,6 +137,18 @@ object ScopeMatrix {
         USER_ADMINISTRATION(Scope.ADMIN, Permission.SUPER_ADMIN),
 
         /**
+         * "Reset a user's linked sign-in identity" (#187, `PATCH
+         * /partials/admin/users/{userId}/identity-reset`): returns the row to the bootstrap
+         * placeholder so the NEXT OIDC sign-in with that email can claim it. Its own
+         * operation rather than a [USER_ADMINISTRATION] action because its effect is of a
+         * different kind — it does not flip a flag, it releases the row's IDENTITY to
+         * whoever next proves control of the email, so the doc carries it as its own row
+         * (§7.6) and the audit as its own event (`auth.user.identity_reset`). Super admin
+         * only; the deactivated-user rule (180) is untouched by the verb.
+         */
+        USER_IDENTITY_RESET(Scope.ADMIN, Permission.SUPER_ADMIN),
+
+        /**
          * "The workspaces page and the workspace reads" (§7.6, D13 — 2026-09-20): the
          * `/workspaces` screen, one workspace, its members. Narrowed from every member to
          * [Permission.WS_ADMIN]: the page administers members and roles, and a viewer has

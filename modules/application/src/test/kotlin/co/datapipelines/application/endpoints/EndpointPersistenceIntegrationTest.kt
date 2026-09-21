@@ -198,10 +198,10 @@ class EndpointPersistenceIntegrationTest {
         // §5.2's ancestor walk asks for the whole chain at once — one round trip, not one per
         // path segment, because "a query per level before the request is even authorised" is
         // the cheapest thing a hostile caller could ask the database to do.
-        bindings.findByPrefixes(listOf("/lending/home", "/lending", "/")).map { it.pathPrefix } shouldContainExactlyInAnyOrder
+        bindings.findByPrefixes(listOf("/lending/home", "/lending", "/"), workspaceId).map { it.pathPrefix } shouldContainExactlyInAnyOrder
             listOf("/lending", "/lending/home")
-        bindings.findByPrefixes(emptyList()).shouldBeEmpty()
-        bindings.findByPrefixes(listOf("/nothing")).shouldBeEmpty()
+        bindings.findByPrefixes(emptyList(), workspaceId).shouldBeEmpty()
+        bindings.findByPrefixes(listOf("/nothing"), workspaceId).shouldBeEmpty()
 
         bindings.findByKey(keyId).map { it.pathPrefix } shouldContainExactlyInAnyOrder listOf("/lending", "/lending/home")
         bindings.findByKey("dpk_absent").shouldBeEmpty()
@@ -210,6 +210,40 @@ class EndpointPersistenceIntegrationTest {
         bindings.delete("/lending", keyId) shouldBe true
         bindings.delete("/lending", keyId) shouldBe false
         bindings.findByKey(keyId).map { it.pathPrefix } shouldContainExactly listOf("/lending/home")
+    }
+
+    @Test
+    fun `findByPrefixes answers only the asked workspace's bindings (#191)`() {
+        bindings.insert(binding("/lending")) shouldBe true
+        bindings.insert(binding("/lending/home")) shouldBe true
+
+        // A foreign workspace's key is bound at a nearer node. The serve path asks with the
+        // ENDPOINT's workspace id, so the foreign row must not come back at all — the D11 rule
+        // (filter in the query) applied to bindings. The authorizer's in-memory filter is the
+        // backstop; this is the query that keeps the rows out of the answer in the first place.
+        val foreignWorkspace = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name, created_by) VALUES (:id, :name, 'Foreign', :owner)",
+            mapOf("id" to foreignWorkspace, "name" to "w_${foreignWorkspace.toString().replace("-", "")}", "owner" to userId),
+        )
+        val foreignKey = "dpk_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+        jdbc.update(
+            """
+            INSERT INTO api_keys (id, user_id, name, key_hash, workspace_id, kind)
+            VALUES (:id, :owner, 'foreign key', 'x', :ws, 'endpoint')
+            """.trimIndent(),
+            mapOf("id" to foreignKey, "owner" to userId, "ws" to workspaceId),
+        )
+        jdbc.update(
+            "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by)" +
+                " VALUES ('/lending', :key, :ws, :owner)",
+            mapOf("key" to foreignKey, "ws" to foreignWorkspace, "owner" to userId),
+        )
+
+        bindings.findByPrefixes(listOf("/lending", "/"), workspaceId).map { it.apiKeyId } shouldContainExactlyInAnyOrder
+            listOf(keyId)
+        bindings.findByPrefixes(listOf("/lending", "/"), foreignWorkspace).map { it.apiKeyId } shouldBe listOf(foreignKey)
+        bindings.findByPrefixes(listOf("/lending", "/"), UUID.randomUUID()).shouldBeEmpty()
     }
 
     @Test

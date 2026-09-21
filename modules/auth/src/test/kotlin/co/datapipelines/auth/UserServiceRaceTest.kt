@@ -26,7 +26,10 @@ class UserServiceRaceTest {
 
     @Test
     fun `findOrCreateByEmail - the first-login race links the winner's row instead of 500ing`() {
-        val winner = user(email = EMAIL)
+        // The race is ONE login racing itself: the winner's row carries the SAME
+        // (provider, provider_subject) the loser links with (#187 — otherwise the loser's
+        // link would now be a mismatch refusal, not a race outcome).
+        val winner = user(email = EMAIL, providerSubject = "sub-1")
         every { users.findByEmail(EMAIL) } returnsMany listOf(null, winner)
         every { users.insert(any(), any(), any(), any(), any(), any()) } throws DuplicateKeyException("users_email_key")
         every { users.updateIdentity(any(), any(), any(), any(), any()) } just runs
@@ -54,12 +57,13 @@ class UserServiceRaceTest {
     private fun user(
         email: String,
         provider: String = "google",
+        providerSubject: String = email,
     ) = User(
         id = UUID.randomUUID(),
         email = email,
         displayName = email.substringBefore('@'),
         provider = provider,
-        providerSubject = email,
+        providerSubject = providerSubject,
         isActive = true,
         isAdmin = false,
         createdAt = Instant.now(),

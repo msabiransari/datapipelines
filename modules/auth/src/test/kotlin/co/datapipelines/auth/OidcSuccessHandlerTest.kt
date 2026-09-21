@@ -65,6 +65,9 @@ class OidcSuccessHandlerTest {
         extra: Map<String, Any> = emptyMap(),
     ): Map<String, Any> = mapOf("sub" to "sub-1", "email" to email, "name" to "Alice") + extra
 
+    private fun authPropertiesWithProvider(provider: AuthProperties.Provider) =
+        AuthProperties(oidc = AuthProperties.Oidc(providers = listOf(provider)))
+
     @Test
     fun `a verified login issues dp_session with the documented cookie attributes`() {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns
@@ -86,12 +89,83 @@ class OidcSuccessHandlerTest {
     }
 
     @Test
-    fun `an absent email_verified claim is treated as the provider vouching for the address`() {
+    fun `an absent email_verified claim is refused by default - the provider has not vouched (#187)`() {
+        // Fail closed: provisioning is keyed on email, so a provider that stays silent about
+        // verification must not hand the account to whoever asserts the address.
+        val response = run(baseClaims())
+
+        response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
+        response.redirectedUrl shouldBe "/login?error=oidc_error"
+        verify(exactly = 0) { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an absent claim is accepted under the provider's trust knob, and the assumption is audited (#187)`() {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns
             UserService.Provisioned(user(), created = false)
         every { jwtService.issue(any(), any(), any()) } returns "jwt"
+        val props =
+            authPropertiesWithProvider(
+                AuthProperties.Provider(
+                    name = "keycloak",
+                    clientId = "dp-client",
+                    clientSecret = "dp-secret",
+                    issuerUri = "https://sso.test",
+                    trustEmailWithoutVerifiedClaim = true,
+                ),
+            )
 
-        run(baseClaims()).getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldNotBeNull()
+        val response = run(baseClaims(), props)
+
+        response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldNotBeNull()
+        verify(exactly = 1) { auditLogger.log("auth.login.email_verified_assumed", any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a claim that is PRESENT and false is refused whatever the knob says (#187)`() {
+        val props =
+            authPropertiesWithProvider(
+                AuthProperties.Provider(
+                    name = "keycloak",
+                    clientId = "dp-client",
+                    clientSecret = "dp-secret",
+                    issuerUri = "https://sso.test",
+                    trustEmailWithoutVerifiedClaim = true,
+                ),
+            )
+
+        val response = run(baseClaims(extra = mapOf("email_verified" to false)), props)
+
+        response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
+        response.redirectedUrl shouldBe "/login?error=oidc_error"
+    }
+
+    @Test
+    fun `an email linked to a different sign-in identity is refused - nothing is re-linked (#187)`() {
+        every {
+            userService.findOrCreateByEmail(any(), any(), any(), any(), any())
+        } throws IdentityMismatchException(userId, storedProvider = "google", incomingProvider = "keycloak")
+
+        val response = run(baseClaims(extra = mapOf("email_verified" to true)))
+
+        response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
+        response.redirectedUrl shouldBe "/login?error=identity_mismatch"
+        verify {
+            auditLogger.log(
+                "auth.login.identity_mismatch",
+                any(),
+                any(),
+                any(),
+                any(),
+                match {
+                    it["stored_provider"] == "google" &&
+                        it["incoming_provider"] == "keycloak" &&
+                        // The subject values never appear in the audit.
+                        it.keys.none { key -> key.contains("subject") }
+                },
+            )
+        }
+        verify(exactly = 0) { jwtService.issue(any(), any(), any()) }
     }
 
     @Test
@@ -117,7 +191,7 @@ class OidcSuccessHandlerTest {
             UserService.Provisioned(user(), created = false)
         every { jwtService.issue(any(), any(), any()) } returns "jwt"
 
-        run(baseClaims(email = "Alice@Company.COM"))
+        run(baseClaims(email = "Alice@Company.COM", extra = mapOf("email_verified" to true)))
 
         verify { userService.findOrCreateByEmail("alice@company.com", "Alice", null, "keycloak", "sub-1") }
     }
@@ -134,7 +208,7 @@ class OidcSuccessHandlerTest {
     fun `a domain outside the allowlist is rejected and audited, with no session cookie`() {
         val props = AuthProperties(allowlist = AuthProperties.Allowlist(domains = listOf("company.com")))
 
-        val response = run(baseClaims(email = "eve@evil.com"), props)
+        val response = run(baseClaims(email = "eve@evil.com", extra = mapOf("email_verified" to true)), props)
 
         response.redirectedUrl shouldBe "/login?error=domain_not_allowed"
         response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
@@ -147,7 +221,7 @@ class OidcSuccessHandlerTest {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns
             UserService.Provisioned(user(active = false), created = false)
 
-        val response = run(baseClaims())
+        val response = run(baseClaims(extra = mapOf("email_verified" to true)))
 
         response.redirectedUrl shouldBe "/login?error=inactive"
         response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
@@ -162,7 +236,7 @@ class OidcSuccessHandlerTest {
         every { workspaceService.workspaceForLogin(any(), any()) } returns
             WorkspaceContext(UUID.randomUUID(), "demo")
 
-        run(baseClaims())
+        run(baseClaims(extra = mapOf("email_verified" to true)))
 
         val (user, createdBy, workspace) = notices.newUsers.single()
         user.email shouldBe "alice@company.com"
@@ -177,7 +251,7 @@ class OidcSuccessHandlerTest {
             UserService.Provisioned(user(), created = false)
         every { jwtService.issue(any(), any(), any()) } returns "jwt"
 
-        run(baseClaims())
+        run(baseClaims(extra = mapOf("email_verified" to true)))
 
         notices.newUsers.shouldBeEmpty()
     }
