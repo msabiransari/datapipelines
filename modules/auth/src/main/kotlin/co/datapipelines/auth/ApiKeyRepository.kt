@@ -129,7 +129,8 @@ class ApiKeyRepository(
             .query(
                 "SELECT secret_sealed FROM api_keys WHERE id = :id",
                 MapSqlParameterSource("id", keyId),
-            ) { rs, _ -> rs.getBytes("secret_sealed") }.firstOrNull()
+            ) { rs, _ -> rs.getBytes("secret_sealed") }
+            .firstOrNull()
 
     /**
      * Every key of [kind] pinned to [workspaceId], revoked included, newest first — the

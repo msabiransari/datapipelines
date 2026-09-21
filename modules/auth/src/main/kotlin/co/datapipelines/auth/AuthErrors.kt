@@ -78,6 +78,14 @@ object AuthErrorCodes {
     const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
 
     /**
+     * 400 — on-demand issuance asked for a `user` key (roles design 2026-09-20, D16/§3.3).
+     * User keys are minted by the login/switch hook and nowhere else — one per user per
+     * workspace — so no request surface may create one. A 400, not a 403: the caller's
+     * credential and role are fine; the KIND is not mintable on demand.
+     */
+    const val KEY_KIND_NOT_MINTABLE = "auth.key_kind_not_mintable"
+
+    /**
      * 404 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
      * The same status a member gets: the owner ruled (2026-09-14) that a deactivated
      * workspace answers not-found on EVERY surface, keys included — deactivation must not
@@ -86,14 +94,6 @@ object AuthErrorCodes {
      * and pinned there), so it reveals nothing the holder did not already know — and it is
      * what an operator greps the audit log and the catalogue for.
      */
-    /**
-     * 400 — on-demand issuance asked for a `user` key (roles design 2026-09-20, D16/§3.3).
-     * User keys are minted by the login/switch hook and nowhere else — one per user per
-     * workspace — so no request surface may create one. A 400, not a 403: the caller's
-     * credential and role are fine; the KIND is not mintable on demand.
-     */
-    const val KEY_KIND_NOT_MINTABLE = "auth.key_kind_not_mintable"
-
     const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
 
     /**
@@ -183,7 +183,7 @@ class ApiKeyInvalidException(
         HTTP_UNAUTHORIZED,
         reason,
         "That key is not valid. Your MCP key rotates by deleting it in the top bar and signing in again; " +
-        "an API key is created on /api-keys by a workspace admin.",
+            "an API key is created on /api-keys by a workspace admin.",
     )
 
 /**
@@ -210,7 +210,7 @@ class ApiKeyExpiredException :
         HTTP_UNAUTHORIZED,
         "API key past expiration",
         "That key has expired. Your MCP key rotates by deleting it in the top bar and signing in again; " +
-        "an API key is created on /api-keys by a workspace admin.",
+            "an API key is created on /api-keys by a workspace admin.",
     )
 
 class SessionInvalidException(

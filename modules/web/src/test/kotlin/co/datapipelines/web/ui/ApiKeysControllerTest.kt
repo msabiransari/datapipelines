@@ -303,7 +303,10 @@ class ApiKeysAdminControllerTest {
 
     private fun stubPageReads() {
         every { publishing.list(any()) } returns emptyList()
+        // The page lists the two ADMIN kinds (endpoint + server) — both stubs, or the mock
+        // answers the second kind's read with "no answer found".
         every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT) } returns listOf(sampleKey())
+        every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.SERVER) } returns emptyList()
         every { userRepository.findById(userId) } returns null
     }
 
@@ -424,6 +427,7 @@ class ApiKeysAdminControllerTest {
         every { publishing.list(any()) } returns emptyList()
         every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT) } returns
             listOf(sampleKey().copy(isRevoked = true))
+        every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.SERVER) } returns emptyList()
         every { userRepository.findById(userId) } returns null
 
         val model: ExtendedModelMap = ExtendedModelMap()
