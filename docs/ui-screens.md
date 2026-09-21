@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.59
+**Status:** v1.61
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-19 (173)
