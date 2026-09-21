@@ -86,7 +86,9 @@ class DraftFirstGoldenPathE2eTest {
             .then()
             .statusCode(401)
             .header("Cache-Control", org.hamcrest.Matchers.containsString("no-store"))
-            .header("X-Frame-Options", org.hamcrest.Matchers.equalTo("DENY"))
+            // 188: SAMEORIGIN is the product's stated value (auth's SecurityHeaders), not Spring's DENY.
+            .header("X-Frame-Options", org.hamcrest.Matchers.equalTo("SAMEORIGIN"))
+            .header("Content-Security-Policy", org.hamcrest.Matchers.startsWith("default-src 'self'; script-src 'self'; "))
     }
 
     @Test
