@@ -293,7 +293,12 @@ class AuthHttpBoundaryTest {
      */
     @Test
     fun `every response carries the stated security headers, 401s and the SSE stream included`() {
-        data class Case(val method: HttpMethod, val path: String, val expected: Int, val headers: HttpHeaders = HttpHeaders())
+        data class Case(
+            val method: HttpMethod,
+            val path: String,
+            val expected: Int,
+            val headers: HttpHeaders = HttpHeaders(),
+        )
         val cases =
             listOf(
                 Case(HttpMethod.GET, "/health", 200),
@@ -302,10 +307,11 @@ class AuthHttpBoundaryTest {
                 Case(HttpMethod.GET, "/pipelines/abc-123/editor", 401),
                 Case(HttpMethod.GET, "/api/v1/probe/stream", 200, headers(apiKey = readKey)),
             )
-        cases.forEach { (method, path, expected, requestHeaders) ->
-            val response = call(method, path, requestHeaders)
-            withClue("$method $path") {
-                response.statusCode.value() shouldBe expected
+        cases.forEach { case ->
+            val path = case.path
+            val response = call(case.method, path, case.headers)
+            withClue("${case.method} $path") {
+                response.statusCode.value() shouldBe case.expected
                 val h = response.headers
                 h.getFirst("X-Content-Type-Options") shouldBe "nosniff"
                 h.getFirst("X-Frame-Options") shouldBe SecurityHeaders.FRAME_OPTIONS

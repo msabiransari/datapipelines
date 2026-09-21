@@ -5,6 +5,8 @@ import org.springframework.security.web.header.HeaderWriter
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter
 import org.springframework.security.web.header.writers.StaticHeadersWriter
 import org.springframework.security.web.util.matcher.RequestMatcher
+import java.security.MessageDigest
+import java.util.Base64
 
 /**
  * The response headers the app STATES for itself (#188, deployment.md §6.2 / §9) — the
@@ -81,11 +83,12 @@ object SecurityHeaders {
     const val CYTOSCAPE_STYLESHEET = ".__________cytoscape_container { position: relative; }"
 
     /** `'sha256-<base64>'` of [CYTOSCAPE_STYLESHEET], the CSP hash-source form. */
-    val CYTOSCAPE_STYLESHEET_HASH: String =
-        "'sha256-" +
-            java.util.Base64.getEncoder().encodeToString(
-                java.security.MessageDigest.getInstance("SHA-256").digest(CYTOSCAPE_STYLESHEET.toByteArray(Charsets.UTF_8)),
-            ) + "'"
+    val CYTOSCAPE_STYLESHEET_HASH: String = cspHashSource(CYTOSCAPE_STYLESHEET)
+
+    private fun cspHashSource(sheet: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(sheet.toByteArray(Charsets.UTF_8))
+        return "'sha256-" + Base64.getEncoder().encodeToString(digest) + "'"
+    }
 
     /**
      * `img-src` admits `https:` for one reason: the OIDC profile picture

@@ -166,12 +166,18 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         }
         """.trimIndent()
 
-    /** Arms a one-shot capture of the FIRST animation frame after the next boosted swap. */
+    /**
+     * Arms a one-shot capture of the FIRST animation frame after the next boosted swap.
+     * The probe is spliced into the evaluated source here, in Kotlin, rather than handed
+     * to an in-page `eval`: the app's CSP has no `'unsafe-eval'` (188), so an `eval` that
+     * runs INSIDE the page is refused — only the expression Playwright compiles through
+     * CDP is exempt.
+     */
     private val armFirstFrame =
         """
-        (probe) => { window.__ff = null;
+        () => { window.__ff = null;
           document.body.addEventListener('htmx:afterSwap', () => {
-            requestAnimationFrame(() => { window.__ff = eval('(' + probe + ')')(); });
+            requestAnimationFrame(() => { window.__ff = ($geometryProbe)(); });
           }, {once: true}); }
         """.trimIndent()
 
@@ -337,7 +343,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
                         collapsed,
                     )
                     page.waitForLoadState(LoadState.NETWORKIDLE)
-                    page.evaluate(armFirstFrame, geometryProbe)
+                    page.evaluate(armFirstFrame)
                     page.click("a[data-nav-section='$section']")
                     page.waitForSelector(".tplx-tree")
                     page.waitForFunction("() => window.__ff !== null")

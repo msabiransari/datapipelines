@@ -85,10 +85,18 @@ class SecurityHeadersTest {
         headersFor("/pipelines/abc-123/editor").getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY_EDITOR
         // Its neighbours do not: the list, the pipeline's own page, a partial under it, and a
         // longer path that happens to end in /editor.
-        listOf("/pipelines", "/pipelines/abc-123", "/pipelines/abc-123/editor/x", "/partials/pipelines/abc-123/editor", "/templates/editor", "/login", "/api/v1/pipelines", "/mcp")
-            .forEach { uri ->
-                headersFor(uri).getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
-            }
+        listOf(
+            "/pipelines",
+            "/pipelines/abc-123",
+            "/pipelines/abc-123/editor/x",
+            "/partials/pipelines/abc-123/editor",
+            "/templates/editor",
+            "/login",
+            "/api/v1/pipelines",
+            "/mcp",
+        ).forEach { uri ->
+            headersFor(uri).getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
+        }
     }
 
     @Test

@@ -82,8 +82,10 @@ class OidcLoginIntegrationTest {
             downstreamOwnsResponse = true
         }
         response.getHeader("X-Content-Type-Options") shouldBe "nosniff"
-        response.getHeader("X-Frame-Options") shouldBe "DENY"
+        // 188: SAMEORIGIN is the product's stated value (SecurityHeaders), not Spring's DENY.
+        response.getHeader("X-Frame-Options") shouldBe SecurityHeaders.FRAME_OPTIONS
         response.getHeader("Cache-Control") shouldBe "no-cache, no-store, max-age=0, must-revalidate"
+        response.getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
     }
 
     private val jar = mutableMapOf<String, String>()

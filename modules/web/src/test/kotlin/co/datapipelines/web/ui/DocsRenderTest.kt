@@ -14,6 +14,8 @@ import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
+import java.net.URLClassLoader
+import java.nio.file.Files
 
 /**
  * The in-product docs screens (033), rendered exactly as DocsController hands them to the
@@ -141,8 +143,9 @@ class DocsRenderTest {
      */
     @Test
     fun `raw html in a doc source renders as text - a script or an onerror image never reaches the page`() {
-        val fixtures = java.nio.file.Files.createTempDirectory("dp-docs-fixture")
-        val docs = fixtures.resolve("docs").also { java.nio.file.Files.createDirectories(it) }
+        val fixtures = Files.createTempDirectory("dp-docs-fixture")
+        val docs = fixtures.resolve("docs")
+        Files.createDirectories(docs)
         val slugs = catalog.index().flatMap { group -> group.docs.map { it.slug } }
         slugs.forEach { slug -> docs.resolve("$slug.md").toFile().writeText("# $slug\n\nA fixture.\n") }
         val payload =
@@ -158,7 +161,7 @@ class DocsRenderTest {
             A `<code>` span stays what it was.
             """.trimIndent()
         docs.resolve("readme.md").toFile().writeText(payload)
-        val loader = java.net.URLClassLoader(arrayOf(fixtures.toUri().toURL()), null)
+        val loader = URLClassLoader(arrayOf(fixtures.toUri().toURL()), null)
 
         val html = DocsCatalog(loader).render("readme")!!.html
 

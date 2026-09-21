@@ -161,13 +161,14 @@ class ApplicationSmokeTest {
         }
         // The one route with a different policy: the pipeline editor (Alpine's eval, #195,
         // and the hash of the one <style> Cytoscape injects — SecurityHeaders says why).
-        rest.getForEntity("/pipelines/00000000-0000-0000-0000-000000000000/editor", String::class.java).headers
-            .getFirst("Content-Security-Policy") shouldBe
+        val editor = rest.getForEntity("/pipelines/00000000-0000-0000-0000-000000000000/editor", String::class.java)
+        editor.headers.getFirst("Content-Security-Policy") shouldBe
             CSP_POLICY
                 .replace("script-src 'self'", "script-src 'self' 'unsafe-eval'")
                 .replace("style-src 'self'", "style-src 'self' 'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='")
         // And the one route with none: the sitemap (an XML data document).
-        rest.getForEntity("/sitemap.xml", String::class.java).headers.getFirst("Content-Security-Policy") shouldBe null
+        val sitemap = rest.getForEntity("/sitemap.xml", String::class.java)
+        sitemap.headers.getFirst("Content-Security-Policy") shouldBe null
     }
 
     @Test
@@ -238,9 +239,10 @@ class ApplicationSmokeTest {
 
             registry.add("spring.data.redis.host") { redis.host }
             registry.add("spring.data.redis.port") { SharedRedis.port }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("spring.data.redis.password") { SharedRedis.PASSWORD }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedRedis.port }
+            registry.add("datapipelines.redis.password") { SharedRedis.PASSWORD }
 
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }

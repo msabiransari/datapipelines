@@ -303,12 +303,25 @@ abstract class BrowserSuite {
         /** The CSP violations seen since the last drain — see [closePage]. Static: one per test JVM. */
         private val cspViolations = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+        /**
+         * SHA-256 of the EMPTY string, as CSP prints it. Playwright's own screenshot path
+         * appends an empty `<style>` element to the page and fills it through `insertRule`
+         * (CSSOM, which no policy governs) to hide the caret, and Chromium reports the empty
+         * element as a refused inline style with this hash. An empty style carries no rule,
+         * so nothing the app renders was blocked — it is set aside BY THIS EXACT HASH and
+         * nothing else is; a real inline style has a real hash and still fails the test.
+         */
+        private const val EMPTY_INLINE_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
+
         /** Every page this context opens reports a CSP refusal into [cspViolations]. */
         private fun BrowserContext.watchingCsp(): BrowserContext =
             apply {
                 onPage { page ->
                     page.onConsoleMessage { message ->
-                        if (message.text().contains("Content Security Policy")) cspViolations += "${page.url()} — ${message.text()}"
+                        val text = message.text()
+                        if (!text.contains("Content Security Policy")) return@onConsoleMessage
+                        if (text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH)) return@onConsoleMessage
+                        cspViolations += "${page.url()} — $text"
                     }
                 }
             }
