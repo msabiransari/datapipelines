@@ -266,6 +266,8 @@ services:
       DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:-}
       DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:-}
       DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:-}
+      # 178 — the promoter lens's per-workspace inventory cache (configuration.md §3.19). Not a secret.
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_INVENTORY_CACHE_TTL_SECONDS: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_INVENTORY_CACHE_TTL_SECONDS:-60}
 
       # The credentials the bootstrap datasources file names as ${...} placeholders.
       # They belong HERE, on the app, not only on the loader: that file is runtime
