@@ -150,16 +150,47 @@ class PublishedEndpointBindingConfinementE2eTest {
 
     @Test
     fun `the workspace's own bound key still serves its own endpoint`() {
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, ownKey)
-            .`when`()
-            .get("/api/conf/v1/p")
-            .then()
-            .statusCode(200)
-            .body("rows.size()", equalTo(1))
-            .body("rows[0][0]", equalTo(1))
+        val executionId =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ownKey)
+                .`when`()
+                .get("/api/conf/v1/p")
+                .then()
+                .statusCode(200)
+                .body("rows.size()", equalTo(1))
+                .body("rows[0][0]", equalTo(1))
+                .extract()
+                .jsonPath()
+                .getString("execution_id")
+
+        // #192 — the serve audit's outcome rows, as read from the DATABASE: the pre-answer
+        // `started` row and the terminal `completed` row for the same execution.
+        serveAuditOutcomes(executionId) shouldBe listOf("started", "completed")
     }
+
+    /** The `outcome` values of the execution's `endpoint.served` rows, oldest first. */
+    private fun serveAuditOutcomes(executionId: String): List<String> =
+        DriverManager
+            .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
+            .use { connection -> serveAuditOutcomes(connection, executionId) }
+
+    private fun serveAuditOutcomes(
+        connection: java.sql.Connection,
+        executionId: String,
+    ): List<String> =
+        connection
+            .prepareStatement(
+                "SELECT details_json ->> 'outcome' FROM audit_log " +
+                    "WHERE event = 'endpoint.served' AND details_json ->> 'execution_id' = ? ORDER BY id",
+            ).use { ps ->
+                ps.setString(1, executionId)
+                ps.executeQuery().use { rs ->
+                    val seen = mutableListOf<String>()
+                    while (rs.next()) seen += rs.getString(1)
+                    seen
+                }
+            }
 
     // ------------------------------------------------------------------------ fixture
 
