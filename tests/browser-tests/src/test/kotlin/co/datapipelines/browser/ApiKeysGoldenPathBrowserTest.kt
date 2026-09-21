@@ -139,7 +139,8 @@ class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
 
         // The copy endpoint serves the OPENED secret, and only to the owner's session.
         val secret =
-            page.request()
+            page
+                .request()
                 .get("$baseUrl/partials/mcp-key/secret")
                 .text()
         secret shouldStartWith prefix.removeSuffix("…")

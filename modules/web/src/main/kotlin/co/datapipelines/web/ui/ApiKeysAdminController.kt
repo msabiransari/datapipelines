@@ -105,7 +105,12 @@ class ApiKeysAdminController(
         model.addAttribute("keyId", issued.record.id)
         model.addAttribute("keyName", issued.record.name)
         model.addAttribute("keyKind", issued.record.kind.wire)
-        model.addAttribute("keyScopes", issued.record.scopes.map { it.wire }.sorted())
+        model.addAttribute(
+            "keyScopes",
+            issued.record.scopes
+                .map { it.wire }
+                .sorted(),
+        )
         model.addAttribute("keyBindings", bindingPaths)
         model.addAttribute("keyExpires", expiresAt?.let { RelativeTime.absolute(it) })
         model.addAttribute("keys", rows(principal))

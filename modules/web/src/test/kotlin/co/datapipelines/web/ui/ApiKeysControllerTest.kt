@@ -453,8 +453,10 @@ class ApiKeysAdminControllerTest {
         every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
         every { bindingRepository.findByKey("dpk_abc123") } returns
             listOf(
-                co.datapipelines.application.endpoints.EndpointKeyBinding("/nyc", "dpk_abc123", workspaceId, userId, Instant.now()),
-                co.datapipelines.application.endpoints.EndpointKeyBinding("/old", "dpk_abc123", workspaceId, userId, Instant.now()),
+                co.datapipelines.application.endpoints
+                    .EndpointKeyBinding("/nyc", "dpk_abc123", workspaceId, userId, Instant.now()),
+                co.datapipelines.application.endpoints
+                    .EndpointKeyBinding("/old", "dpk_abc123", workspaceId, userId, Instant.now()),
             )
 
         controller.associate("dpk_abc123", listOf("/nyc", "/lending"), ExtendedModelMap())

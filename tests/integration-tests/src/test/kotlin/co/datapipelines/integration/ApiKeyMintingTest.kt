@@ -332,6 +332,7 @@ class ApiKeyMintingTest {
     }
 
     private var cleaned = false
+
     /** The top bar's read: the caller's live MCP key in the session's active workspace. */
     private fun mine(session: String): Map<String, Any?> {
         val body =

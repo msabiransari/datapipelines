@@ -371,6 +371,7 @@ class WorkspaceIsolationIntegrationTest {
         const val BOB = "bbb00000-0000-0000-0000-000000000002"
         const val GLOBEX_INVITATION_EMAIL = "dana@globex.test"
         private const val CAROL = "ccc00000-0000-0000-0000-000000000003"
+
         // 179 (V31): one live `user` key per (user, workspace) — the deactivation test's
         // second globex key needs its OWN owner, a globex member.
         private const val DAVE = "ddd00000-0000-0000-0000-000000000004"

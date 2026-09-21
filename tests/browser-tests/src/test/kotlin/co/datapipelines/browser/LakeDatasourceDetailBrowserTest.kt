@@ -141,7 +141,8 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
                 // audit_log.key_id keeps resolving).
                 connection
                     .prepareStatement(
-                        "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND workspace_id = ? AND kind = 'user' AND is_revoked = FALSE",
+                        "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND workspace_id = ?" +
+                            " AND kind = 'user' AND is_revoked = FALSE",
                     ).use { ps ->
                         ps.setObject(1, userId)
                         ps.setObject(2, workspaceId)
